@@ -1,6 +1,6 @@
 # Transport Improvements: Migration Outline
 
-- Status: Design baseline; contract proof, design reconciliation, parallel build, complete cutover
+- Status: Buffered proof accepted; additive delivery, consumer migration, then legacy removal
 - Baseline: v0.19.0, `e440a28c49935df722e4e80685ef12f6d8247ff8`, inspected 2026-09-16
 - Release delta reviewed: `7c744828..e440a28c`; file helpers, artifacts, harness facets and session
   lifecycle
@@ -26,7 +26,7 @@ another SSH runner. Existing host/guest identities and operation lifetimes remai
 | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
 | `transports/base.py`, concrete transports, Proxmox transport                         | Common execution target above carrier delivery; explicit optional interaction.                                          |
 | `transports/__init__.py`, VM platform native/provision results                       | Construct the new target under the same explicit route ownership.                                                       |
-| `capabilities/base.py`, VM/agent/session context constructors                        | Deliver the new target type through existing identity accessors.                                                        |
+| `capabilities/base.py`, VM/agent/session context constructors                        | Add stable new identity accessors alongside legacy; migrate consumers, then delete legacy accessors.                    |
 | Capability readiness and operations, setup invocation runners                        | Consume the common type without rebuilding transports or context authority.                                             |
 | `harness_setup/runner.py`                                                            | Move prepared environment policy into shared target defaults; retire forwarding implementation.                         |
 | `remote_exec.py`, backup, remote Lima host provisioning/rollback, native logout      | Use managed job start/observe/wait/dispose with explicit retention and actual execution-host identity.                  |
@@ -51,13 +51,14 @@ physical deletion of `agentworks.native_files` at cutover. Copy/adapt proven alg
 tests into `execution/files.py` and `execution/file_policy.py` without importing the old module. Its
 elevated directories seed the catalog; ordinary user/workspace roots and narrowly approved tmux
 directories must be inventoried explicitly, not enabled by a global root or home wildcard. Only one
-core policy remains after cutover. Production continues using the shipped policy until the coherent
-switch, never both policies for one mutation.
+core policy remains after removal. Legacy calls keep the shipped checks; new calls do not enforce
+the successor permission policy during coexistence. The successor catalog and recipient intents are
+reviewed before activation at removal, never composed with old policy for one mutation.
 
 Retain domain code, not the execution facade: artifact capture, routing, native discovery rules,
 generated sections, ownership records and application checkpoints remain in their existing owners.
 Setup/readiness invocations carry RunContext alongside descriptive inputs instead of a raw runner;
-resources use its bound command/file interfaces directly. Remove access through `files.runner`,
+resources use its bound execution/file interfaces directly. Remove access through `files.runner`,
 public staging slots and alternate file wrappers. Actual marketplace/plugin installation may still
 require command access; file-only must describe the operation's authority honestly.
 
@@ -117,35 +118,45 @@ separation or shell bootstrap is being independently improvised. The OpenSSH 8.5
 applicable locations are recorded before proof acceptance. The proof is not full-platform acceptance
 or a production cutover.
 
-Build the destination execution stack in separate modules while the old production path remains
-operational. New internal entry points and test composition roots exercise common requests/results,
-shell policy, files/jobs, channel features, and context delivery. Production `RunContext` does not
-gain an old/new target union, and plugin authors are not asked to choose a stack.
+Build the destination stack independently, then add the complete new surface to production
+`RunContext`. Permanent new accessors `admin_execution_target()` and `agent_execution_target()`
+return `ExecutionTarget | None`; existing `admin_target()` and `agent_target()` retain their legacy
+types and behavior until deletion. No union type, runtime stack selector, fallback wrapper or second
+context object is introduced. Core composition owns both sets of passive handles during coexistence
+without routing a call from one implementation through the other.
 
-New contexts deliver the scoped target/access interfaces from the contract proposal, not the full
-implementation object. Core composition explicitly supplies required operations and elevation; test
-composition also supplies restricted views. The future third-party plugin policy evaluator is not a
-dependency of this cutover, but the API must not require another redesign to withhold commands, file
-directions, job actions or elevation later. File grants are bounded now by the core-owned mutation
-allowlist, not deferred until that evaluator exists. Registration requests and user approval are
-future selection mechanisms within the same ceiling.
+The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) defers new recipient permission
+enforcement, including the successor core file ceiling, until legacy is physically removed. Record
+consumer intent in the migration inventory and prepare small grant values and isolated denial tests,
+but do not restrict production recipients or claim file-only/profile-required isolation during
+coexistence. Keep existing legacy checks unchanged. No runtime bypass toggle, policy engine or
+shadow-decision service is needed. Registration requests and user consent remain future work.
+
+Deferral is not a safety waiver: bound identity, explicit elevation/shell/profile, no-staging
+readiness, sensitive-data handling, actual guest permissions, SSH trust, safe path/object handling,
+metadata preservation, and truthful lifecycle/outcome semantics apply immediately. A file operation
+acts only on its explicit destination and cannot escape it through links or helper injection, even
+before the catalog limits which destinations recipients may choose. Requested profiles must supply
+their guarantees; coexistence prevents treating their selection as mandatory for the recipient.
 
 Develop against the [proposed carrier contract and destination layout](execution-contract.md). The
 proposed revised SSH assignment is a new carrier and connection/trust implementation under
 `execution/carriers/ssh/`, not consolidation of the old runner. This effort builds shared semantics
-and the other adapters, then composes the new SSH carrier. The independent-carrier design in #796 at
-`2494f6e2` supersedes #757's legacy consolidation; both SDDs still need reconciliation after the
-proof. No old execution code is called from the new stack, directly or indirectly. Copying useful
-code and tests is permitted. Transport owns applying reusable SSH policy in platform-host access,
-Lima adapters/provisioning and provider-inner paths; SSH owns the policy/guarantees and independent
+and the other adapters, then composes the new SSH carrier. The
+[current SSH reference](prior-art-research.md#ssh-coordination-reference) supersedes #757's legacy
+consolidation; broader contract reconciliation remains after the accepted buffered proof. No old
+execution code is called from the new stack, directly or indirectly. Copying useful code and tests
+is permitted. Transport owns applying reusable SSH policy in platform-host access, Lima
+adapters/provisioning and provider-inner paths; SSH owns the policy/guarantees and independent
 connection/trust migration.
 
-Old and new implementation code intentionally coexist during development; production continues using
-only the old stack until the coherent cutover. Configuration and trust records are retained state,
-not disposable implementation. The SSH effort specifies reuse or migration of those records without
-resetting host trust, broadening identity selection, or importing the old runner. Resolve trust-file
-writer ownership and rollback evidence before switching production; tests of conversion use isolated
-copies, not a concurrent second writer against operator state.
+Old and new code intentionally coexist in production during the bounded migration sequence. Each
+consumer operation selects exactly one API, never dual dispatch. Configuration and trust records are
+retained state, not disposable implementation. The SSH effort specifies reuse or migration of those
+records without resetting host trust, broadening identity selection, or importing the old runner.
+Resolve trust-file writer ownership and rollback evidence before the first production use of the new
+carrier; tests of conversion use isolated copies, not a concurrent second writer against operator
+state.
 
 Existing callers are migration evidence, not the new API's limit. Design and test the core/plugin
 scenarios in FRD R11 even where the old stack has no equivalent operation. Test new mutating
@@ -161,55 +172,81 @@ workflows on isolated resources, never by sending one production request down bo
    adapters. Verify single-attempt delivery and truthful status-255 handling; apply preparation
    exactly once. Run new-stack tests with legacy modules unavailable, and test reusable
    platform-host composition independently from Lima-specific management commands.
-4. Validate complete new-stack workflows through internal entry points: provisioning, native
-   recovery with Tailscale unavailable, plugin operations, backup, and interactive attachment.
-   Validate new context delivery independently while the production context still uses the old API.
-5. Prepare and validate the complete caller cutover against the settled contract. Audit every call's
-   invocation form, shell/startup policy, identity, environment, stdio, deadline, and job lifetime.
-   Audit each consumer's needed action interfaces, file locations/metadata and elevation, not merely
-   its admin/agent identity. Resolve surviving legacy work, SSH configuration/trust state, and the
-   external plugin compatibility policy before switching.
-6. Cut over factories, `RunContext` producers/consumers, plugins, and direct service entry points in
-   one coherent production increment. Run the same workflow gates through real production entry
-   points, physically remove the old stack and temporary test scaffolding, and update collateral.
-   Prove production package import and workflows still work after removal, not only that factories
-   prefer the new path.
+4. **Additive implementation PR:** validate complete new-stack workflows before exposing the new
+   RunContext accessors: provisioning, native recovery without Tailscale, files, jobs, backup, host
+   provisioning/rollback and interactive attachment. Existing callers remain unchanged. Prove their
+   behavior stays unchanged and constructing/accessing either surface adds no I/O, route activation
+   or mutations. The new surface is usable independently, not a facade calling legacy.
+5. **Consumer migration PR(s):** assign non-overlapping workflow batches with an owner and tests.
+   Audit each operation's command versus file API, shell/startup, bound identity, elevation,
+   environment, stdio, deadline, profile, lifetime and exact filesystem effects. Record intended
+   grants and core catalog entries for later enforcement. Migrate direct calls as well as context
+   consumers. Each batch uses only the new API for its migrated operations and proves its complete
+   workflows through production entry points; unmigrated operations continue unchanged. Resolve
+   job/state compatibility before switching their owners, not after deleting their reader.
+6. **Removal and permission-activation PR:** require an empty legacy-consumer inventory and all
+   migration evidence. Delete legacy accessors, factories, packages, tests superseded by proven
+   replacements and temporary scaffolding. Prove installed-package startup and all workflows with
+   those files absent, then enable the reviewed recipient grants and core file allowlist in that
+   same final increment. Prove allowed workflows and denied actions/paths/profile choices through
+   real context entry points, with no public or indirect legacy bypass. Only this state may claim
+   restricted RunContext authority. A failed gate blocks activation/completion, not permission to
+   ship enforced restrictions while leaving a legacy escape.
 
-The cutover gate requires all mandatory operations on supported targets, optional-feature
+Each migration batch records old entry points, new owner/accessor, deliberate operation choices,
+intended grants/paths, regression and live evidence, surviving state disposition and removal status.
+Transport owns this ledger and the final removal PR; delegates cannot leave deletion unassigned. No
+automatic fallback or duplicate production mutation is permitted at any stage.
+
+The additive-surface gate requires all mandatory operations on supported targets, optional-feature
 support/refusal, native bootstrap without a circular helper dependency, secret-handling evidence,
 shell-policy coverage, and supported workstation/platform live evidence. Missing evidence needs
 operator disposition; a successful SSH fixture alone cannot satisfy it.
 
-Implementation can use successive commits and internal test harnesses on its feature branch. The
-current delivery publishes the reviewed design baseline before proof, without claiming a proven
-implementation boundary. The default implementation landing unit contains the new stack and complete
-cutover together; splitting it later requires independently complete units and an explicit removal
-point. Temporary coexistence during development is not a promise to release two public APIs or a
-runtime selection flag.
+PR #830 publishes this design before implementation so both lanes can build against main. The
+implementation, migration batches and removal are separately reviewed, independently green delivery
+units. Temporary released coexistence is intentional, not a permanent compatibility promise.
+Permanent docs describe the actual stage in the PR that ships it; do not claim enforced permissions
+in additive or migration releases. Broader lifecycle/file acceptance remains open.
 
 ## Existing jobs and compatibility
 
 ### File consumer migration
 
 Refresh this release inventory again before implementation and cutover. Classify shell snippets that
-only create/write/merge/chmod/chown/remove files and move those operations to FileAccess. Withhold
-commands/jobs from resources whose remaining work needs only files; do not assume every existing
-shell snippet requires an execution grant forever.
+only create/write/merge/chmod/chown/remove files and move those operations to FileAccess. Record
+file-only intent for those resources; withhold commands/jobs only at post-removal activation. Do not
+assume every existing shell snippet requires an execution grant forever.
 
 For each destination record the core entry, exact-file/subtree and root-creation scope, approved
 actions and metadata, owning resource, and whether a consumer interprets its contents as commands.
 Include session-scoped roots derived from trusted session identity, native recovery paths, helper
-scratch and platform-host locations. Missing approval requires a core policy change before cutover,
-not an automatic parent-wide grant, plugin override or fallback to public exec. This ceiling governs
-the file API, not arbitrary commands that were separately authorized for real execution work.
+scratch and platform-host locations. Missing approval requires a core policy change before
+activation, not an automatic parent-wide grant, plugin override or fallback to public exec. This
+ceiling governs the file API, not arbitrary commands that were separately authorized for real
+execution work.
 
 Validate the plan's file-only slice before migrating the wider estate. Prove privileged placement,
-JSON value preservation/conflicts and directory/stale-socket operations with execution interfaces
-absent, then run the full harness/session workflows. Required file operations remain available on
-native routes; registration consent and a general plugin permission evaluator are not cutover
-prerequisites.
+JSON value preservation/conflicts and directory/stale-socket operations without caller execution
+calls, then run the full harness/session workflows. Isolated tests also exercise execution
+interfaces absent, but production withholding waits for removal. Required file operations remain
+available on native routes; registration consent and a general plugin permission evaluator are not
+cutover prerequisites.
 
 ### Jobs and plugin compatibility
+
+Sessions adopt the [shared supervisor and profile design](execution-lifecycle-lld.md), not a second
+cgroup implementation. Preserve session UUID/run identity and resource-domain readiness while moving
+launch, observation and stop below it. Map #770's requirements and resolve ownership before retiring
+that proposal. Audit each consumer's required profile, action, identity, lifetime and I/O grants,
+including read-only job observers and file-only resources. Guest containment is not an in-process
+plugin sandbox.
+
+Existing sessions do not gain containment by moving their parent into a unit. Untracked detached
+descendants require an explicit legacy-run disposition: authorized shutdown/recreation or retained
+uncertainty, never a false clean certification. Preserve restart consent and do not broaden an
+operation's cleanup targets to unrelated same-user work. Non-systemd placement-host jobs and WSL2
+power lifetime must pass their own gates before production cutover.
 
 The two in-tree production `run_detached` callers do not implement intentional cross-invocation
 reuse of a completed result: Lima provisioning passes `reuse_completed=False`
@@ -249,9 +286,11 @@ acknowledged detached launch; later observation opens a fresh authorized context
   change must not select one accidentally.
 - Environment and elevation changes can alter guest authority or expose secrets. Preserve scoped
   resolution and prove whole-operation identity and secret absence across adapters.
-- Before cutover, the old production path remains the rollback point. After cutover, rollback must
-  account for new jobs, retained artifacts, and plugin contract changes; changing only an import
-  does not establish that old code can read new state. Prefer a forward repair when it cannot.
+- Coexistence is not automatic rollback. Reverting a consumer migration must account for new jobs,
+  retained artifacts, trust writers and plugin contracts; changing an import does not establish that
+  old code can read new state. Never replay an uncertain mutation on legacy. After removal, prefer
+  forward repair when an older release cannot interpret the state. A rollback restoring legacy also
+  invalidates the new permission-boundary claim.
 - A context target can outlive its route accidentally. Lifetime checks and later-observation tests
   must cover both normal exit and exceptions.
 - In-flight SSH changes can move migration sites. Reconcile the artifacts after the shared proof;
