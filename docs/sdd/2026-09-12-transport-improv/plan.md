@@ -8,6 +8,7 @@
 - Proposed interfaces and layout: [Execution contract](execution-contract.md)
 - Active proof implementation: [Proof LLD and evidence](proof-lld.md)
 - Proposed lifecycle: [Execution profiles and supervisor design](execution-lifecycle-lld.md)
+- Shared I/O experiment: [Carrier I/O candidate](carrier-io-lld.md), pending joint review/proof
 
 The required order is: settle the transport-owned small contract, prove it, reconcile both SDDs,
 build independently in parallel, validate complete workflows, add the new RunContext surface,
@@ -83,7 +84,7 @@ open; the SDD is not complete and must not be locked.
 
 The operator directed implementation after merging #830 at `cea5e852`. The additive delivery branch
 is `feat/transport-execution-stack`; it builds the complete new surface without migrating existing
-production consumers. SSH proceeds in its own lane. Development delegates use isolated worktrees
+production consumers. SSH proceeds in its own lane. Development delegates use isolated working trees
 from the same published baseline; the transport lead integrates their reviewed work.
 
 The first bounded assignments complete the file-operation and invocation/result LLDs and refresh the
@@ -91,7 +92,7 @@ RunContext/platform adoption inventory. These close implementation details alrea
 not another requirements phase or a new prerequisite design-only PR. The lead owns shared types,
 carrier-contract changes, composition and the overall plan. SSH implementation files and its SDD
 remain SSH-owned. Broad changes wait for their relevant detailed-design/proof gate; limited
-experiments and implementation of settled pieces stay unwired until production acceptance.
+experiments and implementation of settled pieces stay outside production until acceptance.
 
 The cgroup/session ownership disposition remains required before overlapping lifecycle
 implementation. File, preparation and context work can proceed independently of that ruling.
