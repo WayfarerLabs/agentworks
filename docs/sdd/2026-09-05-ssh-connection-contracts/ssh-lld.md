@@ -116,8 +116,9 @@ status observed before cleanup can establish completion.
 
 ## Proof and remaining work
 
-The [trust LLD](trust-lld.md) specifies Phase 2 import, refresh and operation admission. It is an
-implementation design, not evidence that those mechanisms are shipped or accepted.
+The [trust LLD](trust-lld.md) specifies Phase 2 import, refresh and operation admission. The
+[forwarding LLD](forwarding-lld.md) defines positive listener setup and owned resource lifetime.
+These are implementation designs, not evidence that those mechanisms are shipped or accepted.
 
 The [SSH test handoff](../../../cli/tests/execution/carriers/ssh/README.md) gives local commands and
 explicit live construction using the shared harness. Synthetic local executables test process I/O,
