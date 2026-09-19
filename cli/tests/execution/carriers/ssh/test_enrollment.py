@@ -105,8 +105,9 @@ def test_success_preserves_complete_policy_and_requires_strict_second_connection
     admitted = resolve_trust(synthetic.bundle)
     for argv in synthetic.calls:
         selection = next(arg for arg in argv if arg.startswith("UserKnownHostsFile="))
-        assert selection.index(str(result.known_hosts_file)) < selection.index(str(admitted.known_hosts[0]))
-        assert f'RevokedHostKeys="{admitted.revoked_host_keys}"' in argv
+        assert selection.index(result.known_hosts_file.as_posix()) < selection.index(admitted.known_hosts[0].as_posix())
+        assert admitted.revoked_host_keys is not None
+        assert f'RevokedHostKeys="{admitted.revoked_host_keys.as_posix()}"' in argv
     with pytest.raises(SSHEnrollmentError):
         synthetic.enroll()
     assert len(synthetic.calls) == 2
