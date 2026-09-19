@@ -20,8 +20,8 @@ from agentworks.errors import ValidationError
 from agentworks.execution.carrier import CapturedOutput, CarrierIO, Deadline, Failure
 from agentworks.execution.carriers.ssh import _trust_files as files
 from agentworks.execution.carriers.ssh import enrollment
-from agentworks.execution.carriers.ssh._io import _ProcessResult
-from agentworks.execution.carriers.ssh.connection import SSHConnection
+from agentworks.execution.carriers.ssh._io import _ProcessResult, run_process
+from agentworks.execution.carriers.ssh.connection import SSHConnection, admit_connection
 from agentworks.execution.carriers.ssh.enrollment import (
     SSHCreationProvenance,
     SSHEnrollmentError,
@@ -240,7 +240,7 @@ def test_expired_filesystem_admission_never_dispatches(
 ) -> None:
     now = [0.0]
     monkeypatch.setattr(time, "monotonic", lambda: now[0])
-    original = enrollment.admit_connection
+    original = admit_connection
 
     def delayed(connection: SSHConnection) -> SSHTrustFiles:
         result = original(connection)
@@ -416,7 +416,7 @@ def test_installed_ssh_auth_failure_retains_host_key_for_strict_recovery(local_s
 def test_installed_ssh_positive_ack_without_saved_key_fails_strict_verification(
     local_sshd: LocalSSH, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    original = enrollment.run_process
+    original = run_process
     statuses: list[int | None] = []
 
     def lose_saved_key(argv: list[str], *, io: CarrierIO, deadline: Deadline) -> _ProcessResult:
@@ -473,7 +473,7 @@ def test_interruption_is_not_masked_by_flush_failure(
 def test_admission_generation_change_refuses_before_creation(
     synthetic: SyntheticEnrollment, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    original = enrollment.admit_connection
+    original = admit_connection
 
     def changed(connection: SSHConnection) -> SSHTrustFiles:
         trust = original(connection)
