@@ -63,12 +63,16 @@ bound over that call.
 
 `carriers/wsl2.py` is a private buffered candidate bound to an explicit local WSL executable,
 distribution and delivery user. It sends literal prepared argv through `--exec`, without selecting
-an application shell or discovering a route. Its candidate report treats observed client statuses 0
-through 255 as completion, including 255; absent, negative and out-of-range statuses remain
-uncertain. Independently known completion survives a local I/O failure. This interpretation is based
-on WSL client source, not native Windows acceptance. The carrier is not registered or wired into
-production. Real WSL argument/byte fidelity, status interpretation, interruption and distribution
-lifetime still require proof, and the shared pump's launch-interruption gap applies.
+an application shell or discovering a route. Its candidate report uses observed client statuses 0
+through 255 as dispatch evidence, but only zero establishes typed completion. WSL can collapse a
+normal exit and a signal into the same number, and a lost status channel can produce 1. Nonzero
+statuses therefore retain the raw local number without inventing an exact guest exit or signal;
+absent, negative and out-of-range statuses leave dispatch uncertain too. Independently known
+completion survives a local I/O failure. This source-based interpretation is not native Windows
+acceptance. The carrier is not registered or wired into production. Shared preparation must still
+establish every required application exit and signal independently; this conservative adapter does
+not narrow that requirement. Real WSL argument/byte fidelity, status interpretation, interruption
+and distribution lifetime require proof, and the shared pump's launch-interruption gap applies.
 
 ## Observation and guest lifetime
 

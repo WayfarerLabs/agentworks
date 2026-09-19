@@ -366,12 +366,21 @@ second copy of it. These are implementation inputs, not completed adapter accept
 
 The private `carriers/wsl2.py` candidate uses that literal `--exec` path and the transport-owned
 shared pump. The same pinned source initializes WSL client failure to -1 at lines 1554-1557, returns
-the service launch result at lines 654-693, and maps caught failures to -1 at lines 1923-1927. Its
-proposed interpretation accepts only independently observed integer statuses 0 through 255 as
-command-chain completion, preserving 255 rather than borrowing SSH's ambiguity rule. Negative
-statuses, the Windows unsigned representation 4294967295 and other out-of-range statuses remain
-uncertain. Unit mapping tests do not prove these distinctions against supported shipped WSL clients.
-The carrier remains outside production composition pending the live cases above and the shared
+the service launch result at lines 654-693, and maps caught failures to -1 at lines 1923-1927. The
+integer alone does not establish an exact guest exit: the pinned
+[Linux init](https://github.com/microsoft/WSL/blob/a366853fa06b46b0797a5d359321a870a6aafce0/src/linux/init/init.cpp#L2050-L2063)
+normalizes ordinary exits but sends a signaled child's raw wait status unchanged. Normal exit 15 and
+SIGTERM therefore both produce 15. The
+[Windows VM worker](https://github.com/microsoft/WSL/blob/a366853fa06b46b0797a5d359321a870a6aafce0/src/windows/common/interop.cpp#L574-L615)
+forwards that number and returns 1 if the status channel closes without an exit message.
+
+The corrected private mapping uses observed statuses 0 through 255 as candidate dispatch evidence,
+with typed completion only for zero. Nonzero values retain raw local status and outcome uncertainty,
+not a fabricated exit-code kind; negative, absent and out-of-range values leave dispatch uncertain
+as well. Shared preparation still owes independently proved application results for every required
+exit value and signal. This limitation does not redefine the public contract or complete WSL
+conformance. Unit tests do not establish these distinctions against supported shipped clients. The
+carrier remains outside production composition pending the live cases above and the shared
 launch-interruption ownership gate.
 
 ## Claims not relied upon
