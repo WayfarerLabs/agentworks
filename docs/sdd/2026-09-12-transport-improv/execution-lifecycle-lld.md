@@ -201,6 +201,12 @@ Preserve existing home/workspace semantics or obtain operator disposition of dem
 General quotas, a jail product, broad egress policy and in-process Python-plugin isolation are not
 implied. The API must accommodate future profiles without claiming those mechanisms ship now.
 
+Managing an elevated job is distinct from containing a hostile administrator. MANAGED can supply
+ordinary descendant ownership and cleanup for an elevated workload without promising resistance to
+that workload's administrative authority. CONTAINED must refuse any identity/authority combination
+that invalidates its restrictions; selecting the profile does not revoke ambient root authority.
+Session adoption therefore does not silently turn admin-mode sessions into a containment guarantee.
+
 Non-systemd placement hosts, including macOS before VM creation, still need MANAGED independent jobs
 for provisioning and rollback. They must supply all four added promises: identifiable workload
 ownership, ordinary descendant tracking, supervisor-owned stop and verified terminal emptiness, plus
@@ -221,6 +227,24 @@ these bounded proofs before enabling the corresponding behavior:
 | CONTAINED and membership identity           | Execute the complete source R4/R7 and acceptance cases under an authorized adversarial charter; escape/relaunch is denied or remains in the run, and ambiguous identity refuses. No general permission service is added.                                                                                                               |
 | macOS placement-host jobs                   | Launch actual host provisioning work before guest creation; disconnect the observer, re-observe the same job, stop ordinary detached descendants during rollback and independently verify the owned workload empty while unrelated work survives. Retain launch/output/completion evidence and exercise lost contact/stale references. |
 | WSL2 lifetime and native readiness/recovery | Measure work with the platform hold retained and released; do not imply a job reference owns power. Required readiness/recovery work runs without staging or requested startup; unsupported terminal/live I/O does not block it.                                                                                                       |
+
+Session adoption exercises these shared lifecycle proofs through the actual domain entry points:
+
+- Follow run identity through environment removal, fork/exec, double fork, reparenting and
+  additional tmux panes/sessions. Include named-console agent shells and record their lifetime
+  owner.
+- Exercise stop, restart, delete, failed-launch rollback and cascading agent/workspace cleanup;
+  verify that each targets the selected run and preserves unrelated work.
+- Interrupt persistence of the launch record and lose the launch acknowledgment. Neither case may
+  permit replay or certify an unobserved boundary as empty.
+- Distinguish independently verified reboot or VM destruction from suspension or transport loss.
+  Only evidence establishing that the old workload cannot remain may discharge its cleanup.
+- Keep legacy runs controllable without certifying detached descendants from parent/tmux exit.
+  Replacement cannot inherit a completion claim unsupported by the old run's evidence.
+
+These are proposed proof cases for the existing lifecycle and migration design, not adoption of the
+entire #770 FRD. Requirements-home reconciliation, supported-environment pricing and the unresolved
+containment mechanisms remain open gates in the plan.
 
 After proof, migrate sessions and other jobs, preserving legacy-run uncertainty, consent and
 ownership. The plan's complete-workflow and physical-deletion checks are the migration acceptance
