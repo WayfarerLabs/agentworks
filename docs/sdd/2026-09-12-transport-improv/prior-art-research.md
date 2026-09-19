@@ -318,6 +318,28 @@ still needs a proved macOS metadata implementation. It does not close the file L
 ancestor-rename, hard-link, cross-identity locking, or mount-confinement questions. Those remain
 independent acceptance gates.
 
+## Native adapter audit, 2026-09-19
+
+The existing finite-input carrier boundary permits non-production adapter proofs without selecting
+the new helper runtime. It does not authorize production wiring or settle the sink extension.
+
+The
+[Lima v2.0.3 shell implementation](https://github.com/lima-vm/lima/blob/d2ef7c5111d80e07c6d76172bcba9c4c7cd50557/cmd/limactl/shell.go#L188-L228)
+adds login startup even with an explicit `--shell`. The same version returns without dispatch when
+the instance is stopped and start was not requested. Thus a thin `limactl shell` wrapper neither
+honors our preparation-controlled startup policy nor turns local zero into evidence of dispatch.
+Native Lima needs provider discovery composed with the shared SSH policy and delivery, or another
+proved mechanism; no legacy wrapper should be copied as the new carrier.
+
+The
+[WSL command parser at a366853f](https://github.com/microsoft/WSL/blob/a366853fa06b46b0797a5d359321a870a6aafce0/src/windows/common/WslClient.cpp#L1803-L1842)
+supports a direct-exec path using Windows argument parsing instead of the user's shell. This makes
+`--exec` a candidate for literal prepared argv, not proof of byte fidelity or trustworthy guest
+status. Windows live cases must cover empty/quoted arguments, binary pipes, provider diagnostics,
+exit 255, interruption, and VM power lifetime. Reusing the current bounded subprocess pump requires
+coordination with its SSH owner: non-SSH adapters should neither import SSH-private I/O nor grow a
+second copy of it. These are implementation inputs, not completed adapter acceptance.
+
 ## Claims not relied upon
 
 - A common API makes every backend interactive.
