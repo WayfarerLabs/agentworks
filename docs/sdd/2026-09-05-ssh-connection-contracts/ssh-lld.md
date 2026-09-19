@@ -57,6 +57,16 @@ or account-shell startup behavior. Transport's current Linux Bash/base64 prepara
 neither guest Python nor filesystem staging. The shared bootstrap requires Bash 5.1 or newer;
 measured images and outstanding locations are recorded in [poc-results.md](poc-results.md).
 
+## Phase 2 identity validation
+
+Operation-time checks now verify a private identity's sibling public file against the public
+identity embedded in the configured key. OpenSSH tries the `.pub` companion before deriving that
+identity; `IdentitiesOnly=yes` alone cannot prevent a stale companion from selecting another agent
+key. A mismatch or unverifiable companion refuses before client dispatch. An explicitly configured
+public identity takes precedence over further suffix lookup, matching OpenSSH. The retained
+`ssh_identity` leaf performs bounded public-only parsing without decrypting private material. These
+new checks need their own authentication-offer evidence; the old PoC record is unchanged.
+
 ## Process and evidence
 
 `client.py` owns version gating and mapping into the shared report. `_io.py` owns one subprocess and

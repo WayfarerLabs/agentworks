@@ -34,15 +34,14 @@ source attribution, maintenance authority and file hashes. These are local polic
 not a job registry or a new authorization system.
 
 Initial import creates a new bundle without replacing an existing destination. The caller supplies
-stable source snapshots or quiesces source writers for the copy. Source-file identity/size/time
-checks can reject observed change, but cannot prove consistency against an uncooperative in-place
-writer. Snapshot ownership is explicit; import does not seize control of the operator's original
-files.
+stable source snapshots or stops source writers for the copy. Source-file identity/size/time checks
+can reject observed change, but cannot prove consistency against an uncooperative in-place writer.
+Snapshot ownership is explicit; import does not seize control of the operator's original files.
 
-A nonblocking per-bundle lock serializes writers and operation admission. Copy/adapt the existing
-local `flock`/Windows byte-range lock pattern without importing legacy execution. Keep the lock file
-in place after release so competing processes cannot lock different replacement inodes. Process exit
-releases the operating-system lock; no stale-lock deletion heuristic is needed.
+A per-bundle lock that refuses contention serializes writers and operation admission. Copy/adapt the
+existing local `flock`/Windows byte-range lock pattern without importing legacy execution. Keep the
+lock file in place after release so competing processes cannot lock different underlying files.
+Process exit releases the operating-system lock; no stale-lock deletion heuristic is needed.
 
 Refresh requires the expected current generation, refusing a stale concurrent update. Under the lock
 it first durably marks the bundle blocked, then copies the complete replacement policy into a new
