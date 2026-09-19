@@ -229,9 +229,13 @@ def test_deadline_budget_includes_process_startup(
         startup_offset = 2.0
         return child
 
+    def reject_output_read(output: _subprocess._Output, pipe: Any) -> bool:
+        pytest.fail("Expired startup budget allowed an output observation cycle")
+
     monkeypatch.setattr(time, "monotonic", lambda: monotonic() + startup_offset)
     deadline = Deadline.after(1)
     monkeypatch.setattr(subprocess, "Popen", complete_startup)
+    monkeypatch.setattr(_subprocess._Output, "read", reject_output_read)
     result = run_process(
         [sys.executable, "-c", "import time; time.sleep(30)"],
         io=CarrierIO(),
