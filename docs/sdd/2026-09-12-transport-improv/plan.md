@@ -9,6 +9,8 @@
 - Active proof implementation: [Proof LLD and evidence](proof-lld.md)
 - Proposed lifecycle: [Execution profiles and supervisor design](execution-lifecycle-lld.md)
 - Shared I/O experiment: [Carrier I/O candidate](carrier-io-lld.md), pending joint review/proof
+- Detailed candidates: [Preparation and results](preparation-lld.md) and
+  [file operations](file-operations-lld.md), with their substrate decisions and proofs still open
 
 The required order is: settle the transport-owned small contract, prove it, reconcile both SDDs,
 build independently in parallel, validate complete workflows, add the new RunContext surface,
@@ -102,6 +104,19 @@ while operational safety and deliberately selected profile guarantees apply imme
 No new public feedback/fix allowance is inferred from the completed #830 review. A coherent
 checkpoint receives the normal private reviews and validation before a testing brief and
 `review-requested`; the additive implementation is marked ready only when its own gates pass.
+
+### Initial implementation checkpoint
+
+- [x] Extract immutable command/script values and explicit shell constants into `execution.models`,
+      update transport-owned proof consumers, and preserve the buffered carrier interface. Local
+      execution tests report 309 passed and four platform-scoped skips; production remains
+      unchanged.
+- [ ] Accept the preparation/result and file-operation LLDs after private review and disposition of
+      their helper/runtime, launch-evidence, cross-identity locking, and platform prerequisites.
+- [ ] Jointly accept and prove the carrier sink extension with the SSH owner before changing
+      `CarrierIO` or sensitive-output handling.
+- [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
+      access. The models-only checkpoint is not additive-surface completion.
 
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
