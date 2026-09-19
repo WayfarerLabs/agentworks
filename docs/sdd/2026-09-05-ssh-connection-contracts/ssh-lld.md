@@ -134,12 +134,14 @@ a candidate, not concrete live/terminal types. The bounded borrowed-endpoint app
 pump's fair non-blocking pipe operations; exact endpoint and report types remain transport's to
 supply and accept through joint proof. SSH does not create substitute common types while waiting.
 
-Terminal integration additionally needs explicit borrowed handles and restoration ownership. The
-retained `terminal.guarded_terminal()` acts on process-global stdin/stdout and silently tolerates
-restoration failure, so it cannot be used unchanged as proof of restoring an arbitrary borrowed
-endpoint. Keep terminal mechanics separate from byte-stream pumping and resolve the native
-POSIX/Windows handle contract with transport before enabling the feature. Existing terminal
-constants/utilities remain reusable only with their dependency closure and behavior audited.
+The [terminal LLD](terminal-lld.md) records local feasibility evidence and the unresolved
+prepared-input interface. Terminal integration additionally needs explicit borrowed handles and
+restoration ownership. The retained `terminal.guarded_terminal()` acts on process-global
+stdin/stdout and silently tolerates restoration failure, so it cannot be used unchanged as proof of
+restoring an arbitrary borrowed endpoint. Keep terminal mechanics separate from byte-stream pumping
+and resolve the native POSIX/Windows handle contract with transport before enabling the feature.
+Existing terminal constants/utilities remain reusable only with their dependency closure and
+behavior audited.
 
 Additive RunContext composition, platform endpoint fields and the genuine creation-flow provenance
 binding also remain transport-owned dependencies. Independent trust, identity and forwarding tests
