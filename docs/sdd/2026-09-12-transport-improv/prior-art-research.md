@@ -186,14 +186,14 @@ overrides are also shipped behavior, documented in
 [`native-harness-setup`](../../guides/native-harness-setup.md). Restricting the implementation to
 root-owned configuration trees would therefore omit required workflows.
 
-A local unprivileged probe on Linux 6.1.0-52 arm64 reproduced two deterministic interleavings in an
-owned temporary directory. It opened an approved directory with `O_DIRECTORY | O_NOFOLLOW`, moved it
-beneath an outside sibling, then created a file through the held descriptor: publication occurred at
-the moved location. Separately, it opened a regular file, checked that its link count was one, added
-an outside hard link, and called `fchmod` on the held descriptor: the outside alias acquired the
-changed mode. Fresh-inode replacement afterward preserved that alias's old bytes. These are
-mechanism counterexamples, not a live-carrier test or a demonstrated exploit of the proposed helper,
-which is not implemented. All fixture objects were removed by the temporary-directory owner.
+A local unprivileged probe on Linux 6.1.0-52 arm64 reproduced two deterministic operation sequences
+in an owned temporary directory. It opened an approved directory with `O_DIRECTORY | O_NOFOLLOW`,
+moved it beneath an outside sibling, then created a file through the held descriptor: publication
+occurred at the moved location. Separately, it opened a regular file, checked that its link count
+was one, added an outside hard link, and called `fchmod` on the held descriptor: the outside alias
+acquired the changed mode. Fresh-inode replacement afterward preserved that alias's old bytes. These
+are mechanism counterexamples, not a live-carrier test or a demonstrated exploit of the proposed
+helper, which is not implemented. All fixture objects were removed by the temporary-directory owner.
 
 Linux [`openat2`](https://man7.org/linux/man-pages/man2/openat2.2.html) constrains path resolution;
 it does not make a later operation through a held descriptor an atomic absolute-path check. The
