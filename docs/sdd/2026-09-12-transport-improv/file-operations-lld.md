@@ -29,8 +29,8 @@ string allowlist are not carried forward.
 
 The first slice needs one small file helper, invoked as a subprocess through the new `Carrier`.
 Shell built-ins do not expose the required descriptor-relative object handling. An early Python
-prerequisite and a packaged native executable are unresolved candidates; the requested operator
-decision is still pending, so this LLD selects neither. In every case, the helper is a closed
+prerequisite and a packaged native executable are unresolved candidates. The operator authorized
+investigating early Python, not selecting or installing it. In every case, the helper is a closed
 operation protocol, not a daemon, agent, remote execution escape, or general file-policy engine.
 
 Directory transfer and confined extraction remain required by R7 but are deliberately outside this

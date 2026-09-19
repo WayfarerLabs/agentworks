@@ -263,10 +263,10 @@ cutover prerequisites.
 
 Sessions adopt the [shared supervisor and profile design](execution-lifecycle-lld.md), not a second
 cgroup implementation. Preserve session UUID/run identity and resource-domain readiness while moving
-launch, observation and stop below it. Map #770's requirements and resolve ownership before retiring
-that proposal. Audit each consumer's required profile, action, identity, lifetime and I/O grants,
-including read-only job observers and file-only resources. Guest containment is not an in-process
-plugin sandbox.
+launch, observation and stop below it. The operator assigned this implementation to transport and
+closed #770 on 2026-09-19; its preserved requirements still need complete reconciliation. Audit each
+consumer's required profile, action, identity, lifetime and I/O grants, including read-only job
+observers and file-only resources. Guest containment is not an in-process plugin sandbox.
 
 Existing sessions do not gain containment by moving their parent into a unit. Untracked detached
 descendants require an explicit legacy-run disposition: authorized shutdown/recreation or retained

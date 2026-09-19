@@ -96,8 +96,9 @@ carrier-contract changes, composition and the overall plan. SSH implementation f
 remain SSH-owned. Broad changes wait for their relevant detailed-design/proof gate; limited
 experiments and implementation of settled pieces stay outside production until acceptance.
 
-The cgroup/session ownership disposition remains required before overlapping lifecycle
-implementation. File, preparation and context work can proceed independently of that ruling.
+The operator confirmed transport ownership of the shared cgroup/supervisor implementation and
+session adoption on 2026-09-19. #770 is closed; its final head matches the preserved requirements
+input at `2c406948`. The ownership gate is resolved, not the containment or compatibility proofs.
 Recipient permissions and the successor core file ceiling stay inactive until final legacy removal,
 while operational safety and deliberately selected profile guarantees apply immediately.
 
@@ -121,10 +122,10 @@ checkpoint receives the normal private reviews and validation before a testing b
 At this checkpoint, runtime selection is a concrete decision rather than an assumed prerequisite.
 The baseline `PROVISIONING_PACKAGES` omits Python, while `INIT_SYSTEM_PACKAGES` installs it during
 Phase B; early native bootstrap and remote macOS host execution currently use shell-based paths. The
-operator has been asked whether to investigate an explicit early Python prerequisite instead of
-distributing native helper binaries. No selection or change to the supported platform contract is
-implied by that question. File-only no-staging readiness and exact direct-launch evidence must still
-pass their own proofs whichever substrate is selected.
+operator authorized investigating an explicit early Python prerequisite instead of distributing
+native helper binaries. This is not approval to require or install it, or to change the supported
+platform contract. File-only no-staging readiness and exact direct-launch evidence must still pass
+their own proofs whichever substrate is selected.
 
 Private review also identified a filesystem confinement gap: held directory descriptors and a
 one-time link-count check do not establish safety against ancestor rename or later hard-link
@@ -246,9 +247,9 @@ connection and trust only. Before broader lifecycle implementation, complete the
       supplies the proposal, not implementation proof.
 - [ ] Reconcile the complete #770 requirements, threat model, acceptance cases and exclusions using
       the [preserved input](inputs/session-cgroups-frd-2c406948.md), not the routing index as a
-      replacement FRD. Obtain explicit owner/operator disposition before overlapping lifecycle
-      implementation or artifact retirement; at transfer carry the accepted text into its designated
-      requirements home and reconcile any later source changes.
+      replacement FRD. Ownership is assigned to transport and #770 is closed; carry the accepted
+      text into its designated requirements home. The closed source head is `2c406948`, matching the
+      preserved snapshot; closing the PR does not complete requirements reconciliation.
 - [ ] Complete and prove Linux supervisor launch through SSH and native QGA: protected identity,
       secret/source delivery, privilege changes, foreground wait, independent launch, output
       retention and terminal evidence. No workload code runs before boundary entry.

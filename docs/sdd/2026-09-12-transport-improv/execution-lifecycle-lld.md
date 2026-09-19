@@ -165,20 +165,19 @@ incomplete. Resource owners set output/record retention and abandoned-job cleanu
 
 This effort owns the unified implementation rather than splitting cgroup launch/stop between two
 stacks. Sessions retain their domain lifecycle, tmux/harness readiness and restart consent, using
-the shared supervisor. The earlier [#770 draft](https://github.com/WayfarerLabs/agentworks/pull/770)
-is design input, not a second implementation assignment. Its disposition requires an explicit
-owner/operator handoff; this revision neither edits its artifacts nor closes its PR. Do not retire
-that record until its complete requirements have a designated home or explicit operator disposition.
-The sibling effort's charter remains in force; ownership disposition gates overlapping
-implementation, not just artifact retirement. Neither lane can settle the saga assignment by
-changing its own plan.
+the shared supervisor. The operator explicitly assigned this implementation to transport on
+2026-09-19 and closed [#770](https://github.com/WayfarerLabs/agentworks/pull/770), whose
+[closing note](https://github.com/WayfarerLabs/agentworks/pull/770#issuecomment-5744754690) points
+here. It is requirements input, not a second implementation assignment. This resolves implementation
+ownership; it does not complete requirements reconciliation, weaken containment guarantees or
+authorize editing saga-owned records.
 
 The [verbatim source snapshot](inputs/session-cgroups-frd-2c406948.md) preserves #770's full FRD at
 `2c406948`, including threat model, acceptance cases, exclusions and rulings, independently of draft
-branch retention. It is review input, not a second evolving FRD or a new authority source. At an
-authorized transfer, reconcile the then-current source and carry the accepted text into its
-designated requirements home before retiring the old record. The table below is only a routing
-index; its labels neither replace nor narrow the source requirements.
+branch retention. The closed PR's final head matches that snapshot. It is review input, not a second
+evolving FRD or a new authority source. Carry the accepted text into its designated requirements
+home as part of reconciliation. The table below is only a routing index; its labels neither replace
+nor narrow the source requirements.
 
 | Source requirement                          | Proposed implementation destination                        |
 | ------------------------------------------- | ---------------------------------------------------------- |
@@ -212,9 +211,8 @@ needs operator disposition, not a silent implementation shortcut.
 
 ## Delivery sequence and proof criteria
 
-First publish the reviewed design and settle the cross-effort ownership disposition before
-overlapping lifecycle implementation. Then complete these bounded proofs before enabling the
-corresponding behavior:
+The reviewed design is published and the operator has settled implementation ownership. Complete
+these bounded proofs before enabling the corresponding behavior:
 
 | Proof                                       | Observable acceptance                                                                                                                                                                                                                                                                                                                  |
 | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

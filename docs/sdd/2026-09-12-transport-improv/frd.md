@@ -113,6 +113,18 @@ These rulings supersede the earlier single-increment cutover and permission-enfo
 R7/R9/R10 and their acceptance scenarios, not the final-state requirements. The response and staged
 acceptance gates are in the [migration strategy](migration-strategy.md#sequence-and-cutover-gates).
 
+On transport ownership of the shared cgroup/supervisor implementation and session adoption:
+
+> Yes, transport owns that implementation
+
+On investigation of an early Python prerequisite:
+
+> Investigate an early Python prerequisite (recommended)
+
+On the earlier session-cgroups PR:
+
+> And 770 has been closed with a note
+
 ### Implementation scope
 
 In scope for the eventual implementation:
