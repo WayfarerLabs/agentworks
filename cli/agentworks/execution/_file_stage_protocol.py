@@ -1,4 +1,4 @@
-"""Closed stdlib-only protocol for private stage creation and chunks."""
+"""Closed stdlib-only protocol for private stage transfer and recovery."""
 
 from __future__ import annotations
 
@@ -13,8 +13,15 @@ from typing import Any
 from ._file_paths import normalized_relative_path, normalized_root
 from ._file_wire import valid_nonce
 from ._helper_identity import IdentityExpectation, decode_identity
-from ._scratch import ScratchFailureKind, ScratchPhase, ScratchReference
-from ._scratch_receipt import ScratchCleanupDebt, ScratchOperation, ScratchReceiptContext
+from ._scratch import ScratchFailureKind, ScratchPhase, ScratchReference, _cleanup_debt
+from ._scratch_receipt import (
+    ScratchCleanupDebt,
+    ScratchHistoricalOwnership,
+    ScratchOperation,
+    ScratchOwnershipUncertainty,
+    ScratchReceiptContext,
+    scratch_name,
+)
 from ._scratch_wire import (
     ScratchWireError,
     decode_cleanup_debt,
@@ -30,11 +37,15 @@ _MAX_OFFSET = (1 << 63) - 1
 _COMMON_FIELDS = frozenset({"identity", "nonce", "operation", "path", "remaining_seconds", "root", "token", "version"})
 _BEGIN_FIELDS = _COMMON_FIELDS | {"expected_length"}
 _CHUNK_FIELDS = _COMMON_FIELDS | {"chunk_sha256", "data", "offset", "reference"}
+_RECONCILE_FIELDS = _COMMON_FIELDS
+_CLEANUP_FIELDS = _COMMON_FIELDS | {"cleanup"}
 
 
 class FileStageOperation(StrEnum):
     BEGIN = "stage_begin"
     CHUNK = "stage_chunk"
+    RECONCILE = "stage_reconcile"
+    CLEANUP = "stage_cleanup"
 
 
 class FileStageFailureCode(StrEnum):
@@ -102,7 +113,36 @@ class FileStageChunkRequest:
         return FileStageOperation.CHUNK
 
 
-FileStageRequest = FileStageBeginRequest | FileStageChunkRequest
+@dataclass(frozen=True, slots=True, repr=False)
+class FileStageReconcileRequest:
+    nonce: str
+    root_path: str
+    relative_path: str
+    token: bytes
+    identity: IdentityExpectation
+    remaining_seconds: float | None
+
+    @property
+    def operation(self) -> FileStageOperation:
+        return FileStageOperation.RECONCILE
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class FileStageCleanupRequest:
+    nonce: str
+    root_path: str
+    relative_path: str
+    token: bytes
+    cleanup_debt: ScratchCleanupDebt
+    identity: IdentityExpectation
+    remaining_seconds: float | None
+
+    @property
+    def operation(self) -> FileStageOperation:
+        return FileStageOperation.CLEANUP
+
+
+FileStageRequest = FileStageBeginRequest | FileStageChunkRequest | FileStageReconcileRequest | FileStageCleanupRequest
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -243,6 +283,15 @@ def encode_file_stage_request(request: FileStageRequest) -> bytes:
                     "reference": encode_scratch_reference(request.reference),
                 }
             )
+        elif isinstance(request, FileStageReconcileRequest):
+            pass
+        elif isinstance(request, FileStageCleanupRequest):
+            if (
+                request.cleanup_debt._name != scratch_name(request.token)
+                or request.cleanup_debt._uid != request.identity.euid
+            ):
+                raise ScratchWireError
+            common["cleanup"] = encode_cleanup_debt(request.cleanup_debt)
         else:
             raise TypeError
         encoded = _json_bytes(common)
@@ -280,7 +329,12 @@ def decode_file_stage_request(data: bytes) -> FileStageRequest:
         failed = True
     if failed:
         raise _invalid_request()
-    expected_fields = _BEGIN_FIELDS if operation is FileStageOperation.BEGIN else _CHUNK_FIELDS
+    expected_fields = {
+        FileStageOperation.BEGIN: _BEGIN_FIELDS,
+        FileStageOperation.CHUNK: _CHUNK_FIELDS,
+        FileStageOperation.RECONCILE: _RECONCILE_FIELDS,
+        FileStageOperation.CLEANUP: _CLEANUP_FIELDS,
+    }[operation]
     if set(value) != expected_fields or value["version"] != 1 or type(value["version"]) is not int:
         raise _invalid_request()
     nonce = value["nonce"]
@@ -302,6 +356,18 @@ def decode_file_stage_request(data: bytes) -> FileStageRequest:
             remaining,
         )
     context = stage_context(identity)
+    if operation is FileStageOperation.RECONCILE:
+        return FileStageReconcileRequest(nonce, root_path, relative_path, token, identity, remaining)
+    if operation is FileStageOperation.CLEANUP:
+        failed = False
+        cleanup: ScratchCleanupDebt | None = None
+        try:
+            cleanup = decode_cleanup_debt(value["cleanup"], token, context)
+        except ScratchWireError:
+            failed = True
+        if failed or cleanup is None:
+            raise _invalid_request()
+        return FileStageCleanupRequest(nonce, root_path, relative_path, token, cleanup, identity, remaining)
     failed = False
     reference: ScratchReference | None = None
     try:
@@ -375,6 +441,54 @@ def encode_file_stage_chunk_result() -> bytes:
 
 def parse_file_stage_chunk_result(body: bytes) -> None:
     if body != encode_file_stage_chunk_result():
+        raise FileStageControlError
+
+
+def encode_file_stage_reconcile_result(
+    result: ScratchHistoricalOwnership | ScratchOwnershipUncertainty,
+) -> bytes:
+    if isinstance(result, ScratchOwnershipUncertainty):
+        return b'{"result":"ownership_uncertain"}'
+    failed = False
+    body = b""
+    try:
+        body = _json_bytes({"cleanup": encode_cleanup_debt(_cleanup_debt(result)), "result": "recovered"})
+    except (AttributeError, ScratchWireError, TypeError, ValueError):
+        failed = True
+    if failed:
+        raise FileStageControlError
+    return body
+
+
+def parse_file_stage_reconcile_result(
+    body: bytes,
+    token: bytes,
+    identity: IdentityExpectation,
+) -> ScratchCleanupDebt | None:
+    value = _load_json(body, request=False)
+    failed = False
+    canonical = b""
+    cleanup: ScratchCleanupDebt | None = None
+    try:
+        canonical = _json_bytes(value)
+        result = value.get("result")
+        if result == "recovered" and set(value) == {"cleanup", "result"}:
+            cleanup = decode_cleanup_debt(value["cleanup"], token, stage_context(identity))
+        elif result != "ownership_uncertain" or set(value) != {"result"}:
+            failed = True
+    except (ScratchWireError, TypeError, ValueError):
+        failed = True
+    if failed or canonical != body:
+        raise FileStageControlError
+    return cleanup
+
+
+def encode_file_stage_cleanup_result() -> bytes:
+    return b'{"result":"cleaned"}'
+
+
+def parse_file_stage_cleanup_result(body: bytes) -> None:
+    if body != encode_file_stage_cleanup_result():
         raise FileStageControlError
 
 

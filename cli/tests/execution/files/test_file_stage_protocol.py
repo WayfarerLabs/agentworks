@@ -13,26 +13,34 @@ from agentworks.execution._file_stage_protocol import (
     MAX_STAGE_CHUNK_BYTES,
     FileStageBeginRequest,
     FileStageChunkRequest,
+    FileStageCleanupRequest,
     FileStageControlError,
     FileStageFailureCode,
     FileStageFailureControl,
+    FileStageReconcileRequest,
     FileStageRequestError,
     decode_file_stage_request,
     encode_file_stage_begin_result,
+    encode_file_stage_cleanup_result,
     encode_file_stage_failure,
+    encode_file_stage_reconcile_result,
     encode_file_stage_request,
     parse_file_stage_begin_result,
+    parse_file_stage_cleanup_result,
     parse_file_stage_failure,
+    parse_file_stage_reconcile_result,
     stage_context,
 )
 from agentworks.execution._helper_identity import IdentityExpectation
-from agentworks.execution._scratch import ScratchFailureKind, ScratchPhase, ScratchReference
+from agentworks.execution._scratch import ScratchFailureKind, ScratchPhase, ScratchReference, _cleanup_debt
 from agentworks.execution._scratch_receipt import (
     _RECEIPT_BUILD_MODE,
     _RECEIPT_MODE,
     ScratchCleanupDebt,
+    ScratchHistoricalOwnership,
     ScratchOperation,
     ScratchOwnership,
+    ScratchOwnershipUncertainty,
     ScratchReceiptContext,
     _Identity,
     scratch_name,
@@ -89,6 +97,22 @@ def _chunk(*, data: bytes = b"chunk") -> FileStageChunkRequest:
     )
 
 
+def _reconcile() -> FileStageReconcileRequest:
+    return FileStageReconcileRequest(_NONCE, "/trusted/root", "nested/target", _TOKEN, _IDENTITY, 1.25)
+
+
+def _cleanup() -> FileStageCleanupRequest:
+    return FileStageCleanupRequest(
+        _NONCE,
+        "/trusted/root",
+        "nested/target",
+        _TOKEN,
+        _cleanup_debt(_reference()),
+        _IDENTITY,
+        1.25,
+    )
+
+
 def _json(value: object) -> bytes:
     return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("ascii")
 
@@ -112,7 +136,7 @@ def _exception_details(error: BaseException) -> str:
     return repr(details)
 
 
-@pytest.mark.parametrize("stage_request", [_begin(), _chunk()])
+@pytest.mark.parametrize("stage_request", [_begin(), _chunk(), _reconcile(), _cleanup()])
 def test_requests_round_trip_without_exposing_selectors_or_payload(stage_request) -> None:
     decoded = decode_file_stage_request(encode_file_stage_request(stage_request))
 
@@ -281,6 +305,70 @@ def test_begin_result_round_trips_only_an_active_reference() -> None:
 
     assert parse_file_stage_begin_result(body, _TOKEN, _IDENTITY) == reference
     assert set(json.loads(body)) == {"reference"}
+
+
+def test_reconcile_result_exposes_only_cleanup_debt_or_uncertainty() -> None:
+    reference = _reference()
+    historical = ScratchHistoricalOwnership(reference._ownership)
+
+    recovered = parse_file_stage_reconcile_result(
+        encode_file_stage_reconcile_result(historical),
+        _TOKEN,
+        _IDENTITY,
+    )
+    uncertain = parse_file_stage_reconcile_result(
+        encode_file_stage_reconcile_result(ScratchOwnershipUncertainty()),
+        _TOKEN,
+        _IDENTITY,
+    )
+
+    assert recovered == _cleanup_debt(reference)
+    assert uncertain is None
+
+
+def test_cleanup_result_has_one_exact_closed_shape() -> None:
+    parse_file_stage_cleanup_result(encode_file_stage_cleanup_result())
+
+    with pytest.raises(FileStageControlError):
+        parse_file_stage_cleanup_result(b'{"result":"accepted"}')
+
+
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        FileStageCleanupRequest(
+            _NONCE,
+            "/trusted/root",
+            "target",
+            b"z" * 16,
+            _cleanup_debt(_reference()),
+            _IDENTITY,
+            1.0,
+        ),
+        FileStageCleanupRequest(
+            _NONCE,
+            "/trusted/root",
+            "target",
+            _TOKEN,
+            ScratchCleanupDebt(
+                scratch_name(_TOKEN),
+                _Identity(1, 2),
+                _Identity(1, 3),
+                _Identity(1, 4),
+                _Identity(1, 5),
+                (_RECEIPT_MODE,),
+                _IDENTITY.euid + 1,
+                1002,
+            ),
+            _IDENTITY,
+            1.0,
+        ),
+    ],
+    ids=["token", "identity"],
+)
+def test_cleanup_request_refuses_debt_outside_original_core_binding(candidate: FileStageCleanupRequest) -> None:
+    with pytest.raises(FileStageRequestError):
+        encode_file_stage_request(candidate)
 
 
 @pytest.mark.parametrize("kind", list(ScratchFailureKind))

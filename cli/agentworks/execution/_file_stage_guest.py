@@ -13,15 +13,19 @@ from ._file_stage_protocol import (
     MAX_REQUEST_BYTES,
     FileStageBeginRequest,
     FileStageChunkRequest,
+    FileStageCleanupRequest,
     FileStageFailureCode,
     FileStageFailureControl,
+    FileStageReconcileRequest,
     FileStageRequest,
     FileStageRequestError,
     decode_file_stage_request,
     empty_file_stage_body,
     encode_file_stage_begin_result,
     encode_file_stage_chunk_result,
+    encode_file_stage_cleanup_result,
     encode_file_stage_failure,
+    encode_file_stage_reconcile_result,
     stage_context,
 )
 from ._file_wire import FileRecordKind, FileRecordWriter
@@ -33,8 +37,13 @@ from ._scratch import (
     ScratchTransferError,
     _cleanup_debt,
     begin_scratch,
+    cleanup_scratch,
+    reconcile_scratch_ownership,
     write_scratch_chunk,
 )
+from ._scratch_receipt import ScratchHistoricalOwnership, ScratchOwnershipUncertainty
+
+_OperationResult = ScratchReference | ScratchHistoricalOwnership | ScratchOwnershipUncertainty | None
 
 
 class _SafeFailure(Exception):
@@ -110,7 +119,7 @@ def _open_parent(request: FileStageRequest) -> tuple[int, int | None]:
         raise
 
 
-def _operate(request: FileStageRequest, expires_at: float | None) -> ScratchReference | None:
+def _operate(request: FileStageRequest, expires_at: float | None) -> _OperationResult:
     root_fd, parent_fd = _open_parent(request)
     selected_fd = root_fd if parent_fd is None else parent_fd
     try:
@@ -123,15 +132,25 @@ def _operate(request: FileStageRequest, expires_at: float | None) -> ScratchRefe
                 context,
                 expires_at=expires_at,
             )
-        assert isinstance(request, FileStageChunkRequest)
-        write_scratch_chunk(
-            selected_fd,
-            request.reference,
-            request.offset,
-            request.data,
-            request.chunk_digest,
-            expires_at=expires_at,
-        )
+        if isinstance(request, FileStageChunkRequest):
+            write_scratch_chunk(
+                selected_fd,
+                request.reference,
+                request.offset,
+                request.data,
+                request.chunk_digest,
+                expires_at=expires_at,
+            )
+            return None
+        if isinstance(request, FileStageReconcileRequest):
+            return reconcile_scratch_ownership(
+                selected_fd,
+                request.token,
+                context,
+                expires_at=expires_at,
+            )
+        assert isinstance(request, FileStageCleanupRequest)
+        cleanup_scratch(selected_fd, request.cleanup_debt)
         return None
     except ScratchTransferError as error:
         raise _SafeFailure(_scratch_failure(error)) from None
@@ -154,6 +173,26 @@ def _finish_failure(
     return 0
 
 
+def _deadline_failure(request: FileStageRequest, result: _OperationResult) -> FileStageFailureControl:
+    debt = None
+    if isinstance(request, FileStageBeginRequest):
+        assert isinstance(result, ScratchReference)
+        phase = ScratchPhase.BEGIN
+        debt = _cleanup_debt(result)
+    elif isinstance(request, FileStageChunkRequest):
+        phase = ScratchPhase.WRITE
+        debt = _cleanup_debt(request.reference)
+    elif isinstance(request, FileStageReconcileRequest):
+        phase = ScratchPhase.RECONCILE
+        if isinstance(result, ScratchHistoricalOwnership):
+            debt = _cleanup_debt(result)
+    else:
+        assert isinstance(request, FileStageCleanupRequest)
+        phase = ScratchPhase.CLEANUP
+        debt = request.cleanup_debt
+    return FileStageFailureControl(FileStageFailureCode.SCRATCH, ScratchFailureKind.DEADLINE, phase, debt)
+
+
 def main(nonce: str) -> int:
     """Execute one request after nonce, runtime, and exact identity checks."""
     writer = FileRecordWriter(nonce)
@@ -169,7 +208,7 @@ def main(nonce: str) -> int:
         return _finish_failure(writer, FileStageFailureControl(FileStageFailureCode.IDENTITY_MISMATCH))
     expires_at = _expires_at(request.remaining_seconds)
     failure: FileStageFailureControl | None = None
-    result: ScratchReference | None = None
+    result: _OperationResult = None
     try:
         with system_file_lock(expires_at=expires_at):
             try:
@@ -180,23 +219,22 @@ def main(nonce: str) -> int:
         return _finish_failure(writer, _lock_failure(error))
     if _expired(expires_at):
         if failure is None:
-            if isinstance(request, FileStageBeginRequest):
-                assert result is not None
-                phase = ScratchPhase.BEGIN
-                debt = _cleanup_debt(result)
-            else:
-                phase = ScratchPhase.WRITE
-                debt = _cleanup_debt(request.reference)
-            failure = FileStageFailureControl(FileStageFailureCode.SCRATCH, ScratchFailureKind.DEADLINE, phase, debt)
+            failure = _deadline_failure(request, result)
         elif failure.code in {FileStageFailureCode.ROOT_REFUSED, FileStageFailureCode.PARENT_REFUSED}:
             failure = FileStageFailureControl(FileStageFailureCode.LOCK_DEADLINE)
     if failure is not None:
         return _finish_failure(writer, failure)
     if isinstance(request, FileStageBeginRequest):
-        assert result is not None
+        assert isinstance(result, ScratchReference)
         body = encode_file_stage_begin_result(result)
-    else:
+    elif isinstance(request, FileStageChunkRequest):
         body = encode_file_stage_chunk_result()
+    elif isinstance(request, FileStageReconcileRequest):
+        assert isinstance(result, ScratchHistoricalOwnership | ScratchOwnershipUncertainty)
+        body = encode_file_stage_reconcile_result(result)
+    else:
+        assert isinstance(request, FileStageCleanupRequest)
+        body = encode_file_stage_cleanup_result()
     writer.write(FileRecordKind.RESULT, body)
     writer.write(FileRecordKind.FINISHED, empty_file_stage_body())
     return 0

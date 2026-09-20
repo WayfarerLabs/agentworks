@@ -1,4 +1,4 @@
-"""One-attempt host exchanges for private stage creation and chunks."""
+"""One-attempt host exchanges for private stage transfer and recovery."""
 
 from __future__ import annotations
 
@@ -12,17 +12,21 @@ from agentworks.execution._file_stage_bundle import FIXED_SOURCE
 from agentworks.execution._file_stage_protocol import (
     FileStageBeginRequest,
     FileStageChunkRequest,
+    FileStageCleanupRequest,
     FileStageControlError,
     FileStageFailureCode,
     FileStageFailureControl,
     FileStageOperation,
+    FileStageReconcileRequest,
     FileStageRequest,
     FileStageRequestError,
     encode_file_stage_request,
     parse_empty_file_stage_body,
     parse_file_stage_begin_result,
     parse_file_stage_chunk_result,
+    parse_file_stage_cleanup_result,
     parse_file_stage_failure,
+    parse_file_stage_reconcile_result,
 )
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, FileRecordReader, FileWireError
 from agentworks.execution._helper_launcher import IdentityPlan, build_helper_argv
@@ -39,6 +43,7 @@ from agentworks.execution.carrier import (
 
 if TYPE_CHECKING:
     from agentworks.execution._scratch import ScratchReference
+    from agentworks.execution._scratch_receipt import ScratchCleanupDebt
     from agentworks.execution.carrier import Carrier, Deadline, ExitStatus
 
 _DEFAULT_RUNTIME = "/usr/bin/python3"
@@ -47,6 +52,9 @@ _DEFAULT_RUNTIME = "/usr/bin/python3"
 class FileStageObservationState(StrEnum):
     CREATED = "created"
     ACCEPTED = "accepted"
+    RECOVERED = "recovered"
+    OWNERSHIP_UNCERTAIN = "ownership_uncertain"
+    CLEANED = "cleaned"
     REFUSED = "refused"
     INVALID = "invalid"
     INCOMPLETE = "incomplete"
@@ -67,6 +75,7 @@ class FileStageObservation:
     state: FileStageObservationState
     reference: ScratchReference | None = field(default=None, repr=False)
     failure: FileStageFailureControl | None = field(default=None, repr=False)
+    cleanup_debt: ScratchCleanupDebt | None = field(default=None, repr=False)
     error: FileStageObservationError | FileWireError | None = None
 
 
@@ -95,6 +104,30 @@ class FileStageChunkUncertain(Exception):
         super().__init__("private stage chunk may have been dispatched")
 
 
+class FileStageReconcileUncertain(Exception):
+    """Safe cause retained when reconciliation observation is unavailable."""
+
+    def __init__(self) -> None:
+        super().__init__("private stage reconciliation observation is unavailable")
+
+
+class FileStageCleanupUncertain(Exception):
+    """Safe cause retained when cleanup may have been dispatched."""
+
+    def __init__(self) -> None:
+        super().__init__("private stage cleanup may have been dispatched")
+
+
+def _control_uncertainty(operation: FileStageOperation) -> Exception:
+    if operation is FileStageOperation.BEGIN:
+        return FileStageCreationUncertain()
+    if operation is FileStageOperation.CHUNK:
+        return FileStageChunkUncertain()
+    if operation is FileStageOperation.RECONCILE:
+        return FileStageReconcileUncertain()
+    return FileStageCleanupUncertain()
+
+
 class _DiagnosticSink:
     def __init__(self) -> None:
         self.saw_data = False
@@ -112,6 +145,8 @@ class _FileStageCollector:
         self._request = request
         self._reference: ScratchReference | None = None
         self._accepted = False
+        self._cleanup_debt: ScratchCleanupDebt | None = None
+        self._ownership_uncertain = False
         self._failure: FileStageFailureControl | None = None
         self._terminal = False
         self._error: FileStageObservationError | None = None
@@ -142,8 +177,21 @@ class _FileStageCollector:
                     self._fail(FileStageObservationError.CONTROL)
                 else:
                     self._reference = reference
-            else:
+            elif self._request.operation is FileStageOperation.CHUNK:
                 parse_file_stage_chunk_result(record.body)
+                self._accepted = True
+            elif self._request.operation is FileStageOperation.RECONCILE:
+                cleanup = parse_file_stage_reconcile_result(
+                    record.body,
+                    self._request.token,
+                    self._request.identity,
+                )
+                if cleanup is None:
+                    self._ownership_uncertain = True
+                else:
+                    self._cleanup_debt = cleanup
+            else:
+                parse_file_stage_cleanup_result(record.body)
                 self._accepted = True
             return
         if record.kind is FileRecordKind.FAILED:
@@ -166,19 +214,32 @@ class _FileStageCollector:
         self._fail(FileStageObservationError.ORDER)
 
     def _has_outcome(self) -> bool:
-        return self._reference is not None or self._accepted or self._failure is not None
+        return (
+            self._reference is not None
+            or self._accepted
+            or self._cleanup_debt is not None
+            or self._ownership_uncertain
+            or self._failure is not None
+        )
 
     def _valid_failure(self, failure: FileStageFailureControl) -> bool:
         if failure.code is not FileStageFailureCode.SCRATCH:
             return True
-        expected_phase = (
-            ScratchPhase.BEGIN if self._request.operation is FileStageOperation.BEGIN else ScratchPhase.WRITE
-        )
+        expected_phase = {
+            FileStageOperation.BEGIN: ScratchPhase.BEGIN,
+            FileStageOperation.CHUNK: ScratchPhase.WRITE,
+            FileStageOperation.RECONCILE: ScratchPhase.RECONCILE,
+            FileStageOperation.CLEANUP: ScratchPhase.CLEANUP,
+        }[self._request.operation]
         if failure.phase is not expected_phase:
             return False
-        if self._request.operation is FileStageOperation.CHUNK:
-            assert isinstance(self._request, FileStageChunkRequest)
-            return failure.cleanup_debt == _cleanup_debt(self._request.reference)
+        if isinstance(self._request, FileStageChunkRequest | FileStageCleanupRequest):
+            expected_debt = (
+                _cleanup_debt(self._request.reference)
+                if isinstance(self._request, FileStageChunkRequest)
+                else self._request.cleanup_debt
+            )
+            return failure.cleanup_debt == expected_debt
         return True
 
     def _fail(self, error: FileStageObservationError) -> None:
@@ -189,6 +250,8 @@ class _FileStageCollector:
     def _clear(self) -> None:
         self._reference = None
         self._accepted = False
+        self._cleanup_debt = None
+        self._ownership_uncertain = False
         self._failure = None
         self._terminal = False
 
@@ -228,9 +291,21 @@ class _FileStageCollector:
             reference = self._reference
             self._clear()
             return FileStageObservation(FileStageObservationState.CREATED, reference=reference)
+        if self._cleanup_debt is not None:
+            cleanup_debt = self._cleanup_debt
+            self._clear()
+            return FileStageObservation(FileStageObservationState.RECOVERED, cleanup_debt=cleanup_debt)
+        if self._ownership_uncertain:
+            self._clear()
+            return FileStageObservation(FileStageObservationState.OWNERSHIP_UNCERTAIN)
         assert self._accepted
         self._clear()
-        return FileStageObservation(FileStageObservationState.ACCEPTED)
+        state = (
+            FileStageObservationState.CLEANED
+            if self._request.operation is FileStageOperation.CLEANUP
+            else FileStageObservationState.ACCEPTED
+        )
+        return FileStageObservation(state)
 
 
 def _validate_text(value: object) -> str:
@@ -296,12 +371,7 @@ def _exchange(
         reader.abort()
         collector.abort()
         if dispatch is not Dispatch.NOT_SENT:
-            uncertainty: Exception = (
-                FileStageCreationUncertain()
-                if request.operation is FileStageOperation.BEGIN
-                else FileStageChunkUncertain()
-            )
-            raise control from uncertainty
+            raise control from _control_uncertainty(request.operation)
         raise
 
 
@@ -353,6 +423,52 @@ def stage_chunk(
         offset,
         data,
         chunk_digest,
+        plan.expected,
+        deadline.remaining(),
+    )
+    return _exchange(carrier, request, plan, deadline, runtime_path)
+
+
+def stage_reconcile(
+    carrier: Carrier,
+    *,
+    trusted_root_path: str,
+    relative_path: str,
+    token: bytes,
+    plan: IdentityPlan,
+    deadline: Deadline,
+    runtime_path: str = _DEFAULT_RUNTIME,
+) -> FileStageCandidateResult:
+    """Read one exact stage receipt without replaying creation or promoting it."""
+    request = FileStageReconcileRequest(
+        secrets.token_hex(16),
+        _validate_text(trusted_root_path),
+        _validate_text(relative_path),
+        token,
+        plan.expected,
+        deadline.remaining(),
+    )
+    return _exchange(carrier, request, plan, deadline, runtime_path)
+
+
+def stage_cleanup(
+    carrier: Carrier,
+    *,
+    trusted_root_path: str,
+    relative_path: str,
+    token: bytes,
+    cleanup_debt: ScratchCleanupDebt,
+    plan: IdentityPlan,
+    deadline: Deadline,
+    runtime_path: str = _DEFAULT_RUNTIME,
+) -> FileStageCandidateResult:
+    """Attempt exact cleanup once without inferring terminal quiescence."""
+    request = FileStageCleanupRequest(
+        secrets.token_hex(16),
+        _validate_text(trusted_root_path),
+        _validate_text(relative_path),
+        token,
+        cleanup_debt,
         plan.expected,
         deadline.remaining(),
     )

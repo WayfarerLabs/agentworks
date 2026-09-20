@@ -11,23 +11,31 @@ import pytest
 from agentworks.errors import ValidationError
 from agentworks.execution._file_stage_exchange import (
     FileStageChunkUncertain,
+    FileStageCleanupUncertain,
     FileStageCreationUncertain,
     FileStageObservationError,
     FileStageObservationState,
+    FileStageReconcileUncertain,
     stage_begin,
     stage_chunk,
+    stage_cleanup,
+    stage_reconcile,
 )
 from agentworks.execution._file_stage_protocol import (
     FileStageBeginRequest,
     FileStageChunkRequest,
+    FileStageCleanupRequest,
     FileStageFailureCode,
     FileStageFailureControl,
+    FileStageReconcileRequest,
     FileStageRequest,
     decode_file_stage_request,
     empty_file_stage_body,
     encode_file_stage_begin_result,
     encode_file_stage_chunk_result,
+    encode_file_stage_cleanup_result,
     encode_file_stage_failure,
+    encode_file_stage_reconcile_result,
     stage_context,
 )
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, FileWireError, encode_file_record
@@ -38,7 +46,9 @@ from agentworks.execution._scratch_receipt import (
     _RECEIPT_BUILD_MODE,
     _RECEIPT_MODE,
     ScratchCleanupDebt,
+    ScratchHistoricalOwnership,
     ScratchOwnership,
+    ScratchOwnershipUncertainty,
     _Identity,
     scratch_name,
 )
@@ -161,6 +171,17 @@ def _chunk_records(request: FileStageRequest) -> bytes:
     return _records(request, FileRecordKind.RESULT, encode_file_stage_chunk_result())
 
 
+def _reconcile_records(request: FileStageRequest) -> bytes:
+    assert isinstance(request, FileStageReconcileRequest)
+    historical = ScratchHistoricalOwnership(_reference(request)._ownership)
+    return _records(request, FileRecordKind.RESULT, encode_file_stage_reconcile_result(historical))
+
+
+def _cleanup_records(request: FileStageRequest) -> bytes:
+    assert isinstance(request, FileStageCleanupRequest)
+    return _records(request, FileRecordKind.RESULT, encode_file_stage_cleanup_result())
+
+
 def test_complete_begin_exposes_reference_only_after_sensitive_terminal_exchange(plan: IdentityPlan) -> None:
     carrier = TranscriptCarrier(_begin_records)
 
@@ -241,6 +262,103 @@ def test_complete_chunk_is_accepted_once_without_payload_retention(plan: Identit
     assert result.observation.state is FileStageObservationState.ACCEPTED
     assert payload.decode() not in repr(result)
     assert carrier.invocation is not None and payload.decode() not in carrier.invocation.argv
+
+
+def test_complete_reconcile_exposes_only_cleanup_debt_after_terminal(plan: IdentityPlan) -> None:
+    carrier = TranscriptCarrier(_reconcile_records)
+
+    result = stage_reconcile(
+        carrier,
+        trusted_root_path="/trusted/root-canary",
+        relative_path="nested/target-canary",
+        token=_TOKEN,
+        plan=plan,
+        deadline=Deadline.after(1),
+    )
+
+    assert result.observation.state is FileStageObservationState.RECOVERED
+    assert result.observation.cleanup_debt is not None
+    assert result.observation.reference is None
+    assert carrier.io is not None and carrier.io.sensitive
+    assert carrier.invocation is not None
+    assert "root-canary" not in carrier.invocation.argv
+    assert "target-canary" not in carrier.invocation.argv
+
+
+def test_truncated_reconcile_never_exposes_parsed_cleanup_debt(plan: IdentityPlan) -> None:
+    result = stage_reconcile(
+        TranscriptCarrier(lambda request: _reconcile_records(request)[:-1]),
+        trusted_root_path="/trusted/root",
+        relative_path="target",
+        token=_TOKEN,
+        plan=plan,
+        deadline=Deadline.after(1),
+    )
+
+    assert result.observation.state is FileStageObservationState.UNCERTAIN
+    assert result.observation.cleanup_debt is None
+    assert result.observation.error is FileWireError.TRUNCATED
+
+
+def test_complete_reconcile_can_report_ownership_uncertainty(plan: IdentityPlan) -> None:
+    def uncertain(request: FileStageRequest) -> bytes:
+        assert isinstance(request, FileStageReconcileRequest)
+        return _records(
+            request,
+            FileRecordKind.RESULT,
+            encode_file_stage_reconcile_result(ScratchOwnershipUncertainty()),
+        )
+
+    result = stage_reconcile(
+        TranscriptCarrier(uncertain),
+        trusted_root_path="/trusted/root",
+        relative_path="target",
+        token=_TOKEN,
+        plan=plan,
+        deadline=Deadline.after(1),
+    )
+
+    assert result.observation.state is FileStageObservationState.OWNERSHIP_UNCERTAIN
+    assert result.observation.cleanup_debt is None
+
+
+def test_reconcile_reply_from_another_request_nonce_is_uncertain(plan: IdentityPlan) -> None:
+    def crossbound(request: FileStageRequest) -> bytes:
+        assert isinstance(request, FileStageReconcileRequest)
+        historical = ScratchHistoricalOwnership(_reference(request)._ownership)
+        return encode_file_record(
+            "0" * 32,
+            FileRecord(0, FileRecordKind.RESULT, encode_file_stage_reconcile_result(historical)),
+        )
+
+    result = stage_reconcile(
+        TranscriptCarrier(crossbound),
+        trusted_root_path="/trusted/root",
+        relative_path="target",
+        token=_TOKEN,
+        plan=plan,
+        deadline=Deadline.after(1),
+    )
+
+    assert result.observation.state is FileStageObservationState.UNCERTAIN
+    assert result.observation.error is FileWireError.NONCE
+    assert result.observation.cleanup_debt is None
+
+
+def test_complete_cleanup_reports_only_attempt_observation(plan: IdentityPlan) -> None:
+    begin = FileStageBeginRequest("0" * 32, "/trusted/root", "target", _TOKEN, 1, plan.expected, 1.0)
+    result = stage_cleanup(
+        TranscriptCarrier(_cleanup_records),
+        trusted_root_path=begin.root_path,
+        relative_path=begin.relative_path,
+        token=_TOKEN,
+        cleanup_debt=_debt(begin),
+        plan=plan,
+        deadline=Deadline.after(1),
+    )
+
+    assert result.observation.state is FileStageObservationState.CLEANED
+    assert result.observation.cleanup_debt is None
 
 
 @pytest.mark.parametrize(
@@ -419,6 +537,66 @@ def test_chunk_prescratch_refusal_accepts_non_scratch_failure_without_debt(plan:
     assert result.observation.failure.cleanup_debt is None
 
 
+def _cleanup_refusal(
+    plan: IdentityPlan,
+    debt_change: Callable[[ScratchCleanupDebt], ScratchCleanupDebt | None],
+):
+    begin = FileStageBeginRequest("0" * 32, "/trusted/root", "target", _TOKEN, 1, plan.expected, 1.0)
+    debt = _debt(begin)
+
+    def refusal(request: FileStageRequest) -> bytes:
+        assert isinstance(request, FileStageCleanupRequest)
+        failure = FileStageFailureControl(
+            FileStageFailureCode.SCRATCH,
+            ScratchFailureKind.CONFLICT,
+            ScratchPhase.CLEANUP,
+            debt_change(debt),
+        )
+        return _records(request, FileRecordKind.FAILED, encode_file_stage_failure(failure))
+
+    return stage_cleanup(
+        TranscriptCarrier(refusal),
+        trusted_root_path=begin.root_path,
+        relative_path=begin.relative_path,
+        token=_TOKEN,
+        cleanup_debt=debt,
+        plan=plan,
+        deadline=Deadline.after(1),
+    )
+
+
+def test_cleanup_scratch_refusal_exposes_only_matching_request_debt(plan: IdentityPlan) -> None:
+    result = _cleanup_refusal(plan, lambda debt: debt)
+
+    assert result.observation.state is FileStageObservationState.REFUSED
+    assert result.observation.failure is not None
+    assert result.observation.failure.cleanup_debt is not None
+
+
+@pytest.mark.parametrize(
+    "debt_change",
+    [
+        lambda _debt: None,
+        lambda debt: replace(debt, _parent=_Identity(9, 2)),
+        lambda debt: replace(debt, _directory=_Identity(9, 3)),
+        lambda debt: replace(debt, _object=_Identity(9, 4)),
+        lambda debt: replace(debt, _receipt=_Identity(9, 5)),
+        lambda debt: replace(debt, _receipt_modes=(_RECEIPT_BUILD_MODE, _RECEIPT_MODE)),
+        lambda debt: replace(debt, _gid=9999),
+    ],
+    ids=["absent", "parent", "directory", "data", "receipt", "receipt-mode", "gid"],
+)
+def test_cleanup_scratch_refusal_rejects_debt_not_equal_to_request(
+    plan: IdentityPlan,
+    debt_change: Callable[[ScratchCleanupDebt], ScratchCleanupDebt | None],
+) -> None:
+    result = _cleanup_refusal(plan, debt_change)
+
+    assert result.observation.state is FileStageObservationState.UNCERTAIN
+    assert result.observation.error is FileStageObservationError.CONTROL
+    assert result.observation.failure is None
+
+
 @pytest.mark.parametrize(
     ("build", "stderr", "error"),
     [
@@ -472,7 +650,12 @@ def test_noisy_wrong_nonce_duplicate_and_stderr_creation_responses_are_uncertain
 
 @pytest.mark.parametrize(
     ("operation", "cause_type"),
-    [("begin", FileStageCreationUncertain), ("chunk", FileStageChunkUncertain)],
+    [
+        ("begin", FileStageCreationUncertain),
+        ("chunk", FileStageChunkUncertain),
+        ("reconcile", FileStageReconcileUncertain),
+        ("cleanup", FileStageCleanupUncertain),
+    ],
 )
 def test_control_interruption_propagates_with_operation_specific_uncertainty(
     plan: IdentityPlan,
@@ -499,7 +682,7 @@ def test_control_interruption_propagates_with_operation_specific_uncertainty(
     with pytest.raises(KeyboardInterrupt) as raised:
         if operation == "begin":
             stage_begin(**kwargs, expected_length=1)
-        else:
+        elif operation == "chunk":
             request = FileStageBeginRequest("0" * 32, "/trusted/root", "target", _TOKEN, 1, plan.expected, 1.0)
             data = b"x"
             stage_chunk(
@@ -509,6 +692,11 @@ def test_control_interruption_propagates_with_operation_specific_uncertainty(
                 data=data,
                 chunk_digest=hashlib.sha256(data).digest(),
             )
+        elif operation == "reconcile":
+            stage_reconcile(**kwargs)
+        else:
+            request = FileStageBeginRequest("0" * 32, "/trusted/root", "target", _TOKEN, 1, plan.expected, 1.0)
+            stage_cleanup(**kwargs, cleanup_debt=_debt(request))
     assert isinstance(raised.value.__cause__, cause_type)
 
 
