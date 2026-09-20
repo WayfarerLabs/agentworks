@@ -109,15 +109,15 @@ carrier types remain buffered-only and its live I/O LLD remains a candidate. Ful
 delivery requires transport's concrete carrier/report/terminal definitions and joint proof. The
 operator confirmed #833 as the implementation source, with terminal/PTY work proceeding in parallel.
 
-SSH integration `678e487d` incorporates that transport pin and adds a separately cherry-pickable
-buffered-mode guard for #833: unfamiliar shared input/output modes refuse before connection
-admission or process creation. Current constructor checks already exclude these shapes; the guard
-lets transport widen its types safely before SSH adopts them. Six simulated future-mode cases prove
-that boundary, not live-mode support. A clean cherry-pick onto transport `a885ef5a` passed its
-client and guard tests (53 passed, 4 skipped). The complete SSH combination passed 10,596 local
-tests with 12 skips, full Ruff/format and mypy. Three independent private reviews passed the guard;
-removing its input and output checks broke the corresponding four and two cases. Real widened types
-must be exercised when the extension is published.
+SSH integration `678e487d` incorporates that transport pin and adds a standalone buffered-mode guard
+for #833: unfamiliar shared input/output modes refuse before connection admission or process
+creation. Current constructor checks already exclude these shapes; the guard lets transport widen
+its types safely before SSH adopts them. Six simulated future-mode cases prove that boundary, not
+live-mode support. A clean cherry-pick onto transport `a885ef5a` passed its client and guard tests
+(53 passed, 4 skipped). The complete SSH combination passed 10,596 local tests with 12 skips, full
+Ruff/format and mypy. Three independent private reviews passed the guard; removing its input and
+output checks broke the corresponding four and two cases. Real widened types must be exercised when
+the extension is published.
 
 The [terminal experiment](terminal-lld.md#real-ssh-client-relay-experiment) now demonstrates why an
 owned local stdin PTY is preferable to pipes for POSIX OpenSSH: geometry, resize and nondefault
