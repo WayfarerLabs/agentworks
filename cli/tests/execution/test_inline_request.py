@@ -90,6 +90,26 @@ def test_canonical_manifest_is_closed_ascii_and_keeps_payload_out_of_helper_argv
     )
 
 
+@pytest.mark.windows
+def test_guest_module_import_does_not_require_posix_account_database() -> None:
+    script = r"""
+import importlib.abc
+import sys
+
+class BlockPwd(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "pwd":
+            raise ImportError("POSIX account database is unavailable")
+
+sys.meta_path.insert(0, BlockPwd())
+import agentworks.execution._inline_guest
+assert "pwd" not in sys.modules
+"""
+    result = subprocess.run([sys.executable, "-I", "-c", script], capture_output=True, timeout=20)
+
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+
+
 @pytest.mark.parametrize(
     "data",
     [

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import pwd
 from contextlib import suppress
 from dataclasses import dataclass
 
@@ -101,6 +100,8 @@ def _script_shell(manifest: InlineManifest) -> tuple[str, ScriptShell]:
         return "/bin/sh", ScriptShell.SH
     if manifest.shell is ScriptShell.BASH:
         return "/bin/bash", ScriptShell.BASH
+    import pwd
+
     try:
         configured = pwd.getpwuid(manifest.identity.euid).pw_shell
     except (KeyError, OSError):
