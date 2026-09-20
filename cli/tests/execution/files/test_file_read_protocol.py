@@ -21,20 +21,23 @@ from agentworks.execution._file_read import (
 )
 from agentworks.execution._file_read_bundle import FIXED_SOURCE
 from agentworks.execution._file_read_protocol import (
-    MAX_RECORD_BYTES,
     FileReadFailure,
-    FileReadRecord,
-    FileReadRecordKind,
     FileReadRequestError,
     FileReadResultControl,
-    FileReadWireError,
     decode_file_read_request,
     empty_file_read_body,
     encode_file_read_failure,
-    encode_file_read_record,
     encode_file_read_result,
 )
 from agentworks.execution._file_stat import FileStat
+from agentworks.execution._file_wire import (
+    MAX_RECORD_BYTES,
+    FileRecord,
+    FileRecordKind,
+    FileRecordReader,
+    FileWireError,
+    encode_file_record,
+)
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution.carrier import (
@@ -113,20 +116,20 @@ def plan() -> IdentityPlan:
     return IdentityPlan(IdentityExpectation(1001, 1002, (1002, 1003)), IdentityMode.DIRECT)
 
 
-def _record(nonce: str, sequence: int, kind: FileReadRecordKind, body: bytes) -> bytes:
-    return encode_file_read_record(nonce, FileReadRecord(sequence, kind, body))
+def _record(nonce: str, sequence: int, kind: FileRecordKind, body: bytes) -> bytes:
+    return encode_file_record(nonce, FileRecord(sequence, kind, body))
 
 
 def _success(nonce: str, data: bytes) -> bytes:
     records: list[bytes] = []
     sequence = 0
     for offset in range(0, len(data), 4096):
-        records.append(_record(nonce, sequence, FileReadRecordKind.DATA, data[offset : offset + 4096]))
+        records.append(_record(nonce, sequence, FileRecordKind.DATA, data[offset : offset + 4096]))
         sequence += 1
     metadata = FileStat(1, 2, stat.S_IFREG | 0o600, 1, 1001, 1002, len(data), 3, 4)
     control = FileReadResultControl(hashlib.sha256(data).digest(), metadata)
-    records.append(_record(nonce, sequence, FileReadRecordKind.RESULT, encode_file_read_result(control)))
-    records.append(_record(nonce, sequence + 1, FileReadRecordKind.FINISHED, empty_file_read_body()))
+    records.append(_record(nonce, sequence, FileRecordKind.RESULT, encode_file_read_result(control)))
+    records.append(_record(nonce, sequence + 1, FileRecordKind.FINISHED, empty_file_read_body()))
     return b"".join(records)
 
 
@@ -185,36 +188,36 @@ def test_exit_zero_without_a_complete_transcript_is_not_success(plan: IdentityPl
         (
             lambda nonce: b"reflected-request-canary\n" + _success(nonce, b"secret"),
             FileReadObservationState.INVALID,
-            FileReadWireError.MALFORMED,
+            FileWireError.MALFORMED,
         ),
         (
-            lambda nonce: _record("0" * 32, 0, FileReadRecordKind.ABSENT, empty_file_read_body()),
+            lambda nonce: _record("0" * 32, 0, FileRecordKind.ABSENT, empty_file_read_body()),
             FileReadObservationState.INVALID,
-            FileReadWireError.NONCE,
+            FileWireError.NONCE,
         ),
         (
-            lambda nonce: _record(nonce, 1, FileReadRecordKind.ABSENT, empty_file_read_body()),
+            lambda nonce: _record(nonce, 1, FileRecordKind.ABSENT, empty_file_read_body()),
             FileReadObservationState.INVALID,
-            FileReadWireError.SEQUENCE,
+            FileWireError.SEQUENCE,
         ),
         (
-            lambda nonce: _record(nonce, 0, FileReadRecordKind.ABSENT, empty_file_read_body())[:-1],
+            lambda nonce: _record(nonce, 0, FileRecordKind.ABSENT, empty_file_read_body())[:-1],
             FileReadObservationState.INCOMPLETE,
-            FileReadWireError.TRUNCATED,
+            FileWireError.TRUNCATED,
         ),
         (
             lambda nonce: (
-                _record(nonce, 0, FileReadRecordKind.ABSENT, empty_file_read_body())
-                + _record(nonce, 1, FileReadRecordKind.ABSENT, empty_file_read_body())
+                _record(nonce, 0, FileRecordKind.ABSENT, empty_file_read_body())
+                + _record(nonce, 1, FileRecordKind.ABSENT, empty_file_read_body())
             ),
             FileReadObservationState.INVALID,
             FileReadObservationError.ORDER,
         ),
         (
             lambda nonce: (
-                _record(nonce, 0, FileReadRecordKind.ABSENT, empty_file_read_body())
-                + _record(nonce, 1, FileReadRecordKind.FINISHED, empty_file_read_body())
-                + _record(nonce, 2, FileReadRecordKind.FINISHED, empty_file_read_body())
+                _record(nonce, 0, FileRecordKind.ABSENT, empty_file_read_body())
+                + _record(nonce, 1, FileRecordKind.FINISHED, empty_file_read_body())
+                + _record(nonce, 2, FileRecordKind.FINISHED, empty_file_read_body())
             ),
             FileReadObservationState.INVALID,
             FileReadObservationError.POST_TERMINAL,
@@ -225,7 +228,7 @@ def test_malformed_reflected_wrong_nonce_order_truncation_and_trailing_records_a
     plan: IdentityPlan,
     build,
     expected_state: FileReadObservationState,
-    expected_error: FileReadObservationError | FileReadWireError,
+    expected_error: FileReadObservationError | FileWireError,
 ) -> None:
     prepared = prepare_file_read(
         trusted_root_path="/trusted",
@@ -253,9 +256,9 @@ def test_digest_mismatch_and_incomplete_stream_disclose_no_data_or_hash(plan: Id
     metadata = FileStat(1, 2, stat.S_IFREG | 0o600, 1, 1001, 1002, len(canary), 3, 4)
     wrong = FileReadResultControl(b"x" * 32, metadata)
     transcript = (
-        _record(prepared.nonce, 0, FileReadRecordKind.DATA, canary)
-        + _record(prepared.nonce, 1, FileReadRecordKind.RESULT, encode_file_read_result(wrong))
-        + _record(prepared.nonce, 2, FileReadRecordKind.FINISHED, empty_file_read_body())
+        _record(prepared.nonce, 0, FileRecordKind.DATA, canary)
+        + _record(prepared.nonce, 1, FileRecordKind.RESULT, encode_file_read_result(wrong))
+        + _record(prepared.nonce, 2, FileRecordKind.FINISHED, empty_file_read_body())
     )
     invalid = execute_file_read(TranscriptCarrier(transcript), prepared, deadline=Deadline.after(1))
 
@@ -291,9 +294,9 @@ def test_result_metadata_must_bind_the_exact_stream_length(plan: IdentityPlan) -
     metadata = FileStat(1, 2, stat.S_IFREG | 0o600, 1, 1001, 1002, len(data) + 1, 3, 4)
     control = FileReadResultControl(hashlib.sha256(data).digest(), metadata)
     transcript = (
-        _record(prepared.nonce, 0, FileReadRecordKind.DATA, data)
-        + _record(prepared.nonce, 1, FileReadRecordKind.RESULT, encode_file_read_result(control))
-        + _record(prepared.nonce, 2, FileReadRecordKind.FINISHED, empty_file_read_body())
+        _record(prepared.nonce, 0, FileRecordKind.DATA, data)
+        + _record(prepared.nonce, 1, FileRecordKind.RESULT, encode_file_read_result(control))
+        + _record(prepared.nonce, 2, FileRecordKind.FINISHED, empty_file_read_body())
     )
 
     result = execute_file_read(TranscriptCarrier(transcript), prepared, deadline=Deadline.after(1))
@@ -312,8 +315,8 @@ def test_result_metadata_rejects_undefined_high_linux_mode_bits(plan: IdentityPl
     )
     metadata = FileStat(1, 2, 0x80000000 | stat.S_IFREG | 0o600, 1, 1001, 1002, 0, 3, 4)
     control = FileReadResultControl(hashlib.sha256(b"").digest(), metadata)
-    transcript = _record(prepared.nonce, 0, FileReadRecordKind.RESULT, encode_file_read_result(control)) + _record(
-        prepared.nonce, 1, FileReadRecordKind.FINISHED, empty_file_read_body()
+    transcript = _record(prepared.nonce, 0, FileRecordKind.RESULT, encode_file_read_result(control)) + _record(
+        prepared.nonce, 1, FileRecordKind.FINISHED, empty_file_read_body()
     )
 
     result = execute_file_read(TranscriptCarrier(transcript), prepared, deadline=Deadline.after(1))
@@ -411,8 +414,8 @@ def test_absent_and_refusal_are_complete_typed_outcomes_without_payload(plan: Id
         max_bytes=32,
         plan=plan,
     )
-    absent_transcript = _record(prepared.nonce, 0, FileReadRecordKind.ABSENT, empty_file_read_body()) + _record(
-        prepared.nonce, 1, FileReadRecordKind.FINISHED, empty_file_read_body()
+    absent_transcript = _record(prepared.nonce, 0, FileRecordKind.ABSENT, empty_file_read_body()) + _record(
+        prepared.nonce, 1, FileRecordKind.FINISHED, empty_file_read_body()
     )
     absent = execute_file_read(TranscriptCarrier(absent_transcript), prepared, deadline=Deadline.after(1))
 
@@ -428,9 +431,9 @@ def test_absent_and_refusal_are_complete_typed_outcomes_without_payload(plan: Id
     refusal_transcript = _record(
         prepared.nonce,
         0,
-        FileReadRecordKind.FAILED,
+        FileRecordKind.FAILED,
         encode_file_read_failure(FileReadFailure.UNSUPPORTED_OBJECT),
-    ) + _record(prepared.nonce, 1, FileReadRecordKind.FINISHED, empty_file_read_body())
+    ) + _record(prepared.nonce, 1, FileRecordKind.FINISHED, empty_file_read_body())
     refusal = execute_file_read(TranscriptCarrier(refusal_transcript), prepared, deadline=Deadline.after(1))
 
     assert refusal.observation.state is FileReadObservationState.REFUSED
@@ -449,8 +452,26 @@ def test_oversized_record_is_bounded_and_rejected(plan: IdentityPlan) -> None:
     result = execute_file_read(TranscriptCarrier(transcript), prepared, deadline=Deadline.after(1))
 
     assert result.observation.state is FileReadObservationState.INVALID
-    assert result.observation.error is FileReadWireError.OVERSIZED
+    assert result.observation.error is FileWireError.OVERSIZED
     assert result.observation.snapshot is None
+
+
+def test_record_callback_exception_clears_buffer_and_propagates_without_raw_retention() -> None:
+    nonce = "0123456789abcdef0123456789abcdef"
+    canary = b"callback-canary"
+    failure = RuntimeError("closed callback failure")
+
+    def reject(_record: FileRecord) -> None:
+        raise failure
+
+    reader = FileRecordReader(nonce, reject)
+    with pytest.raises(RuntimeError) as raised:
+        _write(reader, encode_file_record(nonce, FileRecord(0, FileRecordKind.DATA, canary)))
+
+    assert raised.value is failure
+    assert reader.error is FileWireError.CALLBACK
+    assert reader._record == bytearray()
+    assert canary.decode() not in repr(reader)
 
 
 @pytest.mark.windows

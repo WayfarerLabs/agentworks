@@ -152,6 +152,28 @@ def test_empty_and_small_regular_files_are_complete(
     assert result.observation.snapshot.data == content
 
 
+def test_execute_only_root_ancestors_do_not_require_directory_read_permission(
+    tmp_path: Path,
+    plan: IdentityPlan,
+) -> None:
+    root = tmp_path / "execute-only"
+    nested = root / "nested"
+    nested.mkdir(parents=True)
+    content = b"bounded-content"
+    (nested / "leaf").write_bytes(content)
+    root.chmod(0o111)
+    nested.chmod(0o111)
+    try:
+        _, result = _read(nested, "leaf", plan, max_bytes=len(content))
+    finally:
+        root.chmod(0o700)
+        nested.chmod(0o700)
+
+    assert result.observation.state is FileReadObservationState.PRESENT
+    assert result.observation.snapshot is not None
+    assert result.observation.snapshot.data == content
+
+
 def test_absence_is_distinct_from_every_failure(tmp_path: Path, plan: IdentityPlan) -> None:
     _, result = _read(tmp_path, "missing", plan)
     _, missing_root = _read(tmp_path / "missing-root", "file", plan)

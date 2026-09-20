@@ -21,6 +21,7 @@ _MODULE_NAMES = (
     "_scratch",
     "_file_lock",
     "_file_publication",
+    "_file_wire",
     "_file_read_protocol",
 )
 _DISPATCHER = """

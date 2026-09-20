@@ -2,27 +2,24 @@
 
 from __future__ import annotations
 
-import errno
 import os
 import sys
 from contextlib import suppress
 
+from ._file_paths import ConfinedOpenError, open_linux_root
 from ._file_read_protocol import (
-    MAX_RECORD_BODY_BYTES,
     MAX_REQUEST_BYTES,
     FileReadFailure,
-    FileReadRecord,
-    FileReadRecordKind,
     FileReadRequest,
     FileReadRequestError,
     FileReadResultControl,
     decode_file_read_request,
     empty_file_read_body,
     encode_file_read_failure,
-    encode_file_read_record,
     encode_file_read_result,
 )
 from ._file_snapshot import FileSnapshot, SnapshotFailureKind, SnapshotReadError, read_snapshot
+from ._file_wire import MAX_RECORD_BODY_BYTES, FileRecord, FileRecordKind, encode_file_record
 from ._helper_identity import matches_current_identity
 
 
@@ -31,8 +28,8 @@ class _Emitter:
         self._nonce = nonce
         self._sequence = 0
 
-    def emit(self, kind: FileReadRecordKind, body: bytes) -> None:
-        record = encode_file_read_record(self._nonce, FileReadRecord(self._sequence, kind, body))
+    def emit(self, kind: FileRecordKind, body: bytes) -> None:
+        record = encode_file_record(self._nonce, FileRecord(self._sequence, kind, body))
         remaining = memoryview(record)
         while remaining:
             written = os.write(1, remaining)
@@ -40,34 +37,6 @@ class _Emitter:
                 raise OSError
             remaining = remaining[written:]
         self._sequence += 1
-
-
-def _open_trusted_root(path: str) -> int | None:
-    """Open every absolute ancestor without links, permitting mounts to the root."""
-    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
-    try:
-        descriptor = os.open("/", flags)
-    except OSError:
-        raise _SafeFailure(FileReadFailure.ROOT_REFUSED) from None
-    components = () if path == "/" else path[1:].split("/")
-    for component in components:
-        error_number: int | None = None
-        try:
-            child = os.open(component, flags, dir_fd=descriptor)
-        except OSError as error:
-            error_number = error.errno
-            child = None
-        if child is None:
-            with suppress(OSError):
-                os.close(descriptor)
-            if error_number == errno.ENOENT:
-                return None
-            raise _SafeFailure(FileReadFailure.ROOT_REFUSED)
-        previous = descriptor
-        descriptor = child
-        with suppress(OSError):
-            os.close(previous)
-    return descriptor
 
 
 class _SafeFailure(Exception):
@@ -96,7 +65,10 @@ def _failure_for_snapshot(error: SnapshotReadError) -> FileReadFailure:
 
 
 def _snapshot(request: FileReadRequest) -> FileSnapshot | None:
-    root_fd = _open_trusted_root(request.root_path)
+    try:
+        root_fd = open_linux_root(request.root_path)
+    except ConfinedOpenError:
+        raise _SafeFailure(FileReadFailure.ROOT_REFUSED) from None
     if root_fd is None:
         return None
     try:
@@ -110,10 +82,10 @@ def _snapshot(request: FileReadRequest) -> FileSnapshot | None:
 
 def _emit_snapshot(emitter: _Emitter, snapshot: FileSnapshot) -> None:
     for offset in range(0, len(snapshot.data), MAX_RECORD_BODY_BYTES):
-        emitter.emit(FileReadRecordKind.DATA, snapshot.data[offset : offset + MAX_RECORD_BODY_BYTES])
+        emitter.emit(FileRecordKind.DATA, snapshot.data[offset : offset + MAX_RECORD_BODY_BYTES])
     observed = snapshot.stat
     emitter.emit(
-        FileReadRecordKind.RESULT,
+        FileRecordKind.RESULT,
         encode_file_read_result(
             FileReadResultControl(
                 digest=snapshot.digest,
@@ -124,8 +96,8 @@ def _emit_snapshot(emitter: _Emitter, snapshot: FileSnapshot) -> None:
 
 
 def _finish_failure(emitter: _Emitter, failure: FileReadFailure) -> int:
-    emitter.emit(FileReadRecordKind.FAILED, encode_file_read_failure(failure))
-    emitter.emit(FileReadRecordKind.FINISHED, empty_file_read_body())
+    emitter.emit(FileRecordKind.FAILED, encode_file_read_failure(failure))
+    emitter.emit(FileRecordKind.FINISHED, empty_file_read_body())
     return 0
 
 
@@ -147,8 +119,8 @@ def main(nonce: str) -> int:
     except _SafeFailure as error:
         return _finish_failure(emitter, error.failure)
     if snapshot is None:
-        emitter.emit(FileReadRecordKind.ABSENT, empty_file_read_body())
+        emitter.emit(FileRecordKind.ABSENT, empty_file_read_body())
     else:
         _emit_snapshot(emitter, snapshot)
-    emitter.emit(FileReadRecordKind.FINISHED, empty_file_read_body())
+    emitter.emit(FileRecordKind.FINISHED, empty_file_read_body())
     return 0

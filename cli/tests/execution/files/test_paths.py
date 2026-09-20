@@ -14,7 +14,10 @@ import agentworks.execution._file_paths as paths_module
 from agentworks.execution._file_paths import (
     ConfinedOpenError,
     ConfinedOpenFailure,
+    normalized_relative_path,
+    normalized_root,
     open_linux_confined,
+    open_linux_root,
 )
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="openat2 is Linux-specific")
@@ -30,6 +33,94 @@ def _failure(root_fd: int, relative_path: str) -> ConfinedOpenError:
     with pytest.raises(ConfinedOpenError) as raised:
         open_linux_confined(root_fd, relative_path, _READ_FLAGS)
     return raised.value
+
+
+@pytest.mark.parametrize("path", ["/", "/root", "/root/nested", "/snowman-☃"])
+def test_normalized_root_accepts_canonical_absolute_paths(path: str) -> None:
+    assert normalized_root(path)
+
+
+@pytest.mark.parametrize("path", ["", "relative", "//", "/root/", "/root//leaf", "/./leaf", "/../leaf", "/nul\0"])
+def test_normalized_root_rejects_every_noncanonical_shape(path: str) -> None:
+    assert not normalized_root(path)
+
+
+@pytest.mark.parametrize("path", ["leaf", "nested/leaf", "snowman-☃"])
+def test_normalized_relative_path_accepts_canonical_descendants(path: str) -> None:
+    assert normalized_relative_path(path)
+
+
+@pytest.mark.parametrize("path", ["", "/leaf", "leaf/", "leaf//child", ".", "..", "a/./b", "a/../b", "nul\0"])
+def test_normalized_relative_path_rejects_every_noncanonical_shape(path: str) -> None:
+    assert not normalized_relative_path(path)
+
+
+def test_linux_root_walk_uses_path_descriptors_for_execute_only_directories(tmp_path: Path) -> None:
+    root = tmp_path / "execute-only"
+    nested = root / "nested"
+    nested.mkdir(parents=True)
+    leaf = nested / "leaf"
+    leaf.write_bytes(b"content")
+    root.chmod(0o111)
+    nested.chmod(0o111)
+    descriptor: int | None = None
+    try:
+        descriptor = open_linux_root(str(nested))
+        assert descriptor is not None
+        assert os.fstat(descriptor).st_ino == nested.stat().st_ino
+        assert os.stat("leaf", dir_fd=descriptor, follow_symlinks=False).st_ino == leaf.stat().st_ino
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        root.chmod(0o700)
+        nested.chmod(0o700)
+
+
+def test_linux_root_walk_reports_absence_and_refuses_symlink_ancestors(tmp_path: Path) -> None:
+    actual = tmp_path / "actual"
+    actual.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(actual, target_is_directory=True)
+
+    assert open_linux_root(str(tmp_path / "missing" / "nested")) is None
+    with pytest.raises(ConfinedOpenError) as raised:
+        open_linux_root(str(link / "nested"))
+    assert raised.value.kind is ConfinedOpenFailure.UNSUPPORTED_OBJECT
+
+
+def test_linux_root_walk_refuses_an_ancestor_without_search_permission(tmp_path: Path) -> None:
+    blocked = tmp_path / "blocked"
+    child = blocked / "child"
+    child.mkdir(parents=True)
+    blocked.chmod(0)
+    try:
+        with pytest.raises(ConfinedOpenError) as raised:
+            open_linux_root(str(child))
+    finally:
+        blocked.chmod(0o700)
+    assert raised.value.kind is ConfinedOpenFailure.IO
+
+
+def test_linux_root_walk_closes_every_owned_descriptor_after_mid_walk_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened = iter((101, 102))
+    closed: list[int] = []
+
+    def failing_open(path: str, flags: int, *, dir_fd: int | None = None) -> int:
+        del flags, dir_fd
+        if path == "second":
+            raise OSError(errno.EIO, "injected")
+        return next(opened)
+
+    monkeypatch.setattr(os, "open", failing_open)
+    monkeypatch.setattr(os, "close", closed.append)
+
+    with pytest.raises(ConfinedOpenError) as raised:
+        open_linux_root("/first/second")
+
+    assert raised.value.kind is ConfinedOpenFailure.IO
+    assert closed == [101, 102]
 
 
 def test_actual_openat2_opens_nested_regular_file_and_borrows_root(tmp_path: Path) -> None:

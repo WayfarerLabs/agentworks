@@ -13,17 +13,19 @@ from agentworks.execution._file_read_bundle import FIXED_SOURCE
 from agentworks.execution._file_read_protocol import (
     FileReadControlError,
     FileReadFailure,
-    FileReadRecord,
-    FileReadRecordKind,
-    FileReadRecordReader,
     FileReadRequest,
     FileReadRequestError,
     FileReadResultControl,
-    FileReadWireError,
     encode_file_read_request,
     parse_empty_file_read_body,
     parse_file_read_failure,
     parse_file_read_result,
+)
+from agentworks.execution._file_wire import (
+    FileRecord,
+    FileRecordKind,
+    FileRecordReader,
+    FileWireError,
 )
 from agentworks.execution._helper_launcher import IdentityPlan, build_helper_argv
 from agentworks.execution.carrier import (
@@ -73,7 +75,7 @@ class FileReadObservation:
     state: FileReadObservationState
     snapshot: FileReadSnapshot | None = field(default=None, repr=False)
     failure: FileReadFailure | None = None
-    error: FileReadObservationError | FileReadWireError | None = None
+    error: FileReadObservationError | FileWireError | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,7 +113,7 @@ class _FileReadCollector:
         self._terminal = False
         self._error: FileReadObservationError | None = None
 
-    def accept(self, record: FileReadRecord) -> None:
+    def accept(self, record: FileRecord) -> None:
         if self._error is not None:
             return
         if self._terminal:
@@ -122,8 +124,8 @@ class _FileReadCollector:
         except FileReadControlError:
             self._fail(FileReadObservationError.CONTROL)
 
-    def _accept(self, record: FileReadRecord) -> None:
-        if record.kind is FileReadRecordKind.DATA:
+    def _accept(self, record: FileRecord) -> None:
+        if record.kind is FileRecordKind.DATA:
             if self._result is not None or self._absent or self._failure is not None:
                 self._fail(FileReadObservationError.ORDER)
             elif len(self._data) + len(record.body) > self._max_bytes:
@@ -131,7 +133,7 @@ class _FileReadCollector:
             else:
                 self._data.extend(record.body)
             return
-        if record.kind is FileReadRecordKind.RESULT:
+        if record.kind is FileRecordKind.RESULT:
             if self._result is not None or self._absent or self._failure is not None:
                 self._fail(FileReadObservationError.ORDER)
                 return
@@ -141,21 +143,21 @@ class _FileReadCollector:
             else:
                 self._result = result
             return
-        if record.kind is FileReadRecordKind.ABSENT:
+        if record.kind is FileRecordKind.ABSENT:
             parse_empty_file_read_body(record.body)
             if self._data or self._result is not None or self._absent or self._failure is not None:
                 self._fail(FileReadObservationError.ORDER)
             else:
                 self._absent = True
             return
-        if record.kind is FileReadRecordKind.FAILED:
+        if record.kind is FileRecordKind.FAILED:
             failure = parse_file_read_failure(record.body)
             if self._data or self._result is not None or self._absent or self._failure is not None:
                 self._fail(FileReadObservationError.ORDER)
             else:
                 self._failure = failure
             return
-        if record.kind is FileReadRecordKind.FINISHED:
+        if record.kind is FileRecordKind.FINISHED:
             parse_empty_file_read_body(record.body)
             if self._result is None and not self._absent and self._failure is None:
                 self._fail(FileReadObservationError.ORDER)
@@ -182,12 +184,12 @@ class _FileReadCollector:
 
     def finish(
         self,
-        wire_error: FileReadWireError | None,
+        wire_error: FileWireError | None,
         *,
         streams_complete: bool,
         stderr_noise: bool,
     ) -> FileReadObservation:
-        error: FileReadObservationError | FileReadWireError | None = self._error or wire_error
+        error: FileReadObservationError | FileWireError | None = self._error or wire_error
         state = FileReadObservationState.INVALID
         if error is None and stderr_noise:
             error = FileReadObservationError.STDERR
@@ -197,7 +199,7 @@ class _FileReadCollector:
         elif error is None and not self._terminal:
             error = FileReadObservationError.MISSING_TERMINAL
             state = FileReadObservationState.INCOMPLETE
-        elif error is FileReadWireError.TRUNCATED:
+        elif error is FileWireError.TRUNCATED:
             state = FileReadObservationState.INCOMPLETE
         if error is not None:
             self._clear()
@@ -222,7 +224,7 @@ class PreparedFileRead:
     invocation: PreparedInvocation
     io: CarrierIO
     nonce: str
-    _reader: FileReadRecordReader = field(repr=False)
+    _reader: FileRecordReader = field(repr=False)
     _collector: _FileReadCollector = field(repr=False)
     _stderr: _DiagnosticSink = field(repr=False)
     _claimed: bool = field(default=False, init=False, repr=False)
@@ -271,7 +273,7 @@ def prepare_file_read(
     if request_failure is not None:
         raise ValidationError("File-read request contains an invalid field")
     collector = _FileReadCollector(max_bytes)
-    reader = FileReadRecordReader(nonce, collector.accept)
+    reader = FileRecordReader(nonce, collector.accept)
     stderr = _DiagnosticSink()
     return PreparedFileRead(
         invocation=PreparedInvocation(fixed_argv),
