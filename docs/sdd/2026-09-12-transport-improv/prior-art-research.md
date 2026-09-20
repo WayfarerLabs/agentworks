@@ -669,12 +669,12 @@ or macOS evidence.
 
 A one-shot launch-owner thread is a candidate, not the selected implementation. Local trials
 preserved exact child cleanup through repeated construction-time SIGINT, without replacing signal
-handlers. However, an early version relied on interruptible event/liveness synchronization and
-incorrectly concluded cleanup had finished. The thread's own startup handoff still needs proof:
-interruption must distinguish a never-started owner from one that will start later, without
-returning with a surviving thread or borrowed endpoint. The existing exclusion of hard real-time
-process-creation guarantees does not excuse lost ownership or change callback threading. Do not
-substitute a generic future cancellation or `Thread.is_alive()` check for this proof.
+handlers. However, an early version relied on event/liveness synchronization that could itself be
+interrupted and incorrectly concluded cleanup had finished. The thread's own startup handoff still
+needs proof: interruption must distinguish a never-started owner from one that will start later,
+without returning with a surviving thread or borrowed endpoint. The existing exclusion of hard
+real-time process-creation guarantees does not excuse lost ownership or change callback threading.
+Do not substitute a generic future cancellation or `Thread.is_alive()` check for this proof.
 
 ## Native adapter audit, 2026-09-19
 
