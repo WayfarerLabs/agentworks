@@ -228,7 +228,6 @@ def test_live_delivery_does_not_turn_ssh_255_into_remote_completion(
 
 
 @pytest.mark.integration
-@pytest.mark.windows
 def test_installed_ssh_live_duplex_preserves_sensitive_binary_delivery(
     local_sshd: SSHConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
