@@ -393,6 +393,18 @@ shared carrier interface remains unchanged. Actual privilege transitions, target
 native acceptance, full files/lifecycle and additive RunContext remain open. No live infrastructure
 was touched and no public feedback/fix round is consumed.
 
+All hosted checks subsequently pass at `3ada8ff0` in
+[run 35504674348](https://github.com/WayfarerLabs/agentworks/actions/runs/35504674348), including
+Windows Python 3.13 and Linux Python 3.12/3.13/3.14.
+
+The private account-discovery increment at `40a6bade` reads only the core-bound account's IDs/groups
+under the delivery identity and feeds the existing identity plan. It uses a bounded one-shot JSON
+reply, no staging or privilege change, and no public account selector. The developer's focused suite
+passes 64 tests; execution tests pass 1,151 with six skips. Real distribution-Python-3.11 lookup and
+lookup-to-inline composition run locally. The latter correctly refuses this container's differing
+database and inherited group memberships. Private review and final gates are pending. This does not
+close native identity-transition, Darwin acceptance or production composition gates.
+
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
 

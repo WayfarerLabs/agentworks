@@ -130,6 +130,21 @@ bounding-set restrictions and `no_new_privs` belong to the independently selecte
 profile, not ordinary account selection. This candidate still requires actual root-demotion, sudo
 and native-platform proof before production use.
 
+Core resolves the bound workload account before constructing its identity plan. A private, fixed
+read-only helper queries the destination account database under the existing delivery identity; it
+does not need an identity transition to discover the transition's inputs. The account name travels
+in sensitive stdin, never as executable source. Only UID, primary GID and normalized supplementary
+groups return. No password, account description, home or shell is exported by this lookup. Shell
+selection remains after the final identity transition.
+
+The lookup uses one carrier attempt and a bounded nonce-bound JSON request/reply, not an application
+stream protocol. Missing accounts and lookup/runtime refusals remain distinct from malformed or
+incomplete observation. Noise, reflection, duplicate fields, extra content, oversized metadata or
+incomplete streams must not yield an identity. Discovery neither grants authority nor certifies the
+identity of a later process: the selected helper still checks its actual IDs/groups before workload
+access. There is no account cache, automatic replay, staging, privilege change or public account
+selector in this operation. The runtime prerequisite probe supplies the selected Python path.
+
 The sudo wrapper consumes the same manifest from stdin after privilege change. Source, input, and
 environment never appear in sudo argv or environment assignments. A failure before the inner
 bootstrap's first trusted frame cannot be classified as sudo refusal from raw nonzero status or

@@ -152,9 +152,23 @@ The fixed launcher gives Python a minimal environment. Trusted numeric identity 
 in wrapper argv; workload source, paths, environment and input remain in stdin. Linux helpers verify
 real/effective/saved IDs and normalized groups before workload access. A non-Linux destination with
 a compatible interpreter returns closed refusal evidence; an interpreter that cannot start cannot
-provide that evidence. The host import remains workstation-neutral. Account resolution, actual
-sudo/root-demotion acceptance and native integration remain open; these private plans are not grants
-and do not activate permissions.
+provide that evidence. The host import remains workstation-neutral. Actual sudo/root-demotion
+acceptance and native integration remain open; these private plans are not grants and do not
+activate permissions.
+
+`_account.resolve_account` discovers a core-bound account's UID, primary GID and normalized groups
+through one read-only carrier attempt under the delivery identity. It accepts an already-selected
+compatible Python path, changes no credentials and creates no files. The account name stays in
+sensitive stdin. The fixed helper queries the Linux or Darwin account database; it does not export
+passwords, account descriptions, home directories or shells. Native Darwin acceptance remains open.
+
+Both request and reply are bounded to 32 KiB. A complete, nonce-bound response and complete
+delivered streams are required to return identity metadata. Missing accounts and closed helper
+refusals remain distinct from invalid or incomplete observation; raw status is separate. Raw
+diagnostics are dropped and private response buffers are cleared after the attempt. Discovered
+groups can differ from a running process's inherited groups, so lookup does not replace the launch
+helper's actual identity check or grant authority. This private operation is not production
+RunContext composition.
 
 ## Private inline preparation
 

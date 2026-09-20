@@ -5,6 +5,21 @@
 
 ## Findings
 
+### Destination account discovery
+
+Python 3.11's Unix `pwd.getpwnam` supplies numeric UID and primary GID, with a missing account
+reported separately. `os.getgrouplist` queries account group membership and includes the supplied
+primary group. These read-only interfaces avoid parsing shell output or changing the discovery
+process's credentials. Database membership is not the credentials already held by a running process;
+the launch helper must still verify its actual identity.
+
+Decision: use a small private metadata lookup before building identity plans. Return only the
+required IDs/groups, and refuse oversized or incomplete observations. Lazy Unix imports preserve
+workstation portability; documentation of Unix APIs is not native macOS acceptance.
+
+Sources: [Python 3.11 account lookup](https://docs.python.org/3.11/library/pwd.html),
+[group discovery](https://docs.python.org/3.11/library/os.html#os.getgrouplist).
+
 ### Explicit Linux helper identity transitions
 
 <!-- cspell:ignore setpriv -->
