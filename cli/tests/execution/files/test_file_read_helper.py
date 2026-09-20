@@ -158,7 +158,6 @@ def test_absence_is_distinct_from_every_failure(tmp_path: Path, identity: FileRe
     assert result.observation.state is FileReadObservationState.ABSENT
     assert result.observation.snapshot is None
     assert result.observation.failure is None
-    assert result.observation.trusted_terminal
     assert missing_root.observation.state is FileReadObservationState.ABSENT
     assert missing_root.observation.snapshot is None
 
@@ -289,7 +288,7 @@ def test_caller_bound_has_no_file_layer_ceiling(identity: FileReadIdentity) -> N
         identity=identity,
     )
 
-    assert prepared.request_size < 1024
+    assert len(prepared.io.input.data) < 1024  # type: ignore[union-attr]
 
 
 def test_request_manifest_has_an_independent_finite_bound(identity: FileReadIdentity) -> None:

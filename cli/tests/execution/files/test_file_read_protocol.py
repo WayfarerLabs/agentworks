@@ -19,11 +19,11 @@ from agentworks.execution._file_read import (
     execute_file_read,
     prepare_file_read,
 )
+from agentworks.execution._file_read_bundle import FIXED_SOURCE
 from agentworks.execution._file_read_protocol import (
     MAX_RECORD_BYTES,
     FileReadFailure,
     FileReadIdentity,
-    FileReadMetadata,
     FileReadRecord,
     FileReadRecordKind,
     FileReadRequestError,
@@ -35,6 +35,7 @@ from agentworks.execution._file_read_protocol import (
     encode_file_read_record,
     encode_file_read_result,
 )
+from agentworks.execution._file_stat import FileStat
 from agentworks.execution.carrier import (
     ByteSink,
     CapturedOutput,
@@ -90,6 +91,22 @@ class TranscriptCarrier:
         )
 
 
+@dataclass
+class InterruptingCarrier:
+    stdout: bytes
+    interruption: BaseException
+
+    @property
+    def features(self) -> ChannelFeatures:
+        return ChannelFeatures()
+
+    def execute(self, invocation: object, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        del invocation, deadline
+        assert isinstance(io.output, SinkOutput)
+        _write(io.output.stdout, self.stdout)
+        raise self.interruption
+
+
 @pytest.fixture
 def identity() -> FileReadIdentity:
     return FileReadIdentity(1001, 1002, (1002, 1003))
@@ -105,8 +122,8 @@ def _success(nonce: str, data: bytes) -> bytes:
     for offset in range(0, len(data), 4096):
         records.append(_record(nonce, sequence, FileReadRecordKind.DATA, data[offset : offset + 4096]))
         sequence += 1
-    metadata = FileReadMetadata(1, 2, stat.S_IFREG | 0o600, 1, 1001, 1002, len(data), 3, 4)
-    control = FileReadResultControl(len(data), hashlib.sha256(data).digest(), metadata)
+    metadata = FileStat(1, 2, stat.S_IFREG | 0o600, 1, 1001, 1002, len(data), 3, 4)
+    control = FileReadResultControl(hashlib.sha256(data).digest(), metadata)
     records.append(_record(nonce, sequence, FileReadRecordKind.RESULT, encode_file_read_result(control)))
     records.append(_record(nonce, sequence + 1, FileReadRecordKind.FINISHED, empty_file_read_body()))
     return b"".join(records)
@@ -232,8 +249,8 @@ def test_digest_mismatch_and_incomplete_stream_disclose_no_data_or_hash(identity
         max_bytes=len(canary),
         identity=identity,
     )
-    metadata = FileReadMetadata(1, 2, stat.S_IFREG | 0o600, 1, 1001, 1002, len(canary), 3, 4)
-    wrong = FileReadResultControl(len(canary), b"x" * 32, metadata)
+    metadata = FileStat(1, 2, stat.S_IFREG | 0o600, 1, 1001, 1002, len(canary), 3, 4)
+    wrong = FileReadResultControl(b"x" * 32, metadata)
     transcript = (
         _record(prepared.nonce, 0, FileReadRecordKind.DATA, canary)
         + _record(prepared.nonce, 1, FileReadRecordKind.RESULT, encode_file_read_result(wrong))
@@ -270,8 +287,8 @@ def test_result_metadata_must_bind_the_exact_stream_length(identity: FileReadIde
         max_bytes=32,
         identity=identity,
     )
-    metadata = FileReadMetadata(1, 2, stat.S_IFREG | 0o600, 1, 1001, 1002, len(data) + 1, 3, 4)
-    control = FileReadResultControl(len(data), hashlib.sha256(data).digest(), metadata)
+    metadata = FileStat(1, 2, stat.S_IFREG | 0o600, 1, 1001, 1002, len(data) + 1, 3, 4)
+    control = FileReadResultControl(hashlib.sha256(data).digest(), metadata)
     transcript = (
         _record(prepared.nonce, 0, FileReadRecordKind.DATA, data)
         + _record(prepared.nonce, 1, FileReadRecordKind.RESULT, encode_file_read_result(control))
@@ -281,8 +298,90 @@ def test_result_metadata_must_bind_the_exact_stream_length(identity: FileReadIde
     result = execute_file_read(TranscriptCarrier(transcript), prepared, deadline=Deadline.after(1))
 
     assert result.observation.state is FileReadObservationState.INVALID
+    assert result.observation.error is FileReadObservationError.CONTENT
+    assert result.observation.snapshot is None
+
+
+def test_result_metadata_rejects_undefined_high_linux_mode_bits(identity: FileReadIdentity) -> None:
+    prepared = prepare_file_read(
+        trusted_root_path="/trusted",
+        relative_path="file",
+        max_bytes=1,
+        identity=identity,
+    )
+    metadata = FileStat(1, 2, 0x80000000 | stat.S_IFREG | 0o600, 1, 1001, 1002, 0, 3, 4)
+    control = FileReadResultControl(hashlib.sha256(b"").digest(), metadata)
+    transcript = _record(prepared.nonce, 0, FileReadRecordKind.RESULT, encode_file_read_result(control)) + _record(
+        prepared.nonce, 1, FileReadRecordKind.FINISHED, empty_file_read_body()
+    )
+
+    result = execute_file_read(TranscriptCarrier(transcript), prepared, deadline=Deadline.after(1))
+
+    assert result.observation.state is FileReadObservationState.INVALID
     assert result.observation.error is FileReadObservationError.CONTROL
     assert result.observation.snapshot is None
+
+
+@pytest.mark.parametrize("interruption_type", [KeyboardInterrupt, SystemExit, RuntimeError])
+def test_carrier_base_exception_clears_complete_transcript_state_before_propagation(
+    identity: FileReadIdentity,
+    interruption_type: type[BaseException],
+) -> None:
+    canary = b"collector-interrupt-canary"
+    assert len(canary) == 26
+    prepared = prepare_file_read(
+        trusted_root_path="/trusted",
+        relative_path="file",
+        max_bytes=len(canary),
+        identity=identity,
+    )
+    interruption = interruption_type()
+    carrier = InterruptingCarrier(_success(prepared.nonce, canary), interruption)
+
+    with pytest.raises(interruption_type) as raised:
+        execute_file_read(carrier, prepared, deadline=Deadline.after(1))
+
+    assert raised.value is interruption
+    assert prepared._collector._data == bytearray()
+    assert prepared._collector._result is None
+    assert not prepared._collector._terminal
+    assert prepared._reader._record == bytearray()
+    assert canary.decode() not in repr(prepared)
+
+
+@pytest.mark.parametrize("phase", ["reader", "collector"])
+def test_finalization_base_exception_clears_transcript_state_before_propagation(
+    identity: FileReadIdentity,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+) -> None:
+    canary = b"collector-interrupt-canary"
+    prepared = prepare_file_read(
+        trusted_root_path="/trusted",
+        relative_path="file",
+        max_bytes=len(canary),
+        identity=identity,
+    )
+    interruption = KeyboardInterrupt()
+
+    def interrupt(*_args: object, **_kwargs: object) -> None:
+        raise interruption
+
+    target = prepared._reader if phase == "reader" else prepared._collector
+    monkeypatch.setattr(target, "finish", interrupt)
+
+    with pytest.raises(KeyboardInterrupt) as raised:
+        execute_file_read(
+            TranscriptCarrier(_success(prepared.nonce, canary)),
+            prepared,
+            deadline=Deadline.after(1),
+        )
+
+    assert raised.value is interruption
+    assert prepared._collector._data == bytearray()
+    assert prepared._collector._result is None
+    assert not prepared._collector._terminal
+    assert prepared._reader._record == bytearray()
 
 
 def test_stderr_noise_is_rejected_without_retention(identity: FileReadIdentity) -> None:
@@ -318,7 +417,6 @@ def test_absent_and_refusal_are_complete_typed_outcomes_without_payload(identity
 
     assert absent.observation.state is FileReadObservationState.ABSENT
     assert absent.observation.snapshot is None
-    assert absent.observation.trusted_terminal
 
     prepared = prepare_file_read(
         trusted_root_path="/trusted",
@@ -337,7 +435,6 @@ def test_absent_and_refusal_are_complete_typed_outcomes_without_payload(identity
     assert refusal.observation.state is FileReadObservationState.REFUSED
     assert refusal.observation.failure is FileReadFailure.UNSUPPORTED_OBJECT
     assert refusal.observation.snapshot is None
-    assert refusal.observation.trusted_terminal
 
 
 def test_oversized_record_is_bounded_and_rejected(identity: FileReadIdentity) -> None:
@@ -382,37 +479,22 @@ assert not blocked.intersection(sys.modules)
 
 
 @pytest.mark.windows
-def test_protocol_is_an_independent_stdlib_module(tmp_path: Path) -> None:
-    protocol_path = Path(__file__).parents[3] / "agentworks" / "execution" / "_file_read_protocol.py"
-    script = r"""
-import importlib.util
-import sys
-
-path = sys.argv[1]
-spec = importlib.util.spec_from_file_location("_standalone_file_read_protocol", path)
-assert spec is not None and spec.loader is not None
-protocol = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = protocol
-spec.loader.exec_module(protocol)
-request = protocol.FileReadRequest(
-    "0123456789abcdef0123456789abcdef",
-    "/",
-    "file",
-    1,
-    protocol.FileReadIdentity(1, 2, (2, 3)),
-)
-encoded = protocol.encode_file_read_request(request)
-assert encoded.isascii()
-assert protocol.decode_file_read_request(encoded) == request
-assert "agentworks" not in sys.modules
-"""
+@pytest.mark.parametrize("interpreter", [Path(sys.executable), Path("/usr/bin/python3.11")])
+def test_fixed_helper_bundle_is_an_independent_stdlib_package(tmp_path: Path, interpreter: Path) -> None:
+    if not interpreter.is_file():
+        pytest.skip(f"compatibility interpreter is unavailable: {interpreter}")
+    nonce = "0123456789abcdef0123456789abcdef"
     completed = subprocess.run(
-        [sys.executable, "-I", "-S", "-B", "-c", script, str(protocol_path)],
+        [str(interpreter), "-I", "-S", "-B", "-c", FIXED_SOURCE, nonce],
         cwd=tmp_path,
+        input=b"",
         capture_output=True,
         timeout=10,
     )
     assert completed.returncode == 0, completed.stderr.decode(errors="replace")
+    assert completed.stderr == b""
+    assert completed.stdout.startswith(f"AGWF1 {nonce} ".encode("ascii"))
+    assert completed.stdout.isascii()
 
 
 def test_complete_qga_json_request_is_ascii_armored(identity: FileReadIdentity) -> None:
@@ -428,7 +510,7 @@ def test_complete_qga_json_request_is_ascii_armored(identity: FileReadIdentity) 
     assert input_data.isascii()
     assert all(argument.isascii() for argument in prepared.invocation.argv)
     assert body.isascii()
-    assert len(body) > prepared.request_size
+    assert len(body) > len(input_data)
 
 
 def test_invalid_request_exception_does_not_retain_raw_manifest_fields() -> None:

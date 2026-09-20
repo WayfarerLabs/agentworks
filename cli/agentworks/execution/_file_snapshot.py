@@ -22,6 +22,7 @@ from ._file_paths import (
     ConfinedOpenFailure,
     open_linux_confined,
 )
+from ._file_stat import FileStat
 
 _READ_CHUNK_BYTES = 64 * 1024
 _DESCRIPTOR_OPERATIONS_AVAILABLE = (
@@ -52,24 +53,11 @@ class SnapshotReadError(Exception):
 
 
 @dataclass(frozen=True)
-class SnapshotStat:
-    device: int
-    inode: int
-    mode: int
-    link_count: int
-    uid: int
-    gid: int
-    size: int
-    modified_ns: int
-    changed_ns: int
-
-
-@dataclass(frozen=True)
 class FileSnapshot:
     """Immutable bytes and the observations that bind them to one object."""
 
     data: bytes = field(repr=False)
-    stat: SnapshotStat
+    stat: FileStat
     digest: bytes = field(repr=False)
 
 
@@ -183,7 +171,7 @@ def _open_at(parent_fd: int, name: str, *, directory: bool) -> int | None:
 def _snapshot_open_leaf(
     leaf_fd: int,
     *,
-    expected: SnapshotStat,
+    expected: FileStat,
     parent_fd: int,
     leaf_name: str,
     root_device: int,
@@ -214,7 +202,7 @@ def _snapshot_open_leaf(
     return FileSnapshot(data=bytes(content), stat=before, digest=content_hash.digest())
 
 
-def _is_supported_leaf(observed: SnapshotStat, root_device: int) -> bool:
+def _is_supported_leaf(observed: FileStat, root_device: int) -> bool:
     return (
         stat.S_ISREG(observed.mode)
         and (observed.link_count, observed.device) == (1, root_device)
@@ -222,8 +210,8 @@ def _is_supported_leaf(observed: SnapshotStat, root_device: int) -> bool:
     )
 
 
-def _snapshot_stat(observed: os.stat_result) -> SnapshotStat:
-    return SnapshotStat(
+def _snapshot_stat(observed: os.stat_result) -> FileStat:
+    return FileStat(
         device=observed.st_dev,
         inode=observed.st_ino,
         mode=observed.st_mode,
@@ -236,7 +224,7 @@ def _snapshot_stat(observed: os.stat_result) -> SnapshotStat:
     )
 
 
-def _path_snapshot_stat(parent_fd: int, leaf_name: str) -> SnapshotStat | None:
+def _path_snapshot_stat(parent_fd: int, leaf_name: str) -> FileStat | None:
     error_number: int | None = None
     try:
         observed = os.stat(leaf_name, dir_fd=parent_fd, follow_symlinks=False)

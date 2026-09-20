@@ -15,7 +15,6 @@ from agentworks.execution._file_read_protocol import (
     FileReadControlError,
     FileReadFailure,
     FileReadIdentity,
-    FileReadMetadata,
     FileReadRecord,
     FileReadRecordKind,
     FileReadRecordReader,
@@ -39,6 +38,7 @@ from agentworks.execution.carrier import (
 )
 
 if TYPE_CHECKING:
+    from agentworks.execution._file_stat import FileStat
     from agentworks.execution.carrier import Carrier, Deadline, ExitStatus
 
 _DEFAULT_RUNTIME = "/usr/bin/python3"
@@ -66,7 +66,7 @@ class FileReadObservationError(StrEnum):
 @dataclass(frozen=True, slots=True, repr=False)
 class FileReadSnapshot:
     data: bytes
-    metadata: FileReadMetadata
+    metadata: FileStat
     digest: bytes
 
 
@@ -76,7 +76,6 @@ class FileReadObservation:
     snapshot: FileReadSnapshot | None = field(default=None, repr=False)
     failure: FileReadFailure | None = None
     error: FileReadObservationError | FileReadWireError | None = None
-    trusted_terminal: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,7 +138,7 @@ class _FileReadCollector:
                 self._fail(FileReadObservationError.ORDER)
                 return
             result = parse_file_read_result(record.body, self._max_bytes)
-            if result.length != len(self._data) or result.digest != hashlib.sha256(self._data).digest():
+            if result.metadata.size != len(self._data) or result.digest != hashlib.sha256(self._data).digest():
                 self._fail(FileReadObservationError.CONTENT)
             else:
                 self._result = result
@@ -170,11 +169,18 @@ class _FileReadCollector:
     def _fail(self, error: FileReadObservationError) -> None:
         if self._error is None:
             self._error = error
+        self._clear()
+
+    def _clear(self) -> None:
         self._data.clear()
         self._result = None
         self._absent = False
         self._failure = None
         self._terminal = False
+
+    def abort(self) -> None:
+        """Forget all transcript-derived state when the attempt cannot return a result."""
+        self._clear()
 
     def finish(
         self,
@@ -196,24 +202,19 @@ class _FileReadCollector:
         elif error is FileReadWireError.TRUNCATED:
             state = FileReadObservationState.INCOMPLETE
         if error is not None:
-            self._data.clear()
-            self._result = None
+            self._clear()
             return FileReadObservation(state=state, error=error)
         if self._result is not None:
             snapshot = FileReadSnapshot(bytes(self._data), self._result.metadata, self._result.digest)
-            return FileReadObservation(
-                state=FileReadObservationState.PRESENT,
-                snapshot=snapshot,
-                trusted_terminal=True,
-            )
+            self._clear()
+            return FileReadObservation(state=FileReadObservationState.PRESENT, snapshot=snapshot)
         if self._absent:
-            return FileReadObservation(state=FileReadObservationState.ABSENT, trusted_terminal=True)
+            self._clear()
+            return FileReadObservation(state=FileReadObservationState.ABSENT)
         assert self._failure is not None
-        return FileReadObservation(
-            state=FileReadObservationState.REFUSED,
-            failure=self._failure,
-            trusted_terminal=True,
-        )
+        failure = self._failure
+        self._clear()
+        return FileReadObservation(state=FileReadObservationState.REFUSED, failure=failure)
 
 
 @dataclass
@@ -223,7 +224,6 @@ class PreparedFileRead:
     invocation: PreparedInvocation
     io: CarrierIO
     nonce: str
-    request_size: int
     _reader: FileReadRecordReader = field(repr=False)
     _collector: _FileReadCollector = field(repr=False)
     _stderr: _DiagnosticSink = field(repr=False)
@@ -299,7 +299,6 @@ def prepare_file_read(
             sensitive=True,
         ),
         nonce=nonce,
-        request_size=len(request_data),
         _reader=reader,
         _collector=collector,
         _stderr=stderr,
@@ -313,24 +312,27 @@ def execute_file_read(
     deadline: Deadline,
 ) -> FileReadCandidateResult:
     """Make exactly one carrier call and interpret only a complete typed transcript."""
-    prepared.claim()
     try:
+        prepared.claim()
         report = carrier.execute(prepared.invocation, io=prepared.io, deadline=deadline)
-    finally:
         prepared._reader.finish()
-    delivered = report.stdout.retention is Retention.DELIVERED and report.stderr.retention is Retention.DELIVERED
-    observation = prepared._collector.finish(
-        prepared._reader.error,
-        streams_complete=delivered and report.stdout.complete and report.stderr.complete,
-        stderr_noise=prepared._stderr.saw_data,
-    )
-    return FileReadCandidateResult(
-        dispatch=report.dispatch,
-        carrier_completion=report.completion,
-        carrier_local_status=report.local_status,
-        carrier_failure=report.failure,
-        observation=observation,
-    )
+        delivered = report.stdout.retention is Retention.DELIVERED and report.stderr.retention is Retention.DELIVERED
+        observation = prepared._collector.finish(
+            prepared._reader.error,
+            streams_complete=delivered and report.stdout.complete and report.stderr.complete,
+            stderr_noise=prepared._stderr.saw_data,
+        )
+        return FileReadCandidateResult(
+            dispatch=report.dispatch,
+            carrier_completion=report.completion,
+            carrier_local_status=report.local_status,
+            carrier_failure=report.failure,
+            observation=observation,
+        )
+    except BaseException:
+        prepared._reader.abort()
+        prepared._collector.abort()
+        raise
 
 
 def read_file(

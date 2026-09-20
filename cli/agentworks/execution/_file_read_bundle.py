@@ -5,7 +5,7 @@ from __future__ import annotations
 from agentworks.execution._helper_bundle import build_helper_modules
 
 _PACKAGE = "_agw_file_read"
-_MODULE_NAMES = ("_file_paths", "_file_snapshot", "_file_read_protocol", "_file_read_guest")
+_MODULE_NAMES = ("_file_stat", "_file_paths", "_file_snapshot", "_file_read_protocol", "_file_read_guest")
 
 
 FIXED_SOURCE = build_helper_modules(_PACKAGE, _MODULE_NAMES) + (

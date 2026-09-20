@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+from ._file_stat import FileStat
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -31,7 +33,6 @@ _RESULT_FIELDS = frozenset(
         "digest",
         "gid",
         "inode",
-        "length",
         "link_count",
         "mode",
         "modified_ns",
@@ -112,23 +113,9 @@ class FileReadRecord:
 
 
 @dataclass(frozen=True, slots=True, repr=False)
-class FileReadMetadata:
-    device: int
-    inode: int
-    mode: int
-    link_count: int
-    uid: int
-    gid: int
-    size: int
-    modified_ns: int
-    changed_ns: int
-
-
-@dataclass(frozen=True, slots=True, repr=False)
 class FileReadResultControl:
-    length: int
     digest: bytes
-    metadata: FileReadMetadata
+    metadata: FileStat
 
 
 def _invalid_request() -> FileReadRequestError:
@@ -315,7 +302,6 @@ def encode_file_read_result(result: FileReadResultControl) -> bytes:
             "digest": result.digest.hex(),
             "gid": metadata.gid,
             "inode": metadata.inode,
-            "length": result.length,
             "link_count": metadata.link_count,
             "mode": metadata.mode,
             "modified_ns": metadata.modified_ns,
@@ -347,12 +333,11 @@ def parse_file_read_result(body: bytes, max_bytes: int) -> FileReadResultControl
         or any(character not in _LOWER_HEX for character in digest_text)
     ):
         raise FileReadControlError
-    length = _bounded_integer(value["length"], 0, max_bytes)
     size = _bounded_integer(value["size"], 0, max_bytes)
-    metadata = FileReadMetadata(
+    metadata = FileStat(
         device=_bounded_integer(value["device"], 0, _MAX_STAT_VALUE),
         inode=_bounded_integer(value["inode"], 1, _MAX_STAT_VALUE),
-        mode=_bounded_integer(value["mode"], 0, _MAX_ID),
+        mode=_bounded_integer(value["mode"], 0, 0o177777),
         link_count=_bounded_integer(value["link_count"], 1, _MAX_STAT_VALUE),
         uid=_bounded_integer(value["uid"], 0, _MAX_ID),
         gid=_bounded_integer(value["gid"], 0, _MAX_ID),
@@ -360,9 +345,9 @@ def parse_file_read_result(body: bytes, max_bytes: int) -> FileReadResultControl
         modified_ns=_bounded_integer(value["modified_ns"], _MIN_TIME_NS, _MAX_TIME_NS),
         changed_ns=_bounded_integer(value["changed_ns"], _MIN_TIME_NS, _MAX_TIME_NS),
     )
-    if metadata.link_count != 1 or metadata.size != length or not stat.S_ISREG(metadata.mode):
+    if metadata.link_count != 1 or not stat.S_ISREG(metadata.mode):
         raise FileReadControlError
-    return FileReadResultControl(length, bytes.fromhex(digest_text), metadata)
+    return FileReadResultControl(bytes.fromhex(digest_text), metadata)
 
 
 def _parse_uint(token: bytes, maximum: int) -> int | None:
@@ -435,6 +420,11 @@ class FileReadRecordReader:
     def finish(self) -> None:
         if not self._finished and self._error is None and self._record:
             self._fail(FileReadWireError.TRUNCATED)
+        self._finished = True
+
+    def abort(self) -> None:
+        """Forget borrowed stream bytes when the attempt cannot return a result."""
+        self._record.clear()
         self._finished = True
 
     def _accept_record(self, record: bytes) -> None:

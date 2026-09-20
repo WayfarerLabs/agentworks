@@ -87,5 +87,4 @@ def test_file_read_through_buffered_proxmox_delivery(
         assert result.observation.snapshot.data == data
     else:
         assert result.observation.snapshot is None
-        assert not result.observation.trusted_terminal
         assert result.observation.state in {FileReadObservationState.INVALID, FileReadObservationState.INCOMPLETE}

@@ -11,7 +11,6 @@ from ._file_read_protocol import (
     MAX_RECORD_BODY_BYTES,
     MAX_REQUEST_BYTES,
     FileReadFailure,
-    FileReadMetadata,
     FileReadRecord,
     FileReadRecordKind,
     FileReadRequest,
@@ -125,19 +124,8 @@ def _emit_snapshot(emitter: _Emitter, snapshot: FileSnapshot) -> None:
         FileReadRecordKind.RESULT,
         encode_file_read_result(
             FileReadResultControl(
-                length=len(snapshot.data),
                 digest=snapshot.digest,
-                metadata=FileReadMetadata(
-                    device=observed.device,
-                    inode=observed.inode,
-                    mode=observed.mode,
-                    link_count=observed.link_count,
-                    uid=observed.uid,
-                    gid=observed.gid,
-                    size=observed.size,
-                    modified_ns=observed.modified_ns,
-                    changed_ns=observed.changed_ns,
-                ),
+                metadata=observed,
             )
         ),
     )
