@@ -619,7 +619,8 @@ remains open.
 ### Darwin ownership feasibility
 
 The follow-up source audit distinguishes ordinary process-group cleanup from inherited ownership
-that survives daemonization. Apple's [launchd guidance](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html)
+that survives ordinary background detachment. Apple's
+[launchd guidance](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html)
 requires managed programs not to daemonize and recommends avoiding `setsid`. The published
 [launchd manual](https://github.com/apple-oss-distributions/launchd/blob/launchd-842.92.1/man/launchd.plist.5#L371-L375)
 describes cleanup of the job's process group, not arbitrary descendants that create other groups.
