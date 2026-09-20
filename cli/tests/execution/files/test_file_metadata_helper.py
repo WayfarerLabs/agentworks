@@ -1,0 +1,498 @@
+"""Real fixed-bundle checks for locked Linux metadata operations."""
+
+from __future__ import annotations
+
+import json
+import os
+import socket
+import stat
+import subprocess
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from agentworks.execution._file_lock import _file_lock_at_root
+from agentworks.execution._file_metadata_bundle import FIXED_LOADER
+from agentworks.execution._file_metadata_exchange import (
+    FileMetadataCandidateResult,
+    FileMetadataObservationState,
+    ensure_file_directory,
+    set_file_metadata,
+)
+from agentworks.execution._file_metadata_protocol import FileMetadataFailureCode
+from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution.carrier import (
+    CarrierIO,
+    CarrierReport,
+    ChannelFeatures,
+    Deadline,
+    Dispatch,
+    ExitStatus,
+    PreparedInvocation,
+)
+from agentworks.execution.carriers._subprocess import run_process
+from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
+
+pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the metadata helper requires Linux")
+
+
+class LocalCarrier:
+    def __init__(self, *, guest_deadline_grace: bool = False) -> None:
+        self.calls = 0
+        self.invocation: PreparedInvocation | None = None
+        self.io: CarrierIO | None = None
+        self._guest_deadline_grace = guest_deadline_grace
+
+    @property
+    def features(self) -> ChannelFeatures:
+        return ChannelFeatures()
+
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.calls += 1
+        self.invocation = invocation
+        self.io = io
+        process_deadline = Deadline.after(2) if self._guest_deadline_grace else deadline
+        result = run_process(list(invocation.argv), io=io, deadline=process_deadline)
+        completion = None
+        if result.exit_status is not None:
+            completion = (
+                ExitStatus(signal=-result.exit_status)
+                if result.exit_status < 0
+                else ExitStatus(code=result.exit_status)
+            )
+        return CarrierReport(
+            Dispatch.SENT if result.started else Dispatch.NOT_SENT,
+            completion,
+            result.local_status,
+            result.stdout,
+            result.stderr,
+            result.failure,
+        )
+
+
+@pytest.fixture
+def plan() -> IdentityPlan:
+    return IdentityPlan(
+        IdentityExpectation(os.geteuid(), os.getegid(), tuple(sorted(set(os.getgroups()) | {os.getegid()}))),
+        IdentityMode.DIRECT,
+    )
+
+
+def _provision_lock_root(path: Path) -> Path:
+    lock_root = path / "lock-root"
+    lock_root.mkdir(mode=0o700)
+    current = lock_root
+    for component in ("var", "lib", "agentworks", "execution"):
+        current = current / component
+        current.mkdir(mode=0o700)
+    lock = current / "files.lock"
+    lock.touch(mode=0o444)
+    lock.chmod(0o444)
+    return lock_root
+
+
+def _fixture_source(lock_root: Path, injection: str = "") -> str:
+    package = "_agw_file_metadata"
+    return FIXED_LOADER + (
+        "import contextlib,os\n"
+        f"g=sys.modules[{(package + '._file_metadata_guest')!r}]\n"
+        f"l=sys.modules[{(package + '._file_lock')!r}]\n"
+        f"m=sys.modules[{(package + '._file_metadata')!r}]\n" + injection + "@contextlib.contextmanager\n"
+        "def fixture_lock(*,expires_at):\n"
+        f" d=os.open({str(lock_root)!r},os.O_PATH|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)\n"
+        " try:\n"
+        f"  with l._file_lock_at_root(d,{os.geteuid()},expires_at=expires_at):yield\n"
+        " finally:os.close(d)\n"
+        "g.system_file_lock=fixture_lock\n"
+        f"raise SystemExit(g.main(sys.argv[1]))\n"
+    )
+
+
+def _set(
+    root: Path,
+    relative: str,
+    plan: IdentityPlan,
+    source: str,
+    *,
+    mode: int,
+    runtime: Path = Path(sys.executable),
+    deadline: float = 15,
+    carrier: LocalCarrier | None = None,
+) -> tuple[LocalCarrier, FileMetadataCandidateResult]:
+    carrier = LocalCarrier() if carrier is None else carrier
+    with patch("agentworks.execution._file_metadata_exchange.FIXED_SOURCE", source):
+        result = set_file_metadata(
+            carrier,
+            trusted_root_path=str(root),
+            relative_path=relative,
+            uid=os.geteuid(),
+            gid=os.getegid(),
+            mode=mode,
+            plan=plan,
+            deadline=Deadline.after(deadline),
+            runtime_path=str(runtime),
+        )
+    return carrier, result
+
+
+def _ensure(
+    root: Path,
+    relative: str,
+    plan: IdentityPlan,
+    source: str,
+    *,
+    mode: int,
+    runtime: Path = Path(sys.executable),
+    deadline: float = 15,
+) -> tuple[LocalCarrier, FileMetadataCandidateResult]:
+    carrier = LocalCarrier()
+    with patch("agentworks.execution._file_metadata_exchange.FIXED_SOURCE", source):
+        result = ensure_file_directory(
+            carrier,
+            trusted_root_path=str(root),
+            relative_path=relative,
+            uid=os.geteuid(),
+            gid=os.getegid(),
+            mode=mode,
+            plan=plan,
+            deadline=Deadline.after(deadline),
+            runtime_path=str(runtime),
+        )
+    return carrier, result
+
+
+@pytest.mark.parametrize(
+    "runtime",
+    [Path(sys.executable), Path("/usr/bin/python3")],
+    ids=["current", "bookworm-system-python"],
+)
+def test_fixed_bundle_creates_converges_and_is_idempotent(
+    tmp_path: Path,
+    plan: IdentityPlan,
+    runtime: Path,
+) -> None:
+    if not runtime.is_file():
+        pytest.skip(f"compatibility interpreter is unavailable: {runtime}")
+    lock_root = _provision_lock_root(tmp_path)
+    root = tmp_path / "root"
+    root.mkdir()
+    existing = root / "existing"
+    existing.write_bytes(b"unrelated-content")
+    existing.chmod(0o600)
+    source = _fixture_source(lock_root)
+
+    carrier, changed_file = _set(root, "existing", plan, source, mode=0o640, runtime=runtime)
+    _, created = _ensure(root, "shared", plan, source, mode=0o3770, runtime=runtime)
+    _, unchanged = _ensure(root, "shared", plan, source, mode=0o3770, runtime=runtime)
+
+    assert carrier.calls == 1
+    assert carrier.io is not None and carrier.io.sensitive
+    assert carrier.invocation is not None and str(root) not in " ".join(carrier.invocation.argv)
+    assert changed_file.observation.state is FileMetadataObservationState.CHANGED
+    assert changed_file.observation.revision is not None
+    assert existing.read_bytes() == b"unrelated-content"
+    assert stat.S_IMODE(existing.stat().st_mode) == 0o640
+    assert created.observation.state is FileMetadataObservationState.CHANGED
+    assert stat.S_IMODE((root / "shared").stat().st_mode) == 0o3770
+    assert unchanged.observation.state is FileMetadataObservationState.UNCHANGED
+
+
+def test_ensure_creates_only_final_component_and_preserves_children(tmp_path: Path, plan: IdentityPlan) -> None:
+    lock_root = _provision_lock_root(tmp_path)
+    root = tmp_path / "root"
+    parent = root / "parent"
+    parent.mkdir(parents=True)
+    child = parent / "child"
+    child.write_bytes(b"child-content")
+    child.chmod(0o600)
+    source = _fixture_source(lock_root)
+
+    _, missing_parent = _ensure(root, "missing/final", plan, source, mode=0o755)
+    _, existing_parent = _ensure(root, "parent", plan, source, mode=0o2770)
+
+    assert missing_parent.observation.state is FileMetadataObservationState.REFUSED
+    assert missing_parent.observation.failure is not None
+    assert missing_parent.observation.failure.code is FileMetadataFailureCode.PARENT_REFUSED
+    assert not (root / "missing").exists()
+    assert existing_parent.observation.state is FileMetadataObservationState.CHANGED
+    assert child.read_bytes() == b"child-content"
+    assert stat.S_IMODE(child.stat().st_mode) == 0o600
+
+
+def test_missing_root_conflicting_file_socket_and_unsupported_modes_refuse(
+    tmp_path: Path,
+    plan: IdentityPlan,
+) -> None:
+    lock_root = _provision_lock_root(tmp_path)
+    root = tmp_path / "root"
+    root.mkdir()
+    regular = root / "regular"
+    regular.write_bytes(b"content")
+    listener = socket.socket(socket.AF_UNIX)
+    listener.bind(str(root / "socket"))
+    source = _fixture_source(lock_root)
+    try:
+        _, missing_root = _set(tmp_path / "missing", "leaf", plan, source, mode=0o600)
+        _, conflict = _ensure(root, "regular", plan, source, mode=0o755)
+        _, socket_result = _set(root, "socket", plan, source, mode=0o600)
+        _, setuid_file = _set(root, "regular", plan, source, mode=0o4600)
+    finally:
+        listener.close()
+
+    assert missing_root.observation.state is FileMetadataObservationState.REFUSED
+    assert missing_root.observation.failure is not None
+    assert missing_root.observation.failure.code is FileMetadataFailureCode.ROOT_REFUSED
+    for result in (conflict, socket_result, setuid_file):
+        assert result.observation.state is FileMetadataObservationState.REFUSED
+        assert result.observation.failure is not None
+        assert result.observation.failure.code is FileMetadataFailureCode.METADATA
+    assert regular.read_bytes() == b"content"
+
+
+def test_identity_mismatch_precedes_lock_and_target_access(tmp_path: Path, plan: IdentityPlan) -> None:
+    carrier = LocalCarrier()
+    mismatched = IdentityPlan(
+        IdentityExpectation((plan.expected.euid + 1) % (2**32), plan.expected.egid, plan.expected.groups),
+        IdentityMode.DIRECT,
+    )
+    with patch("agentworks.execution._file_metadata_exchange.FIXED_SOURCE", _fixture_source(tmp_path / "absent-lock")):
+        result = set_file_metadata(
+            carrier,
+            trusted_root_path=str(tmp_path / "absent-target"),
+            relative_path="leaf",
+            uid=os.geteuid(),
+            gid=os.getegid(),
+            mode=0o600,
+            plan=mismatched,
+            deadline=Deadline.after(15),
+            runtime_path=sys.executable,
+        )
+
+    assert carrier.calls == 1
+    assert result.observation.state is FileMetadataObservationState.REFUSED
+    assert result.observation.failure is not None
+    assert result.observation.failure.code is FileMetadataFailureCode.IDENTITY_MISMATCH
+    assert not (tmp_path / "absent-target").exists()
+
+
+def test_lock_contention_obeys_deadline_and_releases_for_next_attempt(tmp_path: Path, plan: IdentityPlan) -> None:
+    lock_root = _provision_lock_root(tmp_path)
+    root = tmp_path / "root"
+    root.mkdir()
+    target = root / "target"
+    target.write_bytes(b"content")
+    target.chmod(0o600)
+    source = _fixture_source(lock_root)
+    lock_root_fd = os.open(lock_root, os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        with _file_lock_at_root(lock_root_fd, os.geteuid(), expires_at=None):
+            carrier, blocked = _set(
+                root,
+                "target",
+                plan,
+                source,
+                mode=0o640,
+                deadline=0.05,
+                carrier=LocalCarrier(guest_deadline_grace=True),
+            )
+    finally:
+        os.close(lock_root_fd)
+    _, changed = _set(root, "target", plan, source, mode=0o640)
+
+    assert carrier.calls == 1
+    assert blocked.observation.state is FileMetadataObservationState.REFUSED
+    assert blocked.observation.failure is not None
+    assert blocked.observation.failure.code is FileMetadataFailureCode.LOCK_DEADLINE
+    assert stat.S_IMODE(target.stat().st_mode) == 0o640
+    assert changed.observation.state is FileMetadataObservationState.CHANGED
+
+
+def test_helper_releases_lock_before_emitting_frames(tmp_path: Path, plan: IdentityPlan) -> None:
+    lock_root = _provision_lock_root(tmp_path)
+    root = tmp_path / "root"
+    root.mkdir()
+    target = root / "target"
+    target.write_bytes(b"content")
+    target.chmod(0o600)
+    injection = (
+        "g._fixture_lock_held=False\n"
+        "base_emit=g._Emitter.emit\n"
+        "def checked_emit(self,kind,body):\n"
+        " assert not g._fixture_lock_held\n"
+        " return base_emit(self,kind,body)\n"
+        "g._Emitter.emit=checked_emit\n"
+    )
+    source = (
+        _fixture_source(lock_root, injection)
+        .replace(
+            "  with l._file_lock_at_root(d,",
+            "  g._fixture_lock_held=True\n  with l._file_lock_at_root(d,",
+        )
+        .replace(
+            ",expires_at=expires_at):yield\n",
+            ",expires_at=expires_at):yield\n  g._fixture_lock_held=False\n",
+        )
+    )
+
+    _, result = _set(root, "target", plan, source, mode=0o640)
+
+    assert result.observation.state is FileMetadataObservationState.CHANGED
+
+
+def test_verified_partial_creation_and_uncertain_attempt_are_not_replayed(
+    tmp_path: Path,
+    plan: IdentityPlan,
+) -> None:
+    lock_root = _provision_lock_root(tmp_path)
+    root = tmp_path / "root"
+    root.mkdir()
+    partial_injection = (
+        "def partial(parent_fd,leaf_name,**kwargs):\n"
+        " os.mkdir(leaf_name,0o700,dir_fd=parent_fd)\n"
+        " raise m.MetadataError(m.MetadataFailureKind.IO,m.MetadataPhase.VERIFICATION,"
+        "completed_steps=(m.MetadataStep.CREATION,))\n"
+        "g.ensure_directory=partial\n"
+    )
+    partial_carrier, partial = _ensure(
+        root,
+        "partial",
+        plan,
+        _fixture_source(lock_root, partial_injection),
+        mode=0o755,
+    )
+    target = root / "target"
+    target.write_bytes(b"content")
+    target.chmod(0o600)
+    uncertain_injection = (
+        "base_set=g.set_metadata\n"
+        "def uncertain(*args,**kwargs):\n"
+        " base_set(*args,**kwargs)\n"
+        " raise m.MetadataError(m.MetadataFailureKind.METADATA,m.MetadataPhase.MODE,"
+        "attempted_step=m.MetadataStep.MODE)\n"
+        "g.set_metadata=uncertain\n"
+    )
+    uncertain_carrier, uncertain = _set(
+        root,
+        "target",
+        plan,
+        _fixture_source(lock_root, uncertain_injection),
+        mode=0o640,
+    )
+
+    assert partial_carrier.calls == 1
+    assert partial.observation.state is FileMetadataObservationState.PARTIAL
+    assert (root / "partial").is_dir()
+    assert stat.S_IMODE((root / "partial").stat().st_mode) == 0o700
+    assert uncertain_carrier.calls == 1
+    assert uncertain.observation.state is FileMetadataObservationState.UNCERTAIN
+    assert stat.S_IMODE(target.stat().st_mode) == 0o640
+
+
+def test_proc_bridge_changes_held_inode_not_replacement_name(tmp_path: Path, plan: IdentityPlan) -> None:
+    lock_root = _provision_lock_root(tmp_path)
+    root = tmp_path / "root"
+    root.mkdir()
+    target = root / "target"
+    target.write_bytes(b"old")
+    target.chmod(0o600)
+    old_inode = target.stat().st_ino
+    replacement = root / "replacement"
+    replacement.write_bytes(b"new")
+    replacement.chmod(0o644)
+    retained = root / "retained"
+    injection = (
+        "base_chmod=m.os.chmod\n"
+        "def replacing_chmod(path,mode):\n"
+        f" os.rename({str(target)!r},{str(retained)!r})\n"
+        f" os.rename({str(replacement)!r},{str(target)!r})\n"
+        " return base_chmod(path,mode)\n"
+        "m.os.chmod=replacing_chmod\n"
+    )
+
+    _, result = _set(root, "target", plan, _fixture_source(lock_root, injection), mode=0o640)
+
+    assert result.observation.state is FileMetadataObservationState.PARTIAL
+    assert retained.stat().st_ino == old_inode
+    assert stat.S_IMODE(retained.stat().st_mode) == 0o640
+    assert target.read_bytes() == b"new"
+    assert stat.S_IMODE(target.stat().st_mode) == 0o644
+
+
+def test_missing_lock_is_deterministic_refusal_without_production_setup(
+    tmp_path: Path,
+    plan: IdentityPlan,
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    target = root / "target"
+    target.write_bytes(b"content")
+    initial_mode = stat.S_IMODE(target.stat().st_mode)
+    missing_lock_root = tmp_path / "missing-lock-root"
+    missing_lock_root.mkdir()
+
+    _, result = _set(root, "target", plan, _fixture_source(missing_lock_root), mode=0o640)
+
+    assert result.observation.state is FileMetadataObservationState.REFUSED
+    assert result.observation.failure is not None
+    assert result.observation.failure.code is FileMetadataFailureCode.LOCK_MISSING
+    assert stat.S_IMODE(target.stat().st_mode) == initial_mode
+    assert not tuple(missing_lock_root.iterdir())
+
+
+def test_complete_proxmox_post_fits_provider_bound_and_returns_typed_refusal(
+    tmp_path: Path,
+    plan: IdentityPlan,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.invalid", "node1", 101, "token", "synthetic"))
+    body_sizes: list[int] = []
+    status: dict[str, object] = {}
+
+    def request(method: str, suffix: str, *, body: bytes | None = None, timeout: float | None) -> dict[str, object]:
+        if method == "POST":
+            assert body is not None and body.isascii()
+            body_sizes.append(len(body))
+            envelope = json.loads(body)
+            completed = subprocess.run(
+                envelope["command"],
+                input=envelope["input-data"].encode("ascii"),
+                capture_output=True,
+                timeout=timeout,
+                check=False,
+            )
+            status.update(
+                exited=True,
+                exitcode=completed.returncode,
+                **{"out-data": completed.stdout.decode("ascii"), "err-data": ""},
+            )
+            return {"pid": 42}
+        assert suffix == "exec-status?pid=42" and body is None
+        return status
+
+    monkeypatch.setattr(carrier._wire, "request", request)
+    mismatched = IdentityPlan(
+        IdentityExpectation((plan.expected.euid + 1) % (2**32), plan.expected.egid, plan.expected.groups),
+        IdentityMode.DIRECT,
+    )
+    result = set_file_metadata(
+        carrier,
+        trusted_root_path=str(root),
+        relative_path="leaf",
+        uid=os.geteuid(),
+        gid=os.getegid(),
+        mode=0o600,
+        plan=mismatched,
+        deadline=Deadline.after(15),
+        runtime_path=sys.executable,
+    )
+
+    assert len(FIXED_LOADER) < body_sizes[0] < 65_536
+    assert result.dispatch is Dispatch.SENT
+    assert result.observation.state is FileMetadataObservationState.REFUSED
+    assert result.observation.failure is not None
+    assert result.observation.failure.code is FileMetadataFailureCode.IDENTITY_MISMATCH
