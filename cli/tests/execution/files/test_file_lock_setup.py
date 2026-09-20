@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+import json
 import os
 import shlex
 import shutil
@@ -214,6 +215,44 @@ def test_owner_mismatch_is_refused(tmp_path: Path) -> None:
     assert error.phase is FileLockSetupPhase.LIB
 
 
+def test_opened_directory_is_closed_when_observation_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    child = tmp_path / "agentworks"
+    child.mkdir(mode=0o755)
+    child.chmod(0o755)
+    parent_fd = _open_parent(tmp_path)
+    original_fstat = os.fstat
+    acquired: list[int] = []
+
+    def failing_fstat(descriptor: int) -> os.stat_result:
+        if descriptor != parent_fd:
+            acquired.append(descriptor)
+            raise OSError(errno.EIO, "untrusted fixture detail")
+        return original_fstat(descriptor)
+
+    monkeypatch.setattr(os, "fstat", failing_fstat)
+    try:
+        with pytest.raises(FileLockSetupError) as raised:
+            lock_setup_module._open_existing_directory(
+                parent_fd,
+                "agentworks",
+                os.getuid(),
+                FileLockSetupPhase.AGENTWORKS,
+                [],
+            )
+    finally:
+        os.close(parent_fd)
+
+    assert raised.value.kind is FileLockSetupFailureKind.IO
+    assert raised.value.phase is FileLockSetupPhase.AGENTWORKS
+    assert len(acquired) == 1
+    with pytest.raises(OSError) as closed:
+        original_fstat(acquired[0])
+    assert closed.value.errno == errno.EBADF
+
+
 def test_symlink_namespace_component_is_refused(tmp_path: Path) -> None:
     target = tmp_path / "target"
     target.mkdir()
@@ -313,6 +352,49 @@ def test_partial_failure_reports_created_objects(tmp_path: Path, monkeypatch: py
     assert not (tmp_path / "agentworks" / "execution" / "files.lock").exists()
 
 
+def test_main_reports_closed_partial_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    original_open = os.open
+
+    def failing_open(path: str | bytes | Path, flags: int, mode: int = 0o777, *, dir_fd: int | None = None) -> int:
+        if path == "files.lock":
+            raise OSError(errno.EIO, "untrusted fixture detail")
+        return original_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", failing_open)
+    monkeypatch.setattr(
+        lock_setup_module,
+        "setup_system_file_lock",
+        lambda: setup_file_lock_namespace(parent_fd, os.getuid()),
+    )
+    try:
+        assert main() == 1
+    finally:
+        os.close(parent_fd)
+
+    agentworks = tmp_path / "agentworks"
+    execution = agentworks / "execution"
+    lock = execution / "files.lock"
+    remaining = []
+    if agentworks.is_dir():
+        remaining.append(FileLockSetupObject.AGENTWORKS_DIRECTORY.value)
+    if execution.is_dir():
+        remaining.append(FileLockSetupObject.EXECUTION_DIRECTORY.value)
+    if lock.is_file():
+        remaining.append(FileLockSetupObject.LOCK.value)
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "created": remaining,
+        "kind": FileLockSetupFailureKind.IO.value,
+        "phase": FileLockSetupPhase.LOCK.value,
+    }
+
+
 def test_main_requires_root_before_fixed_path_access(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(os, "geteuid", lambda: 1)
     monkeypatch.setattr(lock_setup_module, "_open_root", lambda _created: pytest.fail("root path was opened"))
@@ -349,7 +431,11 @@ def test_fixed_bundle_executes_without_installed_package(interpreter: Path) -> N
     )
     assert completed.returncode == 1
     assert completed.stdout == b""
-    assert completed.stderr == b""
+    assert json.loads(completed.stderr) == {
+        "created": [],
+        "kind": FileLockSetupFailureKind.IDENTITY.value,
+        "phase": FileLockSetupPhase.ROOT.value,
+    }
 
 
 def _stat_mode(path: Path) -> int:

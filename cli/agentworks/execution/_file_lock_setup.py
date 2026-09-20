@@ -8,6 +8,7 @@ objects created by this invocation may have permissions or ACLs finalized.
 from __future__ import annotations
 
 import errno
+import json
 import os
 import stat
 import sys
@@ -136,10 +137,17 @@ def setup_file_lock_namespace(parent_fd: int, trusted_owner_uid: int) -> FileLoc
 
 
 def main() -> int:
-    """Run fixed privileged setup without emitting filesystem diagnostics."""
+    """Run fixed privileged setup with one closed failure diagnostic."""
     try:
         setup_system_file_lock()
-    except FileLockSetupError:
+    except FileLockSetupError as error:
+        diagnostic = {
+            "created": [created.value for created in error.created],
+            "kind": error.kind.value,
+            "phase": error.phase.value,
+        }
+        with suppress(OSError):
+            sys.stderr.write(json.dumps(diagnostic, separators=(",", ":"), sort_keys=True) + "\n")
         return 1
     return 0
 
@@ -170,11 +178,10 @@ def _open_existing_directory(
     if not allow_unfinalized and not _safe_directory_stat(named, trusted_owner_uid):
         _fail(FileLockSetupFailureKind.UNSAFE, phase, created)
     descriptor = _open_at(parent_fd, name, _DIRECTORY_FLAGS, phase, created)
-    opened = _fstat(descriptor, phase, created)
-    if (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino):
-        _close(descriptor)
-        _fail(FileLockSetupFailureKind.CONFLICT, phase, created)
     try:
+        opened = _fstat(descriptor, phase, created)
+        if (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino):
+            _fail(FileLockSetupFailureKind.CONFLICT, phase, created)
         if allow_unfinalized:
             if not _owned_directory_stat(opened, trusted_owner_uid):
                 _fail(FileLockSetupFailureKind.UNSAFE, phase, created)
@@ -261,11 +268,11 @@ def _ensure_lock(
     created_now = False
     descriptor: int | None = None
     if named is None:
-        descriptor, already_exists = _create_lock(parent_fd, created)
+        descriptor = _create_lock(parent_fd, created)
         if descriptor is not None:
             created.append(FileLockSetupObject.LOCK)
             created_now = True
-        elif already_exists:
+        else:
             named = _stat_at(parent_fd, "files.lock", phase, created)
 
     if descriptor is None:
@@ -291,7 +298,7 @@ def _ensure_lock(
         _close(descriptor)
 
 
-def _create_lock(parent_fd: int, created: list[FileLockSetupObject]) -> tuple[int | None, bool]:
+def _create_lock(parent_fd: int, created: list[FileLockSetupObject]) -> int | None:
     flags = _LOCK_FLAGS | os.O_CREAT | os.O_EXCL
     descriptor: int | None = None
     error_number: int | None = None
@@ -300,9 +307,9 @@ def _create_lock(parent_fd: int, created: list[FileLockSetupObject]) -> tuple[in
     except OSError as error:
         error_number = error.errno
     if descriptor is not None:
-        return descriptor, False
+        return descriptor
     if error_number == errno.EEXIST:
-        return None, True
+        return None
     _fail(FileLockSetupFailureKind.IO, FileLockSetupPhase.LOCK, created)
 
 
