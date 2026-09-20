@@ -207,6 +207,13 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       requests for approved-root operations through core-owned parent decomposition, without
       granting parent/sibling authority. Bind those operations in the complete FileAccess surface
       before the additive RunContext gate, not as a forwarding layer over legacy files.
+- [ ] Separate unverified scratch identity/length from final digest verification, permitting
+      one-pass upload without rewinding the source or using a whole-file host buffer. Add streaming
+      from one held source inode into a private snapshot, including source-change refusal, deadline
+      checks and exact cleanup evidence, before wiring snapshot/chunk/publication exchanges.
+- [ ] Settle and fault-test cleanup ownership when the first scratch/snapshot creation reply or
+      publication-stage cleanup-debt reply is lost. Missing identity is not absence; do not recover
+      by replaying creation or scanning a prefix.
 - [ ] Jointly accept and prove the privately implemented carrier sink extension with the SSH owner
       before enabling its production use or exposing it through RunContext.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext

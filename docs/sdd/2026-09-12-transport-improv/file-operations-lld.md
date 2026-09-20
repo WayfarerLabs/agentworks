@@ -208,6 +208,29 @@ debt and never hides the primary outcome. A prerequisite probe must establish in
 and required features without installing anything; no separately installed helper version or
 executable-digest handshake is needed when the executable source travels with each invocation.
 
+Upload consumes its declared finite source once. The unverified scratch reference binds exact object
+identity and expected length, not a whole-file digest that a streaming source cannot yet supply.
+Each chunk still carries its exact offset and digest. The host computes the overall digest while
+consuming the source, rejects short or excess input before publication, and supplies the final
+digest with the publication request. Guest verification establishes a ready reference carrying that
+verified digest before publication can consume it. This separates incomplete transfer from verified
+content without requiring a host spool solely to precompute a digest.
+
+A download snapshot copies one held source inode into private scratch in bounded chunks while
+holding the transaction lock. Source identity/metadata and the copied length/digest must agree
+before the snapshot is ready. Chunk retrieval then reads that private snapshot outside the lock,
+never successive ranges of the changing public source. The existing bounded-memory read and
+digest-only observation do not implement this streaming snapshot; its substrate remains to be built
+and proved.
+
+The first creation acknowledgment remains a transfer-design gate. Today the helper chooses the
+scratch name and records its inode identities before returning them; losing that reply leaves the
+host without an exact cleanup reference. The same issue applies to snapshot creation and to
+unreported publication-stage cleanup debt. An unavailable reference is not proof that no artifact
+exists. Preserve that uncertainty separately from known exact cleanup debt, never replay creation to
+recover a reference, and never scan a name prefix to infer ownership. Reconciliation of this case
+must be settled and fault-tested before the transfer exchange is accepted.
+
 The delivery audit at `0ecb9a2e` found that one monolithic bundle plus a 24 KiB chunk nearly
 exhausts or exceeds the historical 64 KiB Proxmox whole-POST limit before its missing dispatcher is
 added. The largest existing per-module representation also exceeds Windows' 32,767-character process
