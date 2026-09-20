@@ -152,6 +152,24 @@ carrier status separate; it does not infer application success or an eager start
 This candidate is not wired to production RunContext and does not yet supply staging, elevation,
 terminal I/O or managed lifetime.
 
+## Private inline file reads
+
+`_file_read.py` composes a bounded, same-identity Linux file read through one carrier attempt. The
+core selects a trusted root and relative path; the helper checks the expected UID, GID and groups
+before opening the target. Absolute root traversal refuses links, and the existing snapshot reader
+also refuses descendant mount crossings and unsupported objects. Missing roots or files produce an
+absent observation, not an I/O success with empty bytes.
+
+Paths and other request values travel only in sensitive stdin. A file-specific collector validates
+the complete nonce-bound response, length, digest and metadata before releasing bytes. Noise,
+reflection, truncation or invalid records cannot become a successful read, and carrier completion is
+reported separately. Helper code uses the fixed module packager; it creates no guest files, spool or
+lock. The destination needs compatible Python 3.11 or newer with zlib already available.
+
+This is not production FileAccess or native platform acceptance. It does not provide stat-only
+observations, mutation, elevation, transaction locking, macOS support or a hard elapsed-time bound
+for filesystem reads. It assumes a cooperative execution identity, not hostile same-user isolation.
+
 ## Private terminal handoff preparation
 
 `_terminal_handoff.py` provides platform-neutral host preparation for one no-staging, same-terminal

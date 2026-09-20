@@ -211,6 +211,15 @@ environment, cwd, source text, callbacks, or a destination outside its single re
 
 ### No-staging readiness gate
 
+The private Linux `_file_read.py` implementation now composes the existing snapshot reader with a
+fixed bundled helper and a file-specific `AGWF1` collector. It checks an explicitly bound identity
+before path access and sends caller paths only through sensitive stdin. Complete length, digest,
+metadata, framing and carrier-stream evidence are required before returning file bytes. Root or leaf
+absence remains distinct from refusal and incomplete observation. The helper performs no deployment,
+spool, mutation or lock creation. This implements a local bounded-read candidate, not stat-only
+support, transaction locking, production FileAccess or native SSH/QGA/macOS acceptance. The
+remaining readiness gates below still apply.
+
 Preparation readiness permits no helper deployment, private scratch, spool, or new lock state.
 FileAccess may expose only bounded `read_file` and `stat` there, and only through an
 already-available trusted substrate proved to meet file confinement, object, sensitivity, and

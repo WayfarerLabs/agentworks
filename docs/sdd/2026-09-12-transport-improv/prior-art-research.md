@@ -514,6 +514,15 @@ explains why asynchronous exceptions can interrupt ownership transitions. Any se
 needs explicit interrupt ownership and safe checkpoints, not an incidental signal-handler change
 inside a carrier. No application-wide cancellation policy is adopted by this experiment.
 
+A codebase adoption audit at `6ea48b41` found no existing safe-checkpoint mechanism to reuse.
+`capabilities/base.py` keeps RunContext passive, while the VM operation boundaries and realization
+logs own cleanup after an exception propagates. CLI entry converts interruption to exit 130; it does
+not protect the process-construction transition. Status observation uses a thread pool whose
+cancellation stops queued futures, not work already running. A future interruption owner therefore
+must account for both direct operation calls and worker-thread observations. These are current
+composition facts, not acceptance of a new signal policy or permission to put signal handling in
+RunContext. The launch-ownership gate remains open.
+
 ## Native adapter audit, 2026-09-19
 
 The existing finite-input carrier boundary permits non-production adapter proofs without selecting

@@ -143,6 +143,11 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       interactive-ready follows terminal restoration. Premature input retains raw carriage-return
       semantics, while post-handoff input receives canonical translation. This is not SSH delivery,
       workstation-platform acceptance or application-start proof.
+- [x] Compose a private same-identity Linux file read through one carrier attempt without staging,
+      spool or lock creation. The implementation includes strict file-response collection and actual
+      local Python 3.11 reads; the focused file, inline, terminal and import suite passes 404 cases.
+      Native acceptance, stat-only operations, mutation, locking and FileAccess remain separate
+      gates.
 - [ ] Accept the preparation/result and file-operation LLDs after private review and disposition of
       their helper/runtime, launch-evidence, cross-identity locking, and platform prerequisites.
 - [ ] Jointly accept and prove the privately implemented carrier sink extension with the SSH owner
