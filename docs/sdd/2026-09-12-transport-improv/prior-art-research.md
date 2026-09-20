@@ -616,6 +616,32 @@ identity, so it is not itself proof of the transport's stale-reference guarantee
 Neither `--foreground` nor launchd establishes every MANAGED guarantee; the macOS mechanism gate
 remains open.
 
+### Darwin ownership feasibility
+
+The follow-up source audit distinguishes ordinary process-group cleanup from inherited ownership
+that survives daemonization. Apple's [launchd guidance](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html)
+requires managed programs not to daemonize and recommends avoiding `setsid`. The published
+[launchd manual](https://github.com/apple-oss-distributions/launchd/blob/launchd-842.92.1/man/launchd.plist.5#L371-L375)
+describes cleanup of the job's process group, not arbitrary descendants that create other groups.
+That source is historical; it does not prove current implementation details or establish a modern
+coalition-backed public lifecycle contract.
+
+Darwin coalitions have the relevant kernel shape: inherited membership survives fork and exec,
+membership cannot change after creation, and identifiers are not reused. However, Apple's
+[XNU coalition overview](https://github.com/apple-oss-distributions/xnu/blob/xnu-12377.121.6/doc/observability/coalitions.md)
+reserves their creation, termination, reaping and explicit spawn placement for launchd or kernel
+tests. These are not a supported general-client substitute for cgroups. Moreover, coalition
+termination is not itself a kill operation. A private coalition controller is not selected here.
+
+The evidence therefore does not support advertising generic MANAGED on macOS through a plain
+launchd/process-group implementation. This is a public-mechanism gap, not proof that every possible
+Darwin supervisor is impossible. The lead recommends retaining the unchanged MANAGED guarantees
+where they can be proved and investigating a narrower, explicit cooperative resource-lifetime
+contract for macOS placement-host workflows. That would change the current independent-job/profile
+requirement and needs operator disposition before implementation. Lima foreground ownership remains
+a candidate for preserving required VM workflows, not proof of generic descendant emptiness. No
+requirement is waived by this research, and no native macOS result is claimed.
+
 ## Claims not relied upon
 
 - A common API makes every backend interactive.
