@@ -180,7 +180,7 @@ reports 10,413 passed and 11 skipped. The focused execution/provisioning suite r
 and four skipped. These are workstation tests, not live platform acceptance. Subsequent
 combined-stream testing exposed a further gap: a pending sink paused accounting while the other pipe
 could keep collecting. The scheduler now suspends all fresh reads during post-exit pending delivery,
-then resumes the unchanged accumulated budget. Its correction is being reviewed with the next
+then resumes the unchanged accumulated budget. Its correction received fresh review with the next
 bounded work unit, rather than inheriting the earlier clean verdict.
 
 The safe ancestor `a885ef5a` is published with only early guest Python provisioning and the local
@@ -199,6 +199,14 @@ bounded read-only observations. Their
 [runtime](preparation-lld.md#darwin-inline-prerequisite-candidate) and
 [filesystem](file-operations-lld.md#confinement-and-filesystem-mechanics) evidence descriptions keep
 production composition, native platform acceptance, full mount handling and locking gates open.
+
+At `b881942d`, project, complexity and generic correctness reviews are clean for the runtime
+experiment, file snapshot primitive and combined-stream correction. Independent mutations prove that
+the corrected representation tests detect disclosure of either snapshot bytes or its digest. The
+runtime-identical `be168621` passes 10,470 local tests with 11 skips; the final corrected execution
+suite passes 549 with four skips. Ruff, mypy, file lint, rulesync and locked-SDD checks pass. This
+is private implementation evidence, not native platform acceptance or a completed additive
+RunContext handoff.
 
 SSH's implementation at `4fcfeaa8` includes transport `e85e9f5c` and adopts the reviewed finite
 subprocess pump. It still needs transport-owned shared I/O types and terminal preparation, plus
