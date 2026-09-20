@@ -48,14 +48,20 @@ system/default trust context. An explicit bundle selects that trust source, not 
 bypass. The API hostname must match the certificate; there is no server-name override. Redirects and
 ambient proxies are disabled, and provider exception text is not returned.
 
-`carriers/_subprocess.py` supplies a shared process pump with finite or explicitly enabled live
-input, separate bounded outputs, explicit environment binding and bounded local cleanup. Borrowed
-byte endpoints must return without waiting on external I/O. The pump never closes them or changes
-their descriptor flags. Short sink writes retain a bounded pending suffix; temporary stalls are not
-EOF. Endpoint failures preserve independently observed completion and mark incomplete delivery.
-After child exit, pending sink delivery pauses all fresh pipe collection. Once both pending chunks
-clear, collection resumes against its accumulated budget; the original deadline separately bounds
-sink delivery. A stalled sink cannot exempt fresh reads from the other stream's collection budget.
+`_process.py` supplies the standard-library-only process pump for workstation use and destination
+helper composition. `carriers/_subprocess.py` maps carrier input, retention and result policy around
+that core without changing its call signature. The core is compatible with Python 3.11 on POSIX;
+nonblocking Windows pipes require Python 3.12 or newer. Sharing this code does not itself implement
+guest delivery, framing or workload supervision.
+
+The pump supports finite or explicitly enabled live input, separate bounded outputs, explicit
+environment binding and bounded local cleanup. Borrowed byte endpoints must return without waiting
+on external I/O. The pump never closes them or changes their descriptor flags. Short sink writes
+retain a bounded pending suffix; temporary stalls are not EOF. Endpoint failures preserve
+independently observed completion and mark incomplete delivery. After child exit, pending sink
+delivery pauses all fresh pipe collection. Once both pending chunks clear, collection resumes
+against its accumulated budget; the original deadline separately bounds sink delivery. A stalled
+sink cannot exempt fresh reads from the other stream's collection budget.
 
 `SinkOutput` feeds transient raw carrier bytes to trusted collectors and reports `DELIVERED` with no
 retained bytes, including on sensitive calls. These are private preparation endpoints, not plugin
