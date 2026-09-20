@@ -349,7 +349,7 @@ def test_stopped_wait_status_remains_pending_until_terminal_status(
 def test_windows_waiting_never_calls_posix_waitpid(
     children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(os, "waitpid", lambda *args: pytest.fail("Windows called waitpid"))
+    monkeypatch.setattr(os, "waitpid", lambda *args: pytest.fail("Windows called waitpid"), raising=False)
 
     result = execute("import sys; sys.exit(42)")
 
@@ -1095,7 +1095,7 @@ def test_failed_reap_is_observation_failure(
     children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     original = Popen.wait
-    original_waitpid = os.waitpid
+    original_waitpid = os.waitpid if os.name != "nt" else None
 
     def wait(process: Popen[bytes], timeout: float | None = None) -> int:
         if process is children[-1]:
@@ -1105,6 +1105,7 @@ def test_failed_reap_is_observation_failure(
     def waitpid(pid: int, options: int) -> tuple[int, int]:
         if children and pid == children[-1].pid:
             raise OSError("secret-canary")
+        assert original_waitpid is not None
         return original_waitpid(pid, options)
 
     with monkeypatch.context() as context:
@@ -1125,7 +1126,7 @@ def test_failed_reap_during_interruption_adds_safe_note(
     children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     original_wait = Popen.wait
-    original_waitpid = os.waitpid
+    original_waitpid = os.waitpid if os.name != "nt" else None
     waitpid_calls = 0
 
     def advance(output: _subprocess._Output, pipe: Any) -> tuple[bool, bool]:
@@ -1142,6 +1143,7 @@ def test_failed_reap_during_interruption_adds_safe_note(
             waitpid_calls += 1
             if waitpid_calls > 2:
                 raise OSError("secret-canary")
+        assert original_waitpid is not None
         return original_waitpid(pid, options)
 
     with monkeypatch.context() as context:
