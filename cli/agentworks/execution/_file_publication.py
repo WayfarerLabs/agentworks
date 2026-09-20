@@ -1,5 +1,7 @@
 """Atomic Linux publication beneath a caller-owned directory descriptor.
 The caller owns confinement and locking; unsupported metadata and objects refuse.
+Operational facts are carried by ``FilePublicationError`` directly or as the
+fixed cause of an escaping control-flow exception.
 """
 
 from __future__ import annotations
@@ -11,24 +13,26 @@ import secrets
 import stat
 import sys
 from contextlib import suppress
-from dataclasses import astuple, dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from operator import attrgetter
-from typing import TYPE_CHECKING, TypeVar, cast
+from typing import TYPE_CHECKING, NoReturn, TypeVar, cast
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-from agentworks.execution._file_snapshot import FileSnapshot, SnapshotFailureKind, SnapshotReadError, read_snapshot
+from agentworks.execution._file_snapshot import (
+    FileSnapshot,
+    SnapshotFailureKind,
+    SnapshotReadError,
+    _snapshot_stat,
+    read_snapshot,
+)
 
 _ACCESS_ACL = "system.posix_acl_access"
 _RENAME_NOREPLACE = 1
 _STAGE_ATTEMPTS = 16
 _STAGE_PREFIX = ".agentworks-stage-"
 _T = TypeVar("_T")
-_STAT_VALUES = attrgetter(
-    "st_dev", "st_ino", "st_mode", "st_nlink", "st_uid", "st_gid", "st_size", "st_mtime_ns", "st_ctime_ns"
-)
 
 
 class PublicationFailureKind(Enum):
@@ -50,6 +54,16 @@ class PublicationPhase(Enum):
     CONDITION = "condition"
     METADATA = "metadata"
     PUBLICATION = "publication"
+    CLEANUP = "cleanup"
+
+
+@dataclass(frozen=True, repr=False)
+class PublicationCleanupDebt:
+    """Exact private staging identity retained after cleanup refusal."""
+
+    name: str = field(repr=False)
+    device: int | None = field(repr=False)
+    inode: int | None = field(repr=False)
 
 
 class FilePublicationError(Exception):
@@ -60,12 +74,12 @@ class FilePublicationError(Exception):
         kind: PublicationFailureKind,
         phase: PublicationPhase,
         *,
-        cleanup_failed: bool = False,
+        cleanup_debt: PublicationCleanupDebt | None = None,
     ) -> None:
         self.kind = kind
         self.phase = phase
-        self.cleanup_failed = cleanup_failed
-        super().__init__(kind.value, phase.value, cleanup_failed)
+        self.cleanup_debt = cleanup_debt
+        super().__init__(kind.value, phase.value, cleanup_debt is not None)
 
 
 @dataclass(frozen=True)
@@ -107,6 +121,7 @@ def publish_file(
 
     stage_name: str | None = None
     stage_identity: _ObjectIdentity | None = None
+    publication_attempted = False
     failure: FilePublicationError | None = None
     try:
         stage_name, stage_fd, stage_identity = _create_stage(parent_fd)
@@ -119,41 +134,62 @@ def publish_file(
             else:
                 if expected.stat.mode & (stat.S_ISUID | stat.S_ISGID):
                     raise FilePublicationError(PublicationFailureKind.METADATA, PublicationPhase.METADATA)
-                replacement_fd = _open_existing(parent_fd, leaf_name)
-                _require_supported_existing(replacement_fd, expected.stat.device)
-                _require_stat_match(replacement_fd, expected)
+                replacement_fd = _open_existing(parent_fd, leaf_name, expected.stat.device)
+                _require_existing_match(replacement_fd, expected)
                 access_acl = _read_access_acl(replacement_fd)
                 _prepare_replacement(stage_fd, expected, access_acl)
             _os_call(os.fsync, stage_fd, kind=PublicationFailureKind.IO, phase=PublicationPhase.METADATA)
             _verify_stage(stage_fd, parent_fd, stage_name, stage_identity)
             if expected is None:
+                publication_attempted = True
                 _rename_noreplace(parent_fd, stage_name, leaf_name)
             else:
                 assert replacement_fd is not None
                 _verify_replacement_condition(parent_fd, leaf_name, expected, replacement_fd, access_acl)
+                publication_attempted = True
                 _rename_replace(parent_fd, stage_name, leaf_name)
         finally:
-            if replacement_fd is not None:
-                _close(replacement_fd)
-            _close(stage_fd)
+            try:
+                if replacement_fd is not None:
+                    _close(replacement_fd)
+            finally:
+                _close(stage_fd)
     except FilePublicationError as error:
         failure = error
-    except BaseException:
+    except BaseException as control:
+        prior = _control_fact(control)
+        if prior is None and publication_attempted:
+            prior = FilePublicationError(PublicationFailureKind.UNCERTAIN, PublicationPhase.PUBLICATION)
+        cleanup_debt = None
         if stage_name is not None and stage_identity is not None:
-            _cleanup_stage(parent_fd, stage_name, stage_identity)
-        raise
+            cleanup_debt = _cleanup_or_raise_control(
+                parent_fd,
+                stage_name,
+                stage_identity,
+                prior=prior,
+            )
+        _raise_control(control, prior=prior, cleanup_debt=cleanup_debt)
     else:
         return
 
-    cleanup_failed = False
-    if stage_name is not None and stage_identity is not None:
-        cleanup_failed = not _cleanup_stage(parent_fd, stage_name, stage_identity)
     assert failure is not None
+    cleanup_debt = None
+    if stage_name is not None and stage_identity is not None:
+        cleanup_debt = _cleanup_or_raise_control(parent_fd, stage_name, stage_identity, prior=failure)
     raise FilePublicationError(
         failure.kind,
         failure.phase,
-        cleanup_failed=failure.cleanup_failed or cleanup_failed,
+        cleanup_debt=failure.cleanup_debt or cleanup_debt,
     ) from None
+
+
+def retry_publication_cleanup(parent_fd: int, debt: PublicationCleanupDebt) -> bool:
+    """Retry exact-name cleanup under the same borrowed parent descriptor."""
+    if not isinstance(debt, PublicationCleanupDebt):
+        raise ValueError("Publication cleanup debt has an invalid type")
+    if debt.device is None or debt.inode is None:
+        return False
+    return _cleanup_stage(parent_fd, debt.name, _ObjectIdentity(debt.device, debt.inode))
 
 
 def _validate_inputs(
@@ -200,23 +236,39 @@ def _create_stage(parent_fd: int) -> tuple[str, int, _ObjectIdentity]:
             error_number = error.errno
         else:
             observed: os.stat_result | None = None
-            with suppress(OSError):
+            control: BaseException | None = None
+            try:
                 observed = os.fstat(descriptor)
+            except OSError:
+                pass
+            except BaseException as error:
+                control = error
+            if control is not None:
+                _close(descriptor)
+                _raise_control(
+                    control,
+                    cleanup_debt=PublicationCleanupDebt(name, None, None),
+                )
             if observed is None:
                 _close(descriptor)
                 raise FilePublicationError(
                     PublicationFailureKind.IO,
                     PublicationPhase.STAGING,
-                    cleanup_failed=True,
+                    cleanup_debt=PublicationCleanupDebt(name, None, None),
                 )
             if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1 or observed.st_dev != parent.st_dev:
                 _close(descriptor)
                 identity = _ObjectIdentity(observed.st_dev, observed.st_ino)
-                cleanup_failed = not _cleanup_stage(parent_fd, name, identity)
+                cleanup_debt = _cleanup_or_raise_control(
+                    parent_fd,
+                    name,
+                    identity,
+                    prior=FilePublicationError(PublicationFailureKind.UNSUPPORTED, PublicationPhase.STAGING),
+                )
                 raise FilePublicationError(
                     PublicationFailureKind.UNSUPPORTED,
                     PublicationPhase.STAGING,
-                    cleanup_failed=cleanup_failed,
+                    cleanup_debt=cleanup_debt,
                 )
             return name, descriptor, _ObjectIdentity(observed.st_dev, observed.st_ino)
         if error_number != errno.EEXIST:
@@ -282,7 +334,12 @@ def _read_matching_snapshot(parent_fd: int, leaf_name: str, expected: FileSnapsh
     raise FilePublicationError(PublicationFailureKind.IO, PublicationPhase.CONDITION)
 
 
-def _open_existing(parent_fd: int, leaf_name: str) -> int:
+def _open_existing(parent_fd: int, leaf_name: str, device: int) -> int:
+    observed = _stat_at(parent_fd, leaf_name, PublicationPhase.CONDITION)
+    if observed is None:
+        raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.CONDITION)
+    if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1 or observed.st_dev != device:
+        raise FilePublicationError(PublicationFailureKind.UNSUPPORTED, PublicationPhase.CONDITION)
     flags = os.O_RDWR | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0)
     error_number: int | None = None
@@ -301,16 +358,12 @@ def _open_existing(parent_fd: int, leaf_name: str) -> int:
     raise FilePublicationError(PublicationFailureKind.IO, PublicationPhase.CONDITION)
 
 
-def _require_stat_match(descriptor: int, expected: FileSnapshot) -> None:
+def _require_existing_match(descriptor: int, expected: FileSnapshot) -> None:
     observed = _fstat(descriptor, PublicationPhase.CONDITION)
-    if _STAT_VALUES(observed) != astuple(expected.stat):
-        raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.CONDITION)
-
-
-def _require_supported_existing(descriptor: int, device: int) -> None:
-    observed = _fstat(descriptor, PublicationPhase.CONDITION)
-    if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1 or observed.st_dev != device:
+    if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1 or observed.st_dev != expected.stat.device:
         raise FilePublicationError(PublicationFailureKind.UNSUPPORTED, PublicationPhase.CONDITION)
+    if _snapshot_stat(observed) != expected.stat:
+        raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.CONDITION)
 
 
 def _verify_replacement_condition(
@@ -323,7 +376,7 @@ def _verify_replacement_condition(
     current = _read_matching_snapshot(parent_fd, leaf_name, expected)
     if current is None or current != expected:
         raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.CONDITION)
-    _require_stat_match(replacement_fd, expected)
+    _require_existing_match(replacement_fd, expected)
     if _read_access_acl(replacement_fd) != access_acl:
         raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.CONDITION)
 
@@ -382,7 +435,7 @@ def _verify_stage(
         or descriptor_stat.st_nlink != 1
         or _ObjectIdentity(descriptor_stat.st_dev, descriptor_stat.st_ino) != identity
         or _ObjectIdentity(named_stat.st_dev, named_stat.st_ino) != identity
-        or _STAT_VALUES(named_stat) != _STAT_VALUES(descriptor_stat)
+        or _snapshot_stat(named_stat) != _snapshot_stat(descriptor_stat)
     ):
         raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.METADATA)
 
@@ -399,7 +452,7 @@ def _rename_noreplace(parent_fd: int, stage_name: str, leaf_name: str) -> None:
     renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
     renameat2.restype = ctypes.c_int
     ctypes.set_errno(0)
-    interrupted = False
+    failed = False
     try:
         result = renameat2(
             parent_fd,
@@ -408,10 +461,10 @@ def _rename_noreplace(parent_fd: int, stage_name: str, leaf_name: str) -> None:
             os.fsencode(leaf_name),
             _RENAME_NOREPLACE,
         )
-    except BaseException:
-        interrupted = True
+    except OSError:
+        failed = True
         result = -1
-    if interrupted:
+    if failed:
         raise FilePublicationError(PublicationFailureKind.UNCERTAIN, PublicationPhase.PUBLICATION)
     if result == 0:
         return
@@ -427,7 +480,7 @@ def _rename_replace(parent_fd: int, stage_name: str, leaf_name: str) -> None:
     failed = False
     try:
         os.rename(stage_name, leaf_name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
-    except BaseException:
+    except OSError:
         failed = True
     if failed:
         raise FilePublicationError(PublicationFailureKind.UNCERTAIN, PublicationPhase.PUBLICATION)
@@ -448,6 +501,59 @@ def _cleanup_stage(parent_fd: int, stage_name: str, identity: _ObjectIdentity) -
     except OSError:
         failed = True
     return not failed
+
+
+def _cleanup_debt(stage_name: str, identity: _ObjectIdentity) -> PublicationCleanupDebt:
+    return PublicationCleanupDebt(stage_name, identity.device, identity.inode)
+
+
+def _cleanup_or_raise_control(
+    parent_fd: int,
+    stage_name: str,
+    identity: _ObjectIdentity,
+    *,
+    prior: FilePublicationError | None,
+) -> PublicationCleanupDebt | None:
+    """Try cleanup once; a cleanup interruption escapes with the known debt.
+
+    Repeated asynchronous interruption is not retried or bounded here.
+    """
+    debt = _cleanup_debt(stage_name, identity)
+    interrupted: BaseException | None = None
+    try:
+        cleaned = _cleanup_stage(parent_fd, stage_name, identity)
+    except BaseException as control:
+        interrupted = control
+        cleaned = False
+    if interrupted is not None:
+        _raise_control(interrupted, prior=prior, cleanup_debt=debt)
+    return None if cleaned else debt
+
+
+def _control_fact(control: BaseException) -> FilePublicationError | None:
+    cause = control.__cause__
+    return cause if isinstance(cause, FilePublicationError) else None
+
+
+def _raise_control(
+    control: BaseException,
+    *,
+    prior: FilePublicationError | None = None,
+    cleanup_debt: PublicationCleanupDebt | None = None,
+) -> NoReturn:
+    fact = prior or _control_fact(control)
+    if cleanup_debt is not None:
+        if fact is None:
+            fact = FilePublicationError(
+                PublicationFailureKind.IO,
+                PublicationPhase.CLEANUP,
+                cleanup_debt=cleanup_debt,
+            )
+        else:
+            fact = FilePublicationError(fact.kind, fact.phase, cleanup_debt=cleanup_debt)
+    if fact is None:
+        raise control
+    raise control from fact
 
 
 def _fstat(descriptor: int, phase: PublicationPhase) -> os.stat_result:
@@ -482,12 +588,11 @@ def _os_call(  # noqa: UP047
     *args: object,
     kind: PublicationFailureKind,
     phase: PublicationPhase,
-    **kwargs: object,
 ) -> _T:
     failed = False
     result: object = None
     try:
-        result = function(*args, **kwargs)
+        result = function(*args)
     except OSError:
         failed = True
     if failed:

@@ -7,6 +7,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -19,10 +20,11 @@ from agentworks.execution._file_publication import (
     PublicationFailureKind,
     PublicationPhase,
     publish_file,
+    retry_publication_cleanup,
 )
 from agentworks.execution._file_snapshot import FileSnapshot, read_snapshot
 
-pytestmark = pytest.mark.skipif(os.name != "posix" or not hasattr(os, "listxattr"), reason="Linux file publication")
+pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux file publication")
 
 
 def _open_parent(path: Path) -> int:
@@ -66,6 +68,11 @@ def _stage_names(path: Path) -> list[Path]:
     return list(path.glob(f"{publication_module._STAGE_PREFIX}*"))
 
 
+def _publication_cause(error: BaseException) -> FilePublicationError:
+    assert isinstance(error.__cause__, FilePublicationError)
+    return error.__cause__
+
+
 def test_create_only_publishes_all_bytes_with_requested_metadata(tmp_path: Path) -> None:
     parent_fd = _open_parent(tmp_path)
     content = os.urandom(192 * 1024 + 17)
@@ -80,6 +87,15 @@ def test_create_only_publishes_all_bytes_with_requested_metadata(tmp_path: Path)
     assert target.read_bytes() == content
     assert (observed.st_uid, observed.st_gid, stat.S_IMODE(observed.st_mode)) == (os.getuid(), os.getgid(), 0o640)
     assert not _stage_names(tmp_path)
+
+
+def test_non_linux_platform_refuses_before_parent_io(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    parent_fd = _open_parent(tmp_path)
+    os.close(parent_fd)
+    monkeypatch.setattr("agentworks.execution._file_publication.sys.platform", "darwin")
+    error = _failure(parent_fd, "target", b"content", expected=None)
+    assert error.kind is PublicationFailureKind.UNSUPPORTED
+    assert error.phase is PublicationPhase.STAGING
 
 
 def test_create_uses_exclusive_nofollow_0600_staging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -262,6 +278,31 @@ def test_replacement_refuses_links_and_special_objects(tmp_path: Path, kind: str
     assert not _stage_names(tmp_path)
 
 
+def test_observed_fifo_is_refused_before_writable_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "target"
+    target.write_bytes(b"old")
+    parent_fd = _open_parent(tmp_path)
+    expected = _snapshot(parent_fd, "target")
+    target.unlink()
+    os.mkfifo(target)
+    original_open = os.open
+    writable_leaf_opened = False
+
+    def recording_open(path: str, flags: int, *args: object, **kwargs: object) -> int:
+        nonlocal writable_leaf_opened
+        if path == "target" and flags & os.O_RDWR:
+            writable_leaf_opened = True
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", recording_open)
+    try:
+        error = _failure(parent_fd, "target", b"new", expected=expected)
+    finally:
+        os.close(parent_fd)
+    assert error.kind is PublicationFailureKind.UNSUPPORTED
+    assert not writable_leaf_opened
+
+
 def test_read_only_destination_requires_ordinary_write_authority(tmp_path: Path) -> None:
     if os.geteuid() == 0:
         pytest.skip("root bypasses ordinary mode-bit write checks")
@@ -359,7 +400,7 @@ def test_partial_write_failure_leaves_old_inode_and_cleans_stage(
         os.close(parent_fd)
     assert error.kind is PublicationFailureKind.IO
     assert error.phase is PublicationPhase.CONTENT
-    assert not error.cleanup_failed
+    assert error.cleanup_debt is None
     assert target.read_bytes() == b"old"
     assert target.stat().st_ino == before.st_ino
     assert not _stage_names(tmp_path)
@@ -400,16 +441,102 @@ def test_cleanup_failure_is_bounded_and_reported(tmp_path: Path, monkeypatch: py
         "_write",
         lambda *_args: (_ for _ in ()).throw(FilePublicationError(PublicationFailureKind.IO, PublicationPhase.CONTENT)),
     )
-    try:
-        error = _failure(parent_fd, "target", b"content", expected=None)
-        debt = _stage_names(tmp_path)
-    finally:
-        os.close(parent_fd)
+    error = _failure(parent_fd, "target", b"content", expected=None)
+    debt = _stage_names(tmp_path)
     assert error.kind is PublicationFailureKind.IO
-    assert error.cleanup_failed
+    assert error.cleanup_debt is not None
     assert len(debt) == 1
+    assert (error.cleanup_debt.device, error.cleanup_debt.inode) == (debt[0].stat().st_dev, debt[0].stat().st_ino)
+    assert debt[0].name not in repr(error.cleanup_debt)
     monkeypatch.setattr(os, "unlink", original_unlink)
-    debt[0].unlink()
+    assert retry_publication_cleanup(parent_fd, error.cleanup_debt)
+    os.close(parent_fd)
+    assert not debt[0].exists()
+
+
+def test_unidentified_stage_debt_retains_exact_name_but_refuses_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    original_fstat = os.fstat
+
+    def fail_regular_fstat(descriptor: int) -> os.stat_result:
+        observed = original_fstat(descriptor)
+        if stat.S_ISREG(observed.st_mode):
+            raise OSError(errno.EIO, "fixture stage identity failure")
+        return observed
+
+    monkeypatch.setattr(os, "fstat", fail_regular_fstat)
+    error = _failure(parent_fd, "target", b"content", expected=None)
+    debt = error.cleanup_debt
+    assert debt is not None and debt.device is None and debt.inode is None
+    assert debt.name not in repr(debt)
+    assert not retry_publication_cleanup(parent_fd, debt)
+    os.close(parent_fd)
+    (tmp_path / debt.name).unlink()
+
+
+def test_stage_identity_interrupt_releases_fd_and_carries_unknown_debt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    original_fstat = os.fstat
+    stage_fd: int | None = None
+
+    def interrupt_regular_fstat(descriptor: int) -> os.stat_result:
+        nonlocal stage_fd
+        observed = original_fstat(descriptor)
+        if stat.S_ISREG(observed.st_mode):
+            stage_fd = descriptor
+            raise KeyboardInterrupt
+        return observed
+
+    monkeypatch.setattr(os, "fstat", interrupt_regular_fstat)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        publish_file(parent_fd, "target", b"content", expected=None, create_metadata=_metadata())
+    cause = _publication_cause(raised.value)
+    assert cause.phase is PublicationPhase.CLEANUP
+    assert cause.cleanup_debt is not None and cause.cleanup_debt.device is None
+    monkeypatch.setattr(os, "fstat", original_fstat)
+    assert stage_fd is not None
+    with pytest.raises(OSError):
+        os.fstat(stage_fd)
+    os.close(parent_fd)
+    (tmp_path / cause.cleanup_debt.name).unlink()
+
+
+def test_second_cleanup_interrupt_escapes_with_known_debt_and_closed_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    stage_fd: int | None = None
+
+    def interrupt_write(descriptor: int, _content: memoryview) -> int:
+        nonlocal stage_fd
+        stage_fd = descriptor
+        raise KeyboardInterrupt
+
+    original_stat = os.stat
+
+    def interrupt_cleanup(path: str, *args: object, **kwargs: object) -> os.stat_result:
+        if path.startswith(publication_module._STAGE_PREFIX):
+            raise SystemExit
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(publication_module, "_write", interrupt_write)
+    monkeypatch.setattr(os, "stat", interrupt_cleanup)
+    with pytest.raises(SystemExit) as raised:
+        publish_file(parent_fd, "target", b"content", expected=None, create_metadata=_metadata())
+    cause = _publication_cause(raised.value)
+    debt = cause.cleanup_debt
+    assert cause.phase is PublicationPhase.CLEANUP
+    assert debt is not None and debt.device is not None and debt.inode is not None
+    assert stage_fd is not None
+    with pytest.raises(OSError):
+        os.fstat(stage_fd)
+    monkeypatch.setattr(os, "stat", original_stat)
+    assert retry_publication_cleanup(parent_fd, debt)
+    os.close(parent_fd)
 
 
 def test_cleanup_never_unlinks_a_replaced_stage_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -424,11 +551,10 @@ def test_cleanup_never_unlinks_a_replaced_stage_name(tmp_path: Path, monkeypatch
         raise FilePublicationError(PublicationFailureKind.IO, PublicationPhase.CONTENT)
 
     monkeypatch.setattr(publication_module, "_write", substitute_stage)
-    try:
-        error = _failure(parent_fd, "target", b"content", expected=None)
-    finally:
-        os.close(parent_fd)
-    assert error.cleanup_failed
+    error = _failure(parent_fd, "target", b"content", expected=None)
+    assert error.cleanup_debt is not None
+    assert not retry_publication_cleanup(parent_fd, error.cleanup_debt)
+    os.close(parent_fd)
     impostors = _stage_names(tmp_path)
     assert len(impostors) == 1
     assert impostors[0].read_bytes() == b"not owned"
@@ -462,9 +588,62 @@ def test_post_rename_failure_reports_uncertainty_without_blind_cleanup(
         os.close(parent_fd)
     assert error.kind is PublicationFailureKind.UNCERTAIN
     assert error.phase is PublicationPhase.PUBLICATION
-    assert not error.cleanup_failed
+    assert error.cleanup_debt is None
     assert target.read_bytes() == b"new"
     assert not _stage_names(tmp_path)
+
+
+def test_post_rename_interrupt_preserves_control_type_with_uncertainty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "target"
+    target.write_bytes(b"old")
+    parent_fd = _open_parent(tmp_path)
+    expected = _snapshot(parent_fd, "target")
+    original_rename = os.rename
+
+    def rename_then_interrupt(*args: object, **kwargs: object) -> None:
+        original_rename(*args, **kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(os, "rename", rename_then_interrupt)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        _publish_replace(parent_fd, "target", b"new", expected)
+    os.close(parent_fd)
+    cause = _publication_cause(raised.value)
+    assert cause.kind is PublicationFailureKind.UNCERTAIN
+    assert cause.phase is PublicationPhase.PUBLICATION
+    assert cause.cleanup_debt is None
+    assert target.read_bytes() == b"new"
+
+
+def test_interrupt_after_successful_rename_during_close_retains_uncertainty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "target"
+    target.write_bytes(b"old")
+    parent_fd = _open_parent(tmp_path)
+    expected = _snapshot(parent_fd, "target")
+    original_close = publication_module._close
+    close_count = 0
+
+    def close_then_interrupt(descriptor: int) -> None:
+        nonlocal close_count
+        close_count += 1
+        original_close(descriptor)
+        if close_count == 1:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(publication_module, "_close", close_then_interrupt)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        _publish_replace(parent_fd, "target", b"new", expected)
+    os.close(parent_fd)
+    cause = _publication_cause(raised.value)
+    assert cause.kind is PublicationFailureKind.UNCERTAIN
+    assert cause.phase is PublicationPhase.PUBLICATION
+    assert cause.cleanup_debt is None
+    assert close_count == 2
+    assert target.read_bytes() == b"new"
 
 
 def test_errors_have_fixed_secret_free_exception_chain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
