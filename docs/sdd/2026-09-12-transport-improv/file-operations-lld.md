@@ -202,11 +202,14 @@ workstation command line, including framing, quoting and privilege prefixes. Ret
 Proxmox compatibility floor rather than silently adding a package prerequisite. Oversized requests
 must refuse before dispatch; there is no automatic executable-staging fallback.
 
-Every exchange is one `Carrier.execute` with literal absolute argv. Its ASCII `AGWF1` envelope has a
-32-hex request ID, one closed operation, unique named base64/decimal fields, and a terminator. The
-response must match the ID and contain closed status/phase values. Strict field/line/decoded/total
-bounds inherit the preparation substrate's proved carrier limits. No request value becomes argv or
-shell source; fixed preparation bootstrap source cannot be reused for file operations.
+Every exchange is one `Carrier.execute` with literal absolute argv. Requests use bounded canonical
+ASCII JSON with a version, 32-hex request ID, one closed operation, identity, and operation-specific
+fields. Paths and other byte payloads use canonical base64. Responses use the existing sequenced
+`AGWF1` records, matching that request ID, with closed result/failure bodies and a final terminator.
+The framing codec is shared between concrete file exchanges; their request schemas and response
+grammars remain operation-specific. Unknown, duplicate, noncanonical or extra fields refuse. Strict
+field/line/decoded/total bounds must fit the complete carrier request. No request value becomes argv
+or shell source; fixed preparation bootstrap source cannot be reused for file operations.
 
 Ordinary buffered capture cannot safely carry this protocol: sensitive input suppresses the
 response, while ordinary `Capture` can flow toward public execution results. Use the implemented
@@ -363,8 +366,10 @@ extended attributes for an in-place change.
 Create a missing directory with mode 0700, preserving inherited ACLs, then converge metadata on its
 held inode. Do not remove a newly created public directory when a later step fails: it may already
 contain other work. Record completed creation/ownership/mode steps, and distinguish known partial
-changes from an uncertain attempted change. These local mechanisms need privileged and native
-filesystem proof before public enablement; no malicious same-user namespace guarantee is added.
+changes from an uncertain attempted change. A returned syscall error alone does not prove that an
+attempted mutation had no effect; retain uncertainty unless the outcome is confirmed. These local
+mechanisms need privileged and native filesystem proof before public enablement; no malicious
+same-user namespace guarantee is added.
 
 ## Cooperating writers and honest limits
 
@@ -412,6 +417,13 @@ guests need convergence before the first Phase-B file operation. Native recovery
 needs an explicit independent setup path; ordinary reinitialization currently requires Tailscale
 reachability. These setup paths and cross-identity contention remain implementation and acceptance
 gates. Local setup fixtures do not establish privileged bootstrap or cross-identity acceptance.
+
+The read-only transaction entry walks the fixed namespace with path-only directory descriptors,
+checking root ownership and no group/other write authority at each ancestor. It refuses observed
+links, replacement and missing state, then acquires the existing lock; it never invokes setup.
+Directory listing authority is unnecessary for this walk. These checks establish the observed
+namespace, not local-filesystem locking semantics, which provisioning and native acceptance must
+establish separately.
 
 SSH-accessed macOS platform hosts have no existing privileged setup lifecycle. A protected
 machine-wide lock there would add an administrator prerequisite; the operator decision is pending.

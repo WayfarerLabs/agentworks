@@ -313,11 +313,13 @@ descriptor on exit. Each transaction opens a fresh descriptor. The lock is an em
 single-link regular file owned by the trusted setup identity; its parent must have that owner and
 must not be group/other writable. No operation creates, repairs, replaces or unlinks lock state.
 
-The caller establishes the protected ancestor namespace and local-filesystem prerequisite, and
-supplies the same inode to every execution identity. The primitive alone does not establish that
-machine-wide setup or cross-identity availability. It must not enclose child creation: a fork can
-inherit the descriptor and prolong the lock. Local contention and cleanup tests are not native macOS
-or ordinary/elevated acceptance. This private primitive is not wired into file delivery yet.
+`system_file_lock` opens the fixed `/var/lib/agentworks/execution` namespace with path-only
+descriptors, checking root ownership and no group/other write authority at every ancestor. It
+rejects observed links or replacement without requiring directory read permission. Setup and
+local-filesystem locking semantics remain provisioning prerequisites, not results of this walk. The
+lock must not enclose child creation: a fork can inherit the descriptor and prolong ownership. Local
+contention and cleanup tests are not native macOS or ordinary/elevated acceptance. These private
+entries are not wired into file delivery yet.
 
 Debian new-guest bootstrap invokes `_file_lock_setup.py` through a fixed standalone bundle after
 installing distribution Python. It provisions `/var/lib/agentworks/execution/files.lock` as root,

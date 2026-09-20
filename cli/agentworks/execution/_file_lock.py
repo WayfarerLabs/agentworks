@@ -1,8 +1,8 @@
 """Linux cooperative file transactions using a pre-provisioned fixed lock.
 
-The caller owns the protected parent namespace and local-filesystem prerequisite.
-This module borrows that directory descriptor; it never creates or repairs lock
-state and makes no claim about ACLs, path setup, or nonlocal filesystems.
+The low-level entry borrows a protected parent descriptor; the system entry
+validates the fixed root-owned namespace. Neither creates or repairs lock state.
+Provisioning owns setup and the local-filesystem locking prerequisite.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import os
 import stat
 import sys
 import time
-from contextlib import contextmanager, suppress
+from contextlib import ExitStack, contextmanager, suppress
 from enum import Enum
 from typing import TYPE_CHECKING
 
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 _LOCK_NAME = "files.lock"
+_LOCK_DIRECTORY = ("var", "lib", "agentworks", "execution")
 _POLL_SECONDS = 0.05
 
 
@@ -40,6 +41,79 @@ class FileLockError(Exception):
     def __init__(self, kind: FileLockFailureKind) -> None:
         self.kind = kind
         super().__init__(kind.value)
+
+
+@contextmanager
+def system_file_lock(*, expires_at: float | None) -> Iterator[None]:
+    """Open the fixed root-owned Linux namespace and hold its existing lock.
+
+    Provisioning must establish local-filesystem locking semantics. This path
+    validates protected ancestors without creating, repairing or staging files.
+    """
+    if sys.platform != "linux" or not hasattr(os, "O_PATH"):
+        raise FileLockError(FileLockFailureKind.UNSUPPORTED)
+    _raise_if_expired(expires_at)
+    root_fd = _open_namespace_directory("/", None)
+    try:
+        with _file_lock_at_root(root_fd, 0, expires_at=expires_at):
+            yield
+    finally:
+        _close(root_fd)
+
+
+@contextmanager
+def _file_lock_at_root(
+    root_fd: int,
+    trusted_owner_uid: int,
+    *,
+    expires_at: float | None,
+) -> Iterator[None]:
+    """Borrow a namespace root; fixtures use the same fixed walk as production."""
+    _raise_if_expired(expires_at)
+    if not _safe_parent(_fstat(root_fd), trusted_owner_uid):
+        raise FileLockError(FileLockFailureKind.UNSAFE)
+    with ExitStack() as opened:
+        parent_fd = root_fd
+        for component in _LOCK_DIRECTORY:
+            _raise_if_expired(expires_at)
+            descriptor = _open_namespace_directory(component, parent_fd)
+            opened.callback(_close, descriptor)
+            held = _fstat(descriptor)
+            if not _safe_parent(held, trusted_owner_uid):
+                raise FileLockError(FileLockFailureKind.UNSAFE)
+            named = _stat_namespace_directory(parent_fd, component)
+            if (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino):
+                raise FileLockError(FileLockFailureKind.CONFLICT)
+            if not _safe_parent(named, trusted_owner_uid):
+                raise FileLockError(FileLockFailureKind.UNSAFE)
+            parent_fd = descriptor
+        with file_lock(parent_fd, trusted_owner_uid, expires_at=expires_at):
+            yield
+
+
+def _open_namespace_directory(name: str, parent_fd: int | None) -> int:
+    flags = os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    error_number: int | None = None
+    try:
+        return os.open(name, flags, dir_fd=parent_fd)
+    except OSError as error:
+        error_number = error.errno
+    if error_number == errno.ENOENT:
+        raise FileLockError(FileLockFailureKind.MISSING)
+    if error_number in {errno.ELOOP, errno.ENOTDIR}:
+        raise FileLockError(FileLockFailureKind.UNSAFE)
+    raise FileLockError(FileLockFailureKind.IO)
+
+
+def _stat_namespace_directory(parent_fd: int, name: str) -> os.stat_result:
+    error_number: int | None = None
+    try:
+        return os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except OSError as error:
+        error_number = error.errno
+    if error_number == errno.ENOENT:
+        raise FileLockError(FileLockFailureKind.CONFLICT)
+    raise FileLockError(FileLockFailureKind.IO)
 
 
 @contextmanager
