@@ -172,6 +172,8 @@ def _finish_failure(
 def _deadline_failure(request: FileStageRequest, result: _OperationResult) -> FileStageFailureControl:
     debt = None
     if isinstance(request, FileStageBeginRequest):
+        if result is None:
+            return FileStageFailureControl(FileStageFailureCode.DEADLINE)
         assert isinstance(result, ScratchReference)
         phase = ScratchPhase.BEGIN
         debt = _cleanup_debt(result)
@@ -204,7 +206,7 @@ def main(nonce: str) -> int:
         return _finish_failure(writer, FileStageFailureControl(FileStageFailureCode.IDENTITY_MISMATCH))
     expires_at = _expires_at(request.remaining_seconds)
     if _expired(expires_at):
-        return _finish_failure(writer, FileStageFailureControl(FileStageFailureCode.DEADLINE))
+        return _finish_failure(writer, _deadline_failure(request, None))
     failure: FileStageFailureControl | None = None
     result: _OperationResult = None
     try:
@@ -215,7 +217,7 @@ def main(nonce: str) -> int:
         if failure is None:
             failure = _deadline_failure(request, result)
         elif failure.code in {FileStageFailureCode.ROOT_REFUSED, FileStageFailureCode.PARENT_REFUSED}:
-            failure = FileStageFailureControl(FileStageFailureCode.DEADLINE)
+            failure = _deadline_failure(request, None)
     if failure is not None:
         return _finish_failure(writer, failure)
     if isinstance(request, FileStageBeginRequest):

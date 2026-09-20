@@ -503,7 +503,10 @@ def test_reconcile_deadline_after_missing_root_lookup_is_not_absence(
 
     assert result.observation.state is FileStageObservationState.REFUSED
     assert result.observation.failure is not None
-    assert result.observation.failure.code is FileStageFailureCode.DEADLINE
+    assert result.observation.failure.code is FileStageFailureCode.SCRATCH
+    assert result.observation.failure.kind is ScratchFailureKind.DEADLINE
+    assert result.observation.failure.phase is ScratchPhase.RECONCILE
+    assert result.observation.failure.cleanup_debt is None
     assert result.observation.cleanup_debt is None
 
 

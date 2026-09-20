@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import sys
 from collections.abc import Callable
 from types import ModuleType
@@ -34,15 +35,34 @@ from agentworks.execution._file_objects import FileObjectFailureKind, FileObject
 from agentworks.execution._file_read_protocol import FileReadFailure, FileReadRequest
 from agentworks.execution._file_stage_protocol import (
     FileStageBeginRequest,
+    FileStageChunkRequest,
+    FileStageCleanupRequest,
     FileStageFailureCode,
     FileStageFailureControl,
+    FileStageReconcileRequest,
+    stage_context,
 )
 from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._scratch import ScratchFailureKind, ScratchPhase, ScratchReference, _cleanup_debt
+from agentworks.execution._scratch_receipt import ScratchOwnership, _Identity
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the file helpers require Linux")
 
 _NONCE = "0" * 32
 _IDENTITY = IdentityExpectation(1000, 1000, (1000,))
+_TOKEN = bytes(range(16))
+_REFERENCE = ScratchReference(
+    ScratchOwnership(
+        _TOKEN,
+        stage_context(_IDENTITY),
+        _Identity(1, 2),
+        _Identity(1, 3),
+        _Identity(1, 4),
+        1000,
+        1,
+        _Identity(1, 5),
+    )
+)
 _CASES = (
     (
         _file_read_guest,
@@ -87,13 +107,34 @@ _CASES = (
         FileStageBeginRequest(_NONCE, "/private", "leaf", bytes(range(16)), 1, _IDENTITY, 0.0),
         FileStageFailureControl(FileStageFailureCode.DEADLINE),
     ),
+    (
+        _file_stage_guest,
+        FileStageChunkRequest(
+            _NONCE, "/private", "leaf", _TOKEN, _REFERENCE, 0, b"x", hashlib.sha256(b"x").digest(), _IDENTITY, 0.0
+        ),
+        FileStageFailureControl(
+            FileStageFailureCode.SCRATCH, ScratchFailureKind.DEADLINE, ScratchPhase.WRITE, _cleanup_debt(_REFERENCE)
+        ),
+    ),
+    (
+        _file_stage_guest,
+        FileStageReconcileRequest(_NONCE, "/private", "leaf", _TOKEN, _IDENTITY, 0.0),
+        FileStageFailureControl(FileStageFailureCode.SCRATCH, ScratchFailureKind.DEADLINE, ScratchPhase.RECONCILE),
+    ),
+    (
+        _file_stage_guest,
+        FileStageCleanupRequest(_NONCE, "/private", "leaf", _TOKEN, _cleanup_debt(_REFERENCE), _IDENTITY, 0.0),
+        FileStageFailureControl(
+            FileStageFailureCode.SCRATCH, ScratchFailureKind.DEADLINE, ScratchPhase.CLEANUP, _cleanup_debt(_REFERENCE)
+        ),
+    ),
 )
 
 
 @pytest.mark.parametrize(
     ("guest", "decoded", "expected"),
     _CASES,
-    ids=("read", "inventory", "metadata", "object", "stage"),
+    ids=("read", "inventory", "metadata", "object", "stage-begin", "stage-chunk", "stage-reconcile", "stage-cleanup"),
 )
 def test_expired_budget_refuses_before_root_access(
     guest: ModuleType,
