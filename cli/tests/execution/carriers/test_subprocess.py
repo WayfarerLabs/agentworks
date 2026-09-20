@@ -163,7 +163,7 @@ from agentworks.execution.carriers._subprocess import run_process
 signal.signal(signal.SIGCHLD, signal.SIG_IGN)
 result = run_process(
     [sys.executable, '-c', 'import sys; sys.exit(42)'],
-    io=CarrierIO(), deadline=Deadline.after(3),
+    io=CarrierIO(), deadline=Deadline(None),
 )
 print(json.dumps([result.local_status, result.exit_status, result.failure]))
 """
@@ -181,6 +181,7 @@ from agentworks.execution.carrier import CarrierIO, Deadline
 from agentworks.execution.carriers._subprocess import run_process
 original_popen = subprocess.Popen
 reaped = []
+kill_attempted = False
 def spawn(*args, **kwargs):
     process = original_popen(*args, **kwargs)
     def reap():
@@ -190,18 +191,23 @@ def spawn(*args, **kwargs):
     thread.join(2)
     assert not thread.is_alive()
     return process
+def forbidden_kill(pid, sig):
+    global kill_attempted
+    kill_attempted = True
+    raise AssertionError('lost process identity was signaled')
 subprocess.Popen = spawn
+os.kill = forbidden_kill
 result = run_process(
     [sys.executable, '-c', 'import sys,time; time.sleep(.1); sys.exit(42)'],
-    io=CarrierIO(), deadline=Deadline.after(3),
+    io=CarrierIO(), deadline=Deadline(None),
 )
 subprocess.Popen = original_popen
 print(json.dumps([result.local_status, result.exit_status, result.failure,
-                  os.waitstatus_to_exitcode(reaped[0])]))
+                  os.waitstatus_to_exitcode(reaped[0]), kill_attempted]))
 """
     )
 
-    assert result == [None, None, "observation", 42]
+    assert result == [None, None, "observation", 42, False]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="waitpid ownership is POSIX-specific")

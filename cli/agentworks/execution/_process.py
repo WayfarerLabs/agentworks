@@ -410,7 +410,9 @@ class _LaunchOwner:
                 except OSError:
                     self.publish_observation_failure()
                 else:
-                    if observed is not None:
+                    if status.lost:
+                        self.publish_observation_failure()
+                    elif observed is not None:
                         self.publish_exit(observed)
             with self._condition:
                 if self._pump_stopped:
