@@ -145,6 +145,12 @@ identity of a later process: the selected helper still checks its actual IDs/gro
 access. There is no account cache, automatic replay, staging, privilege change or public account
 selector in this operation. The runtime prerequisite probe supplies the selected Python path.
 
+The same fixed lookup family supplies a separate metadata-owner/group operation. It resolves only
+the requested UID and GID; it does not run the execution-account supplementary-group lookup or
+change the helper's credentials. Its result kind is bound to its request, so file ownership cannot
+be mistaken for a complete execution identity. File metadata selection and execution elevation
+remain independent choices.
+
 The sudo wrapper consumes the same manifest from stdin after privilege change. Source, input, and
 environment never appear in sudo argv or environment assignments. A failure before the inner
 bootstrap's first trusted frame cannot be classified as sudo refusal from raw nonzero status or

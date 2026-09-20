@@ -113,6 +113,21 @@ one explicit component at a time. Existing non-directories conflict; an existing
 verified and its requested owner/group/mode is converged. Root creation therefore remains distinct
 from permission to mutate descendants or the trusted parent.
 
+The private helper request always retains a nonempty relative path. For an authorized operation on
+an approved root itself, core binds that root's trusted parent and passes only the root's final
+component; descendant operations bind the approved root. This decomposition does not grant the
+caller access to the parent or siblings. There is no empty-path or `.` self-target sentinel. Exact
+ancestor creation, such as `/run/agentworks` before a session socket directory, remains a separate
+explicit operation rather than implicit `mkdir -p` behavior. During coexistence this is internal
+path composition, not a claim that the successor permission model is active.
+
+Requested metadata owner and group names are resolved by a closed read-only operation in the fixed
+account helper. It resolves the pair to numeric UID/GID without retrieving supplementary groups,
+changing credentials or selecting elevation. Missing owner and missing group are distinct closed
+refusals. Names remain in sensitive input; no password, home, shell or group member list returns.
+The resulting numeric ownership is an input to the already selected file-operation identity plan,
+not a replacement for that plan. A lookup never grants permission to apply the metadata.
+
 `read_file` returns `None` only for absence. It opens regular files nonblocking and rejects every
 other object before reading, so a FIFO or device cannot hang the operation. `stat` reports the
 closed `FileKind` set above and rejects links or unsupported special objects. `list_directory` never

@@ -195,6 +195,14 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       fixed lock. Validate paths, revision/kind and relative time budget at the request boundary;
       prove no staging for stat and no replay after uncertain removal before extending the same
       composition to the remaining file operations.
+- [ ] Resolve metadata owner/group pairs through the fixed account helper without caller exec or
+      identity transition. Preserve account lookup's independent full execution-identity result;
+      prove that responses cannot cross the two operation kinds.
+- [ ] Bring bounded reads under the fixed transaction lock and guest-local relative budget, then
+      compose the remaining inventory, metadata and publication exchanges. Preserve exact-leaf
+      requests for approved-root operations through core-owned parent decomposition, without
+      granting parent/sibling authority. Bind those operations in the complete FileAccess surface
+      before the additive RunContext gate, not as a forwarding layer over legacy files.
 - [ ] Jointly accept and prove the privately implemented carrier sink extension with the SSH owner
       before enabling its production use or exposing it through RunContext.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
