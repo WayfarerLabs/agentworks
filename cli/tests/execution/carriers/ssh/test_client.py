@@ -321,6 +321,8 @@ def test_deadline_keeps_partial_evidence_and_reaps(synthetic: SyntheticSSH) -> N
     assert report.dispatch == Dispatch.UNKNOWN
     assert report.completion is None
     assert report.stdout.data == b"partial" and report.stderr.data == b"diagnostic"
+    assert report.stdout.provenance == Provenance.CARRIER_STDOUT
+    assert report.stderr.provenance == Provenance.MIXED_STDERR
     assert not report.stdout.complete and not report.stderr.complete
     synthetic.assert_closed()
 
@@ -452,8 +454,16 @@ def test_supported_client_banners(synthetic: SyntheticSSH, version: str) -> None
 
 
 @pytest.mark.parametrize("phase", ["version", "command"])
+@pytest.mark.parametrize(
+    "io,retention",
+    [
+        (CarrierIO(), Retention.CAPTURED),
+        (CarrierIO(output=Discard()), Retention.DISCARDED),
+        (CarrierIO(sensitive=True), Retention.SUPPRESSED),
+    ],
+)
 def test_failed_spawn_does_not_claim_dispatch_or_expose_exception(
-    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, phase: str
+    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, phase: str, io: CarrierIO, retention: Retention
 ) -> None:
     original = subprocess.Popen
 
@@ -463,10 +473,13 @@ def test_failed_spawn_does_not_claim_dispatch_or_expose_exception(
         return original(argv, **kwargs)
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
-    report = synthetic.execute()
+    report = synthetic.execute(io)
     assert report.dispatch == Dispatch.NOT_SENT
     assert report.failure == Failure.DISPATCH
     assert report.completion is None
+    assert report.stdout.provenance == Provenance.CARRIER_STDOUT
+    assert report.stderr.provenance == Provenance.MIXED_STDERR
+    assert report.stdout.retention == report.stderr.retention == retention
     assert "secret-canary" not in repr(report)
     synthetic.assert_closed()
 

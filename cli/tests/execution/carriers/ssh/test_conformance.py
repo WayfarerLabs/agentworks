@@ -119,7 +119,8 @@ from agentworks.execution.carriers.ssh import SSHCarrier, SSHConnection
 from agentworks.execution.carriers.ssh.trust import SSHTrustFiles
 from agentworks.execution.carrier import Deadline
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
-from agentworks.execution.preparation import Command, prepare, decode_output
+from agentworks.execution.models import Command
+from agentworks.execution.preparation import prepare, decode_output
 
 connection = SSHConnection(
     host="fixture.invalid", user="fixture", ssh_executable=sys.argv[1],

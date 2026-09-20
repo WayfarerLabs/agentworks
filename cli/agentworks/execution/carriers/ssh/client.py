@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import os
 import re
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError, ValidationError
@@ -22,7 +20,8 @@ from agentworks.execution.carrier import (
     FiniteInput,
     Provenance,
 )
-from agentworks.execution.carriers._subprocess import output_retention, run_process
+from agentworks.execution.carriers._subprocess import output_retention
+from agentworks.execution.carriers.ssh._io import run_process
 from agentworks.execution.carriers.ssh.connection import admit_connection, build_ssh_argv
 
 if TYPE_CHECKING:
@@ -78,7 +77,7 @@ class SSHCarrier:
 
         if deadline.expired:
             return _not_sent(io, Failure.DEADLINE)
-        result = run_process(argv, io=io, deadline=deadline, custody=custody, env=_child_environment())
+        result = run_process(argv, io=io, deadline=deadline, custody=custody)
         completion = (
             ExitStatus(code=result.exit_status)
             if result.exit_status is not None and 0 <= result.exit_status < 255
@@ -98,28 +97,15 @@ class SSHCarrier:
             dispatch,
             completion,
             result.local_status,
-            replace(result.stdout, provenance=Provenance.CARRIER_STDOUT),
-            replace(result.stderr, provenance=Provenance.MIXED_STDERR),
+            result.stdout,
+            result.stderr,
             failure,
         )
 
 
-def _child_environment() -> dict[str, str] | None:
-    if os.name != "nt":
-        return None
-    # These describe OpenSSH's parent's handles, never our new Python pipes.
-    # https://github.com/PowerShell/openssh-portable/blob/v9.5.0.0/contrib/win32/win32compat/w32fd.c#L115-L128
-    # Newer clients also accept OPENSSH_STDIO_MODE to select handle semantics.
-    return {
-        name: value
-        for name, value in os.environ.items()
-        if name.upper() not in ("C28FC6F98A2C44ABBBD89D6A3037D0D9_POSIX_FD_STATE", "OPENSSH_STDIO_MODE")
-    }
-
-
 def check_client_version(connection: SSHConnection, *, deadline: Deadline, custody: LocalDeliveryCustody) -> Failure | None:
     """Check the selected installed client within the original operation budget."""
-    version = run_process([connection.ssh_executable, "-V"], io=CarrierIO(output=Capture(4096)), deadline=deadline, custody=custody, env=_child_environment())
+    version = run_process([connection.ssh_executable, "-V"], io=CarrierIO(output=Capture(4096)), deadline=deadline, custody=custody)
     if version.failure is not None:
         return version.failure
     if not custody.settled:

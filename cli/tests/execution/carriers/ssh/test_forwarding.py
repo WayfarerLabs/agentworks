@@ -20,7 +20,8 @@ import pytest
 
 from agentworks.errors import ValidationError
 from agentworks.execution.carrier import Deadline, Failure
-from agentworks.execution.carriers.ssh import _io, forwarding
+from agentworks.execution.carriers import _subprocess
+from agentworks.execution.carriers.ssh import forwarding
 from agentworks.execution.carriers.ssh.connection import SSHConnection, admit_connection
 from agentworks.execution.carriers.ssh.forwarding import ForwardingError, LocalForward, open_local_forwards
 from agentworks.execution.carriers.ssh.trust import (
@@ -265,7 +266,7 @@ def test_delayed_cleanup_reports_uncertainty_within_join_bound(
     synthetic: SyntheticForwarding, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     release = threading.Event()
-    original = _io._cleanup
+    original = _subprocess._cleanup
 
     def delayed(process: subprocess.Popen[bytes]) -> bool:
         release.wait(timeout=5)
