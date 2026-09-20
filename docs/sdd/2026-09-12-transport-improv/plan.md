@@ -303,6 +303,20 @@ start, interruption ownership, staging, elevation, terminal preparation, lifecyc
 RunContext remain open; the candidate is not a completed additive delivery or a public feedback/fix
 round.
 
+Hosted checks for `f768ade0` passed except Windows in
+[run 35498733365](https://github.com/WayfarerLabs/agentworks/actions/runs/35498733365). Package-wide
+import discovery exposed the guest module's eager POSIX account-database import. The fix at
+`22511320` defers that import until guest default-shell lookup and adds a fresh-process regression
+with the module unavailable; it does not skip the independence check. At `3b10267a`, the full local
+non-integration suite passes 10,934 tests with 12 skips, with Ruff, formatting, strict mypy and file
+lint passing. Hosted Windows confirmation of the correction remains pending.
+
+The [terminal input proposal](carrier-io-lld.md#proposed-terminal-input-adapter) now gives bootstrap
+EOF a terminal-only handoff meaning, preserves preparation-owned readiness parsing and keeps
+presentation above the carrier. Explicit input and output descriptors supply native terminal facts
+without process-global stdio lookup. This remains a candidate for joint native proof with SSH, not
+an enabled terminal mode or accepted platform evidence.
+
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
 
