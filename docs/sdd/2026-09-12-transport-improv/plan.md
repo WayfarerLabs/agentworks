@@ -187,6 +187,14 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       Prove every final envelope against both complete Proxmox HTTP-body and workstation
       process-command bounds; no executable-helper staging fallback. The Proxmox compatibility floor
       remains 64 KiB even on providers accepting larger requests.
+- [ ] Review and integrate private held-object metadata, bounded inventory, search-only root
+      traversal and read-only fixed lock-namespace composition. Preserve explicit partial/uncertain
+      mutation facts and requested-depth completeness without claiming public FileAccess or native
+      acceptance.
+- [ ] Deliver concrete stat/removal helper exchanges using the shared framing, identity check and
+      fixed lock. Validate paths, revision/kind and relative time budget at the request boundary;
+      prove no staging for stat and no replay after uncertain removal before extending the same
+      composition to the remaining file operations.
 - [ ] Jointly accept and prove the privately implemented carrier sink extension with the SSH owner
       before enabling its production use or exposing it through RunContext.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext

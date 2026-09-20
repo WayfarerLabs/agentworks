@@ -773,6 +773,32 @@ persistent executable or deployment handshake. Core alone selects the bundle. Fi
 must cover PVE 8/9, direct and forwarded node routes, requested identities, and supported SSH
 workstations. No fallback stages executable code when a request is too large.
 
+## Held-object metadata and search-only traversal
+
+The Linux [open documentation](https://man7.org/linux/man-pages/man2/open.2.html) distinguishes
+path-only descriptors from descriptors opened for content access. They can support
+descriptor-relative lookup without directory read authority, but cannot be passed directly to
+`fchmod`. The [chmod documentation](https://man7.org/linux/man-pages/man2/chmod.2.html) places
+empty-path support after Bookworm's kernel floor. The selected Linux metadata candidate therefore
+uses the fixed `/proc/self/fd/<descriptor>` bridge to the already held inode, with identity
+verification and no mutable caller-path fallback. Missing or incompatible procfs is a refusal.
+
+A local audit on Debian 12.15, Linux 6.1.180 arm64, glibc 2.36 and Python 3.11.2 confirmed that
+direct `fchmod` on the path-only descriptor fails. Metadata changes through its procfs path
+continued to affect the retained inode after rename, pathname replacement and unlink, not the
+replacement file. This is mechanism evidence, not a guarantee against hostile same-user processes or
+native platform acceptance.
+
+The [Linux ACL model](https://man7.org/linux/man-pages/man5/acl.5.html) ties chmod to access-ACL
+permissions and describes default-ACL inheritance. In the local fixture, creating a directory with
+mode 0700 and then converging its mode produced the same access/default ACL bytes as direct creation
+with the final mode. Ordinary user attributes survived in-place metadata changes even where mode 000
+prevented reading their values. The implementation therefore preserves attributes in place rather
+than copying or enumerating them. Current session socket and shared-workspace directories use
+set-group-ID modes, so directory metadata must support those explicitly; regular-file modes remain
+limited to ordinary permission bits. Privileged ownership transitions and native filesystem proof
+remain open.
+
 ## Claims not relied upon
 
 - A common API makes every backend interactive.

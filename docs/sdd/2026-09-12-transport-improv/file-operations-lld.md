@@ -117,10 +117,10 @@ from permission to mutate descendants or the trusted parent.
 other object before reading, so a FIFO or device cannot hang the operation. `stat` reports the
 closed `FileKind` set above and rejects links or unsupported special objects. `list_directory` never
 follows links or crosses a descendant mount. Its requested depth defines the inventory: depth 1
-includes immediate children, and directories at the boundary are reported but not opened. Results
-are complete within that requested depth; exceeding an entry, name or encoded-output bound is an
-error, never truncation. Unsupported depths refuse before traversal. Sorting is bytewise by relative
-UTF-8 path so SSH and QGA return the same order.
+includes immediate children, and directories at the boundary are reported but not enumerated.
+Results are complete within that requested depth; exceeding an entry, name or encoded-output bound
+is an error, never truncation. Unsupported depths refuse before traversal. Sorting is bytewise by
+relative UTF-8 path so SSH and QGA return the same order.
 
 `upload` streams into `write_file`; `download` streams one snapshot to a private local sibling and
 replaces only after verification. Local links/special objects are refused. Windows-local publication
@@ -207,7 +207,7 @@ ASCII JSON with a version, 32-hex request ID, one closed operation, identity, an
 fields. Paths and other byte payloads use canonical base64. Responses use the existing sequenced
 `AGWF1` records, matching that request ID, with closed result/failure bodies and a final terminator.
 The framing codec is shared between concrete file exchanges; their request schemas and response
-grammars remain operation-specific. Unknown, duplicate, noncanonical or extra fields refuse. Strict
+grammars remain operation-specific. Unknown, duplicate, non-canonical or extra fields refuse. Strict
 field/line/decoded/total bounds must fit the complete carrier request. No request value becomes argv
 or shell source; fixed preparation bootstrap source cannot be reused for file operations.
 
@@ -366,8 +366,8 @@ extended attributes for an in-place change.
 Create a missing directory with mode 0700, preserving inherited ACLs, then converge metadata on its
 held inode. Do not remove a newly created public directory when a later step fails: it may already
 contain other work. Record completed creation/ownership/mode steps, and distinguish known partial
-changes from an uncertain attempted change. A returned syscall error alone does not prove that an
-attempted mutation had no effect; retain uncertainty unless the outcome is confirmed. These local
+changes from an uncertain attempted change. A returned system-call error alone does not prove that
+an attempted mutation had no effect; retain uncertainty unless the outcome is confirmed. These local
 mechanisms need privileged and native filesystem proof before public enablement; no malicious
 same-user namespace guarantee is added.
 

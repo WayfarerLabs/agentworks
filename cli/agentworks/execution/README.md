@@ -188,11 +188,13 @@ or managed lifetime.
 
 `_file_read.py` composes a bounded, identity-bound Linux file read through one carrier attempt. The
 core selects a trusted root and relative path; the helper checks the expected UID, GID and groups
-before opening the target. Absolute root traversal refuses links, and the existing snapshot reader
-also refuses descendant mount crossings and unsupported objects. Missing roots or files produce an
-absent observation, not an I/O success with empty bytes.
+before opening the target. Absolute root traversal uses path-only descriptors and refuses links
+without requiring directory read permission. The existing snapshot reader also refuses descendant
+mount crossings and unsupported objects. Missing roots or files produce an absent observation, not
+an I/O success with empty bytes.
 
-Workload paths and request payload travel only in sensitive stdin. A file-specific collector
+Workload paths and request payload travel only in sensitive stdin. `_file_wire.py` supplies the
+shared bounded `AGWF1` record framing; the read schema remains concrete. A file-specific collector
 validates the complete nonce-bound response, length, digest and metadata before releasing bytes.
 Noise, reflection, truncation or invalid records cannot become a successful read, and carrier
 completion is reported separately. Helper code uses the fixed module packager; it creates no guest
@@ -340,6 +342,35 @@ returns unchanged; interrupted or ambiguous mutation is not reported as unchange
 The caller owns the trusted parent and transaction lock. Removal neither checks tmux liveness nor
 provides atomic compare-and-remove against external writers. Session code must coordinate server
 absence before supplying a socket revision. No recursive removal or FIFO creation is exposed.
+
+## Private metadata convergence
+
+`_file_metadata.py` converges regular-file or directory ownership and mode on a held Linux inode. It
+verifies the fixed procfs descriptor bridge instead of reopening the caller's mutable path;
+unavailable or incompatible procfs refuses. Ordinary attributes remain in place, and access-ACL
+permissions are checked against the resulting mode. Directory modes can include set-group-ID and
+sticky bits; regular-file modes are ordinary permissions only. Socket metadata and set-user-ID
+requests are not supported.
+
+`ensure_directory` creates only the final component, initially with mode 0700, then converges it. It
+does not remove a created public directory if a later step fails. Errors distinguish unchanged,
+confirmed partial changes and uncertain attempts, retaining closed completed-step facts. The caller
+owns path validation, the trusted parent and the transaction lock. These private functions provide
+neither a public file service nor native or elevated acceptance.
+
+## Private directory inventory
+
+`_file_inventory.py` reads a bounded Linux directory inventory beneath a borrowed trusted root and
+caller-owned transaction lock. It observes regular files, directories and sockets without reading
+file content, refusing links, multiply linked regular files, unsupported special objects and
+descendant mount crossings. Depth one returns immediate children; a directory at the requested depth
+is observed but its children are not enumerated.
+
+Results are sorted by relative UTF-8 path bytes. Entry, name and encoded-output limits fail rather
+than returning a truncated result. The shared encoder defines the exact compact JSON byte count,
+including framing. Disappearance or observed replacement conflicts. The result is a bounded set of
+observations, not a coherent snapshot against external writers. Carrier delivery and public
+`FileAccess` composition are not implemented by this private primitive.
 
 ## Private scratch transfer
 
