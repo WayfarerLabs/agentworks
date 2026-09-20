@@ -32,6 +32,7 @@ from agentworks.execution.carrier import (
     Provenance,
     Retention,
 )
+from agentworks.execution.carriers import _subprocess
 from agentworks.execution.carriers.ssh import _io, client
 from agentworks.execution.carriers.ssh.client import SSHCarrier
 from agentworks.execution.carriers.ssh.connection import SSHConnection, admit_connection
@@ -237,14 +238,14 @@ def test_unretained_output_never_enters_capture(
         "import sys; data=sys.stdin.buffer.read()*10000; sys.stdout.buffer.write(data); sys.stderr.buffer.write(data)"
     )
     observed = []
-    original = _io._Output.report
+    original = _subprocess._Output.report
 
     def report(output):
         if output.retention != Retention.CAPTURED:
             observed.append(len(output.data))
         return original(output)
 
-    monkeypatch.setattr(_io._Output, "report", report)
+    monkeypatch.setattr(_subprocess._Output, "report", report)
     result = synthetic.execute(io)
     assert observed == [0, 0]
     assert result.stdout.data == result.stderr.data == b""
@@ -320,6 +321,8 @@ def test_deadline_keeps_partial_evidence_and_reaps(synthetic: SyntheticSSH) -> N
     assert report.dispatch == Dispatch.UNKNOWN
     assert report.completion is None
     assert report.stdout.data == b"partial" and report.stderr.data == b"diagnostic"
+    assert report.stdout.provenance == Provenance.CARRIER_STDOUT
+    assert report.stderr.provenance == Provenance.MIXED_STDERR
     assert not report.stdout.complete and not report.stderr.complete
     synthetic.assert_closed()
 
@@ -395,7 +398,7 @@ def test_interrupted_failed_reap_attaches_safe_evidence(
     synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     original_wait = Popen.wait
-    original_read = _io._Output.read
+    original_read = _subprocess._Output.read
 
     def read(output, pipe):
         if len(synthetic.children) == 2:
@@ -409,7 +412,7 @@ def test_interrupted_failed_reap_attaches_safe_evidence(
 
     synthetic.command = "import time; time.sleep(30)"
     with monkeypatch.context() as context:
-        context.setattr(_io._Output, "read", read)
+        context.setattr(_subprocess._Output, "read", read)
         context.setattr(Popen, "wait", wait)
         with pytest.raises(KeyboardInterrupt) as raised:
             synthetic.execute()
@@ -446,8 +449,16 @@ def test_supported_client_banners(synthetic: SyntheticSSH, version: str) -> None
 
 
 @pytest.mark.parametrize("phase", ["version", "command"])
+@pytest.mark.parametrize(
+    "io,retention",
+    [
+        (CarrierIO(), Retention.CAPTURED),
+        (CarrierIO(output=Discard()), Retention.DISCARDED),
+        (CarrierIO(sensitive=True), Retention.SUPPRESSED),
+    ],
+)
 def test_failed_spawn_does_not_claim_dispatch_or_expose_exception(
-    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, phase: str
+    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, phase: str, io: CarrierIO, retention: Retention
 ) -> None:
     original = subprocess.Popen
 
@@ -457,10 +468,13 @@ def test_failed_spawn_does_not_claim_dispatch_or_expose_exception(
         return original(argv, **kwargs)
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
-    report = synthetic.execute()
+    report = synthetic.execute(io)
     assert report.dispatch == Dispatch.NOT_SENT
     assert report.failure == Failure.DISPATCH
     assert report.completion is None
+    assert report.stdout.provenance == Provenance.CARRIER_STDOUT
+    assert report.stderr.provenance == Provenance.MIXED_STDERR
+    assert report.stdout.retention == report.stderr.retention == retention
     assert "secret-canary" not in repr(report)
     synthetic.assert_closed()
 
@@ -469,14 +483,14 @@ def test_failed_spawn_does_not_claim_dispatch_or_expose_exception(
 def test_interruption_cleans_owned_process_before_propagating(
     synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, interruption: type[BaseException]
 ) -> None:
-    original = _io._Output.read
+    original = _subprocess._Output.read
 
     def read(output, pipe):
         if len(synthetic.children) == 2:
             raise interruption()
         return original(output, pipe)
 
-    monkeypatch.setattr(_io._Output, "read", read)
+    monkeypatch.setattr(_subprocess._Output, "read", read)
     synthetic.command = "import time; time.sleep(30)"
     with pytest.raises(interruption):
         synthetic.execute()
@@ -516,7 +530,7 @@ def test_descendant_output_handles_do_not_block_cleanup(
         "sys.stdout.write('parent')"
     )
     if flood:
-        original = _io._Output.read
+        original = _subprocess._Output.read
 
         def read(output, pipe):
             progressed = original(output, pipe)
@@ -524,7 +538,7 @@ def test_descendant_output_handles_do_not_block_cleanup(
             # happens to pause the real flooding writer between two reads.
             return progressed or (len(synthetic.children) == 2 and not output.eof)
 
-        monkeypatch.setattr(_io._Output, "read", read)
+        monkeypatch.setattr(_subprocess._Output, "read", read)
     try:
         started = time.monotonic()
         report = synthetic.execute(CarrierIO(output=Capture(32)), seconds=None)
