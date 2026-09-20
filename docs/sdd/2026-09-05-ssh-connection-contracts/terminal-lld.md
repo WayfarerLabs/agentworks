@@ -29,14 +29,20 @@ terminal handles, the agreed pairing and presentation policy, and the ordinary S
 policy before dispatch. The caller retains handle lifetime; the carrier never closes those handles.
 Terminal presentation combines output rather than claiming separate byte-exact guest streams.
 
-For POSIX, snapshot the supplied input terminal before starting the owned client. OpenSSH changes
-its stdin's terminal settings and normally restores with `TCSADRAIN`, as shown in the installed
-client family's
+For POSIX, snapshot the supplied terminal, then copy its original modes and geometry to an owned PTY
+slave. Put the supplied terminal into raw mode before launching SSH and let the preparation source
+withhold its keyboard bytes until the remote interactive handoff. SSH receives the owned slave as
+stdin and owned pipes for stdout/stderr. The early-input experiment below explains why delaying
+local raw mode until the handoff changes keystroke meaning.
+
+OpenSSH changes its owned stdin terminal's settings and normally restores with `TCSADRAIN`, as shown
+in the installed client family's
 [OpenSSH 9.2 source](https://github.com/openssh/openssh-portable/blob/V_9_2_P1/sshtty.c#L57). A
-killed client cannot perform that restoration. The parent therefore retains the snapshot and
-restores after bounded child cleanup on every exit path, including interruption. It must preserve
-the original control-flow exception and make cleanup/restoration uncertainty observable. If an owned
-child may still mutate the terminal, the operation cannot claim the snapshot is stably restored.
+killed client cannot perform that restoration. The parent separately owns restoration of the
+borrowed terminal after ending the relay and bounded client cleanup on every exit path, including
+interruption. It must preserve the original control-flow exception and make cleanup/restoration
+uncertainty observable. If a relay task may still touch the borrowed terminal, the operation cannot
+claim the snapshot is stably restored.
 
 A dedicated client session is a candidate for local process ownership without changing the caller's
 foreground process group. It needs an explicit resize mechanism: poll the supplied endpoint's window
@@ -141,8 +147,30 @@ uses stdin. Runtime evidence here is from 9.2p1, not an 8.5 runtime test.
 The shared input design must compose preparation-owned payload and keyboard sequencing with explicit
 borrowed terminal handles. SSH owns its local PTY, resize relay and terminal restoration; it must
 not parse readiness or application frames. Transport owns that parser and the concrete shared shape.
-The experiment changed borrowed modes only after readiness and did not exercise early keyboard
-input; that timing and queued-input preservation need joint proof before selecting the mechanism.
+The initial comparison changed borrowed modes only after readiness and did not exercise early
+keyboard input. The follow-up below corrects that candidate timing.
+
+## Early keyboard input
+
+Two further real SSH trials queued identical keystrokes before sending the preparation frame. Both
+withheld keyboard forwarding until interactive readiness. The borrowed terminal used canonical
+input, carriage-return translation, interrupt byte `0x07` and literal-next byte `0x16`.
+
+| Borrowed terminal timing | Queued keys | Bytes relayed after readiness | Remote observation                 |
+| ------------------------ | ----------- | ----------------------------- | ---------------------------------- |
+| Raw before launch        | `16 07 0d`  | `16 07 0d`                    | Reads literal `07 0a`, exits zero  |
+| Cooked until readiness   | `16 07 0d`  | `07 0a`                       | Interrupt handler fires, exits 130 |
+
+In the second case, the local terminal consumed literal-next and translated the carriage return. The
+remote terminal then interpreted the already-processed interrupt byte. Early raw mode preserves the
+original keys for one remote interpretation; waiting to forward alone does not preserve them. Both
+trials restored borrowed modes, flags, inheritable state and liveness, returned descriptor counts
+from four to four, and removed observed processes and fixture directories.
+
+These cases cover keys arriving after terminal acquisition. Existing queued bytes may already have
+been transformed before that boundary; no input flushing or promise to reverse prior processing is
+selected here. Production acquisition/queued-input policy, control-flow interruption and supported
+platform behavior still need joint acceptance.
 
 ## Remaining proof
 
