@@ -15,7 +15,7 @@ from ._file_objects import FileKind, FileObjectFailureKind, FileObjectPhase
 from ._file_paths import normalized_relative_path, normalized_root
 from ._file_stat import FileRevision, FileStat
 from ._file_wire import valid_nonce
-from ._helper_identity import IdentityExpectation
+from ._helper_identity import IdentityExpectation, decode_identity
 
 MAX_REQUEST_BYTES = 32_768
 MAX_PATH_BYTES = 4_096
@@ -151,32 +151,27 @@ def _decode_base64_text(value: object) -> str:
         encoded = b""
     if failed or len(decoded) > MAX_PATH_BYTES or base64.b64encode(decoded) != encoded:
         raise _invalid_request()
+    failed = False
+    text = ""
     try:
-        return decoded.decode("utf-8")
+        text = decoded.decode("utf-8")
     except UnicodeDecodeError:
-        raise _invalid_request() from None
+        failed = True
+    if failed:
+        raise _invalid_request()
+    return text
 
 
 def _identity(value: object) -> IdentityExpectation:
-    if type(value) is not dict or set(value) != {"egid", "euid", "groups"}:
+    failed = False
+    identity: IdentityExpectation | None = None
+    try:
+        identity = decode_identity(value)
+    except ValueError:
+        failed = True
+    if failed or identity is None:
         raise _invalid_request()
-    euid = value["euid"]
-    egid = value["egid"]
-    groups = value["groups"]
-    if (
-        type(euid) is not int
-        or not 0 <= euid <= _MAX_ID
-        or type(egid) is not int
-        or not 0 <= egid <= _MAX_ID
-        or type(groups) is not list
-        or not groups
-        or len(groups) > 65_536
-        or any(type(group) is not int or not 0 <= group <= _MAX_ID for group in groups)
-        or groups != sorted(set(groups))
-        or egid not in groups
-    ):
-        raise _invalid_request()
-    return IdentityExpectation(euid, egid, tuple(groups))
+    return identity
 
 
 def _bounded_integer(value: object, minimum: int, maximum: int, *, request: bool) -> int:
@@ -276,10 +271,14 @@ def encode_file_object_request(request: FileObjectRequest) -> bytes:
         value["expected_revision"] = (
             None if request.expected_revision is None else _encode_revision(request.expected_revision)
         )
+    failed = False
+    encoded = b""
     try:
         encoded = _json_bytes(value)
     except (AttributeError, TypeError, UnicodeEncodeError, ValueError):
-        raise _invalid_request() from None
+        failed = True
+    if failed:
+        raise _invalid_request()
     if len(encoded) > MAX_REQUEST_BYTES:
         raise FileObjectRequestError(FileObjectFailureCode.OVERSIZED_REQUEST)
     decode_file_object_request(encoded)
@@ -293,16 +292,22 @@ def decode_file_object_request(data: bytes) -> FileObjectRequest:
     if len(data) > MAX_REQUEST_BYTES:
         raise FileObjectRequestError(FileObjectFailureCode.OVERSIZED_REQUEST)
     value = _load_json(data, request=True)
+    failed = False
+    canonical = b""
     try:
         canonical = _json_bytes(value)
     except (TypeError, ValueError):
-        raise _invalid_request() from None
-    if canonical != data:
+        failed = True
+    if failed or canonical != data:
         raise _invalid_request()
+    failed = False
+    operation = FileObjectOperation.STAT
     try:
         operation = FileObjectOperation(value.get("operation"))
     except (TypeError, ValueError):
-        raise _invalid_request() from None
+        failed = True
+    if failed:
+        raise _invalid_request()
     fields = _COMMON_REQUEST_FIELDS
     if operation is FileObjectOperation.REMOVE:
         fields |= {"expected_kind", "expected_revision"}
@@ -321,10 +326,14 @@ def decode_file_object_request(data: bytes) -> FileObjectRequest:
     expected_kind = None
     expected_revision = None
     if operation is FileObjectOperation.REMOVE:
+        failed = False
+        expected_kind = FileKind.REGULAR
         try:
             expected_kind = FileKind(value["expected_kind"])
         except (TypeError, ValueError):
-            raise _invalid_request() from None
+            failed = True
+        if failed:
+            raise _invalid_request()
         expected_revision = _decode_revision(value["expected_revision"], request=True)
         if _kind_for_mode(expected_revision.stat.mode, request=True) is not expected_kind:
             raise _invalid_request()
@@ -359,20 +368,27 @@ def encode_file_object_result(result: FileObjectResultControl) -> bytes:
 
 def parse_file_object_result(body: bytes, operation: FileObjectOperation) -> FileObjectResultControl:
     value = _load_json(body, request=False)
+    failed = False
+    canonical = b""
+    result_kind = FileObjectResultKind.ABSENT
     try:
         canonical = _json_bytes(value)
         result_kind = FileObjectResultKind(value.get("result"))
     except (TypeError, ValueError):
-        raise FileObjectControlError from None
-    if canonical != body:
+        failed = True
+    if failed or canonical != body:
         raise FileObjectControlError
     if result_kind is FileObjectResultKind.PRESENT:
         if operation is not FileObjectOperation.STAT or set(value) != {"kind", "result", "revision"}:
             raise FileObjectControlError
+        failed = False
+        object_kind = FileKind.REGULAR
         try:
             object_kind = FileKind(value["kind"])
         except (TypeError, ValueError):
-            raise FileObjectControlError from None
+            failed = True
+        if failed:
+            raise FileObjectControlError
         revision = _decode_revision(value["revision"], request=False)
         if revision.digest is not None or _kind_for_mode(revision.stat.mode, request=False) is not object_kind:
             raise FileObjectControlError
@@ -399,12 +415,15 @@ def encode_file_object_failure(failure: FileObjectFailureControl) -> bytes:
 
 def parse_file_object_failure(body: bytes) -> FileObjectFailureControl:
     value = _load_json(body, request=False)
+    failed = False
+    canonical = b""
+    code = FileObjectFailureCode.INVALID_REQUEST
     try:
         canonical = _json_bytes(value)
         code = FileObjectFailureCode(value.get("code"))
     except (TypeError, ValueError):
-        raise FileObjectControlError from None
-    if canonical != body:
+        failed = True
+    if failed or canonical != body:
         raise FileObjectControlError
     if code is not FileObjectFailureCode.OBJECT:
         if set(value) != {"code"}:
@@ -412,9 +431,14 @@ def parse_file_object_failure(body: bytes) -> FileObjectFailureControl:
         return FileObjectFailureControl(code)
     if set(value) != {"code", "kind", "phase"}:
         raise FileObjectControlError
+    failed = False
+    kind = FileObjectFailureKind.UNSUPPORTED
+    phase = FileObjectPhase.OBSERVATION
     try:
         kind = FileObjectFailureKind(value["kind"])
         phase = FileObjectPhase(value["phase"])
     except (TypeError, ValueError):
-        raise FileObjectControlError from None
+        failed = True
+    if failed:
+        raise FileObjectControlError
     return FileObjectFailureControl(code, kind, phase)

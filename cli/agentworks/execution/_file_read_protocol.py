@@ -14,7 +14,7 @@ from typing import Any
 from ._file_paths import normalized_relative_path, normalized_root
 from ._file_stat import FileStat
 from ._file_wire import valid_nonce
-from ._helper_identity import IdentityExpectation
+from ._helper_identity import IdentityExpectation, decode_identity
 
 MAX_REQUEST_BYTES = 32_768
 _MAX_ID = 2**32 - 1
@@ -127,24 +127,15 @@ def _decode_base64_text(value: object) -> str:
 
 
 def _identity(value: object) -> IdentityExpectation:
-    if type(value) is not dict or set(value) != {"egid", "euid", "groups"}:
+    failed = False
+    identity: IdentityExpectation | None = None
+    try:
+        identity = decode_identity(value)
+    except ValueError:
+        failed = True
+    if failed or identity is None:
         raise _invalid_request()
-    euid = value["euid"]
-    egid = value["egid"]
-    groups = value["groups"]
-    if (
-        type(euid) is not int
-        or not 0 <= euid <= _MAX_ID
-        or type(egid) is not int
-        or not 0 <= egid <= _MAX_ID
-        or type(groups) is not list
-        or not groups
-        or any(type(group) is not int or not 0 <= group <= _MAX_ID for group in groups)
-        or groups != sorted(set(groups))
-        or egid not in groups
-    ):
-        raise _invalid_request()
-    return IdentityExpectation(euid, egid, tuple(groups))
+    return identity
 
 
 def _remaining_seconds(value: object) -> float | None:

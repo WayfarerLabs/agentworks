@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution import _account
 from agentworks.execution._account import (
     AccountObservationError,
     AccountObservationState,
@@ -28,6 +29,7 @@ from agentworks.execution._account_protocol import (
     AccountFailure,
     FileOwnership,
     FileOwnershipFailure,
+    FileOwnershipRequestError,
     encode_account_failure,
     encode_account_identity,
     encode_file_ownership_failure,
@@ -53,6 +55,25 @@ from agentworks.execution.carrier import (
 )
 from agentworks.execution.carriers._subprocess import run_process
 from agentworks.execution.models import Command
+
+
+def _exception_details(error: BaseException) -> str:
+    pending = [error]
+    seen: set[int] = set()
+    details: list[object] = []
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        details.extend(current.args)
+        details.append(getattr(current, "object", None))
+        details.append(getattr(current, "doc", None))
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
+    return repr(details)
 
 
 @dataclass
@@ -442,6 +463,32 @@ def test_invalid_or_oversized_file_ownership_names_refuse_before_dispatch(owner:
     with pytest.raises(ValidationError):
         resolve_file_ownership(carrier, owner, group, Deadline.after(1), sys.executable)
 
+    assert carrier.calls == 0
+
+
+def test_file_ownership_host_conversion_discards_sensitive_encoder_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    canary = "ownership-host-chain-canary"
+
+    def fail(_request: object) -> bytes:
+        raw_error: UnicodeEncodeError | None = None
+        try:
+            ("\ud800" + canary).encode("utf-8")
+        except UnicodeEncodeError as error:
+            raw_error = error
+        assert raw_error is not None
+        wrapped = FileOwnershipRequestError(FileOwnershipFailure.INVALID_REQUEST)
+        wrapped.__context__ = raw_error
+        raise wrapped
+
+    monkeypatch.setattr(_account, "encode_file_ownership_request", fail)
+    carrier = OwnershipReplyCarrier(b"")
+
+    with pytest.raises(ValidationError) as raised:
+        resolve_file_ownership(carrier, "owner", "group", Deadline.after(1), sys.executable)
+
+    assert canary not in _exception_details(raised.value)
     assert carrier.calls == 0
 
 

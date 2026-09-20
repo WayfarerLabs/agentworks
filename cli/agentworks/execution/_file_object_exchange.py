@@ -208,10 +208,13 @@ class _FileObjectCollector:
 def _validate_text(value: object) -> str:
     if type(value) is not str or "\0" in value:
         raise ValidationError("File-object paths must be valid non-NUL UTF-8 strings")
+    failed = False
     try:
         value.encode("utf-8")
     except UnicodeEncodeError:
-        raise ValidationError("File-object paths must be valid non-NUL UTF-8 strings") from None
+        failed = True
+    if failed:
+        raise ValidationError("File-object paths must be valid non-NUL UTF-8 strings")
     return value
 
 
@@ -231,6 +234,8 @@ def _exchange(
     fixed_argv = build_helper_argv(plan, runtime_path=runtime_path, fixed_source=FIXED_SOURCE, nonce=nonce)
     root = _validate_text(trusted_root_path)
     leaf = _validate_text(relative_path)
+    request_data = b""
+    request_failure: FileObjectFailureCode | None = None
     try:
         request_data = encode_file_object_request(
             FileObjectRequest(
@@ -245,9 +250,11 @@ def _exchange(
             )
         )
     except FileObjectRequestError as error:
-        if error.failure is FileObjectFailureCode.OVERSIZED_REQUEST:
-            raise ValidationError("File-object request exceeds the 32768-byte manifest bound") from None
-        raise ValidationError("File-object request contains an invalid field") from None
+        request_failure = error.failure
+    if request_failure is FileObjectFailureCode.OVERSIZED_REQUEST:
+        raise ValidationError("File-object request exceeds the 32768-byte manifest bound")
+    if request_failure is not None:
+        raise ValidationError("File-object request contains an invalid field")
     collector = _FileObjectCollector(operation)
     reader = FileRecordReader(nonce, collector.accept)
     stderr = _DiagnosticSink()

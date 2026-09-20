@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from ._helper_identity import IdentityExpectation
+from ._helper_identity import IdentityExpectation, decode_identity
 
 MAX_ACCOUNT_MESSAGE_BYTES = 32_768
 _MAX_ID = 2**32 - 1
@@ -134,12 +134,22 @@ def _decode_object(data: bytes) -> dict[str, Any]:
         raise _MessageError
     if len(data) > MAX_ACCOUNT_MESSAGE_BYTES:
         raise _MessageError(oversized=True)
+    failed = False
+    value: Any = None
     try:
         value = json.loads(data.decode("ascii"), object_pairs_hook=_unique_object)
-        if type(value) is not dict or _json_bytes(value) != data:
-            raise _MessageError
     except (UnicodeDecodeError, TypeError, ValueError, RecursionError):
-        raise _MessageError from None
+        failed = True
+    if failed or type(value) is not dict:
+        raise _MessageError
+    failed = False
+    canonical = b""
+    try:
+        canonical = _json_bytes(value)
+    except (TypeError, ValueError, RecursionError):
+        failed = True
+    if failed or canonical != data:
+        raise _MessageError
     return value
 
 
@@ -154,25 +164,38 @@ def _invalid_request() -> AccountRequestError:
 def _name_text(value: object) -> str:
     if type(value) is not str or not value or "\0" in value:
         raise ValueError
+    failed = False
     try:
         value.encode("utf-8")
     except UnicodeEncodeError:
-        raise ValueError from None
+        failed = True
+    if failed:
+        raise ValueError("invalid name")
     return value
 
 
 def _account_text(value: object) -> str:
+    failed = False
+    text = ""
     try:
-        return _name_text(value)
+        text = _name_text(value)
     except ValueError:
-        raise _invalid_request() from None
+        failed = True
+    if failed:
+        raise _invalid_request()
+    return text
 
 
 def _file_ownership_text(value: object) -> str:
+    failed = False
+    text = ""
     try:
-        return _name_text(value)
+        text = _name_text(value)
     except ValueError:
-        raise FileOwnershipRequestError(FileOwnershipFailure.INVALID_REQUEST) from None
+        failed = True
+    if failed:
+        raise FileOwnershipRequestError(FileOwnershipFailure.INVALID_REQUEST)
+    return text
 
 
 def _valid_response_envelope(value: dict[str, Any], nonce: str) -> bool:
@@ -195,24 +218,15 @@ def _file_ownership(value: object) -> FileOwnership:
 
 
 def _identity(value: object) -> IdentityExpectation:
-    if type(value) is not dict or set(value) != {"egid", "euid", "groups"}:
+    failed = False
+    identity: IdentityExpectation | None = None
+    try:
+        identity = decode_identity(value)
+    except ValueError:
+        failed = True
+    if failed or identity is None:
         raise AccountResponseError("invalid account identity")
-    euid = value["euid"]
-    egid = value["egid"]
-    groups = value["groups"]
-    if (
-        type(euid) is not int
-        or not 0 <= euid <= _MAX_ID
-        or type(egid) is not int
-        or not 0 <= egid <= _MAX_ID
-        or type(groups) is not list
-        or not groups
-        or any(type(group) is not int or not 0 <= group <= _MAX_ID for group in groups)
-        or groups != sorted(set(groups))
-        or egid not in groups
-    ):
-        raise AccountResponseError("invalid account identity")
-    return IdentityExpectation(euid, egid, tuple(groups))
+    return identity
 
 
 def encode_account_request(request: AccountRequest) -> bytes:
@@ -229,13 +243,7 @@ def encode_account_request(request: AccountRequest) -> bytes:
     return encoded
 
 
-def decode_account_request(data: bytes) -> AccountRequest:
-    """Validate one untrusted canonical request from finite stdin."""
-    try:
-        value = _decode_object(data)
-    except _MessageError as error:
-        failure = AccountFailure.OVERSIZED if error.oversized else AccountFailure.INVALID_REQUEST
-        raise AccountRequestError(failure) from None
+def _account_request(value: dict[str, Any]) -> AccountRequest:
     if set(value) != _REQUEST_FIELDS:
         raise _invalid_request()
     if (
@@ -246,6 +254,22 @@ def decode_account_request(data: bytes) -> AccountRequest:
     ):
         raise _invalid_request()
     return AccountRequest(value["nonce"], _account_text(value["account"]))
+
+
+def decode_account_request(data: bytes) -> AccountRequest:
+    """Validate one untrusted canonical request from finite stdin."""
+    failed = False
+    oversized = False
+    value: dict[str, Any] = {}
+    try:
+        value = _decode_object(data)
+    except _MessageError as error:
+        failed = True
+        oversized = error.oversized
+    if failed:
+        failure = AccountFailure.OVERSIZED if oversized else AccountFailure.INVALID_REQUEST
+        raise AccountRequestError(failure)
+    return _account_request(value)
 
 
 def encode_file_ownership_request(request: FileOwnershipRequest) -> bytes:
@@ -263,13 +287,7 @@ def encode_file_ownership_request(request: FileOwnershipRequest) -> bytes:
     return encoded
 
 
-def decode_file_ownership_request(data: bytes) -> FileOwnershipRequest:
-    """Validate one untrusted canonical file-ownership request from finite stdin."""
-    try:
-        value = _decode_object(data)
-    except _MessageError as error:
-        failure = FileOwnershipFailure.OVERSIZED if error.oversized else FileOwnershipFailure.INVALID_REQUEST
-        raise FileOwnershipRequestError(failure) from None
+def _file_ownership_request(value: dict[str, Any]) -> FileOwnershipRequest:
     if (
         set(value) != _FILE_OWNERSHIP_REQUEST_FIELDS
         or type(value["version"]) is not int
@@ -286,6 +304,48 @@ def decode_file_ownership_request(data: bytes) -> FileOwnershipRequest:
     )
 
 
+def decode_file_ownership_request(data: bytes) -> FileOwnershipRequest:
+    """Validate one untrusted canonical file-ownership request from finite stdin."""
+    failed = False
+    oversized = False
+    value: dict[str, Any] = {}
+    try:
+        value = _decode_object(data)
+    except _MessageError as error:
+        failed = True
+        oversized = error.oversized
+    if failed:
+        failure = FileOwnershipFailure.OVERSIZED if oversized else FileOwnershipFailure.INVALID_REQUEST
+        raise FileOwnershipRequestError(failure)
+    return _file_ownership_request(value)
+
+
+def decode_account_lookup_request(data: bytes) -> AccountRequest | FileOwnershipRequest:
+    """Parse once and select one of the two fixed account-database operations."""
+    failed = False
+    oversized = False
+    value: dict[str, Any] = {}
+    try:
+        value = _decode_object(data)
+    except _MessageError as error:
+        failed = True
+        oversized = error.oversized
+    if failed:
+        failure = AccountFailure.OVERSIZED if oversized else AccountFailure.INVALID_REQUEST
+        raise AccountRequestError(failure)
+    if value.get("purpose") == "resolve_file_ownership":
+        failed = False
+        ownership_request: FileOwnershipRequest | None = None
+        try:
+            ownership_request = _file_ownership_request(value)
+        except FileOwnershipRequestError:
+            failed = True
+        if failed or ownership_request is None:
+            raise AccountRequestError(AccountFailure.INVALID_REQUEST)
+        return ownership_request
+    return _account_request(value)
+
+
 def encode_account_identity(nonce: str, identity: IdentityExpectation) -> bytes:
     """Encode one normalized identity, rejecting an oversized group list."""
     value = {
@@ -297,10 +357,13 @@ def encode_account_identity(nonce: str, identity: IdentityExpectation) -> bytes:
     encoded = _json_bytes(value)
     if len(encoded) > MAX_ACCOUNT_MESSAGE_BYTES:
         raise AccountIdentityError(AccountFailure.OVERSIZED)
+    failed = False
     try:
         _identity(value["identity"])
-    except AccountResponseError as error:
-        raise AccountIdentityError(AccountFailure.LOOKUP) from error
+    except AccountResponseError:
+        failed = True
+    if failed:
+        raise AccountIdentityError(AccountFailure.LOOKUP)
     return encoded
 
 
@@ -317,10 +380,13 @@ def encode_file_ownership_success(nonce: str, ownership: FileOwnership) -> bytes
         "status": "file_ownership",
         "version": 1,
     }
+    failed = False
     try:
         _file_ownership(value["ownership"])
-    except FileOwnershipResponseError as error:
-        raise FileOwnershipRecordError(FileOwnershipFailure.LOOKUP) from error
+    except FileOwnershipResponseError:
+        failed = True
+    if failed:
+        raise FileOwnershipRecordError(FileOwnershipFailure.LOOKUP)
     return _json_bytes(value)
 
 
@@ -336,29 +402,41 @@ def encode_file_ownership_failure(nonce: str, failure: FileOwnershipFailure) -> 
 
 def decode_account_response(data: bytes, nonce: str) -> AccountResponse:
     """Validate one nonce-bound canonical response from untrusted stdout."""
+    failed = False
+    value: dict[str, Any] = {}
     try:
         value = _decode_object(data)
     except _MessageError:
-        raise AccountResponseError("invalid account response") from None
+        failed = True
+    if failed:
+        raise AccountResponseError("invalid account response")
     if not _valid_response_envelope(value, nonce):
         raise AccountResponseError("invalid account response")
     if set(value) == _SUCCESS_FIELDS and value["status"] == "identity":
         return AccountResponse(identity=_identity(value["identity"]))
     if set(value) == _REFUSAL_FIELDS and value["status"] == "refused":
+        failed = False
+        failure = AccountFailure.INVALID_REQUEST
         try:
             failure = AccountFailure(value["failure"])
         except (TypeError, ValueError):
-            raise AccountResponseError("invalid account response") from None
+            failed = True
+        if failed:
+            raise AccountResponseError("invalid account response")
         return AccountResponse(failure=failure)
     raise AccountResponseError("invalid account response")
 
 
 def decode_file_ownership_response(data: bytes, nonce: str) -> FileOwnershipResponse:
     """Validate one nonce- and kind-bound file-ownership response."""
+    failed = False
+    value: dict[str, Any] = {}
     try:
         value = _decode_object(data)
     except _MessageError:
-        raise FileOwnershipResponseError("invalid file ownership response") from None
+        failed = True
+    if failed:
+        raise FileOwnershipResponseError("invalid file ownership response")
     if not _valid_response_envelope(value, nonce):
         raise FileOwnershipResponseError("invalid file ownership response")
     if (
@@ -368,9 +446,13 @@ def decode_file_ownership_response(data: bytes, nonce: str) -> FileOwnershipResp
     ):
         return FileOwnershipResponse(ownership=_file_ownership(value["ownership"]))
     if set(value) == _REFUSAL_FIELDS and type(value["status"]) is str and value["status"] == "file_ownership_refused":
+        failed = False
+        failure = FileOwnershipFailure.INVALID_REQUEST
         try:
             failure = FileOwnershipFailure(value["failure"])
         except (TypeError, ValueError):
-            raise FileOwnershipResponseError("invalid file ownership response") from None
+            failed = True
+        if failed:
+            raise FileOwnershipResponseError("invalid file ownership response")
         return FileOwnershipResponse(failure=failure)
     raise FileOwnershipResponseError("invalid file ownership response")

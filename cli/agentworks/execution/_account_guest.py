@@ -15,9 +15,7 @@ from ._account_protocol import (
     FileOwnershipFailure,
     FileOwnershipRecordError,
     FileOwnershipRequest,
-    FileOwnershipRequestError,
-    decode_account_request,
-    decode_file_ownership_request,
+    decode_account_lookup_request,
     encode_account_failure,
     encode_account_identity,
     encode_file_ownership_failure,
@@ -33,14 +31,7 @@ def _read_request() -> AccountRequest | FileOwnershipRequest:
         if not chunk:
             break
         data.extend(chunk)
-    encoded = bytes(data)
-    try:
-        return decode_account_request(encoded)
-    except AccountRequestError as account_error:
-        try:
-            return decode_file_ownership_request(encoded)
-        except FileOwnershipRequestError:
-            raise account_error from None
+    return decode_account_lookup_request(bytes(data))
 
 
 def _write_all(data: bytes) -> None:

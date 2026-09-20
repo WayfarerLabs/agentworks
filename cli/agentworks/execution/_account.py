@@ -208,12 +208,16 @@ def resolve_account(
 ) -> AccountResolutionResult:
     """Resolve one core-bound account without replay or identity transition."""
     nonce = secrets.token_hex(16)
+    request = b""
+    request_failure: AccountFailure | None = None
     try:
         request = encode_account_request(AccountRequest(nonce, trusted_account))
     except AccountRequestError as error:
-        if error.failure is AccountFailure.OVERSIZED:
-            raise ValidationError("Account lookup request exceeds its manifest bound") from None
-        raise ValidationError("Account lookup requires a valid UTF-8 account") from None
+        request_failure = error.failure
+    if request_failure is AccountFailure.OVERSIZED:
+        raise ValidationError("Account lookup request exceeds its manifest bound")
+    if request_failure is not None:
+        raise ValidationError("Account lookup requires a valid UTF-8 account")
     invocation = PreparedInvocation(
         build_clean_helper_argv(runtime_path=runtime_path, fixed_source=FIXED_SOURCE, nonce=nonce)
     )
@@ -248,12 +252,16 @@ def resolve_file_ownership(
 ) -> FileOwnershipResolutionResult:
     """Resolve one core-bound owner/group pair without replay or identity transition."""
     nonce = secrets.token_hex(16)
+    request = b""
+    request_failure: FileOwnershipFailure | None = None
     try:
         request = encode_file_ownership_request(FileOwnershipRequest(nonce, trusted_owner, trusted_group))
     except FileOwnershipRequestError as error:
-        if error.failure is FileOwnershipFailure.OVERSIZED:
-            raise ValidationError("File ownership lookup request exceeds its manifest bound") from None
-        raise ValidationError("File ownership lookup requires valid UTF-8 names") from None
+        request_failure = error.failure
+    if request_failure is FileOwnershipFailure.OVERSIZED:
+        raise ValidationError("File ownership lookup request exceeds its manifest bound")
+    if request_failure is not None:
+        raise ValidationError("File ownership lookup requires valid UTF-8 names")
     invocation = PreparedInvocation(
         build_clean_helper_argv(runtime_path=runtime_path, fixed_source=FIXED_SOURCE, nonce=nonce)
     )

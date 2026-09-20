@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections.abc import Callable
 from types import SimpleNamespace
 
 import pytest
@@ -21,6 +22,7 @@ from agentworks.execution._account_protocol import (
     FileOwnershipRequest,
     FileOwnershipRequestError,
     FileOwnershipResponseError,
+    decode_account_lookup_request,
     decode_account_request,
     decode_account_response,
     decode_file_ownership_request,
@@ -47,6 +49,25 @@ def _request(account: str = "workload") -> bytes:
 
 def _ownership_request(owner: str = "workload", group: str = "tmux-agent-access") -> bytes:
     return encode_file_ownership_request(FileOwnershipRequest(NONCE, owner, group))
+
+
+def _exception_details(error: BaseException) -> str:
+    pending = [error]
+    seen: set[int] = set()
+    details: list[object] = []
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        details.extend(current.args)
+        details.append(getattr(current, "object", None))
+        details.append(getattr(current, "doc", None))
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
+    return repr(details)
 
 
 def _run_guest(monkeypatch: pytest.MonkeyPatch, request: bytes) -> bytes:
@@ -117,6 +138,81 @@ def test_file_ownership_request_is_canonical_ascii_and_round_trips_utf8_names() 
         "worker-☃",
         "access-☃",
     )
+
+
+def test_fixed_guest_request_dispatch_preserves_both_concrete_wires() -> None:
+    assert decode_account_lookup_request(_request()) == AccountRequest(NONCE, "workload")
+    assert decode_account_lookup_request(_ownership_request()) == FileOwnershipRequest(
+        NONCE,
+        "workload",
+        "tmux-agent-access",
+    )
+    malformed = json.loads(_ownership_request())
+    malformed.pop("group")
+    with pytest.raises(AccountRequestError) as raised:
+        decode_account_lookup_request(_json(malformed))
+    assert raised.value.failure is AccountFailure.INVALID_REQUEST
+
+
+@pytest.mark.parametrize(
+    ("canary", "invoke", "error_type"),
+    [
+        (
+            "account-json-doc-canary",
+            lambda: decode_account_request(b'{"account":"account-json-doc-canary"'),
+            AccountRequestError,
+        ),
+        (
+            "account-json-bytes-canary",
+            lambda: decode_account_request(b"\xffaccount-json-bytes-canary"),
+            AccountRequestError,
+        ),
+        (
+            "ownership-name-canary",
+            lambda: encode_file_ownership_request(FileOwnershipRequest(NONCE, "\ud800ownership-name-canary", "group")),
+            FileOwnershipRequestError,
+        ),
+        (
+            "account-failure-canary",
+            lambda: decode_account_response(
+                _json(
+                    {
+                        "failure": "account-failure-canary",
+                        "nonce": NONCE,
+                        "status": "refused",
+                        "version": 1,
+                    }
+                ),
+                NONCE,
+            ),
+            AccountResponseError,
+        ),
+        (
+            "ownership-failure-canary",
+            lambda: decode_file_ownership_response(
+                _json(
+                    {
+                        "failure": "ownership-failure-canary",
+                        "nonce": NONCE,
+                        "status": "file_ownership_refused",
+                        "version": 1,
+                    }
+                ),
+                NONCE,
+            ),
+            FileOwnershipResponseError,
+        ),
+    ],
+)
+def test_closed_account_errors_do_not_retain_sensitive_values_in_exception_chains(
+    canary: str,
+    invoke: Callable[[], object],
+    error_type: type[BaseException],
+) -> None:
+    with pytest.raises(error_type) as raised:
+        invoke()
+
+    assert canary not in _exception_details(raised.value)
 
 
 @pytest.mark.parametrize(

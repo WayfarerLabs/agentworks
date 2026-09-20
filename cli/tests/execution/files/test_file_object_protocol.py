@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import stat
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
+from agentworks.errors import ValidationError
+from agentworks.execution import _file_object_exchange
 from agentworks.execution._file_object_exchange import (
     FileObjectMutationUncertain,
     FileObjectObservationError,
@@ -53,6 +57,29 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
+
+
+def _json(value: object) -> bytes:
+    return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("ascii")
+
+
+def _exception_details(error: BaseException) -> str:
+    pending = [error]
+    seen: set[int] = set()
+    details: list[object] = []
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        details.extend(current.args)
+        details.append(getattr(current, "object", None))
+        details.append(getattr(current, "doc", None))
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
+    return repr(details)
 
 
 @pytest.mark.windows
@@ -162,6 +189,43 @@ def test_request_rejects_duplicate_noncanonical_invalid_and_oversized_json(data:
     assert "a" * 100 not in repr(raised.value)
 
 
+@pytest.mark.parametrize(
+    ("canary", "operation", "field", "supplied"),
+    [
+        ("object-operation-canary", FileObjectOperation.STAT, "operation", "object-operation-canary"),
+        ("object-kind-canary", FileObjectOperation.REMOVE, "expected_kind", "object-kind-canary"),
+        (
+            "object-path-bytes-canary",
+            FileObjectOperation.STAT,
+            "path",
+            base64.b64encode(b"object-path-bytes-canary\xff").decode("ascii"),
+        ),
+    ],
+)
+def test_request_decoder_errors_do_not_retain_sensitive_fields(
+    canary: str,
+    operation: FileObjectOperation,
+    field: str,
+    supplied: object,
+) -> None:
+    value = json.loads(encode_file_object_request(_request(operation)))
+    value[field] = supplied
+
+    with pytest.raises(FileObjectRequestError) as raised:
+        decode_file_object_request(_json(value))
+
+    assert canary not in _exception_details(raised.value)
+
+
+def test_request_json_error_does_not_retain_sensitive_document() -> None:
+    canary = "object-json-doc-canary"
+
+    with pytest.raises(FileObjectRequestError) as raised:
+        decode_file_object_request(b'{"operation":"object-json-doc-canary"')
+
+    assert canary not in _exception_details(raised.value)
+
+
 def test_request_rejects_huge_integer_duration_as_closed_invalid_request() -> None:
     value = json.loads(encode_file_object_request(_request(FileObjectOperation.STAT)))
     marker = b'"remaining_seconds":'
@@ -192,6 +256,52 @@ def test_result_rejects_operation_state_and_digest_combinations() -> None:
     )
     with pytest.raises(FileObjectControlError):
         parse_file_object_result(digest_stat, FileObjectOperation.STAT)
+
+
+def _parse_result_field(field: str, supplied: str) -> object:
+    if field == "result":
+        value: dict[str, object] = {"result": supplied}
+    else:
+        value = json.loads(
+            encode_file_object_result(
+                FileObjectResultControl(FileObjectResultKind.PRESENT, FileKind.REGULAR, _revision())
+            )
+        )
+        value[field] = supplied
+    return parse_file_object_result(_json(value), FileObjectOperation.STAT)
+
+
+def _parse_failure_field(field: str, supplied: str) -> object:
+    if field == "code":
+        value: dict[str, object] = {"code": supplied}
+    else:
+        value = {
+            "code": FileObjectFailureCode.OBJECT.value,
+            "kind": FileObjectFailureKind.CONFLICT.value,
+            "phase": FileObjectPhase.REMOVAL.value,
+        }
+        value[field] = supplied
+    return parse_file_object_failure(_json(value))
+
+
+@pytest.mark.parametrize(
+    ("canary", "invoke"),
+    [
+        ("object-result-canary", lambda: _parse_result_field("result", "object-result-canary")),
+        ("object-result-kind-canary", lambda: _parse_result_field("kind", "object-result-kind-canary")),
+        ("object-code-canary", lambda: _parse_failure_field("code", "object-code-canary")),
+        ("object-failure-kind-canary", lambda: _parse_failure_field("kind", "object-failure-kind-canary")),
+        ("object-phase-canary", lambda: _parse_failure_field("phase", "object-phase-canary")),
+    ],
+)
+def test_response_decoder_errors_do_not_retain_sensitive_fields(
+    canary: str,
+    invoke: Callable[[], object],
+) -> None:
+    with pytest.raises(FileObjectControlError) as raised:
+        invoke()
+
+    assert canary not in _exception_details(raised.value)
 
 
 @pytest.mark.parametrize("kind", list(FileObjectFailureKind))
@@ -248,6 +358,56 @@ def _records(request: FileObjectRequest, body: bytes, kind: FileRecordKind = Fil
     return encode_file_record(request.nonce, FileRecord(0, kind, body)) + encode_file_record(
         request.nonce, FileRecord(1, FileRecordKind.FINISHED, empty_file_object_body())
     )
+
+
+def test_host_path_validation_discards_sensitive_unicode_error_chain(plan: IdentityPlan) -> None:
+    canary = "object-host-path-canary"
+    carrier = TranscriptCarrier(lambda _request: b"")
+
+    with pytest.raises(ValidationError) as raised:
+        stat_file(
+            carrier,
+            trusted_root_path="/trusted",
+            relative_path="\ud800" + canary,
+            plan=plan,
+            deadline=Deadline.after(1),
+        )
+
+    assert canary not in _exception_details(raised.value)
+    assert carrier.calls == 0
+
+
+def test_host_request_conversion_discards_sensitive_encoder_chain(
+    plan: IdentityPlan,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    canary = "object-host-encoder-canary"
+
+    def fail(_request: FileObjectRequest) -> bytes:
+        raw_error: UnicodeEncodeError | None = None
+        try:
+            ("\ud800" + canary).encode("utf-8")
+        except UnicodeEncodeError as error:
+            raw_error = error
+        assert raw_error is not None
+        wrapped = FileObjectRequestError(FileObjectFailureCode.INVALID_REQUEST)
+        wrapped.__context__ = raw_error
+        raise wrapped
+
+    monkeypatch.setattr(_file_object_exchange, "encode_file_object_request", fail)
+    carrier = TranscriptCarrier(lambda _request: b"")
+
+    with pytest.raises(ValidationError) as raised:
+        stat_file(
+            carrier,
+            trusted_root_path="/trusted",
+            relative_path="leaf",
+            plan=plan,
+            deadline=Deadline.after(1),
+        )
+
+    assert canary not in _exception_details(raised.value)
+    assert carrier.calls == 0
 
 
 def test_complete_stat_result_does_not_depend_on_carrier_exit(plan: IdentityPlan) -> None:

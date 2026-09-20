@@ -12,7 +12,7 @@ from agentworks.errors import ValidationError
 from agentworks.execution import _helper_identity, _inline_guest
 from agentworks.execution._evidence_wire import Frame, FrameKind, FrameReader
 from agentworks.execution._file_read import FileReadObservationState, read_file
-from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._helper_identity import IdentityExpectation, decode_identity
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan, build_helper_argv
 from agentworks.execution._inline import execute_inline_candidate, prepare_inline_candidate
 from agentworks.execution._inline_control import FailureCode, FailurePhase, parse_failure
@@ -39,6 +39,31 @@ def _plan(mode: IdentityMode, *, uid: int = 1001) -> IdentityPlan:
     gid = 0 if uid == 0 else 1002
     groups = (0,) if uid == 0 else (1002, 1003)
     return IdentityPlan(_identity(uid, gid, groups), mode)
+
+
+def test_wire_identity_decoder_accepts_one_normalized_numeric_identity() -> None:
+    assert decode_identity({"euid": 1001, "egid": 1002, "groups": [1002, 1003]}) == _identity()
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        {"euid": True, "egid": 1002, "groups": [1002]},
+        {"euid": 1001, "egid": -1, "groups": [1002]},
+        {"euid": 2**32, "egid": 1002, "groups": [1002]},
+        {"euid": 1001, "egid": 1002, "groups": []},
+        {"euid": 1001, "egid": 1002, "groups": [1003, 1002]},
+        {"euid": 1001, "egid": 1002, "groups": [1002, 1002]},
+        {"euid": 1001, "egid": 1002, "groups": [1003]},
+        {"euid": 1001, "egid": 1002, "groups": [1002, "identity-wire-canary"]},
+    ],
+)
+def test_wire_identity_decoder_rejects_invalid_shapes_without_retaining_input(value: object) -> None:
+    with pytest.raises(ValueError) as raised:
+        decode_identity(value)
+
+    assert "identity-wire-canary" not in repr(raised.value.args)
 
 
 def test_direct_launcher_is_the_fixed_minimal_helper_environment() -> None:
