@@ -90,10 +90,17 @@ production-composition evidence.
 ## Remaining integration and acceptance
 
 Transport [#833](https://github.com/WayfarerLabs/agentworks/pull/833), observed at
-`6f20bdb5930ccf09c278c419acf784a65bc79dad`, still provides only buffered carrier types. Its live I/O
-LLD is a candidate. This SSH branch has not substituted local shared types or claimed integration
-with that unfinished implementation. Full live/terminal delivery requires transport's concrete
-carrier/report/terminal definitions and joint proof.
+`e85e9f5c4752ae926315fa7c0e69b871de42e4fc`, supplies the shared subprocess pump adopted by SSH. Its
+carrier types remain buffered-only and its live I/O LLD remains a candidate. Full live/terminal
+delivery requires transport's concrete carrier/report/terminal definitions and joint proof. The
+operator confirmed #833 as the implementation source, with terminal/PTY work proceeding in parallel.
+
+Transport's
+[launch-interruption evidence](../2026-09-12-transport-improv/prior-art-research.md#local-process-startup-and-interruption)
+also applies to the former SSH pump: interruption before the cleanup guard can orphan the local
+child. Adoption preserves that known gap; tests of interruption inside the I/O loop cannot close it.
+Shared launch ownership and SSH forwarding's corresponding startup path remain production acceptance
+work.
 
 Also outstanding are additive RunContext/platform composition, a genuine creation-flow provenance
 and publication binding, complete SSH-backed workflow evidence, and supported Linux/macOS/Windows
