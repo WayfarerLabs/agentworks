@@ -29,7 +29,13 @@ def _child_environment() -> dict[str, str] | None:
 
 def run_process(argv: list[str], *, io: CarrierIO, deadline: Deadline) -> ProcessResult:
     """Run an owned SSH client with isolated pipe settings and SSH provenance."""
-    result = _subprocess.run_process(argv, io=io, deadline=deadline, env=_child_environment())
+    result = _subprocess.run_process(
+        argv,
+        io=io,
+        deadline=deadline,
+        env=_child_environment(),
+        live_stdio=True,
+    )
     return replace(
         result,
         stdout=replace(result.stdout, provenance=Provenance.CARRIER_STDOUT),
