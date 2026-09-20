@@ -240,6 +240,16 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       requests. Every follow-on mutation must validate its still-existing operation receipt under
       the transaction lock before creating any artifact; read-only snapshot chunks retain their
       existing unlocked exact-reference checks.
+- [x] Deliver private stage reconciliation and exact cleanup through the fixed identity-bound
+      helper. Accept complete historical cleanup ownership only, preserve missing-evidence
+      uncertainty and exact failure debt, and check expiry before explicit cleanup mutation and
+      after descriptor closure. All three private lanes are clean at `b0840a37`. This does not
+      complete snapshot/publication recovery or prove earlier-request quiescence.
+- [x] Admit the fixed Linux snapshot scratch parent independently of source-write authority. The
+      selector creates and repairs nothing, refuses links and unsafe ownership/mode, and preserves
+      deadline/descriptor handling. Local fixtures prove a non-root download from a read-only source
+      parent, and a separate read-only host probe admits UID 0/mode 01777. Native VM/macOS selection
+      and remote snapshot delivery remain unproved.
 - [ ] Jointly accept and prove the privately implemented carrier sink extension with the SSH owner
       before enabling its production use or exposing it through RunContext.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
@@ -691,6 +701,36 @@ intermittent gate failure, not a diagnosed or fixed website defect. Hosted recei
 [run 35520474884](https://github.com/WayfarerLabs/agentworks/actions/runs/35520474884); the stage
 increment requires fresh hosted confirmation. Remote recovery is the next file implementation; full
 FileAccess, native acceptance, launch ownership, lifecycle and additive RunContext remain open.
+
+The stage recovery and Linux scratch-root increment is privately reviewed at `b0840a37`. Lost
+creation replies can recover complete historical cleanup ownership through the fixed helper, never
+an active or ready content reference. Cleanup failures cannot introduce different debt. Missing
+receipts remain uncertainty; delayed follow-on chunks refuse after receipt removal, but this does
+not establish that an earlier original creation cannot arrive later.
+
+Review corrected explicit cleanup after an expired path lookup and rejected historical replies with
+missing identities or widened receipt modes. The typed result encoder no longer repeats those
+external checks. Removing the incoming checks makes all ten malformed-history cases fail; removing
+pre-cleanup admission mutates data despite a final refusal. Six real-helper deadline tests now
+advance a controlled guest clock at the intended boundary, replacing a reproduced scheduling race.
+The final correctness lane passes 147 focused tests, all 60 repeated deadline cases and 20,000
+malformed-request probes. The complete file selection passes 736 tests. Root admission is local
+Linux evidence only: namespace-sandbox `/tmp` has UID 65534 and correctly refuses, while the same
+read-only probe outside that sandbox observes UID 0/mode 01777 and closes the admitted descriptor.
+
+The final full suite at `b0840a37` passes 11,781 tests with 13 skips. Ruff/format, CI-scoped mypy
+(993 sources), file lint, typer isolation, locked-SDD, rulesync and diff checks pass. Website gates
+pass 160 Python and 103 Node tests and both deterministic double-build comparisons. Owned temporary
+test/build output was removed and absence verified; no live infrastructure was touched.
+
+All hosted checks pass at the prior stage publication `37d8150b` in
+[run 35522218730](https://github.com/WayfarerLabs/agentworks/actions/runs/35522218730). The new
+increment still needs hosted confirmation after publication. Snapshot/publication delivery, full
+FileAccess, launch ownership, lifecycle, native acceptance and additive RunContext remain required.
+The launch-owner candidate is being implemented separately; its design evidence is not production
+acceptance. Shared SSH interfaces remain unchanged. Both macOS operator decisions remain pending.
+This progress increment consumes no public feedback/fix round; all three remain available for the
+completed PR.
 
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
