@@ -50,8 +50,9 @@ def test_regular_binary_snapshot_binds_bytes_stat_and_digest(tmp_path: Path) -> 
     assert result.stat.size == len(content)
     assert result.stat.link_count == 1
     assert result.stat.inode == target.stat().st_ino
-    assert content.hex() not in repr(result)
-    assert result.digest.hex() not in repr(result)
+    representation = repr(result)
+    assert repr(content) not in representation
+    assert repr(result.digest) not in representation
     with pytest.raises(FrozenInstanceError):
         result.data = b"changed"  # type: ignore[misc]
 
