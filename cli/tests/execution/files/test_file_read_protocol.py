@@ -455,19 +455,13 @@ def test_oversized_record_is_bounded_and_rejected(identity: FileReadIdentity) ->
 @pytest.mark.windows
 def test_host_import_does_not_require_posix_only_modules() -> None:
     script = r"""
-import importlib.abc
 import sys
 
 blocked = {"ctypes", "fcntl", "grp", "pwd"}
-class BlockPosix(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname.partition(".")[0] in blocked:
-            raise ImportError("blocked POSIX-only module")
-
-sys.meta_path.insert(0, BlockPosix())
+sys.modules.update(dict.fromkeys(blocked))
 sys.path.insert(0, sys.argv[1])
 import agentworks.execution._file_read
-assert not blocked.intersection(sys.modules)
+assert all(sys.modules[name] is None for name in blocked)
 """
     cli_root = Path(__file__).parents[3]
     completed = subprocess.run(
