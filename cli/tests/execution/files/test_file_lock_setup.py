@@ -60,8 +60,7 @@ def _setfacl(path: Path, *arguments: str) -> None:
     if executable is None:
         pytest.skip("setfacl is unavailable")
     completed = subprocess.run([executable, *arguments, str(path)], check=False, capture_output=True)
-    if completed.returncode != 0:
-        pytest.skip("fixture filesystem does not support POSIX ACLs")
+    assert completed.returncode == 0, completed.stderr.decode(errors="replace")
 
 
 def test_fresh_setup_creates_exact_namespace(tmp_path: Path) -> None:
@@ -142,7 +141,7 @@ def test_adverse_umask_does_not_weaken_final_permissions(tmp_path: Path) -> None
 
 
 def test_inherited_directory_acls_are_removed_from_new_objects(tmp_path: Path) -> None:
-    _setfacl(tmp_path, "-d", "-m", f"u:{os.getuid() + 1}:---")
+    _setfacl(tmp_path, "-d", "-m", f"g:{os.getgid()}:---")
     parent_fd = _open_parent(tmp_path)
     try:
         _setup(parent_fd)
@@ -162,7 +161,7 @@ def test_inherited_lock_acl_is_removed_from_new_lock(tmp_path: Path) -> None:
     execution.mkdir(parents=True)
     agentworks.chmod(0o755)
     execution.chmod(0o755)
-    _setfacl(execution, "-d", "-m", f"u:{os.getuid() + 1}:---")
+    _setfacl(execution, "-d", "-m", f"g:{os.getgid()}:---")
     parent_fd = _open_parent(tmp_path)
     try:
         result = _setup(parent_fd)
@@ -178,7 +177,7 @@ def test_inherited_lock_acl_is_removed_from_new_lock(tmp_path: Path) -> None:
 def test_existing_access_acl_is_refused_without_rewrite(tmp_path: Path) -> None:
     agentworks = tmp_path / "agentworks"
     agentworks.mkdir(mode=0o755)
-    _setfacl(agentworks, "-m", f"u:{os.getuid() + 1}:---")
+    _setfacl(agentworks, "-m", f"g:{os.getgid()}:---")
     acl_before = os.getxattr(agentworks, _ACCESS_ACL)
     parent_fd = _open_parent(tmp_path)
     try:
