@@ -338,6 +338,44 @@ privilege/FD behavior, account startup, secret exposure, macOS host jobs and WSL
 plan's proofs before enabling profiles. Linux systemd features cannot be inferred from a distro
 name.
 
+### Systemd 252 lifecycle evidence constraints
+
+A focused source audit narrows the supervisor proof without selecting a second carrier protocol.
+`Type=exec` acknowledges execution of the configured `ExecStart` binary. If that binary is the
+trusted Python helper, it does not prove entry into a subsequently launched payload. Switching to
+`Type=notify` does not create stronger evidence by itself, and CLOEXEC error-pipe EOF also occurs if
+a child dies before exec. Helper acceptance, payload evidence and readiness remain distinct.
+
+Source: [v252 service types](https://github.com/systemd/systemd/blob/v252/man/systemd.service.xml).
+
+Do not preserve generic-job records by setting `RemainAfterExit=yes`: the service state machine
+keeps an exited service active instead of taking the ordinary stop path. Conversely, unreferenced
+successful units can be garbage-collected with their exit/accounting state. An active IPC reference
+does not survive loss of its owning client. Decision: retain bounded run evidence independently of
+unit collection, without delaying main-anchor cleanup or adding a permanent bus client solely to
+keep records alive. Loss of both unit and retained evidence stays uncertain; it never permits launch
+replay. This does not add a reboot-survival guarantee.
+
+Sources:
+[v252 service state machine](https://github.com/systemd/systemd/blob/v252/src/core/service.c),
+[v252 unit collection](https://github.com/systemd/systemd/blob/v252/man/systemd.unit.xml).
+
+`ExecStopPost` can record service result and main-exit facts, but cannot certify terminal emptiness.
+The v252 stop state machine explicitly proceeds to that hook after a SIGKILL timeout with processes
+still present; the hook itself is also a unit process. Decision: preserve completion facts before
+collection, then independently observe the bound old workload boundary before reporting successful
+disposal or admitting replacement. A missing unit alone is not that observation. The proof must
+validate boot, run and cgroup identity and distinguish an absent old boundary from an unavailable
+mount or failed observation.
+
+Sources: [v252 stop hooks](https://github.com/systemd/systemd/blob/v252/man/systemd.service.xml),
+[v252 timeout handling](https://github.com/systemd/systemd/blob/v252/src/core/service.c).
+
+The next bounded experiment must cover fast success before observation, lost start acknowledgment,
+main-exit cleanup of detached descendants, stop escalation, retained output and completion, and
+refusal to replace a still-populated boundary. These are source-informed experiment constraints, not
+implemented supervisor behavior or native acceptance.
+
 ### Lifecycle test-bed gaps
 
 For macOS mechanism selection, do not equate a launchd job with a Linux cgroup. Apple's
