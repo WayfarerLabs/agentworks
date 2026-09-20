@@ -24,23 +24,8 @@ from ._file_metadata_protocol import (
     encode_file_metadata_result,
 )
 from ._file_paths import ConfinedOpenError, open_linux_confined, open_linux_root
-from ._file_wire import FileRecord, FileRecordKind, encode_file_record
+from ._file_wire import FileRecordKind, FileRecordWriter
 from ._helper_identity import matches_current_identity
-
-
-class _Emitter:
-    def __init__(self, nonce: str) -> None:
-        self._nonce = nonce
-        self._sequence = 0
-
-    def emit(self, kind: FileRecordKind, body: bytes) -> None:
-        remaining = memoryview(encode_file_record(self._nonce, FileRecord(self._sequence, kind, body)))
-        while remaining:
-            written = os.write(1, remaining)
-            if written <= 0:
-                raise OSError
-            remaining = remaining[written:]
-        self._sequence += 1
 
 
 class _SafeFailure(Exception):
@@ -135,25 +120,25 @@ def _operate(request: FileMetadataRequest, expires_at: float | None) -> FileMeta
             os.close(root_fd)
 
 
-def _finish_failure(emitter: _Emitter, failure: FileMetadataFailureControl) -> int:
-    emitter.emit(FileRecordKind.FAILED, encode_file_metadata_failure(failure))
-    emitter.emit(FileRecordKind.FINISHED, empty_file_metadata_body())
+def _finish_failure(writer: FileRecordWriter, failure: FileMetadataFailureControl) -> int:
+    writer.write(FileRecordKind.FAILED, encode_file_metadata_failure(failure))
+    writer.write(FileRecordKind.FINISHED, empty_file_metadata_body())
     return 0
 
 
 def main(nonce: str) -> int:
     """Execute one request after nonce, runtime and exact identity checks."""
-    emitter = _Emitter(nonce)
+    writer = FileRecordWriter(nonce)
     try:
         request = _read_request()
     except FileMetadataRequestError as error:
-        return _finish_failure(emitter, FileMetadataFailureControl(error.failure))
+        return _finish_failure(writer, FileMetadataFailureControl(error.failure))
     if request.nonce != nonce:
-        return _finish_failure(emitter, FileMetadataFailureControl(FileMetadataFailureCode.NONCE_MISMATCH))
+        return _finish_failure(writer, FileMetadataFailureControl(FileMetadataFailureCode.NONCE_MISMATCH))
     if sys.platform != "linux":
-        return _finish_failure(emitter, FileMetadataFailureControl(FileMetadataFailureCode.UNSUPPORTED_RUNTIME))
+        return _finish_failure(writer, FileMetadataFailureControl(FileMetadataFailureCode.UNSUPPORTED_RUNTIME))
     if not matches_current_identity(request.identity):
-        return _finish_failure(emitter, FileMetadataFailureControl(FileMetadataFailureCode.IDENTITY_MISMATCH))
+        return _finish_failure(writer, FileMetadataFailureControl(FileMetadataFailureCode.IDENTITY_MISMATCH))
     expires_at = None if request.remaining_seconds is None else time.monotonic() + request.remaining_seconds
     failure: FileMetadataFailureControl | None = None
     result: FileMetadataResultControl | None = None
@@ -166,8 +151,8 @@ def main(nonce: str) -> int:
     except FileLockError as error:
         failure = _lock_failure(error)
     if failure is not None:
-        return _finish_failure(emitter, failure)
+        return _finish_failure(writer, failure)
     assert result is not None
-    emitter.emit(FileRecordKind.RESULT, encode_file_metadata_result(result))
-    emitter.emit(FileRecordKind.FINISHED, empty_file_metadata_body())
+    writer.write(FileRecordKind.RESULT, encode_file_metadata_result(result))
+    writer.write(FileRecordKind.FINISHED, empty_file_metadata_body())
     return 0

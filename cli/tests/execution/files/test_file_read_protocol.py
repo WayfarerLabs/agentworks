@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import stat
 import subprocess
 import sys
@@ -14,7 +15,12 @@ from pathlib import Path
 import pytest
 
 from agentworks.execution import _file_read
-from agentworks.execution._file_read import FileReadObservationError, FileReadObservationState, read_file
+from agentworks.execution._file_read import (
+    FileReadCandidateResult,
+    FileReadObservationError,
+    FileReadObservationState,
+    read_file,
+)
 from agentworks.execution._file_read_bundle import FIXED_SOURCE
 from agentworks.execution._file_read_protocol import (
     FileReadFailure,
@@ -29,6 +35,7 @@ from agentworks.execution._file_wire import (
     FileRecord,
     FileRecordKind,
     FileRecordReader,
+    FileRecordWriter,
     FileWireError,
     encode_file_record,
 )
@@ -58,6 +65,56 @@ def _write(sink: ByteSink, data: bytes) -> int:
         calls += 1
         remaining = remaining[written:]
     return calls
+
+
+def test_file_record_writer_completes_short_writes_and_sequences_records(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    nonce = "0" * 32
+    written = bytearray()
+    calls = 0
+
+    def short_write(descriptor: int, data: memoryview) -> int:
+        nonlocal calls
+        assert descriptor == 1
+        calls += 1
+        count = min(3, len(data))
+        written.extend(data[:count])
+        return count
+
+    monkeypatch.setattr(os, "write", short_write)
+    writer = FileRecordWriter(nonce)
+    writer.write(FileRecordKind.DATA, b"payload")
+    writer.write(FileRecordKind.FINISHED, b"{}")
+
+    expected = encode_file_record(nonce, FileRecord(0, FileRecordKind.DATA, b"payload")) + encode_file_record(
+        nonce,
+        FileRecord(1, FileRecordKind.FINISHED, b"{}"),
+    )
+    assert bytes(written) == expected
+    assert calls > 2
+
+
+def test_file_record_writer_rejects_zero_write_without_advancing_sequence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    nonce = "0" * 32
+    writer = FileRecordWriter(nonce)
+    monkeypatch.setattr(os, "write", lambda _descriptor, _data: 0)
+
+    with pytest.raises(OSError):
+        writer.write(FileRecordKind.DATA, b"unwritten")
+
+    written = bytearray()
+
+    def complete_write(descriptor: int, data: memoryview) -> int:
+        assert descriptor == 1
+        written.extend(data)
+        return len(data)
+
+    monkeypatch.setattr(os, "write", complete_write)
+    writer.write(FileRecordKind.FINISHED, b"{}")
+    assert bytes(written) == encode_file_record(nonce, FileRecord(0, FileRecordKind.FINISHED, b"{}"))
 
 
 @dataclass
@@ -146,7 +203,7 @@ def _read(
     *,
     max_bytes: int = 32_000,
     deadline: Deadline | None = None,
-):
+) -> FileReadCandidateResult:
     return read_file(
         carrier,
         trusted_root_path="/trusted/root-canary",

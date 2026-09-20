@@ -381,9 +381,7 @@ def encode_file_metadata_failure(failure: FileMetadataFailureControl) -> bytes:
                 "phase": None if failure.phase is None else failure.phase.value,
             }
         )
-    encoded = _json_bytes(value)
-    parse_file_metadata_failure(encoded)
-    return encoded
+    return _json_bytes(value)
 
 
 def parse_file_metadata_failure(body: bytes) -> FileMetadataFailureControl:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import os
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -76,6 +77,23 @@ def encode_file_record(nonce: str, record: FileRecord) -> bytes:
         )
         + b"\n"
     )
+
+
+class FileRecordWriter:
+    """Write one helper's sequenced AGWF1 records completely to stdout."""
+
+    def __init__(self, nonce: str) -> None:
+        self._nonce = nonce
+        self._sequence = 0
+
+    def write(self, kind: FileRecordKind, body: bytes) -> None:
+        remaining = memoryview(encode_file_record(self._nonce, FileRecord(self._sequence, kind, body)))
+        while remaining:
+            written = os.write(1, remaining)
+            if written <= 0:
+                raise OSError
+            remaining = remaining[written:]
+        self._sequence += 1
 
 
 class FileRecordReader:

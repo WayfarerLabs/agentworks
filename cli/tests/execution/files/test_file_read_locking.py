@@ -202,12 +202,12 @@ def observed_lock(*,expires_at):
   yield
  unlocked[0]=True
 guest.system_file_lock=observed_lock
-real_emit=guest._Emitter.emit
-def checked_emit(self,kind,body):
+real_write=guest.FileRecordWriter.write
+def checked_write(self,kind,body):
  if not unlocked[0]:
   raise RuntimeError('protocol output while locked')
- return real_emit(self,kind,body)
-guest._Emitter.emit=checked_emit
+ return real_write(self,kind,body)
+guest.FileRecordWriter.write=checked_write
 """
     monkeypatch.setattr(_file_read, "FIXED_SOURCE", fixed_lock_source(fixed_lock_bundle, patch))
 

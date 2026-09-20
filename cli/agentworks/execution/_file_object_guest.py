@@ -31,23 +31,8 @@ from ._file_objects import (
     stat_file_object,
 )
 from ._file_paths import ConfinedOpenError, open_linux_confined, open_linux_root
-from ._file_wire import FileRecord, FileRecordKind, encode_file_record
+from ._file_wire import FileRecordKind, FileRecordWriter
 from ._helper_identity import matches_current_identity
-
-
-class _Emitter:
-    def __init__(self, nonce: str) -> None:
-        self._nonce = nonce
-        self._sequence = 0
-
-    def emit(self, kind: FileRecordKind, body: bytes) -> None:
-        remaining = memoryview(encode_file_record(self._nonce, FileRecord(self._sequence, kind, body)))
-        while remaining:
-            written = os.write(1, remaining)
-            if written <= 0:
-                raise OSError
-            remaining = remaining[written:]
-        self._sequence += 1
 
 
 class _SafeFailure(Exception):
@@ -149,33 +134,33 @@ def _operate(request: FileObjectRequest, expires_at: float | None) -> FileObject
             os.close(root_fd)
 
 
-def _finish_failure(emitter: _Emitter, failure: FileObjectFailureControl) -> int:
-    emitter.emit(FileRecordKind.FAILED, encode_file_object_failure(failure))
-    emitter.emit(FileRecordKind.FINISHED, empty_file_object_body())
+def _finish_failure(writer: FileRecordWriter, failure: FileObjectFailureControl) -> int:
+    writer.write(FileRecordKind.FAILED, encode_file_object_failure(failure))
+    writer.write(FileRecordKind.FINISHED, empty_file_object_body())
     return 0
 
 
 def main(nonce: str) -> int:
     """Execute one request after nonce, runtime and exact identity checks."""
-    emitter = _Emitter(nonce)
+    writer = FileRecordWriter(nonce)
     try:
         request = _read_request()
     except FileObjectRequestError as error:
-        return _finish_failure(emitter, FileObjectFailureControl(error.failure))
+        return _finish_failure(writer, FileObjectFailureControl(error.failure))
     if request.nonce != nonce:
-        return _finish_failure(emitter, FileObjectFailureControl(FileObjectFailureCode.NONCE_MISMATCH))
+        return _finish_failure(writer, FileObjectFailureControl(FileObjectFailureCode.NONCE_MISMATCH))
     if sys.platform != "linux":
-        return _finish_failure(emitter, FileObjectFailureControl(FileObjectFailureCode.UNSUPPORTED_RUNTIME))
+        return _finish_failure(writer, FileObjectFailureControl(FileObjectFailureCode.UNSUPPORTED_RUNTIME))
     if not matches_current_identity(request.identity):
-        return _finish_failure(emitter, FileObjectFailureControl(FileObjectFailureCode.IDENTITY_MISMATCH))
+        return _finish_failure(writer, FileObjectFailureControl(FileObjectFailureCode.IDENTITY_MISMATCH))
     expires_at = None if request.remaining_seconds is None else time.monotonic() + request.remaining_seconds
     try:
         with system_file_lock(expires_at=expires_at):
             result = _operate(request, expires_at)
     except FileLockError as error:
-        return _finish_failure(emitter, _lock_failure(error))
+        return _finish_failure(writer, _lock_failure(error))
     except _SafeFailure as error:
-        return _finish_failure(emitter, error.failure)
-    emitter.emit(FileRecordKind.RESULT, encode_file_object_result(result))
-    emitter.emit(FileRecordKind.FINISHED, empty_file_object_body())
+        return _finish_failure(writer, error.failure)
+    writer.write(FileRecordKind.RESULT, encode_file_object_result(result))
+    writer.write(FileRecordKind.FINISHED, empty_file_object_body())
     return 0

@@ -22,7 +22,7 @@ from ._file_inventory_protocol import (
 )
 from ._file_lock import FileLockError, FileLockFailureKind, system_file_lock
 from ._file_paths import ConfinedOpenError, open_linux_confined, open_linux_root
-from ._file_wire import MAX_RECORD_BODY_BYTES, FileRecord, FileRecordKind, encode_file_record
+from ._file_wire import MAX_RECORD_BODY_BYTES, FileRecordKind, FileRecordWriter
 from ._helper_identity import matches_current_identity
 
 _DIRECTORY_FLAGS = (
@@ -32,21 +32,6 @@ _DIRECTORY_FLAGS = (
     | getattr(os, "O_CLOEXEC", 0)
     | getattr(os, "O_NONBLOCK", 0)
 )
-
-
-class _Emitter:
-    def __init__(self, nonce: str) -> None:
-        self._nonce = nonce
-        self._sequence = 0
-
-    def emit(self, kind: FileRecordKind, body: bytes) -> None:
-        remaining = memoryview(encode_file_record(self._nonce, FileRecord(self._sequence, kind, body)))
-        while remaining:
-            written = os.write(1, remaining)
-            if written <= 0:
-                raise OSError
-            remaining = remaining[written:]
-        self._sequence += 1
 
 
 class _SafeFailure(Exception):
@@ -121,9 +106,6 @@ def _snapshot(request: FileInventoryRequest, expires_at: float | None) -> bytes 
                 expires_at=expires_at,
             )
             encoded = encode_inventory(entries)
-            if len(encoded) > request.max_encoded_bytes:
-                raise _SafeFailure(FileInventoryFailureCode.LIMIT)
-            _raise_if_expired(expires_at)
             return encoded
         except FileInventoryError as error:
             raise _SafeFailure(_inventory_failure(error)) from None
@@ -135,46 +117,46 @@ def _snapshot(request: FileInventoryRequest, expires_at: float | None) -> bytes 
             os.close(root_fd)
 
 
-def _emit_snapshot(emitter: _Emitter, snapshot: bytes) -> None:
+def _emit_snapshot(writer: FileRecordWriter, snapshot: bytes) -> None:
     for offset in range(0, len(snapshot), MAX_RECORD_BODY_BYTES):
-        emitter.emit(FileRecordKind.DATA, snapshot[offset : offset + MAX_RECORD_BODY_BYTES])
-    emitter.emit(
+        writer.write(FileRecordKind.DATA, snapshot[offset : offset + MAX_RECORD_BODY_BYTES])
+    writer.write(
         FileRecordKind.RESULT,
         encode_file_inventory_result(FileInventoryResultControl(len(snapshot), hashlib.sha256(snapshot).digest())),
     )
 
 
-def _finish_failure(emitter: _Emitter, failure: FileInventoryFailureCode) -> int:
-    emitter.emit(FileRecordKind.FAILED, encode_file_inventory_failure(failure))
-    emitter.emit(FileRecordKind.FINISHED, empty_file_inventory_body())
+def _finish_failure(writer: FileRecordWriter, failure: FileInventoryFailureCode) -> int:
+    writer.write(FileRecordKind.FAILED, encode_file_inventory_failure(failure))
+    writer.write(FileRecordKind.FINISHED, empty_file_inventory_body())
     return 0
 
 
 def main(nonce: str) -> int:
     """Execute one list request after nonce, runtime and exact identity checks."""
-    emitter = _Emitter(nonce)
+    writer = FileRecordWriter(nonce)
     try:
         request = _read_request()
     except FileInventoryRequestError as error:
-        return _finish_failure(emitter, error.failure)
+        return _finish_failure(writer, error.failure)
     if request.nonce != nonce:
-        return _finish_failure(emitter, FileInventoryFailureCode.NONCE_MISMATCH)
+        return _finish_failure(writer, FileInventoryFailureCode.NONCE_MISMATCH)
     if sys.platform != "linux":
-        return _finish_failure(emitter, FileInventoryFailureCode.UNSUPPORTED_RUNTIME)
+        return _finish_failure(writer, FileInventoryFailureCode.UNSUPPORTED_RUNTIME)
     if not matches_current_identity(request.identity):
-        return _finish_failure(emitter, FileInventoryFailureCode.IDENTITY_MISMATCH)
+        return _finish_failure(writer, FileInventoryFailureCode.IDENTITY_MISMATCH)
     try:
         expires_at = _expires_at(request.remaining_seconds)
         with system_file_lock(expires_at=expires_at):
             snapshot = _snapshot(request, expires_at)
             _raise_if_expired(expires_at)
     except FileLockError as error:
-        return _finish_failure(emitter, _lock_failure(error))
+        return _finish_failure(writer, _lock_failure(error))
     except _SafeFailure as error:
-        return _finish_failure(emitter, error.failure)
+        return _finish_failure(writer, error.failure)
     if snapshot is None:
-        emitter.emit(FileRecordKind.ABSENT, empty_file_inventory_body())
+        writer.write(FileRecordKind.ABSENT, empty_file_inventory_body())
     else:
-        _emit_snapshot(emitter, snapshot)
-    emitter.emit(FileRecordKind.FINISHED, empty_file_inventory_body())
+        _emit_snapshot(writer, snapshot)
+    writer.write(FileRecordKind.FINISHED, empty_file_inventory_body())
     return 0

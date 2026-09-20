@@ -319,11 +319,11 @@ def test_helper_releases_lock_before_emitting_frames(tmp_path: Path, plan: Ident
     target.chmod(0o600)
     injection = (
         "g._fixture_lock_held=False\n"
-        "base_emit=g._Emitter.emit\n"
-        "def checked_emit(self,kind,body):\n"
+        "base_write=g.FileRecordWriter.write\n"
+        "def checked_write(self,kind,body):\n"
         " assert not g._fixture_lock_held\n"
-        " return base_emit(self,kind,body)\n"
-        "g._Emitter.emit=checked_emit\n"
+        " return base_write(self,kind,body)\n"
+        "g.FileRecordWriter.write=checked_write\n"
     )
     source = (
         _fixture_source(lock_root, injection)
