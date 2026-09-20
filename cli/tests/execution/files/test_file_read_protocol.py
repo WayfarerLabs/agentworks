@@ -336,7 +336,7 @@ def test_carrier_base_exception_clears_complete_transcript_state_before_propagat
         identity=identity,
     )
     interruption = interruption_type()
-    carrier = InterruptingCarrier(_success(prepared.nonce, canary), interruption)
+    carrier = InterruptingCarrier(_success(prepared.nonce, canary) + b"reader-interrupt-canary", interruption)
 
     with pytest.raises(interruption_type) as raised:
         execute_file_read(carrier, prepared, deadline=Deadline.after(1))
