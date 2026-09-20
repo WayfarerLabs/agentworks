@@ -162,14 +162,20 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       and production composition remain separate gates.
 - [ ] Accept the preparation/result and file-operation LLDs after private review and disposition of
       their helper/runtime, launch-evidence, cross-identity locking, and platform prerequisites.
-- [ ] Implement private revision-aware publication with explicit Create/Replace/Match conditions,
+- [x] Implement private revision-aware publication with explicit Create/Replace/Match conditions,
       bounded streaming from verified scratch, stat-only observations without old-content reads, and
-      a content-bound post-publication revision. Prove observed conflict, deadline and
-      uncertain-publication behavior without claiming atomicity against non-cooperating writers.
-- [ ] Implement the private read-only transaction-lock primitive and prove local contention,
-      deadline, refusal and release behavior. Then establish its protected namespace through
-      explicit setup and prove ordinary/elevated helpers contend on the same inode. Keep macOS
-      host-administrator setup pending operator disposition; readiness never installs the lock.
+      a content-bound post-publication revision. At `75aaaa5e`, all three private lanes are clean
+      and the focused file suite passes 169 tests, including conflict, deadline and
+      uncertain-publication behavior. External-writer atomicity and native acceptance are not
+      claimed.
+- [x] Implement the private read-only transaction-lock primitive with local contention, deadline,
+      refusal and release tests. At `75aaaa5e`, all three private lanes are clean. The corrected
+      post-acquisition deadline test is mutation-proven. Protected namespace setup, ordinary/admin
+      sharing and native macOS acceptance remain separate gates.
+- [ ] Establish the transaction lock's protected namespace through explicit setup and prove
+      ordinary/elevated helpers contend on the same inode. Keep macOS host-administrator setup
+      pending operator disposition; readiness never installs the lock. Validate finite nonnegative
+      relative budgets at the file request boundary before deriving a guest-local expiry.
 - [ ] Jointly accept and prove the privately implemented carrier sink extension with the SSH owner
       before enabling its production use or exposing it through RunContext.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
@@ -428,6 +434,27 @@ passes 11,073 tests with 12 skips; Ruff, formatting and CI-scoped mypy (942 sour
 gates at that pin pass 160 Python tests, 103 Node tests and both deterministic build comparisons.
 Temporary build outputs were removed and no live infrastructure was touched. These private
 corrections consume no public feedback/fix round.
+
+All hosted checks subsequently pass at `aa82b8f2` in
+[run 35506094459](https://github.com/WayfarerLabs/agentworks/actions/runs/35506094459), including
+Windows Python 3.13 and Linux Python 3.12/3.13/3.14.
+
+The file-mechanics increment is privately reviewed at `75aaaa5e`. Publication now accepts explicit
+Create/Replace/Match conditions, uses metadata-only observations when no old-content match is
+required, streams verified scratch in bounded chunks, and verifies a content-bound revision after
+rename. The fixed read-only lock primitive proves local contention/refusal/release but does not
+install its namespace or close cross-identity/native acceptance. Review removed a duplicate
+post-publication reader and corrected a mistimed deadline test; deleting the post-acquisition check
+now makes that test fail. All three private lanes are clean.
+
+The final full suite at `e9cce152` passes 11,118 tests with 12 skips. Ruff, formatting and CI-scoped
+mypy (945 sources) pass. The focused file suite passes 169 tests. File lint, typer isolation,
+rulesync and locked-SDD checks pass. Website gates at `4c35aafe` pass 160 Python and 103 Node tests
+plus both deterministic build comparisons; its local server emitted a BrokenPipeError without a
+failed assertion. Temporary build output was removed. No live infrastructure was touched. Shared
+namespace setup, complete file delivery, launch ownership, lifecycle, native proof and the additive
+RunContext remain open; neither pending macOS decision is waived. These are private implementation
+corrections, not a public feedback/fix round.
 
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
