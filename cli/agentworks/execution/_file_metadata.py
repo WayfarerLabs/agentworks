@@ -1,7 +1,7 @@
 """Private Linux metadata convergence beneath a borrowed parent descriptor.
 
 The caller owns validated numeric inputs, the protected parent descriptor, and
-the cooperating-writer lock. Mutations target only a verified path-only handle
+operation serialization. Mutations target only a verified path-only handle
 through procfs, never the mutable caller path.
 """
 

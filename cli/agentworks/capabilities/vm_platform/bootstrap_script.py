@@ -18,9 +18,6 @@ import shlex
 from dataclasses import dataclass, field
 
 from agentworks.capabilities.vm_platform.skel import BASHRC, ZSHRC
-from agentworks.execution._file_lock_setup_bundle import FIXED_SOURCE as _FILE_LOCK_SETUP_SOURCE
-
-_FILE_LOCK_SETUP_COMMAND = shlex.join(("/usr/bin/python3", "-I", "-S", "-B", "-c", _FILE_LOCK_SETUP_SOURCE))
 
 # Canonical cloud-init drop-in that stops host-key regeneration on stop/start.
 # By default cloud-init may delete and regenerate /etc/ssh/ssh_host_* on some
@@ -119,11 +116,6 @@ timeout 600 apt-get dist-upgrade -y -qq -o Dpkg::Options::="--force-confnew"
 # shellcheck disable=SC2086
 apt-get install -y -qq -o Dpkg::Options::="--force-confnew" $PROVISIONING_PACKAGES
 echo "##SUCCESS## provisioning packages installed"
-
-# -- Step 2a: Provision the shared file transaction lock --
-echo "##STEP## File transaction lock"
-{file_lock_setup_command}
-echo "##SUCCESS## file transaction lock provisioned"
 
 # -- Step 2b: Preserve SSH host keys across reboots --
 # By default, cloud-init may delete and regenerate SSH host keys on certain
@@ -295,7 +287,6 @@ def generate_bootstrap_script(
         tailscale_auth_key=shlex.quote(tailscale_auth_key or ""),
         vm_hostname=shlex.quote(hostname),
         swap=swap,
-        file_lock_setup_command=_FILE_LOCK_SETUP_COMMAND,
         ssh_preserve_path=SSH_PRESERVE_KEYS_PATH,
         ssh_preserve_content=SSH_PRESERVE_KEYS_CONTENT,
         reboot_sentinel=REBOOT_SENTINEL_PATH,

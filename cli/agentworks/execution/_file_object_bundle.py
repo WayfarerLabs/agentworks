@@ -11,7 +11,6 @@ _MODULE_NAMES = (
     "_file_paths",
     "_file_snapshot",
     "_file_objects",
-    "_file_lock",
     "_file_wire",
     "_file_object_protocol",
     "_file_object_guest",

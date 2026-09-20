@@ -12,7 +12,6 @@ _MODULE_NAMES = (
     "_file_snapshot",
     "_file_objects",
     "_file_inventory",
-    "_file_lock",
     "_file_wire",
     "_file_inventory_protocol",
     "_file_inventory_guest",

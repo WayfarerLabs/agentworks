@@ -10,7 +10,6 @@ _MODULE_NAMES = (
     "_file_paths",
     "_scratch_receipt",
     "_scratch",
-    "_file_lock",
     "_file_wire",
     "_scratch_wire",
     "_file_stage_protocol",

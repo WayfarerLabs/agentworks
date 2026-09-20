@@ -1,4 +1,4 @@
-"""Destination entry point for one locked Linux metadata operation."""
+"""Destination entry point for one Linux metadata operation."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import sys
 import time
 from contextlib import suppress
 
-from ._file_lock import FileLockError, FileLockFailureKind, system_file_lock
 from ._file_metadata import MetadataError, MetadataResult, ensure_directory, set_metadata
 from ._file_metadata_protocol import (
     MAX_REQUEST_BYTES,
@@ -42,18 +41,6 @@ def _read_request() -> FileMetadataRequest:
             break
         data.extend(chunk)
     return decode_file_metadata_request(bytes(data))
-
-
-def _lock_failure(error: FileLockError) -> FileMetadataFailureControl:
-    code = {
-        FileLockFailureKind.UNSUPPORTED: FileMetadataFailureCode.LOCK_UNSUPPORTED,
-        FileLockFailureKind.MISSING: FileMetadataFailureCode.LOCK_MISSING,
-        FileLockFailureKind.UNSAFE: FileMetadataFailureCode.LOCK_UNSAFE,
-        FileLockFailureKind.CONFLICT: FileMetadataFailureCode.LOCK_CONFLICT,
-        FileLockFailureKind.DEADLINE: FileMetadataFailureCode.LOCK_DEADLINE,
-        FileLockFailureKind.IO: FileMetadataFailureCode.LOCK_IO,
-    }[error.kind]
-    return FileMetadataFailureControl(code)
 
 
 def _parent(request: FileMetadataRequest) -> tuple[int, int | None, str]:
@@ -143,13 +130,9 @@ def main(nonce: str) -> int:
     failure: FileMetadataFailureControl | None = None
     result: FileMetadataResultControl | None = None
     try:
-        with system_file_lock(expires_at=expires_at):
-            try:
-                result = _operate(request, expires_at)
-            except _SafeFailure as error:
-                failure = error.failure
-    except FileLockError as error:
-        failure = _lock_failure(error)
+        result = _operate(request, expires_at)
+    except _SafeFailure as error:
+        failure = error.failure
     if failure is not None:
         return _finish_failure(writer, failure)
     assert result is not None

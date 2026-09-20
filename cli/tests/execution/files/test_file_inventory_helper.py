@@ -1,4 +1,4 @@
-"""Real fixed-bundle checks for locked Linux directory inventory."""
+"""Real fixed-bundle checks for Linux directory inventory."""
 
 from __future__ import annotations
 
@@ -8,13 +8,12 @@ import os
 import socket
 import subprocess
 import sys
-from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from agentworks.execution._file_inventory_bundle import FIXED_LOADER
+from agentworks.execution._file_inventory_bundle import FIXED_LOADER, FIXED_SOURCE
 from agentworks.execution._file_inventory_exchange import (
     FileInventoryCandidateResult,
     FileInventoryObservationState,
@@ -94,36 +93,6 @@ def plan() -> IdentityPlan:
     )
 
 
-def _provision_lock_root(path: Path) -> Path:
-    lock_root = path / "lock-root"
-    lock_root.mkdir(mode=0o700)
-    current = lock_root
-    for component in ("var", "lib", "agentworks", "execution"):
-        current = current / component
-        current.mkdir(mode=0o700)
-    lock = current / "files.lock"
-    lock.touch(mode=0o444)
-    lock.chmod(0o444)
-    return lock_root
-
-
-def _fixture_source(lock_root: Path) -> str:
-    package = "_agw_file_inventory"
-    return FIXED_LOADER + (
-        "import contextlib,os\n"
-        f"g=sys.modules[{(package + '._file_inventory_guest')!r}]\n"
-        f"l=sys.modules[{(package + '._file_lock')!r}]\n"
-        "@contextlib.contextmanager\n"
-        "def fixture_lock(*,expires_at):\n"
-        f" d=os.open({str(lock_root)!r},os.O_PATH|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)\n"
-        " try:\n"
-        f"  with l._file_lock_at_root(d,{os.geteuid()},expires_at=expires_at):yield\n"
-        " finally:os.close(d)\n"
-        "g.system_file_lock=fixture_lock\n"
-        f"raise SystemExit(g.main(sys.argv[1]))\n"
-    )
-
-
 def _list(
     root: Path,
     relative: str,
@@ -136,8 +105,6 @@ def _list(
     max_encoded_bytes: int = 65_536,
 ) -> tuple[LocalCarrier, FileInventoryCandidateResult]:
     carrier = LocalCarrier()
-    # Production request and argv stay intact. The fixed fixture source redirects
-    # only the protected lock namespace to an owned temporary hierarchy.
     with patch("agentworks.execution._file_inventory_exchange.FIXED_SOURCE", source):
         result = list_directory(
             carrier,
@@ -159,7 +126,6 @@ def test_isolated_bundle_lists_sorted_utf8_metadata_without_content_reads(
 ) -> None:
     if not runtime.is_file():
         pytest.skip(f"compatibility interpreter is unavailable: {runtime}")
-    lock_root = _provision_lock_root(tmp_path)
     approved = tmp_path / "approved"
     target = approved / "target"
     nested = target / "nested"
@@ -169,7 +135,7 @@ def test_isolated_bundle_lists_sorted_utf8_metadata_without_content_reads(
     private.chmod(0)
     (nested / "child").write_bytes(b"child")
     try:
-        carrier, result = _list(approved, "target", plan, _fixture_source(lock_root), runtime=runtime)
+        carrier, result = _list(approved, "target", plan, FIXED_SOURCE, runtime=runtime)
     finally:
         private.chmod(0o600)
 
@@ -191,7 +157,7 @@ def test_isolated_bundle_lists_sorted_utf8_metadata_without_content_reads(
 
 
 def test_empty_directory_and_missing_target_are_distinct_complete_outcomes(tmp_path: Path, plan: IdentityPlan) -> None:
-    source = _fixture_source(_provision_lock_root(tmp_path))
+    source = FIXED_SOURCE
     approved = tmp_path / "approved"
     (approved / "empty").mkdir(parents=True)
 
@@ -207,7 +173,7 @@ def test_empty_directory_and_missing_target_are_distinct_complete_outcomes(tmp_p
 
 @pytest.mark.parametrize("object_kind", ["symlink", "hardlink", "fifo"])
 def test_helper_refuses_links_and_special_entries(tmp_path: Path, plan: IdentityPlan, object_kind: str) -> None:
-    source = _fixture_source(_provision_lock_root(tmp_path))
+    source = FIXED_SOURCE
     approved = tmp_path / "approved"
     target = approved / "target"
     target.mkdir(parents=True)
@@ -227,7 +193,7 @@ def test_helper_refuses_links_and_special_entries(tmp_path: Path, plan: Identity
 
 
 def test_helper_observes_socket_metadata(tmp_path: Path, plan: IdentityPlan) -> None:
-    source = _fixture_source(_provision_lock_root(tmp_path))
+    source = FIXED_SOURCE
     approved = tmp_path / "approved"
     target = approved / "target"
     target.mkdir(parents=True)
@@ -247,7 +213,7 @@ def test_helper_observes_socket_metadata(tmp_path: Path, plan: IdentityPlan) -> 
 def test_helper_refuses_target_mount_crossing(tmp_path: Path, plan: IdentityPlan) -> None:
     if not Path("/proc").is_dir():
         pytest.skip("procfs fixture is unavailable")
-    source = _fixture_source(_provision_lock_root(tmp_path))
+    source = FIXED_SOURCE
 
     _, result = _list(Path("/"), "proc", plan, source, runtime=Path(sys.executable))
 
@@ -256,7 +222,7 @@ def test_helper_refuses_target_mount_crossing(tmp_path: Path, plan: IdentityPlan
 
 
 def test_helper_enforces_requested_depth_entry_and_encoded_bounds(tmp_path: Path, plan: IdentityPlan) -> None:
-    source = _fixture_source(_provision_lock_root(tmp_path))
+    source = FIXED_SOURCE
     approved = tmp_path / "approved"
     target = approved / "target"
     nested = target / "nested"
@@ -303,7 +269,7 @@ def _decode_records(nonce: str, data: bytes) -> list[FileRecord]:
     return records
 
 
-def test_identity_mismatch_precedes_lock_and_target_io(
+def test_identity_mismatch_precedes_target_io(
     tmp_path: Path, plan: IdentityPlan, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from agentworks.execution import _file_inventory_guest as guest
@@ -312,7 +278,6 @@ def test_identity_mismatch_precedes_lock_and_target_io(
     reads = [prepared, b""]
     written = bytearray()
     monkeypatch.setattr(guest, "matches_current_identity", lambda _expected: False)
-    monkeypatch.setattr(guest, "system_file_lock", lambda **_kwargs: pytest.fail("lock was accessed"))
     monkeypatch.setattr(guest, "open_linux_root", lambda _path: pytest.fail("target was accessed"))
     monkeypatch.setattr(os, "read", lambda _fd, _size: reads.pop(0))
     monkeypatch.setattr(os, "write", lambda _fd, data: written.extend(data) or len(data))
@@ -321,86 +286,6 @@ def test_identity_mismatch_precedes_lock_and_target_io(
     records = _decode_records("0" * 32, bytes(written))
     assert [record.kind for record in records] == [FileRecordKind.FAILED, FileRecordKind.FINISHED]
     assert parse_file_inventory_failure(records[0].body) is FileInventoryFailureCode.IDENTITY_MISMATCH
-
-
-def test_lock_releases_before_any_snapshot_frame(
-    tmp_path: Path, plan: IdentityPlan, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from agentworks.execution import _file_inventory_guest as guest
-
-    prepared = _prepared_request(plan, tmp_path)
-    reads = [prepared, b""]
-    written = bytearray()
-    locked = False
-
-    @contextmanager
-    def fixture_lock(*, expires_at: float | None):
-        nonlocal locked
-        assert expires_at is not None
-        locked = True
-        try:
-            yield
-        finally:
-            locked = False
-
-    def snapshot(_request: FileInventoryRequest, _expires_at: float | None) -> bytes:
-        assert locked
-        return b"[]"
-
-    def write(_fd: int, data: memoryview) -> int:
-        assert not locked
-        written.extend(data)
-        return len(data)
-
-    monkeypatch.setattr(guest, "matches_current_identity", lambda _expected: True)
-    monkeypatch.setattr(guest, "system_file_lock", fixture_lock)
-    monkeypatch.setattr(guest, "_snapshot", snapshot)
-    monkeypatch.setattr(os, "read", lambda _fd, _size: reads.pop(0))
-    monkeypatch.setattr(os, "write", write)
-
-    assert guest.main("0" * 32) == 0
-    records = _decode_records("0" * 32, bytes(written))
-    assert [record.kind for record in records] == [
-        FileRecordKind.DATA,
-        FileRecordKind.RESULT,
-        FileRecordKind.FINISHED,
-    ]
-
-
-@pytest.mark.parametrize(
-    ("lock_kind", "failure_code"),
-    [
-        ("MISSING", FileInventoryFailureCode.LOCK_MISSING),
-        ("UNSAFE", FileInventoryFailureCode.LOCK_UNSAFE),
-        ("DEADLINE", FileInventoryFailureCode.LOCK_DEADLINE),
-    ],
-)
-def test_lock_refusals_emit_no_inventory_bytes(
-    tmp_path: Path,
-    plan: IdentityPlan,
-    monkeypatch: pytest.MonkeyPatch,
-    lock_kind: str,
-    failure_code: FileInventoryFailureCode,
-) -> None:
-    from agentworks.execution import _file_inventory_guest as guest
-    from agentworks.execution._file_lock import FileLockError, FileLockFailureKind
-
-    def refusing_lock(*, expires_at: float | None):
-        del expires_at
-        raise FileLockError(FileLockFailureKind[lock_kind])
-
-    prepared = _prepared_request(plan, tmp_path)
-    reads = [prepared, b""]
-    written = bytearray()
-    monkeypatch.setattr(guest, "matches_current_identity", lambda _expected: True)
-    monkeypatch.setattr(guest, "system_file_lock", refusing_lock)
-    monkeypatch.setattr(os, "read", lambda _fd, _size: reads.pop(0))
-    monkeypatch.setattr(os, "write", lambda _fd, data: written.extend(data) or len(data))
-
-    assert guest.main("0" * 32) == 0
-    records = _decode_records("0" * 32, bytes(written))
-    assert [record.kind for record in records] == [FileRecordKind.FAILED, FileRecordKind.FINISHED]
-    assert parse_file_inventory_failure(records[0].body) is failure_code
 
 
 def test_owned_descriptors_close_on_control_interruption(
@@ -445,7 +330,7 @@ def test_maximum_framed_candidate_fits_qemu_7_2_capture_as_local_sizing_evidence
 def test_complete_proxmox_envelope_fits_and_delivers_real_helper_response(
     tmp_path: Path, plan: IdentityPlan, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source = _fixture_source(_provision_lock_root(tmp_path))
+    source = FIXED_SOURCE
     approved = tmp_path / "approved"
     target = approved / "target"
     target.mkdir(parents=True)

@@ -78,7 +78,7 @@ def spool_snapshot(
 ) -> SpoolSnapshot | None:
     """Copy one held regular source into ready scratch using bounded chunks.
 
-    The caller owns both borrowed descriptors and its cooperating-writer lock,
+    The caller owns both borrowed descriptors and operation serialization,
     and retains ``token`` and ``identity`` for lost-reply reconciliation.
     ``None`` means initial source absence. A failure after scratch creation
     makes one exact cleanup attempt outside the expired operation budget.

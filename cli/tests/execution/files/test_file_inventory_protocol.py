@@ -24,12 +24,10 @@ from agentworks.execution._file_inventory_protocol import (
     MAX_ENCODED_BYTES,
     MAX_ENTRIES,
     FileInventoryControlError,
-    FileInventoryFailureCode,
     FileInventoryRequest,
     FileInventoryRequestError,
     FileInventoryResultControl,
     decode_file_inventory_request,
-    encode_file_inventory_failure,
     encode_file_inventory_request,
     encode_file_inventory_result,
     parse_file_inventory_entries,
@@ -178,10 +176,6 @@ def test_request_decoder_does_not_retain_invalid_utf8_path_bytes() -> None:
 def test_result_and_failure_controls_are_canonical_and_closed() -> None:
     result = FileInventoryResultControl(2, hashlib.sha256(b"[]").digest())
     assert parse_file_inventory_result(encode_file_inventory_result(result), 2) == result
-    assert (
-        parse_file_inventory_failure(encode_file_inventory_failure(FileInventoryFailureCode.LOCK_MISSING))
-        is FileInventoryFailureCode.LOCK_MISSING
-    )
 
     for body in (b'{"length":2}', b'{"digest":"0","length":2}', b'{"code":"unknown"}', b'{ "code":"io"}'):
         with pytest.raises(FileInventoryControlError):

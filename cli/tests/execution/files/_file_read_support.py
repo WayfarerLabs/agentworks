@@ -1,4 +1,4 @@
-"""Test-only fixed-lock helper composition for file-read integration checks."""
+"""Test-only helper composition for file-read integration checks."""
 
 from __future__ import annotations
 
@@ -19,8 +19,6 @@ from agentworks.execution.carrier import (
 from agentworks.execution.carriers._subprocess import run_process
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     import pytest
 
 _PACKAGE = "_agw_file_read"
@@ -29,43 +27,24 @@ _MODULE_NAMES = (
     "_file_stat",
     "_file_paths",
     "_file_snapshot",
-    "_file_lock",
     "_file_wire",
     "_file_read_protocol",
     "_file_read_guest",
 )
 
 
-def fixed_lock_source(root: Path, guest_patch: str = "") -> str:
+def fixture_source(guest_patch: str = "") -> str:
     entry = f"""
-import contextlib,os,sys
-@contextlib.contextmanager
-def fixed_test_lock(*,expires_at):
- root_fd=os.open({str(root)!r},os.O_PATH|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
- try:
-  with sys.modules[{(_PACKAGE + "._file_lock")!r}]._file_lock_at_root(root_fd,os.getuid(),expires_at=expires_at):
-   yield
- finally:
-  os.close(root_fd)
+import sys
 guest=sys.modules[{(_PACKAGE + "._file_read_guest")!r}]
-guest.system_file_lock=fixed_test_lock
 {textwrap.dedent(guest_patch)}
 raise SystemExit(guest.main(sys.argv[1]))
 """
     return build_helper_modules(_PACKAGE, _MODULE_NAMES) + textwrap.dedent(entry)
 
 
-def install_fixed_lock_bundle(root: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    root.mkdir(mode=0o700)
-    parent = root
-    for component in ("var", "lib", "agentworks", "execution"):
-        parent = parent / component
-        parent.mkdir(mode=0o700)
-    lock = parent / "files.lock"
-    lock.write_bytes(b"")
-    lock.chmod(0o444)
-    monkeypatch.setattr(_file_read, "FIXED_SOURCE", fixed_lock_source(root))
-    return root
+def install_fixture_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_file_read, "FIXED_SOURCE", fixture_source())
 
 
 class LocalCarrier:

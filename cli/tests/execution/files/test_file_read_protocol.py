@@ -416,7 +416,6 @@ def test_stderr_noise_is_rejected_without_retention(plan: IdentityPlan) -> None:
     ("kind", "failure", "expected_state"),
     [
         (FileRecordKind.ABSENT, None, FileReadObservationState.ABSENT),
-        (FileRecordKind.FAILED, FileReadFailure.LOCK_UNSAFE, FileReadObservationState.REFUSED),
     ],
 )
 def test_absence_and_refusal_are_complete_typed_outcomes(

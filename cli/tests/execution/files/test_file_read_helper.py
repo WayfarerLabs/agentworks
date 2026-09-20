@@ -19,14 +19,9 @@ from agentworks.execution._file_read_protocol import FileReadFailure
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution.carrier import Deadline, ExitStatus
-from tests.execution.files._file_read_support import LocalCarrier, install_fixed_lock_bundle
+from tests.execution.files._file_read_support import LocalCarrier
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the file-read helper candidate requires Linux")
-
-
-@pytest.fixture(autouse=True)
-def fixed_lock_bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    return install_fixed_lock_bundle(tmp_path / "lock-root", monkeypatch)
 
 
 @pytest.fixture

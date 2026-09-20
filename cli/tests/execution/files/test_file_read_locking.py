@@ -1,4 +1,4 @@
-"""Fixed-lock and guest-local deadline checks for the file-read helper."""
+"""Guest-local deadline and cleanup checks for the file-read helper."""
 
 from __future__ import annotations
 
@@ -9,13 +9,12 @@ from pathlib import Path
 import pytest
 
 from agentworks.execution import _file_read, _file_read_guest
-from agentworks.execution._file_lock import FileLockError, FileLockFailureKind
 from agentworks.execution._file_read import FileReadCandidateResult, FileReadObservationState, read_file
 from agentworks.execution._file_read_protocol import FileReadFailure, FileReadRequest
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution.carrier import Deadline
-from tests.execution.files._file_read_support import LocalCarrier, fixed_lock_source, install_fixed_lock_bundle
+from tests.execution.files._file_read_support import LocalCarrier, fixture_source, install_fixture_bundle
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the file-read helper candidate requires Linux")
 
@@ -29,8 +28,8 @@ def plan() -> IdentityPlan:
 
 
 @pytest.fixture(autouse=True)
-def fixed_lock_bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    return install_fixed_lock_bundle(tmp_path / "lock-root", monkeypatch)
+def fixed_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    install_fixture_bundle(monkeypatch)
 
 
 def _read(
@@ -52,12 +51,7 @@ def _read(
     )
 
 
-def test_identity_mismatch_precedes_a_missing_system_lock(
-    tmp_path: Path,
-    plan: IdentityPlan,
-    fixed_lock_bundle: Path,
-) -> None:
-    (fixed_lock_bundle / "var/lib/agentworks/execution/files.lock").unlink()
+def test_identity_mismatch_precedes_target_access(tmp_path: Path, plan: IdentityPlan) -> None:
     expected = plan.expected
     mismatched = IdentityPlan(
         IdentityExpectation(expected.euid + 100_000, expected.egid, expected.groups),
@@ -70,56 +64,9 @@ def test_identity_mismatch_precedes_a_missing_system_lock(
     assert result.observation.failure is FileReadFailure.IDENTITY_MISMATCH
 
 
-@pytest.mark.parametrize("lock_state", ["missing", "unsafe"])
-def test_missing_or_unsafe_system_lock_refuses_before_absent_target_observation(
-    tmp_path: Path,
-    plan: IdentityPlan,
-    fixed_lock_bundle: Path,
-    lock_state: str,
-) -> None:
-    lock = fixed_lock_bundle / "var/lib/agentworks/execution/files.lock"
-    if lock_state == "missing":
-        lock.unlink()
-        expected = FileReadFailure.LOCK_MISSING
-    else:
-        lock.chmod(0o600)
-        expected = FileReadFailure.LOCK_UNSAFE
-
-    result = _read(tmp_path / "missing-root", "missing", plan)
-
-    assert result.observation.state is FileReadObservationState.REFUSED
-    assert result.observation.failure is expected
-    assert result.observation.snapshot is None
-
-
-def test_guest_deadline_while_acquiring_the_fixed_lock(
-    tmp_path: Path,
-    plan: IdentityPlan,
-    fixed_lock_bundle: Path,
-) -> None:
-    import fcntl
-
-    lock_fd = os.open(fixed_lock_bundle / "var/lib/agentworks/execution/files.lock", os.O_RDONLY)
-    fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    try:
-        result = _read(
-            tmp_path,
-            "missing",
-            plan,
-            deadline=Deadline.after(0.03),
-            carrier=LocalCarrier(dispatch_deadline=Deadline.after(5)),
-        )
-    finally:
-        os.close(lock_fd)
-
-    assert result.observation.state is FileReadObservationState.REFUSED
-    assert result.observation.failure is FileReadFailure.LOCK_DEADLINE
-
-
 def test_snapshot_deadline_maps_to_closed_read_refusal(
     tmp_path: Path,
     plan: IdentityPlan,
-    fixed_lock_bundle: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     patch = """
@@ -127,7 +74,7 @@ def deadline_snapshot(*args,**kwargs):
  raise guest.SnapshotReadError(guest.SnapshotFailureKind.DEADLINE)
 guest.read_snapshot=deadline_snapshot
 """
-    monkeypatch.setattr(_file_read, "FIXED_SOURCE", fixed_lock_source(fixed_lock_bundle, patch))
+    monkeypatch.setattr(_file_read, "FIXED_SOURCE", fixture_source(patch))
 
     result = _read(tmp_path, "missing", plan)
 
@@ -135,29 +82,10 @@ guest.read_snapshot=deadline_snapshot
     assert result.observation.failure is FileReadFailure.DEADLINE
 
 
-@pytest.mark.parametrize(
-    ("kind", "failure"),
-    [
-        (FileLockFailureKind.UNSUPPORTED, FileReadFailure.LOCK_UNSUPPORTED),
-        (FileLockFailureKind.MISSING, FileReadFailure.LOCK_MISSING),
-        (FileLockFailureKind.UNSAFE, FileReadFailure.LOCK_UNSAFE),
-        (FileLockFailureKind.CONFLICT, FileReadFailure.LOCK_CONFLICT),
-        (FileLockFailureKind.DEADLINE, FileReadFailure.LOCK_DEADLINE),
-        (FileLockFailureKind.IO, FileReadFailure.LOCK_IO),
-    ],
-)
-def test_every_lock_failure_has_a_closed_read_variant(
-    kind: FileLockFailureKind,
-    failure: FileReadFailure,
-) -> None:
-    assert _file_read_guest._failure_for_lock(FileLockError(kind)) is failure
-
-
 @pytest.mark.parametrize("present", [False, True], ids=["absence", "post-snapshot"])
 def test_final_guest_deadline_covers_absence_and_materialized_snapshot(
     tmp_path: Path,
     plan: IdentityPlan,
-    fixed_lock_bundle: Path,
     monkeypatch: pytest.MonkeyPatch,
     present: bool,
 ) -> None:
@@ -171,7 +99,7 @@ def delayed_snapshot(*args,**kwargs):
  return result
 guest._snapshot=delayed_snapshot
 """
-    monkeypatch.setattr(_file_read, "FIXED_SOURCE", fixed_lock_source(fixed_lock_bundle, patch))
+    monkeypatch.setattr(_file_read, "FIXED_SOURCE", fixture_source(patch))
 
     result = _read(
         tmp_path,
@@ -186,30 +114,8 @@ guest._snapshot=delayed_snapshot
     assert result.observation.snapshot is None
 
 
-def test_snapshot_records_are_emitted_only_after_the_fixed_lock_is_released(
-    tmp_path: Path,
-    plan: IdentityPlan,
-    fixed_lock_bundle: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_read_succeeds_without_protected_lock_namespace(tmp_path: Path, plan: IdentityPlan) -> None:
     (tmp_path / "target").write_bytes(b"content")
-    patch = """
-unlocked=[False]
-base_lock=guest.system_file_lock
-@contextlib.contextmanager
-def observed_lock(*,expires_at):
- with base_lock(expires_at=expires_at):
-  yield
- unlocked[0]=True
-guest.system_file_lock=observed_lock
-real_write=guest.FileRecordWriter.write
-def checked_write(self,kind,body):
- if not unlocked[0]:
-  raise RuntimeError('protocol output while locked')
- return real_write(self,kind,body)
-guest.FileRecordWriter.write=checked_write
-"""
-    monkeypatch.setattr(_file_read, "FIXED_SOURCE", fixed_lock_source(fixed_lock_bundle, patch))
 
     result = _read(tmp_path, "target", plan)
 

@@ -1,4 +1,4 @@
-"""Real fixed-bundle checks for locked Linux metadata operations."""
+"""Real fixed-bundle checks for Linux metadata operations."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ from unittest.mock import patch
 
 import pytest
 
-from agentworks.execution._file_lock import _file_lock_at_root
 from agentworks.execution._file_metadata_bundle import FIXED_LOADER
 from agentworks.execution._file_metadata_exchange import (
     FileMetadataCandidateResult,
@@ -81,33 +80,12 @@ def plan() -> IdentityPlan:
     )
 
 
-def _provision_lock_root(path: Path) -> Path:
-    lock_root = path / "lock-root"
-    lock_root.mkdir(mode=0o700)
-    current = lock_root
-    for component in ("var", "lib", "agentworks", "execution"):
-        current = current / component
-        current.mkdir(mode=0o700)
-    lock = current / "files.lock"
-    lock.touch(mode=0o444)
-    lock.chmod(0o444)
-    return lock_root
-
-
-def _fixture_source(lock_root: Path, injection: str = "") -> str:
+def _fixture_source(injection: str = "") -> str:
     package = "_agw_file_metadata"
     return FIXED_LOADER + (
-        "import contextlib,os\n"
+        "import os\n"
         f"g=sys.modules[{(package + '._file_metadata_guest')!r}]\n"
-        f"l=sys.modules[{(package + '._file_lock')!r}]\n"
-        f"m=sys.modules[{(package + '._file_metadata')!r}]\n" + injection + "@contextlib.contextmanager\n"
-        "def fixture_lock(*,expires_at):\n"
-        f" d=os.open({str(lock_root)!r},os.O_PATH|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)\n"
-        " try:\n"
-        f"  with l._file_lock_at_root(d,{os.geteuid()},expires_at=expires_at):yield\n"
-        " finally:os.close(d)\n"
-        "g.system_file_lock=fixture_lock\n"
-        f"raise SystemExit(g.main(sys.argv[1]))\n"
+        f"m=sys.modules[{(package + '._file_metadata')!r}]\n" + injection + "raise SystemExit(g.main(sys.argv[1]))\n"
     )
 
 
@@ -176,13 +154,12 @@ def test_fixed_bundle_creates_converges_and_is_idempotent(
 ) -> None:
     if not runtime.is_file():
         pytest.skip(f"compatibility interpreter is unavailable: {runtime}")
-    lock_root = _provision_lock_root(tmp_path)
     root = tmp_path / "root"
     root.mkdir()
     existing = root / "existing"
     existing.write_bytes(b"unrelated-content")
     existing.chmod(0o600)
-    source = _fixture_source(lock_root)
+    source = _fixture_source()
 
     carrier, changed_file = _set(root, "existing", plan, source, mode=0o640, runtime=runtime)
     _, created = _ensure(root, "shared", plan, source, mode=0o3770, runtime=runtime)
@@ -201,14 +178,13 @@ def test_fixed_bundle_creates_converges_and_is_idempotent(
 
 
 def test_ensure_creates_only_final_component_and_preserves_children(tmp_path: Path, plan: IdentityPlan) -> None:
-    lock_root = _provision_lock_root(tmp_path)
     root = tmp_path / "root"
     parent = root / "parent"
     parent.mkdir(parents=True)
     child = parent / "child"
     child.write_bytes(b"child-content")
     child.chmod(0o600)
-    source = _fixture_source(lock_root)
+    source = _fixture_source()
 
     _, missing_parent = _ensure(root, "missing/final", plan, source, mode=0o755)
     _, existing_parent = _ensure(root, "parent", plan, source, mode=0o2770)
@@ -226,14 +202,13 @@ def test_missing_root_conflicting_file_socket_and_unsupported_modes_refuse(
     tmp_path: Path,
     plan: IdentityPlan,
 ) -> None:
-    lock_root = _provision_lock_root(tmp_path)
     root = tmp_path / "root"
     root.mkdir()
     regular = root / "regular"
     regular.write_bytes(b"content")
     listener = socket.socket(socket.AF_UNIX)
     listener.bind(str(root / "socket"))
-    source = _fixture_source(lock_root)
+    source = _fixture_source()
     try:
         _, missing_root = _set(tmp_path / "missing", "leaf", plan, source, mode=0o600)
         _, conflict = _ensure(root, "regular", plan, source, mode=0o755)
@@ -252,13 +227,13 @@ def test_missing_root_conflicting_file_socket_and_unsupported_modes_refuse(
     assert regular.read_bytes() == b"content"
 
 
-def test_identity_mismatch_precedes_lock_and_target_access(tmp_path: Path, plan: IdentityPlan) -> None:
+def test_identity_mismatch_precedes_target_access(tmp_path: Path, plan: IdentityPlan) -> None:
     carrier = LocalCarrier()
     mismatched = IdentityPlan(
         IdentityExpectation((plan.expected.euid + 1) % (2**32), plan.expected.egid, plan.expected.groups),
         IdentityMode.DIRECT,
     )
-    with patch("agentworks.execution._file_metadata_exchange.FIXED_SOURCE", _fixture_source(tmp_path / "absent-lock")):
+    with patch("agentworks.execution._file_metadata_exchange.FIXED_SOURCE", _fixture_source()):
         result = set_file_metadata(
             carrier,
             trusted_root_path=str(tmp_path / "absent-target"),
@@ -278,75 +253,10 @@ def test_identity_mismatch_precedes_lock_and_target_access(tmp_path: Path, plan:
     assert not (tmp_path / "absent-target").exists()
 
 
-def test_lock_contention_obeys_deadline_and_releases_for_next_attempt(tmp_path: Path, plan: IdentityPlan) -> None:
-    lock_root = _provision_lock_root(tmp_path)
-    root = tmp_path / "root"
-    root.mkdir()
-    target = root / "target"
-    target.write_bytes(b"content")
-    target.chmod(0o600)
-    source = _fixture_source(lock_root)
-    lock_root_fd = os.open(lock_root, os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    try:
-        with _file_lock_at_root(lock_root_fd, os.geteuid(), expires_at=None):
-            carrier, blocked = _set(
-                root,
-                "target",
-                plan,
-                source,
-                mode=0o640,
-                deadline=0.05,
-                carrier=LocalCarrier(guest_deadline_grace=True),
-            )
-    finally:
-        os.close(lock_root_fd)
-    _, changed = _set(root, "target", plan, source, mode=0o640)
-
-    assert carrier.calls == 1
-    assert blocked.observation.state is FileMetadataObservationState.REFUSED
-    assert blocked.observation.failure is not None
-    assert blocked.observation.failure.code is FileMetadataFailureCode.LOCK_DEADLINE
-    assert stat.S_IMODE(target.stat().st_mode) == 0o640
-    assert changed.observation.state is FileMetadataObservationState.CHANGED
-
-
-def test_helper_releases_lock_before_emitting_frames(tmp_path: Path, plan: IdentityPlan) -> None:
-    lock_root = _provision_lock_root(tmp_path)
-    root = tmp_path / "root"
-    root.mkdir()
-    target = root / "target"
-    target.write_bytes(b"content")
-    target.chmod(0o600)
-    injection = (
-        "g._fixture_lock_held=False\n"
-        "base_write=g.FileRecordWriter.write\n"
-        "def checked_write(self,kind,body):\n"
-        " assert not g._fixture_lock_held\n"
-        " return base_write(self,kind,body)\n"
-        "g.FileRecordWriter.write=checked_write\n"
-    )
-    source = (
-        _fixture_source(lock_root, injection)
-        .replace(
-            "  with l._file_lock_at_root(d,",
-            "  g._fixture_lock_held=True\n  with l._file_lock_at_root(d,",
-        )
-        .replace(
-            ",expires_at=expires_at):yield\n",
-            ",expires_at=expires_at):yield\n  g._fixture_lock_held=False\n",
-        )
-    )
-
-    _, result = _set(root, "target", plan, source, mode=0o640)
-
-    assert result.observation.state is FileMetadataObservationState.CHANGED
-
-
 def test_verified_partial_creation_and_uncertain_attempt_are_not_replayed(
     tmp_path: Path,
     plan: IdentityPlan,
 ) -> None:
-    lock_root = _provision_lock_root(tmp_path)
     root = tmp_path / "root"
     root.mkdir()
     partial_injection = (
@@ -360,7 +270,7 @@ def test_verified_partial_creation_and_uncertain_attempt_are_not_replayed(
         root,
         "partial",
         plan,
-        _fixture_source(lock_root, partial_injection),
+        _fixture_source(partial_injection),
         mode=0o755,
     )
     target = root / "target"
@@ -378,7 +288,7 @@ def test_verified_partial_creation_and_uncertain_attempt_are_not_replayed(
         root,
         "target",
         plan,
-        _fixture_source(lock_root, uncertain_injection),
+        _fixture_source(uncertain_injection),
         mode=0o640,
     )
 
@@ -392,7 +302,6 @@ def test_verified_partial_creation_and_uncertain_attempt_are_not_replayed(
 
 
 def test_proc_bridge_changes_held_inode_not_replacement_name(tmp_path: Path, plan: IdentityPlan) -> None:
-    lock_root = _provision_lock_root(tmp_path)
     root = tmp_path / "root"
     root.mkdir()
     target = root / "target"
@@ -412,7 +321,7 @@ def test_proc_bridge_changes_held_inode_not_replacement_name(tmp_path: Path, pla
         "m.os.chmod=replacing_chmod\n"
     )
 
-    _, result = _set(root, "target", plan, _fixture_source(lock_root, injection), mode=0o640)
+    _, result = _set(root, "target", plan, _fixture_source(injection), mode=0o640)
 
     assert result.observation.state is FileMetadataObservationState.PARTIAL
     assert retained.stat().st_ino == old_inode
@@ -421,7 +330,7 @@ def test_proc_bridge_changes_held_inode_not_replacement_name(tmp_path: Path, pla
     assert stat.S_IMODE(target.stat().st_mode) == 0o644
 
 
-def test_missing_lock_is_deterministic_refusal_without_production_setup(
+def test_metadata_mutation_succeeds_without_protected_lock_namespace(
     tmp_path: Path,
     plan: IdentityPlan,
 ) -> None:
@@ -429,17 +338,11 @@ def test_missing_lock_is_deterministic_refusal_without_production_setup(
     root.mkdir()
     target = root / "target"
     target.write_bytes(b"content")
-    initial_mode = stat.S_IMODE(target.stat().st_mode)
-    missing_lock_root = tmp_path / "missing-lock-root"
-    missing_lock_root.mkdir()
+    target.chmod(0o600)
+    _, result = _set(root, "target", plan, _fixture_source(), mode=0o640)
 
-    _, result = _set(root, "target", plan, _fixture_source(missing_lock_root), mode=0o640)
-
-    assert result.observation.state is FileMetadataObservationState.REFUSED
-    assert result.observation.failure is not None
-    assert result.observation.failure.code is FileMetadataFailureCode.LOCK_MISSING
-    assert stat.S_IMODE(target.stat().st_mode) == initial_mode
-    assert not tuple(missing_lock_root.iterdir())
+    assert result.observation.state is FileMetadataObservationState.CHANGED
+    assert stat.S_IMODE(target.stat().st_mode) == 0o640
 
 
 def test_complete_proxmox_post_fits_provider_bound_and_returns_typed_refusal(

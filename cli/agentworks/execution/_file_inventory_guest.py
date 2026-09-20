@@ -1,4 +1,4 @@
-"""Destination entry point for one locked bounded Linux directory inventory."""
+"""Destination entry point for one bounded Linux directory inventory."""
 
 from __future__ import annotations
 
@@ -20,7 +20,6 @@ from ._file_inventory_protocol import (
     encode_file_inventory_failure,
     encode_file_inventory_result,
 )
-from ._file_lock import FileLockError, FileLockFailureKind, system_file_lock
 from ._file_paths import ConfinedOpenError, open_linux_confined, open_linux_root
 from ._file_wire import MAX_RECORD_BODY_BYTES, FileRecordKind, FileRecordWriter
 from ._helper_identity import matches_current_identity
@@ -48,17 +47,6 @@ def _read_request() -> FileInventoryRequest:
             break
         data.extend(chunk)
     return decode_file_inventory_request(bytes(data))
-
-
-def _lock_failure(error: FileLockError) -> FileInventoryFailureCode:
-    return {
-        FileLockFailureKind.UNSUPPORTED: FileInventoryFailureCode.LOCK_UNSUPPORTED,
-        FileLockFailureKind.MISSING: FileInventoryFailureCode.LOCK_MISSING,
-        FileLockFailureKind.UNSAFE: FileInventoryFailureCode.LOCK_UNSAFE,
-        FileLockFailureKind.CONFLICT: FileInventoryFailureCode.LOCK_CONFLICT,
-        FileLockFailureKind.DEADLINE: FileInventoryFailureCode.LOCK_DEADLINE,
-        FileLockFailureKind.IO: FileInventoryFailureCode.LOCK_IO,
-    }[error.kind]
 
 
 def _inventory_failure(error: FileInventoryError) -> FileInventoryFailureCode:
@@ -147,11 +135,8 @@ def main(nonce: str) -> int:
         return _finish_failure(writer, FileInventoryFailureCode.IDENTITY_MISMATCH)
     try:
         expires_at = _expires_at(request.remaining_seconds)
-        with system_file_lock(expires_at=expires_at):
-            snapshot = _snapshot(request, expires_at)
-            _raise_if_expired(expires_at)
-    except FileLockError as error:
-        return _finish_failure(writer, _lock_failure(error))
+        snapshot = _snapshot(request, expires_at)
+        _raise_if_expired(expires_at)
     except _SafeFailure as error:
         return _finish_failure(writer, error.failure)
     if snapshot is None:

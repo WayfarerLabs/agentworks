@@ -1,4 +1,4 @@
-"""Destination entry point for one locked private stage operation."""
+"""Destination entry point for one private stage operation."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import sys
 import time
 from contextlib import suppress
 
-from ._file_lock import FileLockError, FileLockFailureKind, system_file_lock
 from ._file_paths import ConfinedOpenError, open_linux_confined, open_linux_root
 from ._file_stage_protocol import (
     MAX_REQUEST_BYTES,
@@ -70,18 +69,6 @@ def _expires_at(remaining_seconds: float | None) -> float | None:
 
 def _expired(expires_at: float | None) -> bool:
     return expires_at is not None and time.monotonic() >= expires_at
-
-
-def _lock_failure(error: FileLockError) -> FileStageFailureControl:
-    code = {
-        FileLockFailureKind.UNSUPPORTED: FileStageFailureCode.LOCK_UNSUPPORTED,
-        FileLockFailureKind.MISSING: FileStageFailureCode.LOCK_MISSING,
-        FileLockFailureKind.UNSAFE: FileStageFailureCode.LOCK_UNSAFE,
-        FileLockFailureKind.CONFLICT: FileStageFailureCode.LOCK_CONFLICT,
-        FileLockFailureKind.DEADLINE: FileStageFailureCode.LOCK_DEADLINE,
-        FileLockFailureKind.IO: FileStageFailureCode.LOCK_IO,
-    }[error.kind]
-    return FileStageFailureControl(code)
 
 
 def _scratch_failure(error: ScratchTransferError) -> FileStageFailureControl:
@@ -219,18 +206,14 @@ def main(nonce: str) -> int:
     failure: FileStageFailureControl | None = None
     result: _OperationResult = None
     try:
-        with system_file_lock(expires_at=expires_at):
-            try:
-                result = _operate(request, expires_at)
-            except _SafeFailure as error:
-                failure = error.failure
-    except FileLockError as error:
-        return _finish_failure(writer, _lock_failure(error))
+        result = _operate(request, expires_at)
+    except _SafeFailure as error:
+        failure = error.failure
     if _expired(expires_at):
         if failure is None:
             failure = _deadline_failure(request, result)
         elif failure.code in {FileStageFailureCode.ROOT_REFUSED, FileStageFailureCode.PARENT_REFUSED}:
-            failure = FileStageFailureControl(FileStageFailureCode.LOCK_DEADLINE)
+            failure = FileStageFailureControl(FileStageFailureCode.DEADLINE)
     if failure is not None:
         return _finish_failure(writer, failure)
     if isinstance(request, FileStageBeginRequest):

@@ -171,7 +171,7 @@ def publish_file(
 ) -> FileRevision:
     """Publish bytes or verified scratch under one explicit write condition.
 
-    The parent and cooperating-writer lock are borrowed. Replacement preserves
+    The parent and operation serialization are borrowed. Replacement preserves
     the observed access profile and refuses a change seen before publication.
     """
     _validate_inputs(parent_fd, leaf_name, content, condition, create_metadata, expires_at)

@@ -15,7 +15,6 @@ from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution.carrier import Deadline, Dispatch, ExitStatus
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
-from tests.execution.files._file_read_support import install_fixed_lock_bundle
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -23,19 +22,12 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the file-read guest requires Linux")
 
 
-@pytest.fixture
-def fixed_lock_bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    install_fixed_lock_bundle(tmp_path / "lock-root", monkeypatch)
-
-
 @pytest.mark.parametrize("fault", [None, "truncated", "stdout_noise", "stderr_noise"])
 def test_file_read_through_buffered_proxmox_delivery(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    fixed_lock_bundle: None,
     fault: str | None,
 ) -> None:
-    del fixed_lock_bundle
     data = b"file-content-canary\x00\xff\r\n" * 1_024
     (tmp_path / "file-path-canary").write_bytes(data)
     carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.invalid", "node1", 101, "token", "synthetic"))

@@ -27,7 +27,6 @@ _MODULE_NAMES = (
     "_file_snapshot",
     "_scratch_receipt",
     "_scratch",
-    "_file_lock",
     "_file_publication",
     "_file_wire",
     "_file_read_protocol",
@@ -78,7 +77,6 @@ _SNAPSHOT_MODULE_NAMES = (
     "_scratch",
     "_file_spool",
     "_scratch_root",
-    "_file_lock",
     "_file_wire",
     "_scratch_wire",
 )

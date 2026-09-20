@@ -36,7 +36,7 @@ from agentworks.execution._scratch_receipt import _Identity, scratch_name
 from agentworks.execution.carrier import CarrierIO, Deadline, Dispatch, PreparedInvocation, SinkOutput
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 from agentworks.execution.carriers.ssh.connection import SSHConnection, build_ssh_argv
-from tests.execution.files._file_stage_support import LocalCarrier, fixed_lock_source, install_fixed_lock_bundle
+from tests.execution.files._file_stage_support import LocalCarrier, fixture_source, install_fixture_bundle
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the private stage helper candidate requires Linux")
 
@@ -78,8 +78,8 @@ def plan() -> IdentityPlan:
 
 
 @pytest.fixture(autouse=True)
-def fixed_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
-    return install_fixed_lock_bundle(tmp_path / "lock-root", monkeypatch)
+def fixed_source(monkeypatch: pytest.MonkeyPatch) -> str:
+    return install_fixture_bundle(monkeypatch)
 
 
 def _begin(
@@ -461,23 +461,12 @@ def test_reconcile_identity_mismatch_precedes_absent_root_access(tmp_path: Path,
     assert str(missing_root) not in repr(result)
 
 
-def test_missing_fixed_lock_refuses_before_root_access(tmp_path: Path, plan: IdentityPlan) -> None:
-    lock = tmp_path / "lock-root/var/lib/agentworks/execution/files.lock"
-    lock.unlink()
-
-    _, result = _begin(tmp_path / "missing-root", "destination", 1, plan)
-
-    assert result.observation.state is FileStageObservationState.REFUSED
-    assert result.observation.failure is not None
-    assert result.observation.failure.code is FileStageFailureCode.LOCK_MISSING
-
-
 def test_guest_deadline_after_missing_root_lookup_is_not_root_refusal(
     tmp_path: Path,
     plan: IdentityPlan,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    source = fixed_lock_source(tmp_path / "lock-root", _ADVANCE_AFTER_OPEN_ROOT)
+    source = fixture_source(_ADVANCE_AFTER_OPEN_ROOT)
     monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
     carrier = LocalCarrier(dispatch_deadline=Deadline.after(15))
 
@@ -492,7 +481,7 @@ def test_guest_deadline_after_missing_root_lookup_is_not_root_refusal(
 
     assert result.observation.state is FileStageObservationState.REFUSED
     assert result.observation.failure is not None
-    assert result.observation.failure.code is FileStageFailureCode.LOCK_DEADLINE
+    assert result.observation.failure.code is FileStageFailureCode.DEADLINE
     assert result.observation.failure.cleanup_debt is None
 
 
@@ -501,7 +490,7 @@ def test_reconcile_deadline_after_missing_root_lookup_is_not_absence(
     plan: IdentityPlan,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    source = fixed_lock_source(tmp_path / "lock-root", _ADVANCE_AFTER_OPEN_ROOT)
+    source = fixture_source(_ADVANCE_AFTER_OPEN_ROOT)
     monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
 
     _, result = _reconcile(
@@ -514,7 +503,7 @@ def test_reconcile_deadline_after_missing_root_lookup_is_not_absence(
 
     assert result.observation.state is FileStageObservationState.REFUSED
     assert result.observation.failure is not None
-    assert result.observation.failure.code is FileStageFailureCode.LOCK_DEADLINE
+    assert result.observation.failure.code is FileStageFailureCode.DEADLINE
     assert result.observation.cleanup_debt is None
 
 
@@ -523,7 +512,7 @@ def test_guest_deadline_after_closed_success_retains_created_cleanup_debt(
     plan: IdentityPlan,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    source = fixed_lock_source(tmp_path / "lock-root", _ADVANCE_AFTER_OPERATE)
+    source = fixture_source(_ADVANCE_AFTER_OPERATE)
     monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
     root = tmp_path / "approved"
     root.mkdir()
@@ -557,7 +546,7 @@ def test_guest_deadline_after_closed_reconcile_retains_recovered_cleanup_debt(
     root.mkdir()
     _, begun = _begin(root, "destination", 1, plan)
     assert begun.observation.state is FileStageObservationState.CREATED
-    source = fixed_lock_source(tmp_path / "lock-root", _ADVANCE_AFTER_OPERATE)
+    source = fixture_source(_ADVANCE_AFTER_OPERATE)
     monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
 
     _, result = _reconcile(
@@ -588,7 +577,7 @@ def test_cleanup_deadline_after_parent_open_refuses_before_mutation(
     debt = recovered.observation.cleanup_debt
     assert debt is not None
     scratch = root / scratch_name(_TOKEN)
-    source = fixed_lock_source(tmp_path / "lock-root", _ADVANCE_AFTER_OPEN_ROOT)
+    source = fixture_source(_ADVANCE_AFTER_OPEN_ROOT)
     monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
 
     _, result = _cleanup(
@@ -621,7 +610,7 @@ def test_guest_deadline_after_closed_cleanup_retains_original_exact_debt(
     _, recovered = _reconcile(root, "destination", plan)
     debt = recovered.observation.cleanup_debt
     assert debt is not None
-    source = fixed_lock_source(tmp_path / "lock-root", _ADVANCE_AFTER_OPERATE)
+    source = fixture_source(_ADVANCE_AFTER_OPERATE)
     monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
 
     _, result = _cleanup(
@@ -685,7 +674,7 @@ def short_write(fd,data):
  return real_write(fd,data[:max(1,len(data)//3)])
 guest.os.write=short_write
 """
-    source = fixed_lock_source(tmp_path / "lock-root", patch_source)
+    source = fixture_source(patch_source)
     monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
     root = tmp_path / "approved"
     root.mkdir()

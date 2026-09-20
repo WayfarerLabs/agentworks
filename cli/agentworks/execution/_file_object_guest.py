@@ -1,4 +1,4 @@
-"""Destination entry point for one locked Linux file-object operation."""
+"""Destination entry point for one Linux file-object operation."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import sys
 import time
 from contextlib import suppress
 
-from ._file_lock import FileLockError, FileLockFailureKind, system_file_lock
 from ._file_object_protocol import (
     MAX_REQUEST_BYTES,
     FileObjectFailureCode,
@@ -49,18 +48,6 @@ def _read_request() -> FileObjectRequest:
             break
         data.extend(chunk)
     return decode_file_object_request(bytes(data))
-
-
-def _lock_failure(error: FileLockError) -> FileObjectFailureControl:
-    code = {
-        FileLockFailureKind.UNSUPPORTED: FileObjectFailureCode.LOCK_UNSUPPORTED,
-        FileLockFailureKind.MISSING: FileObjectFailureCode.LOCK_MISSING,
-        FileLockFailureKind.UNSAFE: FileObjectFailureCode.LOCK_UNSAFE,
-        FileLockFailureKind.CONFLICT: FileObjectFailureCode.LOCK_CONFLICT,
-        FileLockFailureKind.DEADLINE: FileObjectFailureCode.LOCK_DEADLINE,
-        FileLockFailureKind.IO: FileObjectFailureCode.LOCK_IO,
-    }[error.kind]
-    return FileObjectFailureControl(code)
 
 
 def _parent(request: FileObjectRequest) -> tuple[int | None, int | None, str]:
@@ -155,10 +142,7 @@ def main(nonce: str) -> int:
         return _finish_failure(writer, FileObjectFailureControl(FileObjectFailureCode.IDENTITY_MISMATCH))
     expires_at = None if request.remaining_seconds is None else time.monotonic() + request.remaining_seconds
     try:
-        with system_file_lock(expires_at=expires_at):
-            result = _operate(request, expires_at)
-    except FileLockError as error:
-        return _finish_failure(writer, _lock_failure(error))
+        result = _operate(request, expires_at)
     except _SafeFailure as error:
         return _finish_failure(writer, error.failure)
     writer.write(FileRecordKind.RESULT, encode_file_object_result(result))

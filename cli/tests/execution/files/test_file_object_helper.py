@@ -1,4 +1,4 @@
-"""Real fixed-bundle checks for locked Linux file-object operations."""
+"""Real fixed-bundle checks for Linux file-object operations."""
 
 from __future__ import annotations
 
@@ -13,17 +13,16 @@ from unittest.mock import patch
 
 import pytest
 
-from agentworks.execution._file_object_bundle import FIXED_LOADER
+from agentworks.execution._file_object_bundle import FIXED_LOADER, FIXED_SOURCE
 from agentworks.execution._file_object_exchange import (
     FileObjectCandidateResult,
     FileObjectObservationState,
     remove_file,
     stat_file,
 )
-from agentworks.execution._file_object_protocol import FileObjectFailureCode, parse_file_object_failure
+from agentworks.execution._file_object_protocol import FileObjectFailureCode
 from agentworks.execution._file_objects import FileKind
 from agentworks.execution._file_stat import FileRevision
-from agentworks.execution._file_wire import FileRecord, FileRecordKind, FileRecordReader
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution.carrier import (
@@ -81,36 +80,6 @@ def plan() -> IdentityPlan:
     )
 
 
-def _provision_lock_root(path: Path) -> Path:
-    lock_root = path / "lock-root"
-    lock_root.mkdir(mode=0o700)
-    current = lock_root
-    for component in ("var", "lib", "agentworks", "execution"):
-        current = current / component
-        current.mkdir(mode=0o700)
-    lock = current / "files.lock"
-    lock.touch(mode=0o444)
-    lock.chmod(0o444)
-    return lock_root
-
-
-def _fixture_source(lock_root: Path) -> str:
-    package = "_agw_file_object"
-    return FIXED_LOADER + (
-        "import contextlib,os\n"
-        f"g=sys.modules[{(package + '._file_object_guest')!r}]\n"
-        f"l=sys.modules[{(package + '._file_lock')!r}]\n"
-        "@contextlib.contextmanager\n"
-        "def fixture_lock(*,expires_at):\n"
-        f" d=os.open({str(lock_root)!r},os.O_PATH|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)\n"
-        " try:\n"
-        f"  with l._file_lock_at_root(d,{os.geteuid()},expires_at=expires_at):yield\n"
-        " finally:os.close(d)\n"
-        "g.system_file_lock=fixture_lock\n"
-        f"raise SystemExit(g.main(sys.argv[1]))\n"
-    )
-
-
 def _stat(
     root: Path,
     relative: str,
@@ -120,8 +89,6 @@ def _stat(
     runtime: Path,
 ) -> tuple[LocalCarrier, FileObjectCandidateResult]:
     carrier = LocalCarrier()
-    # The production request and argv shape stay intact; only fixed test source
-    # redirects the fixed lock namespace to the owned fixture.
     with patch("agentworks.execution._file_object_exchange.FIXED_SOURCE", source):
         result = stat_file(
             carrier,
@@ -140,7 +107,6 @@ def test_isolated_bundle_stats_mode_zero_file_through_execute_only_ancestry(
 ) -> None:
     if not runtime.is_file():
         pytest.skip(f"compatibility interpreter is unavailable: {runtime}")
-    lock_root = _provision_lock_root(tmp_path)
     root = tmp_path / "execute-only"
     parent = root / "nested"
     parent.mkdir(parents=True)
@@ -150,7 +116,7 @@ def test_isolated_bundle_stats_mode_zero_file_through_execute_only_ancestry(
     root.chmod(0o111)
     parent.chmod(0o111)
     try:
-        carrier, result = _stat(root, "nested/leaf", plan, _fixture_source(lock_root), runtime=runtime)
+        carrier, result = _stat(root, "nested/leaf", plan, FIXED_SOURCE, runtime=runtime)
     finally:
         parent.chmod(0o700)
         root.chmod(0o700)
@@ -169,12 +135,11 @@ def test_isolated_bundle_stats_mode_zero_file_through_execute_only_ancestry(
 def test_remove_through_write_and_search_parent_without_read_permission(
     tmp_path: Path, plan: IdentityPlan, include_digest: bool
 ) -> None:
-    lock_root = _provision_lock_root(tmp_path)
     root = tmp_path / "write-search"
     root.mkdir()
     target = root / "target"
     target.write_bytes(b"content")
-    source = _fixture_source(lock_root)
+    source = FIXED_SOURCE
     _, observed = _stat(root, "target", plan, source, runtime=Path(sys.executable))
     assert observed.observation.revision is not None
     expected = observed.observation.revision
@@ -202,11 +167,10 @@ def test_remove_through_write_and_search_parent_without_read_permission(
     assert not target.exists()
 
 
-def test_missing_root_parent_and_leaf_are_complete_absence_after_lock(tmp_path: Path, plan: IdentityPlan) -> None:
-    lock_root = _provision_lock_root(tmp_path)
+def test_missing_root_parent_and_leaf_are_complete_absence(tmp_path: Path, plan: IdentityPlan) -> None:
     root = tmp_path / "root"
     root.mkdir()
-    source = _fixture_source(lock_root)
+    source = FIXED_SOURCE
 
     cases = ((tmp_path / "missing-root", "leaf"), (root, "missing/leaf"), (root, "leaf"))
     for candidate_root, relative in cases:
@@ -264,14 +228,13 @@ def test_root_absence_checks_guest_local_expiry_before_reporting_no_effect(
 
 
 def test_stat_reports_directory_and_socket_metadata_without_content(tmp_path: Path, plan: IdentityPlan) -> None:
-    lock_root = _provision_lock_root(tmp_path)
     root = tmp_path / "objects"
     root.mkdir()
     (root / "directory").mkdir()
     listener = socket.socket(socket.AF_UNIX)
     listener.bind(str(root / "socket"))
     try:
-        source = _fixture_source(lock_root)
+        source = FIXED_SOURCE
         for name, kind in (("directory", FileKind.DIRECTORY), ("socket", FileKind.SOCKET)):
             _, result = _stat(root, name, plan, source, runtime=Path(sys.executable))
             assert result.observation.state is FileObjectObservationState.PRESENT
@@ -279,62 +242,6 @@ def test_stat_reports_directory_and_socket_metadata_without_content(tmp_path: Pa
             assert result.observation.revision is not None and result.observation.revision.digest is None
     finally:
         listener.close()
-
-
-@pytest.mark.parametrize(
-    ("lock_kind", "failure_code"),
-    [
-        ("MISSING", FileObjectFailureCode.LOCK_MISSING),
-        ("UNSAFE", FileObjectFailureCode.LOCK_UNSAFE),
-    ],
-)
-def test_missing_and_unsafe_lock_are_complete_refusals_without_installation(
-    tmp_path: Path,
-    plan: IdentityPlan,
-    monkeypatch: pytest.MonkeyPatch,
-    lock_kind: str,
-    failure_code: FileObjectFailureCode,
-) -> None:
-    from agentworks.execution import _file_object_guest as guest
-    from agentworks.execution._file_lock import FileLockError, FileLockFailureKind
-
-    def refusing_lock(*, expires_at: float | None):
-        del expires_at
-        raise FileLockError(FileLockFailureKind[lock_kind])
-
-    monkeypatch.setattr(guest, "system_file_lock", refusing_lock)
-
-    root = tmp_path / "root"
-    root.mkdir()
-    written = bytearray()
-    from agentworks.execution._file_object_protocol import (
-        FileObjectOperation,
-        FileObjectRequest,
-        encode_file_object_request,
-    )
-
-    prepared_input = encode_file_object_request(
-        FileObjectRequest(
-            "0" * 32,
-            FileObjectOperation.STAT,
-            str(root),
-            "leaf",
-            1.0,
-            plan.expected,
-        )
-    )
-    chunks = [prepared_input, b""]
-    monkeypatch.setattr(os, "read", lambda _fd, _size: chunks.pop(0))
-    monkeypatch.setattr(os, "write", lambda _fd, data: written.extend(data) or len(data))
-    assert guest.main("0" * 32) == 0
-    records: list[FileRecord] = []
-    reader = FileRecordReader("0" * 32, records.append)
-    reader.try_write(memoryview(written))
-    reader.finish()
-    assert reader.error is None
-    assert [record.kind for record in records] == [FileRecordKind.FAILED, FileRecordKind.FINISHED]
-    assert parse_file_object_failure(records[0].body).code is failure_code
-    assert not tuple(root.iterdir())
 
 
 def test_complete_proxmox_post_fits_provider_bound_and_returns_typed_outcome(

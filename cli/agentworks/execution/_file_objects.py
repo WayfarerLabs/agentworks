@@ -1,6 +1,6 @@
 """Private Linux filesystem-object observation and conditional removal.
 
-The caller owns the trusted parent descriptor and cooperating-writer lock,
+The caller owns the trusted parent descriptor and operation serialization,
 and supplies an already-validated single leaf name.
 Linux ``openat2`` confines the exact leaf without requiring read authority.
 External writers can still race the final check and removal syscall; this

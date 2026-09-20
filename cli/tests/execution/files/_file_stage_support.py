@@ -1,4 +1,4 @@
-"""Test-only fixed-lock helper composition for private stage exchanges."""
+"""Test-only helper composition for private stage exchanges."""
 
 from __future__ import annotations
 
@@ -19,42 +19,23 @@ from agentworks.execution.carrier import (
 from agentworks.execution.carriers._subprocess import run_process
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     import pytest
 
 _PACKAGE = "_agw_file_stage"
 
 
-def fixed_lock_source(root: Path, guest_patch: str = "") -> str:
+def fixture_source(guest_patch: str = "") -> str:
     entry = f"""
-import contextlib,os,sys
-@contextlib.contextmanager
-def fixed_test_lock(*,expires_at):
- root_fd=os.open({str(root)!r},os.O_PATH|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
- try:
-  with sys.modules[{(_PACKAGE + "._file_lock")!r}]._file_lock_at_root(root_fd,os.getuid(),expires_at=expires_at):
-   yield
- finally:
-  os.close(root_fd)
+import sys
 guest=sys.modules[{(_PACKAGE + "._file_stage_guest")!r}]
-guest.system_file_lock=fixed_test_lock
 {textwrap.dedent(guest_patch)}
 raise SystemExit(guest.main(sys.argv[1]))
 """
     return FIXED_LOADER + textwrap.dedent(entry)
 
 
-def install_fixed_lock_bundle(root: Path, monkeypatch: pytest.MonkeyPatch) -> str:
-    root.mkdir(mode=0o700)
-    parent = root
-    for component in ("var", "lib", "agentworks", "execution"):
-        parent = parent / component
-        parent.mkdir(mode=0o700)
-    lock = parent / "files.lock"
-    lock.write_bytes(b"")
-    lock.chmod(0o444)
-    source = fixed_lock_source(root)
+def install_fixture_bundle(monkeypatch: pytest.MonkeyPatch) -> str:
+    source = fixture_source()
     monkeypatch.setattr(_file_stage_exchange, "FIXED_SOURCE", source)
     return source
 
