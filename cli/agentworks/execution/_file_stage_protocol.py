@@ -460,18 +460,7 @@ def encode_file_stage_reconcile_result(
 ) -> bytes:
     if isinstance(result, ScratchOwnershipUncertainty):
         return b'{"result":"ownership_uncertain"}'
-    failed = False
-    body = b""
-    try:
-        cleanup = _cleanup_debt(result)
-        if not _historical_cleanup_shape(cleanup):
-            raise ScratchWireError
-        body = _json_bytes({"cleanup": encode_cleanup_debt(cleanup), "result": "recovered"})
-    except (AttributeError, ScratchWireError, TypeError, ValueError):
-        failed = True
-    if failed:
-        raise FileStageControlError
-    return body
+    return _json_bytes({"cleanup": encode_cleanup_debt(_cleanup_debt(result)), "result": "recovered"})
 
 
 def parse_file_stage_reconcile_result(
