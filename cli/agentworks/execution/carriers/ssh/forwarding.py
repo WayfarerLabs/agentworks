@@ -14,7 +14,8 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ConnectivityError, StateError, ValidationError
 from agentworks.execution.carrier import Failure, PreparedInvocation
-from agentworks.execution.carriers.ssh._io import _child_environment, _cleanup
+from agentworks.execution.carriers._subprocess import _cleanup
+from agentworks.execution.carriers.ssh._io import _child_environment
 from agentworks.execution.carriers.ssh.client import check_client_version
 from agentworks.execution.carriers.ssh.connection import admit_connection, build_ssh_argv
 
