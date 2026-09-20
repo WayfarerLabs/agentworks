@@ -895,6 +895,53 @@ def test_same_iteration_pending_transition_stops_fresh_other_stream_read(
     assert_closed(children)
 
 
+@pytest.mark.skipif(
+    os.name == "nt" or not all(hasattr(os, name) for name in ("waitid", "P_PID", "WEXITED", "WNOWAIT")),
+    reason="deterministic non-reaping exit observation requires POSIX waitid WNOWAIT",
+)
+def test_alternating_post_exit_backpressure_spends_collection_budget(
+    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class AlternatingSink:
+        def __init__(self, *, stall_first: bool) -> None:
+            self.stall_next = stall_first
+            self.calls = 0
+
+        def try_write(self, data: memoryview) -> int | None:
+            self.calls += 1
+            should_stall = self.stall_next
+            self.stall_next = not self.stall_next
+            return None if should_stall else len(data)
+
+    spawn = subprocess.Popen
+    read = os.read
+    output_fds: set[int] = set()
+
+    def completed_start(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        process = spawn(argv, **kwargs)
+        assert process.stdout is not None and process.stderr is not None
+        output_fds.update((process.stdout.fileno(), process.stderr.fileno()))
+        os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT)
+        return process
+
+    def continuously_ready_read(fd: int, size: int) -> bytes:
+        if fd in output_fds:
+            return b"x"
+        return read(fd, size)
+
+    stdout = AlternatingSink(stall_first=False)
+    stderr = AlternatingSink(stall_first=True)
+    monkeypatch.setattr(subprocess, "Popen", completed_start)
+    monkeypatch.setattr(os, "read", continuously_ready_read)
+    result = execute("pass", io=CarrierIO(output=SinkOutput(stdout, stderr)), seconds=1)
+
+    assert result.local_status == result.exit_status == 0
+    assert result.failure == Failure.OUTPUT
+    assert stdout.calls > 1 and stderr.calls > 1
+    assert not result.stdout.complete and not result.stderr.complete
+    assert_closed(children)
+
+
 @pytest.mark.parametrize(
     ("stall_seconds", "deadline_seconds", "expected_failure"),
     [(0.3, 2.0, Failure.OUTPUT), (None, 0.5, Failure.DEADLINE)],
