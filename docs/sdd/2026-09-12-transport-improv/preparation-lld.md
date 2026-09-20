@@ -345,6 +345,15 @@ it does not define a second numbered-part bootstrap or an independent chunk size
 also reuse the substrate without exposing command access. Neither use grants the recipient public
 `run`.
 
+The private `_scratch.py` increment implements these destination-side object operations beneath a
+borrowed parent descriptor, including exact duplicate comparison, whole-object verification and
+identity-bound cleanup debt. It does not yet carry requests over a carrier, validate reconstructed
+wire references, deploy helpers or integrate execution preparation. Its fresh-interpreter fixture
+reconstructs scalar facts only in test code; it is not a production serializer. Known acquisition
+facts survive handled creation interruptions, but Python bookkeeping is not signal-atomic and
+filesystem calls have no hard interruption bound. Native macOS, concurrency composition and
+whole-request QGA bounds remain separate gates.
+
 Chunks use a conservative 24 KiB raw bound, an exact offset, total expected length, chunk SHA-256,
 and whole-object SHA-256. A lost chunk acknowledgement permits another control request only after
 the owned scratch identity and fixed range make the write demonstrably idempotent. Blind append,

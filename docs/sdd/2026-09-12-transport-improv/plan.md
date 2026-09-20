@@ -239,9 +239,9 @@ bounded evidence record. The experiment no longer forces Python's private launch
 observes the route and actual session creation under local CPython 3.12.13 and Debian 3.11.2. The
 focused suite passes 81 tests with one skip. This head also gives the oversized live-input fixture
 short parameter IDs: Windows CI at `4cf5261f` could not set pytest's environment variable for its
-65,634-character generated test identifier. The input and assertions remain unchanged. Fresh hosted
-Windows verification is pending; no production-launch or native-platform gate is closed by this test
-correction.
+65,634-character generated test identifier. The input and assertions remain unchanged. All hosted
+checks subsequently pass at `e6860525`, including Windows Python 3.13 and Linux Python
+3.12/3.13/3.14; no production-launch or native-platform gate is closed by this test correction.
 
 SSH's implementation at `174187d2` includes transport `a885ef5a` and adopts the reviewed finite
 subprocess pump. Its owner has separately supplied the buffered compatibility guard integrated here.

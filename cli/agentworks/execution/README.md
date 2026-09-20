@@ -187,3 +187,28 @@ acceptance remain open.
 Atomic visibility does not imply directory-entry crash durability, an external-writer
 compare-and-swap guarantee or a hard filesystem deadline. Native-platform acceptance and the
 complete file service remain separate work.
+
+## Private scratch transfer
+
+`_scratch.py` supplies POSIX destination-side scratch operations beneath a borrowed trusted parent
+descriptor. Each object has an unpredictable private directory and one fixed data file, with final
+modes 0700 and 0600. An identity-bound private reference carries its declared length and SHA-256.
+Operations reopen and check the recorded objects; observed replacement, links, special objects or
+changed ownership/mode refuse. The caller owns confinement and coordination between writers.
+
+Writes use bounded exact offsets and a chunk digest. An exact previously written range may be
+retried after comparing its bytes; gaps, conflicting duplicates and partially overlapping chunks
+refuse. Whole-object length and digest verification precedes bounded reads. The 24 KiB raw chunk
+limit is an internal candidate, not evidence that a complete encoded carrier request fits.
+
+Cleanup removes only the recorded data object and empty directory, never unknown neighboring objects
+or a recursive prefix match. Errors retain closed facts and unresolved identity-bound cleanup debt.
+Creation preserves known acquisition facts through handled control-flow interruption; an unresolved
+debt is attached as a closed error cause while the original control exception propagates. Python
+ownership bookkeeping is not signal-atomic and repeated interruption is not a bounded cleanup
+guarantee.
+
+This primitive does not implement remote request validation, a wire protocol, helper deployment,
+execution staging or FileAccess. Filesystem calls have no hard interruption bound, and no crash
+durability or hostile same-user race guarantee is made. Local Linux fixtures are not native macOS or
+carrier acceptance.
