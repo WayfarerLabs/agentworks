@@ -15,9 +15,13 @@ import os
 import stat
 import sys
 import time
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 from ._file_paths import (
     ConfinedOpenError,
@@ -71,6 +75,30 @@ class FileSnapshot:
         digest = self.revision.digest
         assert digest is not None
         return digest
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class _HeldRegularFile:
+    """One confined source descriptor and its stable initial observation."""
+
+    descriptor: int
+    parent_fd: int
+    leaf_name: str
+    stat: FileStat
+
+    def read(self, maximum: int, *, expires_at: float | None) -> bytes:
+        _check_deadline(expires_at)
+        result = _read(self.descriptor, maximum)
+        _check_deadline(expires_at)
+        return result
+
+    def verify(self, *, expires_at: float | None) -> None:
+        _check_deadline(expires_at)
+        held = _snapshot_stat(_fstat(self.descriptor))
+        named = _path_snapshot_stat(self.parent_fd, self.leaf_name)
+        if held != self.stat or named != self.stat:
+            raise SnapshotReadError(SnapshotFailureKind.CONFLICT)
+        _check_deadline(expires_at)
 
 
 def read_snapshot(
@@ -134,6 +162,55 @@ def _read_regular_file(
     collect_content: bool,
     expires_at: float | None,
 ) -> FileSnapshot | FileRevision | None:
+    stat_only = not include_digest and not collect_content
+    with _hold_regular_file(
+        trusted_root_fd,
+        components,
+        max_bytes=max_bytes,
+        stat_only=stat_only,
+        expires_at=expires_at,
+    ) as held:
+        if held is None:
+            return None
+
+        content = bytearray() if collect_content else None
+        content_hash = hashlib.sha256() if include_digest else None
+        observed_size = 0
+        if include_digest or collect_content:
+            while True:
+                request_size = _READ_CHUNK_BYTES
+                if max_bytes is not None:
+                    request_size = min(request_size, max_bytes - observed_size + 1)
+                chunk = held.read(request_size, expires_at=expires_at)
+                if not chunk:
+                    break
+                observed_size += len(chunk)
+                if max_bytes is not None and observed_size > max_bytes:
+                    raise SnapshotReadError(SnapshotFailureKind.LIMIT)
+                if content is not None:
+                    content.extend(chunk)
+                if content_hash is not None:
+                    content_hash.update(chunk)
+
+        held.verify(expires_at=expires_at)
+        if include_digest and observed_size != held.stat.size:
+            raise SnapshotReadError(SnapshotFailureKind.CONFLICT)
+        revision = FileRevision(held.stat, None if content_hash is None else content_hash.digest())
+        if content is None:
+            return revision
+        return FileSnapshot(data=bytes(content), revision=revision)
+
+
+@contextmanager
+def _hold_regular_file(
+    trusted_root_fd: int,
+    components: tuple[str, ...],
+    *,
+    max_bytes: int | None,
+    stat_only: bool,
+    expires_at: float | None,
+) -> Iterator[_HeldRegularFile | None]:
+    """Borrow one stable confined regular leaf while owning descendant descriptors."""
     if not _DESCRIPTOR_OPERATIONS_AVAILABLE:
         raise SnapshotReadError(SnapshotFailureKind.IO)
 
@@ -142,15 +219,16 @@ def _read_regular_file(
     if not stat.S_ISDIR(root_stat.st_mode):
         raise SnapshotReadError(SnapshotFailureKind.UNSUPPORTED_OBJECT)
     root_device = root_stat.st_dev
-
     parent_fd = trusted_root_fd
     parent_owned = False
+    leaf_fd: int | None = None
     try:
         for component in components[:-1]:
             _check_deadline(expires_at)
             child_fd = _open_at(parent_fd, component, directory=True)
             if child_fd is None:
-                return None
+                yield None
+                return
             previous_fd = parent_fd if parent_owned else None
             parent_fd = child_fd
             parent_owned = True
@@ -160,34 +238,30 @@ def _read_regular_file(
             if not stat.S_ISDIR(child_stat.st_mode) or child_stat.st_dev != root_device:
                 raise SnapshotReadError(SnapshotFailureKind.UNSUPPORTED_OBJECT)
 
-        expected = _path_snapshot_stat(parent_fd, components[-1])
+        leaf_name = components[-1]
+        expected = _path_snapshot_stat(parent_fd, leaf_name)
         if expected is None:
-            return None
+            yield None
+            return
         if not _is_supported_leaf(expected, root_device):
             raise SnapshotReadError(SnapshotFailureKind.UNSUPPORTED_OBJECT)
         if max_bytes is not None and expected.size > max_bytes:
             raise SnapshotReadError(SnapshotFailureKind.LIMIT)
-        if not include_digest and not collect_content:
-            leaf_fd = _open_at(parent_fd, components[-1], directory=False, stat_only=True)
+        if stat_only:
+            leaf_fd = _open_at(parent_fd, leaf_name, directory=False, stat_only=True)
         else:
-            leaf_fd = _open_at(parent_fd, components[-1], directory=False)
+            leaf_fd = _open_at(parent_fd, leaf_name, directory=False)
         if leaf_fd is None:
             raise SnapshotReadError(SnapshotFailureKind.CONFLICT)
-        try:
-            return _observe_open_leaf(
-                leaf_fd,
-                expected=expected,
-                parent_fd=parent_fd,
-                leaf_name=components[-1],
-                root_device=root_device,
-                max_bytes=max_bytes,
-                include_digest=include_digest,
-                collect_content=collect_content,
-                expires_at=expires_at,
-            )
-        finally:
-            _close(leaf_fd)
+        before = _snapshot_stat(_fstat(leaf_fd))
+        if not _is_supported_leaf(before, root_device):
+            raise SnapshotReadError(SnapshotFailureKind.UNSUPPORTED_OBJECT)
+        if before != expected or _path_snapshot_stat(parent_fd, leaf_name) != before:
+            raise SnapshotReadError(SnapshotFailureKind.CONFLICT)
+        yield _HeldRegularFile(leaf_fd, parent_fd, leaf_name, before)
     finally:
+        if leaf_fd is not None:
+            _close(leaf_fd)
         if parent_owned:
             _close(parent_fd)
 
@@ -248,55 +322,6 @@ def _open_at(parent_fd: int, name: str, *, directory: bool, stat_only: bool = Fa
     if error_number in {errno.ELOOP, errno.ENOTDIR, errno.ENXIO, errno.ENODEV, errno.EXDEV}:
         raise SnapshotReadError(SnapshotFailureKind.UNSUPPORTED_OBJECT)
     raise SnapshotReadError(SnapshotFailureKind.IO)
-
-
-def _observe_open_leaf(
-    leaf_fd: int,
-    *,
-    expected: FileStat,
-    parent_fd: int,
-    leaf_name: str,
-    root_device: int,
-    max_bytes: int | None,
-    include_digest: bool,
-    collect_content: bool,
-    expires_at: float | None,
-) -> FileSnapshot | FileRevision:
-    before = _snapshot_stat(_fstat(leaf_fd))
-    if not _is_supported_leaf(before, root_device):
-        raise SnapshotReadError(SnapshotFailureKind.UNSUPPORTED_OBJECT)
-    if before != expected or _path_snapshot_stat(parent_fd, leaf_name) != before:
-        raise SnapshotReadError(SnapshotFailureKind.CONFLICT)
-
-    content = bytearray() if collect_content else None
-    content_hash = hashlib.sha256() if include_digest else None
-    observed_size = 0
-    if include_digest or collect_content:
-        while True:
-            _check_deadline(expires_at)
-            request_size = _READ_CHUNK_BYTES
-            if max_bytes is not None:
-                request_size = min(request_size, max_bytes - observed_size + 1)
-            chunk = _read(leaf_fd, request_size)
-            if not chunk:
-                break
-            observed_size += len(chunk)
-            if max_bytes is not None and observed_size > max_bytes:
-                raise SnapshotReadError(SnapshotFailureKind.LIMIT)
-            if content is not None:
-                content.extend(chunk)
-            if content_hash is not None:
-                content_hash.update(chunk)
-
-    _check_deadline(expires_at)
-    after = _snapshot_stat(_fstat(leaf_fd))
-    named_after = _path_snapshot_stat(parent_fd, leaf_name)
-    if after != before or named_after != before or (include_digest and observed_size != before.size):
-        raise SnapshotReadError(SnapshotFailureKind.CONFLICT)
-    revision = FileRevision(before, None if content_hash is None else content_hash.digest())
-    if content is None:
-        return revision
-    return FileSnapshot(data=bytes(content), revision=revision)
 
 
 def _check_deadline(expires_at: float | None) -> None:
