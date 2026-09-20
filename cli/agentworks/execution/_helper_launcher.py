@@ -64,6 +64,17 @@ def _validate_runtime_path(runtime_path: str) -> None:
         raise ValidationError("Helper runtime must be an absolute non-assignment UTF-8 path")
 
 
+def build_clean_helper_argv(
+    *,
+    runtime_path: str,
+    fixed_source: str,
+    nonce: str,
+) -> tuple[str, ...]:
+    """Build one fixed helper launch under the carrier delivery identity."""
+    _validate_runtime_path(runtime_path)
+    return (*_ENV, runtime_path, "-I", "-S", "-B", "-c", fixed_source, nonce)
+
+
 def build_helper_argv(
     plan: IdentityPlan,
     *,
@@ -73,8 +84,7 @@ def build_helper_argv(
 ) -> tuple[str, ...]:
     """Build one fixed helper launch with an explicit identity transition."""
     expected = _validate_plan(plan)
-    _validate_runtime_path(runtime_path)
-    helper = (*_ENV, runtime_path, "-I", "-S", "-B", "-c", fixed_source, nonce)
+    helper = build_clean_helper_argv(runtime_path=runtime_path, fixed_source=fixed_source, nonce=nonce)
     if plan.mode is IdentityMode.DIRECT:
         return helper
     if plan.mode is IdentityMode.SUDO_ROOT:
