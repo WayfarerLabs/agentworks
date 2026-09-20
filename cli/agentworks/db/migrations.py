@@ -769,6 +769,29 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
         ALTER TABLE consoles ADD COLUMN last_started_at TEXT;
     """,
     38: _add_session_identity,
+    # Durable coarse operation ownership is independent of connection and -
+    # process lifetime. Resource identity stays core-selected and has no ---
+    # foreign key so the same shape covers VM and platform-host work. ------
+    39: """
+        CREATE TABLE operation_claims (
+            resource_kind TEXT NOT NULL
+                CHECK (resource_kind IN ('vm', 'platform-host')),
+            resource_name TEXT NOT NULL
+                CHECK (typeof(resource_name) = 'text' AND length(resource_name) BETWEEN 1 AND 255),
+            operation_id TEXT NOT NULL UNIQUE
+                CHECK (
+                    length(operation_id) = 32
+                    AND operation_id NOT GLOB '*[^0-9a-f]*'
+                ),
+            operation_kind TEXT NOT NULL
+                CHECK (typeof(operation_kind) = 'text' AND length(operation_kind) BETWEEN 1 AND 64),
+            state TEXT NOT NULL
+                CHECK (state IN ('reserved', 'possible-dispatch', 'resolved')),
+            claimed_at TEXT NOT NULL CHECK (length(claimed_at) = 20),
+            updated_at TEXT NOT NULL CHECK (length(updated_at) = 20),
+            PRIMARY KEY (resource_kind, resource_name)
+        );
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -899,6 +922,17 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
         "consoles": ("last_started_at",),
     },
     38: {"sessions": ("session_uuid", "run_id")},
+    39: {
+        "operation_claims": (
+            "resource_kind",
+            "resource_name",
+            "operation_id",
+            "operation_kind",
+            "state",
+            "claimed_at",
+            "updated_at",
+        )
+    },
 }
 
 _SCHEMA_SENTINEL_REMOVED_TABLES: dict[int, tuple[str, ...]] = {

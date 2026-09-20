@@ -46,6 +46,7 @@ if TYPE_CHECKING:
         VMRow,
         WorkspaceRow,
     )
+    from agentworks.db.operations import OperationRepository
     from agentworks.debian import DebianRelease
 
 
@@ -248,6 +249,13 @@ class Database:
         from agentworks.db.instance_state import InstanceStateRepository
 
         return InstanceStateRepository(self)
+
+    @property
+    def operations(self) -> OperationRepository:
+        """Return the durable operation-ownership repository."""
+        from agentworks.db.operations import OperationRepository
+
+        return OperationRepository(self)
 
     @staticmethod
     def check_schema(path: Path | None = None) -> tuple[bool, int, int]:

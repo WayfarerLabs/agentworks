@@ -82,6 +82,13 @@ from agentworks.db.models import (
     VMStatus,
     WorkspaceRow,
 )
+from agentworks.db.operations import (
+    OperationClaim,
+    OperationClaimState,
+    OperationOwnership,
+    OperationResourceKind,
+    OperationScope,
+)
 
 DB_PATH = CONFIG_DIR / "agentworks.db"
 
@@ -116,6 +123,11 @@ __all__ = [
     "InstanceRecordMetadata",
     "InstanceStateInspection",
     "MigrationContext",
+    "OperationClaim",
+    "OperationClaimState",
+    "OperationOwnership",
+    "OperationResourceKind",
+    "OperationScope",
     "MalformedInstanceRecord",
     "ProvisioningStatus",
     "PreparedRestore",
