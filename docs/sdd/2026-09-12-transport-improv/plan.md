@@ -213,7 +213,11 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       checks and exact cleanup evidence, before wiring snapshot/chunk/publication exchanges.
 - [ ] Settle and fault-test cleanup ownership when the first scratch/snapshot creation reply or
       publication-stage cleanup-debt reply is lost. Missing identity is not absence; do not recover
-      by replaying creation or scanning a prefix.
+      by replaying creation or scanning a prefix. Prove the bounded immutable ownership-receipt
+      candidate, including original-parent binding, interrupted receipt creation/removal and late
+      requests. Every follow-on mutation must validate its still-existing operation receipt under
+      the transaction lock before creating any artifact; read-only snapshot chunks retain their
+      existing unlocked exact-reference checks.
 - [ ] Jointly accept and prove the privately implemented carrier sink extension with the SSH owner
       before enabling its production use or exposing it through RunContext.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
