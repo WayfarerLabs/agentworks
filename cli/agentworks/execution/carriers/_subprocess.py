@@ -20,13 +20,23 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agentworks.execution.carrier import Capture, CapturedOutput, Failure, FiniteInput, Retention
+from agentworks.errors import ValidationError
+from agentworks.execution._byte_io import SinkWriteError, try_write_to_sink
+from agentworks.execution.carrier import (
+    Capture,
+    CapturedOutput,
+    Failure,
+    FiniteInput,
+    LiveInput,
+    Retention,
+    SinkOutput,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from typing import IO
 
-    from agentworks.execution.carrier import CarrierIO, Deadline
+    from agentworks.execution.carrier import ByteSink, ByteSource, CarrierIO, Deadline
 
 _CHUNK = 65_536
 _POLL_SECONDS = 0.01
@@ -38,28 +48,111 @@ _EXIT_DRAIN_SECONDS = 0.1
 class _Output:
     retention: Retention
     limit: int
+    sink: ByteSink | None = field(default=None, repr=False)
     data: bytearray = field(default_factory=bytearray, repr=False)
+    pending: memoryview | None = field(default=None, repr=False)
     eof: bool = False
     limited: bool = False
 
-    def read(self, pipe: IO[bytes]) -> bool:
-        """Read at most one chunk, so neither output can starve the other."""
+    def advance(self, pipe: IO[bytes]) -> tuple[bool, bool]:
+        """Advance one bounded read or borrowed-sink write."""
         if self.eof:
-            return False
+            return False, False
+        if self.pending is not None:
+            return self._write_pending()
         try:
             chunk = os.read(pipe.fileno(), _CHUNK)
         except BlockingIOError:
-            return False
+            return False, False
         if not chunk:
             self.eof = True
+            return False, False
+        if self.sink is not None:
+            self.pending = memoryview(chunk)
+            _, failed = self._write_pending()
+            return True, failed
         elif self.retention == Retention.CAPTURED:
             available = self.limit - len(self.data)
             self.data.extend(chunk[:available])
             self.limited |= len(chunk) > available
-        return bool(chunk)
+        return True, False
+
+    def _write_pending(self) -> tuple[bool, bool]:
+        assert self.sink is not None and self.pending is not None
+        try:
+            written = try_write_to_sink(self.sink, self.pending)
+        except SinkWriteError:
+            return False, True
+        if written is None:
+            return False, False
+        if written == len(self.pending):
+            self.pending = None
+        else:
+            self.pending = self.pending[written:]
+        return True, False
 
     def report(self) -> CapturedOutput:
-        return CapturedOutput(bytes(self.data), self.eof and not self.limited, retention=self.retention)
+        complete = self.eof and self.pending is None and not self.limited
+        return CapturedOutput(bytes(self.data), complete, retention=self.retention)
+
+
+@dataclass
+class _Input:
+    source: ByteSource | None = field(default=None, repr=False)
+    pending: memoryview | None = field(default=None, repr=False)
+    eof: bool = False
+
+    @classmethod
+    def from_io(cls, io: CarrierIO) -> _Input:
+        if isinstance(io.input, FiniteInput):
+            return cls(pending=memoryview(io.input.data), eof=True)
+        if isinstance(io.input, LiveInput):
+            return cls(source=io.input.source)
+        return cls(eof=True)
+
+    @property
+    def complete(self) -> bool:
+        return self.eof and (self.pending is None or not self.pending)
+
+    def advance(self, pipe: IO[bytes]) -> tuple[bool, bool]:
+        """Advance one bounded source read and one bounded pipe write."""
+        progressed = False
+        if self.pending is None and not self.eof:
+            assert self.source is not None
+            try:
+                chunk = self.source.try_read(_CHUNK)
+            except Exception:
+                return False, True
+            if chunk is None:
+                return False, False
+            if type(chunk) is not bytes or len(chunk) > _CHUNK:
+                return False, True
+            progressed = True
+            if not chunk:
+                self.eof = True
+            else:
+                self.pending = memoryview(chunk)
+        if self.pending:
+            try:
+                written = os.write(pipe.fileno(), self.pending[:_CHUNK])
+            except BlockingIOError:
+                return progressed, False
+            except OSError:
+                return progressed, True
+            if written <= 0 or written > min(len(self.pending), _CHUNK):
+                return progressed, True
+            progressed = True
+            if written == len(self.pending):
+                self.pending = None
+            else:
+                self.pending = self.pending[written:]
+        if self.complete and not pipe.closed:
+            try:
+                pipe.close()
+            except OSError:
+                return progressed, True
+            progressed = True
+        return progressed, False
 
 
 @dataclass(frozen=True)
@@ -91,7 +184,9 @@ def _cleanup(process: subprocess.Popen[bytes]) -> bool:
 def output_retention(io: CarrierIO) -> Retention:
     """Use one retention policy for pre-dispatch and process evidence."""
     return (
-        Retention.SUPPRESSED
+        Retention.DELIVERED
+        if isinstance(io.output, SinkOutput)
+        else Retention.SUPPRESSED
         if io.sensitive
         else Retention.CAPTURED
         if isinstance(io.output, Capture)
@@ -105,18 +200,24 @@ def run_process(
     io: CarrierIO,
     deadline: Deadline,
     env: Mapping[str, str] | None = None,
+    live_stdio: bool = False,
 ) -> ProcessResult:
-    """Send finite input once while fairly draining two independently capped streams."""
+    """Fairly pump bounded input and output without retaining borrowed endpoints."""
     retention = output_retention(io)
     limit = io.output.max_bytes if isinstance(io.output, Capture) else 0
-    stdout = _Output(retention, limit)
-    stderr = _Output(retention, limit)
+    stdout_sink = io.output.stdout if isinstance(io.output, SinkOutput) else None
+    stderr_sink = io.output.stderr if isinstance(io.output, SinkOutput) else None
+    stdout = _Output(retention, limit, stdout_sink)
+    stderr = _Output(retention, limit, stderr_sink)
+    requires_live = isinstance(io.input, LiveInput) or (isinstance(io.output, SinkOutput) and io.output.require_live)
+    if requires_live and not live_stdio:
+        raise ValidationError("Live carrier I/O is unavailable on this channel")
     if deadline.expired:
         return ProcessResult(False, None, None, stdout.report(), stderr.report(), Failure.DEADLINE)
     try:
         process = subprocess.Popen(
             argv,
-            stdin=subprocess.PIPE if isinstance(io.input, FiniteInput) else subprocess.DEVNULL,
+            stdin=subprocess.PIPE if isinstance(io.input, FiniteInput | LiveInput) else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             bufsize=0,
@@ -134,8 +235,8 @@ def run_process(
             if pipe is not None:
                 os.set_blocking(pipe.fileno(), False)
         assert process.stdout is not None and process.stderr is not None
-        data = memoryview(io.input.data if isinstance(io.input, FiniteInput) else b"")
-        offset = 0
+        input_state = _Input.from_io(io)
+        output_first = True
         while True:
             exit_status = process.poll()
             if deadline.expired:
@@ -149,27 +250,36 @@ def run_process(
                     # an explicitly unbounded invocation after its client exits.
                     failure = Failure.OUTPUT
                     break
-            try:
-                progressed = stdout.read(process.stdout)
-                progressed = stderr.read(process.stderr) or progressed
-            except OSError:
-                failure = Failure.OUTPUT
+            progressed = False
+            outputs = (
+                ((stdout, process.stdout), (stderr, process.stderr))
+                if output_first
+                else ((stderr, process.stderr), (stdout, process.stdout))
+            )
+            output_first = not output_first
+            for output, pipe in outputs:
+                try:
+                    output_progressed, output_failed = output.advance(pipe)
+                except OSError:
+                    output_failed = True
+                    output_progressed = False
+                progressed = output_progressed or progressed
+                if output_failed:
+                    failure = Failure.OUTPUT
+                    break
+            if failure is not None:
                 break
             if process.stdin is not None and not process.stdin.closed:
-                try:
-                    if offset < len(data):
-                        written = os.write(process.stdin.fileno(), data[offset : offset + _CHUNK])
-                        offset += written
-                        progressed |= written > 0
-                    if offset == len(data):
-                        process.stdin.close()
-                except BlockingIOError:
-                    pass
-                except OSError:
+                if exit_status is not None and not input_state.complete:
+                    failure = Failure.INPUT
+                    break
+                input_progressed, input_failed = input_state.advance(process.stdin)
+                progressed = input_progressed or progressed
+                if input_failed:
                     failure = Failure.INPUT
                     break
             if exit_status is not None:
-                if offset < len(data):
+                if not input_state.complete:
                     failure = Failure.INPUT
                     break
                 if stdout.eof and stderr.eof:

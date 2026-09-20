@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from agentworks.errors import ValidationError
 from agentworks.execution.carrier import (
     Capture,
     CarrierIO,
@@ -21,8 +22,10 @@ from agentworks.execution.carrier import (
     Discard,
     Failure,
     FiniteInput,
+    LiveInput,
     Provenance,
     Retention,
+    SinkOutput,
 )
 from agentworks.execution.carriers import _subprocess
 from agentworks.execution.carriers._subprocess import ProcessResult, run_process
@@ -57,12 +60,14 @@ def execute(
     io: CarrierIO | None = None,
     seconds: float | None = 10,
     env: Mapping[str, str] | None = None,
+    live_stdio: bool = False,
 ) -> ProcessResult:
     return run_process(
         [sys.executable, "-c", script],
         io=io or CarrierIO(),
         deadline=Deadline.after(seconds),
         env=env,
+        live_stdio=live_stdio,
     )
 
 
@@ -72,6 +77,42 @@ def assert_closed(children: list[subprocess.Popen[bytes]]) -> None:
         assert child.poll() is not None
         for pipe in (child.stdin, child.stdout, child.stderr):
             assert pipe is None or pipe.closed
+
+
+class ChunkSource:
+    def __init__(self, chunks: list[bytes | None]) -> None:
+        self.chunks = chunks
+        self.limits: list[int] = []
+        self.closed = False
+
+    def try_read(self, limit: int) -> bytes | None:
+        self.limits.append(limit)
+        return self.chunks.pop(0) if self.chunks else b""
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class ShortSink:
+    def __init__(self, limit: int, *, stall_every: int | None = None) -> None:
+        self.limit = limit
+        self.stall_every = stall_every
+        self.calls = 0
+        self.offers: list[int] = []
+        self.data = bytearray()
+        self.closed = False
+
+    def try_write(self, data: memoryview) -> int | None:
+        self.calls += 1
+        self.offers.append(len(data))
+        if self.stall_every is not None and self.calls % self.stall_every == 0:
+            return None
+        written = min(self.limit, len(data))
+        self.data.extend(data[:written])
+        return written
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def test_binary_streams_remain_separate_and_unattributed(children: list[subprocess.Popen[bytes]]) -> None:
@@ -103,6 +144,148 @@ def test_duplex_pressure_delivers_finite_input_once_then_eof(children: list[subp
     assert result.exit_status == 0
     assert result.failure is None
     assert result.stdout.complete and result.stderr.complete
+    assert_closed(children)
+
+
+def test_live_duplex_handles_stalls_short_writes_and_binary_bytes(
+    children: list[subprocess.Popen[bytes]],
+) -> None:
+    data = bytes(range(256)) * 512
+    chunks: list[bytes | None] = [None]
+    chunks.extend(data[offset : offset + 8192] for offset in range(0, len(data), 8192))
+    chunks.append(b"")
+    source = ChunkSource(chunks)
+    stdout = ShortSink(4096, stall_every=4)
+    stderr = ShortSink(3072, stall_every=3)
+    result = execute(
+        "import hashlib,sys; "
+        "sys.stdout.buffer.write(bytes(range(256))*256); sys.stdout.buffer.flush(); "
+        "sys.stderr.buffer.write(bytes(reversed(range(256)))*256); sys.stderr.buffer.flush(); "
+        "data=sys.stdin.buffer.read(); sys.stdout.buffer.write(hashlib.sha256(data).digest())",
+        io=CarrierIO(input=LiveInput(source), output=SinkOutput(stdout, stderr, require_live=True)),
+        live_stdio=True,
+    )
+    assert bytes(stdout.data) == bytes(range(256)) * 256 + hashlib.sha256(data).digest()
+    assert bytes(stderr.data) == bytes(reversed(range(256))) * 256
+    assert result.stdout.data == result.stderr.data == b""
+    assert result.stdout.retention == result.stderr.retention == Retention.DELIVERED
+    assert result.stdout.complete and result.stderr.complete
+    assert result.exit_status == 0
+    assert result.failure is None
+    assert source.limits and set(source.limits) == {_subprocess._CHUNK}
+    assert max(stdout.offers + stderr.offers) <= _subprocess._CHUNK
+    assert not source.closed and not stdout.closed and not stderr.closed
+    assert_closed(children)
+
+
+def test_live_source_eof_closes_only_owned_stdin(children: list[subprocess.Popen[bytes]]) -> None:
+    source = ChunkSource([b""])
+    result = execute(
+        "import sys; assert sys.stdin.buffer.read() == b''; sys.stdout.buffer.write(b'eof')",
+        io=CarrierIO(input=LiveInput(source)),
+        live_stdio=True,
+    )
+    assert result.stdout.data == b"eof"
+    assert result.failure is None
+    assert not source.closed
+    assert_closed(children)
+
+
+def test_sensitive_sink_delivery_is_transient_not_retained(children: list[subprocess.Popen[bytes]]) -> None:
+    canary = b"sensitive-live-reflection-canary"
+    source = ChunkSource([canary, b""])
+    stdout = ShortSink(7)
+    stderr = ShortSink(5)
+    result = execute(
+        "import sys; data=sys.stdin.buffer.read(); "
+        "sys.stdout.buffer.write(data); sys.stderr.buffer.write(data); sys.exit(19)",
+        io=CarrierIO(
+            input=LiveInput(source, sensitive=True),
+            output=SinkOutput(stdout, stderr, require_live=True),
+        ),
+        live_stdio=True,
+    )
+    assert bytes(stdout.data) == bytes(stderr.data) == canary
+    assert result.exit_status == 19
+    assert result.failure is None
+    assert result.stdout.retention == result.stderr.retention == Retention.DELIVERED
+    assert result.stdout.data == result.stderr.data == b""
+    assert canary.decode() not in repr(result)
+    assert_closed(children)
+
+
+@pytest.mark.parametrize(
+    "response",
+    [b"x" * (_subprocess._CHUNK + 1), "not-bytes", 0, True, ValueError("secret-source-canary")],
+)
+def test_invalid_live_source_response_is_input_failure(
+    children: list[subprocess.Popen[bytes]], response: object
+) -> None:
+    class InvalidSource:
+        def try_read(self, limit: int) -> bytes | None:
+            if isinstance(response, Exception):
+                raise response
+            return response  # type: ignore[return-value]
+
+    result = execute(
+        "import time; time.sleep(30)",
+        io=CarrierIO(input=LiveInput(InvalidSource())),
+        live_stdio=True,
+    )
+    assert result.failure == Failure.INPUT
+    assert result.exit_status is None
+    assert "secret-source-canary" not in repr(result)
+    assert_closed(children)
+
+
+@pytest.mark.parametrize("response", [0, -1, True, "one", 1_000_000, ValueError("secret-sink-canary")])
+def test_invalid_sink_response_is_output_failure(children: list[subprocess.Popen[bytes]], response: object) -> None:
+    class InvalidSink:
+        def try_write(self, data: memoryview) -> int | None:
+            if isinstance(response, Exception):
+                raise response
+            return response  # type: ignore[return-value]
+
+    result = execute(
+        "import sys,time; sys.stdout.buffer.write(b'payload'); sys.stdout.buffer.flush(); time.sleep(30)",
+        io=CarrierIO(output=SinkOutput(InvalidSink(), ShortSink(64))),
+    )
+    assert result.failure == Failure.OUTPUT
+    assert result.exit_status is None
+    assert result.stdout.retention == result.stderr.retention == Retention.DELIVERED
+    assert not result.stdout.complete
+    assert "secret-sink-canary" not in repr(result)
+    assert_closed(children)
+
+
+@pytest.mark.parametrize(
+    "io",
+    [
+        CarrierIO(input=LiveInput(ChunkSource([b""]))),
+        CarrierIO(output=SinkOutput(ShortSink(64), ShortSink(64), require_live=True)),
+    ],
+)
+def test_live_feature_mismatch_refuses_before_process_creation(monkeypatch: pytest.MonkeyPatch, io: CarrierIO) -> None:
+    def spawn(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        raise AssertionError("unsupported live I/O attempted to spawn")
+
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    with pytest.raises(ValidationError):
+        execute("raise AssertionError", io=io)
+
+
+def test_buffered_sink_delivery_does_not_require_live_feature(children: list[subprocess.Popen[bytes]]) -> None:
+    stdout = ShortSink(2)
+    stderr = ShortSink(3)
+    result = execute(
+        "import sys; sys.stdout.buffer.write(b'out'); sys.stderr.buffer.write(b'error')",
+        io=CarrierIO(output=SinkOutput(stdout, stderr)),
+    )
+    assert bytes(stdout.data) == b"out"
+    assert bytes(stderr.data) == b"error"
+    assert result.stdout.retention == result.stderr.retention == Retention.DELIVERED
+    assert result.stdout.complete and result.stderr.complete
+    assert result.failure is None
     assert_closed(children)
 
 
@@ -180,11 +363,11 @@ def test_deadline_preserves_partial_evidence_and_reaps(
 ) -> None:
     markers = {b"partial", b"diagnostic"}
     observed: set[bytes] = set()
-    original_read = _subprocess._Output.read
+    original_advance = _subprocess._Output.advance
     spawn = subprocess.Popen
 
-    def read(output: _subprocess._Output, pipe: Any) -> bool:
-        progressed = original_read(output, pipe)
+    def advance(output: _subprocess._Output, pipe: Any) -> tuple[bool, bool]:
+        progressed = original_advance(output, pipe)
         observed.update(marker for marker in markers if marker in output.data)
         return progressed
 
@@ -193,7 +376,7 @@ def test_deadline_preserves_partial_evidence_and_reaps(
         return spawn(argv, **kwargs)
 
     deadline = Deadline.after(10)
-    monkeypatch.setattr(_subprocess._Output, "read", read)
+    monkeypatch.setattr(_subprocess._Output, "advance", advance)
     monkeypatch.setattr(subprocess, "Popen", delayed_startup)
     monkeypatch.setattr(Deadline, "expired", property(lambda value: observed == markers or value.remaining() == 0))
     result = run_process(
@@ -229,13 +412,13 @@ def test_deadline_budget_includes_process_startup(
         startup_offset = 2.0
         return child
 
-    def reject_output_read(output: _subprocess._Output, pipe: Any) -> bool:
+    def reject_output_read(output: _subprocess._Output, pipe: Any) -> tuple[bool, bool]:
         pytest.fail("Expired startup budget allowed an output observation cycle")
 
     monkeypatch.setattr(time, "monotonic", lambda: monotonic() + startup_offset)
     deadline = Deadline.after(1)
     monkeypatch.setattr(subprocess, "Popen", complete_startup)
-    monkeypatch.setattr(_subprocess._Output, "read", reject_output_read)
+    monkeypatch.setattr(_subprocess._Output, "advance", reject_output_read)
     result = run_process(
         [sys.executable, "-c", "import time; time.sleep(30)"],
         io=CarrierIO(),
@@ -277,6 +460,83 @@ def test_natural_exit_is_observed_despite_unsent_input(children: list[subprocess
         while not done.exists() and time.monotonic() < until:
             time.sleep(0.01)
         assert done.exists()
+
+
+def test_live_input_early_close_preserves_observed_exit(children: list[subprocess.Popen[bytes]]) -> None:
+    class EndlessSource:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def try_read(self, limit: int) -> bytes | None:
+            self.calls += 1
+            return b"x" * limit
+
+    source = EndlessSource()
+    result = execute(
+        "import sys; sys.stdout.buffer.write(b'parent'); sys.exit(23)",
+        io=CarrierIO(input=LiveInput(source)),
+        seconds=None,
+        live_stdio=True,
+    )
+    assert source.calls > 0
+    assert result.failure == Failure.INPUT
+    assert result.local_status == result.exit_status == 23
+    assert result.stdout.data == b"parent"
+    assert_closed(children)
+
+
+def test_stalled_source_keeps_draining_until_deadline_and_stops_after_return(
+    children: list[subprocess.Popen[bytes]],
+) -> None:
+    class StalledSource:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def try_read(self, limit: int) -> bytes | None:
+            self.calls += 1
+            return None
+
+    source = StalledSource()
+    stdout = ShortSink(64)
+    stderr = ShortSink(64)
+    result = execute(
+        "import sys,time; sys.stdout.buffer.write(b'ready'); sys.stdout.buffer.flush(); time.sleep(30)",
+        io=CarrierIO(
+            input=LiveInput(source),
+            output=SinkOutput(stdout, stderr, require_live=True),
+        ),
+        seconds=0.1,
+        live_stdio=True,
+    )
+    calls_after_return = source.calls
+    time.sleep(0.05)
+    assert source.calls == calls_after_return
+    assert source.calls > 1
+    assert bytes(stdout.data) == b"ready"
+    assert result.failure == Failure.DEADLINE
+    assert result.exit_status is None
+    assert not result.stdout.complete and not result.stderr.complete
+    assert_closed(children)
+
+
+def test_sink_failure_preserves_independently_observed_exit(children: list[subprocess.Popen[bytes]]) -> None:
+    class FailAfterExit:
+        def try_write(self, data: memoryview) -> int | None:
+            if children[-1].poll() is None:
+                return None
+            raise RuntimeError("secret-sink-canary")
+
+    result = execute(
+        "import sys; sys.stdout.buffer.write(b'payload'); sys.stdout.buffer.flush(); sys.exit(23)",
+        io=CarrierIO(output=SinkOutput(FailAfterExit(), ShortSink(64))),
+        seconds=None,
+    )
+    assert result.local_status == result.exit_status == 23
+    assert result.failure == Failure.OUTPUT
+    assert not result.stdout.complete
+    assert result.stdout.data == b""
+    assert "secret-sink-canary" not in repr(result)
+    assert_closed(children)
 
 
 def test_input_pipe_failure_is_safe(children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -349,13 +609,13 @@ def test_descendant_output_handles_have_a_bounded_post_exit_drain(
         "sys.stdout.write('parent')"
     )
     if flood:
-        original = _subprocess._Output.read
+        original = _subprocess._Output.advance
 
-        def read(output: _subprocess._Output, pipe: Any) -> bool:
-            progressed = original(output, pipe)
-            return progressed or not output.eof
+        def advance(output: _subprocess._Output, pipe: Any) -> tuple[bool, bool]:
+            progressed, failed = original(output, pipe)
+            return progressed or not output.eof, failed
 
-        monkeypatch.setattr(_subprocess._Output, "read", read)
+        monkeypatch.setattr(_subprocess._Output, "advance", advance)
     try:
         started = time.monotonic()
         result = execute(script, io=CarrierIO(output=Capture(32)), seconds=None)
@@ -380,10 +640,10 @@ def test_interruption_reaps_before_propagating(
     monkeypatch: pytest.MonkeyPatch,
     interruption: type[BaseException],
 ) -> None:
-    def read(output: _subprocess._Output, pipe: Any) -> bool:
+    def advance(output: _subprocess._Output, pipe: Any) -> tuple[bool, bool]:
         raise interruption()
 
-    monkeypatch.setattr(_subprocess._Output, "read", read)
+    monkeypatch.setattr(_subprocess._Output, "advance", advance)
     with pytest.raises(interruption):
         execute("import time; time.sleep(30)")
     assert_closed(children)
@@ -414,7 +674,7 @@ def test_failed_reap_during_interruption_adds_safe_note(
 ) -> None:
     original_wait = Popen.wait
 
-    def read(output: _subprocess._Output, pipe: Any) -> bool:
+    def advance(output: _subprocess._Output, pipe: Any) -> tuple[bool, bool]:
         raise KeyboardInterrupt()
 
     def wait(process: Popen[bytes], timeout: float | None = None) -> int:
@@ -423,7 +683,7 @@ def test_failed_reap_during_interruption_adds_safe_note(
         return original_wait(process, timeout=timeout)
 
     with monkeypatch.context() as context:
-        context.setattr(_subprocess._Output, "read", read)
+        context.setattr(_subprocess._Output, "advance", advance)
         context.setattr(Popen, "wait", wait)
         with pytest.raises(KeyboardInterrupt) as raised:
             execute("import time; time.sleep(30)")

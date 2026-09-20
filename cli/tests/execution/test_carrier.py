@@ -7,6 +7,7 @@ import math
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution._byte_io import SinkWriteError, try_write_to_sink
 from agentworks.execution.carrier import (
     Capture,
     CapturedOutput,
@@ -17,8 +18,10 @@ from agentworks.execution.carrier import (
     EndOfInput,
     ExitStatus,
     FiniteInput,
+    LiveInput,
     PreparedInvocation,
     Retention,
+    SinkOutput,
 )
 
 
@@ -69,6 +72,47 @@ def test_input_sensitivity_cannot_be_downgraded() -> None:
     assert io.sensitive
     assert CarrierIO(sensitive=True).sensitive
     assert isinstance(CarrierIO().input, EndOfInput)
+
+
+def test_live_endpoint_representations_are_hidden_and_sensitivity_is_promoted() -> None:
+    class Endpoint:
+        def __repr__(self) -> str:
+            return "secret-endpoint-canary"
+
+    source = Endpoint()
+    stdout = Endpoint()
+    stderr = Endpoint()
+    io = CarrierIO(
+        input=LiveInput(source, sensitive=True),  # type: ignore[arg-type]
+        output=SinkOutput(stdout, stderr),  # type: ignore[arg-type]
+    )
+    assert io.sensitive
+    for value in (io.input, io.output, io):
+        assert "secret-endpoint-canary" not in repr(value)
+
+
+@pytest.mark.parametrize("field", ["input", "output"])
+def test_unknown_io_mode_is_refused(field: str) -> None:
+    kwargs = {field: object()}
+    with pytest.raises(ValidationError):
+        CarrierIO(**kwargs)  # type: ignore[arg-type]
+
+
+def test_delivered_output_cannot_retain_raw_bytes() -> None:
+    with pytest.raises(ValidationError):
+        CapturedOutput(b"private", retention=Retention.DELIVERED)
+
+
+def test_sink_adapter_failure_has_no_payload_or_exception_chain() -> None:
+    class BrokenSink:
+        def try_write(self, data: memoryview) -> int | None:
+            raise RuntimeError("secret-sink-canary")
+
+    with pytest.raises(SinkWriteError) as failure:
+        try_write_to_sink(BrokenSink(), memoryview(b"private"))
+    assert failure.value.__context__ is None
+    assert failure.value.__cause__ is None
+    assert "secret" not in repr(failure.value)
 
 
 @pytest.mark.parametrize("bound", [-1, 1.5, True])
