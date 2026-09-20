@@ -10,24 +10,29 @@ from __future__ import annotations
 
 import ctypes
 import errno
+import hashlib
+import hmac
 import os
 import secrets
 import stat
 import sys
+import time
 from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, NoReturn, TypeVar, cast
+from typing import TYPE_CHECKING, NoReturn, Protocol, TypeVar, cast
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-from agentworks.execution._file_snapshot import (
-    FileSnapshot,
-    SnapshotFailureKind,
-    SnapshotReadError,
-    _snapshot_stat,
-    read_snapshot,
+from agentworks.execution._file_snapshot import _snapshot_stat
+from agentworks.execution._file_stat import FileRevision, FileStat
+from agentworks.execution._scratch import (
+    ReadyScratchReference,
+    ScratchFailureKind,
+    ScratchTransferError,
+    iter_ready_scratch,
+    ready_scratch_contract,
 )
 
 _ACCESS_ACL = "system.posix_acl_access"
@@ -37,6 +42,12 @@ _STAGE_PREFIX = ".agentworks-stage-"
 _T = TypeVar("_T")
 
 
+class _Digest(Protocol):
+    def update(self, data: bytes | bytearray | memoryview, /) -> None: ...
+
+    def digest(self) -> bytes: ...
+
+
 class PublicationFailureKind(Enum):
     """Closed publication outcomes that reveal no file content or names."""
 
@@ -44,6 +55,7 @@ class PublicationFailureKind(Enum):
     CONFLICT = "conflict"
     WRITE_AUTHORITY = "write_authority"
     METADATA = "metadata"
+    DEADLINE = "deadline"
     IO = "io"
     UNCERTAIN = "uncertain"
 
@@ -101,6 +113,31 @@ class CreateMetadata:
             raise ValueError("Create mode must contain only regular permission bits")
 
 
+@dataclass(frozen=True, slots=True)
+class Create:
+    """Require an absent destination."""
+
+
+@dataclass(frozen=True, slots=True)
+class Replace:
+    """Require an existing regular file without matching a prior revision."""
+
+
+@dataclass(frozen=True, slots=True)
+class Match:
+    """Require an existing regular file matching one prior revision."""
+
+    revision: FileRevision
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class ScratchFileSource:
+    """Borrowed parent descriptor and verified private scratch object."""
+
+    parent_fd: int
+    ready: ReadyScratchReference
+
+
 @dataclass(frozen=True)
 class _ObjectIdentity:
     device: int
@@ -116,23 +153,35 @@ class _StageOwnership:
     identity: _ObjectIdentity | None = None
 
 
+@dataclass(frozen=True, repr=False)
+class _ReplacementObservation:
+    descriptor: int
+    revision: FileRevision
+    access_acl: bytes | None = field(repr=False)
+
+
 def publish_file(
     parent_fd: int,
     leaf_name: str,
-    content: bytes,
+    content: bytes | ScratchFileSource,
     *,
-    expected: FileSnapshot | None,
+    condition: Create | Replace | Match,
     create_metadata: CreateMetadata,
-) -> None:
-    """Create an absent leaf or replace the exact supplied snapshot atomically.
-    The parent is borrowed; replacement preserves access metadata, while creation
-    establishes supplied metadata and normal default-ACL behavior.
+    expires_at: float | None = None,
+) -> FileRevision:
+    """Publish bytes or verified scratch under one explicit write condition.
+
+    The parent and cooperating-writer lock are borrowed. Replacement preserves
+    the observed access profile and refuses a change seen before publication.
     """
-    _validate_inputs(parent_fd, leaf_name, content, expected, create_metadata)
+    _validate_inputs(parent_fd, leaf_name, content, condition, create_metadata, expires_at)
+    _check_deadline(expires_at, PublicationPhase.STAGING)
 
     stage = _StageOwnership()
-    replacement_fd: int | None = None
+    replacement: _ReplacementObservation | None = None
     publication_attempted = False
+    rename_succeeded = False
+    published_revision: FileRevision | None = None
     failure: FilePublicationError | None = None
     control: BaseException | None = None
     close_control: BaseException | None = None
@@ -143,42 +192,65 @@ def publish_file(
             stage_fd = stage.descriptor
             stage_identity = stage.identity
             assert stage_name is not None and stage_fd is not None and stage_identity is not None
-            access_acl: bytes | None = None
-            _write_all(stage_fd, content)
-            if expected is None:
+            content_size, content_digest = _write_content(stage_fd, content, expires_at)
+            if isinstance(condition, Create):
                 _prepare_create(stage_fd, parent_fd, create_metadata)
             else:
-                if expected.stat.mode & (stat.S_ISUID | stat.S_ISGID):
+                replacement = _observe_replacement(parent_fd, leaf_name, condition, expires_at)
+                if replacement.revision.stat.mode & (stat.S_ISUID | stat.S_ISGID):
                     raise FilePublicationError(PublicationFailureKind.METADATA, PublicationPhase.METADATA)
-                replacement_fd = _open_existing(parent_fd, leaf_name, expected.stat.device)
-                _require_existing_match(replacement_fd, expected)
-                access_acl = _read_access_acl(replacement_fd)
-                _prepare_replacement(stage_fd, expected, access_acl)
+                _prepare_replacement(stage_fd, replacement.revision.stat, replacement.access_acl)
             _os_call(os.fsync, stage_fd, kind=PublicationFailureKind.IO, phase=PublicationPhase.METADATA)
-            _verify_stage(stage_fd, parent_fd, stage_name, stage_identity)
-            if expected is None:
+            _verify_stage(stage_fd, parent_fd, stage_name, stage_identity, content_size)
+            _check_deadline(expires_at, PublicationPhase.PUBLICATION)
+            if isinstance(condition, Create):
                 publication_attempted = True
                 _rename_noreplace(parent_fd, stage_name, leaf_name)
+                rename_succeeded = True
             else:
-                assert replacement_fd is not None
-                _verify_replacement_condition(parent_fd, leaf_name, expected, replacement_fd, access_acl)
+                assert replacement is not None
+                _verify_replacement_condition(parent_fd, leaf_name, replacement, expires_at)
+                _check_deadline(expires_at, PublicationPhase.PUBLICATION)
                 publication_attempted = True
                 _rename_replace(parent_fd, stage_name, leaf_name)
+                rename_succeeded = True
+            published_revision = _observe_published(
+                stage_fd,
+                parent_fd,
+                leaf_name,
+                stage_identity,
+                content_digest,
+                expires_at,
+            )
         except FilePublicationError as error:
-            failure = error
+            if rename_succeeded or (
+                publication_attempted
+                and error.kind
+                not in {
+                    PublicationFailureKind.CONFLICT,
+                    PublicationFailureKind.UNSUPPORTED,
+                }
+            ):
+                failure = FilePublicationError(PublicationFailureKind.UNCERTAIN, PublicationPhase.PUBLICATION)
+            else:
+                failure = error
         except BaseException as error:
             control = error
     finally:
-        close_control = _close_publication_descriptors(replacement_fd, stage)
+        close_control = _close_publication_descriptors(
+            None if replacement is None else replacement.descriptor,
+            stage,
+        )
 
     prior = failure or (_control_fact(control) if control is not None else None)
-    if prior is None and publication_attempted:
+    if prior is None and publication_attempted and (published_revision is None or close_control is not None):
         prior = FilePublicationError(PublicationFailureKind.UNCERTAIN, PublicationPhase.PUBLICATION)
     if close_control is not None:
         control = close_control
 
     if failure is None and control is None:
-        return
+        assert published_revision is not None
+        return published_revision
 
     cleanup_debt = _cleanup_owned_stage(parent_fd, stage, prior=prior)
     if control is not None:
@@ -204,9 +276,10 @@ def retry_publication_cleanup(parent_fd: int, debt: PublicationCleanupDebt) -> b
 def _validate_inputs(
     parent_fd: int,
     leaf_name: str,
-    content: bytes,
-    expected: FileSnapshot | None,
+    content: bytes | ScratchFileSource,
+    condition: Create | Replace | Match,
     create_metadata: CreateMetadata,
+    expires_at: float | None,
 ) -> None:
     if type(parent_fd) is not int or parent_fd < 0:
         raise ValueError("Parent descriptor must be a nonnegative integer")
@@ -221,12 +294,14 @@ def _validate_inputs(
         encoding_failed = True
     if encoding_failed:
         raise ValueError("Publication leaf is not encodable")
-    if type(content) is not bytes:
-        raise ValueError("Publication content must be bytes")
-    if expected is not None and not isinstance(expected, FileSnapshot):
-        raise ValueError("Expected state must be a file snapshot or None")
+    if type(content) is not bytes and not isinstance(content, ScratchFileSource):
+        raise ValueError("Publication content must be bytes or verified scratch")
+    if not isinstance(condition, (Create, Replace, Match)):
+        raise ValueError("Publication condition has an invalid type")
     if not isinstance(create_metadata, CreateMetadata):
         raise ValueError("Create metadata has an invalid type")
+    if expires_at is not None and (type(expires_at) not in {int, float} or expires_at != expires_at):
+        raise ValueError("Publication deadline must be a monotonic timestamp or None")
     if sys.platform != "linux":
         raise FilePublicationError(PublicationFailureKind.UNSUPPORTED, PublicationPhase.STAGING)
 
@@ -242,7 +317,7 @@ def _create_stage(parent_fd: int, stage: _StageOwnership) -> None:
     parent = _fstat(parent_fd, PublicationPhase.STAGING)
     if not stat.S_ISDIR(parent.st_mode):
         raise FilePublicationError(PublicationFailureKind.UNSUPPORTED, PublicationPhase.STAGING)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
     for _ in range(_STAGE_ATTEMPTS):
         candidate = _STAGE_PREFIX + secrets.token_hex(16)
         stage.name = candidate
@@ -264,18 +339,80 @@ def _create_stage(parent_fd: int, stage: _StageOwnership) -> None:
     raise FilePublicationError(PublicationFailureKind.IO, PublicationPhase.STAGING)
 
 
-def _write_all(descriptor: int, content: bytes) -> None:
+def _write_content(
+    descriptor: int,
+    content: bytes | ScratchFileSource,
+    expires_at: float | None,
+) -> tuple[int, bytes]:
+    digest = hashlib.sha256()
+    copied = 0
+    if isinstance(content, ScratchFileSource):
+        expected_size, expected_digest = ready_scratch_contract(content.ready)
+        try:
+            chunks = iter(iter_ready_scratch(content.parent_fd, content.ready))
+            while True:
+                _check_deadline(expires_at, PublicationPhase.CONTENT)
+                try:
+                    chunk = next(chunks)
+                except StopIteration:
+                    break
+                _check_deadline(expires_at, PublicationPhase.CONTENT)
+                _write_block(descriptor, chunk, digest, expires_at=expires_at)
+                copied += len(chunk)
+        except ScratchTransferError as error:
+            if error.kind is ScratchFailureKind.UNSUPPORTED:
+                kind = PublicationFailureKind.UNSUPPORTED
+            elif error.kind is ScratchFailureKind.IO:
+                kind = PublicationFailureKind.IO
+            else:
+                kind = PublicationFailureKind.CONFLICT
+            raise FilePublicationError(kind, PublicationPhase.CONTENT) from None
+        if copied != expected_size or not hmac.compare_digest(digest.digest(), expected_digest):
+            raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.CONTENT)
+        return copied, digest.digest()
+
+    _write_block(descriptor, content, digest, expires_at=expires_at)
+    return len(content), digest.digest()
+
+
+def _write_block(
+    descriptor: int,
+    content: bytes,
+    digest: _Digest,
+    *,
+    expires_at: float | None = None,
+) -> None:
     view = memoryview(content)
     offset = 0
     while offset < len(view):
-        written = _write(descriptor, view[offset:])
-        if written <= 0 or written > len(view) - offset:
+        _check_deadline(expires_at, PublicationPhase.CONTENT)
+        request = view[offset : offset + 64 * 1024]
+        written = _write(descriptor, request)
+        if written <= 0 or written > len(request):
             raise FilePublicationError(PublicationFailureKind.IO, PublicationPhase.CONTENT)
+        digest.update(request[:written])
         offset += written
 
 
 def _write(descriptor: int, content: memoryview) -> int:
     return _os_call(os.write, descriptor, content, kind=PublicationFailureKind.IO, phase=PublicationPhase.CONTENT)
+
+
+def _pread(
+    descriptor: int,
+    size: int,
+    offset: int,
+    *,
+    phase: PublicationPhase = PublicationPhase.CONDITION,
+) -> bytes:
+    return _os_call(
+        os.pread,
+        descriptor,
+        size,
+        offset,
+        kind=PublicationFailureKind.IO,
+        phase=phase,
+    )
 
 
 def _prepare_create(
@@ -293,42 +430,26 @@ def _prepare_create(
     _require_known_metadata(stage_fd)
 
 
-def _prepare_replacement(stage_fd: int, expected: FileSnapshot, access_acl: bytes | None) -> None:
+def _prepare_replacement(stage_fd: int, expected: FileStat, access_acl: bytes | None) -> None:
     _require_known_metadata(stage_fd)
-    mode = stat.S_IMODE(expected.stat.mode)
-    _set_ownership(stage_fd, expected.stat.uid, expected.stat.gid)
+    mode = stat.S_IMODE(expected.mode)
+    _set_ownership(stage_fd, expected.uid, expected.gid)
     _set_access_acl(stage_fd, access_acl)
     _metadata_call(os.fchmod, stage_fd, mode)
     observed = _fstat(stage_fd, PublicationPhase.METADATA)
-    if not _matches_access_metadata(observed, expected.stat.uid, expected.stat.gid, mode, expected.stat.device):
+    if not _matches_access_metadata(observed, expected.uid, expected.gid, mode, expected.device):
         raise FilePublicationError(PublicationFailureKind.METADATA, PublicationPhase.METADATA)
     if _read_access_acl(stage_fd) != access_acl:
         raise FilePublicationError(PublicationFailureKind.METADATA, PublicationPhase.METADATA)
 
 
-def _read_matching_snapshot(parent_fd: int, leaf_name: str, expected: FileSnapshot) -> FileSnapshot | None:
-    result: FileSnapshot | None = None
-    failure_kind: SnapshotFailureKind | None = None
-    try:
-        result = read_snapshot(parent_fd, leaf_name, max(expected.stat.size, 1))
-    except SnapshotReadError as error:
-        failure_kind = error.kind
-    if failure_kind is None:
-        return result
-    if failure_kind is SnapshotFailureKind.UNSUPPORTED_OBJECT:
-        raise FilePublicationError(PublicationFailureKind.UNSUPPORTED, PublicationPhase.CONDITION)
-    if failure_kind in {SnapshotFailureKind.CONFLICT, SnapshotFailureKind.LIMIT}:
-        raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.CONDITION)
-    raise FilePublicationError(PublicationFailureKind.IO, PublicationPhase.CONDITION)
-
-
-def _open_existing(parent_fd: int, leaf_name: str, device: int) -> int:
+def _open_existing(parent_fd: int, leaf_name: str, device: int, *, readable: bool) -> int:
     observed = _stat_at(parent_fd, leaf_name, PublicationPhase.CONDITION)
     if observed is None:
         raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.CONDITION)
     if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1 or observed.st_dev != device:
         raise FilePublicationError(PublicationFailureKind.UNSUPPORTED, PublicationPhase.CONDITION)
-    flags = os.O_RDWR | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    flags = (os.O_RDWR if readable else os.O_WRONLY) | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0)
     error_number: int | None = None
     try:
@@ -346,26 +467,105 @@ def _open_existing(parent_fd: int, leaf_name: str, device: int) -> int:
     raise FilePublicationError(PublicationFailureKind.IO, PublicationPhase.CONDITION)
 
 
-def _require_existing_match(descriptor: int, expected: FileSnapshot) -> None:
-    observed = _fstat(descriptor, PublicationPhase.CONDITION)
-    if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1 or observed.st_dev != expected.stat.device:
+def _observe_replacement(
+    parent_fd: int,
+    leaf_name: str,
+    condition: Replace | Match,
+    expires_at: float | None,
+) -> _ReplacementObservation:
+    parent = _fstat(parent_fd, PublicationPhase.CONDITION)
+    named = _stat_at(parent_fd, leaf_name, PublicationPhase.CONDITION)
+    if named is None:
+        raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.CONDITION)
+    _require_supported_regular(named, parent.st_dev)
+    include_digest = isinstance(condition, Match) and condition.revision.digest is not None
+    descriptor = _open_existing(parent_fd, leaf_name, parent.st_dev, readable=include_digest)
+    try:
+        revision = _observe_descriptor_revision(
+            descriptor,
+            parent_fd,
+            leaf_name,
+            parent.st_dev,
+            include_digest=include_digest,
+            expires_at=expires_at,
+        )
+        if isinstance(condition, Match) and revision != condition.revision:
+            raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.CONDITION)
+        access_acl = _read_access_acl(descriptor)
+        _require_revision_match(descriptor, parent_fd, leaf_name, revision)
+    except BaseException:
+        _close(descriptor)
+        raise
+    return _ReplacementObservation(descriptor, revision, access_acl)
+
+
+def _observe_descriptor_revision(
+    descriptor: int,
+    parent_fd: int,
+    leaf_name: str,
+    device: int,
+    *,
+    include_digest: bool,
+    expires_at: float | None,
+) -> FileRevision:
+    before_result = _fstat(descriptor, PublicationPhase.CONDITION)
+    _require_supported_regular(before_result, device)
+    before = _snapshot_stat(before_result)
+    named = _stat_at(parent_fd, leaf_name, PublicationPhase.CONDITION)
+    if named is None or _snapshot_stat(named) != before:
+        raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.CONDITION)
+    digest = hashlib.sha256() if include_digest else None
+    observed_size = 0
+    while digest is not None and observed_size < before.size:
+        _check_deadline(expires_at, PublicationPhase.CONDITION)
+        block = _pread(descriptor, min(64 * 1024, before.size - observed_size), observed_size)
+        if not block:
+            raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.CONDITION)
+        digest.update(block)
+        observed_size += len(block)
+    _check_deadline(expires_at, PublicationPhase.CONDITION)
+    after = _snapshot_stat(_fstat(descriptor, PublicationPhase.CONDITION))
+    named_after = _stat_at(parent_fd, leaf_name, PublicationPhase.CONDITION)
+    if after != before or named_after is None or _snapshot_stat(named_after) != before:
+        raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.CONDITION)
+    return FileRevision(before, None if digest is None else digest.digest())
+
+
+def _require_supported_regular(observed: os.stat_result, device: int) -> None:
+    if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1 or observed.st_dev != device:
         raise FilePublicationError(PublicationFailureKind.UNSUPPORTED, PublicationPhase.CONDITION)
-    if _snapshot_stat(observed) != expected.stat:
+
+
+def _require_revision_match(
+    descriptor: int,
+    parent_fd: int,
+    leaf_name: str,
+    revision: FileRevision,
+) -> None:
+    observed = _fstat(descriptor, PublicationPhase.CONDITION)
+    _require_supported_regular(observed, revision.stat.device)
+    named = _stat_at(parent_fd, leaf_name, PublicationPhase.CONDITION)
+    if _snapshot_stat(observed) != revision.stat or named is None or _snapshot_stat(named) != revision.stat:
         raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.CONDITION)
 
 
 def _verify_replacement_condition(
     parent_fd: int,
     leaf_name: str,
-    expected: FileSnapshot,
-    replacement_fd: int,
-    access_acl: bytes | None,
+    replacement: _ReplacementObservation,
+    expires_at: float | None,
 ) -> None:
-    current = _read_matching_snapshot(parent_fd, leaf_name, expected)
-    if current is None or current != expected:
+    current = _observe_descriptor_revision(
+        replacement.descriptor,
+        parent_fd,
+        leaf_name,
+        replacement.revision.stat.device,
+        include_digest=replacement.revision.digest is not None,
+        expires_at=expires_at,
+    )
+    if current != replacement.revision:
         raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.CONDITION)
-    _require_existing_match(replacement_fd, expected)
-    if _read_access_acl(replacement_fd) != access_acl:
+    if _read_access_acl(replacement.descriptor) != replacement.access_acl:
         raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.CONDITION)
 
 
@@ -414,6 +614,7 @@ def _verify_stage(
     parent_fd: int,
     stage_name: str,
     identity: _ObjectIdentity,
+    content_size: int,
 ) -> None:
     descriptor_stat = _fstat(stage_fd, PublicationPhase.METADATA)
     named_stat = _stat_at(parent_fd, stage_name, PublicationPhase.METADATA)
@@ -421,11 +622,61 @@ def _verify_stage(
         named_stat is None
         or not stat.S_ISREG(descriptor_stat.st_mode)
         or descriptor_stat.st_nlink != 1
+        or descriptor_stat.st_size != content_size
         or _ObjectIdentity(descriptor_stat.st_dev, descriptor_stat.st_ino) != identity
         or _ObjectIdentity(named_stat.st_dev, named_stat.st_ino) != identity
         or _snapshot_stat(named_stat) != _snapshot_stat(descriptor_stat)
     ):
         raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.METADATA)
+
+
+def _observe_published(
+    stage_fd: int,
+    parent_fd: int,
+    leaf_name: str,
+    identity: _ObjectIdentity,
+    digest: bytes,
+    expires_at: float | None,
+) -> FileRevision:
+    _check_deadline(expires_at, PublicationPhase.PUBLICATION)
+    before = _fstat(stage_fd, PublicationPhase.PUBLICATION)
+    named_before = _stat_at(parent_fd, leaf_name, PublicationPhase.PUBLICATION)
+    if (
+        named_before is None
+        or not stat.S_ISREG(before.st_mode)
+        or before.st_nlink != 1
+        or _ObjectIdentity(before.st_dev, before.st_ino) != identity
+        or _ObjectIdentity(named_before.st_dev, named_before.st_ino) != identity
+        or _snapshot_stat(named_before) != _snapshot_stat(before)
+    ):
+        raise FilePublicationError(PublicationFailureKind.UNCERTAIN, PublicationPhase.PUBLICATION)
+
+    observed_digest = hashlib.sha256()
+    offset = 0
+    while offset < before.st_size:
+        _check_deadline(expires_at, PublicationPhase.PUBLICATION)
+        block = _pread(
+            stage_fd,
+            min(64 * 1024, before.st_size - offset),
+            offset,
+            phase=PublicationPhase.PUBLICATION,
+        )
+        if not block:
+            raise FilePublicationError(PublicationFailureKind.UNCERTAIN, PublicationPhase.PUBLICATION)
+        observed_digest.update(block)
+        offset += len(block)
+
+    _check_deadline(expires_at, PublicationPhase.PUBLICATION)
+    after = _fstat(stage_fd, PublicationPhase.PUBLICATION)
+    named_after = _stat_at(parent_fd, leaf_name, PublicationPhase.PUBLICATION)
+    if (
+        _snapshot_stat(after) != _snapshot_stat(before)
+        or named_after is None
+        or _snapshot_stat(named_after) != _snapshot_stat(before)
+        or not hmac.compare_digest(observed_digest.digest(), digest)
+    ):
+        raise FilePublicationError(PublicationFailureKind.UNCERTAIN, PublicationPhase.PUBLICATION)
+    return FileRevision(_snapshot_stat(after), observed_digest.digest())
 
 
 def _rename_noreplace(parent_fd: int, stage_name: str, leaf_name: str) -> None:
@@ -617,6 +868,11 @@ def _os_call(  # noqa: UP047
     if failed:
         raise FilePublicationError(kind, phase)
     return cast("_T", result)
+
+
+def _check_deadline(expires_at: float | None, phase: PublicationPhase) -> None:
+    if expires_at is not None and time.monotonic() >= expires_at:
+        raise FilePublicationError(PublicationFailureKind.DEADLINE, phase)
 
 
 def _close(descriptor: int) -> None:

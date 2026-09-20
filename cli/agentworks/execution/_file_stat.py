@@ -16,3 +16,11 @@ class FileStat:
     size: int
     modified_ns: int
     changed_ns: int
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class FileRevision:
+    """Private regular-file observation, optionally bound to its content."""
+
+    stat: FileStat
+    digest: bytes | None = None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+import hashlib
 import os
 import secrets
 import shutil
@@ -16,14 +17,18 @@ import pytest
 
 import agentworks.execution._file_publication as publication_module
 from agentworks.execution._file_publication import (
+    Create,
     CreateMetadata,
     FilePublicationError,
+    Match,
     PublicationFailureKind,
     PublicationPhase,
+    Replace,
     publish_file,
     retry_publication_cleanup,
 )
-from agentworks.execution._file_snapshot import FileSnapshot, read_snapshot
+from agentworks.execution._file_snapshot import FileSnapshot, read_revision, read_snapshot
+from agentworks.execution._file_stat import FileRevision
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux file publication")
 
@@ -42,8 +47,8 @@ def _snapshot(parent_fd: int, name: str) -> FileSnapshot:
     return result
 
 
-def _publish_replace(parent_fd: int, name: str, content: bytes, expected: FileSnapshot) -> None:
-    publish_file(parent_fd, name, content, expected=expected, create_metadata=_metadata())
+def _publish_match(parent_fd: int, name: str, content: bytes, expected: FileSnapshot) -> None:
+    publish_file(parent_fd, name, content, condition=Match(expected.revision), create_metadata=_metadata())
 
 
 def _failure(
@@ -51,16 +56,18 @@ def _failure(
     name: str,
     content: bytes,
     *,
-    expected: FileSnapshot | None,
+    condition: Create | Replace | Match,
     create_metadata: CreateMetadata | None = None,
+    expires_at: float | None = None,
 ) -> FilePublicationError:
     with pytest.raises(FilePublicationError) as raised:
         publish_file(
             parent_fd,
             name,
             content,
-            expected=expected,
+            condition=condition,
             create_metadata=create_metadata or _metadata(),
+            expires_at=expires_at,
         )
     return raised.value
 
@@ -78,7 +85,7 @@ def test_create_only_publishes_all_bytes_with_requested_metadata(tmp_path: Path)
     parent_fd = _open_parent(tmp_path)
     content = os.urandom(192 * 1024 + 17)
     try:
-        publish_file(parent_fd, "new", content, expected=None, create_metadata=_metadata(0o640))
+        revision = publish_file(parent_fd, "new", content, condition=Create(), create_metadata=_metadata(0o640))
         os.fstat(parent_fd)
     finally:
         os.close(parent_fd)
@@ -86,6 +93,9 @@ def test_create_only_publishes_all_bytes_with_requested_metadata(tmp_path: Path)
     target = tmp_path / "new"
     observed = target.stat()
     assert target.read_bytes() == content
+    assert revision.digest == hashlib.sha256(content).digest()
+    assert revision.stat.inode == observed.st_ino
+    assert revision.stat.size == len(content)
     assert (observed.st_uid, observed.st_gid, stat.S_IMODE(observed.st_mode)) == (os.getuid(), os.getgid(), 0o640)
     assert not _stage_names(tmp_path)
 
@@ -94,7 +104,7 @@ def test_non_linux_platform_refuses_before_parent_io(tmp_path: Path, monkeypatch
     parent_fd = _open_parent(tmp_path)
     os.close(parent_fd)
     monkeypatch.setattr("agentworks.execution._file_publication.sys.platform", "darwin")
-    error = _failure(parent_fd, "target", b"content", expected=None)
+    error = _failure(parent_fd, "target", b"content", condition=Create())
     assert error.kind is PublicationFailureKind.UNSUPPORTED
     assert error.phase is PublicationPhase.STAGING
 
@@ -111,13 +121,14 @@ def test_create_uses_exclusive_nofollow_0600_staging(tmp_path: Path, monkeypatch
 
     monkeypatch.setattr(os, "open", recording_open)
     try:
-        publish_file(parent_fd, "new", b"content", expected=None, create_metadata=_metadata())
+        publish_file(parent_fd, "new", b"content", condition=Create(), create_metadata=_metadata())
     finally:
         os.close(parent_fd)
 
     assert len(staging_calls) == 1
     flags, mode = staging_calls[0]
     assert flags & (os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW) == os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    assert flags & os.O_ACCMODE == os.O_RDWR
     assert mode == 0o600
 
 
@@ -139,7 +150,7 @@ def test_create_retains_default_acl_as_direct_create_would(tmp_path: Path) -> No
     os.close(control_fd)
     control_acl = os.getxattr(tmp_path / "control", "system.posix_acl_access")
     try:
-        publish_file(parent_fd, "published", b"content", expected=None, create_metadata=_metadata(0o640))
+        publish_file(parent_fd, "published", b"content", condition=Create(), create_metadata=_metadata(0o640))
     finally:
         os.close(parent_fd)
 
@@ -162,7 +173,7 @@ def test_replace_matching_snapshot_preserves_access_profile(tmp_path: Path) -> N
     parent_fd = _open_parent(tmp_path)
     try:
         expected = _snapshot(parent_fd, "target")
-        _publish_replace(parent_fd, "target", b"new bytes", expected)
+        _publish_match(parent_fd, "target", b"new bytes", expected)
     finally:
         os.close(parent_fd)
 
@@ -196,12 +207,129 @@ def test_replace_removes_staging_inherited_acl_when_existing_file_has_none(tmp_p
 
     parent_fd = _open_parent(tmp_path)
     try:
-        _publish_replace(parent_fd, "target", b"new", _snapshot(parent_fd, "target"))
+        _publish_match(parent_fd, "target", b"new", _snapshot(parent_fd, "target"))
     finally:
         os.close(parent_fd)
     with pytest.raises(OSError) as still_absent:
         os.getxattr(target, "system.posix_acl_access")
     assert still_absent.value.errno in {errno.ENODATA, getattr(errno, "ENOATTR", errno.ENODATA)}
+
+
+def test_unconditional_replace_does_not_read_old_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "target"
+    old_content = os.urandom(2 * 1024 * 1024)
+    target.write_bytes(old_content)
+    before = target.stat()
+    parent_fd = _open_parent(tmp_path)
+    original_pread = os.pread
+
+    def reject_old_read(descriptor: int, size: int, offset: int) -> bytes:
+        if os.fstat(descriptor).st_ino == before.st_ino:
+            pytest.fail("old content was read")
+        return original_pread(descriptor, size, offset)
+
+    monkeypatch.setattr(os, "pread", reject_old_read)
+    try:
+        revision = publish_file(
+            parent_fd,
+            "target",
+            b"replacement",
+            condition=Replace(),
+            create_metadata=_metadata(),
+        )
+    finally:
+        os.close(parent_fd)
+
+    after = target.stat()
+    assert target.read_bytes() == b"replacement"
+    assert after.st_ino != before.st_ino
+    assert revision.stat.inode == after.st_ino
+    assert revision.digest == hashlib.sha256(b"replacement").digest()
+
+
+def test_stat_only_match_does_not_read_old_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "target"
+    target.write_bytes(os.urandom(2 * 1024 * 1024))
+    old_inode = target.stat().st_ino
+    parent_fd = _open_parent(tmp_path)
+    expected = read_revision(parent_fd, "target", include_digest=False)
+    assert expected is not None
+    original_pread = os.pread
+
+    def reject_old_read(descriptor: int, size: int, offset: int) -> bytes:
+        if os.fstat(descriptor).st_ino == old_inode:
+            pytest.fail("old content was read")
+        return original_pread(descriptor, size, offset)
+
+    monkeypatch.setattr(os, "pread", reject_old_read)
+    try:
+        publish_file(
+            parent_fd,
+            "target",
+            b"replacement",
+            condition=Match(expected),
+            create_metadata=_metadata(),
+        )
+    finally:
+        os.close(parent_fd)
+
+    assert target.read_bytes() == b"replacement"
+
+
+def test_match_refuses_stale_digest_even_when_metadata_matches(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    target.write_bytes(b"current")
+    parent_fd = _open_parent(tmp_path)
+    try:
+        current = _snapshot(parent_fd, "target")
+        stale = FileRevision(current.stat, hashlib.sha256(b"stale!!").digest())
+        error = _failure(parent_fd, "target", b"new", condition=Match(stale))
+    finally:
+        os.close(parent_fd)
+
+    assert error.kind is PublicationFailureKind.CONFLICT
+    assert error.phase is PublicationPhase.CONDITION
+    assert target.read_bytes() == b"current"
+    assert not _stage_names(tmp_path)
+
+
+def test_replace_and_match_require_an_existing_regular_file(tmp_path: Path) -> None:
+    parent_fd = _open_parent(tmp_path)
+    try:
+        replace_error = _failure(parent_fd, "missing", b"new", condition=Replace())
+        template = tmp_path / "template"
+        template.write_bytes(b"content")
+        revision = _snapshot(parent_fd, "template").revision
+        template.unlink()
+        match_error = _failure(parent_fd, "missing", b"new", condition=Match(revision))
+    finally:
+        os.close(parent_fd)
+
+    assert replace_error.kind is PublicationFailureKind.CONFLICT
+    assert match_error.kind is PublicationFailureKind.CONFLICT
+    assert not (tmp_path / "missing").exists()
+    assert not _stage_names(tmp_path)
+
+
+def test_expired_deadline_refuses_before_staging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    parent_fd = _open_parent(tmp_path)
+    monkeypatch.setattr(publication_module, "_create_stage", lambda *_args: pytest.fail("stage was created"))
+    try:
+        with pytest.raises(FilePublicationError) as raised:
+            publish_file(
+                parent_fd,
+                "target",
+                b"content",
+                condition=Create(),
+                create_metadata=_metadata(),
+                expires_at=0.0,
+            )
+    finally:
+        os.close(parent_fd)
+    assert raised.value.kind is PublicationFailureKind.DEADLINE
+    assert raised.value.phase is PublicationPhase.STAGING
+    assert not (tmp_path / "target").exists()
+    assert not _stage_names(tmp_path)
 
 
 def test_create_conflict_keeps_existing_inode_and_bytes(tmp_path: Path) -> None:
@@ -210,7 +338,7 @@ def test_create_conflict_keeps_existing_inode_and_bytes(tmp_path: Path) -> None:
     before = target.stat()
     parent_fd = _open_parent(tmp_path)
     try:
-        error = _failure(parent_fd, "target", b"replacement", expected=None)
+        error = _failure(parent_fd, "target", b"replacement", condition=Create())
     finally:
         os.close(parent_fd)
     assert error.kind is PublicationFailureKind.CONFLICT
@@ -224,7 +352,7 @@ def test_create_refuses_when_renameat2_is_unavailable(tmp_path: Path, monkeypatc
     parent_fd = _open_parent(tmp_path)
     monkeypatch.setattr("agentworks.execution._file_publication.ctypes.CDLL", lambda *_args, **_kwargs: object())
     try:
-        error = _failure(parent_fd, "target", b"content", expected=None)
+        error = _failure(parent_fd, "target", b"content", condition=Create())
     finally:
         os.close(parent_fd)
     assert error.kind is PublicationFailureKind.UNSUPPORTED
@@ -243,7 +371,7 @@ def test_stale_snapshot_conflicts_without_replacing_newer_inode(tmp_path: Path) 
         replacement.write_bytes(b"second")
         os.replace(replacement, target)
         newer = target.stat()
-        error = _failure(parent_fd, "target", b"third", expected=stale)
+        error = _failure(parent_fd, "target", b"third", condition=Match(stale.revision))
     finally:
         os.close(parent_fd)
     assert error.kind is PublicationFailureKind.CONFLICT
@@ -272,7 +400,7 @@ def test_replacement_refuses_links_and_special_objects(tmp_path: Path, kind: str
         else:
             target.unlink()
             target.mkdir()
-        error = _failure(parent_fd, "target", b"new", expected=expected)
+        error = _failure(parent_fd, "target", b"new", condition=Match(expected.revision))
     finally:
         os.close(parent_fd)
     assert error.kind is PublicationFailureKind.UNSUPPORTED
@@ -297,7 +425,7 @@ def test_observed_fifo_is_refused_before_writable_open(tmp_path: Path, monkeypat
 
     monkeypatch.setattr(os, "open", recording_open)
     try:
-        error = _failure(parent_fd, "target", b"new", expected=expected)
+        error = _failure(parent_fd, "target", b"new", condition=Match(expected.revision))
     finally:
         os.close(parent_fd)
     assert error.kind is PublicationFailureKind.UNSUPPORTED
@@ -313,7 +441,7 @@ def test_read_only_destination_requires_ordinary_write_authority(tmp_path: Path)
     before = target.stat()
     parent_fd = _open_parent(tmp_path)
     try:
-        error = _failure(parent_fd, "target", b"new", expected=_snapshot(parent_fd, "target"))
+        error = _failure(parent_fd, "target", b"new", condition=Match(_snapshot(parent_fd, "target").revision))
     finally:
         os.close(parent_fd)
     assert error.kind is PublicationFailureKind.WRITE_AUTHORITY
@@ -330,7 +458,7 @@ def test_unavailable_create_ownership_refuses_before_publication(tmp_path: Path)
             parent_fd,
             "target",
             b"content",
-            expected=None,
+            condition=Create(),
             create_metadata=_metadata(uid=os.getuid() + 1),
         )
     finally:
@@ -349,7 +477,7 @@ def test_set_id_destination_is_refused_before_replacement(tmp_path: Path) -> Non
     before = target.stat()
     parent_fd = _open_parent(tmp_path)
     try:
-        error = _failure(parent_fd, "target", b"new", expected=_snapshot(parent_fd, "target"))
+        error = _failure(parent_fd, "target", b"new", condition=Match(_snapshot(parent_fd, "target").revision))
     finally:
         os.close(parent_fd)
     assert error.kind is PublicationFailureKind.METADATA
@@ -367,7 +495,7 @@ def test_unknown_extended_metadata_is_refused_without_blind_copy(tmp_path: Path)
     before = target.stat()
     parent_fd = _open_parent(tmp_path)
     try:
-        error = _failure(parent_fd, "target", b"new", expected=_snapshot(parent_fd, "target"))
+        error = _failure(parent_fd, "target", b"new", condition=Match(_snapshot(parent_fd, "target").revision))
     finally:
         os.close(parent_fd)
     assert error.kind is PublicationFailureKind.METADATA
@@ -395,7 +523,12 @@ def test_partial_write_failure_leaves_old_inode_and_cleans_stage(
 
     monkeypatch.setattr(publication_module, "_write", failing_write)
     try:
-        error = _failure(parent_fd, "target", b"replacement", expected=_snapshot(parent_fd, "target"))
+        error = _failure(
+            parent_fd,
+            "target",
+            b"replacement",
+            condition=Match(_snapshot(parent_fd, "target").revision),
+        )
         os.fstat(parent_fd)
     finally:
         os.close(parent_fd)
@@ -418,7 +551,7 @@ def test_metadata_failure_leaves_old_inode_unchanged(tmp_path: Path, monkeypatch
 
     monkeypatch.setattr(os, "fchmod", fail_mode)
     try:
-        error = _failure(parent_fd, "target", b"new", expected=_snapshot(parent_fd, "target"))
+        error = _failure(parent_fd, "target", b"new", condition=Match(_snapshot(parent_fd, "target").revision))
     finally:
         os.close(parent_fd)
     assert error.kind is PublicationFailureKind.METADATA
@@ -442,7 +575,7 @@ def test_cleanup_failure_is_bounded_and_reported(tmp_path: Path, monkeypatch: py
         "_write",
         lambda *_args: (_ for _ in ()).throw(FilePublicationError(PublicationFailureKind.IO, PublicationPhase.CONTENT)),
     )
-    error = _failure(parent_fd, "target", b"content", expected=None)
+    error = _failure(parent_fd, "target", b"content", condition=Create())
     debt = _stage_names(tmp_path)
     assert error.kind is PublicationFailureKind.IO
     assert error.cleanup_debt is not None
@@ -468,7 +601,7 @@ def test_unidentified_stage_debt_retains_exact_name_but_refuses_retry(
         return observed
 
     monkeypatch.setattr(os, "fstat", fail_regular_fstat)
-    error = _failure(parent_fd, "target", b"content", expected=None)
+    error = _failure(parent_fd, "target", b"content", condition=Create())
     debt = error.cleanup_debt
     assert debt is not None and debt.device is None and debt.inode is None
     assert debt.name not in repr(debt)
@@ -494,7 +627,7 @@ def test_stage_identity_interrupt_releases_fd_and_carries_unknown_debt(
 
     monkeypatch.setattr(os, "fstat", interrupt_regular_fstat)
     with pytest.raises(KeyboardInterrupt) as raised:
-        publish_file(parent_fd, "target", b"content", expected=None, create_metadata=_metadata())
+        publish_file(parent_fd, "target", b"content", condition=Create(), create_metadata=_metadata())
     cause = _publication_cause(raised.value)
     assert cause.phase is PublicationPhase.CLEANUP
     assert cause.cleanup_debt is not None and cause.cleanup_debt.device is None
@@ -530,7 +663,7 @@ def test_identified_stage_interrupt_before_acquisition_return_cleans_owned_objec
     monkeypatch.setattr(os, "open", recording_open)
     monkeypatch.setattr(stat, "S_ISREG", interrupt_stage_validation)
     with pytest.raises(KeyboardInterrupt):
-        publish_file(parent_fd, "target", b"content", expected=None, create_metadata=_metadata())
+        publish_file(parent_fd, "target", b"content", condition=Create(), create_metadata=_metadata())
     assert stage_fd is not None
     with pytest.raises(OSError):
         os.fstat(stage_fd)
@@ -561,7 +694,7 @@ def test_stage_identity_error_then_close_interrupt_retains_unknown_debt(
     monkeypatch.setattr(os, "fstat", fail_regular_fstat)
     monkeypatch.setattr(publication_module, "_close", close_then_interrupt)
     with pytest.raises(KeyboardInterrupt) as raised:
-        publish_file(parent_fd, "target", b"content", expected=None, create_metadata=_metadata())
+        publish_file(parent_fd, "target", b"content", condition=Create(), create_metadata=_metadata())
     cause = _publication_cause(raised.value)
     assert cause.kind is PublicationFailureKind.IO
     assert cause.phase is PublicationPhase.STAGING
@@ -596,7 +729,7 @@ def test_interrupted_stage_open_never_deletes_colliding_candidate(
     monkeypatch.setattr(secrets, "token_hex", lambda _length: "collision")
     monkeypatch.setattr(os, "open", interrupt_candidate_open)
     with pytest.raises(KeyboardInterrupt) as raised:
-        publish_file(parent_fd, "target", b"content", expected=None, create_metadata=_metadata())
+        publish_file(parent_fd, "target", b"content", condition=Create(), create_metadata=_metadata())
     cause = _publication_cause(raised.value)
     assert cause.cleanup_debt is not None
     assert cause.cleanup_debt.name == candidate.name
@@ -627,7 +760,7 @@ def test_second_cleanup_interrupt_escapes_with_known_debt_and_closed_stage(
     monkeypatch.setattr(publication_module, "_write", interrupt_write)
     monkeypatch.setattr(os, "stat", interrupt_cleanup)
     with pytest.raises(SystemExit) as raised:
-        publish_file(parent_fd, "target", b"content", expected=None, create_metadata=_metadata())
+        publish_file(parent_fd, "target", b"content", condition=Create(), create_metadata=_metadata())
     cause = _publication_cause(raised.value)
     debt = cause.cleanup_debt
     assert cause.phase is PublicationPhase.CLEANUP
@@ -652,7 +785,7 @@ def test_cleanup_never_unlinks_a_replaced_stage_name(tmp_path: Path, monkeypatch
         raise FilePublicationError(PublicationFailureKind.IO, PublicationPhase.CONTENT)
 
     monkeypatch.setattr(publication_module, "_write", substitute_stage)
-    error = _failure(parent_fd, "target", b"content", expected=None)
+    error = _failure(parent_fd, "target", b"content", condition=Create())
     assert error.cleanup_debt is not None
     assert not retry_publication_cleanup(parent_fd, error.cleanup_debt)
     os.close(parent_fd)
@@ -684,13 +817,61 @@ def test_post_rename_failure_reports_uncertainty_without_blind_cleanup(
 
     monkeypatch.setattr(os, "rename", rename_then_fail)
     try:
-        error = _failure(parent_fd, "target", b"new", expected=expected)
+        error = _failure(parent_fd, "target", b"new", condition=Match(expected.revision))
     finally:
         os.close(parent_fd)
     assert error.kind is PublicationFailureKind.UNCERTAIN
     assert error.phase is PublicationPhase.PUBLICATION
     assert error.cleanup_debt is None
     assert target.read_bytes() == b"new"
+    assert not _stage_names(tmp_path)
+
+
+def test_final_named_observation_failure_reports_uncertainty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "target"
+    target.write_bytes(b"old")
+    parent_fd = _open_parent(tmp_path)
+
+    def fail_final_observation(*_args: object, **_kwargs: object) -> FileRevision:
+        raise FilePublicationError(PublicationFailureKind.IO, PublicationPhase.PUBLICATION)
+
+    monkeypatch.setattr(publication_module, "_observe_published", fail_final_observation)
+    try:
+        error = _failure(parent_fd, "target", b"new", condition=Replace())
+    finally:
+        os.close(parent_fd)
+    assert error.kind is PublicationFailureKind.UNCERTAIN
+    assert error.phase is PublicationPhase.PUBLICATION
+    assert error.cleanup_debt is None
+    assert target.read_bytes() == b"new"
+    assert not _stage_names(tmp_path)
+
+
+def test_post_rename_write_cannot_produce_a_stale_content_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "target"
+    target.write_bytes(b"old")
+    parent_fd = _open_parent(tmp_path)
+    original_rename = publication_module._rename_replace
+
+    def rename_then_write(parent: int, source: str, destination: str) -> None:
+        original_rename(parent, source, destination)
+        descriptor = os.open(destination, os.O_WRONLY, dir_fd=parent)
+        try:
+            os.pwrite(descriptor, b"X", 0)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    monkeypatch.setattr(publication_module, "_rename_replace", rename_then_write)
+    try:
+        error = _failure(parent_fd, "target", b"new", condition=Replace())
+    finally:
+        os.close(parent_fd)
+    assert error.kind is PublicationFailureKind.UNCERTAIN
+    assert error.phase is PublicationPhase.PUBLICATION
+    assert target.read_bytes() == b"Xew"
     assert not _stage_names(tmp_path)
 
 
@@ -709,7 +890,7 @@ def test_post_rename_interrupt_preserves_control_type_with_uncertainty(
 
     monkeypatch.setattr(os, "rename", rename_then_interrupt)
     with pytest.raises(KeyboardInterrupt) as raised:
-        _publish_replace(parent_fd, "target", b"new", expected)
+        _publish_match(parent_fd, "target", b"new", expected)
     os.close(parent_fd)
     cause = _publication_cause(raised.value)
     assert cause.kind is PublicationFailureKind.UNCERTAIN
@@ -737,7 +918,7 @@ def test_interrupt_after_successful_rename_during_close_retains_uncertainty(
 
     monkeypatch.setattr(publication_module, "_close", close_then_interrupt)
     with pytest.raises(KeyboardInterrupt) as raised:
-        _publish_replace(parent_fd, "target", b"new", expected)
+        _publish_match(parent_fd, "target", b"new", expected)
     os.close(parent_fd)
     cause = _publication_cause(raised.value)
     assert cause.kind is PublicationFailureKind.UNCERTAIN
@@ -756,7 +937,7 @@ def test_errors_have_fixed_secret_free_exception_chain(tmp_path: Path, monkeypat
         lambda *_args: (_ for _ in ()).throw(FilePublicationError(PublicationFailureKind.IO, PublicationPhase.CONTENT)),
     )
     try:
-        error = _failure(parent_fd, secret_name, b"private-content", expected=None)
+        error = _failure(parent_fd, secret_name, b"private-content", condition=Create())
     finally:
         os.close(parent_fd)
     assert error.args == (PublicationFailureKind.IO.value, PublicationPhase.CONTENT.value, False)
@@ -774,8 +955,14 @@ def test_values_are_frozen_and_inputs_reject_before_io(tmp_path: Path) -> None:
     os.close(parent_fd)
     for name in ("", ".", "..", "nested/name", "nul\x00name"):
         with pytest.raises(ValueError):
-            publish_file(parent_fd, name, b"content", expected=None, create_metadata=metadata)
+            publish_file(parent_fd, name, b"content", condition=Create(), create_metadata=metadata)
     with pytest.raises(ValueError):
-        publish_file(parent_fd, "target", bytearray(b"content"), expected=None, create_metadata=metadata)  # type: ignore[arg-type]
+        publish_file(
+            parent_fd,
+            "target",
+            bytearray(b"content"),  # type: ignore[arg-type]
+            condition=Create(),
+            create_metadata=metadata,
+        )
     with pytest.raises(ValueError):
         CreateMetadata(os.getuid(), os.getgid(), 0o4755)

@@ -18,6 +18,7 @@ from agentworks.execution._file_snapshot import (
     FileSnapshot,
     SnapshotFailureKind,
     SnapshotReadError,
+    read_revision,
     read_snapshot,
 )
 
@@ -56,6 +57,73 @@ def test_regular_binary_snapshot_binds_bytes_stat_and_digest(tmp_path: Path) -> 
     assert repr(result.digest) not in representation
     with pytest.raises(FrozenInstanceError):
         result.data = b"changed"  # type: ignore[misc]
+
+
+def test_stat_only_revision_does_not_read_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "file"
+    target.write_bytes(os.urandom(128 * 1024))
+    root_fd = _open_root(tmp_path)
+    monkeypatch.setattr(snapshot_module, "_read", lambda *_args: pytest.fail("content was read"))
+    try:
+        revision = read_revision(root_fd, "file", include_digest=False)
+    finally:
+        os.close(root_fd)
+
+    assert revision is not None
+    assert revision.digest is None
+    assert revision.stat.size == target.stat().st_size
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="O_PATH is Linux-specific")
+def test_stat_only_revision_uses_path_only_access_for_unreadable_leaf(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "file"
+    target.write_bytes(b"content")
+    target.chmod(0)
+    root_fd = _open_root(tmp_path)
+    original_open = open_linux_confined
+    leaf_flags: list[int] = []
+
+    def recording_open(parent_fd: int, path: str, flags: int) -> int | None:
+        leaf_flags.append(flags)
+        return original_open(parent_fd, path, flags)
+
+    monkeypatch.setattr(snapshot_module, "open_linux_confined", recording_open)
+    monkeypatch.setattr(snapshot_module, "_read", lambda *_args: pytest.fail("content was read"))
+    try:
+        revision = read_revision(root_fd, "file", include_digest=False)
+    finally:
+        os.close(root_fd)
+
+    assert revision is not None
+    assert leaf_flags and leaf_flags[-1] & os.O_PATH == os.O_PATH
+
+
+def test_digest_revision_hashes_without_retaining_content(tmp_path: Path) -> None:
+    content = os.urandom(3 * 64 * 1024 + 23)
+    (tmp_path / "file").write_bytes(content)
+    root_fd = _open_root(tmp_path)
+    try:
+        revision = read_revision(root_fd, "file", include_digest=True)
+    finally:
+        os.close(root_fd)
+
+    assert revision is not None
+    assert revision.digest == hashlib.sha256(content).digest()
+    assert revision.stat.size == len(content)
+    assert repr(content) not in repr(revision)
+
+
+def test_expired_revision_deadline_refuses_before_observation(tmp_path: Path) -> None:
+    (tmp_path / "file").write_bytes(b"content")
+    root_fd = _open_root(tmp_path)
+    try:
+        with pytest.raises(SnapshotReadError) as raised:
+            read_revision(root_fd, "file", include_digest=True, expires_at=0.0)
+    finally:
+        os.close(root_fd)
+    assert raised.value.kind is SnapshotFailureKind.DEADLINE
 
 
 @pytest.mark.parametrize("relative_path", ["missing", "missing/leaf", "present/missing"])

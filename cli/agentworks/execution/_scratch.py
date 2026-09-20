@@ -18,7 +18,10 @@ import stat
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 _DATA_NAME = "data"
 _DIRECTORY_MODE = 0o700
@@ -316,6 +319,27 @@ def read_scratch_range(parent_fd: int, ready: ReadyScratchReference, offset: int
     _finish_operation(reference, ScratchPhase.READ, failure, control, close_control)
     assert result is not None
     return result
+
+
+def ready_scratch_contract(ready: ReadyScratchReference) -> tuple[int, bytes]:
+    """Return the verified object's declared length and digest."""
+    if not isinstance(ready, ReadyScratchReference):
+        raise ValueError("Ready scratch reference has an invalid type")
+    reference = ready._reference
+    return reference._length, bytes(reference._digest)
+
+
+def iter_ready_scratch(parent_fd: int, ready: ReadyScratchReference) -> Iterator[bytes]:
+    """Yield verified scratch content in the transfer substrate's bounded ranges."""
+    length, _ = ready_scratch_contract(ready)
+    if length == 0:
+        read_scratch_range(parent_fd, ready, 0, 0)
+        return
+    offset = 0
+    while offset < length:
+        block = read_scratch_range(parent_fd, ready, offset, min(_MAX_CHUNK_BYTES, length - offset))
+        yield block
+        offset += len(block)
 
 
 def cleanup_scratch(
