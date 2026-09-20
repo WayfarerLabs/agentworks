@@ -321,6 +321,11 @@ PoC merge enables production use.
 
 ## 4. Build the independent stacks in parallel
 
+- [ ] Establish exact child-status ownership wherever a native wait becomes execution evidence.
+      CPython can substitute zero after ignored `SIGCHLD` or another reaper consumes the status; the
+      helper and workstation observers must refuse missing evidence rather than report that
+      synthetic value. Validate the retrospective completion candidate independently from eager
+      launch acknowledgment and preserve uncertainty for unproved signal termination.
 - [ ] Establish local process ownership through launch interruption on supported workstation hosts.
       A real SIGINT probe on Linux CPython 3.12.13 left a child alive when `Popen` construction was
       interrupted before returning its handle. Shared pump extraction and the existing SSH copy do
