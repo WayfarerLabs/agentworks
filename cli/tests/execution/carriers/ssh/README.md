@@ -12,11 +12,12 @@ The process fixtures use synthetic Python children and temporary files. The shar
 fixture substitutes a local POSIX-shell executable for SSH, exercising the real quoting and pipe
 pump without authentication or a server. SSH-boundary live-I/O regressions exercise borrowed input,
 separate binary output sinks, partial writes, temporary backpressure, endpoint faults, interruption
-cleanup and ambiguous status 255. Installed-client tests parse `ssh -G` options and drive a real
-client against an owned loopback peer that refuses before authentication. Forwarding tests also
-start a fixture-owned loopback sshd when available and exercise authenticated delivery, listener
-refusal and cleanup. These local fixtures do not establish the supported workstation and provider
-matrix; report skips separately.
+cleanup and ambiguous status 255. An installed-client test uses fresh fixture keys and one owned
+loopback sshd to exercise sensitive binary live duplex delivery through the real client. Other
+installed-client tests parse `ssh -G` options and drive a real client against an owned loopback peer
+that refuses before authentication. Forwarding tests reuse the fixture-owned loopback sshd when
+available and exercise authenticated delivery, listener refusal and cleanup. These local fixtures do
+not establish the supported workstation and provider matrix; report skips separately.
 
 For the operator's integration tester, combine the SSH and transport branches in a disposable local
 branch. Record both input commit IDs, the integrated commit, conflict resolutions and the installed

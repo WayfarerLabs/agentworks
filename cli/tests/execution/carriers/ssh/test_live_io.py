@@ -26,8 +26,6 @@ from agentworks.execution.carriers.ssh import client
 from agentworks.execution.carriers.ssh.client import SSHCarrier
 from agentworks.execution.carriers.ssh.connection import SSHConnection
 
-pytestmark = pytest.mark.windows
-
 
 class ChunkSource:
     def __init__(self, chunks: list[bytes | None]) -> None:
@@ -116,6 +114,7 @@ def test_ssh_advertises_live_byte_io_without_inspection() -> None:
     assert not carrier.features.terminal
 
 
+@pytest.mark.windows
 def test_live_duplex_preserves_binary_streams_under_backpressure(
     children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -152,6 +151,7 @@ def test_live_duplex_preserves_binary_streams_under_backpressure(
 
 
 @pytest.mark.parametrize("endpoint", ["source", "sink"])
+@pytest.mark.windows
 def test_live_endpoint_fault_is_safe_and_cleans_the_client(
     children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch, endpoint: str
 ) -> None:
@@ -183,6 +183,7 @@ def test_live_endpoint_fault_is_safe_and_cleans_the_client(
     assert_closed(children)
 
 
+@pytest.mark.windows
 def test_live_endpoint_interruption_reaps_before_propagating(
     children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -203,6 +204,7 @@ def test_live_endpoint_interruption_reaps_before_propagating(
     assert_closed(children)
 
 
+@pytest.mark.windows
 def test_live_delivery_does_not_turn_ssh_255_into_remote_completion(
     children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -223,3 +225,65 @@ def test_live_delivery_does_not_turn_ssh_255_into_remote_completion(
     assert report.failure == Failure.OBSERVATION
     assert report.stdout.complete and report.stderr.complete
     assert_closed(children)
+
+
+@pytest.mark.integration
+@pytest.mark.windows
+def test_installed_ssh_live_duplex_preserves_sensitive_binary_delivery(
+    local_sshd: SSHConnection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = (b"sensitive-live-canary\x00\xff\r\n" + bytes(range(256))) * 512
+    chunks: list[bytes | None] = [None]
+    chunks.extend(payload[offset : offset + 8191] for offset in range(0, len(payload), 8191))
+    chunks.append(b"")
+    source = ChunkSource(chunks)
+    stdout = ShortSink(4093, stall_every=4)
+    stderr = ShortSink(3079, stall_every=3)
+    clients: list[tuple[list[str], subprocess.Popen[bytes]]] = []
+    original = subprocess.Popen
+
+    def spawn(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        if argv[0] == local_sshd.ssh_executable and argv[-1] != "-V":
+            assert all(process.poll() is not None for unused, process in clients)
+        process = original(argv, **kwargs)
+        if argv[0] == local_sshd.ssh_executable:
+            clients.append((argv, process))
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    script = (
+        "import sys; data=sys.stdin.buffer.read(); "
+        "sys.stdout.buffer.write(b'\\x00out\\xff'+data); sys.stdout.buffer.flush(); "
+        "sys.stderr.buffer.write(b'\\x80err\\x00'+data[::-1]); sys.stderr.buffer.flush(); sys.exit(23)"
+    )
+    report = SSHCarrier(local_sshd).execute(
+        PreparedInvocation((sys.executable, "-c", script)),
+        io=CarrierIO(
+            input=LiveInput(source, sensitive=True),
+            output=SinkOutput(stdout, stderr, require_live=True),
+        ),
+        deadline=Deadline.after(10),
+    )
+
+    assert bytes(stdout.data) == b"\x00out\xff" + payload
+    assert bytes(stderr.data) == b"\x80err\x00" + payload[::-1]
+    assert report.dispatch == Dispatch.SENT
+    assert report.completion == ExitStatus(code=23)
+    assert report.local_status == 23
+    assert report.failure is None
+    assert report.stdout.data == report.stderr.data == b""
+    assert report.stdout.complete and report.stderr.complete
+    assert report.stdout.retention == report.stderr.retention == Retention.DELIVERED
+    assert report.stdout.provenance == Provenance.CARRIER_STDOUT
+    assert report.stderr.provenance == Provenance.MIXED_STDERR
+    assert "sensitive-live-canary" not in repr(report)
+    assert source.limits and max(stdout.offers + stderr.offers) <= 65_536
+    assert not source.closed and not stdout.closed and not stderr.closed
+    command_clients = [process for argv, process in clients if argv[-1] != "-V"]
+    assert len(command_clients) == 1
+    assert all(process.poll() is not None for unused, process in clients)
+    assert all(
+        pipe is None or pipe.closed
+        for unused, process in clients
+        for pipe in (process.stdin, process.stdout, process.stderr)
+    )
