@@ -123,10 +123,7 @@ def inventory_directory(
     _raise_if_expired(expires_at)
     state.entries.sort(key=lambda entry: entry.relative_path.encode("utf-8"))
     _raise_if_expired(expires_at)
-    result = tuple(state.entries)
-    if len(encode_inventory(result)) != state.encoded_bytes:
-        raise FileInventoryError(FileInventoryFailureKind.IO)
-    return result
+    return tuple(state.entries)
 
 
 def encode_inventory(entries: tuple[FileInventoryEntry, ...]) -> bytes:
