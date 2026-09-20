@@ -178,10 +178,11 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       ordinary/elevated helpers contend on the same inode. Keep macOS host-administrator setup
       pending operator disposition; readiness never installs the lock. Validate finite nonnegative
       relative budgets at the file request boundary before deriving a guest-local expiry.
-- [ ] Review and validate private exact-kind revision-bound object stat/removal and the Debian
+- [x] Review and validate private exact-kind revision-bound object stat/removal and the Debian
       create-time lock setup. Keep setup idempotent without replacing a valid lock inode;
       distinguish local fixture evidence from privileged native bootstrap and ordinary/admin
-      contention.
+      contention. All three private lanes are clean at `876355c7`; the file/Proxmox suite passes 305
+      tests.
 - [ ] Compose fixed inline file-operation bundles with one-stream compression and data-only scratch.
       Prove every final envelope against both complete Proxmox HTTP-body and workstation
       process-command bounds; no executable-helper staging fallback. The Proxmox compatibility floor
@@ -465,6 +466,30 @@ failed assertion. Temporary build output was removed. No live infrastructure was
 namespace setup, complete file delivery, launch ownership, lifecycle, native proof and the additive
 RunContext remain open; neither pending macOS decision is waived. These are private implementation
 corrections, not a public feedback/fix round.
+
+The next increment is privately reviewed at `876355c7`. Linux object stat/removal now binds exact
+kind and revision, and shared new-guest bootstrap provisions the protected lock after Python
+installation. Existing valid lock identity is retained; only new core-owned objects are finalized.
+Setup failures report closed phase/kind/creation facts. Review corrected a post-open descriptor
+leak, removed a redundant create-result flag and kept leaf validation at the future request
+boundary. An ACL-fixture audit found unmapped `nobody` IDs, not missing filesystem support;
+mapped-group fixtures execute the real inherited/existing ACL cases without skips.
+
+The source bundler now compresses trusted modules together, and standalone publication executes
+under Bookworm Python 3.11. The file design selects fixed operation-family inline bundles with
+data-only scratch, avoiding executable installation. The Proxmox carrier also refuses a serialized
+POST over 64 KiB before dispatch, including argv/framing/escaping. These changes do not prove the
+final file dispatcher or native carrier request sizes. Shared SSH types are unchanged; Windows SSH
+command size and complete native file delivery remain acceptance gates.
+
+At `876355c7`, the final full local suite passes 11,177 tests with 12 skips; the file/Proxmox suite
+passes 305 without skips. Ruff, formatting, CI-scoped mypy (951 sources), file lint and diff checks
+pass. Typer isolation, rulesync and locked-SDD checks also pass in this increment. The unchanged
+website code passes 160 Python and 103 Node tests and both deterministic build comparisons;
+temporary build outputs were removed. No live infrastructure was touched. All three private review
+lanes rechecked the correction pin. Native privileged setup, cross-identity contention, complete
+file delivery, lifecycle and additive RunContext remain open; both macOS operator decisions are
+still pending. No public review/test signal is raised and no public fix round is consumed.
 
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
