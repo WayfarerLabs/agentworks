@@ -299,6 +299,25 @@ outcome evidence.
 Sources: [systemd-run v252](https://github.com/systemd/systemd/blob/v252/man/systemd-run.xml),
 [systemd kill policy v252](https://github.com/systemd/systemd/blob/v252/man/systemd.kill.xml).
 
+Bookworm's [systemd-run manual](https://manpages.debian.org/bookworm/systemd/systemd-run.1.en.html)
+confirms that `--pipe` inherits the invoking descriptors and waits for the service to terminate.
+Inference: it is a useful foreground proof path, not a complete independent-job launch protocol. The
+independent path still needs target-owned input/output and a launch acknowledgment that does not
+wait for job completion. `--collect` removes terminal unit evidence, including failed units; it
+cannot replace durable completion records needed after reconnect.
+
+Bookworm's [service manual](https://manpages.debian.org/bookworm/systemd/systemd.service.5.en.html)
+distinguishes `ExitType=main` from keeping a service active while its cgroup contains processes. The
+former matches the generic-job rule when the service's main process represents the job anchor; the
+latter would let arbitrary surviving children prolong a completed main command. Neither setting
+alone proves the separate terminal-empty result.
+
+Bookworm's [execution manual](https://manpages.debian.org/bookworm/systemd/systemd.exec.5.en.html)
+describes `StandardInputData=` as embedded unit input and journal output as the default. Decision:
+neither is the sensitive-payload delivery path. The proof must use private input delivery and
+explicitly owned output instead of placing secrets in unit assignments or relying on default
+logging. These are constraints for the next experiment, not an implemented supervisor.
+
 Kernel cgroup v2 documentation specifies inherited membership, subtree population observation and
 subtree kill. Moving a parent does not move its existing descendants. Decision: launch inside the
 owned boundary, distinguish main-process exit from emptiness, and do not certify legacy sessions by
