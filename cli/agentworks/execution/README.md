@@ -141,12 +141,14 @@ registry because importing that registry currently loads legacy execution module
 ## Private inline preparation
 
 The private `_inline` candidate composes one carrier attempt with a fixed, standard-library-only
-Python helper. Caller arguments, script source, environment, working directory and finite stdin
-travel in the bounded stdin manifest, not helper argv. On Linux, scripts use an inherited memory
-file separately from application stdin. The caller must bind the expected destination identity. The
-host validates bounded helper evidence and keeps carrier status separate; it does not infer
-application success or an eager start acknowledgment. This candidate is not wired to production
-RunContext and does not yet supply staging, elevation, terminal I/O or managed lifetime.
+Python helper. Its packaged modules are compressed with standard-library zlib and ASCII-armored to
+reduce fixed carrier request size; only trusted packaged code uses that encoding. The destination
+Python must provide zlib. Caller arguments, script source, environment, working directory and finite
+stdin travel in the bounded stdin manifest, not helper argv. On Linux, scripts use an inherited
+memory file separately from application stdin. The caller must bind the expected destination
+identity. The host validates bounded helper evidence and keeps carrier status separate; it does not
+infer application success or an eager start acknowledgment. This candidate is not wired to
+production RunContext and does not yet supply staging, elevation, terminal I/O or managed lifetime.
 
 ## Private JSON transformation
 
