@@ -4,7 +4,7 @@
 - PR: [#832](https://github.com/WayfarerLabs/agentworks/pull/832), draft
 - Initial evaluated code: `e63a1ec4a8e9d99e89d09d6b162e908d3a4b96d6`
 - Main/contract base: `cea5e8523aac05edfc3a99a940d7cfb4d71fe32f` (#830)
-- State: Byte I/O adoption in progress; full terminal and production integration remain open
+- State: Byte I/O adoption validated locally; full terminal and production integration remain open
 
 ## Implemented scope
 
@@ -110,8 +110,14 @@ combined non-integration suite passed 12,002 tests with 14 skips after updating 
 fixture's SSH call site to explicit trust. Full Ruff and mypy passed, with 1,005 typed source files.
 Test-only follow-up `5986290d` adds an installed Linux OpenSSH live-byte case with fresh loopback
 credentials: sensitive binary input, partial/stalled sinks, stream provenance, empty retained report
-data and truthful exit 23 all passed. Private review and the final integrated gates remain in
-progress. Its private two-gate terminal preparation is also implemented, but a shared terminal
+data and truthful exit 23 all passed. Final runtime revision `c97fc8c0` removes duplicate SSH mode
+validation and redundant tests after shared byte-mode adoption. The final combined non-integration
+suite passed **11,991 tests with 14 skips**; both SSH duplex tests passed, including the installed
+OpenSSH case. Full Ruff/format, mypy (1,005 source files), file lint, locked-SDD, rulesync and
+typer-isolation checks passed. Website checks passed 160 Python and 103 Node tests, and both
+site-base double builds were identical. Independent project, complexity and correctness reviews are
+clean at `0e499da6`. These are local results; hosted CI records the published head separately.
+Transport's private two-gate terminal preparation is also implemented, but a shared terminal
 endpoint type is not yet enabled or frozen. The operator confirmed #833 as the implementation
 source, with terminal/PTY work proceeding in parallel.
 
