@@ -195,17 +195,36 @@ def _revalidate(
     expected: FileRevision,
     expires_at: float | None,
 ) -> None:
-    _raise_if_expired(expires_at, FileObjectPhase.CONDITION)
-    held = _fstat(observed.descriptor, FileObjectPhase.CONDITION)
-    if _snapshot_stat(held) != expected.stat:
+    current = _verify_observed(parent_fd, leaf_name, observed, FileObjectPhase.CONDITION, expires_at)
+    if current.stat != expected.stat:
         raise FileObjectError(FileObjectFailureKind.CONFLICT, FileObjectPhase.CONDITION)
-    held_kind = _require_supported(held, expected.stat.device, FileObjectPhase.CONDITION)
-    named = _stat_named(parent_fd, leaf_name, FileObjectPhase.CONDITION)
+
+
+def _verify_observed(
+    parent_fd: int,
+    leaf_name: str,
+    observed: _ObservedObject,
+    phase: FileObjectPhase,
+    expires_at: float | None,
+) -> FileRevision:
+    """Re-observe one held object and its exact name without reopening it."""
+    _raise_if_expired(expires_at, phase)
+    held = _fstat(observed.descriptor, phase)
+    held_revision = FileRevision(_snapshot_stat(held))
+    named = _stat_named(parent_fd, leaf_name, phase)
     if named is None:
-        raise FileObjectError(FileObjectFailureKind.CONFLICT, FileObjectPhase.CONDITION)
-    named_kind = _require_supported(named, expected.stat.device, FileObjectPhase.CONDITION)
-    if held_kind is not observed.kind or named_kind is not observed.kind or _snapshot_stat(named) != expected.stat:
-        raise FileObjectError(FileObjectFailureKind.CONFLICT, FileObjectPhase.CONDITION)
+        raise FileObjectError(FileObjectFailureKind.CONFLICT, phase)
+    if (held.st_dev, held.st_ino) != (observed.revision.stat.device, observed.revision.stat.inode) or (
+        named.st_dev,
+        named.st_ino,
+    ) != (held.st_dev, held.st_ino):
+        raise FileObjectError(FileObjectFailureKind.CONFLICT, phase)
+    held_kind = _require_supported(held, observed.revision.stat.device, phase)
+    named_kind = _require_supported(named, observed.revision.stat.device, phase)
+    if held_kind is not observed.kind or named_kind is not observed.kind or _snapshot_stat(named) != held_revision.stat:
+        raise FileObjectError(FileObjectFailureKind.CONFLICT, phase)
+    _raise_if_expired(expires_at, phase)
+    return held_revision
 
 
 def _read_digest_revision(parent_fd: int, leaf_name: str, expires_at: float | None) -> FileRevision | None:
