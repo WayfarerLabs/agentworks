@@ -67,8 +67,15 @@ feed the same sink interface without advertising live I/O, retaining truncation 
 The pump's result records local process facts with unknown stream provenance; each carrier owns
 interpretation as delivery evidence. It does not infer guest dispatch or termination. The SSH code
 in this branch still uses its private buffered pump; its owning implementation lane has adopted the
-shared pump separately. A compatibility refusal for the old adapter and joint SSH byte-I/O proof are
-required before integrating the candidate extension. No terminal support is enabled by these types.
+shared pump separately. The buffered adapter refuses extended input/output modes before connection
+admission or dispatch. Joint SSH byte-I/O proof remains required before enabling them in SSH. No
+terminal support is enabled by these types.
+
+On POSIX, the shared pump records terminal status from exact-child `waitpid` observations. A lost
+wait owner produces unknown status and observation failure, never a guessed zero exit. Once that
+loss is observed, cleanup does not signal or wait on the numeric PID. An external concurrent reaper
+can still create an exit/reuse race before loss is observed; this change does not establish exclusive
+process ownership. Windows retains handle-backed `Popen` waiting.
 
 The cleanup guard covers the I/O loop, not process construction or the intervening initialization. A
 real SIGINT probe on Linux with CPython 3.12.13 interrupted construction after child creation and
