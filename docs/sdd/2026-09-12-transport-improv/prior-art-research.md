@@ -667,14 +667,21 @@ not make that handoff atomic. The
 has a similar source-level handle-publication interval; this experiment provides no native Windows
 or macOS evidence.
 
-A one-shot launch-owner thread is a candidate, not the selected implementation. Local trials
-preserved exact child cleanup through repeated construction-time SIGINT, without replacing signal
-handlers. However, an early version relied on event/liveness synchronization that could itself be
-interrupted and incorrectly concluded cleanup had finished. The thread's own startup handoff still
-needs proof: interruption must distinguish a never-started owner from one that will start later,
-without returning with a surviving thread or borrowed endpoint. The existing exclusion of hard
-real-time process-creation guarantees does not excuse lost ownership or change callback threading.
-Do not substitute a generic future cancellation or `Thread.is_alive()` check for this proof.
+A one-shot launch-owner thread does not resolve ownership under the process core's current promise
+that no thread survives return. After a known successful thread start, local trials preserved exact
+child cleanup through repeated SIGINT without replacing signal handlers. However, interruption
+immediately before native thread creation and immediately afterward can both leave `ident=None`,
+`is_alive()==False` and no owner-entry acknowledgment. The latter case still has a delayed live
+thread. Waiting indefinitely hangs in the former case; returning can leak the thread in the latter.
+Real SIGINT reproduced the post-creation state on both tested interpreters. Retrying thread creation
+can duplicate owners and is not a repair. An earlier version also misread event/liveness
+synchronization interrupted during cleanup as completion.
+
+The existing exclusion of hard real-time process-creation guarantees does not excuse lost ownership,
+leave-behind threads or changes to callback threading. Neither this per-call thread nor a generic
+future cancellation is a selected production mechanism. An application-owned interruption policy or
+a separately established launch owner requires an explicit architecture decision; the carrier must
+not install a process-global signal policy as an incidental implementation detail.
 
 ## Native adapter audit, 2026-09-19
 

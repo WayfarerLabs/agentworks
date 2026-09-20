@@ -486,11 +486,17 @@ derives the scratch parent rather than accepting a path from a receipt. It check
 before opening workload paths and holds the existing transaction lock through mutation. Missing or
 unsafe lock/parent state refuses without setup or repair.
 
+The guest checks expiry after closing its owned path and lock descriptors, before emitting the
+result. If creation or a chunk write already happened, expiry retains exact cleanup debt rather than
+claiming a no-effects refusal.
+
 Tokens, paths, file bytes and references travel only through sensitive stdin. A stage-specific
 collector accepts an active reference or known cleanup debt only after complete nonce-bound framing
 and complete delivered streams. A creation result must match the declared length. Lost, malformed or
 noisy observation after possible dispatch is uncertain and never triggers replay. A chunk failure
 does not publish content; the caller retains its original reference for later exact cleanup.
+Returned chunk scratch-failure debt must match that reference exactly, including receipt mode;
+missing or conflicting debt is invalid control, not new cleanup authority.
 
 The private stage chunk cap is 12 KiB, below the scratch primitive's 24 KiB range cap. The complete
 manifest is limited to 32 KiB, and Proxmox independently enforces its full serialized body limit.

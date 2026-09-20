@@ -300,9 +300,13 @@ The private Linux `stage_begin` and `stage_chunk` exchanges now implement that d
 the existing transaction lock. Every request retains the nonempty original destination path; the
 guest derives its parent after checking execution identity. A complete creation result must match
 the requested length before the host exposes its reference. Cleanup debt is data bound to the
-original token/context, not a returned name or path. Missing private parents refuse. Incomplete
-observation after possible dispatch remains uncertain; no replay or public absence is inferred.
-These exchanges alone do not implement remote cleanup/reconciliation or complete upload/publication.
+original token/context, not a returned name or path. Chunk scratch-failure debt must match the
+already-known active reference exactly; the response cannot introduce different cleanup ownership.
+Missing private parents refuse. Incomplete observation after possible dispatch remains uncertain; no
+replay or public absence is inferred. Guest expiry is checked after owned path and lock cleanup; a
+completed mutation retains exact cleanup debt when that final check expires instead of becoming a
+no-effects refusal. These exchanges alone do not implement remote cleanup/reconciliation or complete
+upload/publication.
 
 Ordinary buffered capture cannot safely carry this protocol: sensitive input suppresses the
 response, while ordinary `Capture` can flow toward public execution results. Use the implemented
