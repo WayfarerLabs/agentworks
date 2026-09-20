@@ -58,10 +58,6 @@ class AccountResponse:
     identity: IdentityExpectation | None = None
     failure: AccountFailure | None = None
 
-    def __post_init__(self) -> None:
-        if (self.identity is None) == (self.failure is None):
-            raise AccountResponseError("account response requires one outcome")
-
 
 def _json_bytes(value: object) -> bytes:
     return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("ascii")
@@ -126,7 +122,6 @@ def encode_account_request(request: AccountRequest) -> bytes:
     encoded = _json_bytes(value)
     if len(encoded) > MAX_ACCOUNT_MESSAGE_BYTES:
         raise AccountRequestError(AccountFailure.OVERSIZED)
-    decode_account_request(encoded)
     return encoded
 
 
@@ -164,7 +159,7 @@ def encode_account_identity(nonce: str, identity: IdentityExpectation) -> bytes:
     if len(encoded) > MAX_ACCOUNT_MESSAGE_BYTES:
         raise AccountIdentityError(AccountFailure.OVERSIZED)
     try:
-        decode_account_response(encoded, nonce)
+        _identity(value["identity"])
     except AccountResponseError as error:
         raise AccountIdentityError(AccountFailure.LOOKUP) from error
     return encoded

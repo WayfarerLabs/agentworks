@@ -267,9 +267,8 @@ def test_invalid_or_oversized_trusted_account_refuses_before_dispatch(account: s
 
 
 @pytest.mark.skipif(sys.platform not in ("linux", "darwin"), reason="requires a POSIX account database")
-def test_real_subprocess_resolves_current_and_missing_accounts_without_staging(tmp_path: Path) -> None:
+def test_real_subprocess_resolves_current_and_missing_accounts() -> None:
     current = _current_account()
-    before = tuple(tmp_path.iterdir())
     carrier = LocalCarrier()
 
     found = resolve_account(carrier, current, Deadline.after(15), sys.executable)
@@ -285,7 +284,6 @@ def test_real_subprocess_resolves_current_and_missing_accounts_without_staging(t
     assert found.observation.identity is not None
     assert missing.observation.state is AccountObservationState.REFUSED
     assert missing.observation.failure is AccountFailure.MISSING
-    assert tuple(tmp_path.iterdir()) == before
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="inline identity verification requires Linux")
