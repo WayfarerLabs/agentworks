@@ -817,8 +817,9 @@ identity, so it is not itself proof of the transport's stale-reference guarantee
 [stop](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/instance/stop.go#L26-L167),
 [delete](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/instance/delete.go#L17-L36), and
 [PID validation](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/store/instance.go#L200-L235).
-Neither `--foreground` nor launchd establishes every MANAGED guarantee; the macOS mechanism gate
-remains open.
+Neither `--foreground` nor launchd establishes every MANAGED guarantee. The operator's subsequent
+coordination ruling keeps actual host resource lifecycle with the VM platform instead of requiring a
+generic macOS MANAGED supervisor; native platform recovery still needs proof.
 
 ### Darwin ownership feasibility
 
@@ -840,12 +841,12 @@ termination is not itself a kill operation. A private coalition controller is no
 
 The evidence therefore does not support advertising generic MANAGED on macOS through a plain
 launchd/process-group implementation. This is a public-mechanism gap, not proof that every possible
-Darwin supervisor is impossible. The lead recommends retaining the unchanged MANAGED guarantees
-where they can be proved and investigating a narrower, explicit cooperative resource-lifetime
-contract for macOS placement-host workflows. That would change the current independent-job/profile
-requirement and needs operator disposition before implementation. Lima foreground ownership remains
-a candidate for preserving required VM workflows, not proof of generic descendant emptiness. No
-requirement is waived by this research, and no native macOS result is claimed.
+Darwin supervisor is impossible. Following the operator's 2026-09-20 scope correction, retain
+unchanged guest MANAGED guarantees and prove the actual platform-owned macOS resource lifecycle. Do
+not introduce a weaker public profile, a private coalition controller or privileged host setup to
+simulate guest containment. Lima foreground ownership is an option to justify for a concrete
+workflow, not a mandatory generic supervisor or proof of descendant emptiness. No native macOS
+result is claimed by this research.
 
 ## Inline file-helper delivery bounds
 
@@ -901,13 +902,15 @@ workstations. No fallback stages executable code when a request is too large.
 
 ### Snapshot helper delivery sizing
 
+<!-- cspell:ignore lzma -->
+
 A local investigation at `64f67f2f` measured the eleven required snapshot modules plus a
 conservative surrogate using the existing stage protocol and guest. It used the real SSH argument
 builder, Windows command-line serialization, a demotion identity and a 288-byte request. Zlib's
 default compression produces a 37,291-character Windows command, above the 32,767-character limit.
 Its highest level still produces 36,831 characters. Standard-library `bz2` reduces that same command
-to 29,293 characters and the complete QGA-shaped JSON body to 28,692 bytes. Lzma also fits this
-surrogate but leaves only 1,236 characters of Windows headroom, versus 3,474 with `bz2`.
+to 29,293 characters and the complete QGA-shaped JSON body to 28,692 bytes. The `lzma` codec also
+fits this surrogate but leaves only 1,236 characters of Windows headroom, versus 3,474 with `bz2`.
 
 The selected candidate replaces the single fixed bundler codec with `bz2`; it adds no codec option,
 fallback, source minification or executable staging. With a temporary implementation, 488 existing

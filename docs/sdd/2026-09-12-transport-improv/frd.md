@@ -181,6 +181,29 @@ On prerequisite detection and diagnostics:
 > Just make sure you detect when python isn't present (or is the system-default xcode shim) and
 > report that very cleanly.
 
+#### Platform authority and operation coordination ruling, 2026-09-20
+
+On the VM-host threat boundary and database-level coordination:
+
+> The only thing running stuff on VM hosts are VM platforms. And they inherently have the ability to
+> do just about anything. Something on the VM host is not going to stop a malicious platform, right?
+> Or am I missing something?
+>
+> And then I've long wanted to do db-level locks to prevent ops from conflicting with each other. I
+> would hope that takes care of most concerns. Using conflict-free filenames should then solve for
+> most of the rest. What do we really need from the file-level locking?
+
+On the recommendation to make database-level operation coordination primary, retain unique scratch
+names and conservative file checks, and require a concrete remaining race to justify any
+destination-side lock rather than imposing blanket machine-wide locking and privileged host setup:
+
+> I agree with your recommendations. Make it happen please.
+
+The [file coordination design](file-operations-lld.md#cooperating-writers-and-honest-limits) and
+[platform-host lifecycle](execution-lifecycle-lld.md#placement-host-resource-lifetime) implement
+this ruling. Host-side cooperation is not containment of a malicious platform. The existing
+exclusion of malicious target-user processes and the guest MANAGED lifecycle requirements remain.
+
 ### Implementation scope
 
 In scope for the eventual implementation:

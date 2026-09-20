@@ -183,8 +183,8 @@ sandbox.
 Core entries distinguish an exact file, descendants of an approved root, and explicit root creation
 or removal. Core alone supplies trusted identity-based path expansion. A caller-controlled path,
 environment, symlink or derived view cannot widen it. An exact-file grant does not confer arbitrary
-sibling writes: private staging/publication/lock names are internal authority with owned cleanup,
-not a public parent grant. Helpers and carrier optimizations must honor the same boundary.
+sibling writes: private staging/publication names are internal authority with owned cleanup, not a
+public parent grant. Helpers and carrier optimizations must honor the same boundary.
 
 Mutation results report changed/unchanged and safe publication evidence, with typed conflict,
 failure or uncertainty. A lost acknowledgement is not permission to repeat a merge or deletion.

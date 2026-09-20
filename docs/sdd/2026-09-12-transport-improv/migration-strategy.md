@@ -39,9 +39,11 @@ delivers the richer tier only.
 
 SSH also reaches remote Lima placement hosts. `capabilities/vm_platform/lima.py:551` constructs this
 target, `:616` starts detached VM provisioning on it before the guest exists, and `:704` cancels
-that work during rollback. This host target participates in the shared execution/job migration
-without being delivered as a guest target through `RunContext`; its macOS-compatible userspace must
-be preserved.
+that work during rollback. This host target participates in the shared execution migration without
+being delivered as a guest target through `RunContext`; its macOS-compatible userspace must be
+preserved. The platform retains VM-resource lifecycle ownership rather than being required to
+replace its runtime with a generic host MANAGED job. It participates in core operation coordination
+for conflicting resources; this is not isolation from a malicious platform.
 
 The destination is reusable SSH-backed platform access. Remote Lima supplies its first management
 commands and guest-hop integration; the shared SSH carrier and host target do not depend on Lima.
@@ -198,11 +200,15 @@ workflows on isolated resources, never by sending one production request down bo
    adapters. Verify single-attempt delivery and truthful status-255 handling; apply preparation
    exactly once. Run new-stack tests with legacy modules unavailable, and test reusable
    platform-host composition independently from Lima-specific management commands.
-4. **Additive implementation PR:** validate complete new-stack workflows before exposing the new
-   RunContext accessors: provisioning, native recovery without Tailscale, files, jobs, backup, host
-   provisioning/rollback and interactive attachment. Existing callers remain unchanged. Prove their
-   behavior stays unchanged and constructing/accessing either surface adds no I/O, route activation
-   or mutations. The new surface is usable independently, not a facade calling legacy.
+4. **Additive implementation PR:** implement database-level resource-operation coordination before
+   exposing conflicting new-stack operations. Nested file requests share operation ownership;
+   uncertain remote effects retain it across disconnects and process death. Remove the private
+   destination-lock implementation and privileged setup rather than maintaining both mechanisms.
+   Validate complete new-stack workflows before exposing the new RunContext accessors: provisioning,
+   native recovery without Tailscale, files, jobs, backup, host provisioning/rollback and
+   interactive attachment. Existing callers remain unchanged. Prove their behavior stays unchanged
+   and constructing/accessing either surface adds no I/O, route activation or mutations. The new
+   surface is usable independently, not a facade calling legacy.
 5. **Consumer migration PR(s):** assign non-overlapping workflow batches with an owner and tests.
    Audit each operation's command versus file API, shell/startup, bound identity, elevation,
    environment, stdio, deadline, profile, lifetime and exact filesystem effects. Record intended

@@ -225,13 +225,12 @@ that workload's administrative authority. Selecting the profile does not revoke 
 authority. Session adoption therefore does not silently turn admin-mode sessions into a containment
 guarantee.
 
-Non-systemd placement hosts, including macOS before VM creation, still need MANAGED independent jobs
-for provisioning and rollback. They must supply all four added promises: identifiable workload
-ownership, ordinary descendant tracking, supervisor-owned stop and verified terminal emptiness, plus
-disconnect survival and retained job evidence. The mechanism is not selected or proven here; a
-process-group wrapper is acceptable only if it demonstrably satisfies those same promises. No
-Linux-specific containment claim is implied. DIRECT-only host support would drop required work and
-needs operator disposition, not a silent implementation shortcut.
+VM platform hosts are used by the platform implementation, not restricted guest resources. Their
+existing administrative authority is not contained by a cooperative supervisor or file lock. Do not
+introduce a host setup service or a new weaker profile merely to simulate Linux guest MANAGED
+execution. A target advertising MANAGED must still prove its complete lifecycle guarantees; host
+platform workflows need their actual provisioning, readiness, rollback and resource-lifetime
+behavior proved instead of inheriting a blanket requirement to support that profile.
 
 ### Placement-host resource lifetime
 
@@ -241,27 +240,31 @@ give its ordinary descendants an exemption from managed-job cleanup. The
 current remote-create wrapper as such a case: ordinary `limactl start` returns after a background
 host agent reports running, whereas `limactl start --foreground` remains the VM-runtime anchor.
 
-The candidate migration uses a separate resource-owned independent job for that foreground anchor,
-with bounded create and readiness operations. Provisioning completion and VM-runtime completion
-remain distinct. The VM domain owner retains the job reference and coordinates explicit stop,
-restart, rollback and delete; neither the SSH carrier nor generic job cleanup understands Lima. This
-is an application of existing lifetime choices, not a new profile, a blanket descendant exception or
-acceptance of Lima's PID files as transport run identity. The candidate must prove supported-version
-behavior and host-side ownership before adoption. In particular, separate QEMU process groups do not
-by themselves prove verified cleanup after abrupt host-agent loss.
+The VM platform owns persistent resource lifecycle. For Lima, use its supported create/start/status/
+stop/delete behavior and prove readiness, disconnect recovery and rollback for the selected driver.
+Evaluate a foreground anchor only where that concrete workflow needs it; it is not a mandatory
+transport-managed replacement for Lima's own runtime. Provisioning completion and VM-runtime
+completion remain distinct. Neither the SSH carrier nor generic job cleanup understands Lima.
+
+Platform operations participate in core database-level coordination for conflicting VM or shared
+host resources. Loss of observation does not release unresolved ownership or prove cleanup, and a
+numeric PID file does not authorize killing arbitrary host processes. These are correctness and
+recovery requirements, not a hostile-platform boundary. Linux guest sessions retain the full MANAGED
+guarantees above. The host workflow must report any cleanup it cannot establish rather than claiming
+cgroup-equivalent descendant ownership.
 
 ## Delivery sequence and proof criteria
 
 The reviewed design is published and the operator has settled implementation ownership. Complete
 these bounded proofs before enabling the corresponding behavior:
 
-| Proof                                       | Observable acceptance                                                                                                                                                                                                                                                                                                                  |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Linux managed launch over SSH and QGA       | Work starts inside the owned boundary under the requested identity/shell; sensitive input stays suppressed, ordinary binary streams remain exact, and foreground wait and independent launch both work on the recorded kernel/systemd versions.                                                                                        |
-| Lifecycle and failure evidence              | Lost acknowledgment reconciles without replay; wait timeout does not stop work; explicit stop, anchor death and OPERATION observer loss clean the owned descendants or report incomplete. Concurrent forks, stale identity, reboot and retained output cannot produce false completion or affect unrelated work.                       |
-| Membership identity                         | Exercise source R7's exit, PID reuse, stale-run and descriptor-attribution cases; ambiguous identity refuses. Do not claim hostile same-user containment or add a general permission service.                                                                                                                                          |
-| macOS placement-host jobs                   | Launch actual host provisioning work before guest creation; disconnect the observer, re-observe the same job, stop ordinary detached descendants during rollback and independently verify the owned workload empty while unrelated work survives. Retain launch/output/completion evidence and exercise lost contact/stale references. |
-| WSL2 lifetime and native readiness/recovery | Measure work with the platform hold retained and released; do not imply a job reference owns power. Required readiness/recovery work runs without staging or requested startup; unsupported terminal/live I/O does not block it.                                                                                                       |
+| Proof                                       | Observable acceptance                                                                                                                                                                                                                                                                                                            |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Linux managed launch over SSH and QGA       | Work starts inside the owned boundary under the requested identity/shell; sensitive input stays suppressed, ordinary binary streams remain exact, and foreground wait and independent launch both work on the recorded kernel/systemd versions.                                                                                  |
+| Lifecycle and failure evidence              | Lost acknowledgment reconciles without replay; wait timeout does not stop work; explicit stop, anchor death and OPERATION observer loss clean the owned descendants or report incomplete. Concurrent forks, stale identity, reboot and retained output cannot produce false completion or affect unrelated work.                 |
+| Membership identity                         | Exercise source R7's exit, PID reuse, stale-run and descriptor-attribution cases; ambiguous identity refuses. Do not claim hostile same-user containment or add a general permission service.                                                                                                                                    |
+| macOS placement-host workflows              | Run actual platform provisioning before guest creation; lose observation, reconcile through platform state without replay, and prove supported stop/rollback while unrelated VMs survive. Coordinate conflicting operations through the state database. Report unproved cleanup without claiming generic descendant containment. |
+| WSL2 lifetime and native readiness/recovery | Measure work with the platform hold retained and released; do not imply a job reference owns power. Required readiness/recovery work runs without staging or requested startup; unsupported terminal/live I/O does not block it.                                                                                                 |
 
 Session adoption exercises these shared lifecycle proofs through the actual domain entry points:
 

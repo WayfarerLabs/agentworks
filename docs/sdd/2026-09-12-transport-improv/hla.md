@@ -264,15 +264,18 @@ bypass either. The file LLD must prove safe object handling on the supported gue
 substrates within the [operator's threat boundary](frd.md#file-safety-and-guest-runtime-rulings):
 untrusted requests and observed unsafe objects are refused; malicious target-user processes are not
 contained. A local path prefix check or a check-then-shell-command sequence is insufficient.
-Internal scratch, locks and publication names have narrowly defined core authority, separate from
-public mutation grants. No caller can redirect these helpers to an arbitrary destination or widen
-access by requesting elevation.
+Internal scratch and publication names have narrowly defined core authority, separate from public
+mutation grants. No caller can redirect these helpers to an arbitrary destination or widen access by
+requesting elevation.
 
 Structured operations implement a specified data transformation and protected read/modify/publish
 sequence. Internal reads do not grant content disclosure. All cooperating mutation paths share the
-chosen serialization protocol; external writer limits must be explicit. Atomic rename does not
-supply conflict detection. Preserve required metadata or refuse, and carry changed/unchanged,
-conflict, partial and uncertain outcomes without leaking document contents.
+database-level operation ownership; nested file exchanges serialize within that operation and
+external writer limits remain explicit. The core owns admission and recovery, not the carrier or a
+machine-wide destination lock. Uncertain remote work retains conflicting operation ownership until
+reconciled; loss of the local connection does not release it. Atomic rename does not supply conflict
+detection. Preserve required metadata or refuse, and carry changed/unchanged, conflict, partial and
+uncertain outcomes without leaking document contents.
 
 This is a file API boundary, not confinement of arbitrary exec or hostile in-process plugins. Review
 allowed locations for execution-bearing contents; use narrower resource operations when needed
@@ -305,11 +308,13 @@ I/O/evidence. A wait timeout is not stop. Stop verifies ownership and descendant
 the main PID's exit. References survive connections, but require newly authorized targets for later
 observation. Retention and abandoned-work cleanup remain the resource owner's responsibility.
 
-Platform power lifetime remains separate. WSL2 holds, non-systemd macOS host jobs and early
-bootstrap need their own measured acceptance cases; required operations cannot be made optional or
-relabeled as weaker profiles to pass. The lifecycle proof gates include lost launch acknowledgment,
-observer loss, anchor death, stale identity, descendant cleanup and containment escape paths. The
-accepted buffered PoC does not establish those guarantees.
+Platform power lifetime remains separate. WSL2 holds, platform-owned macOS host workflows and early
+bootstrap need their own measured acceptance cases. Mac hosts do not inherit a blanket guest MANAGED
+requirement; platforms own resource lifecycle and recovery without a new weak profile or a
+hostile-platform isolation claim. Required operations cannot simply be dropped. The guest lifecycle
+proof gates include lost launch acknowledgment, observer loss, anchor death, stale identity,
+descendant cleanup and containment escape paths. The accepted buffered PoC does not establish those
+guarantees.
 
 ## RunContext integration
 

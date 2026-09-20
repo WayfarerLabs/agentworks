@@ -227,16 +227,16 @@ digest with the publication request. Guest verification establishes a ready refe
 verified digest before publication can consume it. This separates incomplete transfer from verified
 content without requiring a host spool solely to precompute a digest.
 
-A download snapshot copies one held source inode into private scratch in bounded chunks while
-holding the transaction lock. Source identity/metadata and the copied length/digest must agree
-before the snapshot is ready. Chunk retrieval then reads that private snapshot outside the lock,
-never successive ranges of the changing public source. The private `_file_spool.py` candidate now
-composes held-source observation and scratch transfer to implement that local copy. It verifies
-length, EOF, digest and final source identity/metadata, checks expiry after source closure even for
-absence, and retains exact cleanup debt on failure. Core supplies its token and identity before
-dispatch, and the local receipt binds the copy to the snapshot operation. Remote snapshot/chunk
-delivery and lost-reply reconciliation through a carrier remain unimplemented; local copying and
-receipt recovery alone do not prove them.
+A download snapshot copies one held source inode into private scratch in bounded chunks within the
+caller's operation ownership. Source identity/metadata and the copied length/digest must agree
+before the snapshot is ready. Chunk retrieval then reads that private snapshot, never successive
+ranges of the changing public source. The private `_file_spool.py` candidate now composes
+held-source observation and scratch transfer to implement that local copy. It verifies length, EOF,
+digest and final source identity/metadata, checks expiry after source closure even for absence, and
+retains exact cleanup debt on failure. Core supplies its token and identity before dispatch, and the
+local receipt binds the copy to the snapshot operation. Remote snapshot/chunk delivery and
+lost-reply reconciliation through a carrier remain unimplemented; local copying and receipt recovery
+alone do not prove them.
 
 Snapshot storage is independent of source authority. Download must work when the selected identity
 can read the approved source but cannot write its parent. The Linux candidate uses the existing
@@ -251,8 +251,8 @@ objects. Linux [sticky-parent semantics](https://man7.org/linux/man-pages/man2/r
 prevent other unprivileged users from renaming/removing those directories; malicious same-user
 processes remain outside the threat model. Exact parent/object identities and receipt validation
 still apply, and temporary-file cleanup or reboot can invalidate an observation without proving
-completion. The shared lock namespace supplies serialization only, not a target-user-writable
-storage directory. Root selection creates no object and is not part of readiness. The private
+completion. Operation coordination belongs to the database-backed caller, not this temporary
+directory. Root selection creates no object and is not part of readiness. The private
 `_scratch_root.py` selector implements this admission. Local fixtures cover a non-root caller with a
 read-only source parent, unsafe/missing scratch roots, deadline and descriptor cleanup, and
 independence from payload environment. These fixtures do not establish native default-root
@@ -284,15 +284,15 @@ content reference still requires complete length/digest verification. Incomplete
 data can retain historical ownership evidence. Missing, partial or invalid receipts remain uncertain
 and do not authorize adopting the current occupant of a name.
 
-Ownership evidence is not evidence that a helper has stopped. The existing transaction lock must
-serialize creation, transfer mutation, snapshotting, publication, reconciliation and cleanup. A
-missing receipt may precede a delayed request, so observing absence cannot certify terminal cleanup.
-The implementation must prove the ordering around completed creation and subsequent mutation;
-neither a receipt alone nor transport loss establishes quiescence.
+Ownership evidence is not evidence that a helper has stopped. The operation owner must serialize
+creation, transfer mutation, snapshotting, publication, reconciliation and cleanup. A missing
+receipt may precede a delayed request, so observing absence cannot certify terminal cleanup. The
+implementation must prove the ordering around completed creation and subsequent mutation; neither a
+receipt alone nor transport loss establishes quiescence.
 
-Every follow-on mutation must validate the still-existing exact operation receipt under that lock
-before creating any artifact. After cleanup, a delayed chunk or publication request therefore
-refuses instead of recreating state. Locking alone does not establish this: the current publication
+Every follow-on mutation must validate the still-existing exact operation receipt before creating
+any artifact. After cleanup, a delayed chunk or publication request therefore refuses instead of
+recreating state. Database exclusion alone does not establish this: the current publication
 primitive creates its sibling stage before reopening scratch, so its future exchange must admit the
 operation before calling the primitive. This is a concrete prerequisite, not a tombstone service.
 
@@ -325,29 +325,29 @@ grammars remain operation-specific. Unknown, duplicate, non-canonical or extra f
 field/line/decoded/total bounds must fit the complete carrier request. No request value becomes argv
 or shell source; fixed preparation bootstrap source cannot be reused for file operations.
 
-The private Linux `stage_begin`, `stage_chunk`, `stage_reconcile` and `stage_cleanup` exchanges now
-implement that delivery shape under the existing transaction lock. Every request retains the
-nonempty original destination path; the guest derives its parent after checking execution identity.
-A complete creation result must match the requested length before the host exposes its reference.
-Cleanup debt is data bound to the original token/context, not a returned name or path. Chunk
-scratch-failure debt must match the already-known active reference exactly; the response cannot
-introduce different cleanup ownership. Missing private parents refuse. Incomplete observation after
-possible dispatch remains uncertain; no replay or public absence is inferred. Guest expiry is
-checked after owned path and lock cleanup; a completed mutation retains exact cleanup debt when that
-final check expires instead of becoming a no-effects refusal. Reconciliation exposes only complete
-historical cleanup ownership, never a ready content reference; missing or invalid receipts remain
-ownership uncertainty. Explicit cleanup checks expiry before its first deletion and accepts only the
-original identity-bound debt. Returned cleanup failure debt must match it. These exchanges do not
-prove earlier-request quiescence or implement complete upload/publication; delayed chunk requests
-refuse after exact cleanup removes the receipt.
+The private Linux `stage_begin`, `stage_chunk`, `stage_reconcile` and `stage_cleanup` exchanges
+implement that delivery shape. Their blanket destination lock is being removed in favor of the
+operation coordination below. Every request retains the nonempty original destination path; the
+guest derives its parent after checking execution identity. A complete creation result must match
+the requested length before the host exposes its reference. Cleanup debt is data bound to the
+original token/context, not a returned name or path. Chunk scratch-failure debt must match the
+already-known active reference exactly; the response cannot introduce different cleanup ownership.
+Missing private parents refuse. Incomplete observation after possible dispatch remains uncertain; no
+replay or public absence is inferred. Guest expiry is checked after owned descriptor cleanup; a
+completed mutation retains exact cleanup debt when that final check expires instead of becoming a
+no-effects refusal. Reconciliation exposes only complete historical cleanup ownership, never a ready
+content reference; missing or invalid receipts remain ownership uncertainty. Explicit cleanup checks
+expiry before its first deletion and accepts only the original identity-bound debt. Returned cleanup
+failure debt must match it. These exchanges do not prove earlier-request quiescence or implement
+complete upload/publication; delayed chunk requests refuse after exact cleanup removes the receipt.
 
 ### Snapshot exchange candidate
 
 Use a separate fixed snapshot family, not stage operations with a caller-selectable storage root.
 Every request carries the version, nonce, core token, execution identity and relative budget.
 `snapshot_begin` additionally carries the approved source root, nonempty relative source path and
-maximum byte count. After identity admission it acquires the fixed transaction lock, validates the
-fixed scratch parent, and copies one held source with `_file_spool.py`. A complete result is either
+maximum byte count. Within the caller's operation ownership, identity admission validates the fixed
+scratch parent, and copies one held source with `_file_spool.py`. A complete result is either
 initial absence or a ready scratch reference plus the content-bound source revision. The host must
 check that the ready length and digest agree with the source revision and requested bound. Source
 absence does not bypass prerequisite or final deadline checks.
@@ -360,12 +360,12 @@ length and digest. Zero-byte snapshots require no nonempty range. Raw carrier ou
 framing or conflicting ready facts cannot become file bytes or a successful download.
 
 `snapshot_reconcile` needs only the original core token and identity; `snapshot_cleanup` adds the
-known exact cleanup debt. Both operate under the fixed lock and fixed scratch root, independently of
-whether the source still exists or is readable. Reconciliation returns historical cleanup ownership
-only. Missing evidence remains uncertainty, and cleanup does not claim that an earlier unobserved
-creation cannot still arrive. Cleanup checks expiry before mutation and after descriptor closure,
-preserving exact debt. No operation accepts a returned path or allows a stage receipt to be reused
-as a snapshot receipt.
+known exact cleanup debt. Both operate under the same operation ownership and fixed scratch root,
+independently of whether the source still exists or is readable. Reconciliation returns historical
+cleanup ownership only. Missing evidence remains uncertainty, and cleanup does not claim that an
+earlier unobserved creation cannot still arrive. Cleanup checks expiry before mutation and after
+descriptor closure, preserving exact debt. No operation accepts a returned path or allows a stage
+receipt to be reused as a snapshot receipt.
 
 Ready-reference wire fragments belong beside existing scratch reference/debt fragments. Shared
 source-revision fields should have one concrete codec reused by object and snapshot exchanges,
@@ -399,15 +399,15 @@ callbacks, or a destination outside its single request.
 ### No-staging readiness gate
 
 The private Linux read and stat/removal exchanges use fixed bundled helpers and concrete `AGWF1`
-collectors. Each checks its bound identity before acquiring the existing protected system lock or
-accessing workload paths, which travel only through sensitive stdin. Read snapshots materialize
-under the lock and emit bytes only after unlocking; stat returns metadata without reading content.
-Read length, digest, metadata, framing and carrier-stream evidence must all agree before bytes
-return. Root or leaf absence remains distinct from refusal and incomplete observation; an absent
-target never bypasses the lock prerequisite. Both derive a guest-local expiry from the host's
-remaining duration. Neither read nor stat performs deployment, spool, mutation or lock creation.
-These are local private candidates, not production FileAccess or native SSH/QGA/macOS acceptance.
-The remaining readiness gates below still apply.
+collectors. Each checks its bound identity before accessing workload paths, which travel only
+through sensitive stdin. Read snapshots materialize before emission; stat returns metadata without
+reading content. Conflicting work is serialized by the caller's operation ownership, not by a
+destination lock prerequisite. Read length, digest, metadata, framing and carrier-stream evidence
+must all agree before bytes return. Root or leaf absence remains distinct from refusal and
+incomplete observation; an absent target does not bypass identity or deadline checks. Both derive a
+guest-local expiry from the host's remaining duration. Neither read nor stat performs deployment,
+spool, mutation or lock creation. These are local private candidates, not production FileAccess or
+native SSH/QGA/macOS acceptance. The remaining readiness gates below still apply.
 
 Preparation readiness permits no helper deployment, private scratch, spool, or new lock state.
 FileAccess may expose only bounded `read_file` and `stat` there, and only through an
@@ -427,7 +427,7 @@ The private [`_file_snapshot.py`](../../../cli/agentworks/execution/_file_snapsh
 implements descriptor-relative bounded regular-file observation with standard-library Python 3.11
 syntax. It rejects observed special objects before leaf open, retains no-follow/nonblocking checks
 after that observation, and binds bytes to a digest and before/after identity/metadata. It borrows
-the trusted root descriptor and assumes the caller owns any cooperating-writer lock; it creates
+the trusted root descriptor and assumes the caller serializes conflicting operations; it creates
 neither locks nor files. Local fixtures cover object refusal, observed replacement, byte bounds and
 owned-descriptor cleanup. This is not FileAccess or native platform acceptance.
 
@@ -437,23 +437,24 @@ The separate non-Linux POSIX walk detects changed `st_dev`, not same-filesystem 
 Linux fixtures exercise real symlink, proc descriptor magic-link and descendant-mount refusal;
 same-filesystem bind-mount and native macOS proof remain open. A regular-file read still has no hard
 elapsed-time bound. This increment does not resolve helper cancellation or close readiness,
-cross-identity locking and complete platform acceptance.
+cross-identity operation coordination and complete platform acceptance.
 
 The private `_file_publication.py` candidate implements Linux sibling publication beneath a
 caller-owned parent descriptor. It accepts bytes or bounded streaming from verified scratch and
 explicit Create, Replace or Match conditions. Replace observes existing metadata without reading the
 old content; Match also checks content when its revision includes a digest. Publication preserves
 ordinary UID/GID/mode/access-ACL semantics while refusing unsupported metadata. The caller still
-owns confinement, transaction locking and scratch cleanup. This is not remote upload delivery, macOS
-support or FileAccess. Local fault and ACL fixtures are implementation evidence, not acceptance of
-the complete platform guarantees below.
+owns confinement, operation serialization and scratch cleanup. This is not remote upload delivery,
+macOS support or FileAccess. Local fault and ACL fixtures are implementation evidence, not
+acceptance of the complete platform guarantees below.
 
 The private Linux `_file_objects.py` now observes regular files, directories and sockets through
 confined path-only descriptors without requiring content-read permission. Removal requires exact
 kind and revision; a content-bound regular-file revision also invokes the existing bounded digest
 reader. It removes only a matching regular file, empty directory or socket, and reports initially
 absent objects separately. It supplies neither tmux liveness checks nor an external-writer atomic
-compare-and-remove primitive. Caller-owned confinement/locking and native acceptance remain gates.
+compare-and-remove primitive. Caller-owned confinement/serialization and native acceptance remain
+gates.
 
 All target operations occur in the helper process. Host-side normalization and grant checks reject
 untrusted requests early; destination-side traversal and observation enforce the bound operation.
@@ -540,13 +541,42 @@ same-user namespace guarantee is added.
 
 ## Cooperating writers and honest limits
 
-All cooperating helper filesystem transactions on one machine use one identity-neutral, exclusive
-machine-level lock. There is no path hierarchy or shared-lock protocol. Acquisition and the critical
-section obey the caller's deadline. Upload bytes may reach verified private scratch before locking;
-publication then locks, rechecks the condition, and renames. A read locks until its immutable
-snapshot is materialized, then transfers chunks outside the lock. Stat releases after observation;
-list materializes its bounded result before release. Inventory remains a bounded set of
-observations, not a globally coherent filesystem view.
+Database-level operation ownership is the primary coordination mechanism. One Agentworks state
+database coordinates participating operations on its managed resources. Independent databases do not
+thereby coordinate the same target; concurrent independent controllers are not an initial guarantee.
+The core operation boundary acquires the relevant resource scope before conflicting work, then
+shares that ownership through RunContext and nested work. File helpers do not each acquire a
+machine-wide destination lock, and neither guests nor platform hosts require protected lock-file
+provisioning.
+
+Start with coarse VM-level exclusion, independent of execution identity. Host-level mutations use
+the platform's shared resource scope when they can conflict across VMs; do not infer separate
+ownership merely from different SSH routes or user/admin execution. Distinct isolated work may run
+concurrently. Resource ownership, not a hierarchy of per-path locks, determines conflicts.
+
+Database transactions reserve and update ownership atomically and finish before network work. Do not
+hold a SQLite write transaction open for an entire remote operation. Ownership is durable while
+remote effects are possible: local process death, a disconnected carrier, a deadline, or an expired
+lease does not prove that a remote request stopped. Keep unresolved ownership visible and refuse
+conflicting admission until reconciliation establishes that prior work cannot still mutate the
+resource. A lock row alone is not a remote fencing mechanism. Never replay uncertain mutation to
+discover whether it happened. Recovery needs an explicit handoff of the same operation, not an
+unconditional delete-and-reacquire or a second overlapping recovery attempt.
+
+The file composition serializes conflicting exchanges inside one operation too, including cleanup.
+Holding the outer operation scope does not license parallel writes to the same destination. JSON
+snapshot, merge and publication share the operation's ownership; regular publication rechecks its
+condition immediately before mutation. Read materializes its bounded immutable snapshot before
+transfer; inventory remains a bounded set of observations, not a globally coherent filesystem view.
+Fresh exclusive scratch names prevent transfer collisions and retain exact cleanup ownership. They
+do not serialize updates to the final shared filename.
+
+The database coordinator and RunContext composition are implementation gates, not behavior supplied
+by the current database's migration/use locks. Until they are implemented and proved, the private
+file primitives require caller-owned serial execution and are not a production FileAccess surface. A
+destination-side lock may be added only for a demonstrated residual race that this ownership
+boundary cannot address; it is not a default prerequisite or a defense against malicious platform
+code or target-user processes.
 
 The request decoder validates paths and extracts a single nonempty leaf without separators, NUL or
 dot components before calling the private object primitives. Those typed interior helpers do not
@@ -557,51 +587,11 @@ monotonic timestamps cannot be used on the destination. Private filesystem primi
 validated expiry rather than acting as a second request decoder. The host's original deadline
 continues to bound the complete multi-attempt operation.
 
-Ordinary-user and elevated helpers must open the same lock. A per-user cache cannot satisfy that
-contract. Safe creation, permissions, lifecycle, and availability of an identity-neutral namespace
-before permission activation remain unproved on Debian and macOS. The migration inventory must find
-every cross-identity path, and no affected consumer may migrate until the protocol is proven.
-Excluding a required admin/user workflow needs operator disposition.
-
-The Linux implementation candidate opens a fixed `files.lock` under a borrowed, trusted protected
-directory. It acquires an exclusive advisory lock through a fresh read-only descriptor, checks the
-named object's binding after acquisition, and closes the descriptor on exit. Acquisition uses
-nonblocking polling within the guest-local deadline. The lock must be an empty, single-link regular
-file owned by the trusted setup identity with mode 0444; the parent must belong to that identity and
-not be group/other writable. These checks do not establish the entire ancestor namespace or
-filesystem semantics. Trusted setup supplies that prerequisite. Transactions never create, repair,
-replace or unlink the lock. No fork or child launch belongs inside the file critical section:
-inherited descriptors can prolong lock ownership even when the initiating helper exits.
-
-For Debian guests, the persistent location is `/var/lib/agentworks/execution/files.lock`, with
-root-owned protected ancestors. The private setup implementation preserves an existing valid inode,
-refuses unsafe existing objects rather than repairing them, and leaves unrelated
-`/var/lib/agentworks` state alone. Shared new-guest bootstrap now invokes its fixed isolated Python
-bundle immediately after package installation. Existing access ACLs are conservatively refused; only
-newly created core-owned directories and the lock may have inherited ACLs removed and modes
-finalized. This is privileged setup, not file-operation or readiness behavior. Reachable existing
-guests need convergence before the first Phase-B file operation. Native recovery for stranded guests
-needs an explicit independent setup path; ordinary reinitialization currently requires Tailscale
-reachability. These setup paths and cross-identity contention remain implementation and acceptance
-gates. Local setup fixtures do not establish privileged bootstrap or cross-identity acceptance.
-
-The read-only transaction entry walks the fixed namespace with path-only directory descriptors,
-checking root ownership and no group/other write authority at each ancestor. It refuses observed
-links, replacement and missing state, then acquires the existing lock; it never invokes setup.
-Directory listing authority is unnecessary for this walk. These checks establish the observed
-namespace, not local-filesystem locking semantics, which provisioning and native acceptance must
-establish separately.
-
-SSH-accessed macOS platform hosts have no existing privileged setup lifecycle. A protected
-machine-wide lock there would add an administrator prerequisite; the operator decision is pending.
-Do not assume host sudo, install during readiness, substitute a per-user lock, or claim APFS proof
-from Linux fixtures. Missing prerequisites produce a clean refusal. Native filesystem and
-cross-identity proof is required before either platform enables file transactions.
-
-`Match` is atomic only with respect to those cooperating writers: the helper compares the revision
-and renames while holding the transaction lock. A non-cooperating process ignores the lock. No
-portable Debian/macOS primitive atomically compares an observed arbitrary destination revision and
-replaces or unlinks that same revision. Therefore an external writer can race the final check and
+`Match` is atomic only with respect to writers serialized by the same operation coordinator: the
+helper compares the revision and renames while that operation retains ownership. An unrelated
+application or independent controller does not participate in that coordination. No portable
+Debian/macOS primitive atomically compares an observed arbitrary destination revision and replaces
+or unlinks that same revision. Therefore an external writer can race the final check and
 rename/unlink window. Within the revised threat boundary, the helper refuses observed links and
 special objects, but it cannot promise external-writer compare-and-swap. Create-only no-replace
 remains atomic where the named filesystem supports the platform primitive.
@@ -610,8 +600,8 @@ This limit is visible in documentation and tests. It is acceptable only where do
 service coordination makes external writers non-adversarial. Tmux/session code must coordinate
 server absence and socket-directory ownership around `remove`; a fresh server racing after the
 confirmation is not made safe by FileAccess. If a destination requires adversarial external CAS,
-conditional removal, or non-cooperating writers, the current platform primitives do not satisfy it
-and the location cannot enter the initial allowlist without a different mechanism or operator
+conditional removal against hostile writers, the current platform primitives do not satisfy it and
+the location cannot enter the initial allowlist without a different mechanism or operator
 disposition.
 
 `remove` requires both a `Revision` and exact kind. It returns unchanged when the observed object is
@@ -623,7 +613,7 @@ There is no recursive removal and no FIFO path.
 ## Immediate mechanics versus deferred permission activation
 
 The [delivery-stage contract](execution-contract.md#delivery-stages-and-permission-activation) owns
-permission timing and immediate operational guarantees. The cross-identity lock, helper,
+permission timing and immediate operational guarantees. Database operation coordination, helper,
 metadata/platform, carrier I/O, and no-staging candidates above remain hard enablement gates. During
 coexistence the file service constructs an exact-operation confinement request from the explicit
 destination; migration records the intended recipient action, root, identity, elevation,
@@ -684,17 +674,20 @@ generated sections, and native inventory, but drive only the new API/helper.
    partial effects, and cleanup debt. Every pre-rename publication failure leaves the old inode
    unchanged.
 4. **Concurrency/lifecycle:** multiprocess whole-file and JSON writers preserve unique keys and
-   conflict on stale snapshots under the machine transaction lock; lock waits are bounded and
-   immutable snapshot/chunk transfer occurs outside it. Directory tests cover bounded inventory,
-   limits/order, exact creation, empty removal, and no implicit parents/recursive delete. Remove a
-   real tmux socket only after liveness proves absence; replacement yields conflict or uncertainty.
-   An external writer fixture demonstrates, but does not overclaim, the non-CAS limit.
+   conflict on stale snapshots under database-level operation ownership. Nested helpers share that
+   ownership without overlapping conflicting exchanges; disjoint scopes remain independent. Crash,
+   timeout and lost-response tests retain unresolved ownership and refuse conflicting work until
+   recovery establishes quiescence, without replay. Independent databases and external writers are
+   not falsely presented as coordinated. Directory tests cover bounded inventory, limits/order,
+   exact creation, empty removal, and no implicit parents/recursive delete. Remove a real tmux
+   socket only after liveness proves absence; replacement yields conflict or uncertainty. An
+   external writer fixture demonstrates, but does not overclaim, the non-CAS limit.
 5. **Carrier/bootstrap:** prove `SinkOutput` on SSH and QGA with reflected input,
    malformed/truncated envelopes, bounded parser state, and no raw retention. Prove shared private
    scratch data transfer, fixed inline bundles, complete request bounds, exact offsets/digests,
    native finalization if selected, cleanup interruption, and startup with legacy unavailable.
 6. **Live/permissions:** before enablement, run SSH/QGA on clean pre-Phase-B Debian 12/13 for both
-   CPUs and SSH on each supported macOS/CPU, recording tools, filesystems, rename/locks, metadata,
+   CPUs and SSH on each supported macOS/CPU, recording tools, filesystems, rename, metadata,
    scratch, identity, chunks, and faults. No-staging readiness tests prove already-available bounded
    read/stat or refusal with no deploy/spool/lock creation. Separately test future grants in
    isolation, coexistence non-enforcement/unchanged legacy checks, then removal-time activation.
@@ -714,8 +707,8 @@ The following are not established by source inspection and must remain open in t
   establish a prerequisite earlier only where the workflow contract permits, otherwise treat a
   mandatory no-write read as a delivery gate requiring operator decision;
 - inventory finite transfer sizes, network/nonlocal filesystems, every authorized execution
-  identity/elevation choice, and each path written by multiple effective identities; prove the
-  cross-identity lock protocol for required admin/user workflows;
+  identity/elevation choice, and each path written by multiple effective identities; prove all
+  participating writers share database-level operation ownership and recovery;
 - prove unique-sibling atomic rename and the required creation/update owner, mode, and ACL semantics
   on every supported filesystem, refusing unsupported metadata before publication;
 - decide the supported macOS minimum and Windows-local download publication design;

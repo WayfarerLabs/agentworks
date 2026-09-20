@@ -1,8 +1,9 @@
 # Transport Improvements: Design and Delivery Sequence
 
 - Status: Additive implementation started from merged #830; production execution factories and
-  RunContext remain unchanged. New-guest bootstrap now installs distribution Python and provisions
-  the shared file transaction lock; provisioning validation is required.
+  RunContext remain unchanged. New-guest bootstrap installs distribution Python. The private
+  destination-lock implementation and its setup are being removed under the coordination ruling
+  below; database operation ownership is not yet implemented.
 - Delivery vehicle: Design PR #830, then additive implementation, consumer migration PR(s), and
   final removal/activation PR; all labeled `sdd:transport-improv`
 - Requirements: [FRD](frd.md)
@@ -44,6 +45,35 @@ On 2026-09-17 the operator accepted deferring guest cancellation from the buffer
 remain local observation bounds. Live tests demonstrated surviving guest process trees after expiry;
 the PoC has neither a remote cancellation handle nor a reaper. Recording that limitation does not
 waive the production workload-lifecycle gate below or permit automatic replay.
+
+## Operation coordination correction, 2026-09-20
+
+The operator approved database-level operation coordination, unique scratch names and conservative
+file checks instead of blanket machine-wide destination locking and privileged host setup. The
+completed lock experiments below remain historical records; the lock implementation and its
+associated pending acceptance gates are superseded by this ruling.
+
+- [ ] Remove destination lock acquisition, setup, bundled dependencies and lock-only failure codes
+      from the private file helpers and new-guest provisioning. Preserve Python installation,
+      identity checks, object refusal, revisions, bounds, expiry and exact cleanup evidence. Prove
+      bounded read/stat and file operations work without an installed lock namespace.
+- [ ] Implement atomic database operation admission for conflicting resource scopes, with durable
+      ownership and explicit terminal release. Keep SQL transactions short; do not hold a database
+      write lock during remote execution or coordinate independent databases through a new service.
+- [ ] Carry the same operation ownership through core orchestration, RunContext and nested file
+      composition. Serialize conflicting exchanges inside that ownership; cover user/admin writers
+      and shared platform-host resources without splitting ownership by transport route or identity.
+      Retire superseded local harness coordination during consumer migration, not through a second
+      competing new-stack lock.
+- [ ] Prove crash, disconnect and deadline handling retain unresolved ownership. Recovery must
+      establish that prior remote work cannot still mutate before admitting conflicting work, and
+      must not replay uncertain mutation or silently expire a claim. Report incomplete recovery
+      rather than deleting ownership or inventing remote fencing from a database row.
+- [ ] Keep VM-host lifecycle platform-owned. Prove actual Lima readiness, stop, rollback and
+      disconnected-operation recovery without requiring a generic macOS MANAGED supervisor or an
+      administrator-installed file lock. Keep Linux guest MANAGED guarantees unchanged.
+- [ ] Complete the private reviews and gates for this replacement, update permanent collateral, and
+      publish the corrected design and implementation as part of the still-draft effort.
 
 ## Buffered PoC checkpoint record
 
@@ -238,8 +268,8 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       by replaying creation or scanning a prefix. Prove the bounded immutable ownership-receipt
       candidate, including original-parent binding, interrupted receipt creation/removal and late
       requests. Every follow-on mutation must validate its still-existing operation receipt under
-      the transaction lock before creating any artifact; read-only snapshot chunks retain their
-      existing unlocked exact-reference checks.
+      the caller's operation ownership before creating any artifact; read-only snapshot chunks
+      retain their existing unlocked exact-reference checks.
 - [x] Deliver private stage reconciliation and exact cleanup through the fixed identity-bound
       helper. Accept complete historical cleanup ownership only, preserve missing-evidence
       uncertainty and exact failure debt, and check expiry before explicit cleanup mutation and
@@ -821,7 +851,8 @@ PoC merge enables production use.
       generated-section transforms in their domain, backed by snapshots/conditional publication.
       Enumerate tools available during native bootstrap and on supported platform hosts; prove
       destination-side confinement rather than relying on a preflight path check. Define trusted
-      ancestors/mounts, private staging/locks, root creation and fail-closed behavior.
+      ancestors/mounts, private staging, database operation ownership, root creation and fail-closed
+      behavior.
 - [ ] Inventory intended mutation destinations and actions for harness configuration, `/opt`
       provisioning, `/run` session objects, recovery and platform hosts. Review execution-bearing
       content and select explicit core allowlist entries, trusted dynamic-root resolution and
@@ -871,19 +902,19 @@ connection and trust only. Before broader lifecycle implementation, complete the
       target-user containment. Deliver DIRECT/MANAGED without a CONTAINED profile or
       per-run-user/jail implementation; retain future profile extensibility. Prove trusted
       socket-membership identity and ordinary lifecycle cases within that stated boundary.
-- [ ] Resolve non-systemd macOS host jobs, Debian/kernel/systemd floors, WSL2 power lifetime and
-      no-staging recovery. Required workflows block delivery when their guarantees cannot be met; no
-      profile downgrade or fabricated platform equivalence. Use the
+- [ ] Resolve platform-owned macOS host workflows, Debian/kernel/systemd floors, WSL2 power lifetime
+      and no-staging recovery. Required workflows block delivery when their guarantees cannot be
+      met; no profile downgrade or fabricated platform equivalence. Use the
       [observable proof criteria](execution-lifecycle-lld.md#delivery-sequence-and-proof-criteria)
-      and [reported test-bed gaps](prior-art-research.md#lifecycle-test-bed-gaps). For macOS host
-      jobs, prove all MANAGED ownership/tracking/stop/emptiness promises and independent lifetime;
-      workstation SSH evidence is insufficient. Price missing mechanics or infrastructure for
-      operator disposition rather than silently dropping required host work.
+      and [reported test-bed gaps](prior-art-research.md#lifecycle-test-bed-gaps). For macOS hosts,
+      prove the platform's actual start/status/stop and disconnected-operation recovery, not a
+      generic Linux-equivalent MANAGED profile. Workstation SSH evidence is insufficient; report
+      cleanup uncertainty without dropping required platform operations.
 - [ ] Prove the placement-host VM-resource lifetime separately from provisioning completion. For
-      Lima, evaluate `start --foreground` as the resource-owned job anchor, retain its reference
-      through VM lifecycle operations, and prove readiness, disconnect, rollback and abrupt-anchor
-      cleanup for the supported drivers. Do not exempt surviving provisioning descendants from
-      generic cleanup or treat Lima's numeric PID records as safe transport ownership.
+      Lima, use supported platform lifecycle operations and prove readiness, disconnect recovery,
+      stop and rollback for the supported drivers. A foreground anchor is an option to justify for a
+      concrete workflow, not a required replacement for Lima's runtime. Do not treat numeric PID
+      records as authority to kill unrelated host work.
 
 - [ ] SSH effort builds `execution/carriers/ssh/` and its connection/trust migration. Transport
       builds common execution, scoped context delivery, files/jobs and other adapters, and applies
