@@ -195,6 +195,12 @@ parallel in the transport lane, as confirmed by the operator.
 
 ### Complete the carrier and migration
 
+- [x] Adopt transport #833's shared finite-input subprocess pump at `e85e9f5c` while preserving SSH
+      environment policy and report provenance. Integration code `1b2c6832` passes the combined
+      execution and full local suites, recorded in
+      [phase2-results.md](phase2-results.md#shared-subprocess-adoption). This records buffered
+      adoption only; launch-interruption ownership, live/terminal delivery and production
+      composition remain open.
 - [ ] Finish the SSH LLD for R1-R5: complete connection validation, installed-client/path policy,
       config schema and conversion, trust preservation/enrollment/refusal, process/terminal and
       forwarding lifetimes, diagnostics and acceptance fixtures. Name the authority and refresh
