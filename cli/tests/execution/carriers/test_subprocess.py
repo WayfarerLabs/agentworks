@@ -176,23 +176,19 @@ print(json.dumps([result.local_status, result.exit_status, result.failure]))
 def test_competing_reaper_in_fresh_process_loses_status_without_guessing() -> None:
     result = fresh_process_result(
         """
-import json, os, subprocess, sys, threading, time
+import json, os, subprocess, sys, threading
 from agentworks.execution.carrier import CarrierIO, Deadline
 from agentworks.execution.carriers._subprocess import run_process
 original_popen = subprocess.Popen
 reaped = []
-reapers = []
 def spawn(*args, **kwargs):
     process = original_popen(*args, **kwargs)
-    entered = threading.Event()
     def reap():
-        entered.set()
         reaped.append(os.waitpid(process.pid, 0)[1])
     thread = threading.Thread(target=reap)
     thread.start()
-    entered.wait()
-    time.sleep(.02)
-    reapers.append(thread)
+    thread.join(2)
+    assert not thread.is_alive()
     return process
 subprocess.Popen = spawn
 result = run_process(
@@ -200,7 +196,6 @@ result = run_process(
     io=CarrierIO(), deadline=Deadline.after(3),
 )
 subprocess.Popen = original_popen
-reapers[0].join(2)
 print(json.dumps([result.local_status, result.exit_status, result.failure,
                   os.waitstatus_to_exitcode(reaped[0])]))
 """
