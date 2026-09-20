@@ -170,6 +170,12 @@ groups can differ from a running process's inherited groups, so lookup does not 
 helper's actual identity check or grant authority. This private operation is not production
 RunContext composition.
 
+`_account.resolve_file_ownership` uses the same fixed helper for a separate owner/group pair lookup.
+It returns only numeric UID/GID, resolving the named group independently of the owner's primary or
+supplementary groups. Missing owner and missing group have distinct closed refusals. Names remain in
+sensitive stdin, and the response kind must match this operation. Lookup does not change the
+execution identity, select elevation or grant permission to apply the resulting metadata.
+
 ## Private inline preparation
 
 The private `_inline` candidate composes one carrier attempt with a fixed, standard-library-only
@@ -321,7 +327,7 @@ rejects observed links or replacement without requiring directory read permissio
 local-filesystem locking semantics remain provisioning prerequisites, not results of this walk. The
 lock must not enclose child creation: a fork can inherit the descriptor and prolong ownership. Local
 contention and cleanup tests are not native macOS or ordinary/elevated acceptance. These private
-entries are not wired into file delivery yet.
+entries provide the transaction boundary for the private stat/removal helper exchange.
 
 Debian new-guest bootstrap invokes `_file_lock_setup.py` through a fixed standalone bundle after
 installing distribution Python. It provisions `/var/lib/agentworks/execution/files.lock` as root,
@@ -342,6 +348,23 @@ returns unchanged; interrupted or ambiguous mutation is not reported as unchange
 The caller owns the trusted parent and transaction lock. Removal neither checks tmux liveness nor
 provides atomic compare-and-remove against external writers. Session code must coordinate server
 absence before supplying a socket revision. No recursive removal or FIFO creation is exposed.
+
+`_file_object_exchange.py` delivers stat or conditional removal through one fixed, inline Python
+helper attempt. After validating its request, nonce and bound identity, the guest acquires the
+existing system file lock before opening the trusted root. Missing lock setup is a refusal even when
+the requested object is absent. Paths and expected revisions travel only in sensitive stdin. The
+request carries a remaining duration from which the guest derives its own monotonic expiry.
+
+The host accepts only a complete, nonce-bound `AGWF1` result matching the requested operation.
+Carrier completion remains separate from object evidence. Lost, malformed or noisy observation after
+a possibly dispatched removal is uncertain, never permission to retry. A complete helper report of
+an uncertain mutation preserves its closed failure kind and phase. No raw diagnostic bytes are
+retained. Stat returns metadata only; it does not read file contents or stage state.
+
+The fixed operation bundle is checked against the complete Proxmox HTTP request bound. Local
+isolated-interpreter fixtures exercise the real lock walk under a test-owned root, not a production
+configurable lock path. These tests do not establish privileged or cross-identity native acceptance,
+the complete Windows SSH command-line bound, or public FileAccess composition.
 
 ## Private metadata convergence
 
