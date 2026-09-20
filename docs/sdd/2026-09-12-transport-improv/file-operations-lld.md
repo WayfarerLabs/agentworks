@@ -219,7 +219,7 @@ execution or silent removal of a required workflow. The early-Python versus nati
 is settled for provisioned Debian guests; the already-available readiness substrate and the macOS
 host substrate remain open.
 
-## File safety and filesystem mechanics
+## Confinement and filesystem mechanics
 
 All target operations occur in the helper process. Host-side normalization and grant checks reject
 untrusted requests early; destination-side traversal and observation enforce the bound operation.
@@ -257,20 +257,21 @@ uncertainty.
   removes a name whose identity changed. A cleanup failure leaves bounded debt for the owner; it
   does not authorize broader deletion.
 
-New files retain the destination directory's normal inherited ACL behavior. The helper begins with
+For an absent destination, `create_metadata` supplies the requested owner/group/mode. The new file
+retains the destination directory's normal inherited ACL behavior. The helper begins with
 restrictive staging access, does not blanket-clear inherited ACLs or attributes, applies the
-requested owner/group/mode with the platform's ordinary ACL-mask interaction, and verifies the
-effective access metadata before publication. If the requested access result cannot be established,
-the helper refuses while the old destination is still unchanged.
+requested values with the platform's ordinary ACL-mask interaction, and verifies the effective
+access metadata before publication. If the requested access result cannot be established, the helper
+refuses while the destination remains absent.
 
-Existing generated-section updates require the direct-write-equivalent access profile used by the
-shipped workflow: UID, GID, permission bits, and access ACL. Whole-file workflows use their explicit
-create owner/group/mode and any required inherited ACL behavior. Additional extended attributes are
-preserved only when the migration inventory identifies a real workflow requirement and the platform
-can reproduce its ordinary-write semantics. Security attributes, capabilities, set-ID state, and
-flags that an ordinary content write would clear are not blindly copied to a replacement inode. An
-unrecognized or unsupported required metadata case refuses before publication rather than silently
-losing metadata or widening access.
+Every existing regular-file replacement preserves the direct-write-equivalent access profile: UID,
+GID, permission bits, and access ACL, including the ordinary-write effects on those values.
+`create_metadata` does not reset an existing whole file's access metadata. Additional extended
+attributes are preserved only when the migration inventory identifies a real workflow requirement
+and the platform can reproduce its ordinary-write semantics. Security attributes, capabilities,
+set-ID state, and flags that an ordinary content write would clear are not blindly copied to a
+replacement inode. An unrecognized or unsupported required metadata case refuses before publication
+rather than silently losing metadata or widening access.
 
 `set_metadata` changes owner/group, then mode on the held object. It preserves ordinary extended
 attributes and uses the platform's ordinary chmod interaction with an existing access ACL. The
@@ -281,19 +282,27 @@ arbitrary ACL/security attribute mutation are not exposed. The same partial-effe
 
 ## Cooperating writers and honest limits
 
-The file layer does not introduce a machine-wide lock service or cross-identity lock namespace.
-Resource owners serialize their own cooperating mutations to one destination. `Match` binds a
-mutation to an observed revision, and the helper revalidates that revision immediately before atomic
-publication or removal. A mismatch is a conflict; callers observe again before deciding whether to
-retry. Reads and inventory materialize one bounded snapshot before transfer and do not claim a
-globally coherent filesystem view.
+All cooperating helper filesystem transactions on one machine use one identity-neutral, exclusive
+machine-level lock. There is no path hierarchy or shared-lock protocol. Acquisition and the critical
+section obey the caller's deadline. Upload bytes may reach verified private scratch before locking;
+publication then locks, rechecks the condition, and renames. A read locks until its immutable
+snapshot is materialized, then transfers chunks outside the lock. Stat releases after observation;
+list materializes its bounded result before release. Inventory remains a bounded set of
+observations, not a globally coherent filesystem view.
 
-No portable Debian/macOS primitive atomically compares an arbitrary observed destination revision
-and replaces or unlinks that same revision. Final revalidation therefore detects changes completed
-before the check, not a non-cooperating write in the check-to-rename window. Create-only no-replace
-remains atomic where the named filesystem supports the platform primitive. Callers that cannot
-provide cooperative ownership, or that require adversarial external compare-and-swap, cannot use the
-initial mutation path without a different approved design.
+Ordinary-user and elevated helpers must open the same lock. A per-user cache cannot satisfy that
+contract. Safe creation, permissions, lifecycle, and availability of an identity-neutral namespace
+before permission activation remain unproved on Debian and macOS. The migration inventory must find
+every cross-identity path, and no affected consumer may migrate until the protocol is proven.
+Excluding a required admin/user workflow needs operator disposition.
+
+`Match` is atomic only with respect to those cooperating writers: the helper compares the revision
+and renames while holding the transaction lock. A non-cooperating process ignores the lock. No
+portable Debian/macOS primitive atomically compares an observed arbitrary destination revision and
+replaces or unlinks that same revision. Therefore an external writer can race the final check and
+rename/unlink window. Within the revised threat boundary, the helper refuses observed links and
+special objects, but it cannot promise external-writer compare-and-swap. Create-only no-replace
+remains atomic where the named filesystem supports the platform primitive.
 
 This limit is visible in documentation and tests. It is acceptable only where domain ownership or
 service coordination makes external writers non-adversarial. Tmux/session code must coordinate
@@ -312,11 +321,11 @@ There is no recursive removal and no FIFO path.
 ## Immediate mechanics versus deferred permission activation
 
 The [delivery-stage contract](execution-contract.md#delivery-stages-and-permission-activation) owns
-permission timing and immediate operational guarantees. The helper, metadata/platform, carrier I/O,
-and no-staging candidates above remain hard enablement gates. During coexistence the file service
-constructs an exact-operation confinement request from the explicit destination; migration records
-the intended recipient action, root, identity, elevation, owner/group/mode, and content risk outside
-runtime policy.
+permission timing and immediate operational guarantees. The cross-identity lock, helper,
+metadata/platform, carrier I/O, and no-staging candidates above remain hard enablement gates. During
+coexistence the file service constructs an exact-operation confinement request from the explicit
+destination; migration records the intended recipient action, root, identity, elevation,
+owner/group/mode, and content risk outside runtime policy.
 
 At physical legacy removal, `file_policy.py` introduces the reviewed immutable catalog and bound
 recipient subsets into composition. The only values needed are exact-file versus subtree scope,
@@ -368,14 +377,16 @@ generated sections, and native inventory, but drive only the new API/helper.
    same-user ancestor moves and hard-link additions are outside the production guarantee, not
    acceptance gates.
 3. **Publication/metadata:** cover every condition, chunk/partial failures, byte and digest checks,
-   inherited ACL behavior for creation, direct-write-equivalent access metadata for existing
-   generated sections, security-attribute refusal, lost acknowledgment, in-place metadata partial
-   effects, and cleanup debt. Every pre-rename publication failure leaves the old inode unchanged.
-4. **Concurrency/lifecycle:** cooperating whole-file and JSON workflows serialize per destination
-   and conflict on stale snapshots; non-cooperating races demonstrate the documented non-CAS limit.
-   Directory tests cover bounded inventory, limits/order, exact creation, empty removal, and no
-   implicit parents/recursive delete. Remove a real tmux socket only after liveness proves absence;
-   replacement yields conflict or uncertainty.
+   inherited ACL behavior for creation, direct-write-equivalent access metadata for every existing
+   regular-file replacement, security-attribute refusal, lost acknowledgment, in-place metadata
+   partial effects, and cleanup debt. Every pre-rename publication failure leaves the old inode
+   unchanged.
+4. **Concurrency/lifecycle:** multiprocess whole-file and JSON writers preserve unique keys and
+   conflict on stale snapshots under the machine transaction lock; lock waits are bounded and
+   immutable snapshot/chunk transfer occurs outside it. Directory tests cover bounded inventory,
+   limits/order, exact creation, empty removal, and no implicit parents/recursive delete. Remove a
+   real tmux socket only after liveness proves absence; replacement yields conflict or uncertainty.
+   An external writer fixture demonstrates, but does not overclaim, the non-CAS limit.
 5. **Carrier/bootstrap:** prove `SinkOutput` on SSH and QGA with reflected input,
    malformed/truncated envelopes, bounded parser state, and no raw retention. Prove shared private
    scratch helper delivery, the candidate 24 KiB bound, exact offsets/digests, native finalization
@@ -401,7 +412,8 @@ The following are not established by source inspection and must remain open in t
   establish a prerequisite earlier only where the workflow contract permits, otherwise treat a
   mandatory no-write read as a delivery gate requiring operator decision;
 - inventory finite transfer sizes, network/nonlocal filesystems, every authorized execution
-  identity/elevation choice, and each workflow's cooperating-writer ownership;
+  identity/elevation choice, and each path written by multiple effective identities; prove the
+  cross-identity lock protocol for required admin/user workflows;
 - prove unique-sibling atomic rename and the required creation/update owner, mode, and ACL semantics
   on every supported filesystem, refusing unsupported metadata before publication;
 - decide the supported macOS minimum and Windows-local download publication design;

@@ -156,17 +156,18 @@ attributes and replacement (`:149-179`) are useful implementation inputs. Its ex
 `:140` precedes unlink/rename, and the fingerprint is not a complete file/metadata identity.
 Existing tests that edit before the helper runs do not prove the check-to-publication window. The
 earlier general warning about check-then-rename now has this specific migration example; it is not a
-claim that the shipped helper is a naive prefix check or evidence that a new machine-wide lock
-framework is required.
+claim that the shipped helper is a naive prefix check. The successor's proposed machine transaction
+lock still needs cross-identity feasibility evidence; this source inspection does not supply it.
 
 `artifacts/publication.py:106-217` distinguishes whole-file publication with explicit modes from
 generated-section updates that preserve existing access metadata. The generated-section tests at
 `tests/artifacts/test_generated_sections.py:190-264` exercise ordinary extended attributes, POSIX
 access ACLs, copy refusal, and a default-ACL creation case. They are evidence about the shipped
 mechanism, not proof that every readable security attribute should survive replacement. Under the
-[file safety ruling](frd.md#file-safety-and-guest-runtime-rulings), the successor preserves the
-owner/mode/ACL semantics required by actual workflows, retains inherited creation behavior, and
-refuses unsupported required cases before publication. It does not blanket-clear new ACLs or blindly
+[file safety ruling](frd.md#file-safety-and-guest-runtime-rulings), the successor preserves
+direct-write-equivalent owner/mode/ACL semantics for every existing regular-file replacement,
+retains inherited behavior for creation, and refuses unsupported required cases before publication.
+It does not use create metadata to reset an existing whole file, blanket-clear new ACLs, or blindly
 copy security attributes that an ordinary content write would clear.
 
 The release adds artifact publication and generated sections, per-facet activation maps, persistent
@@ -224,9 +225,10 @@ malicious process already running as the authorized target user; compromise at t
 already outside the useful file guarantee. Hostile same-user ancestor moves and hard-link additions
 are therefore no longer production gates. The design still validates untrusted requests and paths,
 refuses observed links and unsupported object types, handles opened objects conservatively, cleans
-up only operation-owned names, binds the authorized identity/elevation, and excludes guest root.
-Accidental and non-cooperating changes remain subject to the documented conflict and uncertainty
-rules.
+up only operation-owned names, binds the authorized identity/elevation, and excludes guest root. The
+threat-boundary change does not remove simultaneous legitimate CLI writers, so the proposed
+cross-identity transaction lock remains an unproved production gate. Accidental and non-cooperating
+changes remain subject to the documented conflict and uncertainty rules.
 
 ### Managed foreground work and session containment
 
@@ -374,8 +376,8 @@ The [OS module documentation](https://docs.python.org/3/library/os.html) describ
 platform-dependent descriptor APIs and Linux-only extended-attribute APIs. A Python helper therefore
 still needs a proved macOS metadata implementation. It also does not prove unique-sibling atomic
 publication, observed-link refusal, required owner/mode/ACL behavior, or cooperative conflict
-handling on supported filesystems. Those remain implementation acceptance gates within the revised
-threat boundary.
+handling and cross-identity locking on supported filesystems. Those remain implementation acceptance
+gates within the revised threat boundary.
 
 ### Local process startup and interruption
 
