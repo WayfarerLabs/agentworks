@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import base64
 import secrets
 import struct
 from dataclasses import dataclass, field
 from enum import StrEnum
-from importlib.resources import files
 from typing import TYPE_CHECKING, NoReturn
 
 from agentworks.errors import ValidationError
+from agentworks.execution._helper_bundle import build_helper_modules
 from agentworks.execution._process import SinkWriteError, try_write_to_sink
 from agentworks.execution._terminal_guest import (
     FRAME_MAGIC,
@@ -29,18 +28,9 @@ _HELPER_ENV = ("PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C")
 _RUNTIME = "/usr/bin/python3"
 
 
-def _build_fixed_source() -> str:
-    encoded = base64.b64encode(files(__package__).joinpath("_terminal_guest.py").read_bytes()).decode("ascii")
-    return (
-        "import base64,sys,types\n"
-        "m=types.ModuleType('_agw_terminal_guest');m.__file__='<agw-terminal-guest>'\n"
-        "sys.modules[m.__name__]=m\n"
-        f"exec(compile(base64.b64decode({encoded!r}),m.__file__,'exec'),m.__dict__)\n"
-        "raise SystemExit(m.run(sys.argv[1]))\n"
-    )
-
-
-FIXED_SOURCE = _build_fixed_source()
+FIXED_SOURCE = build_helper_modules("_agw_terminal", ("_terminal_guest",)) + (
+    "raise SystemExit(sys.modules['_agw_terminal._terminal_guest'].run(sys.argv[1]))\n"
+)
 
 
 class TerminalHandoffFailure(StrEnum):
