@@ -575,6 +575,47 @@ The [preparation candidate](preparation-lld.md#darwin-inline-prerequisite-candid
 selection, refusal and observation rules. Native macOS installation, shim-alias, no-prompt and
 no-write evidence remain outstanding. No Linux fixture substitutes for those measurements.
 
+## Lima provisioning and VM-runtime ownership
+
+Source audit of Lima v2.2.0 (`de0816ea4bdc5267b428ab21025889b8dd785526`) separates completion of
+provisioning commands from the lifetime of the VM they create. This is upstream source evidence, not
+a live macOS result or a new minimum Lima version.
+
+Without an existing autostart registration, ordinary `limactl start` launches its host agent in a
+new process group, watches its readiness events, then returns while that host agent remains running.
+With `--foreground`, it instead replaces the start process with the host agent through `exec`.
+Lima's own launchd template uses this foreground form; ordinary start of an instance registered with
+the user LaunchAgent requests launchd bootstrap instead. Explicit foreground start bypasses that
+registration, so migration must not introduce competing lifetime owners. Sources:
+[start](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/instance/start.go#L238-L422),
+[process group](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/executil/opts_others.go#L12-L15),
+[foreground exec](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/instance/start_unix.go#L20-L48),
+and
+[LaunchAgent template](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/autostart/launchd/io.lima-vm.autostart.INSTANCE.plist#L5-L23).
+
+For VZ, the VM lives inside the host agent and its recorded VM PID is the host agent's PID. QEMU is
+a separate child in another process group; the host agent retains and waits for it. Killing the host
+agent alone therefore has different implications for these two drivers. Sources:
+[VZ runtime](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/driver/vz/vm_darwin.go#L49-L105) and
+[QEMU launch](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/driver/qemu/qemu_driver.go#L282-L443).
+
+The current Agentworks remote-create wrapper combines `limactl create` and ordinary `limactl start`
+in one detached shell. Applying generic main-exit descendant cleanup to that wrapper could terminate
+the intentionally surviving VM runtime. The candidate migration separates bounded create/readiness
+operations from a resource-owned job anchored by `limactl start --foreground`. It adds no exception
+allowing arbitrary descendants of a finished job to survive. The VM owner, not the carrier, must
+retain and reconcile that lifetime through start, stop, restart, rollback and delete.
+
+This candidate still needs supported-version and native-host proof: readiness independent of process
+completion, disconnect survival, abrupt host-agent loss with QEMU descendants, stale references and
+unrelated-process survival. Lima's recorded-PID check uses signal zero rather than a process-birth
+identity, so it is not itself proof of the transport's stale-reference guarantee. Sources:
+[stop](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/instance/stop.go#L26-L167),
+[delete](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/instance/delete.go#L17-L36), and
+[PID validation](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/store/instance.go#L200-L235).
+Neither `--foreground` nor launchd establishes every MANAGED guarantee; the macOS mechanism gate
+remains open.
+
 ## Claims not relied upon
 
 - A common API makes every backend interactive.

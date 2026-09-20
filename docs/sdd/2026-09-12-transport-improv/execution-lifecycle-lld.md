@@ -233,6 +233,23 @@ process-group wrapper is acceptable only if it demonstrably satisfies those same
 Linux-specific containment claim is implied. DIRECT-only host support would drop required work and
 needs operator disposition, not a silent implementation shortcut.
 
+### Placement-host resource lifetime
+
+A provisioning command can intentionally create a resource that outlives the command. This does not
+give its ordinary descendants an exemption from managed-job cleanup. The
+[Lima source audit](prior-art-research.md#lima-provisioning-and-vm-runtime-ownership) identifies the
+current remote-create wrapper as such a case: ordinary `limactl start` returns after a background
+host agent reports running, whereas `limactl start --foreground` remains the VM-runtime anchor.
+
+The candidate migration uses a separate resource-owned independent job for that foreground anchor,
+with bounded create and readiness operations. Provisioning completion and VM-runtime completion
+remain distinct. The VM domain owner retains the job reference and coordinates explicit stop,
+restart, rollback and delete; neither the SSH carrier nor generic job cleanup understands Lima. This
+is an application of existing lifetime choices, not a new profile, a blanket descendant exception or
+acceptance of Lima's PID files as transport run identity. The candidate must prove supported-version
+behavior and host-side ownership before adoption. In particular, separate QEMU process groups do not
+by themselves prove verified cleanup after abrupt host-agent loss.
+
 ## Delivery sequence and proof criteria
 
 The reviewed design is published and the operator has settled implementation ownership. Complete

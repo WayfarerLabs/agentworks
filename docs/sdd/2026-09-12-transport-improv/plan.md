@@ -234,6 +234,15 @@ isolation, rulesync, locked-SDD and website gates pass. This is a draft implemen
 push, not joint live-I/O acceptance or a completed public feedback/fix round. Launch-interruption,
 native-platform, helper, lifecycle and production RunContext gates remain open.
 
+At `e6860525`, all three private review lanes are clean for the public-launch experiment and its
+bounded evidence record. The experiment no longer forces Python's private launch selector; it
+observes the route and actual session creation under local CPython 3.12.13 and Debian 3.11.2. The
+focused suite passes 81 tests with one skip. This head also gives the oversized live-input fixture
+short parameter IDs: Windows CI at `4cf5261f` could not set pytest's environment variable for its
+65,634-character generated test identifier. The input and assertions remain unchanged. Fresh hosted
+Windows verification is pending; no production-launch or native-platform gate is closed by this test
+correction.
+
 SSH's implementation at `174187d2` includes transport `a885ef5a` and adopts the reviewed finite
 subprocess pump. Its owner has separately supplied the buffered compatibility guard integrated here.
 It still needs the extended shared I/O implementation and terminal preparation, plus production
@@ -391,6 +400,11 @@ connection and trust only. Before broader lifecycle implementation, complete the
       jobs, prove all MANAGED ownership/tracking/stop/emptiness promises and independent lifetime;
       workstation SSH evidence is insufficient. Price missing mechanics or infrastructure for
       operator disposition rather than silently dropping required host work.
+- [ ] Prove the placement-host VM-resource lifetime separately from provisioning completion. For
+      Lima, evaluate `start --foreground` as the resource-owned job anchor, retain its reference
+      through VM lifecycle operations, and prove readiness, disconnect, rollback and abrupt-anchor
+      cleanup for the supported drivers. Do not exempt surviving provisioning descendants from
+      generic cleanup or treat Lima's numeric PID records as safe transport ownership.
 
 - [ ] SSH effort builds `execution/carriers/ssh/` and its connection/trust migration. Transport
       builds common execution, scoped context delivery, files/jobs and other adapters, and applies
