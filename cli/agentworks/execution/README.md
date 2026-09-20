@@ -392,11 +392,11 @@ neither a public file service nor native or elevated acceptance.
 
 `_file_metadata_exchange.py` delivers `set_file_metadata` and `ensure_file_directory` through one
 sensitive finite-input carrier attempt. The fixed helper verifies execution identity before taking
-the system transaction lock, confines the parent and leaf, and emits its result after releasing
-the lock. Numeric metadata ownership is separate from execution identity. Missing parents refuse;
-directory creation does not create intermediate components. Complete failure records preserve
-known changes and uncertain attempts; lost observation after possible dispatch remains uncertain
-and never triggers replay. A control interruption carries a closed mutation-uncertainty marker.
+the system transaction lock, confines the parent and leaf, and emits its result after releasing the
+lock. Numeric metadata ownership is separate from execution identity. Missing parents refuse;
+directory creation does not create intermediate components. Complete failure records preserve known
+changes and uncertain attempts; lost observation after possible dispatch remains uncertain and never
+triggers replay. A control interruption carries a closed mutation-uncertainty marker.
 
 ## Private directory inventory
 

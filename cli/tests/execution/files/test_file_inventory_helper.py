@@ -153,7 +153,7 @@ def _list(
     return carrier, result
 
 
-@pytest.mark.parametrize("runtime", [Path(sys.executable), Path("/usr/bin/python3")], ids=["current", "bookworm"])
+@pytest.mark.parametrize("runtime", [Path(sys.executable), Path("/usr/bin/python3.11")], ids=["current", "python311"])
 def test_isolated_bundle_lists_sorted_utf8_metadata_without_content_reads(
     tmp_path: Path, plan: IdentityPlan, runtime: Path
 ) -> None:

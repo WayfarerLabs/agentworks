@@ -538,6 +538,16 @@ def test_missing_acknowledgement_is_not_replayed_or_claimed_unchanged(
     ("build", "stderr", "error"),
     [
         (
+            lambda request: _records(request, b"{}"),
+            b"",
+            FileMetadataObservationError.CONTROL,
+        ),
+        (
+            lambda request: _records(request, b"{}", FileRecordKind.FAILED),
+            b"",
+            FileMetadataObservationError.CONTROL,
+        ),
+        (
             lambda request: (
                 b"noise\n"
                 + _records(
@@ -571,7 +581,7 @@ def test_missing_acknowledgement_is_not_replayed_or_claimed_unchanged(
         ),
     ],
 )
-def test_noisy_wrong_nonce_truncated_and_stderr_responses_are_uncertain(
+def test_malformed_or_incomplete_responses_are_uncertain(
     plan: IdentityPlan,
     build: Callable[[FileMetadataRequest], bytes],
     stderr: bytes,

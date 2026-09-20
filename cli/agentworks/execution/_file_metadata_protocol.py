@@ -324,6 +324,8 @@ def encode_file_metadata_result(result: FileMetadataResultControl) -> bytes:
 
 def parse_file_metadata_result(body: bytes) -> FileMetadataResultControl:
     value = _load_json(body, request=False)
+    if set(value) != {"result", "revision"}:
+        raise FileMetadataControlError
     failed = False
     canonical = b""
     kind = FileMetadataResultKind.UNCHANGED
@@ -332,7 +334,7 @@ def parse_file_metadata_result(body: bytes) -> FileMetadataResultControl:
         kind = FileMetadataResultKind(value["result"])
     except (TypeError, ValueError):
         failed = True
-    if failed or canonical != body or set(value) != {"result", "revision"}:
+    if failed or canonical != body:
         raise FileMetadataControlError
     return FileMetadataResultControl(kind, _decode_revision(value["revision"]))
 
@@ -386,6 +388,8 @@ def encode_file_metadata_failure(failure: FileMetadataFailureControl) -> bytes:
 
 def parse_file_metadata_failure(body: bytes) -> FileMetadataFailureControl:
     value = _load_json(body, request=False)
+    if "code" not in value:
+        raise FileMetadataControlError
     failed = False
     canonical = b""
     code = FileMetadataFailureCode.INVALID_REQUEST

@@ -166,8 +166,8 @@ def _ensure(
 
 @pytest.mark.parametrize(
     "runtime",
-    [Path(sys.executable), Path("/usr/bin/python3")],
-    ids=["current", "bookworm-system-python"],
+    [Path(sys.executable), Path("/usr/bin/python3.11")],
+    ids=["current", "python311"],
 )
 def test_fixed_bundle_creates_converges_and_is_idempotent(
     tmp_path: Path,
