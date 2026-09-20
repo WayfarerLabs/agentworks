@@ -42,6 +42,32 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the private sta
 
 _TOKEN = bytes(range(16))
 
+_ADVANCE_AFTER_OPEN_ROOT = """
+clock=[guest.time.monotonic()]
+def controlled_monotonic():
+ return clock[0]
+guest.time.monotonic=controlled_monotonic
+real_open_root=guest.open_linux_root
+def advancing_open_root(path):
+ result=real_open_root(path)
+ clock[0]+=10.0
+ return result
+guest.open_linux_root=advancing_open_root
+"""
+
+_ADVANCE_AFTER_OPERATE = """
+clock=[guest.time.monotonic()]
+def controlled_monotonic():
+ return clock[0]
+guest.time.monotonic=controlled_monotonic
+real_operate=guest._operate
+def advancing_operate(*args,**kwargs):
+ result=real_operate(*args,**kwargs)
+ clock[0]+=10.0
+ return result
+guest._operate=advancing_operate
+"""
+
 
 @pytest.fixture
 def plan() -> IdentityPlan:
@@ -451,17 +477,9 @@ def test_guest_deadline_after_missing_root_lookup_is_not_root_refusal(
     plan: IdentityPlan,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    patch_source = """
-real_open_root=guest.open_linux_root
-def delayed_open_root(path):
- result=real_open_root(path)
- guest.time.sleep(0.03)
- return result
-guest.open_linux_root=delayed_open_root
-"""
-    source = fixed_lock_source(tmp_path / "lock-root", patch_source)
+    source = fixed_lock_source(tmp_path / "lock-root", _ADVANCE_AFTER_OPEN_ROOT)
     monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
-    carrier = LocalCarrier(dispatch_deadline=Deadline.after(5))
+    carrier = LocalCarrier(dispatch_deadline=Deadline.after(15))
 
     _, result = _begin(
         tmp_path / "missing-root",
@@ -469,7 +487,7 @@ guest.open_linux_root=delayed_open_root
         1,
         plan,
         carrier=carrier,
-        deadline=Deadline.after(0.01),
+        deadline=Deadline.after(5),
     )
 
     assert result.observation.state is FileStageObservationState.REFUSED
@@ -483,23 +501,15 @@ def test_reconcile_deadline_after_missing_root_lookup_is_not_absence(
     plan: IdentityPlan,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    patch_source = """
-real_open_root=guest.open_linux_root
-def delayed_open_root(path):
- result=real_open_root(path)
- guest.time.sleep(0.03)
- return result
-guest.open_linux_root=delayed_open_root
-"""
-    source = fixed_lock_source(tmp_path / "lock-root", patch_source)
+    source = fixed_lock_source(tmp_path / "lock-root", _ADVANCE_AFTER_OPEN_ROOT)
     monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
 
     _, result = _reconcile(
         tmp_path / "missing-root",
         "destination",
         plan,
-        carrier=LocalCarrier(dispatch_deadline=Deadline.after(5)),
-        deadline=Deadline.after(0.01),
+        carrier=LocalCarrier(dispatch_deadline=Deadline.after(15)),
+        deadline=Deadline.after(5),
     )
 
     assert result.observation.state is FileStageObservationState.REFUSED
@@ -513,19 +523,11 @@ def test_guest_deadline_after_closed_success_retains_created_cleanup_debt(
     plan: IdentityPlan,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    patch_source = """
-real_operate=guest._operate
-def delayed_operate(*args,**kwargs):
- result=real_operate(*args,**kwargs)
- guest.time.sleep(0.03)
- return result
-guest._operate=delayed_operate
-"""
-    source = fixed_lock_source(tmp_path / "lock-root", patch_source)
+    source = fixed_lock_source(tmp_path / "lock-root", _ADVANCE_AFTER_OPERATE)
     monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
     root = tmp_path / "approved"
     root.mkdir()
-    carrier = LocalCarrier(dispatch_deadline=Deadline.after(5))
+    carrier = LocalCarrier(dispatch_deadline=Deadline.after(15))
 
     _, result = _begin(
         root,
@@ -533,7 +535,7 @@ guest._operate=delayed_operate
         1,
         plan,
         carrier=carrier,
-        deadline=Deadline.after(0.01),
+        deadline=Deadline.after(5),
     )
 
     assert result.observation.state is FileStageObservationState.REFUSED
@@ -555,23 +557,15 @@ def test_guest_deadline_after_closed_reconcile_retains_recovered_cleanup_debt(
     root.mkdir()
     _, begun = _begin(root, "destination", 1, plan)
     assert begun.observation.state is FileStageObservationState.CREATED
-    patch_source = """
-real_operate=guest._operate
-def delayed_operate(*args,**kwargs):
- result=real_operate(*args,**kwargs)
- guest.time.sleep(0.03)
- return result
-guest._operate=delayed_operate
-"""
-    source = fixed_lock_source(tmp_path / "lock-root", patch_source)
+    source = fixed_lock_source(tmp_path / "lock-root", _ADVANCE_AFTER_OPERATE)
     monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
 
     _, result = _reconcile(
         root,
         "destination",
         plan,
-        carrier=LocalCarrier(dispatch_deadline=Deadline.after(5)),
-        deadline=Deadline.after(0.01),
+        carrier=LocalCarrier(dispatch_deadline=Deadline.after(15)),
+        deadline=Deadline.after(5),
     )
 
     assert result.observation.state is FileStageObservationState.REFUSED
@@ -594,15 +588,7 @@ def test_cleanup_deadline_after_parent_open_refuses_before_mutation(
     debt = recovered.observation.cleanup_debt
     assert debt is not None
     scratch = root / scratch_name(_TOKEN)
-    patch_source = """
-real_open_root=guest.open_linux_root
-def delayed_open_root(path):
- result=real_open_root(path)
- guest.time.sleep(0.03)
- return result
-guest.open_linux_root=delayed_open_root
-"""
-    source = fixed_lock_source(tmp_path / "lock-root", patch_source)
+    source = fixed_lock_source(tmp_path / "lock-root", _ADVANCE_AFTER_OPEN_ROOT)
     monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
 
     _, result = _cleanup(
@@ -610,8 +596,8 @@ guest.open_linux_root=delayed_open_root
         "destination",
         debt,
         plan,
-        carrier=LocalCarrier(dispatch_deadline=Deadline.after(5)),
-        deadline=Deadline.after(0.01),
+        carrier=LocalCarrier(dispatch_deadline=Deadline.after(15)),
+        deadline=Deadline.after(5),
     )
 
     assert result.observation.state is FileStageObservationState.REFUSED
@@ -635,15 +621,7 @@ def test_guest_deadline_after_closed_cleanup_retains_original_exact_debt(
     _, recovered = _reconcile(root, "destination", plan)
     debt = recovered.observation.cleanup_debt
     assert debt is not None
-    patch_source = """
-real_operate=guest._operate
-def delayed_operate(*args,**kwargs):
- result=real_operate(*args,**kwargs)
- guest.time.sleep(0.03)
- return result
-guest._operate=delayed_operate
-"""
-    source = fixed_lock_source(tmp_path / "lock-root", patch_source)
+    source = fixed_lock_source(tmp_path / "lock-root", _ADVANCE_AFTER_OPERATE)
     monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
 
     _, result = _cleanup(
@@ -651,8 +629,8 @@ guest._operate=delayed_operate
         "destination",
         debt,
         plan,
-        carrier=LocalCarrier(dispatch_deadline=Deadline.after(5)),
-        deadline=Deadline.after(0.01),
+        carrier=LocalCarrier(dispatch_deadline=Deadline.after(15)),
+        deadline=Deadline.after(5),
     )
 
     assert result.observation.state is FileStageObservationState.REFUSED
