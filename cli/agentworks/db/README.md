@@ -1,4 +1,28 @@
-# Instance State Store
+# State Database Repositories
+
+## Operation ownership
+
+`Database.operations` reserves coarse VM or platform-host resources for participating operations
+using the same state database. A fresh operation ID identifies each claim; it is not a secret or an
+authentication credential. Claims are committed in short standalone transactions, not held-open SQL
+transactions around network work. Nested command transactions cannot acquire or change them.
+
+Core reserves before work, records possible dispatch before sending a remote mutation, and records
+effects resolved only after obtaining operation-specific evidence that no further effects can occur.
+The repository persists that conclusion; it does not establish remote quiescence. Reserved claims
+can be explicitly abandoned, and resolved claims can be explicitly released. Possible-dispatch
+claims cannot use either release path. Every transition matches the claim's ID and prior state, so a
+delayed database update or release cannot affect a subsequent owner.
+
+Closing the database, process death and elapsed time do not delete claims. Inspection reports their
+bounded metadata without command arguments, environment or file contents. There is no lease expiry,
+automatic takeover or coordination across independent databases. Backup preserves recorded claims;
+restoring one does not establish that target state matches the snapshot.
+
+This persistence primitive is not yet connected to production operation admission or RunContext. The
+caller composition and recovery paths must be implemented before it can protect file workflows.
+
+## Instance state
 
 `Database.instance_state` is the typed persistence boundary for desired instance overlays and
 applied-state slices. It uses the owning `Database` connection, so reads share its snapshot and
