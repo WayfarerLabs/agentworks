@@ -25,9 +25,9 @@ from typing import TYPE_CHECKING, NoReturn, Protocol, TypeVar, cast
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-from agentworks.execution._file_snapshot import _snapshot_stat
-from agentworks.execution._file_stat import FileRevision, FileStat
-from agentworks.execution._scratch import (
+from ._file_snapshot import _snapshot_stat
+from ._file_stat import FileRevision, FileStat
+from ._scratch import (
     ReadyScratchReference,
     ScratchFailureKind,
     ScratchTransferError,
