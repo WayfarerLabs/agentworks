@@ -354,27 +354,131 @@ def test_begin_deadline_between_collisions_never_claims_or_removes_collision(
     os.close(parent_fd)
 
 
-def test_begin_expiry_after_mutation_runs_exact_cleanup_outside_expired_budget(
+def test_begin_expiry_after_mkdir_normalizes_for_cleanup_without_creating_data(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o2700)
+    if not tmp_path.stat().st_mode & stat.S_ISGID:
+        pytest.skip("filesystem does not retain setgid on the parent directory")
+    parent_fd = _open_parent(tmp_path)
+    clock = [0.0]
+    original_mkdir = os.mkdir
+    original_open = os.open
+    data_created = False
+    acquired_modes: list[int] = []
+
+    def create_then_expire(
+        path: object,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> None:
+        original_mkdir(path, mode, dir_fd=dir_fd)  # type: ignore[arg-type]
+        acquired_modes.append(os.stat(path, dir_fd=dir_fd, follow_symlinks=False).st_mode)  # type: ignore[arg-type]
+        clock[0] = 10.0
+
+    def observe_data_creation(path: object, *args: object, **kwargs: object) -> int:
+        nonlocal data_created
+        if path == scratch_module._DATA_NAME:
+            data_created = True
+        return original_open(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "mkdir", create_then_expire)
+    monkeypatch.setattr(os, "open", observe_data_creation)
+    monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    previous_umask = os.umask(0o077)
+    try:
+        with pytest.raises(ScratchTransferError) as raised:
+            begin_scratch(parent_fd, 0, expires_at=5.0)
+    finally:
+        os.umask(previous_umask)
+    assert raised.value.kind is ScratchFailureKind.DEADLINE
+    assert raised.value.cleanup_debt is None
+    assert acquired_modes[0] & stat.S_ISGID
+    assert not data_created
+    assert not list(tmp_path.iterdir())
+    os.close(parent_fd)
+
+
+def test_begin_expiry_retains_exact_debt_when_cleanup_normalization_refuses(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o2700)
+    if not tmp_path.stat().st_mode & stat.S_ISGID:
+        pytest.skip("filesystem does not retain setgid on the parent directory")
+    parent_fd = _open_parent(tmp_path)
+    clock = [0.0]
+    original_mkdir = os.mkdir
+    original_set_mode = scratch_module._set_mode
+
+    def create_then_expire(
+        path: object,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> None:
+        original_mkdir(path, mode, dir_fd=dir_fd)  # type: ignore[arg-type]
+        clock[0] = 10.0
+
+    def refuse_cleanup_normalization(descriptor: int, mode: int, phase: ScratchPhase) -> None:
+        if clock[0] >= 5.0 and stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            raise ScratchTransferError(ScratchFailureKind.IO, phase)
+        original_set_mode(descriptor, mode, phase)
+
+    monkeypatch.setattr(os, "mkdir", create_then_expire)
+    monkeypatch.setattr(scratch_module, "_set_mode", refuse_cleanup_normalization)
+    monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    with pytest.raises(ScratchTransferError) as raised:
+        begin_scratch(parent_fd, 0, expires_at=5.0)
+    debt = raised.value.cleanup_debt
+    assert raised.value.kind is ScratchFailureKind.DEADLINE
+    assert debt is not None and debt._directory is not None and debt._object is None
+    directory = _scratch_directory(tmp_path)
+    assert directory.stat().st_mode & stat.S_ISGID
+    assert not list(directory.iterdir())
+
+    directory.chmod(0o700)
+    cleanup_scratch(parent_fd, debt)
+    os.close(parent_fd)
+
+
+def test_begin_expiry_during_data_creation_performs_only_cleanup_bookkeeping(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     parent_fd = _open_parent(tmp_path)
     clock = [0.0]
+    original_open = os.open
     original_list = scratch_module._list_directory
+    data_created = False
+    listed_phases: list[ScratchPhase] = []
 
-    def list_then_expire(directory_fd: int, phase: ScratchPhase) -> set[str]:
-        names = original_list(directory_fd, phase)
-        if phase is ScratchPhase.BEGIN:
+    def create_data_then_expire(path: object, *args: object, **kwargs: object) -> int:
+        nonlocal data_created
+        descriptor = original_open(path, *args, **kwargs)  # type: ignore[arg-type]
+        if path == scratch_module._DATA_NAME:
+            data_created = True
             clock[0] = 10.0
-        return names
+        return descriptor
 
-    monkeypatch.setattr(scratch_module, "_list_directory", list_then_expire)
+    def record_listing(directory_fd: int, phase: ScratchPhase) -> set[str]:
+        listed_phases.append(phase)
+        return original_list(directory_fd, phase)
+
+    monkeypatch.setattr(os, "open", create_data_then_expire)
+    monkeypatch.setattr(scratch_module, "_list_directory", record_listing)
     monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
 
     with pytest.raises(ScratchTransferError) as raised:
         begin_scratch(parent_fd, 0, expires_at=5.0)
     assert raised.value.kind is ScratchFailureKind.DEADLINE
     assert raised.value.cleanup_debt is None
+    assert data_created
+    assert ScratchPhase.BEGIN not in listed_phases
     assert not list(tmp_path.iterdir())
     os.close(parent_fd)
 

@@ -156,10 +156,21 @@ def begin_scratch(
             _create_directory(parent_fd, acquisition, expires_at)
             directory_fd = acquisition.directory_fd
             assert directory_fd is not None and acquisition.directory is not None
+            try:
+                _check_deadline(expires_at, ScratchPhase.BEGIN)
+            except ScratchTransferError:
+                # This does not advance acquisition after expiry. It only
+                # restores the exact mode required by bounded cleanup.
+                with suppress(ScratchTransferError):
+                    _set_mode(directory_fd, _DIRECTORY_MODE, ScratchPhase.BEGIN)
+                raise
             _create_object(directory_fd, acquisition)
             object_fd = acquisition.object_fd
             assert object_fd is not None and acquisition.object is not None
+            # Object acquisition and directory normalization preserve enough
+            # exact state for cleanup. No verification work starts after expiry.
             _set_mode(directory_fd, _DIRECTORY_MODE, ScratchPhase.BEGIN)
+            _check_deadline(expires_at, ScratchPhase.BEGIN)
             _require_directory_stat(
                 _fstat(directory_fd, ScratchPhase.BEGIN),
                 acquisition.directory,
