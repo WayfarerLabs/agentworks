@@ -212,6 +212,11 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       requests for approved-root operations through core-owned parent decomposition, without
       granting parent/sibling authority. Bind those operations in the complete FileAccess surface
       before the additive RunContext gate, not as a forwarding layer over legacy files.
+- [x] Deliver private stage creation and exact-offset chunk exchanges using sensitive input,
+      complete typed observations, original destination binding and the fixed transaction lock. All
+      three private lanes are clean at `85d27904`, including post-cleanup expiry and exact chunk
+      cleanup-debt binding. These two operations do not complete upload, recovery delivery,
+      publication, public FileAccess or native acceptance.
 - [x] Separate unverified scratch identity/length from final digest verification, permitting
       one-pass upload without rewinding the source or using a whole-file host buffer. Add
       cooperative acquisition/transfer expiry checks while retaining bounded exact cleanup after
@@ -670,6 +675,22 @@ The staging exchange is assigned separately against these receipt types. Full Fi
 acceptance, launch ownership, lifecycle and additive RunContext remain required. Shared SSH types
 are unchanged, and both macOS operator decisions remain pending. This progress push consumes no
 public feedback/fix round; all three remain available for the completed PR.
+
+The private stage increment is reviewed at `85d27904`. Creation and chunk requests use the original
+destination binding, fixed lock and sensitive private protocol. Review corrected expiry after path
+and lock cleanup, oversized pytest IDs on Windows, and returned chunk cleanup debt that could
+conflict with the known active reference. Removing the debt-equality check makes all seven mismatch
+cases fail. The three private lanes pass 86 stage tests, including real local Python 3.11 helpers.
+
+The final full suite passes 11,720 tests with 13 skips. Ruff/format, CI-scoped mypy (991 sources),
+file lint, typer isolation, locked-SDD, rulesync and diff checks pass. Website Node tests pass 103
+cases and both deterministic double-builds match. One Python website run failed the unchanged
+browser keyboard-hold launch witness; a complete rerun passed all 160 tests. This is an observed
+intermittent gate failure, not a diagnosed or fixed website defect. Hosted receipt checks at
+`9d8100b2` pass in
+[run 35520474884](https://github.com/WayfarerLabs/agentworks/actions/runs/35520474884); the stage
+increment requires fresh hosted confirmation. Remote recovery is the next file implementation; full
+FileAccess, native acceptance, launch ownership, lifecycle and additive RunContext remain open.
 
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
