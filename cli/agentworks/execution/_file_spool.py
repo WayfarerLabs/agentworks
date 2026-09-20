@@ -93,43 +93,56 @@ def spool_snapshot(
             stat_only=False,
             expires_at=expires_at,
         ) as source:
-            if source is None:
-                initially_absent = True
-            else:
-                reference = begin_scratch(scratch_parent_fd, source.stat.size, expires_at=expires_at)
-                owned = reference
-                digest = hashlib.sha256()
-                offset = 0
-                while offset < source.stat.size:
-                    chunk = source.read(
-                        min(_MAX_CHUNK_BYTES, source.stat.size - offset),
-                        expires_at=expires_at,
-                    )
-                    if not chunk:
+            try:
+                if source is None:
+                    initially_absent = True
+                else:
+                    reference = begin_scratch(scratch_parent_fd, source.stat.size, expires_at=expires_at)
+                    owned = reference
+                    digest = hashlib.sha256()
+                    offset = 0
+                    while offset < source.stat.size:
+                        chunk = source.read(
+                            min(_MAX_CHUNK_BYTES, source.stat.size - offset),
+                            expires_at=expires_at,
+                        )
+                        if not chunk:
+                            raise SnapshotReadError(SnapshotFailureKind.CONFLICT)
+                        digest.update(chunk)
+                        write_scratch_chunk(
+                            scratch_parent_fd,
+                            reference,
+                            offset,
+                            chunk,
+                            hashlib.sha256(chunk).digest(),
+                            expires_at=expires_at,
+                        )
+                        offset += len(chunk)
+                    if source.read(1, expires_at=expires_at):
                         raise SnapshotReadError(SnapshotFailureKind.CONFLICT)
-                    digest.update(chunk)
-                    write_scratch_chunk(
+                    whole_digest = digest.digest()
+                    ready = verify_scratch(
                         scratch_parent_fd,
                         reference,
-                        offset,
-                        chunk,
-                        hashlib.sha256(chunk).digest(),
+                        whole_digest,
                         expires_at=expires_at,
                     )
-                    offset += len(chunk)
-                if source.read(1, expires_at=expires_at):
-                    raise SnapshotReadError(SnapshotFailureKind.CONFLICT)
-                whole_digest = digest.digest()
-                ready = verify_scratch(
-                    scratch_parent_fd,
-                    reference,
-                    whole_digest,
-                    expires_at=expires_at,
-                )
-                owned = ready
-                source.verify(expires_at=expires_at)
-                source_revision = FileRevision(source.stat, whole_digest)
-        _check_deadline(expires_at)
+                    owned = ready
+                    source.verify(expires_at=expires_at)
+                    source_revision = FileRevision(source.stat, whole_digest)
+            except SnapshotReadError as error:
+                primary = _source_failure(error.kind)
+            except ScratchTransferError as error:
+                primary = _scratch_failure(error.kind)
+                debt = error.cleanup_debt
+            except BaseException as error:
+                scratch_cause = error.__cause__
+                if isinstance(scratch_cause, ScratchTransferError):
+                    primary = _scratch_failure(scratch_cause.kind)
+                    debt = scratch_cause.cleanup_debt
+                raise
+        if primary is None:
+            _check_deadline(expires_at)
     except SnapshotReadError as error:
         primary = _source_failure(error.kind)
     except ScratchTransferError as error:
@@ -138,7 +151,7 @@ def spool_snapshot(
     except BaseException as error:
         control = error
         scratch_cause = error.__cause__
-        if isinstance(scratch_cause, ScratchTransferError):
+        if primary is None and isinstance(scratch_cause, ScratchTransferError):
             primary = _scratch_failure(scratch_cause.kind)
             debt = scratch_cause.cleanup_debt
 

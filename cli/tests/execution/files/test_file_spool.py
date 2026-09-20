@@ -28,6 +28,7 @@ from agentworks.execution._scratch import (
     ReadyScratchReference,
     ScratchFailureKind,
     ScratchPhase,
+    ScratchReference,
     ScratchTransferError,
     cleanup_scratch,
     iter_ready_scratch,
@@ -377,6 +378,46 @@ def test_control_interruption_preserves_exact_cleanup_debt_as_closed_cause(
         assert cause.cleanup_debt is not None
         real_cleanup(scratch_fd, cause.cleanup_debt)
     finally:
+        os.close(scratch_fd)
+        os.close(source_fd)
+
+
+def test_begin_debt_survives_source_close_interruption(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source_root, _scratch_root, source_fd, scratch_fd = _directories(tmp_path)
+    (source_root / "file").write_bytes(b"content")
+    created: ScratchReference | None = None
+    original_close = snapshot_module._close
+
+    def failed_begin(
+        parent_fd: int,
+        expected_length: int,
+        *,
+        expires_at: float | None = None,
+    ) -> ScratchReference:
+        nonlocal created
+        created = scratch_module.begin_scratch(parent_fd, expected_length, expires_at=expires_at)
+        debt = scratch_module._cleanup_debt(created)
+        raise ScratchTransferError(ScratchFailureKind.IO, ScratchPhase.BEGIN, cleanup_debt=debt)
+
+    def interrupting_close(descriptor: int) -> None:
+        original_close(descriptor)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(spool_module, "begin_scratch", failed_begin)
+    monkeypatch.setattr(snapshot_module, "_close", interrupting_close)
+    try:
+        with pytest.raises(KeyboardInterrupt) as raised:
+            spool_snapshot(source_fd, "file", scratch_fd, 1024)
+        cause = raised.value.__cause__
+        assert isinstance(cause, SpoolSnapshotError)
+        assert cause.kind is SpoolSnapshotFailureKind.IO
+        assert created is not None
+        assert cause.cleanup_debt == scratch_module._cleanup_debt(created)
+        cleanup_scratch(scratch_fd, cause.cleanup_debt)
+        created = None
+    finally:
+        if created is not None:
+            cleanup_scratch(scratch_fd, created)
         os.close(scratch_fd)
         os.close(source_fd)
 

@@ -424,6 +424,44 @@ def test_borrowed_root_survives_and_all_descendant_descriptors_close(
         os.close(root_fd)
 
 
+def test_leaf_close_interruption_still_closes_owned_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "file").write_bytes(b"content")
+    root_fd = _open_root(tmp_path)
+    original_open = snapshot_module._open_at
+    original_close = snapshot_module._close
+    owned: set[int] = set()
+    close_count = 0
+
+    def tracking_open(parent_fd: int, name: str, *, directory: bool) -> int | None:
+        descriptor = original_open(parent_fd, name, directory=directory)
+        if descriptor is not None:
+            owned.add(descriptor)
+        return descriptor
+
+    def interrupting_close(descriptor: int) -> None:
+        nonlocal close_count
+        close_count += 1
+        original_close(descriptor)
+        owned.remove(descriptor)
+        if close_count == 1:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(snapshot_module, "_open_at", tracking_open)
+    monkeypatch.setattr(snapshot_module, "_close", interrupting_close)
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            read_snapshot(root_fd, "nested/file", 1024)
+        assert close_count == 2
+        assert not owned
+        os.fstat(root_fd)
+    finally:
+        for descriptor in owned:
+            os.close(descriptor)
+        os.close(root_fd)
+
+
 def test_base_exception_during_directory_inspection_closes_owned_descriptor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

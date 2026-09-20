@@ -260,10 +260,12 @@ def _hold_regular_file(
             raise SnapshotReadError(SnapshotFailureKind.CONFLICT)
         yield _HeldRegularFile(leaf_fd, parent_fd, leaf_name, before)
     finally:
-        if leaf_fd is not None:
-            _close(leaf_fd)
-        if parent_owned:
-            _close(parent_fd)
+        try:
+            if leaf_fd is not None:
+                _close(leaf_fd)
+        finally:
+            if parent_owned:
+                _close(parent_fd)
 
 
 def _validate_inputs(relative_path: str, max_bytes: int, expires_at: float | None) -> tuple[str, ...]:
