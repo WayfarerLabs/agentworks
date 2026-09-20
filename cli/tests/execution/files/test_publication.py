@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import errno
 import os
+import secrets
 import shutil
 import stat
 import subprocess
@@ -503,6 +504,106 @@ def test_stage_identity_interrupt_releases_fd_and_carries_unknown_debt(
         os.fstat(stage_fd)
     os.close(parent_fd)
     (tmp_path / cause.cleanup_debt.name).unlink()
+
+
+def test_identified_stage_interrupt_before_acquisition_return_cleans_owned_object(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    original_open = os.open
+    original_is_regular = stat.S_ISREG
+    stage_fd: int | None = None
+
+    def recording_open(path: str, flags: int, mode: int = 0o777, *, dir_fd: int | None = None) -> int:
+        nonlocal stage_fd
+        descriptor = original_open(path, flags, mode, dir_fd=dir_fd)
+        if path.startswith(publication_module._STAGE_PREFIX):
+            stage_fd = descriptor
+        return descriptor
+
+    def interrupt_stage_validation(mode: int) -> bool:
+        regular = original_is_regular(mode)
+        if regular:
+            raise KeyboardInterrupt
+        return regular
+
+    monkeypatch.setattr(os, "open", recording_open)
+    monkeypatch.setattr(stat, "S_ISREG", interrupt_stage_validation)
+    with pytest.raises(KeyboardInterrupt):
+        publish_file(parent_fd, "target", b"content", expected=None, create_metadata=_metadata())
+    assert stage_fd is not None
+    with pytest.raises(OSError):
+        os.fstat(stage_fd)
+    assert not _stage_names(tmp_path)
+    os.close(parent_fd)
+
+
+def test_stage_identity_error_then_close_interrupt_retains_unknown_debt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    original_fstat = os.fstat
+    original_close = publication_module._close
+    stage_fd: int | None = None
+
+    def fail_regular_fstat(descriptor: int) -> os.stat_result:
+        nonlocal stage_fd
+        observed = original_fstat(descriptor)
+        if stat.S_ISREG(observed.st_mode):
+            stage_fd = descriptor
+            raise OSError(errno.EIO, "fixture stage identity failure")
+        return observed
+
+    def close_then_interrupt(descriptor: int) -> None:
+        original_close(descriptor)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(os, "fstat", fail_regular_fstat)
+    monkeypatch.setattr(publication_module, "_close", close_then_interrupt)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        publish_file(parent_fd, "target", b"content", expected=None, create_metadata=_metadata())
+    cause = _publication_cause(raised.value)
+    assert cause.kind is PublicationFailureKind.IO
+    assert cause.phase is PublicationPhase.STAGING
+    assert cause.cleanup_debt is not None and cause.cleanup_debt.device is None
+    monkeypatch.setattr(os, "fstat", original_fstat)
+    assert stage_fd is not None
+    with pytest.raises(OSError):
+        os.fstat(stage_fd)
+    os.close(parent_fd)
+    (tmp_path / cause.cleanup_debt.name).unlink()
+
+
+def test_interrupted_stage_open_never_deletes_colliding_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    candidate = tmp_path / f"{publication_module._STAGE_PREFIX}collision"
+    candidate.write_bytes(b"not owned")
+    parent_fd = _open_parent(tmp_path)
+    original_open = os.open
+
+    def interrupt_candidate_open(
+        path: str,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        if path == candidate.name:
+            raise KeyboardInterrupt
+        return original_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(secrets, "token_hex", lambda _length: "collision")
+    monkeypatch.setattr(os, "open", interrupt_candidate_open)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        publish_file(parent_fd, "target", b"content", expected=None, create_metadata=_metadata())
+    cause = _publication_cause(raised.value)
+    assert cause.cleanup_debt is not None
+    assert cause.cleanup_debt.name == candidate.name
+    assert cause.cleanup_debt.device is None and cause.cleanup_debt.inode is None
+    assert candidate.read_bytes() == b"not owned"
+    os.close(parent_fd)
+    candidate.unlink()
 
 
 def test_second_cleanup_interrupt_escapes_with_known_debt_and_closed_stage(

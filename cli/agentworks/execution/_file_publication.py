@@ -2,6 +2,8 @@
 The caller owns confinement and locking; unsupported metadata and objects refuse.
 Operational facts are carried by ``FilePublicationError`` directly or as the
 fixed cause of an escaping control-flow exception.
+Known descriptors are protected by an encompassing ``finally``; Python-level
+ownership assignment and failure bookkeeping are not signal-atomic.
 """
 
 from __future__ import annotations
@@ -105,6 +107,15 @@ class _ObjectIdentity:
     inode: int
 
 
+@dataclass(repr=False)
+class _StageOwnership:
+    """Staging resources acquired by one publication attempt."""
+
+    name: str | None = None
+    descriptor: int | None = None
+    identity: _ObjectIdentity | None = None
+
+
 def publish_file(
     parent_fd: int,
     leaf_name: str,
@@ -119,15 +130,20 @@ def publish_file(
     """
     _validate_inputs(parent_fd, leaf_name, content, expected, create_metadata)
 
-    stage_name: str | None = None
-    stage_identity: _ObjectIdentity | None = None
+    stage = _StageOwnership()
+    replacement_fd: int | None = None
     publication_attempted = False
     failure: FilePublicationError | None = None
+    control: BaseException | None = None
+    close_control: BaseException | None = None
     try:
-        stage_name, stage_fd, stage_identity = _create_stage(parent_fd)
-        replacement_fd: int | None = None
-        access_acl: bytes | None = None
         try:
+            _create_stage(parent_fd, stage)
+            stage_name = stage.name
+            stage_fd = stage.descriptor
+            stage_identity = stage.identity
+            assert stage_name is not None and stage_fd is not None and stage_identity is not None
+            access_acl: bytes | None = None
             _write_all(stage_fd, content)
             if expected is None:
                 _prepare_create(stage_fd, parent_fd, create_metadata)
@@ -148,34 +164,27 @@ def publish_file(
                 _verify_replacement_condition(parent_fd, leaf_name, expected, replacement_fd, access_acl)
                 publication_attempted = True
                 _rename_replace(parent_fd, stage_name, leaf_name)
-        finally:
-            try:
-                if replacement_fd is not None:
-                    _close(replacement_fd)
-            finally:
-                _close(stage_fd)
-    except FilePublicationError as error:
-        failure = error
-    except BaseException as control:
-        prior = _control_fact(control)
-        if prior is None and publication_attempted:
-            prior = FilePublicationError(PublicationFailureKind.UNCERTAIN, PublicationPhase.PUBLICATION)
-        cleanup_debt = None
-        if stage_name is not None and stage_identity is not None:
-            cleanup_debt = _cleanup_or_raise_control(
-                parent_fd,
-                stage_name,
-                stage_identity,
-                prior=prior,
-            )
-        _raise_control(control, prior=prior, cleanup_debt=cleanup_debt)
-    else:
+        except FilePublicationError as error:
+            failure = error
+        except BaseException as error:
+            control = error
+    finally:
+        close_control = _close_publication_descriptors(replacement_fd, stage)
+
+    prior = failure or (_control_fact(control) if control is not None else None)
+    if prior is None and publication_attempted:
+        prior = FilePublicationError(PublicationFailureKind.UNCERTAIN, PublicationPhase.PUBLICATION)
+    if close_control is not None:
+        control = close_control
+
+    if failure is None and control is None:
         return
 
+    cleanup_debt = _cleanup_owned_stage(parent_fd, stage, prior=prior)
+    if control is not None:
+        _raise_control(control, prior=prior, cleanup_debt=cleanup_debt)
+
     assert failure is not None
-    cleanup_debt = None
-    if stage_name is not None and stage_identity is not None:
-        cleanup_debt = _cleanup_or_raise_control(parent_fd, stage_name, stage_identity, prior=failure)
     raise FilePublicationError(
         failure.kind,
         failure.phase,
@@ -222,55 +231,34 @@ def _validate_inputs(
         raise FilePublicationError(PublicationFailureKind.UNSUPPORTED, PublicationPhase.STAGING)
 
 
-def _create_stage(parent_fd: int) -> tuple[str, int, _ObjectIdentity]:
+def _create_stage(parent_fd: int, stage: _StageOwnership) -> None:
+    """Acquire a stage and populate caller-owned state immediately.
+
+    Pure Python cannot cover an asynchronous exception between ``os.open``
+    returning from the kernel and assignment of its result to ``stage``. Such
+    an exception can leave an untracked staging object, so this function does
+    not claim complete single-interrupt atomicity across that bytecode window.
+    """
     parent = _fstat(parent_fd, PublicationPhase.STAGING)
     if not stat.S_ISDIR(parent.st_mode):
         raise FilePublicationError(PublicationFailureKind.UNSUPPORTED, PublicationPhase.STAGING)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
     for _ in range(_STAGE_ATTEMPTS):
-        name = _STAGE_PREFIX + secrets.token_hex(16)
+        candidate = _STAGE_PREFIX + secrets.token_hex(16)
+        stage.name = candidate
         error_number: int | None = None
         try:
-            descriptor = os.open(name, flags, 0o600, dir_fd=parent_fd)
+            stage.descriptor = os.open(candidate, flags, 0o600, dir_fd=parent_fd)
         except OSError as error:
             error_number = error.errno
         else:
-            observed: os.stat_result | None = None
-            control: BaseException | None = None
-            try:
-                observed = os.fstat(descriptor)
-            except OSError:
-                pass
-            except BaseException as error:
-                control = error
-            if control is not None:
-                _close(descriptor)
-                _raise_control(
-                    control,
-                    cleanup_debt=PublicationCleanupDebt(name, None, None),
-                )
-            if observed is None:
-                _close(descriptor)
-                raise FilePublicationError(
-                    PublicationFailureKind.IO,
-                    PublicationPhase.STAGING,
-                    cleanup_debt=PublicationCleanupDebt(name, None, None),
-                )
+            assert stage.descriptor is not None
+            observed = _fstat(stage.descriptor, PublicationPhase.STAGING)
+            stage.identity = _ObjectIdentity(observed.st_dev, observed.st_ino)
             if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1 or observed.st_dev != parent.st_dev:
-                _close(descriptor)
-                identity = _ObjectIdentity(observed.st_dev, observed.st_ino)
-                cleanup_debt = _cleanup_or_raise_control(
-                    parent_fd,
-                    name,
-                    identity,
-                    prior=FilePublicationError(PublicationFailureKind.UNSUPPORTED, PublicationPhase.STAGING),
-                )
-                raise FilePublicationError(
-                    PublicationFailureKind.UNSUPPORTED,
-                    PublicationPhase.STAGING,
-                    cleanup_debt=cleanup_debt,
-                )
-            return name, descriptor, _ObjectIdentity(observed.st_dev, observed.st_ino)
+                raise FilePublicationError(PublicationFailureKind.UNSUPPORTED, PublicationPhase.STAGING)
+            return
+        stage.name = None
         if error_number != errno.EEXIST:
             raise FilePublicationError(PublicationFailureKind.IO, PublicationPhase.STAGING)
     raise FilePublicationError(PublicationFailureKind.IO, PublicationPhase.STAGING)
@@ -505,6 +493,37 @@ def _cleanup_stage(parent_fd: int, stage_name: str, identity: _ObjectIdentity) -
 
 def _cleanup_debt(stage_name: str, identity: _ObjectIdentity) -> PublicationCleanupDebt:
     return PublicationCleanupDebt(stage_name, identity.device, identity.inode)
+
+
+def _cleanup_owned_stage(
+    parent_fd: int,
+    stage: _StageOwnership,
+    *,
+    prior: FilePublicationError | None,
+) -> PublicationCleanupDebt | None:
+    if stage.name is None:
+        return None
+    if stage.identity is None:
+        return PublicationCleanupDebt(stage.name, None, None)
+    return _cleanup_or_raise_control(parent_fd, stage.name, stage.identity, prior=prior)
+
+
+def _close_publication_descriptors(
+    replacement_fd: int | None,
+    stage: _StageOwnership,
+) -> BaseException | None:
+    interrupted: BaseException | None = None
+    if replacement_fd is not None:
+        try:
+            _close(replacement_fd)
+        except BaseException as control:
+            interrupted = control
+    if stage.descriptor is not None:
+        try:
+            _close(stage.descriptor)
+        except BaseException as control:
+            interrupted = control
+    return interrupted
 
 
 def _cleanup_or_raise_control(
