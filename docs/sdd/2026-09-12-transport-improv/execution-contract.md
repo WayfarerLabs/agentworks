@@ -173,9 +173,12 @@ Exact option types belong in the file LLD. The intended behaviors are:
 
 Every mutation uses the immutable core ceiling intersected with recipient path/action and
 metadata/elevation grants. Known denials raise `AuthorizationError` before staging or dispatch;
-destination-side object checks enforce FRD R7 at use time. Public reads have their own path grants.
-The mutation ceiling here covers the bound destination filesystem; local download publication also
-needs the owning operation's explicit local destination, not an implied workstation sandbox.
+destination-side object checks enforce FRD R7 at use time, under the
+[file-safety ruling](frd.md#file-safety-and-guest-runtime-rulings). Those checks do not promise
+containment of malicious processes already running as the target user. Public reads have their own
+path grants. The mutation ceiling here covers the bound destination filesystem; local download
+publication also needs the owning operation's explicit local destination, not an implied workstation
+sandbox.
 
 Core entries distinguish an exact file, descendants of an approved root, and explicit root creation
 or removal. Core alone supplies trusted identity-based path expansion. A caller-controlled path,

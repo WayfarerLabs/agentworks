@@ -260,11 +260,13 @@ requirements and the distinction between creating an approved root and mutating 
 
 Enforcement has two parts: reject known policy violations before dispatch, and enforce safe object
 resolution and mutation inside the destination-side trusted helper. An adapter optimization cannot
-bypass either. The file LLD must prove link/race confinement on the supported guest and host
-substrates, including trusted ancestors and mount assumptions; it cannot substitute a local path
-prefix check or a check-then-shell-command sequence. Internal scratch, locks and publication names
-have narrowly defined core authority, separate from public mutation grants. No caller can redirect
-these helpers to an arbitrary destination or widen access by requesting elevation.
+bypass either. The file LLD must prove safe object handling on the supported guest and host
+substrates within the [operator's threat boundary](frd.md#file-safety-and-guest-runtime-rulings):
+untrusted requests and observed unsafe objects are refused; malicious target-user processes are not
+contained. A local path prefix check or a check-then-shell-command sequence is insufficient.
+Internal scratch, locks and publication names have narrowly defined core authority, separate from
+public mutation grants. No caller can redirect these helpers to an arbitrary destination or widen
+access by requesting elevation.
 
 Structured operations implement a specified data transformation and protected read/modify/publish
 sequence. Internal reads do not grant content disclosure. All cooperating mutation paths share the
@@ -285,11 +287,13 @@ native carriers deliver prepared control operations; neither owns a detached-job
 [lifecycle design](execution-lifecycle-lld.md) replaces the earlier process-group-wrapper proposal
 and maps the requirements from #770 without editing that effort's artifacts.
 
-Core-owned profiles add guarantees: DIRECT provides ordinary execution semantics, MANAGED adds owned
-workload boundaries and whole-boundary stop, and proposed CONTAINED adds reviewed resistance to
-escape and indirect relaunch. Linux managed execution uses a system-owned systemd service/cgroup
-created before workload code starts. The lifecycle profile table defines the guarantees and their
-limits; a future sandbox or jail must prove every inherited guarantee before satisfying a profile.
+Core-owned profiles add guarantees: DIRECT provides ordinary execution semantics and MANAGED adds
+owned workload boundaries and whole-boundary stop for ordinary descendants. The
+[operator's threat boundary](frd.md#file-safety-and-guest-runtime-rulings) excludes malicious
+target-user process containment; this delivery does not implement or advertise a CONTAINED profile.
+Linux managed execution uses a system-owned systemd service/cgroup created before workload code
+starts. The lifecycle profile table defines the guarantees and their limits; a future sandbox or
+jail must prove every inherited guarantee before satisfying a profile.
 
 Profiles are explicitly requested and independently granted. Missing authority refuses; missing
 mechanics refuses distinctly. Neither permits a weaker fallback. Required core bootstrap/recovery

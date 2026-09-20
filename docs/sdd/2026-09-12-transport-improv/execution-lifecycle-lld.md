@@ -55,25 +55,26 @@ Guest-side protections implementing a requested profile are not deferred recipie
 
 Proposed core profile names describe guarantees, not a selectable backend:
 
-| Profile                | Added promise                                                                                                                                      | What it does not promise                                                                                    |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `Protection.DIRECT`    | Shared identity, literal arguments, sensitivity and truthful outcome rules; ordinary operational cancellation                                      | Escape-resistant process ownership or isolation from the execution account's ambient authority              |
-| `Protection.MANAGED`   | DIRECT guarantees plus an independently identifiable workload boundary, descendant tracking, supervisor-owned stop and terminal-empty verification | Resistance to malicious same-user indirect execution outside the boundary                                   |
-| `Protection.CONTAINED` | MANAGED guarantees plus the reviewed restrictions preventing workload escape, outside relaunch and control-plane impersonation                     | General cross-session data secrecy, revoked external credentials, or a sandbox for the Python plugin itself |
+| Profile              | Added promise                                                                                                                                      | What it does not promise                                                                       |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `Protection.DIRECT`  | Shared identity, literal arguments, sensitivity and truthful outcome rules; ordinary operational cancellation                                      | Escape-resistant process ownership or isolation from the execution account's ambient authority |
+| `Protection.MANAGED` | DIRECT guarantees plus an independently identifiable workload boundary, descendant tracking, supervisor-owned stop and terminal-empty verification | Resistance to malicious same-user indirect execution outside the boundary                      |
 
 MANAGED's Linux candidate is a system-owned transient systemd service/cgroup, not a public choice of
-unit properties. CONTAINED is a proposed profile whose complete enforcement must pass the tests
-below before it is advertised. Neither profile name is evidence of implementation. Future jail or
-sandbox implementations may satisfy a profile only after demonstrating every inherited guarantee.
-Two unrelated sandboxes are not ordered merely because an enum has larger numeric values. The
-initial core-owned chain needs explicit definitions and tests, not a generic plugin profile DSL.
+unit properties. The [operator ruling](frd.md#file-safety-and-guest-runtime-rulings) excludes
+malicious target-user process containment. The earlier CONTAINED proposal is therefore outside this
+delivery, not an unimplemented advertised profile or a production gate. Neither current profile name
+is evidence of implementation. Future jail or sandbox implementations may satisfy a profile only
+after demonstrating every inherited guarantee. Two unrelated sandboxes are not ordered merely
+because an enum has larger numeric values. The initial core-owned chain needs explicit definitions
+and tests, not a generic plugin profile DSL.
 
 Core binds allowed operations, exact profiles, identities/elevation, lifetime and I/O restrictions
-into the target before giving it to a recipient. A context can grant MANAGED/CONTAINED but not
-DIRECT, forcing managed execution without rewriting the request. A grant for one profile does not
-implicitly authorize every stronger profile; stronger mechanisms can need additional host authority
-or resource access. Derived contexts intersect grants and cannot broaden them. A file-only context
-has no execution interface. An observe-only execution interface cannot start or stop work.
+into the target before giving it to a recipient. A context can grant MANAGED but not DIRECT, forcing
+managed execution without rewriting the request. A grant for one profile does not implicitly
+authorize every stronger profile; stronger mechanisms can need additional host authority or resource
+access. Derived contexts intersect grants and cannot broaden them. A file-only context has no
+execution interface. An observe-only execution interface cannot start or stop work.
 
 Known grant denials raise `AuthorizationError` before preparation or I/O. An authorized profile
 unavailable on the target produces a distinct actionable prerequisite/support refusal, never a
@@ -140,11 +141,10 @@ its explicitly authorized UID/groups. Keep source, stdin and secrets out of visi
 environment metadata, logs and world-readable staging. The secret-delivery/FD protocol needs proof
 with actual privilege changes; systemd invocation alone does not establish it.
 
-Carrier account hooks can execute before the trusted supervisor bootstrap. Managed launch, including
-CONTAINED, cannot rely on a workload-controlled SSH account shell or startup path to establish its
-boundary. The proof must specify a trusted control identity/bootstrap and test that prerequisite
-through both carriers; payload shell initialization remains inside the boundary. A payload wrapper
-cannot undo prior hooks.
+Carrier account hooks can execute before the supervisor bootstrap. The proof must specify the
+control identity/bootstrap and test it through both carriers; payload shell initialization remains
+inside the boundary. A payload wrapper cannot undo prior hooks, and managed execution does not claim
+ownership of arbitrary work an account hook starts before the supervisor.
 
 Allocate a non-reused launch identity before dispatch. Trusted target state binds it to host/VM
 instance, boot incarnation, workload identity, resolved shell, profile revision and unit ownership.
@@ -176,18 +176,18 @@ The [verbatim source snapshot](inputs/session-cgroups-frd-2c406948.md) preserves
 `2c406948`, including threat model, acceptance cases, exclusions and rulings, independently of draft
 branch retention. The closed PR's final head matches that snapshot. It is review input, not a second
 evolving FRD or a new authority source. Carry the accepted text into its designated requirements
-home as part of reconciliation. The table below is only a routing index; its labels neither replace
-nor narrow the source requirements.
+home as part of reconciliation. The table below is a routing index and disposition under the current
+operator rulings; the historical snapshot itself is not rewritten.
 
-| Source requirement                          | Proposed implementation destination                        |
-| ------------------------------------------- | ---------------------------------------------------------- |
-| R1, execution identity                      | Shared supervisor/run identity binding                     |
-| R2, complete termination                    | Shared stop, rollback, restart and migration               |
-| R3, independent lifetime authority          | Target-owned session lifetime and runtime-anchor cleanup   |
-| R4, resistance to escape and relaunch       | CONTAINED enforcement and adversarial proof                |
-| R5, usable sessions and explicit boundaries | Session, harness and named-console adoption                |
-| R6, supported environments and migration    | Compatibility pricing and legacy-run transition            |
-| R7, foundation for permission checks        | Trusted VM-side membership lookup and socket test consumer |
+| Source requirement                          | Proposed implementation destination                                     |
+| ------------------------------------------- | ----------------------------------------------------------------------- |
+| R1, execution identity                      | Shared supervisor/run identity binding                                  |
+| R2, complete termination                    | Shared stop, rollback, restart and migration                            |
+| R3, independent lifetime authority          | Target-owned session lifetime and runtime-anchor cleanup                |
+| R4, resistance to escape and relaunch       | Malicious target-user containment excluded by the later operator ruling |
+| R5, usable sessions and explicit boundaries | Session, harness and named-console adoption                             |
+| R6, supported environments and migration    | Compatibility pricing and legacy-run transition                         |
+| R7, foundation for permission checks        | Trusted VM-side membership lookup and socket test consumer              |
 
 R7's process exit, PID reuse, namespace-relative identifiers, stale runs and unknown membership
 cases all remain required. Its acceptance table also includes transferred descriptors: ambiguous
@@ -195,17 +195,19 @@ attribution must refuse. This does not promote a future service's per-request au
 connection/descriptor-transfer protocol or revocation model into this effort. Account-shell lookup
 in the buffered PoC proves none of this run-membership authentication.
 
-CONTAINED needs a concrete access map and comparison of restricted same-UID execution with per-run
-users before selecting either, against the profile guarantees above and the complete R4 source.
-Preserve existing home/workspace semantics or obtain operator disposition of demonstrated costs.
-General quotas, a jail product, broad egress policy and in-process Python-plugin isolation are not
-implied. The API must accommodate future profiles without claiming those mechanisms ship now.
+Do not add restricted same-UID or per-run-user isolation to satisfy the historical R4 proposal.
+Existing home/workspace semantics remain required. General quotas, a jail product, broad egress
+policy and in-process Python-plugin isolation are not implied. The API must accommodate future
+profiles without implementing or advertising those mechanisms now. Cgroup membership is a lifecycle
+and resource-management boundary, not a process-inspection permission boundary; Linux ptrace
+restrictions are separate mechanisms such as
+[Yama](https://docs.kernel.org/admin-guide/LSM/Yama.html).
 
 Managing an elevated job is distinct from containing a hostile administrator. MANAGED can supply
 ordinary descendant ownership and cleanup for an elevated workload without promising resistance to
-that workload's administrative authority. CONTAINED must refuse any identity/authority combination
-that invalidates its restrictions; selecting the profile does not revoke ambient root authority.
-Session adoption therefore does not silently turn admin-mode sessions into a containment guarantee.
+that workload's administrative authority. Selecting the profile does not revoke ambient root
+authority. Session adoption therefore does not silently turn admin-mode sessions into a containment
+guarantee.
 
 Non-systemd placement hosts, including macOS before VM creation, still need MANAGED independent jobs
 for provisioning and rollback. They must supply all four added promises: identifiable workload
@@ -224,7 +226,7 @@ these bounded proofs before enabling the corresponding behavior:
 | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Linux managed launch over SSH and QGA       | Work starts inside the owned boundary under the requested identity/shell; sensitive input stays suppressed, ordinary binary streams remain exact, and foreground wait and independent launch both work on the recorded kernel/systemd versions.                                                                                        |
 | Lifecycle and failure evidence              | Lost acknowledgment reconciles without replay; wait timeout does not stop work; explicit stop, anchor death and OPERATION observer loss clean the owned descendants or report incomplete. Concurrent forks, stale identity, reboot and retained output cannot produce false completion or affect unrelated work.                       |
-| CONTAINED and membership identity           | Execute the complete source R4/R7 and acceptance cases under an authorized adversarial charter; escape/relaunch is denied or remains in the run, and ambiguous identity refuses. No general permission service is added.                                                                                                               |
+| Membership identity                         | Exercise source R7's exit, PID reuse, stale-run and descriptor-attribution cases; ambiguous identity refuses. Do not claim hostile same-user containment or add a general permission service.                                                                                                                                          |
 | macOS placement-host jobs                   | Launch actual host provisioning work before guest creation; disconnect the observer, re-observe the same job, stop ordinary detached descendants during rollback and independently verify the owned workload empty while unrelated work survives. Retain launch/output/completion evidence and exercise lost contact/stale references. |
 | WSL2 lifetime and native readiness/recovery | Measure work with the platform hold retained and released; do not imply a job reference owns power. Required readiness/recovery work runs without staging or requested startup; unsupported terminal/live I/O does not block it.                                                                                                       |
 

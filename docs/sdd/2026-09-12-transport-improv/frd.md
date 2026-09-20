@@ -125,6 +125,52 @@ On the earlier session-cgroups PR:
 
 > And 770 has been closed with a note
 
+#### File safety and guest runtime rulings
+
+On adding Python to the guest provisioning package list:
+
+> So we're already requiring some apt packages as part of provisioning, right? We probably need to
+> put more structure around that, but if you're simply asking to put python3 in that list, all good.
+> Just please ensure you don't use anything that wouldn't be supported by Bookworm's python3.
+
+On general authorization:
+
+> Isn't #1 simply: (when security lands), things can't do what they're not authorized to do? Please
+> don't tell me you have special requirements/rules/logic around just this one narrow case.
+
+On keeping file safety small and preserving access semantics:
+
+> Ok. I'm glad #1 is general.
+>
+> And for #2, I agree but keep it smart/small/elegant. And for the atomic writes, please consider it
+> a requirement that the file end up as if it were written directly, including impact of
+> ACLs/perms/etc. I'm not an expert here but I feel like writing the temp file to the target
+> directory (with a conflict-free name) is the right move.
+>
+> And finally, what situation would an operation have more OS priv than the caller? That sounds like
+> a bad idea. Can we just do everything as the target user?
+
+On conservative support and refusal:
+
+> Yeah, honestly, do we really want atomic writes? And we should err on the side of caution across
+> the board. Refusing to write strange files (sym or hard links, etc.) is perfectly reasonable,
+> especially at first. And I'd prefer that to a bunch of complexity that we'll never use.
+
+On accepting conservative atomic whole-file replacement with defined metadata semantics, and
+excluding malicious target-user process containment:
+
+> Perfect. Agreed.
+>
+> And then my general assumption is that a malicious process running as a given user will be able to
+> pwn any other process owned by that user as well as the files that user has access to. Maybe
+> cgroups give us something here (can we block process inspection outside the group?) but more is
+> going to require proper jails, which we're not doing.
+>
+> So, no, we shouldn't be protecting against a malicious target user process. That's already game
+> over for that user.
+
+<!-- cspell:ignore pwn -->
+
 ### Implementation scope
 
 In scope for the eventual implementation:

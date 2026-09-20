@@ -290,7 +290,9 @@ candidate, not an accepted constant until QGA whole-request testing confirms it.
 
 The bootstrap argv contains only fixed helper source, non-sensitive protocol constants, and the
 nonce. It contains no command argument, source, environment value, cwd, or stdin bytes. Inline
-delivery installs no guest file and uses no Python or Agentworks installation.
+delivery installs no guest file. The measured buffered proof uses no Python or Agentworks
+installation; the production helper may use the explicitly approved early guest Python prerequisite,
+subject to Bookworm compatibility and a new no-staging proof. Readiness never installs it.
 
 ### Private staging path
 
@@ -334,7 +336,7 @@ FileAccess rather than stdout.
 The composition root binds a private `inline_only=True` constraint to preflight/runup readiness
 targets. It is not a public performance flag. This constraint:
 
-- rejects MANAGED/CONTAINED launch, private scratch, output spooling, and an over-limit manifest;
+- rejects MANAGED launch, private scratch, output spooling, and an over-limit manifest;
 - rejects `login=True` or `interactive=True`;
 - uses EOF or finite inline stdin and a small finite capture bound;
 - runs no install, target realization, helper upload, or implicit probe before the invocation; and
@@ -348,7 +350,9 @@ The Linux inline helper's current measured prerequisites are Bash 5.1+, GNU `env
 `getent`, `id`, and `/dev/fd`. The staged Linux path additionally proposes `mktemp`, `chmod`, `dd`,
 `head`, `cat`, `wc`, `sha256sum`, and `rm`; sudo or setpriv is conditional on the identity plan.
 Every path is fixed by the substrate, not PATH lookup. Python, systemd, Tailscale, and an installed
-Agentworks helper are not prerequisites.
+Agentworks helper are not prerequisites of that measured buffered proof. The
+[guest-runtime ruling](frd.md#file-safety-and-guest-runtime-rulings) allows early Python for the
+production design, but availability and no-staging invocation must be proved before enabling it.
 
 Darwin platform-host preparation implements the same manifest, frames, and result interpreter in a
 separate preparation substrate selected when the host target is constructed. It is not an SSH
@@ -496,9 +500,11 @@ The lead should settle these points with the named owner before assigning broade
 5. **Cross-carrier inline/chunk constants, with SSH and native owners:** replace candidate values
    with the largest conservative values established by whole-request proof. These remain private
    limits.
-6. **File-helper runtime technology, with file and initialization owners:** select and prove the
-   helper technology and its phase availability. Reusing private transfer answers delivery only; it
-   does not establish an early Python prerequisite or select a native executable.
+6. **File-helper runtime, with file and initialization owners:** implement and prove the approved
+   early guest Python prerequisite using Bookworm-compatible helper code. Reusing private transfer
+   answers delivery only. Existing-VM native recovery and macOS host adoption need their own paths;
+   the guest apt-package approval does not establish a host runtime or permit readiness
+   installation.
 7. **Darwin preparation substrate, with platform owner:** prove the installed-tool design or approve
    the cost and bootstrap story of a shipped helper. Do not make SSH parse application frames to
    compensate.

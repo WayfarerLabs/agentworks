@@ -137,19 +137,26 @@ integrates the new invocation values.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
       access. The models-only checkpoint is not additive-surface completion.
 
-At this checkpoint, runtime selection is a concrete decision rather than an assumed prerequisite.
-The baseline `PROVISIONING_PACKAGES` omits Python, while `INIT_SYSTEM_PACKAGES` installs it during
-Phase B; early native bootstrap and remote macOS host execution currently use shell-based paths. The
-operator authorized investigating an explicit early Python prerequisite instead of distributing
-native helper binaries. This is not approval to require or install it, or to change the supported
-platform contract. File-only no-staging readiness and exact direct-launch evidence must still pass
-their own proofs whichever substrate is selected.
+The [operator ruling](frd.md#file-safety-and-guest-runtime-rulings) approves adding `python3` to
+early guest provisioning, with helper code compatible with Bookworm's distribution Python. The
+baseline still installs it only during Phase B; implementation and existing-VM native recovery must
+establish the earlier prerequisite. This approval does not install Python on macOS platform hosts or
+during readiness. Host adoption, file-only no-staging readiness and exact direct-launch evidence
+retain their own design and proof obligations.
 
-Private review also identified a filesystem confinement gap: held directory descriptors and a
-one-time link-count check do not establish safety against ancestor rename or later hard-link
-creation. The file LLD must settle and enforce the necessary trust/ownership conditions, or prove
-another mechanism, before implementation acceptance. Required destinations cannot be silently
-excluded to make the candidate pass. These are design gates, not permission to weaken R7.
+The same ruling bounds file safety to untrusted requests, conservative regular-file publication and
+required access metadata, without containment of malicious target-user processes. Preserve safe
+object checks and explicit trust assumptions, but do not build same-user namespace isolation to
+close the earlier ancestor-rename/hard-link adversarial gate. Unsupported objects or metadata refuse
+before publication; required workflows still need an implemented safe path or explicit disposition,
+not silent omission.
+
+SSH's implementation at `632bf288` is waiting on transport-owned shared I/O types and terminal
+preparation, plus production target/trust composition. The reviewed finite subprocess pump is now
+published at `8fec9e07`; SSH owns adoption at its call sites. This does not close the launch
+interruption gate. Next, settle and jointly prove live source/sink reports and terminal preparation
+without passing the sensitive preparation envelope through a PTY. Full file/lifecycle implementation
+is not a prerequisite for that bounded shared-boundary proof.
 
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
@@ -281,9 +288,10 @@ connection and trust only. Before broader lifecycle implementation, complete the
 - [ ] Prove lost-acknowledgment reconciliation, wait timeout versus stop, observer-loss cleanup,
       runtime-anchor death, concurrent forks, stale identity and independently verified emptiness.
       Settle the OPERATION liveness/lease protocol before offering target-side cleanup.
-- [ ] Complete CONTAINED's access map, compare restricted same-UID and per-run-user designs, and
-      prove the complete #770 escape/relaunch and trusted socket-identity acceptance cases. Record
-      compatibility costs requiring operator disposition.
+- [ ] Reconcile #770's historical escape/relaunch proposal against the later exclusion of malicious
+      target-user containment. Deliver DIRECT/MANAGED without a CONTAINED profile or
+      per-run-user/jail implementation; retain future profile extensibility. Prove trusted
+      socket-membership identity and ordinary lifecycle cases within that stated boundary.
 - [ ] Resolve non-systemd macOS host jobs, Debian/kernel/systemd floors, WSL2 power lifetime and
       no-staging recovery. Required workflows block delivery when their guarantees cannot be met; no
       profile downgrade or fabricated platform equivalence. Use the
