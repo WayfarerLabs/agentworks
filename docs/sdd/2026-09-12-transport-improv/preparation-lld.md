@@ -1,6 +1,6 @@
 # Invocation Preparation and Public Results
 
-- Status: Proposed production design; the bounded proof remains the only implementation
+- Status: Production design with private implementation increments; not enabled for production
 - Governing requirements: [FRD](frd.md), especially R2-R5, R8-R11
 - Existing boundaries: [execution contract](execution-contract.md), [proof](proof-lld.md), and
   [lifecycle](execution-lifecycle-lld.md)
@@ -291,6 +291,8 @@ and managed lifetime keep their separate implementation and proof obligations.
 
 The private record spelling is:
 
+<!-- cspell:ignore AGWE -->
+
 ```text
 AGWE1 <nonce> <sequence> <kind> <decoded_length> <canonical_base64>\n
 ```
@@ -304,10 +306,14 @@ bytes. Encoding/framing does not itself establish phase validity or application 
 The standard-library-only `_evidence_wire` codec is shared by the fixed helper and the workstation.
 Its incremental reader keeps at most one bounded record and sends validated frames to a trusted
 first-party consumer, never a plugin callback. Raw hook output and other nonces are discarded.
-Malformed records associated with this nonce latch a safe closed error and disable further frame
-delivery while input continues to drain. Finalization detects an incomplete matching record. The
-next layer owns phase/order rules, stream accounting, sensitivity and application-evidence
-interpretation; the codec neither accumulates an unbounded transcript nor returns success.
+Records are recognized only at stream or line start, not as substrings of diagnostic text. The
+helper writes a separating newline before its first record, so a hook without a trailing newline
+does not contaminate that record. A matching tag embedded in a raw diagnostic line is discarded with
+that line. Malformed records associated with this nonce latch a safe closed error and disable
+further frame delivery while input continues to drain. Finalization detects an incomplete matching
+record. The next layer owns phase/order rules, stream accounting, sensitivity and
+application-evidence interpretation; the codec neither accumulates an unbounded transcript nor
+returns success.
 
 For Linux script source, the candidate creates an anonymous memory-backed descriptor with
 `os.memfd_create`, writes the bounded source, rewinds it and passes it explicitly to the selected

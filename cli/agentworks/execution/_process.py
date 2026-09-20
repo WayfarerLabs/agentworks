@@ -352,7 +352,11 @@ def run_owned_process(
     pass_fds: tuple[int, ...] = (),
     start_new_session: bool = False,
 ) -> ProcessResult:
-    """Fairly pump bounded input and output without retaining borrowed endpoints."""
+    """Fairly pump bounded input and output without retaining borrowed endpoints.
+
+    Passed descriptors remain caller-owned; only child inheritance is configured.
+    POSIX session creation is a launch control, not descendant containment.
+    """
     stdout = _Output(output.capture_limit, output.stdout_sink)
     stderr = _Output(output.capture_limit, output.stderr_sink)
     if deadline.expired:
