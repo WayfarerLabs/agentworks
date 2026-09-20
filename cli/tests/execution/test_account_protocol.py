@@ -23,9 +23,7 @@ from agentworks.execution._account_protocol import (
     FileOwnershipRequestError,
     FileOwnershipResponseError,
     decode_account_lookup_request,
-    decode_account_request,
     decode_account_response,
-    decode_file_ownership_request,
     decode_file_ownership_response,
     encode_account_failure,
     encode_account_identity,
@@ -92,7 +90,7 @@ def test_request_is_canonical_ascii_and_round_trips_utf8_account() -> None:
     request = _request("worker-☃")
 
     assert request.isascii()
-    assert decode_account_request(request) == AccountRequest(NONCE, "worker-☃")
+    assert decode_account_lookup_request(request) == AccountRequest(NONCE, "worker-☃")
 
 
 @pytest.mark.parametrize(
@@ -117,14 +115,14 @@ def test_request_is_canonical_ascii_and_round_trips_utf8_account() -> None:
 )
 def test_request_rejects_duplicates_extras_noncanonical_trailing_and_wrong_types(content: bytes) -> None:
     with pytest.raises(AccountRequestError) as caught:
-        decode_account_request(content)
+        decode_account_lookup_request(content)
 
     assert caught.value.failure is AccountFailure.INVALID_REQUEST
 
 
 def test_request_rejects_oversize_separately() -> None:
     with pytest.raises(AccountRequestError) as caught:
-        decode_account_request(b"x" * (MAX_ACCOUNT_MESSAGE_BYTES + 1))
+        decode_account_lookup_request(b"x" * (MAX_ACCOUNT_MESSAGE_BYTES + 1))
 
     assert caught.value.failure is AccountFailure.OVERSIZED
 
@@ -133,7 +131,7 @@ def test_file_ownership_request_is_canonical_ascii_and_round_trips_utf8_names() 
     request = _ownership_request("worker-☃", "access-☃")
 
     assert request.isascii()
-    assert decode_file_ownership_request(request) == FileOwnershipRequest(
+    assert decode_account_lookup_request(request) == FileOwnershipRequest(
         NONCE,
         "worker-☃",
         "access-☃",
@@ -159,12 +157,12 @@ def test_fixed_guest_request_dispatch_preserves_both_concrete_wires() -> None:
     [
         (
             "account-json-doc-canary",
-            lambda: decode_account_request(b'{"account":"account-json-doc-canary"'),
+            lambda: decode_account_lookup_request(b'{"account":"account-json-doc-canary"'),
             AccountRequestError,
         ),
         (
             "account-json-bytes-canary",
-            lambda: decode_account_request(b"\xffaccount-json-bytes-canary"),
+            lambda: decode_account_lookup_request(b"\xffaccount-json-bytes-canary"),
             AccountRequestError,
         ),
         (
@@ -246,17 +244,17 @@ def test_closed_account_errors_do_not_retain_sensitive_values_in_exception_chain
     ],
 )
 def test_file_ownership_request_rejects_malformed_or_wrong_schema(content: bytes) -> None:
-    with pytest.raises(FileOwnershipRequestError) as caught:
-        decode_file_ownership_request(content)
+    with pytest.raises(AccountRequestError) as caught:
+        decode_account_lookup_request(content)
 
-    assert caught.value.failure is FileOwnershipFailure.INVALID_REQUEST
+    assert caught.value.failure is AccountFailure.INVALID_REQUEST
 
 
 def test_file_ownership_request_rejects_oversize_separately() -> None:
-    with pytest.raises(FileOwnershipRequestError) as caught:
-        decode_file_ownership_request(b"x" * (MAX_ACCOUNT_MESSAGE_BYTES + 1))
+    with pytest.raises(AccountRequestError) as caught:
+        decode_account_lookup_request(b"x" * (MAX_ACCOUNT_MESSAGE_BYTES + 1))
 
-    assert caught.value.failure is FileOwnershipFailure.OVERSIZED
+    assert caught.value.failure is AccountFailure.OVERSIZED
 
 
 def test_identity_response_contains_only_normalized_ids_and_groups() -> None:

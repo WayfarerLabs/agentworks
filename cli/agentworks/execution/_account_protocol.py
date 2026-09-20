@@ -256,22 +256,6 @@ def _account_request(value: dict[str, Any]) -> AccountRequest:
     return AccountRequest(value["nonce"], _account_text(value["account"]))
 
 
-def decode_account_request(data: bytes) -> AccountRequest:
-    """Validate one untrusted canonical request from finite stdin."""
-    failed = False
-    oversized = False
-    value: dict[str, Any] = {}
-    try:
-        value = _decode_object(data)
-    except _MessageError as error:
-        failed = True
-        oversized = error.oversized
-    if failed:
-        failure = AccountFailure.OVERSIZED if oversized else AccountFailure.INVALID_REQUEST
-        raise AccountRequestError(failure)
-    return _account_request(value)
-
-
 def encode_file_ownership_request(request: FileOwnershipRequest) -> bytes:
     """Encode trusted owner/group names and enforce the guest request schema."""
     value = {
@@ -302,22 +286,6 @@ def _file_ownership_request(value: dict[str, Any]) -> FileOwnershipRequest:
         _file_ownership_text(value["owner"]),
         _file_ownership_text(value["group"]),
     )
-
-
-def decode_file_ownership_request(data: bytes) -> FileOwnershipRequest:
-    """Validate one untrusted canonical file-ownership request from finite stdin."""
-    failed = False
-    oversized = False
-    value: dict[str, Any] = {}
-    try:
-        value = _decode_object(data)
-    except _MessageError as error:
-        failed = True
-        oversized = error.oversized
-    if failed:
-        failure = FileOwnershipFailure.OVERSIZED if oversized else FileOwnershipFailure.INVALID_REQUEST
-        raise FileOwnershipRequestError(failure)
-    return _file_ownership_request(value)
 
 
 def decode_account_lookup_request(data: bytes) -> AccountRequest | FileOwnershipRequest:
