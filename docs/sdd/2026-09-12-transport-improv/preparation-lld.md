@@ -280,6 +280,57 @@ escaping, needs the same native whole-request proof as the manifest. The current
 counts only `input-data`, not fixed helper argv or the complete request. Neither extraction nor
 embedding resolves the separately recorded launch-interruption or application-entry gates.
 
+### Inline Python implementation slice
+
+The next private implementation composes the shared process core with one fixed Linux helper and the
+production evidence grammar. It does not replace the accepted buffered proof, expose RunContext or
+accept application completion before the remaining evidence gates pass. Its first executable slice
+uses the already-selected identity, non-login/non-interactive commands and scripts, finite input,
+and bounded capture or suppression. Elevation, startup modes, live/terminal input, staged transfer
+and managed lifetime keep their separate implementation and proof obligations.
+
+The private record spelling is:
+
+```text
+AGWE1 <nonce> <sequence> <kind> <decoded_length> <canonical_base64>\n
+```
+
+The nonce is 32 lowercase hexadecimal digits. Sequence numbers start at zero and are contiguous,
+with a signed 64-bit positive maximum. Decimal fields have no sign or redundant leading zeroes. The
+whole record, including its newline, is at most 8 KiB; each decoded body is at most 4 KiB. The
+existing eight record kinds are unchanged. Control bodies use closed schemas; stream bodies are
+bytes. Encoding/framing does not itself establish phase validity or application completion.
+
+The standard-library-only `_evidence_wire` codec is shared by the fixed helper and the workstation.
+Its incremental reader keeps at most one bounded record and sends validated frames to a trusted
+first-party consumer, never a plugin callback. Raw hook output and other nonces are discarded.
+Malformed records associated with this nonce latch a safe closed error and disable further frame
+delivery while input continues to drain. Finalization detects an incomplete matching record. The
+next layer owns phase/order rules, stream accounting, sensitivity and application-evidence
+interpretation; the codec neither accumulates an unbounded transcript nor returns success.
+
+For Linux script source, the candidate creates an anonymous memory-backed descriptor with
+`os.memfd_create`, writes the bounded source, rewinds it and passes it explicitly to the selected
+shell through `/proc/self/fd/N`. Application input still uses fd 0. No guest-directory entry is
+created, and the source text appears in neither argv nor the helper environment. This is a Linux
+implementation of the source-descriptor contract, not a portable Darwin mechanism. The parent owns
+and closes the descriptor; the process core borrows passed descriptors without modifying their
+parent-side flags. No sealing or same-user isolation claim is added.
+
+The core exposes only the public process-launch controls this consumer needs: working directory,
+explicit passed descriptors, and new-session creation. Existing workstation carrier defaults stay
+unchanged. The helper selects `shell=False`, `close_fds=True`, `preexec_fn=None` and
+`start_new_session=True`, matching the audited native launch candidate. A session is not a cgroup
+and cannot supply MANAGED cleanup. Normal wait observations remain distinct from eager start proof;
+no synthetic `STARTED` record is emitted.
+
+The first local source-descriptor experiment ran on distribution CPython 3.11.2 and Linux
+6.1.0-52-arm64. Both `/bin/sh` and `/bin/bash` received 16,640 binary stdin bytes independently of
+source, returned separate exact binary streams and exited 255. This measures local descriptor
+mechanics only, not carrier delivery, native guest availability, identity transition, or operation
+lifetime. The helper must not turn the workstation observation deadline into an implicit guest
+runtime limit. Its production lifetime policy still requires the separate target-side owner.
+
 Sensitive and discard modes require the pending [carrier I/O candidate](carrier-io-lld.md), or an
 equivalent jointly accepted seam. The method signature stays:
 
