@@ -144,7 +144,11 @@ with actual privilege changes; systemd invocation alone does not establish it.
 Carrier account hooks can execute before the supervisor bootstrap. The proof must specify the
 control identity/bootstrap and test it through both carriers; payload shell initialization remains
 inside the boundary. A payload wrapper cannot undo prior hooks, and managed execution does not claim
-ownership of arbitrary work an account hook starts before the supervisor.
+ownership of arbitrary work an account hook starts before the supervisor. Managed session entry
+therefore needs a trusted control bootstrap whose pre-boundary startup cannot launch
+workload-controlled hooks. Prove this with an ordinary startup hook that launches background work,
+not only with an adversarial escape fixture. The delivery account and its shell configuration are
+part of this proof; placing only the final tmux command in a unit is insufficient.
 
 Allocate a non-reused launch identity before dispatch. Trusted target state binds it to host/VM
 instance, boot incarnation, workload identity, resolved shell, profile revision and unit ownership.
@@ -154,12 +158,15 @@ launch. Prefer protected unit data where sufficient; justify additional storage 
 generic registry. Preserve durable terminal evidence before unit collection removes it.
 
 Separate workload exit, output completeness and boundary emptiness. A main process exiting does not
-prove its descendants are gone. For sessions the tmux/runtime anchor controls lifetime; arbitrary
-surviving children cannot prolong a dead session. Preserve intentional pane retention only within an
-explicit bounded diagnostic policy. Stop closes admission, targets the validated owned boundary,
-escalates and confirms emptiness before successful disposal or replacement. Stale boot/run/unit/PID
-observations cannot target replacement work; partitions and non-terminating kernel tasks remain
-incomplete. Resource owners set output/record retention and abandoned-job cleanup.
+prove its descendants are gone. For a generic managed job, the main command is the lifetime anchor:
+its exit starts descendant cleanup rather than allowing surviving children to keep the job alive.
+The command's exit fact remains observable while cleanup is pending or incomplete. For sessions the
+tmux/runtime anchor controls lifetime; arbitrary surviving children cannot prolong a dead session.
+Preserve intentional pane retention only within an explicit bounded diagnostic policy. Stop closes
+admission, targets the validated owned boundary, escalates and confirms emptiness before successful
+disposal or replacement. Stale boot/run/unit/PID observations cannot target replacement work;
+partitions and non-terminating kernel tasks remain incomplete. Resource owners set output/record
+retention and abandoned-job cleanup.
 
 ## Session containment and #770 reconciliation
 
@@ -194,6 +201,15 @@ cases all remain required. Its acceptance table also includes transferred descri
 attribution must refuse. This does not promote a future service's per-request authorization,
 connection/descriptor-transfer protocol or revocation model into this effort. Account-shell lookup
 in the buffered PoC proves none of this run-membership authentication.
+
+Membership lookup is descriptive, not an authorization grant. A stopping run can still contain
+processes while cleanup proceeds; lookup may report that verified membership together with the
+stopping state, but must not represent the run as accepting new work. A stale reference never
+inherits membership from a reused PID or replacement unit. Work induced through another session's
+accessible tmux server can legitimately belong to that server's run, so lookup does not establish
+isolation between hostile sessions sharing a UID. Future permission consumers must preserve that
+distinction; this effort does not add a general permission service or activate recipient
+enforcement.
 
 Do not add restricted same-UID or per-run-user isolation to satisfy the historical R4 proposal.
 Existing home/workspace semantics remain required. General quotas, a jail product, broad egress

@@ -171,9 +171,11 @@ incorrectly limiting temporary sink stalls. The correction keeps one accumulated
 while pending sink delivery consumes the original operation deadline. The lexical provisioning tests
 from the initial package increment were removed; package coverage and the separate live-provisioning
 gate remain. These corrections do not establish production or joint SSH acceptance. Before
-publication of the new types, the old SSH adapter in this branch must explicitly refuse unsupported
-I/O shapes instead of silently interpreting them as EOF or discard. That small adapter guard has
-been requested from its SSH owner.
+publication of the new types, the old SSH adapter must explicitly refuse unsupported I/O shapes
+instead of silently interpreting them as EOF or discard. The SSH owner supplied standalone commit
+`678e487d`, integrated here as `fc1c5310`. The integration tests exercise actual `LiveInput` and
+`SinkOutput` values, including sensitivity and both sink-delivery modes, and verify refusal before
+connection access or endpoint consumption.
 
 At `354c7a17`, all three private code-review lanes are clean, and the corrected full local suite
 reports 10,413 passed and 11 skipped. The focused execution/provisioning suite reports 496 passed
@@ -186,9 +188,9 @@ bounded work unit, rather than inheriting the earlier clean verdict.
 The safe ancestor `a885ef5a` is published with only early guest Python provisioning and the local
 PTY experiment, including the provisioning-test correction. Its execution package and RunContext are
 unchanged from `e85e9f5c`. The exact publication pin passes 10,370 local tests with 11 skips and all
-hosted checks. The branch retains that ancestor without changing the implementation tree. New I/O
-types remain local pending the SSH compatibility guard; this is a progress push, not a public review
-handoff.
+hosted checks. The branch retains that ancestor without changing the implementation tree. The
+subsequent compatibility guard removes the prerequisite for publishing the new I/O types; progress
+pushes remain distinct from a public review handoff or joint acceptance.
 
 The [Darwin prerequisite candidate](preparation-lld.md#darwin-inline-prerequisite-candidate) keeps
 runtime selection above carriers and checks interpreter compatibility inside the inline invocation.
@@ -220,10 +222,11 @@ distribution Python 3.11. Ruff, mypy, file lint, typer isolation, rulesync, lock
 gates pass. These remain private building blocks: FileAccess, remote helper delivery, locking,
 platform acceptance and additive RunContext composition are not complete.
 
-SSH's implementation at `4fcfeaa8` includes transport `e85e9f5c` and adopts the reviewed finite
-subprocess pump. It still needs transport-owned shared I/O types and terminal preparation, plus
-production target/trust composition. Pump adoption does not close the launch interruption gate.
-Next, settle and jointly prove live source/sink reports and terminal preparation with a synchronized
+SSH's implementation at `174187d2` includes transport `a885ef5a` and adopts the reviewed finite
+subprocess pump. Its owner has separately supplied the buffered compatibility guard integrated here.
+It still needs the extended shared I/O implementation and terminal preparation, plus production
+target/trust composition. Pump adoption does not close the launch interruption gate. Next, settle
+and jointly prove live source/sink reports and terminal preparation with a synchronized
 payload-to-interactive handoff. A raw envelope through an unprepared PTY is not accepted. The
 [same-terminal experiment](carrier-io-lld.md#same-terminal-preparation-experiment) separates remote
 bootstrap feasibility from the remaining local client adapter proof. Full file/lifecycle
