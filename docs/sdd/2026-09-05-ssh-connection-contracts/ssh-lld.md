@@ -72,10 +72,11 @@ their own authentication-offer evidence; the old PoC record is unchanged.
 ## Process and evidence
 
 `client.py` owns version gating and mapping into the shared report. SSH's `_io.py` supplies client
-environment policy and output provenance to transport's `carriers/_subprocess.py`, which owns the
-subprocess and its pipes. EOF input uses the null device; finite bytes use a pipe. Its single-thread
-pump performs bounded, fair reads and short writes on non-blocking pipes, closing stdin once all
-bytes are sent. Python 3.12 is the project minimum and adds Windows pipe support to
+environment policy and output provenance to transport's `carriers/_subprocess.py`, which adapts the
+shared `_process.py` core. EOF input uses the null device; finite bytes and a borrowed `LiveInput`
+source use an owned pipe. The single-thread pump performs bounded, fair reads and short writes on
+non-blocking pipes, closing stdin after all finite bytes or observed source EOF. Python 3.12 is the
+project minimum and adds Windows pipe support to
 [`os.set_blocking`](https://docs.python.org/3.12/library/os.html#os.set_blocking).
 
 Windows client spawning removes two OpenSSH-private variables from a copy of the child environment:
@@ -91,16 +92,22 @@ launch, as recorded in [poc-results.md](poc-results.md); that is separate eviden
 pre-authentication regression.
 
 Capture is bounded separately per stream and overflow reports incomplete retained output. Discard
-and sensitive suppression drain without retaining payload. Raw stdout has carrier provenance; stderr
-remains mixed client/remote evidence. Only transport's decoder can recover the separate guest
-streams from its shared framing. Errors retain closed failure codes rather than exception text,
-commands or payload-bearing diagnostics.
+and sensitive suppression drain without retaining payload. `SinkOutput` instead delivers transient
+bytes to trusted transport collectors and reports delivered retention with empty report data,
+including for sensitive input. It does not itself authorize public presentation. Partial writes and
+stalls retain a bounded pending suffix; supplied sources and sinks remain borrowed. Raw stdout has
+carrier provenance; stderr remains mixed client/remote evidence. Only transport's decoder can
+recover the separate guest streams from its shared framing. Errors retain closed failure codes
+rather than exception text, commands or payload-bearing diagnostics.
 
 One deadline covers local preparation, client startup and I/O. Expiry stops local observation and
 closes owned handles. Local kill/reap has an additional bounded 0.5-second cleanup allowance; it
 does not renew execution or establish guest cancellation. Interruption inside the guarded I/O loop
-propagates after cleanup. After observed client exit, drainage has at most 0.1 seconds and still
-requires actual EOF for completeness. Inherited descendant handles cannot cause an unbounded drain.
+propagates after cleanup. After observed client exit, pipe collection has a 0.1-second budget;
+pending sink delivery pauses that collection budget while the operation's original deadline still
+applies. Completeness requires actual EOF and delivery of pending output. An explicitly unbounded
+operation can therefore still wait on a stalled sink; inherited descendant pipe collection alone
+cannot extend it indefinitely.
 
 Launch interruption remains an acceptance gap. The cleanup guard begins after process construction
 and loop-state initialization; interruption earlier can leave a child alive, even before Python
@@ -136,23 +143,25 @@ diagnostic prose or adding another probe. Strict trust never becomes implicit en
 Windows, local status 1 after a deadline may be the result of killing the client; only the natural
 status observed before cleanup can establish completion.
 
-## Shared I/O integration checkpoint, 2026-09-19
+## Shared I/O integration checkpoint, 2026-09-20
 
 Transport implementation [PR #833](https://github.com/WayfarerLabs/agentworks/pull/833) at
-`a885ef5af256782abb827d6165cefd72a74e4e58` supplies the shared finite-input subprocess pump and
-canonical invocation models. SSH adopts that pump while retaining environment filtering and
+`84ac8cafee8c6ac97587bcc98e8785b9be62de8a` supplies the shared process core, live byte endpoints and
+canonical invocation models. SSH adopts that core while retaining environment filtering and
 carrier-specific evidence, and imports `Command` from `execution.models` in its independence
 fixture. This is an actual implementation dependency; #832 stacks on #833.
 
-The buffered adapter rejects unfamiliar input/output modes before connection admission or client
-startup. This lets transport extend shared types without the older adapter silently converting new
-input to EOF or new output to discard. Actual live-mode adoption must replace the corresponding
-refusal and prove the real extended shapes; simulated future-mode tests do not establish support.
+The adapter now accepts finite/live byte input and capture/discard/sink output, and advertises live
+stdio. It continues rejecting unfamiliar input/output modes before connection admission or client
+startup. Future shared extensions cannot silently become EOF or discard. Terminal support remains
+disabled until its distinct handle and lifetime contract is implemented and proved.
 
-The carrier interface remains buffered-only. Its I/O LLD is a candidate, not concrete live/terminal
-types. Exact endpoint and report types remain transport's to supply and accept through joint proof.
-SSH does not create substitute common types while waiting. The operator confirmed that terminal/PTY
-work is proceeding in parallel with #833; the SSH terminal notes are input to that joint work.
+The shared carrier interface now includes `LiveInput`, `SinkOutput` and delivered-output retention.
+SSH adoption must prove the actual types and preserve raw stream provenance, sensitivity and
+completion uncertainty. Transport's two-gate terminal preparation is implemented separately; the
+terminal endpoint type remains a joint proof candidate. SSH does not create substitute common types.
+The operator confirmed that terminal/PTY work is proceeding in parallel with #833; the SSH terminal
+notes are input to that joint work.
 
 The [terminal LLD](terminal-lld.md) records local feasibility evidence and the unresolved
 prepared-input interface. Terminal integration additionally needs explicit borrowed handles and
