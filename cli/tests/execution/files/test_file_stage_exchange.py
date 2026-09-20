@@ -63,7 +63,9 @@ def plan() -> IdentityPlan:
     return IdentityPlan(IdentityExpectation(1001, 1002, (1002, 1003)), IdentityMode.DIRECT)
 
 
-def _reference(request: FileStageRequest) -> ScratchReference:
+def _reference(request: FileStageRequest, *, length: int | None = None) -> ScratchReference:
+    if length is None:
+        length = request.expected_length if isinstance(request, FileStageBeginRequest) else 20_000
     return ScratchReference(
         ScratchOwnership(
             request.token,
@@ -72,7 +74,7 @@ def _reference(request: FileStageRequest) -> ScratchReference:
             _Identity(1, 3),
             _Identity(1, 4),
             1002,
-            20_000,
+            length,
             _Identity(1, 5),
         )
     )
@@ -148,7 +150,7 @@ def _begin_records(request: FileStageRequest) -> bytes:
     return _records(
         request,
         FileRecordKind.RESULT,
-        encode_file_stage_begin_result(_reference(request), request.token, request.identity),
+        encode_file_stage_begin_result(_reference(request)),
     )
 
 
@@ -181,6 +183,30 @@ def test_complete_begin_exposes_reference_only_after_sensitive_terminal_exchange
     assert "root-canary" not in carrier.invocation.argv
     assert "target-canary" not in carrier.invocation.argv
     assert "root-canary" not in repr(result) and "target-canary" not in repr(result)
+
+
+def test_complete_begin_with_different_declared_length_is_uncertain_control(plan: IdentityPlan) -> None:
+    def mismatched_length(request: FileStageRequest) -> bytes:
+        assert isinstance(request, FileStageBeginRequest)
+        return _records(
+            request,
+            FileRecordKind.RESULT,
+            encode_file_stage_begin_result(_reference(request, length=request.expected_length + 1)),
+        )
+
+    result = stage_begin(
+        TranscriptCarrier(mismatched_length),
+        trusted_root_path="/trusted/root",
+        relative_path="target",
+        token=_TOKEN,
+        expected_length=20_000,
+        plan=plan,
+        deadline=Deadline.after(1),
+    )
+
+    assert result.observation.state is FileStageObservationState.UNCERTAIN
+    assert result.observation.error is FileStageObservationError.CONTROL
+    assert result.observation.reference is None
 
 
 def test_complete_chunk_is_accepted_once_without_payload_retention(plan: IdentityPlan) -> None:
@@ -257,7 +283,7 @@ def test_complete_refusal_exposes_known_cleanup_debt(plan: IdentityPlan) -> None
         return _records(
             request,
             FileRecordKind.FAILED,
-            encode_file_stage_failure(failure, request.token, request.identity),
+            encode_file_stage_failure(failure),
         )
 
     result = stage_begin(
@@ -287,7 +313,7 @@ def test_truncated_refusal_never_exposes_parsed_cleanup_debt(plan: IdentityPlan)
         return _records(
             request,
             FileRecordKind.FAILED,
-            encode_file_stage_failure(failure, request.token, request.identity),
+            encode_file_stage_failure(failure),
         )[:-1]
 
     result = stage_begin(
@@ -325,7 +351,7 @@ def test_truncated_refusal_never_exposes_parsed_cleanup_debt(plan: IdentityPlan)
                     FileRecord(
                         2,
                         FileRecordKind.RESULT,
-                        encode_file_stage_begin_result(_reference(request), request.token, request.identity),
+                        encode_file_stage_begin_result(_reference(request)),
                     ),
                 )
             ),

@@ -135,18 +135,9 @@ def _operate(request: FileStageRequest, expires_at: float | None) -> ScratchRefe
 
 def _finish_failure(
     writer: FileRecordWriter,
-    request: FileStageRequest | None,
     failure: FileStageFailureControl,
 ) -> int:
-    if request is None:
-        token = bytes(16)
-        from ._helper_identity import IdentityExpectation
-
-        identity = IdentityExpectation(0, 0, (0,))
-    else:
-        token = request.token
-        identity = request.identity
-    writer.write(FileRecordKind.FAILED, encode_file_stage_failure(failure, token, identity))
+    writer.write(FileRecordKind.FAILED, encode_file_stage_failure(failure))
     writer.write(FileRecordKind.FINISHED, empty_file_stage_body())
     return 0
 
@@ -157,24 +148,24 @@ def main(nonce: str) -> int:
     try:
         request = _read_request()
     except FileStageRequestError as error:
-        return _finish_failure(writer, None, FileStageFailureControl(error.failure))
+        return _finish_failure(writer, FileStageFailureControl(error.failure))
     if request.nonce != nonce:
-        return _finish_failure(writer, request, FileStageFailureControl(FileStageFailureCode.NONCE_MISMATCH))
+        return _finish_failure(writer, FileStageFailureControl(FileStageFailureCode.NONCE_MISMATCH))
     if sys.platform != "linux":
-        return _finish_failure(writer, request, FileStageFailureControl(FileStageFailureCode.UNSUPPORTED_RUNTIME))
+        return _finish_failure(writer, FileStageFailureControl(FileStageFailureCode.UNSUPPORTED_RUNTIME))
     if not matches_current_identity(request.identity):
-        return _finish_failure(writer, request, FileStageFailureControl(FileStageFailureCode.IDENTITY_MISMATCH))
+        return _finish_failure(writer, FileStageFailureControl(FileStageFailureCode.IDENTITY_MISMATCH))
     expires_at = _expires_at(request.remaining_seconds)
     try:
         with system_file_lock(expires_at=expires_at):
             result = _operate(request, expires_at)
     except FileLockError as error:
-        return _finish_failure(writer, request, _lock_failure(error))
+        return _finish_failure(writer, _lock_failure(error))
     except _SafeFailure as error:
-        return _finish_failure(writer, request, error.failure)
+        return _finish_failure(writer, error.failure)
     if isinstance(request, FileStageBeginRequest):
         assert result is not None
-        body = encode_file_stage_begin_result(result, request.token, request.identity)
+        body = encode_file_stage_begin_result(result)
     else:
         body = encode_file_stage_chunk_result()
     writer.write(FileRecordKind.RESULT, body)

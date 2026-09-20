@@ -132,11 +132,16 @@ class _FileStageCollector:
             if self._has_outcome():
                 self._fail(FileStageObservationError.ORDER)
             elif self._request.operation is FileStageOperation.BEGIN:
-                self._reference = parse_file_stage_begin_result(
+                reference = parse_file_stage_begin_result(
                     record.body,
                     self._request.token,
                     self._request.identity,
                 )
+                assert isinstance(self._request, FileStageBeginRequest)
+                if reference._ownership._length != self._request.expected_length:
+                    self._fail(FileStageObservationError.CONTROL)
+                else:
+                    self._reference = reference
             else:
                 parse_file_stage_chunk_result(record.body)
                 self._accepted = True

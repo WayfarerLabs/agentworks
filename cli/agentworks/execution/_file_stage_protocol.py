@@ -251,16 +251,15 @@ def encode_file_stage_request(request: FileStageRequest) -> bytes:
         if isinstance(request, FileStageBeginRequest):
             common["expected_length"] = request.expected_length
         elif isinstance(request, FileStageChunkRequest):
+            ownership = request.reference._ownership
+            if ownership._token != request.token or ownership._context != stage_context(request.identity):
+                raise ScratchWireError
             common.update(
                 {
                     "chunk_sha256": _encode_bytes(request.chunk_digest),
                     "data": _encode_bytes(request.data),
                     "offset": request.offset,
-                    "reference": encode_scratch_reference(
-                        request.reference,
-                        request.token,
-                        stage_context(request.identity),
-                    ),
+                    "reference": encode_scratch_reference(request.reference),
                 }
             )
         else:
@@ -358,13 +357,11 @@ def parse_empty_file_stage_body(body: bytes) -> None:
 
 def encode_file_stage_begin_result(
     reference: ScratchReference,
-    token: bytes,
-    identity: IdentityExpectation,
 ) -> bytes:
     failed = False
     body = b""
     try:
-        body = _json_bytes({"reference": encode_scratch_reference(reference, token, stage_context(identity))})
+        body = _json_bytes({"reference": encode_scratch_reference(reference)})
     except (ScratchWireError, TypeError, ValueError):
         failed = True
     if failed:
@@ -402,8 +399,6 @@ def parse_file_stage_chunk_result(body: bytes) -> None:
 
 def encode_file_stage_failure(
     failure: FileStageFailureControl,
-    token: bytes,
-    identity: IdentityExpectation,
 ) -> bytes:
     value: dict[str, object] = {"code": failure.code.value}
     if failure.code is FileStageFailureCode.SCRATCH:
@@ -412,11 +407,7 @@ def encode_file_stage_failure(
         failed = False
         cleanup: dict[str, object] | None = None
         try:
-            cleanup = (
-                None
-                if failure.cleanup_debt is None
-                else encode_cleanup_debt(failure.cleanup_debt, token, stage_context(identity))
-            )
+            cleanup = None if failure.cleanup_debt is None else encode_cleanup_debt(failure.cleanup_debt)
         except ScratchWireError:
             failed = True
         if failed:

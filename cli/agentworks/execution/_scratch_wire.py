@@ -57,14 +57,18 @@ def _decode_optional_identity(value: object) -> _Identity | None:
 
 def encode_scratch_reference(
     reference: ScratchReference,
-    token: bytes,
-    context: ScratchReceiptContext,
 ) -> dict[str, object]:
     """Encode one active reference without exporting a path or receipt body."""
     if not isinstance(reference, ScratchReference):
         raise ScratchWireError
     ownership = reference._ownership
-    if ownership._token != token or ownership._context != context:
+    if not isinstance(ownership, ScratchOwnership):
+        raise ScratchWireError
+    try:
+        scratch_name(ownership._token)
+    except ValueError:
+        raise ScratchWireError from None
+    if not isinstance(ownership._context, ScratchReceiptContext):
         raise ScratchWireError
     return {
         "artifact_gid": ownership._gid,
@@ -103,17 +107,11 @@ def decode_scratch_reference(
 
 def encode_cleanup_debt(
     debt: ScratchCleanupDebt,
-    token: bytes,
-    context: ScratchReceiptContext,
 ) -> dict[str, object]:
     """Encode known cleanup facts without allowing the body to select a name."""
     if not isinstance(debt, ScratchCleanupDebt):
         raise ScratchWireError
-    try:
-        expected_name = scratch_name(token)
-    except ValueError:
-        raise ScratchWireError from None
-    if debt._name != expected_name or debt._uid != context.identity.euid:
+    if type(debt._name) is not str or type(debt._uid) is not int:
         raise ScratchWireError
     if debt._receipt_modes == (_RECEIPT_MODE,):
         receipt_state = _FINAL_RECEIPT

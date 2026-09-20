@@ -38,7 +38,6 @@ from agentworks.execution._scratch_receipt import (
     scratch_name,
 )
 from agentworks.execution._scratch_wire import (
-    ScratchWireError,
     decode_cleanup_debt,
     decode_scratch_reference,
     encode_cleanup_debt,
@@ -198,19 +197,42 @@ def test_request_decoder_does_not_retain_sensitive_manifest_fields() -> None:
     assert canary not in _exception_details(raised.value)
 
 
-def test_active_reference_fragment_is_pathless_and_context_bound() -> None:
+def test_active_reference_fragment_is_pathless_and_decoder_context_bound() -> None:
     reference = _reference()
     context = stage_context(_IDENTITY)
-    encoded = encode_scratch_reference(reference, _TOKEN, context)
+    encoded = encode_scratch_reference(reference)
 
     assert set(encoded) == {"artifact_gid", "data", "directory", "length", "parent", "receipt"}
     assert decode_scratch_reference(encoded, _TOKEN, context) == reference
 
-    wrong_context = ScratchReceiptContext(ScratchOperation.SNAPSHOT, _IDENTITY)
-    with pytest.raises(ScratchWireError):
-        encode_scratch_reference(reference, _TOKEN, wrong_context)
     syntactic = decode_scratch_reference(encoded, b"z" * 16, context)
     assert syntactic._ownership._token == b"z" * 16
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        _reference(token=b"z" * 16),
+        _reference(context=ScratchReceiptContext(ScratchOperation.SNAPSHOT, _IDENTITY)),
+    ],
+)
+def test_chunk_request_entry_refuses_reference_outside_its_core_context(reference: ScratchReference) -> None:
+    request = _chunk()
+    mismatched = FileStageChunkRequest(
+        request.nonce,
+        request.root_path,
+        request.relative_path,
+        request.token,
+        reference,
+        request.offset,
+        request.data,
+        request.chunk_digest,
+        request.identity,
+        request.remaining_seconds,
+    )
+
+    with pytest.raises(FileStageRequestError):
+        encode_file_stage_request(mismatched)
 
 
 @pytest.mark.parametrize(
@@ -235,7 +257,7 @@ def test_cleanup_debt_round_trips_without_exporting_its_derived_name(
         1002,
     )
     context = stage_context(_IDENTITY)
-    encoded = encode_cleanup_debt(debt, _TOKEN, context)
+    encoded = encode_cleanup_debt(debt)
 
     assert encoded["receipt_state"] == state
     assert "name" not in encoded and "token" not in encoded
@@ -244,7 +266,7 @@ def test_cleanup_debt_round_trips_without_exporting_its_derived_name(
 
 def test_begin_result_round_trips_only_an_active_reference() -> None:
     reference = _reference()
-    body = encode_file_stage_begin_result(reference, _TOKEN, _IDENTITY)
+    body = encode_file_stage_begin_result(reference)
 
     assert parse_file_stage_begin_result(body, _TOKEN, _IDENTITY) == reference
     assert set(json.loads(body)) == {"reference"}
@@ -270,7 +292,7 @@ def test_scratch_failure_round_trips_closed_fact_and_optional_debt(
 
     assert (
         parse_file_stage_failure(
-            encode_file_stage_failure(failure, _TOKEN, _IDENTITY),
+            encode_file_stage_failure(failure),
             _TOKEN,
             _IDENTITY,
         )
