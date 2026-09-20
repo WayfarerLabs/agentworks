@@ -1,9 +1,8 @@
-"""Fixed stdlib-only Linux guest for the private terminal handoff candidate."""
+"""One-shot stdlib-only Linux guest for the private terminal handoff candidate."""
 
 from __future__ import annotations
 
 import contextlib
-import errno
 import os
 import signal
 import struct
@@ -50,45 +49,6 @@ class _Reader:
             raise _ProtocolError
 
 
-class _SourceDescriptor:
-    def __init__(self) -> None:
-        self.previous = -1
-        self.previous_inheritable = False
-        try:
-            self.previous_inheritable = os.get_inheritable(SOURCE_FD)
-            self.previous = os.dup(SOURCE_FD)
-        except OSError as error:
-            if error.errno != errno.EBADF:
-                raise
-
-    def install(self, source: bytes) -> None:
-        descriptor = os.memfd_create("agw-terminal-source", os.MFD_CLOEXEC)
-        try:
-            _write_all(descriptor, source)
-            os.lseek(descriptor, 0, os.SEEK_SET)
-            if descriptor == SOURCE_FD:
-                os.set_inheritable(descriptor, True)
-            else:
-                os.dup2(descriptor, SOURCE_FD, inheritable=True)
-        finally:
-            if descriptor != SOURCE_FD:
-                os.close(descriptor)
-
-    def restore(self) -> None:
-        if self.previous >= 0:
-            try:
-                os.dup2(self.previous, SOURCE_FD, inheritable=self.previous_inheritable)
-            finally:
-                os.close(self.previous)
-                self.previous = -1
-        else:
-            try:
-                os.close(SOURCE_FD)
-            except OSError as error:
-                if error.errno != errno.EBADF:
-                    raise
-
-
 def _read_exact(fd: int, length: int) -> bytes:
     chunks = bytearray()
     while len(chunks) < length:
@@ -106,6 +66,20 @@ def _write_all(fd: int, data: bytes) -> None:
         if written <= 0:
             raise _ProtocolError
         remaining = remaining[written:]
+
+
+def _install_source(source: bytes) -> None:
+    descriptor = os.memfd_create("agw-terminal-source", os.MFD_CLOEXEC)
+    try:
+        _write_all(descriptor, source)
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        if descriptor == SOURCE_FD:
+            os.set_inheritable(descriptor, True)
+        else:
+            os.dup2(descriptor, SOURCE_FD, inheritable=True)
+    finally:
+        if descriptor != SOURCE_FD:
+            os.close(descriptor)
 
 
 def _decode_payload(fd: int) -> tuple[tuple[bytes, ...], dict[bytes, bytes], bytes]:
@@ -142,13 +116,20 @@ def _decode_payload(fd: int) -> tuple[tuple[bytes, ...], dict[bytes, bytes], byt
 
 
 def _readiness(nonce: str, kind: int) -> bytes:
-    if len(nonce) != 32 or any(character not in "0123456789abcdef" for character in nonce):
+    if len(nonce) != 32 or any(character not in "0123456789ABCDEF" for character in nonce):
         raise _ProtocolError
     return READINESS_MAGIC + nonce.encode("ascii") + b":" + bytes((kind,))
 
 
 def _interrupt(_signum: int, _frame: object) -> None:
     raise _Interrupted
+
+
+def _restore_exec_signals() -> None:
+    for name in ("SIGPIPE", "SIGXFZ", "SIGXFSZ"):
+        signum = getattr(signal, name, None)
+        if signum is not None and signal.getsignal(signum) is signal.SIG_IGN:
+            signal.signal(signum, signal.SIG_DFL)
 
 
 def run(nonce: str) -> int:
@@ -163,8 +144,6 @@ def run(nonce: str) -> int:
 
     terminal_fd = 0
     saved_mode: list[Any] | None = None
-    source_descriptor: _SourceDescriptor | None = None
-    previous_handlers: list[tuple[int, Any]] = []
     try:
         if not os.isatty(terminal_fd) or not os.isatty(1) or os.ttyname(terminal_fd) != os.ttyname(1):
             raise _ProtocolError
@@ -172,17 +151,16 @@ def run(nonce: str) -> int:
         interactive_ready = _readiness(nonce, INTERACTIVE_READY)
         saved_mode = termios.tcgetattr(terminal_fd)
         for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
-            previous_handlers.append((signum, signal.getsignal(signum)))
             signal.signal(signum, _interrupt)
 
         tty.setraw(terminal_fd, termios.TCSANOW)
         _write_all(1, payload_ready)
         argv, environment, source = _decode_payload(terminal_fd)
-        source_descriptor = _SourceDescriptor()
-        source_descriptor.install(source)
+        _install_source(source)
 
         termios.tcsetattr(terminal_fd, termios.TCSANOW, saved_mode)
         saved_mode = None
+        _restore_exec_signals()
         _write_all(1, interactive_ready)
         os.execve(argv[0], argv, environment)
     except (_Interrupted, OSError, _ProtocolError, termios.error):
@@ -191,12 +169,6 @@ def run(nonce: str) -> int:
         if saved_mode is not None:
             with contextlib.suppress(OSError, termios.error):
                 termios.tcsetattr(terminal_fd, termios.TCSANOW, saved_mode)
-        if source_descriptor is not None:
-            with contextlib.suppress(OSError):
-                source_descriptor.restore()
-        for saved_signum, handler in reversed(previous_handlers):
-            with contextlib.suppress(OSError, ValueError):
-                signal.signal(saved_signum, handler)
     return 1
 
 

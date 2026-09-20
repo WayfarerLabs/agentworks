@@ -267,7 +267,7 @@ def prepare_terminal_handoff(
     if not callable(getattr(presentation, "try_write", None)):
         raise ValidationError("Terminal handoff requires a trusted presentation sink")
     payload = _payload(argv, env, source)
-    nonce = secrets.token_hex(16)
+    nonce = secrets.token_hex(16).upper()
     state = _State()
     bootstrap = _BootstrapSource(state, payload)
     stdout = _ReadinessSink(state, nonce, presentation)

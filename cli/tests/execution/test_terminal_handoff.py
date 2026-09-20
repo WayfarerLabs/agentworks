@@ -29,8 +29,6 @@ from agentworks.execution._terminal_guest import (
     MAX_PAYLOAD_BYTES,
     PAYLOAD_READY,
     READINESS_MAGIC,
-    SOURCE_FD,
-    _SourceDescriptor,
 )
 from agentworks.execution._terminal_handoff import (
     PreparedTerminalHandoff,
@@ -193,47 +191,6 @@ def test_payload_material_stays_off_fixed_argv_and_preparation_is_single_use() -
         prepared.claim()
 
 
-def test_source_descriptor_restores_original_or_closes_its_slot() -> None:
-    result_read, result_write = os.pipe()
-    child = os.fork()
-    if child == 0:  # pragma: no cover - assertions are reported through the pipe
-        os.close(result_read)
-        try:
-            sentinel_read, sentinel_write = os.pipe()
-            os.write(sentinel_write, b"original")
-            os.close(sentinel_write)
-            if sentinel_read != SOURCE_FD:
-                os.dup2(sentinel_read, SOURCE_FD)
-                os.close(sentinel_read)
-            descriptor = _SourceDescriptor()
-            descriptor.install(b"replacement")
-            assert os.read(SOURCE_FD, 64) == b"replacement"
-            descriptor.restore()
-            assert os.read(SOURCE_FD, 64) == b"original"
-            os.close(SOURCE_FD)
-
-            descriptor = _SourceDescriptor()
-            descriptor.install(b"temporary")
-            descriptor.restore()
-            with pytest.raises(OSError):
-                os.fstat(SOURCE_FD)
-            os.write(result_write, b"ok")
-        except BaseException:
-            os.write(result_write, b"failed")
-        finally:
-            os._exit(0)
-
-    os.close(result_write)
-    message = b""
-    try:
-        message = os.read(result_read, 16)
-    finally:
-        os.close(result_read)
-        waited, status = os.waitpid(child, 0)
-    assert message == b"ok"
-    assert waited == child and os.waitstatus_to_exitcode(status) == 0
-
-
 CHILD_CODE = b"""
 import hashlib, os, sys
 source = bytearray()
@@ -253,9 +210,19 @@ os.write(1, b'INPUT:' + incoming.hex().encode() + b'!')
 
 
 class TerminalProcess:
-    def __init__(self, prepared: PreparedTerminalHandoff, *, cwd: Path | None = None) -> None:
+    def __init__(
+        self,
+        prepared: PreparedTerminalHandoff,
+        *,
+        cwd: Path | None = None,
+        output_flags: int = 0,
+    ) -> None:
         self.prepared = prepared
         self.master, self.slave = pty.openpty()
+        if output_flags:
+            mode = termios.tcgetattr(self.slave)
+            mode[1] |= output_flags
+            termios.tcsetattr(self.slave, termios.TCSANOW, mode)
         self.original_mode = termios.tcgetattr(self.slave)
         self.raw_output = bytearray()
         try:
@@ -394,6 +361,45 @@ def test_actual_pty_keeps_source_environment_and_empty_arg_off_terminal_input(
     assert not process_path.exists()
     assert set(tmp_path.iterdir()) == before
     assert source not in running.raw_output and secret not in running.raw_output
+
+
+def test_actual_pty_native_shell_inherits_default_sigpipe(
+    running_processes: list[TerminalProcess],
+) -> None:
+    presentation = CollectSink()
+    prepared = prepare_terminal_handoff(
+        (b"/bin/bash", b"--noprofile", b"--norc", b"-c", b"trap -p PIPE; printf SHELL-DONE!"),
+        {},
+        b"",
+        presentation,
+    )
+    running = TerminalProcess(prepared)
+    running_processes.append(running)
+
+    running.wait_for_payload_gate()
+    running.wait_for_handoff()
+    running.read_until_presented(presentation, b"SHELL-DONE!")
+
+    assert running.process.wait(timeout=5) == 0
+    assert bytes(presentation.data) == b"SHELL-DONE!"
+
+
+def test_actual_pty_restored_uppercase_output_mode_preserves_second_marker(
+    running_processes: list[TerminalProcess],
+) -> None:
+    uppercase_output = getattr(termios, "OLCUC", None)
+    if uppercase_output is None:
+        pytest.skip("this host does not expose the Linux OLCUC terminal flag")
+    prepared = prepare_terminal_handoff((b"/bin/true",), {}, b"", CollectSink())
+    running = TerminalProcess(prepared, output_flags=termios.OPOST | uppercase_output)
+    running_processes.append(running)
+
+    running.wait_for_payload_gate()
+    running.wait_for_handoff()
+
+    assert prepared.handed_off
+    assert termios.tcgetattr(running.slave) == running.original_mode
+    assert running.process.wait(timeout=5) == 0
 
 
 @pytest.mark.parametrize("truncated", [False, True], ids=["malformed", "truncated"])

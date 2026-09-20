@@ -161,7 +161,8 @@ restores the terminal, then emits a distinct nonce-bound interactive-ready marke
 the host source end preparation and permit a future carrier adapter to borrow keyboard input. The
 paired host sink suppresses setup and readiness bytes, handles split and coalesced markers, and
 forwards only bytes after interactive readiness to an explicitly selected trusted presentation sink
-with short-write flow control.
+with short-write flow control. Before exec, the one-shot guest resets Python-ignored pipe and
+file-size signals to their operating-system defaults without changing unrelated signal dispositions.
 
 The preparation object has a single-use guard but does not dispatch or prove replay prevention by a
 carrier. Its readiness markers establish only handoff state, never application launch or exec
