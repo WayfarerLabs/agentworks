@@ -12,8 +12,8 @@
 primitive. Keep the current finite input/capture/discard path working while proving the live and
 terminal extensions. Transport owns the reusable local subprocess pump, input/output and report
 types, shared parsing and acceptance vectors. SSH owns its client environment policy, delivery
-interpretation, call-site adaptation and terminal restoration. Neither lane silently changes this
-boundary. Connection/trust and forwarding work need not wait for these extensions.
+interpretation, call-site adaptation and borrowed-input terminal restoration. Neither lane silently
+changes this boundary. Connection/trust and forwarding work need not wait for these extensions.
 
 This document selects a candidate for an experiment, not permission to advertise live I/O or enable
 production execution. Any change to the types in `carrier.py` is coordinated with the SSH owner
@@ -40,8 +40,8 @@ counts or invalid result types are local input/output failures, not successful E
 The carrier fairly alternates bounded source reads, pipe writes and output draining under the same
 deadline. It does not wrap an arbitrary `BinaryIO.read` or callback in a thread it cannot cancel. It
 owns its bounded pending buffers and subprocess pipes, never the supplied endpoints. On return or
-interruption no task still touches an endpoint. Source EOF closes only the carrier's outgoing pipe;
-intentional guest-side early input closure retains the accepted proof's behavior.
+interruption no task still touches an endpoint. Live-source EOF closes only the carrier's outgoing
+pipe; intentional guest-side early input closure retains the accepted proof's behavior.
 
 Concrete core endpoint adapters, not arbitrary blocking file objects, establish this contract for
 CLI streams. Their owning composition is responsible for exclusive use and any mode restoration. The
@@ -87,15 +87,92 @@ malicious Python endpoint cannot be made non-blocking or secret-safe by its type
 
 ## Terminal choice stays distinct
 
-Terminal input selects one borrowed endpoint containing the terminal's input/output handles. Output
-selects terminal presentation, not separate byte-exact stdout/stderr. There is no separate terminal
-field on `PreparedInvocation` and no second stdin source. The terminal LLD must settle the concrete
-handle shape and console-mode restoration with SSH's platform implementation before adding it to
-`CarrierIO`; the byte protocol above is not proof of terminal feasibility.
+The caller-facing terminal endpoint supplies explicit input and output. The proposed carrier shape
+below pairs borrowed terminal input with trusted stream sinks; preparation selects terminal
+presentation, not separate byte-exact guest stdout/stderr. There is no separate terminal field on
+`PreparedInvocation` and no second stdin source. Joint proof must settle native handle admission and
+console-mode restoration before enabling the mode; the byte protocol alone does not establish
+terminal feasibility.
 
 The [lifecycle design](execution-lifecycle-lld.md#lifecycle-waiting-and-attachment) owns public
 start/attachment constraints. This extension adds neither an asynchronous pump handle nor a new
 detached-job protocol.
+
+### Proposed terminal input adapter
+
+The next shared-type candidate uses the existing byte source for preparation, not a second carrier
+parser or a callback that authorizes launch. Its proposed fields are:
+
+```python
+@dataclass(frozen=True)
+class TerminalInput:
+    input_fd: int
+    term: str
+    bootstrap: ByteSource
+    sensitive: bool = False
+```
+
+`input_fd` is an explicitly borrowed Python file descriptor (a CRT descriptor on Windows), not a
+process-global stdin lookup or an opaque Windows handle. `term` is the explicitly bound terminal
+type. Construction does no descriptor or terminal I/O. Carrier admission verifies usable native
+terminal input before dispatch; Windows and POSIX need their own implementations, not a claim that
+non-blocking pipe support supplies terminal support.
+
+This input requires trusted `SinkOutput` collectors. Preparation does not set `require_live` merely
+because it selects a terminal: terminal and non-terminal live stdio are separate capabilities.
+Terminal mode itself requires prompt delivery of setup and presentation bytes, not buffered
+collection after exit. During preparation, the carrier reads only `bootstrap`: bytes are forwarded
+unchanged, `None` withholds input, and `b""` permanently ends preparation and, after pending
+bootstrap bytes have been written, permits keyboard forwarding from the borrowed descriptor. This
+last transition is not EOF on SSH stdin. Preparation withholds payload until the remote
+payload-ready acknowledgment, then withholds handoff until the interactive-ready acknowledgment.
+Each acknowledgment is bound to the preparation-owned per-attempt nonce; the probe's static markers
+are not a production protocol. SSH sees source behavior, never the acknowledgment grammar. Invalid
+source results are input failures, not implicit handoff. The carrier never reads the bootstrap
+source after handoff.
+
+The carrier snapshots borrowed input, creates its owned input PTY, copies the original modes and
+geometry to the slave, then makes borrowed input raw before launching its client. It propagates
+resize and restores borrowed input on exit. It must not consume keyboard bytes before handoff or
+flush queued input during acquisition or restoration. This does not reverse processing that happened
+before acquisition or promise an unbounded terminal input queue. Keyboard EOF is distinct from
+bootstrap EOF; its delivery and failure behavior still need proof against the actual client and
+console mechanisms. Normal client exit after handoff stops keyboard borrowing without requiring
+keyboard EOF or reporting unsent finite input. A raw Ctrl-D remains an ordinary input byte for the
+remote terminal to interpret; local hangup does not imply remote cancellation.
+
+The proposed responsibility split is:
+
+| Owner                       | Responsibility                                                                                      |
+| --------------------------- | --------------------------------------------------------------------------------------------------- |
+| Shared preparation          | Parse readiness, release bootstrap bytes and handoff, filter raw streams, then select presentation. |
+| SSH/native terminal adapter | Borrow input, own client-side terminal plumbing, propagate resize and restore input modes/flags.    |
+| Shared presentation adapter | Borrow output, deliver explicitly selected display bytes and own emulator sanitation.               |
+
+One caller-facing endpoint supplies both explicit input and output; shared preparation binds both
+adapters from that endpoint. These are trusted internal collectors, not arbitrary plugin sinks whose
+destination the carrier must infer. Only input reaches the carrier as a native terminal descriptor;
+output reaches it through the existing trusted sinks. The presentation adapter must itself satisfy
+the bounded sink and restoration contract. This moves common display policy above the carrier
+instead of requiring SSH to interpret presentation phases. Terminal stdout is a combined guest
+presentation stream; separate client stderr remains raw carrier diagnostics, not a second byte-exact
+guest stream. Sensitive preparation is never consent to show raw setup output. Explicit live
+presentation follows FRD R4's separate selection.
+
+The preparation collector handles split or coalesced acknowledgments without displaying them. At
+interactive readiness it passes subsequent bytes from that same read to the selected presentation
+sink, respecting short writes, then stops interpreting presentation bytes as readiness records. The
+explicitly bound terminal type affects client PTY metadata, not the application's independently
+composed environment. Admission validates the terminal type and supplied handles before dispatch.
+
+This is a concrete proposal for the joint proof, not an implemented or frozen terminal type. Prove
+native handle admission, two-gate ordering, short writes, early keyboard preservation, bounded
+presentation, restoration failure reporting and interruption before enabling it. The shared report
+must preserve known remote facts while exposing local cleanup uncertainty; terminal cleanup cannot
+be inferred from a successful remote exit. Stop all relay/client activity before input restoration
+and before the shared presentation adapter sanitizes the selected output emulator. Cleanup needs its
+own bounded allowance after observation expiry. Do not silently reuse the ordinary pipe pump for
+this mode: its stdin construction and unfinished-input rules do not model an interactive keyboard.
 
 ### Same-terminal preparation experiment
 
@@ -109,12 +186,12 @@ interactive use. Source and application input remain separate. These are experim
 conditions, not a production wire format or a claimed implementation.
 
 Shared preparation owns the handshake, framing and transition to application presentation. The SSH
-carrier owns local terminal handles, client invocation, resize and restoration; it must not
-interpret application frames. The experiment must cover the remote bootstrap and the local OpenSSH
-endpoint separately. Replacing OpenSSH stdin with a pipe is not a complete terminal adapter: OpenSSH
-8.5 reads terminal setup and window dimensions from its input descriptor. An owned local PTY/console
-relay is one candidate, not an accepted dependency. No terminal type is frozen until that ownership
-and supported-platform behavior are proved with the SSH lane.
+carrier owns local input-terminal handles, client invocation, resize and input restoration; it must
+not interpret application frames. The experiment must cover the remote bootstrap and the local
+OpenSSH endpoint separately. Replacing OpenSSH stdin with a pipe is not a complete terminal adapter:
+OpenSSH 8.5 reads terminal setup and window dimensions from its input descriptor. An owned local
+PTY/console relay is one candidate, not an accepted dependency. No terminal type is frozen until
+that ownership and supported-platform behavior are proved with the SSH lane.
 
 The [prior-art investigation](prior-art-research.md#terminal-bootstrap-prior-art) records the
 relevant implementations and their limitations. A local synthetic PTY proves only that fixture; it
