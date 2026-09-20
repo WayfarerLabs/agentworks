@@ -175,13 +175,30 @@ availability checks and platform proof remain open. New guest packages do not sa
 prerequisite. Runtime download, on-target compilation, elevation retry, and a legacy-helper fallback
 are outside this design.
 
-`execution/file_helper.py` owns an operation-lifetime `HelperSession`. Helper delivery reuses the
-preparation LLD's private scratch transfer: a core-selected helper is written at exact offsets into
-operation-owned scratch and length/digest verified. It does not add a numbered-part/base64
-deployment state machine. The shared 24 KiB raw chunk is a candidate pending SSH/QGA whole-request
-proof, not a file-layer constant. An absolute-path `hello` under the clean core environment must
-match version, digest, interpreter, OS/CPU, effective identity, and features. Close removes only
-recorded objects; uncertain cleanup is owner debt and never hides the primary outcome.
+`execution/file_helper.py` owns the operation's exchanges and recorded data scratch. Each exchange
+delivers a fixed, core-selected standard-library source bundle inline to the already-available
+interpreter under the clean core environment. The helper executable is neither installed nor staged.
+A small transfer bundle carries chunk requests; observation and mutation bundles carry only their
+relevant implementation dependencies. Core selects these closed operation families, never a
+caller-supplied module name, source, executable or fallback. Bundling compresses trusted sources
+together once before ASCII armoring; this changes representation, not the request boundary. Every
+invocation verifies its bound identity before accessing workload paths.
+
+Data staging and snapshot spools still reuse preparation's exact-offset, length/digest-verified
+scratch mechanics. The shared 24 KiB raw chunk is a candidate pending complete SSH/QGA request
+proof, not a file-layer constant. Close removes only recorded objects; uncertain cleanup is owner
+debt and never hides the primary outcome. A prerequisite probe must establish interpreter, OS/CPU
+and required features without installing anything; no separately installed helper version or
+executable-digest handshake is needed when the executable source travels with each invocation.
+
+The delivery audit at `0ecb9a2e` found that one monolithic bundle plus a 24 KiB chunk nearly
+exhausts or exceeds the historical 64 KiB Proxmox whole-POST limit before its missing dispatcher is
+added. The largest existing per-module representation also exceeds Windows' 32,767-character process
+command-line limit after SSH serialization. Separate fixed bundles and aggregate compression are the
+selected candidate, not native acceptance. Final encodings must fit the complete provider body and
+workstation command line, including framing, quoting and privilege prefixes. Retain the older
+Proxmox compatibility floor rather than silently adding a package prerequisite. Oversized requests
+must refuse before dispatch; there is no automatic executable-staging fallback.
 
 Every exchange is one `Carrier.execute` with literal absolute argv. Its ASCII `AGWF1` envelope has a
 32-hex request ID, one closed operation, unique named base64/decimal fields, and a terminator. The
@@ -189,9 +206,9 @@ response must match the ID and contain closed status/phase values. Strict field/
 bounds inherit the preparation substrate's proved carrier limits. No request value becomes argv or
 shell source; fixed preparation bootstrap source cannot be reused for file operations.
 
-The existing buffered carrier cannot safely carry this protocol as written: sensitive input makes it
-suppress the response, while ordinary `Capture` can flow toward public execution results. Reuse the
-carrier I/O LLD's internal `SinkOutput(collector)` candidate, subject to its joint SSH proof. The
+Ordinary buffered capture cannot safely carry this protocol: sensitive input suppresses the
+response, while ordinary `Capture` can flow toward public execution results. Use the implemented
+internal `SinkOutput(collector)` extension, subject to its outstanding joint SSH proof. The
 collector incrementally parses the file schema and retains no raw response. It accepts only a
 matching response frame and closed typed fields; download/snapshot bytes stream directly into the
 private destination/spool while offsets and hashes are checked. Its tiny framing buffer is bounded
@@ -201,7 +218,7 @@ delivery/retention facts defined by the carrier I/O LLD; the collector alone own
 outcome. Ordinary sensitive-output suppression remains unchanged. This file schema, not a generic
 private raw-capture mode, decides which typed content may survive.
 
-Closed helper operations are `hello`, `stage_begin`, `stage_chunk`, `publish`, `snapshot_begin`,
+Closed helper operations are `stage_begin`, `stage_chunk`, `publish`, `snapshot_begin`,
 `snapshot_chunk`, `stat`, `list`, `ensure_directory`, `set_metadata`, `remove`, and `cleanup`.
 Staging is created beside the destination with mode 0600 and an unpredictable helper-owned name.
 Chunks use exact offsets and hashes; final size and SHA-256 must match before publication. Snapshot
@@ -223,14 +240,14 @@ remaining readiness gates below still apply.
 Preparation readiness permits no helper deployment, private scratch, spool, or new lock state.
 FileAccess may expose only bounded `read_file` and `stat` there, and only through an
 already-available trusted substrate proved to meet file confinement, object, sensitivity, and
-truthful-result rules within the inline bound. The staged helper described above cannot satisfy this
-gate. Without such a substrate, an optional call refuses before dispatch, while a required workflow
-must establish its prerequisite before entering readiness. Relocation to a staging-capable phase is
-allowed only when the existing workflow contract permits it; a mandatory readiness read that cannot
-remain no-write is a delivery gate requiring operator decision. Absence never authorizes public
-execution or silent removal of a required workflow. The early-Python versus native-helper decision
-is settled for Debian guests and macOS hosts; already-available readiness execution and the macOS
-platform mechanics remain unproved.
+truthful-result rules within the inline bound. Inline code delivery alone does not establish this
+gate: the selected operation must itself create no state. Without such a substrate, an optional call
+refuses before dispatch, while a required workflow must establish its prerequisite before entering
+readiness. Relocation to a staging-capable phase is allowed only when the existing workflow contract
+permits it; a mandatory readiness read that cannot remain no-write is a delivery gate requiring
+operator decision. Absence never authorizes public execution or silent removal of a required
+workflow. The early-Python versus native-helper decision is settled for Debian guests and macOS
+hosts; already-available readiness execution and the macOS platform mechanics remain unproved.
 
 ## Confinement and filesystem mechanics
 
@@ -258,6 +275,13 @@ ordinary UID/GID/mode/access-ACL semantics while refusing unsupported metadata. 
 owns confinement, transaction locking and scratch cleanup. This is not remote upload delivery, macOS
 support or FileAccess. Local fault and ACL fixtures are implementation evidence, not acceptance of
 the complete platform guarantees below.
+
+The private Linux `_file_objects.py` now observes regular files, directories and sockets through
+confined path-only descriptors without requiring content-read permission. Removal requires exact
+kind and revision; a content-bound regular-file revision also invokes the existing bounded digest
+reader. It removes only a matching regular file, empty directory or socket, and reports initially
+absent objects separately. It supplies neither tmux liveness checks nor an external-writer atomic
+compare-and-remove primitive. Caller-owned confinement/locking and native acceptance remain gates.
 
 All target operations occur in the helper process. Host-side normalization and grant checks reject
 untrusted requests early; destination-side traversal and observation enforce the bound operation.
@@ -350,14 +374,17 @@ filesystem semantics. Trusted setup supplies that prerequisite. Transactions nev
 replace or unlink the lock. No fork or child launch belongs inside the file critical section:
 inherited descriptors can prolong lock ownership even when the initiating helper exits.
 
-For Debian guests, the proposed persistent location is `/var/lib/agentworks/execution/files.lock`,
-with root-owned protected ancestors. Setup must preserve an existing valid inode, refuse unsafe
-existing objects rather than repair them during use, and leave unrelated `/var/lib/agentworks` state
-alone. New-guest setup belongs immediately after shared bootstrap package installation. Reachable
-existing guests need convergence before the first Phase-B file operation. Native recovery for
-stranded guests needs an explicit independent setup path; ordinary reinitialization currently
-requires Tailscale reachability. These setup paths and cross-identity contention remain
-implementation and acceptance gates, not behavior supplied by the private lock primitive.
+For Debian guests, the persistent location is `/var/lib/agentworks/execution/files.lock`, with
+root-owned protected ancestors. The private setup implementation preserves an existing valid inode,
+refuses unsafe existing objects rather than repairing them, and leaves unrelated
+`/var/lib/agentworks` state alone. Shared new-guest bootstrap now invokes its fixed isolated Python
+bundle immediately after package installation. Existing access ACLs are conservatively refused; only
+newly created core-owned directories and the lock may have inherited ACLs removed and modes
+finalized. This is privileged setup, not file-operation or readiness behavior. Reachable existing
+guests need convergence before the first Phase-B file operation. Native recovery for stranded guests
+needs an explicit independent setup path; ordinary reinitialization currently requires Tailscale
+reachability. These setup paths and cross-identity contention remain implementation and acceptance
+gates. Local setup fixtures do not establish privileged bootstrap or cross-identity acceptance.
 
 SSH-accessed macOS platform hosts have no existing privileged setup lifecycle. A protected
 machine-wide lock there would add an administrator prerequisite; the operator decision is pending.
@@ -458,8 +485,8 @@ generated sections, and native inventory, but drive only the new API/helper.
    An external writer fixture demonstrates, but does not overclaim, the non-CAS limit.
 5. **Carrier/bootstrap:** prove `SinkOutput` on SSH and QGA with reflected input,
    malformed/truncated envelopes, bounded parser state, and no raw retention. Prove shared private
-   scratch helper delivery, the candidate 24 KiB bound, exact offsets/digests, native finalization
-   if selected, cleanup interruption, and startup with legacy unavailable.
+   scratch data transfer, fixed inline bundles, complete request bounds, exact offsets/digests,
+   native finalization if selected, cleanup interruption, and startup with legacy unavailable.
 6. **Live/permissions:** before enablement, run SSH/QGA on clean pre-Phase-B Debian 12/13 for both
    CPUs and SSH on each supported macOS/CPU, recording tools, filesystems, rename/locks, metadata,
    scratch, identity, chunks, and faults. No-staging readiness tests prove already-available bounded
@@ -475,8 +502,8 @@ The following are not established by source inspection and must remain open in t
 - implement the preinstalled macOS Python prerequisite check, including clean missing/version/shim
   diagnostics, and prove metadata and execution behavior; guest provisioning does not satisfy it;
 - jointly prove the carrier I/O LLD's `SinkOutput` on SSH and QGA without raw response retention;
-- reuse and prove preparation's private scratch transfer and candidate 24 KiB bound; do not add a
-  file-specific deployment protocol;
+- prove fixed inline bundles and preparation's private data-scratch transfer within complete
+  provider-body and workstation-command limits, including the candidate 24 KiB chunk;
 - prove a no-staging, already-available bounded read/stat substrate for every readiness workflow;
   establish a prerequisite earlier only where the workflow contract permits, otherwise treat a
   mandatory no-write read as a delivery gate requiring operator decision;

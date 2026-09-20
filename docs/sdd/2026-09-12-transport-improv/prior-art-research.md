@@ -737,6 +737,42 @@ requirement and needs operator disposition before implementation. Lima foregroun
 a candidate for preserving required VM workflows, not proof of generic descendant emptiness. No
 requirement is waived by this research, and no native macOS result is claimed.
 
+## Inline file-helper delivery bounds
+
+The delivery audit used implementation head `0ecb9a2e` and the actual Proxmox JSON serializer. Eight
+existing helper modules total 99,869 source bytes; their original per-module compressed loader is
+32,141 bytes before an entry point. With a representative ASCII envelope carrying a 24 KiB raw
+chunk, the complete demotion POST is 65,544 bytes before the missing dispatcher. This is not
+credible headroom for one all-operations bundle.
+
+The input field and whole HTTP request have independent limits. Proxmox's
+[HTTP-server change](https://lore.proxmox.com/pve-devel/20250403082759.2506153-1-d.csapak@proxmox.com/)
+documents the prior 64 KiB POST limit and raises it to 512 KiB. Our supported PVE 8 range does not
+establish that newer HTTP-server package on every installation. The file design therefore retains
+the 64 KiB whole-request floor, separately from the guest-agent input-field limit. Both checks
+belong before dispatch, and neither is proof that the request succeeds on a native backend.
+
+Compressing the trusted module sources together as one compact JSON value reduces the measured
+eight-module loader to 27,555 bytes. More importantly, a transfer-only bundle of identity, revision,
+scratch and protocol modules leaves about 18 KiB for its missing dispatcher and other request data
+under the whole-POST floor. Publication carries only metadata and a verified scratch reference, not
+the file chunk. This supports fixed operation-family bundles rather than installing an executable
+helper. These are representation measurements with an existing protocol as a size proxy, not
+measurements of a completed file service.
+
+Windows imposes a separate workstation limit:
+[CreateProcess](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessa)
+accepts at most 32,767 command-line characters including the terminator. Using the current SSH
+serializer and Python's Windows argument serialization, the measured publication command exceeds
+that limit with per-module encoding and fits with aggregate compression. Final SSH options,
+executable paths, quoting, privilege prefixes and the real dispatcher still need complete-size
+checks and native Windows execution. Local Linux argument acceptance does not discharge this gate.
+
+The architecture consequence is fixed inline code with operation-owned data/snapshot scratch, not a
+persistent executable or deployment handshake. Core alone selects the bundle. Final native proof
+must cover PVE 8/9, direct and forwarded node routes, requested identities, and supported SSH
+workstations. No fallback stages executable code when a request is too large.
+
 ## Claims not relied upon
 
 - A common API makes every backend interactive.

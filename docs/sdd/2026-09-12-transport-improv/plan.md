@@ -176,6 +176,14 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       ordinary/elevated helpers contend on the same inode. Keep macOS host-administrator setup
       pending operator disposition; readiness never installs the lock. Validate finite nonnegative
       relative budgets at the file request boundary before deriving a guest-local expiry.
+- [ ] Review and validate private exact-kind revision-bound object stat/removal and the Debian
+      create-time lock setup. Keep setup idempotent without replacing a valid lock inode;
+      distinguish local fixture evidence from privileged native bootstrap and ordinary/admin
+      contention.
+- [ ] Compose fixed inline file-operation bundles with one-stream compression and data-only scratch.
+      Prove every final envelope against both complete Proxmox HTTP-body and workstation
+      process-command bounds; no executable-helper staging fallback. The Proxmox compatibility floor
+      remains 64 KiB even on providers accepting larger requests.
 - [ ] Jointly accept and prove the privately implemented carrier sink extension with the SSH owner
       before enabling its production use or exposing it through RunContext.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
