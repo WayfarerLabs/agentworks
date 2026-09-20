@@ -759,9 +759,10 @@ All hosted checks pass at the prior stage publication `37d8150b` in
 increment still needs hosted confirmation after publication. Snapshot/publication delivery, full
 FileAccess, launch ownership, lifecycle, native acceptance and additive RunContext remain required.
 The launch-owner candidate is being implemented separately; its design evidence is not production
-acceptance. Shared SSH interfaces remain unchanged. Both macOS operator decisions remain pending.
-This progress increment consumes no public feedback/fix round; all three remain available for the
-completed PR.
+acceptance. Shared SSH interfaces remain unchanged. The macOS decisions pending at that checkpoint
+were subsequently disposed by the operation-coordination correction above: no blanket host lock
+setup and no generic macOS MANAGED supervisor prerequisite for VM platforms. This progress increment
+consumes no public feedback/fix round; all three remain available for the completed PR.
 
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
