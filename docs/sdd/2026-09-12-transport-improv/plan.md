@@ -313,8 +313,10 @@ lint passing. Hosted Windows confirmation subsequently passes in
 [run 35499698325](https://github.com/WayfarerLabs/agentworks/actions/runs/35499698325) at
 `616508bc`. That run's Linux 3.13 job exposes a test-only assumption: `pwd` was already loaded
 before the import finder guard. The correction at `728b556d` marks the module unavailable
-explicitly, preserving the regression without changing runtime behavior. Fresh hosted confirmation
-remains pending.
+explicitly, preserving the regression without changing runtime behavior. All hosted checks
+subsequently pass at `7641fa7f` in
+[run 35501242049](https://github.com/WayfarerLabs/agentworks/actions/runs/35501242049), including
+Windows Python 3.13 and Linux Python 3.12/3.13/3.14.
 
 The fixed helper's packaged sources now use zlib compression before ASCII armoring; caller payload
 remains in stdin. At `728b556d`, the minimal `/bin/true` request with identity 1001 measures 18,583
