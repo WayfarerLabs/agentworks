@@ -88,6 +88,59 @@ def test_binary_roundtrip_reopens_each_operation_and_accepts_duplicate_retry(tmp
     assert not list(tmp_path.iterdir())
 
 
+@pytest.mark.parametrize(
+    ("operation", "phase"),
+    [
+        ("write", ScratchPhase.WRITE),
+        ("verify", ScratchPhase.VERIFY),
+        ("read", ScratchPhase.READ),
+    ],
+)
+def test_reopened_operation_close_interrupt_attempts_both_descriptors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    phase: ScratchPhase,
+) -> None:
+    content = b"reopened close"
+    parent_fd = _open_parent(tmp_path)
+    reference = begin_scratch(parent_fd, len(content), _digest(content))
+    write_scratch_chunk(parent_fd, reference, 0, content, _digest(content))
+    ready = verify_scratch(parent_fd, reference)
+    original_close = scratch_module._close_fd
+    closed: list[int] = []
+
+    def close_then_interrupt(descriptor: int) -> None:
+        original_close(descriptor)
+        closed.append(descriptor)
+        if len(closed) == 1:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(scratch_module, "_close_fd", close_then_interrupt)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        if operation == "write":
+            write_scratch_chunk(parent_fd, reference, 0, content, _digest(content))
+        elif operation == "verify":
+            verify_scratch(parent_fd, reference)
+        else:
+            read_scratch_range(parent_fd, ready, 0, len(content))
+    cause = _scratch_cause(raised.value)
+    debt = cause.cleanup_debt
+    assert cause.kind is ScratchFailureKind.IO
+    assert cause.phase is phase
+    assert debt is not None
+    assert debt._name == reference._name
+    assert debt._directory == reference._directory
+    assert debt._object == reference._object
+    assert len(closed) == 2
+    for descriptor in closed:
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
+    monkeypatch.setattr(scratch_module, "_close_fd", original_close)
+    cleanup_scratch(parent_fd, debt)
+    os.close(parent_fd)
+
+
 def test_begin_preserves_setgid_until_data_creation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

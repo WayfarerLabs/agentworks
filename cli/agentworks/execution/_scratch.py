@@ -123,11 +123,8 @@ class _OpenedScratch:
     object_fd: int
     object_stat: os.stat_result
 
-    def close(self) -> None:
-        with suppress(OSError):
-            os.close(self.object_fd)
-        with suppress(OSError):
-            os.close(self.directory_fd)
+    def close(self) -> BaseException | None:
+        return _close_descriptors(self.object_fd, self.directory_fd)
 
 
 def begin_scratch(parent_fd: int, expected_length: int, expected_digest: bytes) -> ScratchReference:
@@ -225,6 +222,8 @@ def write_scratch_chunk(
     if failure is not None:
         _raise_with_debt(failure, reference)
     opened: _OpenedScratch | None = None
+    control: BaseException | None = None
+    close_control: BaseException | None = None
     try:
         opened = _open_scratch(parent_fd, reference, writable=True, phase=ScratchPhase.WRITE)
         size = opened.object_stat.st_size
@@ -247,17 +246,20 @@ def write_scratch_chunk(
                 raise ScratchTransferError(ScratchFailureKind.CONFLICT, ScratchPhase.WRITE)
     except ScratchTransferError as error:
         failure = error
+    except BaseException as error:
+        control = error
     finally:
         if opened is not None:
-            opened.close()
-    if failure is not None:
-        _raise_with_debt(failure, reference)
+            close_control = opened.close()
+    _finish_operation(reference, ScratchPhase.WRITE, failure, control, close_control)
 
 
 def verify_scratch(parent_fd: int, reference: ScratchReference) -> ReadyScratchReference:
     """Verify the complete declared length and SHA-256 digest."""
     opened: _OpenedScratch | None = None
     failure: ScratchTransferError | None = None
+    control: BaseException | None = None
+    close_control: BaseException | None = None
     ready: ReadyScratchReference | None = None
     try:
         opened = _open_scratch(parent_fd, reference, writable=False, phase=ScratchPhase.VERIFY)
@@ -280,11 +282,12 @@ def verify_scratch(parent_fd: int, reference: ScratchReference) -> ReadyScratchR
         ready = ReadyScratchReference(reference, after.st_mtime_ns, after.st_ctime_ns)
     except ScratchTransferError as error:
         failure = error
+    except BaseException as error:
+        control = error
     finally:
         if opened is not None:
-            opened.close()
-    if failure is not None:
-        _raise_with_debt(failure, reference)
+            close_control = opened.close()
+    _finish_operation(reference, ScratchPhase.VERIFY, failure, control, close_control)
     assert ready is not None
     return ready
 
@@ -295,6 +298,8 @@ def read_scratch_range(parent_fd: int, ready: ReadyScratchReference, offset: int
     _validate_range(reference, offset, length)
     opened: _OpenedScratch | None = None
     failure: ScratchTransferError | None = None
+    control: BaseException | None = None
+    close_control: BaseException | None = None
     result: bytes | None = None
     try:
         opened = _open_scratch(parent_fd, reference, writable=False, phase=ScratchPhase.READ)
@@ -303,11 +308,12 @@ def read_scratch_range(parent_fd: int, ready: ReadyScratchReference, offset: int
         _require_ready_stat(_fstat(opened.object_fd, ScratchPhase.READ), ready)
     except ScratchTransferError as error:
         failure = error
+    except BaseException as error:
+        control = error
     finally:
         if opened is not None:
-            opened.close()
-    if failure is not None:
-        _raise_with_debt(failure, reference)
+            close_control = opened.close()
+    _finish_operation(reference, ScratchPhase.READ, failure, control, close_control)
     assert result is not None
     return result
 
@@ -464,9 +470,6 @@ def _cleanup_once(parent_fd: int, debt: ScratchCleanupDebt) -> ScratchFailureKin
                 )
             ):
                 return ScratchFailureKind.CONFLICT
-            descriptor_failure = _cleanup_object_descriptor_failure(directory_fd, debt)
-            if descriptor_failure is not None:
-                return descriptor_failure
             try:
                 os.unlink(_DATA_NAME, dir_fd=directory_fd)
             except OSError:
@@ -556,30 +559,6 @@ def _matches_object(observed: os.stat_result, identity: _Identity, uid: int, gid
     )
 
 
-def _cleanup_object_descriptor_failure(
-    directory_fd: int,
-    debt: ScratchCleanupDebt,
-) -> ScratchFailureKind | None:
-    assert debt._object is not None
-    descriptor: int | None = None
-    try:
-        descriptor = _open_object(directory_fd, False, ScratchPhase.CLEANUP)
-        if not _matches_object(
-            _fstat(descriptor, ScratchPhase.CLEANUP),
-            debt._object,
-            debt._uid,
-            debt._gid,
-        ):
-            return ScratchFailureKind.CONFLICT
-    except ScratchTransferError as error:
-        return error.kind
-    finally:
-        if descriptor is not None:
-            with suppress(OSError):
-                os.close(descriptor)
-    return None
-
-
 def _require_ready_stat(observed: os.stat_result, ready: ReadyScratchReference) -> None:
     reference = ready._reference
     _require_reference_object(observed, reference, ScratchPhase.READ)
@@ -593,8 +572,7 @@ def _require_ready_stat(observed: os.stat_result, ready: ReadyScratchReference) 
 
 def _same_verified_stat(before: os.stat_result, after: os.stat_result) -> bool:
     return (
-        _identity(before) == _identity(after)
-        and before.st_size == after.st_size
+        before.st_size == after.st_size
         and before.st_mtime_ns == after.st_mtime_ns
         and before.st_ctime_ns == after.st_ctime_ns
     )
@@ -617,8 +595,6 @@ def _validate_chunk(
         return ScratchTransferError(ScratchFailureKind.LIMIT, ScratchPhase.WRITE)
     if not data or len(data) > _MAX_CHUNK_BYTES:
         return ScratchTransferError(ScratchFailureKind.LIMIT, ScratchPhase.WRITE)
-    if len(chunk_digest) != hashlib.sha256().digest_size:
-        return ScratchTransferError(ScratchFailureKind.INTEGRITY, ScratchPhase.WRITE)
     if offset > reference._length or len(data) > reference._length - offset:
         return ScratchTransferError(ScratchFailureKind.LIMIT, ScratchPhase.WRITE)
     if not hmac.compare_digest(hashlib.sha256(data).digest(), chunk_digest):
@@ -650,7 +626,7 @@ def _pwrite_all(descriptor: int, offset: int, data: bytes) -> None:
         except OSError:
             failure = True
             break
-        if written <= 0 or written > len(data) - position:
+        if written <= 0:
             failure = True
             break
         position += written
@@ -750,8 +726,12 @@ def _acquisition_debt(acquisition: _ScratchAcquisition) -> ScratchCleanupDebt | 
 
 
 def _close_acquisition(acquisition: _ScratchAcquisition) -> BaseException | None:
+    return _close_descriptors(acquisition.object_fd, acquisition.directory_fd)
+
+
+def _close_descriptors(*descriptors: int | None) -> BaseException | None:
     interrupted: BaseException | None = None
-    for descriptor in (acquisition.object_fd, acquisition.directory_fd):
+    for descriptor in descriptors:
         if descriptor is None:
             continue
         try:
@@ -781,6 +761,22 @@ def _raise_control(
     if fact is None:
         raise control
     raise control from fact
+
+
+def _finish_operation(
+    reference: ScratchReference,
+    phase: ScratchPhase,
+    failure: ScratchTransferError | None,
+    control: BaseException | None,
+    close_control: BaseException | None,
+) -> None:
+    if control is None:
+        control = close_control
+    if control is not None:
+        prior = failure or ScratchTransferError(ScratchFailureKind.IO, phase)
+        _raise_control(control, prior=prior, cleanup_debt=_cleanup_debt(reference))
+    if failure is not None:
+        _raise_with_debt(failure, reference)
 
 
 def _cleanup_debt(owned: ScratchReference | ReadyScratchReference | ScratchCleanupDebt) -> ScratchCleanupDebt:
