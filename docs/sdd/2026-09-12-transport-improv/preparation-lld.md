@@ -310,9 +310,10 @@ The inline helper may embed that exact packaged source as fixed bootstrap code. 
 from application source: caller argv, script, environment, cwd and input remain data on stdin and
 are never interpolated into helper code. Source composition must not install files or import an
 Agentworks installation on the destination. Its final encoded request, including fixed argv and JSON
-escaping, needs the same native whole-request proof as the manifest. The current QGA input guard
-counts only `input-data`, not fixed helper argv or the complete request. Neither extraction nor
-embedding resolves the separately recorded launch-interruption or application-entry gates.
+escaping, needs the same native whole-request proof as the manifest. The private QGA carrier checks
+both `input-data` and the complete serialized request; a fitting local fixture is not native
+acceptance. Neither extraction nor embedding resolves the separately recorded launch-interruption or
+application-entry gates.
 
 ### Default-deny local launch ownership
 
@@ -340,10 +341,15 @@ Raw-thread exceptions must not leak request data through the interpreter's defau
 Preserve existing exact wait evidence, cleanup-induced exit distinctions and external-reaper
 uncertainty; thread ownership is not descendant containment or remote cancellation.
 
-The [local admission experiment](prior-art-research.md#local-process-startup-and-interruption) is
-bounded Linux evidence. Native Windows/macOS behavior, interpreter shutdown, repeated startup
-cancellation and the final bundled-helper size remain implementation gates. The existing OS
-process-creation caveat still applies; no new hard real-time bound is promised.
+The private shared pump now implements this candidate with lock-mediated publication and one
+continuous caller-side cleanup guard. Local tests inject interruption before native start returns,
+between request publication and admission, immediately after admission, during pumping and during
+cleanup. The inline helper also closes its prepared source descriptor across emission or launch
+failure. These checks extend the
+[local admission experiment](prior-art-research.md#local-process-startup-and-interruption), not its
+platform scope. Native Windows/macOS behavior, interpreter shutdown, repeated startup cancellation
+and the final bundled-helper size remain acceptance gates. The existing OS process-creation caveat
+still applies; no new hard real-time bound is promised.
 
 ### Inline Python implementation slice
 

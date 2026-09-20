@@ -83,12 +83,20 @@ loss is observed, cleanup does not signal or wait on the numeric PID. An externa
 can still create an exit/reuse race before loss is observed; this change does not establish
 exclusive process ownership. Windows retains handle-backed `Popen` waiting.
 
-The cleanup guard covers the I/O loop, not process construction or the intervening initialization. A
-real SIGINT probe on Linux with CPython 3.12.13 interrupted construction after child creation and
-left that local child alive without a returned handle. Launch-interruption ownership remains an
-unresolved production gate, including for the existing SSH copy. A deadline consumes startup time
-but cannot interrupt an OS process-creation call that has not returned; it is not a hard real-time
-bound over that call.
+The private pump now uses a default-deny launch owner. A native thread starts with only an admission
+cell; an interrupted, unacknowledged start cancels that cell without releasing command data or
+dispatching work. Once admitted, the owner constructs, observes and cleans up the exact child while
+the caller pumps its borrowed byte endpoints. One continuous caller-side guard covers startup,
+admission and pumping. Control-flow exceptions propagate only after admitted ownership is settled;
+an incomplete cleanup remains explicit. The owner relinquishes command data and pipe capabilities
+before publishing its terminal observation. An inert bootstrap or final native-thread return tail
+may finish later, but cannot use borrowed endpoints or launch work.
+
+Local Linux tests exercise interrupted startup, admission and cleanup, including the interval after
+admission but before pumping. They do not establish native Windows/macOS acceptance or update the
+existing SSH-private copy. A deadline consumes startup time but cannot interrupt an OS
+process-creation call that has not returned; it is not a hard real-time bound over that call. This
+ownership mechanism does not contain descendants or cancel a guest workload.
 
 `carriers/wsl2.py` is a private buffered candidate bound to an explicit local WSL executable,
 distribution and delivery user. It sends literal prepared argv through `--exec`, without selecting
@@ -101,7 +109,7 @@ completion survives a local I/O failure. This source-based interpretation is not
 acceptance. The carrier is not registered or wired into production. Shared preparation must still
 establish every required application exit and signal independently; this conservative adapter does
 not narrow that requirement. Real WSL argument/byte fidelity, status interpretation, interruption
-and distribution lifetime require proof, and the shared pump's launch-interruption gap applies.
+and distribution lifetime require proof, including native acceptance of the shared launch owner.
 
 ## Observation and guest lifetime
 
