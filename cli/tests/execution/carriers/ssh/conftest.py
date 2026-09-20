@@ -47,7 +47,7 @@ def local_sshd(tmp_path: Path) -> Iterator[SSHConnection]:
         f'Port {port}\nListenAddress 127.0.0.1\nHostKey "{host_key}"\n'
         f'AuthorizedKeysFile "{authorized}"\nPidFile "{tmp_path / "pid"}"\n'
         "StrictModes no\nUsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\n"
-        "AllowTcpForwarding local\nPermitRootLogin prohibit-password\nLogLevel ERROR\n"
+        "AllowTcpForwarding local\nPermitRootLogin prohibit-password\nPermitUserRC no\nLogLevel ERROR\n"
     )
     server = subprocess.Popen([sshd, "-D", "-e", "-f", str(config)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     try:

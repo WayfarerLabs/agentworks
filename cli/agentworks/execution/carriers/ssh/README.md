@@ -1,8 +1,8 @@
 # Installed OpenSSH carrier
 
 This internal adapter accepts explicit connection policy and a prepared invocation. It implements
-buffered and live byte delivery plus owned local forwarding. Terminal integration is not
-implemented yet. Production factories and RunContext still use the existing execution stack.
+buffered and live byte delivery plus owned local forwarding. Terminal integration is not implemented
+yet. Production factories and RunContext still use the existing execution stack.
 
 ## Connection policy
 
@@ -103,7 +103,7 @@ interpretation belong above this adapter.
 
 The carrier advertises `live_stdio` and accepts the shared `LiveInput` and `SinkOutput` modes.
 Borrowed sources and sinks remain caller-owned and are used only for the duration of the attempt.
-The shared process core handles bounded reads, partial sink writes and temporary backpressure while
+The shared process core handles bounded reads, partial sink writes and temporary sink stalls while
 the SSH adapter retains its environment filter and stream provenance. Delivered output is not
 retained in the report. Endpoint failure is reported on its input or output boundary and still
 performs bounded local client cleanup.
