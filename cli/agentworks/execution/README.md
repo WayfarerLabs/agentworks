@@ -203,26 +203,24 @@ loader runs; a Python version alone does not establish that the optional `bz2` m
 
 `_file_read.py` composes a bounded, identity-bound Linux file read through one carrier attempt. The
 core selects a trusted root and relative path; the helper checks the expected UID, GID and groups
-before acquiring the existing fixed system file lock or opening the target. Absolute root traversal
-uses path-only descriptors and refuses links without requiring directory read permission. The
-existing snapshot reader also refuses descendant mount crossings and unsupported objects. Missing
-roots or files produce an absent observation, not an I/O success with empty bytes.
+before opening the target. Absolute root traversal uses path-only descriptors and refuses links
+without requiring directory read permission. The existing snapshot reader also refuses descendant
+mount crossings and unsupported objects. Missing roots or files produce an absent observation, not
+an I/O success with empty bytes.
 
 Workload paths and request payload travel only in sensitive stdin. `_file_wire.py` supplies the
 shared bounded `AGWF1` record framing; the read schema remains concrete. A file-specific collector
 validates the complete nonce-bound response, length, digest and metadata before releasing bytes.
 Noise, reflection, truncation or invalid records cannot become a successful read, and carrier
 completion is reported separately. Helper code uses the fixed module packager; it creates no guest
-files, spool or lock. The destination needs compatible Python 3.11 or newer with `bz2` and the
-protected lock namespace already available. Missing or unsafe lock state refuses even if the
-requested file is absent.
+files, spool or lock. The destination needs compatible Python 3.11 or newer with `bz2`, not a
+privileged lock namespace. The caller must serialize conflicting operations.
 
 The host exposes one private `read_file` call, preparing and dispatching one attempt with the
-current remaining deadline. The guest derives its own monotonic expiry and holds the lock until its
-bounded immutable snapshot is materialized. It checks expiry before reporting either a snapshot or
-absence, then releases the lock before emitting file bytes. There is no reusable prepared-read
-object or readiness-time setup. The budget bounds cooperative checks, not an individual blocked
-filesystem system call.
+current remaining deadline. The guest derives its own monotonic expiry and materializes a bounded
+immutable snapshot. It checks expiry before reporting either a snapshot or absence and before
+emitting file bytes. There is no reusable prepared-read object or readiness-time setup. The budget
+bounds cooperative checks, not an individual blocked filesystem system call.
 
 An exceptional exit clears collector-owned response state and the reader's partial record before
 propagating the exception. This is not secure erasure of Python memory or traceback locals; callers
@@ -274,7 +272,7 @@ file service, which is not implemented or wired to production yet.
 `_file_snapshot.py` reads a bounded regular-file snapshot relative to a borrowed trusted root
 descriptor. It refuses observed links, multiply linked files and special objects, reads in bounded
 chunks, and binds the returned bytes to their digest and before/after metadata. The caller retains
-the root descriptor and owns any cooperating-writer lock. The reader creates no files or locks and
+the root descriptor and serializes conflicting operations. The reader creates no files or locks and
 does not expose FileAccess, publication or permission enforcement.
 
 On Linux x86-64 and AArch64, every descendant open uses `openat2` beneath the borrowed root with
@@ -283,7 +281,7 @@ without a weaker fallback. Other POSIX platforms retain the separate component w
 checks, which do not detect same-filesystem bind mounts. Neither path contains a malicious same-user
 process or supplies external-writer compare-and-swap. Regular-file reads can block in the
 filesystem, so this primitive provides no hard elapsed-time bound. Complete helper delivery,
-locking, platform guarantees and production composition remain separate work.
+operation coordination, platform guarantees and production composition remain separate work.
 
 `read_revision` can observe regular-file metadata without retaining content or can include a
 bounded-memory content digest. Linux metadata-only observation uses a path-only descriptor and does
@@ -293,8 +291,8 @@ not require file-read authority. `FileSnapshot.revision` carries the content-bou
 `_file_spool.py` copies one held regular source into private scratch in bounded chunks, returning a
 verified ready reference and the source's content-bound revision. It checks source length, EOF,
 digest and held/named metadata before returning; later chunk reads use the private copy rather than
-the public source. The caller owns the cooperating-writer lock and both parent descriptors, and
-supplies the fresh operation token and execution identity before copying. The immutable receipt
+the public source. The caller serializes conflicting operations and owns both parent descriptors,
+and supplies the fresh operation token and execution identity before copying. The immutable receipt
 binds this operation to snapshot creation, not upload staging. Expiry is checked after source
 descriptors close, including initial absence. Failure attempts exact scratch cleanup and preserves
 unresolved cleanup debt. Local receipt reconciliation can recover cleanup ownership after a lost
@@ -314,7 +312,7 @@ descriptor. It accepts bytes or a borrowed verified scratch source. `Create` req
 binds metadata and optionally content; matching a content-bound revision hashes bounded chunks
 without retaining the old file. Create-only publication uses `renameat2(RENAME_NOREPLACE)` without a
 fallback. Replacement rechecks its observed condition before rename. The caller supplies
-confinement, the cooperating-writer lock and scratch cleanup. This primitive is not FileAccess or a
+confinement, operation serialization and scratch cleanup. This primitive is not FileAccess or a
 remote upload helper.
 
 An unpredictable exclusive sibling receives the content and required metadata before publication.
@@ -346,29 +344,18 @@ Atomic visibility does not imply directory-entry crash durability, an external-w
 compare-and-swap guarantee or a hard filesystem deadline. Native-platform acceptance and the
 complete file service remain separate work.
 
-## Private file transaction lock
+## Private file coordination
 
-`_file_lock.py` borrows a trusted protected directory descriptor and opens its fixed `files.lock`
-read-only. It refuses missing or unsafe state, acquires one exclusive Linux advisory lock with
-deadline-bounded polling, checks that the name still binds the held object, and closes its owned
-descriptor on exit. Each transaction opens a fresh descriptor. The lock is an empty mode-0444
-single-link regular file owned by the trusted setup identity; its parent must have that owner and
-must not be group/other writable. No operation creates, repairs, replaces or unlinks lock state.
+File helpers have no destination-side machine-wide lock or privileged lock setup. Their caller owns
+serialization for the entire logical operation, including snapshot/merge/publication, transfer and
+cleanup. Unique scratch names prevent transfer collisions, not conflicting final-destination writes.
+The helpers retain conservative object checks and revision validation but do not supply atomic
+compare-and-swap against external writers.
 
-`system_file_lock` opens the fixed `/var/lib/agentworks/execution` namespace with path-only
-descriptors, checking root ownership and no group/other write authority at every ancestor. It
-rejects observed links or replacement without requiring directory read permission. Setup and
-local-filesystem locking semantics remain provisioning prerequisites, not results of this walk. The
-lock must not enclose child creation: a fork can inherit the descriptor and prolong ownership. Local
-contention and cleanup tests are not native macOS or ordinary/elevated acceptance. These private
-entries provide the transaction boundary for the private read and stat/removal helper exchanges.
-
-Debian new-guest bootstrap invokes `_file_lock_setup.py` through a fixed standalone bundle after
-installing distribution Python. It provisions `/var/lib/agentworks/execution/files.lock` as root,
-validates protected ancestors, preserves valid existing objects and refuses unsafe ones. Only new
-core-owned objects have inherited ACLs removed and modes finalized; existing access ACLs refuse.
-Setup leaves unrelated state alone. File operations and readiness never invoke setup. Existing-guest
-recovery, cross-identity access and macOS host setup are not supplied by this create-time hook.
+Production composition must provide database-backed operation ownership across participating core
+operations and retain unresolved ownership after loss of remote observation. That composition is not
+enabled here. These private helpers are not safe to expose as an uncoordinated public file service.
+Neither a caller crash nor a missing scratch receipt proves remote mutation has stopped.
 
 ## Private object observation and removal
 
@@ -379,15 +366,14 @@ refuse. Removal requires exact kind and revision; digest-bearing regular revisio
 content through the bounded revision reader. Only empty directories can be removed. Initial absence
 returns unchanged; interrupted or ambiguous mutation is not reported as unchanged.
 
-The caller owns the trusted parent and transaction lock. Removal neither checks tmux liveness nor
-provides atomic compare-and-remove against external writers. Session code must coordinate server
+The caller owns the trusted parent and operation serialization. Removal neither checks tmux liveness
+nor provides atomic compare-and-remove against external writers. Session code must coordinate server
 absence before supplying a socket revision. No recursive removal or FIFO creation is exposed.
 
 `_file_object_exchange.py` delivers stat or conditional removal through one fixed, inline Python
-helper attempt. After validating its request, nonce and bound identity, the guest acquires the
-existing system file lock before opening the trusted root. Missing lock setup is a refusal even when
-the requested object is absent. Paths and expected revisions travel only in sensitive stdin. The
-request carries a remaining duration from which the guest derives its own monotonic expiry.
+helper attempt. After validating its request, nonce and bound identity, the guest opens the trusted
+root without a lock-setup prerequisite. Paths and expected revisions travel only in sensitive stdin.
+The request carries a remaining duration from which the guest derives its own monotonic expiry.
 
 The host accepts only a complete, nonce-bound `AGWF1` result matching the requested operation.
 Carrier completion remains separate from object evidence. Lost, malformed or noisy observation after
@@ -396,9 +382,9 @@ an uncertain mutation preserves its closed failure kind and phase. No raw diagno
 retained. Stat returns metadata only; it does not read file contents or stage state.
 
 The fixed operation bundle is checked against the complete Proxmox HTTP request bound. Local
-isolated-interpreter fixtures exercise the real lock walk under a test-owned root, not a production
-configurable lock path. These tests do not establish privileged or cross-identity native acceptance,
-the complete Windows SSH command-line bound, or public FileAccess composition.
+isolated-interpreter fixtures exercise the real confined operations under a test-owned root without
+an installed lock namespace. These tests do not establish privileged or cross-identity native
+acceptance, the complete Windows SSH command-line bound, or public FileAccess composition.
 
 ## Private metadata convergence
 
@@ -412,22 +398,22 @@ requests are not supported.
 `ensure_directory` creates only the final component, initially with mode 0700, then converges it. It
 does not remove a created public directory if a later step fails. Errors distinguish unchanged,
 confirmed partial changes and uncertain attempts, retaining closed completed-step facts. The caller
-owns path validation, the trusted parent and the transaction lock. These private functions provide
-neither a public file service nor native or elevated acceptance.
+owns path validation, the trusted parent and operation serialization. These private functions
+provide neither a public file service nor native or elevated acceptance.
 
 `_file_metadata_exchange.py` delivers `set_file_metadata` and `ensure_file_directory` through one
-sensitive finite-input carrier attempt. The fixed helper verifies execution identity before taking
-the system transaction lock, confines the parent and leaf, and emits its result after releasing the
-lock. Numeric metadata ownership is separate from execution identity. Missing parents refuse;
-directory creation does not create intermediate components. Complete failure records preserve known
-changes and uncertain attempts; lost observation after possible dispatch remains uncertain and never
-triggers replay. A control interruption carries a closed mutation-uncertainty marker.
+sensitive finite-input carrier attempt. The fixed helper verifies execution identity, confines the
+parent and leaf, and emits its result after owned descriptor cleanup. Numeric metadata ownership is
+separate from execution identity. Missing parents refuse; directory creation does not create
+intermediate components. Complete failure records preserve known changes and uncertain attempts;
+lost observation after possible dispatch remains uncertain and never triggers replay. A control
+interruption carries a closed mutation-uncertainty marker.
 
 ## Private directory inventory
 
 `_file_inventory.py` reads a bounded Linux directory inventory beneath a borrowed trusted root and
-caller-owned transaction lock. It observes regular files, directories and sockets without reading
-file content, refusing links, multiply linked regular files, unsupported special objects and
+caller-owned operation serialization. It observes regular files, directories and sockets without
+reading file content, refusing links, multiply linked regular files, unsupported special objects and
 descendant mount crossings. Depth one returns immediate children; a directory at the requested depth
 is observed but its children are not enumerated.
 
@@ -437,11 +423,11 @@ including framing. Disappearance or observed replacement conflicts. The result i
 observations, not a coherent snapshot against external writers.
 
 `_file_inventory_exchange.py` delivers one `list_directory` request using sensitive finite input and
-delivered-output sinks. Its fixed helper checks identity before acquiring the system lock, encodes
-the bounded inventory while locked, and releases the lock before emitting frames. Missing targets
-remain distinct from empty directories. The host returns entries only after verifying complete
-framing, byte length, digest, entry schema and both carrier streams. Neither exchange implements
-public `FileAccess` composition or establishes native platform acceptance.
+delivered-output sinks. Its fixed helper checks identity and encodes the bounded inventory before
+emitting frames. The caller serializes conflicting operations. Missing targets remain distinct from
+empty directories. The host returns entries only after verifying complete framing, byte length,
+digest, entry schema and both carrier streams. Neither exchange implements public `FileAccess`
+composition or establishes native platform acceptance.
 
 ## Private scratch transfer
 
@@ -458,12 +444,12 @@ and coordination between writers.
 `_scratch_receipt.py` binds that token to the closed stage/snapshot operation, execution identity,
 original parent, declared length and exact acquired objects in a bounded immutable receipt. Active
 access checks that receipt before using scratch. Read-only reconciliation uses the original token
-and context under the caller's transaction lock, never a path recovered from disk. A valid receipt
-can recover historical ownership for exact cleanup even when data is incomplete or already removed;
-it cannot recover a ready content reference or authorize publication. Missing, partial or invalid
-receipts remain ownership uncertainty, not proof of absence. An active reference also binds the
-original receipt inode; historical recovery has no prior receipt inode to compare. No prefix search,
-replay, transfer registry or reboot-durability guarantee is supplied.
+and context under the caller's operation ownership, never a path recovered from disk. A valid
+receipt can recover historical ownership for exact cleanup even when data is incomplete or already
+removed; it cannot recover a ready content reference or authorize publication. Missing, partial or
+invalid receipts remain ownership uncertainty, not proof of absence. An active reference also binds
+the original receipt inode; historical recovery has no prior receipt inode to compare. No prefix
+search, replay, transfer registry or reboot-durability guarantee is supplied.
 
 Writes use bounded exact offsets and a chunk digest. An exact previously written range may be
 retried after comparing its bytes; gaps, conflicting duplicates and partially overlapping chunks
@@ -492,13 +478,12 @@ carrier acceptance.
 `_file_stage_exchange.py` delivers stage creation, exact-offset chunks, ownership reconciliation and
 exact cleanup through a fixed Linux helper. Each request carries the original trusted root and
 nonempty destination path; the guest derives the scratch parent rather than accepting a path from a
-receipt. It checks execution identity before opening workload paths and holds the existing
-transaction lock through mutation. Missing or unsafe lock/parent state refuses without setup or
-repair.
+receipt. It checks execution identity before opening workload paths. The caller serializes
+conflicting operations; missing or unsafe parent state refuses without setup or repair.
 
-The guest checks expiry after closing its owned path and lock descriptors, before emitting the
-result. If creation or a chunk write already happened, expiry retains exact cleanup debt rather than
-claiming a no-effects refusal.
+The guest checks expiry after closing its owned path descriptors, before emitting the result. If
+creation or a chunk write already happened, expiry retains exact cleanup debt rather than claiming a
+no-effects refusal.
 
 Tokens, paths, file bytes and references travel only through sensitive stdin. A stage-specific
 collector accepts an active reference or known cleanup debt only after complete nonce-bound framing

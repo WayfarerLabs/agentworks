@@ -557,24 +557,22 @@ and the operator-facing command banners that the rest of the codebase calls "pha
 
 - **Create-time bootstrap** is owned completely by `create()`, plus whatever the backend runs at
   creation time to get the VM reachable over Tailscale. The shared payload is `bootstrap_script.py`
-  (admin user, packages, file transaction lock, SSH key, swap, hostname, the Apple-vz SVE grub mask,
-  Tailscale). The package step includes distribution Python 3; fixed privileged setup then creates
-  or validates `/var/lib/agentworks/execution/files.lock`. Its protected root-owned namespace and
-  read-only lock are preserved on repeat setup. Unsafe existing state refuses rather than being
-  repaired; unrelated `/var/lib/agentworks` contents remain untouched. Lima instance YAML, Azure
-  `custom_data`, EC2 `UserData`, and GCE `Instance.metadata` retain credential-free forms of that
-  payload. GCE's startup wrapper checks a durable success marker before any mutation and is rejected
-  when its exact UTF-8 value exceeds 256 KiB. After the payload installs Tailscale, `create()` sends
-  the resolved key through one fixed guest command on the provisioning transport's stdin. The value
-  is absent from provider-retained configuration and host-side argv; the guest `tailscale` process
-  necessarily receives its `--auth-key` argument transiently. Delivery is byte-exact, so the guest
-  `read -r` binds exactly the resolved value: the stdin pipe runs in byte mode because a text-mode
-  pipe rewrites LF to the host's line ending and would append a carriage return to the key on
-  Windows (see `agentworks/subprocess_io.py`). Proxmox runs the key-bearing bootstrap from a private
-  guest-agent staging file inside `create()`. WSL2 runs its generated bootstrap from private local
-  and guest staging inside `create()`. Each staging file receives one verified removal attempt.
-  `create()` returns only after bootstrap succeeds and Tailscale joins, or it raises after rolling
-  back partial backend resources. **This stage runs once, at create.**
+  (admin user, packages, SSH key, swap, hostname, the Apple-vz SVE grub mask, Tailscale). The
+  package step includes distribution Python 3; file operations do not require privileged lock setup.
+  Lima instance YAML, Azure `custom_data`, EC2 `UserData`, and GCE `Instance.metadata` retain
+  credential-free forms of that payload. GCE's startup wrapper checks a durable success marker
+  before any mutation and is rejected when its exact UTF-8 value exceeds 256 KiB. After the payload
+  installs Tailscale, `create()` sends the resolved key through one fixed guest command on the
+  provisioning transport's stdin. The value is absent from provider-retained configuration and
+  host-side argv; the guest `tailscale` process necessarily receives its `--auth-key` argument
+  transiently. Delivery is byte-exact, so the guest `read -r` binds exactly the resolved value: the
+  stdin pipe runs in byte mode because a text-mode pipe rewrites LF to the host's line ending and
+  would append a carriage return to the key on Windows (see `agentworks/subprocess_io.py`). Proxmox
+  runs the key-bearing bootstrap from a private guest-agent staging file inside `create()`. WSL2
+  runs its generated bootstrap from private local and guest staging inside `create()`. Each staging
+  file receives one verified removal attempt. `create()` returns only after bootstrap succeeds and
+  Tailscale joins, or it raises after rolling back partial backend resources. **This stage runs
+  once, at create.**
 - **Phase A** receives only the returned optional Tailscale IP and the provisioning transport. If
   the platform could not discover an IP after joining, Phase A runs only `tailscale ip -4` over that
   transport. It then records the IP and provisioning state, verifies Tailscale SSH, closes temporary

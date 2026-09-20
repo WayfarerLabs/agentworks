@@ -1,4 +1,4 @@
-"""Guest-local deadline and cleanup checks for the file-read helper."""
+"""Guest-local deadline and cleanup checks for the private file-read helper."""
 
 from __future__ import annotations
 
