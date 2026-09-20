@@ -345,6 +345,9 @@ def run_process(
                 else ((stderr, process.stderr), (stdout, process.stdout))
             )
             output_first = not output_first
+            if exit_status is not None and pending_delivery:
+                # Resume collection only after the drain clock is unpaused.
+                outputs = [item for item in outputs if item[0].pending is not None]
             for output, pipe in outputs:
                 if (
                     exit_status is not None
