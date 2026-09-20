@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import stat
+import subprocess
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
@@ -50,6 +53,21 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
+
+
+@pytest.mark.windows
+def test_host_import_is_safe_without_posix_only_modules() -> None:
+    script = r"""
+import sys
+blocked = {"ctypes", "fcntl", "grp", "pwd"}
+sys.modules.update(dict.fromkeys(blocked))
+sys.path.insert(0, sys.argv[1])
+import agentworks.execution._file_object_exchange
+assert all(sys.modules[name] is None for name in blocked)
+"""
+    cli_root = Path(__file__).parents[3]
+    completed = subprocess.run([sys.executable, "-I", "-c", script, str(cli_root)], capture_output=True, timeout=10)
+    assert completed.returncode == 0, completed.stderr.decode(errors="replace")
 
 
 def _revision(kind: FileKind = FileKind.REGULAR, digest: bytes | None = None) -> FileRevision:

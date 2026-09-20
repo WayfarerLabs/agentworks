@@ -385,18 +385,3 @@ def test_complete_proxmox_post_fits_provider_bound_and_returns_typed_outcome(
         FileObjectFailureCode.LOCK_MISSING,
         FileObjectFailureCode.LOCK_UNSAFE,
     }
-
-
-@pytest.mark.windows
-def test_host_import_is_safe_without_posix_only_modules() -> None:
-    script = r"""
-import sys
-blocked = {"ctypes", "fcntl", "grp", "pwd"}
-sys.modules.update(dict.fromkeys(blocked))
-sys.path.insert(0, sys.argv[1])
-import agentworks.execution._file_object_exchange
-assert all(sys.modules[name] is None for name in blocked)
-"""
-    cli_root = Path(__file__).parents[3]
-    completed = subprocess.run([sys.executable, "-I", "-c", script, str(cli_root)], capture_output=True, timeout=10)
-    assert completed.returncode == 0, completed.stderr.decode(errors="replace")
