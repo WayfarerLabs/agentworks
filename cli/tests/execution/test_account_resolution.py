@@ -166,9 +166,10 @@ def _current_account() -> str:
 
 
 def test_resolved_identity_uses_one_sensitive_payload_free_attempt_and_preserves_carrier_facts() -> None:
+    account = "account-payload-canary-c86d89e5"
     carrier = ReplyCarrier(b"", completion=ExitStatus(code=19), failure=Failure.OBSERVATION)
 
-    result = _resolve(carrier)
+    result = resolve_account(carrier, account, Deadline.after(15), sys.executable)
 
     assert carrier.calls == 1
     assert result.observation.state is AccountObservationState.RESOLVED
@@ -179,8 +180,9 @@ def test_resolved_identity_uses_one_sensitive_payload_free_attempt_and_preserves
     assert carrier.io is not None and carrier.io.sensitive
     assert isinstance(carrier.io.input, FiniteInput) and carrier.io.input.sensitive
     assert carrier.io.input.data.isascii()
-    assert json.loads(carrier.io.input.data)["account"] == "workload"
-    assert carrier.invocation is not None and "workload" not in carrier.invocation.argv
+    assert json.loads(carrier.io.input.data)["account"] == account
+    assert carrier.invocation is not None
+    assert all(account not in argument for argument in carrier.invocation.argv)
     assert isinstance(carrier.io.output, SinkOutput)
     assert carrier.io.output.stdout.data == bytearray()  # type: ignore[attr-defined]
 
