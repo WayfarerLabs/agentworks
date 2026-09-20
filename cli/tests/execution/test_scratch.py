@@ -6,6 +6,7 @@ import errno
 import hashlib
 import json
 import os
+import secrets
 import stat
 import subprocess
 import sys
@@ -52,6 +53,11 @@ def _failure(function: object, *args: object) -> ScratchTransferError:
     return raised.value
 
 
+def _scratch_cause(error: BaseException) -> ScratchTransferError:
+    assert isinstance(error.__cause__, ScratchTransferError)
+    return error.__cause__
+
+
 def test_binary_roundtrip_reopens_each_operation_and_accepts_duplicate_retry(tmp_path: Path) -> None:
     content = bytes(range(256)) * 97
     first = content[: scratch_module._MAX_CHUNK_BYTES]
@@ -80,6 +86,42 @@ def test_binary_roundtrip_reopens_each_operation_and_accepts_duplicate_retry(tmp
     os.fstat(parent_fd)
     os.close(parent_fd)
     assert not list(tmp_path.iterdir())
+
+
+def test_begin_preserves_setgid_until_data_creation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o2700)
+    if not tmp_path.stat().st_mode & stat.S_ISGID:
+        pytest.skip("filesystem does not retain setgid on the parent directory")
+    original_open = os.open
+    directory_modes_at_data_creation: list[int] = []
+
+    def observe_data_creation(
+        path: object,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        if path == scratch_module._DATA_NAME:
+            assert dir_fd is not None
+            directory_modes_at_data_creation.append(os.fstat(dir_fd).st_mode)
+        return original_open(path, flags, mode, dir_fd=dir_fd)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "open", observe_data_creation)
+
+    parent_fd = _open_parent(tmp_path)
+    reference = begin_scratch(parent_fd, 0, _digest(b""))
+    directory = _scratch_directory(tmp_path)
+    data_path = directory / scratch_module._DATA_NAME
+    assert len(directory_modes_at_data_creation) == 1
+    assert directory_modes_at_data_creation[0] & stat.S_ISGID
+    assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+    assert stat.S_IMODE(data_path.stat().st_mode) == 0o600
+    cleanup_scratch(parent_fd, reference)
+    os.close(parent_fd)
 
 
 def test_reference_can_be_reopened_in_a_fresh_process(tmp_path: Path) -> None:
@@ -382,6 +424,228 @@ def test_begin_identity_failure_retains_unknown_object_debt(
     (directory / scratch_module._DATA_NAME).unlink()
     directory.rmdir()
     os.close(parent_fd)
+
+
+def test_begin_interrupt_after_object_acquisition_closes_fd_and_retains_unknown_object(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    original_fstat = os.fstat
+    object_fd: int | None = None
+
+    def interrupt_regular_identity(descriptor: int) -> os.stat_result:
+        nonlocal object_fd
+        observed = original_fstat(descriptor)
+        if stat.S_ISREG(observed.st_mode):
+            object_fd = descriptor
+            raise KeyboardInterrupt
+        return observed
+
+    monkeypatch.setattr(os, "fstat", interrupt_regular_identity)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        begin_scratch(parent_fd, 0, _digest(b""))
+    cause = _scratch_cause(raised.value)
+    debt = cause.cleanup_debt
+    assert cause.kind is ScratchFailureKind.IO
+    assert cause.phase is ScratchPhase.BEGIN
+    assert debt is not None and debt._directory is not None and debt._object is None
+    monkeypatch.setattr(os, "fstat", original_fstat)
+    assert object_fd is not None
+    with pytest.raises(OSError):
+        os.fstat(object_fd)
+    directory = _scratch_directory(tmp_path)
+    assert (directory / scratch_module._DATA_NAME).exists()
+    cleanup_error = _failure(cleanup_scratch, parent_fd, debt)
+    assert cleanup_error.kind is ScratchFailureKind.CONFLICT
+    (directory / scratch_module._DATA_NAME).unlink()
+    directory.rmdir()
+    os.close(parent_fd)
+
+
+def test_begin_fstat_failure_then_close_interrupt_retains_unknown_object_debt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    original_fstat = os.fstat
+    original_close = scratch_module._close_fd
+    closed: list[int] = []
+
+    def fail_regular_identity(descriptor: int) -> os.stat_result:
+        observed = original_fstat(descriptor)
+        if stat.S_ISREG(observed.st_mode):
+            raise OSError(errno.EIO, "fixture identity failure")
+        return observed
+
+    def close_then_interrupt(descriptor: int) -> None:
+        original_close(descriptor)
+        closed.append(descriptor)
+        if len(closed) == 1:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(os, "fstat", fail_regular_identity)
+    monkeypatch.setattr(scratch_module, "_close_fd", close_then_interrupt)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        begin_scratch(parent_fd, 0, _digest(b""))
+    cause = _scratch_cause(raised.value)
+    debt = cause.cleanup_debt
+    assert cause.kind is ScratchFailureKind.IO
+    assert cause.phase is ScratchPhase.BEGIN
+    assert debt is not None and debt._directory is not None and debt._object is None
+    assert len(closed) == 2
+    monkeypatch.setattr(os, "fstat", original_fstat)
+    for descriptor in closed:
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
+    directory = _scratch_directory(tmp_path)
+    assert (directory / scratch_module._DATA_NAME).exists()
+    cleanup_error = _failure(cleanup_scratch, parent_fd, debt)
+    assert cleanup_error.kind is ScratchFailureKind.CONFLICT
+    (directory / scratch_module._DATA_NAME).unlink()
+    directory.rmdir()
+    os.close(parent_fd)
+
+
+def test_begin_preserves_identified_debt_and_original_control_when_cleanup_interrupts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    original_set_mode = scratch_module._set_mode
+    original_cleanup = scratch_module._cleanup_once
+    descriptors: list[int] = []
+    cleanup_calls = 0
+
+    def interrupt_after_identity(descriptor: int, mode: int, phase: ScratchPhase) -> None:
+        descriptors.append(descriptor)
+        if mode == scratch_module._OBJECT_MODE:
+            raise SystemExit(23)
+        original_set_mode(descriptor, mode, phase)
+
+    def interrupt_cleanup(*_args: object) -> None:
+        nonlocal cleanup_calls
+        cleanup_calls += 1
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(scratch_module, "_set_mode", interrupt_after_identity)
+    monkeypatch.setattr(scratch_module, "_cleanup_once", interrupt_cleanup)
+    with pytest.raises(SystemExit, match="23") as raised:
+        begin_scratch(parent_fd, 0, _digest(b""))
+    cause = _scratch_cause(raised.value)
+    debt = cause.cleanup_debt
+    assert cause.kind is ScratchFailureKind.IO
+    assert cause.phase is ScratchPhase.BEGIN
+    assert debt is not None and debt._directory is not None and debt._object is not None
+    assert cleanup_calls == 1
+    for descriptor in descriptors:
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
+    assert (_scratch_directory(tmp_path) / scratch_module._DATA_NAME).exists()
+    monkeypatch.setattr(scratch_module, "_cleanup_once", original_cleanup)
+    cleanup_scratch(parent_fd, debt)
+    os.close(parent_fd)
+
+
+def test_begin_close_interrupt_retains_complete_debt_and_closes_both_descriptors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    original_close = scratch_module._close_fd
+    original_unlink = os.unlink
+    closed: list[int] = []
+
+    def close_then_interrupt(descriptor: int) -> None:
+        original_close(descriptor)
+        closed.append(descriptor)
+        if len(closed) == 1:
+            raise KeyboardInterrupt
+
+    def deny_data_unlink(path: object, *args: object, **kwargs: object) -> None:
+        if path == scratch_module._DATA_NAME:
+            raise OSError(errno.EIO, "fixture cleanup failure")
+        original_unlink(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(scratch_module, "_close_fd", close_then_interrupt)
+    monkeypatch.setattr(os, "unlink", deny_data_unlink)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        begin_scratch(parent_fd, 0, _digest(b""))
+    cause = _scratch_cause(raised.value)
+    debt = cause.cleanup_debt
+    assert debt is not None and debt._directory is not None and debt._object is not None
+    assert len(closed) == 2
+    for descriptor in closed:
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
+    assert (_scratch_directory(tmp_path) / scratch_module._DATA_NAME).exists()
+    monkeypatch.setattr(os, "unlink", original_unlink)
+    cleanup_scratch(parent_fd, debt)
+    os.close(parent_fd)
+
+
+def test_begin_cleanup_interrupt_preserves_complete_debt_as_closed_cause(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    original_list = scratch_module._list_directory
+    original_cleanup = scratch_module._cleanup_once
+
+    def fail_begin_listing(directory_fd: int, phase: ScratchPhase) -> set[str]:
+        if phase is ScratchPhase.BEGIN:
+            raise ScratchTransferError(ScratchFailureKind.CONFLICT, ScratchPhase.BEGIN)
+        return original_list(directory_fd, phase)
+
+    monkeypatch.setattr(scratch_module, "_list_directory", fail_begin_listing)
+    monkeypatch.setattr(scratch_module, "_cleanup_once", lambda *_args: (_ for _ in ()).throw(KeyboardInterrupt))
+    with pytest.raises(KeyboardInterrupt) as raised:
+        begin_scratch(parent_fd, 0, _digest(b""))
+    cause = _scratch_cause(raised.value)
+    debt = cause.cleanup_debt
+    assert cause.kind is ScratchFailureKind.CONFLICT
+    assert cause.phase is ScratchPhase.BEGIN
+    assert debt is not None and debt._directory is not None and debt._object is not None
+    assert (_scratch_directory(tmp_path) / scratch_module._DATA_NAME).exists()
+    monkeypatch.setattr(scratch_module, "_cleanup_once", original_cleanup)
+    cleanup_scratch(parent_fd, debt)
+    os.close(parent_fd)
+
+
+def test_interrupted_candidate_collision_is_never_deleted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = tmp_path / f"{scratch_module._NAME_PREFIX}collision"
+    candidate.mkdir(mode=0o700)
+    sentinel = candidate / "sentinel"
+    sentinel.write_bytes(b"not owned")
+    parent_fd = _open_parent(tmp_path)
+    original_mkdir = os.mkdir
+
+    def interrupt_candidate_mkdir(
+        path: object,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> None:
+        if path == candidate.name:
+            raise KeyboardInterrupt
+        original_mkdir(path, mode, dir_fd=dir_fd)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(secrets, "token_hex", lambda _length: "collision")
+    monkeypatch.setattr(os, "mkdir", interrupt_candidate_mkdir)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        begin_scratch(parent_fd, 0, _digest(b""))
+    debt = _scratch_cause(raised.value).cleanup_debt
+    assert debt is not None and debt._directory is None and debt._object is None
+    assert sentinel.read_bytes() == b"not owned"
+    cleanup_error = _failure(cleanup_scratch, parent_fd, debt)
+    assert cleanup_error.kind is ScratchFailureKind.CONFLICT
+    assert sentinel.read_bytes() == b"not owned"
+    os.close(parent_fd)
+    sentinel.unlink()
+    candidate.rmdir()
 
 
 def test_cleanup_stat_error_is_not_mistaken_for_absence(
