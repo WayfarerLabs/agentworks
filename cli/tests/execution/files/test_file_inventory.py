@@ -385,18 +385,19 @@ def test_deadline_during_traversal_returns_no_partial_inventory(
     (tmp_path / "first").write_bytes(b"")
     (tmp_path / "second").write_bytes(b"")
     root_fd = _open_directory(tmp_path)
-    expires_at = time.monotonic() + 60.0
-    checks = 0
+    now = 0.0
+    encode_record = inventory_module._encode_record
 
-    def expire_after_one_entry(_expires_at: float | None) -> None:
-        nonlocal checks
-        checks += 1
-        if checks == 4:
-            raise FileInventoryError(FileInventoryFailureKind.DEADLINE)
+    def encode_after_deadline(entry: FileInventoryEntry) -> bytes:
+        nonlocal now
+        record = encode_record(entry)
+        now = 2.0
+        return record
 
-    monkeypatch.setattr(inventory_module, "_raise_if_expired", expire_after_one_entry)
+    monkeypatch.setattr(time, "monotonic", lambda: now)
+    monkeypatch.setattr(inventory_module, "_encode_record", encode_after_deadline)
     try:
-        error = _failure(root_fd, expires_at=expires_at)
+        error = _failure(root_fd, expires_at=1.0)
         os.fstat(root_fd)
     finally:
         os.close(root_fd)

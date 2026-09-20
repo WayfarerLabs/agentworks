@@ -122,8 +122,9 @@ def inventory_directory(
     _walk_directory(root_fd, "", 1, max_depth, state)
     _raise_if_expired(expires_at)
     state.entries.sort(key=lambda entry: entry.relative_path.encode("utf-8"))
+    result = tuple(state.entries)
     _raise_if_expired(expires_at)
-    return tuple(state.entries)
+    return result
 
 
 def encode_inventory(entries: tuple[FileInventoryEntry, ...]) -> bytes:
