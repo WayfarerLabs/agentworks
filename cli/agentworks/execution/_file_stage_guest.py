@@ -150,6 +150,15 @@ def _operate(request: FileStageRequest, expires_at: float | None) -> _OperationR
                 expires_at=expires_at,
             )
         assert isinstance(request, FileStageCleanupRequest)
+        if _expired(expires_at):
+            raise _SafeFailure(
+                FileStageFailureControl(
+                    FileStageFailureCode.SCRATCH,
+                    ScratchFailureKind.DEADLINE,
+                    ScratchPhase.CLEANUP,
+                    request.cleanup_debt,
+                )
+            )
         cleanup_scratch(selected_fd, request.cleanup_debt)
         return None
     except ScratchTransferError as error:

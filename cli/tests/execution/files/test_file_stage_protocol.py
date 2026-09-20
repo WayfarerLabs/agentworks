@@ -326,6 +326,25 @@ def test_reconcile_result_exposes_only_cleanup_debt_or_uncertainty() -> None:
     assert uncertain is None
 
 
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("parent", None),
+        ("directory", None),
+        ("data", None),
+        ("receipt", None),
+        ("receipt_state", "creating_or_final"),
+    ],
+)
+def test_reconcile_result_refuses_impossible_historical_cleanup_shape(field: str, replacement: object) -> None:
+    historical = ScratchHistoricalOwnership(_reference()._ownership)
+    value = json.loads(encode_file_stage_reconcile_result(historical))
+    value["cleanup"][field] = replacement
+
+    with pytest.raises(FileStageControlError):
+        parse_file_stage_reconcile_result(_json(value), _TOKEN, _IDENTITY)
+
+
 def test_cleanup_result_has_one_exact_closed_shape() -> None:
     parse_file_stage_cleanup_result(encode_file_stage_cleanup_result())
 

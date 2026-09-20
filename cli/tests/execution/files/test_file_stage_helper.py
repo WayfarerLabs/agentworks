@@ -581,6 +581,48 @@ guest._operate=delayed_operate
     assert failure.cleanup_debt is not None
 
 
+def test_cleanup_deadline_after_parent_open_refuses_before_mutation(
+    tmp_path: Path,
+    plan: IdentityPlan,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "approved"
+    root.mkdir()
+    _, begun = _begin(root, "destination", 1, plan)
+    assert begun.observation.state is FileStageObservationState.CREATED
+    _, recovered = _reconcile(root, "destination", plan)
+    debt = recovered.observation.cleanup_debt
+    assert debt is not None
+    scratch = root / scratch_name(_TOKEN)
+    patch_source = """
+real_open_root=guest.open_linux_root
+def delayed_open_root(path):
+ result=real_open_root(path)
+ guest.time.sleep(0.03)
+ return result
+guest.open_linux_root=delayed_open_root
+"""
+    source = fixed_lock_source(tmp_path / "lock-root", patch_source)
+    monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
+
+    _, result = _cleanup(
+        root,
+        "destination",
+        debt,
+        plan,
+        carrier=LocalCarrier(dispatch_deadline=Deadline.after(5)),
+        deadline=Deadline.after(0.01),
+    )
+
+    assert result.observation.state is FileStageObservationState.REFUSED
+    failure = result.observation.failure
+    assert failure is not None and failure.kind is ScratchFailureKind.DEADLINE
+    assert failure.phase is ScratchPhase.CLEANUP
+    assert failure.cleanup_debt == debt
+    assert (scratch / "data").is_file()
+    assert (scratch / "receipt").is_file()
+
+
 def test_guest_deadline_after_closed_cleanup_retains_original_exact_debt(
     tmp_path: Path,
     plan: IdentityPlan,

@@ -15,6 +15,7 @@ from ._file_wire import valid_nonce
 from ._helper_identity import IdentityExpectation, decode_identity
 from ._scratch import ScratchFailureKind, ScratchPhase, ScratchReference, _cleanup_debt
 from ._scratch_receipt import (
+    _RECEIPT_MODE,
     ScratchCleanupDebt,
     ScratchHistoricalOwnership,
     ScratchOperation,
@@ -156,6 +157,16 @@ class FileStageFailureControl:
 def stage_context(identity: IdentityExpectation) -> ScratchReceiptContext:
     """Build the sole scratch context accepted by this protocol family."""
     return ScratchReceiptContext(ScratchOperation.STAGE, identity)
+
+
+def _historical_cleanup_shape(debt: ScratchCleanupDebt) -> bool:
+    return (
+        debt._parent is not None
+        and debt._directory is not None
+        and debt._object is not None
+        and debt._receipt is not None
+        and debt._receipt_modes == (_RECEIPT_MODE,)
+    )
 
 
 def _invalid_request() -> FileStageRequestError:
@@ -452,7 +463,10 @@ def encode_file_stage_reconcile_result(
     failed = False
     body = b""
     try:
-        body = _json_bytes({"cleanup": encode_cleanup_debt(_cleanup_debt(result)), "result": "recovered"})
+        cleanup = _cleanup_debt(result)
+        if not _historical_cleanup_shape(cleanup):
+            raise ScratchWireError
+        body = _json_bytes({"cleanup": encode_cleanup_debt(cleanup), "result": "recovered"})
     except (AttributeError, ScratchWireError, TypeError, ValueError):
         failed = True
     if failed:
@@ -474,6 +488,8 @@ def parse_file_stage_reconcile_result(
         result = value.get("result")
         if result == "recovered" and set(value) == {"cleanup", "result"}:
             cleanup = decode_cleanup_debt(value["cleanup"], token, stage_context(identity))
+            if not _historical_cleanup_shape(cleanup):
+                failed = True
         elif result != "ownership_uncertain" or set(value) != {"result"}:
             failed = True
     except (ScratchWireError, TypeError, ValueError):

@@ -20,6 +20,7 @@ from agentworks.execution._file_stage_protocol import (
     FileStageReconcileRequest,
     FileStageRequest,
     FileStageRequestError,
+    _historical_cleanup_shape,
     encode_file_stage_request,
     parse_empty_file_stage_body,
     parse_file_stage_begin_result,
@@ -240,6 +241,8 @@ class _FileStageCollector:
                 else self._request.cleanup_debt
             )
             return failure.cleanup_debt == expected_debt
+        if isinstance(self._request, FileStageReconcileRequest):
+            return failure.cleanup_debt is None or _historical_cleanup_shape(failure.cleanup_debt)
         return True
 
     def _fail(self, error: FileStageObservationError) -> None:

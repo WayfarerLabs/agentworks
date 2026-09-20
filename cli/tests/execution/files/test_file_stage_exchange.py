@@ -322,6 +322,60 @@ def test_complete_reconcile_can_report_ownership_uncertainty(plan: IdentityPlan)
     assert result.observation.cleanup_debt is None
 
 
+def _reconcile_refusal(
+    plan: IdentityPlan,
+    debt_change: Callable[[ScratchCleanupDebt], ScratchCleanupDebt | None],
+):
+    def refusal(request: FileStageRequest) -> bytes:
+        assert isinstance(request, FileStageReconcileRequest)
+        failure = FileStageFailureControl(
+            FileStageFailureCode.SCRATCH,
+            ScratchFailureKind.DEADLINE,
+            ScratchPhase.RECONCILE,
+            debt_change(_debt(request)),
+        )
+        return _records(request, FileRecordKind.FAILED, encode_file_stage_failure(failure))
+
+    return stage_reconcile(
+        TranscriptCarrier(refusal),
+        trusted_root_path="/trusted/root",
+        relative_path="target",
+        token=_TOKEN,
+        plan=plan,
+        deadline=Deadline.after(1),
+    )
+
+
+def test_reconcile_deadline_refusal_accepts_complete_historical_debt(plan: IdentityPlan) -> None:
+    result = _reconcile_refusal(plan, lambda debt: debt)
+
+    assert result.observation.state is FileStageObservationState.REFUSED
+    assert result.observation.failure is not None
+    assert result.observation.failure.cleanup_debt is not None
+
+
+@pytest.mark.parametrize(
+    "debt_change",
+    [
+        lambda debt: replace(debt, _parent=None),
+        lambda debt: replace(debt, _directory=None),
+        lambda debt: replace(debt, _object=None),
+        lambda debt: replace(debt, _receipt=None),
+        lambda debt: replace(debt, _receipt_modes=(_RECEIPT_BUILD_MODE, _RECEIPT_MODE)),
+    ],
+    ids=["parent", "directory", "data", "receipt", "receipt-mode"],
+)
+def test_reconcile_deadline_refusal_rejects_impossible_historical_debt(
+    plan: IdentityPlan,
+    debt_change: Callable[[ScratchCleanupDebt], ScratchCleanupDebt | None],
+) -> None:
+    result = _reconcile_refusal(plan, debt_change)
+
+    assert result.observation.state is FileStageObservationState.UNCERTAIN
+    assert result.observation.error is FileStageObservationError.CONTROL
+    assert result.observation.failure is None
+
+
 def test_reconcile_reply_from_another_request_nonce_is_uncertain(plan: IdentityPlan) -> None:
     def crossbound(request: FileStageRequest) -> bytes:
         assert isinstance(request, FileStageReconcileRequest)
