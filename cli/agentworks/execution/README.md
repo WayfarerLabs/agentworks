@@ -150,6 +150,25 @@ identity. The host validates bounded helper evidence and keeps carrier status se
 infer application success or an eager start acknowledgment. This candidate is not wired to
 production RunContext and does not yet supply staging, elevation, terminal I/O or managed lifetime.
 
+## Private terminal handoff preparation
+
+`_terminal_handoff.py` and `_terminal_guest.py` provide a Linux-only, no-staging candidate for one
+same-terminal bootstrap attempt. A nonce-bound payload-ready marker releases one bounded frame from
+the host byte source. That frame keeps literal byte argv, environment and source off helper argv.
+The guest reads it with echo and terminal input transformations disabled, installs source on a Linux
+memory descriptor separate from terminal stdin, restores the terminal, then emits a distinct
+nonce-bound interactive-ready marker. Only then does the host source end preparation and permit a
+future carrier adapter to borrow keyboard input. The paired host sink suppresses setup and readiness
+bytes, handles split and coalesced markers, and forwards only bytes after interactive readiness to
+an explicitly selected trusted presentation sink with short-write flow control.
+
+The preparation object has a single-use guard but does not dispatch or prove replay prevention by a
+carrier. Its readiness markers establish only handoff state, never application launch or exec
+evidence. Invalid ordering, truncated readiness and endpoint failures close the adapters without
+retaining payload or presentation causes. The candidate is private and is not a `TerminalInput`
+implementation or a production feature. SSH still owns native workstation PTY plumbing, terminal
+metadata, keyboard borrowing, resize, restoration and the joint acceptance proof before enablement.
+
 ## Private JSON transformation
 
 `_json.py` supplies the local, bounded transformation for file-operation composition. It preserves
