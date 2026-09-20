@@ -171,6 +171,16 @@ excluding malicious target-user process containment:
 
 <!-- cspell:ignore pwn -->
 
+On requiring a preinstalled Python 3.11 or newer, compatible with the guest helper, on SSH-accessed
+macOS platform hosts without implicit installation:
+
+> Require preinstalled Python 3
+
+On prerequisite detection and diagnostics:
+
+> Just make sure you detect when python isn't present (or is the system-default xcode shim) and
+> report that very cleanly.
+
 ### Implementation scope
 
 In scope for the eventual implementation:

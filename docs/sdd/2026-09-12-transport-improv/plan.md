@@ -110,15 +110,17 @@ The operator separately authorized up to three public feedback/fix rounds for #8
 2026-09-19 at 20:35:58 UTC, after the initial handoff's one-hour collection window and the complete
 tester report. Its batch is the checkpoint tester report, the complexity review and its subsequent
 directory-depth retraction. The agreed documentation corrections and the separate JSON work unit
-passed project, complexity and correctness review at `ac18444f`. Round closure and a new handoff
-remain pending explicit publication approval. No second round has begun.
+passed project, complexity and correctness review at `ac18444f`. The operator subsequently
+authorized publication, and those corrections plus later privately reviewed increments were pushed
+at `8fec9e07`; its hosted checks passed. Round closure and a new checkpoint handoff remain
+outstanding. No second round has begun.
 
 SSH's implementation continues in #832. Its owner agreed to transport extracting the shared bounded
 subprocess pump, while SSH retains environment sanitation, carrier-specific report interpretation,
-call-site adaptation and combined regression evidence. The shared module is proposed at
-`execution/carriers/_subprocess.py`; the extraction does not accept the separate sink/terminal
-extensions. SSH also owns correcting its incidental preparation-module `Command` import when it
-integrates the new invocation values.
+call-site adaptation and combined regression evidence. The shared module is available at
+`execution/carriers/_subprocess.py` in published head `8fec9e07`; the extraction does not accept the
+separate sink/terminal extensions. SSH also owns correcting its incidental preparation-module
+`Command` import when it integrates the new invocation values.
 
 ### Initial implementation checkpoint
 
@@ -140,9 +142,10 @@ integrates the new invocation values.
 The [operator ruling](frd.md#file-safety-and-guest-runtime-rulings) approves adding `python3` to
 early guest provisioning, with helper code compatible with Bookworm's distribution Python. The
 baseline still installs it only during Phase B; implementation and existing-VM native recovery must
-establish the earlier prerequisite. This approval does not install Python on macOS platform hosts or
-during readiness. Host adoption, file-only no-staging readiness and exact direct-launch evidence
-retain their own design and proof obligations.
+establish the earlier prerequisite. macOS platform hosts must provide preinstalled Python 3.11 or
+newer; detect missing, unsupported, or Xcode-shim interpreters and report clean actionable errors
+without implicit installation or an installation prompt. Prerequisite checks, file-only no-staging
+readiness and exact direct-launch evidence retain their own implementation and proof obligations.
 
 The same ruling bounds file safety to untrusted requests, conservative regular-file publication and
 required access metadata, without containment of malicious target-user processes. Preserve safe

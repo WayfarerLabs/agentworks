@@ -162,8 +162,9 @@ lock still needs cross-identity feasibility evidence; this source inspection doe
 `artifacts/publication.py:106-217` distinguishes whole-file publication with explicit modes from
 generated-section updates that preserve existing access metadata. The generated-section tests at
 `tests/artifacts/test_generated_sections.py:190-264` exercise ordinary extended attributes, POSIX
-access ACLs, copy refusal, and a default-ACL creation case. They are evidence about the shipped
-mechanism, not proof that every readable security attribute should survive replacement. Under the
+access ACLs, copy refusal, and replacement without newly inheriting the parent's default ACL. They
+are evidence about the shipped mechanism, not proof of absent-file creation behavior or that every
+readable security attribute should survive replacement. Under the
 [file safety ruling](frd.md#file-safety-and-guest-runtime-rulings), the successor preserves
 direct-write-equivalent owner/mode/ACL semantics for every existing regular-file replacement,
 retains inherited behavior for creation, and refuses unsupported required cases before publication.
@@ -289,9 +290,11 @@ requirement. The audit uses implementation head `ae444f53` and recommended a sta
 with an explicit early prerequisite. The later
 [guest runtime ruling](frd.md#file-safety-and-guest-runtime-rulings) approves `python3` in the
 new-guest early apt package list and requires the helper to support Bookworm's distribution Python.
-It does not approve implicit runtime installation during readiness, existing-guest recovery, or a
-macOS host prerequisite. Python removes some shell-level parsing and process-control difficulties;
-it does not establish file safety or prove that an application entered its executable.
+The subsequent host ruling requires preinstalled Python 3.11 or newer on macOS platform hosts, with
+clean missing/version/Xcode-shim diagnostics and no installation prompt. Neither ruling approves
+implicit runtime installation during readiness or settles existing-guest recovery. Python removes
+some shell-level parsing and process-control difficulties; it does not establish file safety or
+prove that an application entered its executable.
 
 ### Availability and adoption
 
@@ -309,9 +312,10 @@ Implementation paths below are relative to `cli/agentworks/`.
   replacement must not call legacy transport code to solve this dependency.
 - SSH-backed platform access is a separate adoption case. Lima's current readiness check at
   `capabilities/vm_platform/lima.py:193` checks workstation tools, not a host Python prerequisite.
-  New guest packages cannot supply the runtime for host jobs executed before guest creation.
-  Requiring an explicitly provisioned interpreter on macOS hosts needs an operator decision and its
-  own validation; readiness must not install a package manager or Python implicitly.
+  New guest packages cannot supply the runtime for host jobs executed before guest creation. The
+  subsequent ruling requires a preinstalled compatible interpreter on macOS hosts. Its detection and
+  supported host behavior still need validation; readiness must not install a package manager or
+  Python implicitly, including triggering the Xcode developer-tools installation prompt.
 - Package installation requires an available package source. An offline target lacking Python cannot
   acquire it merely because the carrier works. Installation failure must remain an explicit
   bootstrap failure, with an actionable recovery path, not an automatic canonical-route fallback.
@@ -366,11 +370,11 @@ single-reaper helper and proof on supported interpreter builds before changing t
 
 ### Decisions still required
 
-The new-guest package choice is settled, but its early availability and helper compatibility still
-need implementation evidence. Settle the bootstrap/adoption path for existing native-recovery
-targets and supported macOS platform hosts. Then prove no-staging invocation and exact result
-interpretation through the actual carriers, including launch interruption. Readiness must refuse a
-missing prerequisite rather than install Python implicitly.
+The new-guest package and preinstalled macOS host runtime choices are settled, but their
+availability, diagnostics, and helper compatibility still need implementation evidence. Settle the
+bootstrap path for existing native-recovery targets. Then prove no-staging invocation and exact
+result interpretation through the actual carriers, including launch interruption. Readiness must
+refuse a missing prerequisite rather than install Python implicitly.
 
 The [OS module documentation](https://docs.python.org/3/library/os.html) describes
 platform-dependent descriptor APIs and Linux-only extended-attribute APIs. A Python helper therefore

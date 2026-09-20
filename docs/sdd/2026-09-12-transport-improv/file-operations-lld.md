@@ -23,16 +23,19 @@ command.
 
 The implementation lives under `agentworks.execution` and must have no direct or indirect import of
 `agentworks.native_files`, its `Transport`, or another retirement package. Algorithms and tests may
-be adapted, but the new runtime does not call the legacy stack. The shipped helper's Python3
-dependency, check-then-rename conflict window, public runner, mutable staging slots, and root-only
-string allowlist are not carried forward.
+be adapted, but the new runtime does not call the legacy stack. The shipped helper's unlocked
+check-then-rename conflict window, public runner, mutable staging slots, and root-only string
+allowlist are not carried forward.
 
 The first slice needs one small file helper, invoked as a subprocess through the new `Carrier`.
 Shell built-ins do not expose the required descriptor-relative object handling. Debian guests use a
 standard-library Python helper compatible with Bookworm's distribution `python3`; new-guest early
-provisioning includes that package. Existing-guest recovery, macOS host adoption, and no-staging
-readiness still need their own prerequisite paths. In every case, the helper is a closed operation
-protocol, not a daemon, agent, remote execution escape, or general file-policy engine.
+provisioning includes that package. macOS platform hosts require preinstalled Python 3.11 or newer;
+the [preparation prerequisite check](preparation-lld.md#readiness-and-minimal-substrate) must reject
+missing, unsupported, or Xcode-shim interpreters cleanly without installation. Existing-guest
+recovery and no-staging readiness still need their own proved paths. In every case, the helper is a
+closed operation protocol, not a daemon, agent, remote execution escape, or general file-policy
+engine.
 
 Directory transfer and confined extraction remain required by R7 but are deliberately outside this
 first slice. Their absence blocks complete R7 acceptance, not delivery of the file-only vertical
@@ -167,9 +170,10 @@ Debian guest operations use a standard-library helper that supports the Bookworm
 Python 3.11. New-guest provisioning adds `python3` to the early apt package list and must prove the
 interpreter is available before helper-dependent work. This does not install Python during a file
 operation or readiness check. Existing native-recovery targets without Python need an independent
-bootstrap path. macOS placement-host use still needs an operator-approved runtime/adoption decision
-and platform proof; new guest packages do not satisfy that host prerequisite. Runtime download,
-on-target compilation, elevation retry, and a legacy-helper fallback are outside this design.
+bootstrap path. macOS placement hosts must already provide compatible Python 3.11 or newer;
+availability checks and platform proof remain open. New guest packages do not satisfy that host
+prerequisite. Runtime download, on-target compilation, elevation retry, and a legacy-helper fallback
+are outside this design.
 
 `execution/file_helper.py` owns an operation-lifetime `HelperSession`. Helper delivery reuses the
 preparation LLD's private scratch transfer: a core-selected helper is written at exact offsets into
@@ -216,8 +220,8 @@ must establish its prerequisite before entering readiness. Relocation to a stagi
 allowed only when the existing workflow contract permits it; a mandatory readiness read that cannot
 remain no-write is a delivery gate requiring operator decision. Absence never authorizes public
 execution or silent removal of a required workflow. The early-Python versus native-helper decision
-is settled for provisioned Debian guests; the already-available readiness substrate and the macOS
-host substrate remain open.
+is settled for Debian guests and macOS hosts; already-available readiness execution and the macOS
+platform mechanics remain unproved.
 
 ## Confinement and filesystem mechanics
 
@@ -403,8 +407,8 @@ The following are not established by source inspection and must remain open in t
 
 - prove early `python3` installation for new Debian guests and Bookworm Python 3.11 compatibility;
   define existing-guest native recovery when Python is absent, without implicit readiness install;
-- decide the macOS placement-host helper/runtime adoption path and prove its metadata and execution
-  behavior; new-guest provisioning does not settle that host requirement;
+- implement the preinstalled macOS Python prerequisite check, including clean missing/version/shim
+  diagnostics, and prove metadata and execution behavior; guest provisioning does not satisfy it;
 - jointly prove the carrier I/O LLD's `SinkOutput` on SSH and QGA without raw response retention;
 - reuse and prove preparation's private scratch transfer and candidate 24 KiB bound; do not add a
   file-specific deployment protocol;

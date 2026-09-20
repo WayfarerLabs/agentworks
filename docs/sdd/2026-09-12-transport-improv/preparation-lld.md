@@ -316,7 +316,8 @@ the owned scratch identity and fixed range make the write demonstrably idempoten
 application relaunch, or fallback to another carrier is forbidden. Final whole-object verification
 precedes `LAUNCHING` or execution of a delivered file-helper asset. This shared delivery mechanism
 does not establish runtime availability: the approved early guest Python prerequisite still needs
-implementation and phase-specific proof, and the macOS host adoption decision remains separate.
+implementation and phase-specific proof. macOS hosts must supply the separately approved
+preinstalled compatible interpreter.
 
 Captured stdout and stderr spool separately. Each spool keeps at most `max_bytes + 1`; helper
 readers drain the remainder so a caller retention bound does not send SIGPIPE to the workload. The
@@ -354,13 +355,20 @@ Agentworks helper are not prerequisites of that measured buffered proof. The
 [guest-runtime ruling](frd.md#file-safety-and-guest-runtime-rulings) allows early Python for the
 production design, but availability and no-staging invocation must be proved before enabling it.
 
-Darwin platform-host preparation implements the same manifest, frames, and result interpreter in a
-separate preparation substrate selected when the host target is constructed. It is not an SSH
-carrier branch. The current Linux bootstrap cannot be relabeled Darwin-compatible: the measured Bash
-floor, GNU flags, account lookup, and process-substitution waits differ. The Darwin substrate must
-either prove the installed Bash 3.2/BSD-tool mechanism or justify a pre-delivered core helper that
-itself does not create a circular bootstrap dependency. Until that proof passes, production
-platform-host scripts and managed jobs remain blocked rather than downgraded.
+Darwin platform-host preparation uses the same manifest, frames, and result interpreter with
+preinstalled Python 3.11 or newer. Interpreter selection and validation belong to shared
+preparation, not an SSH carrier branch. Detect a missing interpreter, unsupported version, and the
+system-default Xcode shim separately. Do not execute a known shim to discover whether it prompts for
+developer-tool installation. Report the host and selected path, the prerequisite failure, and the
+remedy without a traceback, implicit installation, or fallback to another identity or route. An
+execution/connection failure is not proof that Python is absent. Prove these cases on macOS,
+including absence of an installation prompt and no readiness writes; no detection algorithm is
+accepted by this paragraph.
+
+The current Linux bootstrap cannot be relabeled Darwin-compatible: account lookup and descriptor,
+metadata, and process APIs differ. The Darwin helper must prove the supported platform mechanics
+without creating a circular bootstrap dependency. Until that proof passes, production platform-host
+scripts and managed jobs remain blocked rather than downgraded.
 
 ## Public result and check behavior
 
@@ -502,12 +510,12 @@ The lead should settle these points with the named owner before assigning broade
    limits.
 6. **File-helper runtime, with file and initialization owners:** implement and prove the approved
    early guest Python prerequisite using Bookworm-compatible helper code. Reusing private transfer
-   answers delivery only. Existing-VM native recovery and macOS host adoption need their own paths;
-   the guest apt-package approval does not establish a host runtime or permit readiness
-   installation.
-7. **Darwin preparation substrate, with platform owner:** prove the installed-tool design or approve
-   the cost and bootstrap story of a shipped helper. Do not make SSH parse application frames to
-   compensate.
+   answers delivery only. Existing-VM native recovery needs its own bootstrap path; neither guest
+   nor host readiness may install a missing interpreter implicitly.
+7. **Darwin preparation substrate, with platform owner:** implement the approved preinstalled Python
+   3.11+ prerequisite, with clean missing/version/Xcode-shim diagnostics and no installation prompt.
+   Prove the host helper and no-staging readiness on macOS. Do not make SSH parse application frames
+   to compensate.
 
 The models-only first increment does not depend on these decisions and does not authorize public
 exports, RunContext accessors, production consumers, grants, file catalog enforcement, or carrier
