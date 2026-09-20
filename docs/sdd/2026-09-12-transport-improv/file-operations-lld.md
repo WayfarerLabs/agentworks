@@ -203,10 +203,13 @@ invocation verifies its bound identity before accessing workload paths.
 
 Data staging and snapshot spools still reuse preparation's exact-offset, length/digest-verified
 scratch mechanics. The shared 24 KiB raw chunk is a candidate pending complete SSH/QGA request
-proof, not a file-layer constant. Close removes only recorded objects; uncertain cleanup is owner
-debt and never hides the primary outcome. A prerequisite probe must establish interpreter, OS/CPU
-and required features without installing anything; no separately installed helper version or
-executable-digest handshake is needed when the executable source travels with each invocation.
+proof, not a file-layer constant. The private stage exchange uses a smaller 12 KiB raw chunk and a
+32 KiB complete-manifest limit. Its fixed bundle and complete provider serialization are measured by
+local fixtures; native acceptance and every supported connection/identity prefix remain separate
+proof obligations. Close removes only recorded objects; uncertain cleanup is owner debt and never
+hides the primary outcome. A prerequisite probe must establish interpreter, OS/CPU and required
+features without installing anything; no separately installed helper version or executable-digest
+handshake is needed when the executable source travels with each invocation.
 
 Upload consumes its declared finite source once. The unverified scratch reference binds exact object
 identity and expected length, not a whole-file digest that a streaming source cannot yet supply.
@@ -292,6 +295,14 @@ The framing codec is shared between concrete file exchanges; their request schem
 grammars remain operation-specific. Unknown, duplicate, non-canonical or extra fields refuse. Strict
 field/line/decoded/total bounds must fit the complete carrier request. No request value becomes argv
 or shell source; fixed preparation bootstrap source cannot be reused for file operations.
+
+The private Linux `stage_begin` and `stage_chunk` exchanges now implement that delivery shape under
+the existing transaction lock. Every request retains the nonempty original destination path; the
+guest derives its parent after checking execution identity. A complete creation result must match
+the requested length before the host exposes its reference. Cleanup debt is data bound to the
+original token/context, not a returned name or path. Missing private parents refuse. Incomplete
+observation after possible dispatch remains uncertain; no replay or public absence is inferred.
+These exchanges alone do not implement remote cleanup/reconciliation or complete upload/publication.
 
 Ordinary buffered capture cannot safely carry this protocol: sensitive input suppresses the
 response, while ordinary `Capture` can flow toward public execution results. Use the implemented

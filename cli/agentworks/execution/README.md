@@ -477,3 +477,28 @@ This primitive does not implement remote request validation, a wire protocol, he
 execution staging or FileAccess. Filesystem calls have no hard interruption bound, and no crash
 durability or hostile same-user race guarantee is made. Local Linux fixtures are not native macOS or
 carrier acceptance.
+
+## Private file staging exchanges
+
+`_file_stage_exchange.py` delivers one stage creation or exact-offset chunk through a fixed Linux
+helper. Each request carries the original trusted root and nonempty destination path; the guest
+derives the scratch parent rather than accepting a path from a receipt. It checks execution identity
+before opening workload paths and holds the existing transaction lock through mutation. Missing or
+unsafe lock/parent state refuses without setup or repair.
+
+Tokens, paths, file bytes and references travel only through sensitive stdin. A stage-specific
+collector accepts an active reference or known cleanup debt only after complete nonce-bound framing
+and complete delivered streams. A creation result must match the declared length. Lost, malformed or
+noisy observation after possible dispatch is uncertain and never triggers replay. A chunk failure
+does not publish content; the caller retains its original reference for later exact cleanup.
+
+The private stage chunk cap is 12 KiB, below the scratch primitive's 24 KiB range cap. The complete
+manifest is limited to 32 KiB, and Proxmox independently enforces its full serialized body limit.
+Local tests exercise the actual request serializer, a fake provider executing the real helper, and
+Windows SSH command-line sizing for explicit fixtures. Those measurements do not establish native
+platform acceptance or fit for every connection/identity prefix.
+
+These entries are not complete upload or FileAccess operations. Remote reconciliation, exact cleanup
+delivery, snapshot retrieval and publication composition remain unfinished. The caller must retain
+the token, original binding and known references; an unavailable creation reply does not establish
+absence or quiescence.
