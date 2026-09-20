@@ -230,6 +230,25 @@ dispatch, and the local receipt binds the copy to the snapshot operation. Remote
 delivery and lost-reply reconciliation through a carrier remain unimplemented; local copying and
 receipt recovery alone do not prove them.
 
+Snapshot storage is independent of source authority. Download must work when the selected identity
+can read the approved source but cannot write its parent. The Linux candidate uses the existing
+fixed `/tmp` directory as a core-selected scratch parent, opened without symlinks and validated as a
+root-owned directory with mode 01777. It does not trust `TMPDIR`, application environment, the
+source path, an account-home convention or a caller-selected staging path. Missing or unsafe state
+refuses; runtime neither creates nor repairs the parent. This selection is private helper machinery,
+not a grant to read or write arbitrary `/tmp` children.
+
+The existing token-derived 0700 directory, 0600 data and immutable receipt own each operation's
+objects. Linux [sticky-parent semantics](https://man7.org/linux/man-pages/man2/rename.2.html)
+prevent other unprivileged users from renaming/removing those directories; malicious same-user
+processes remain outside the threat model. Exact parent/object identities and receipt validation
+still apply, and temporary-file cleanup or reboot can invalidate an observation without proving
+completion. The shared lock namespace supplies serialization only, not a target-user-writable
+storage directory. Root selection creates no object and is not part of readiness. The next local
+proof must cover a read-only source parent, unsafe/missing scratch roots, deadline and descriptor
+cleanup, and independence from payload environment. This Linux choice does not select the macOS host
+root or satisfy its filesystem proof gates.
+
 The first creation acknowledgment remains a transfer-delivery gate. The helper derives the scratch
 name from core's fresh token and records its inode identities before returning them; losing that
 reply leaves the host without an exact cleanup reference until read-only reconciliation establishes

@@ -314,6 +314,37 @@ escaping, needs the same native whole-request proof as the manifest. The current
 counts only `input-data`, not fixed helper argv or the complete request. Neither extraction nor
 embedding resolves the separately recorded launch-interruption or application-entry gates.
 
+### Default-deny local launch ownership
+
+The selected implementation candidate gives one private owner construction and exact cleanup
+responsibility without changing process-global signal handling. A raw standard-library thread starts
+with only a small admission cell. Before the caller observes successful startup, it cannot receive
+command data, environment, cwd, inherited descriptors or borrowed streams. An interrupted or
+ambiguous startup terminally cancels admission and never retries. Such an inert bootstrap may finish
+later without performing operation work.
+
+After successful startup, the caller may publish one immutable launch request within its cleanup
+guard. The owner retains the actual child through construction, status observation and final
+cleanup, including the interval before PID/readiness publication. Caller-side pumping preserves the
+existing byte-endpoint semantics. Before requesting final cleanup, the caller stops using the
+internal pipes; it propagates its first control-flow exception only after the owner has completed
+cleanup or reported the existing explicit incomplete-cleanup outcome. Repeated interrupts do not
+release ownership or dispatch again. Prepared source descriptors remain caller-owned and close in an
+outer `finally` after the carrier/helper has relinquished them.
+
+The terminal observation proves the owner has relinquished operation resources, not that the native
+thread has finished its final return instructions. No background pump or task may touch a borrowed
+endpoint after return. The control protocol needs justified synchronization and bounded storage, not
+an executor, transfer registry or an assumption that arbitrary blocking callbacks can be canceled.
+Raw-thread exceptions must not leak request data through the interpreter's default exception hook.
+Preserve existing exact wait evidence, cleanup-induced exit distinctions and external-reaper
+uncertainty; thread ownership is not descendant containment or remote cancellation.
+
+The [local admission experiment](prior-art-research.md#local-process-startup-and-interruption) is
+bounded Linux evidence. Native Windows/macOS behavior, interpreter shutdown, repeated startup
+cancellation and the final bundled-helper size remain implementation gates. The existing OS
+process-creation caveat still applies; no new hard real-time bound is promised.
+
 ### Inline Python implementation slice
 
 The next private implementation composes the shared process core with one fixed Linux helper and the

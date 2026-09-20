@@ -677,11 +677,35 @@ Real SIGINT reproduced the post-creation state on both tested interpreters. Retr
 can duplicate owners and is not a repair. An earlier version also misread event/liveness
 synchronization interrupted during cleanup as completion.
 
-The existing exclusion of hard real-time process-creation guarantees does not excuse lost ownership,
-leave-behind threads or changes to callback threading. Neither this per-call thread nor a generic
-future cancellation is a selected production mechanism. An application-owned interruption policy or
-a separately established launch owner requires an explicit architecture decision; the carrier must
-not install a process-global signal policy as an incidental implementation detail.
+The shared contract requires no surviving pump or task using borrowed endpoints, not literal
+termination of every inert native thread. The stronger zero-thread statement belongs to the current
+process-core implementation, not the FRD. Neither a generic future cancellation nor a process-global
+signal policy is selected as an incidental carrier mechanism.
+
+A further local prototype used the public
+[`_thread.start_new_thread`](https://docs.python.org/3.11/library/_thread.html#_thread.start_new_thread)
+primitive with default-deny admission. The bootstrap initially receives only a small control cell,
+not command data, prepared descriptors or borrowed endpoints. Work is admitted only after startup
+returns inside the caller's cleanup guard. An ambiguous interrupted start irreversibly cancels that
+cell; a delayed bootstrap can then only exit. After admission, the owner retains construction and
+exact cleanup responsibility even before publishing the PID. The caller continues pumping its
+borrowed endpoints and waits for all admitted work to relinquish resources before returning.
+
+Eight complete local suites passed on each of Linux arm64 CPython 3.11.2 and 3.12.13. Injected
+pre-start and real post-native-start interruptions dispatched no work. Admitted interruptions before
+PID/ready publication, during pumping and repeatedly during cleanup exact-waited one child without
+replay. Prepared source and pipe descriptor counts returned from four to four; endpoint probes ran
+only on the caller thread. Fixtures independently cleaned their children and temporary artifacts.
+
+This is the selected bounded implementation candidate, not production or native-platform acceptance.
+Python 3.11 exposes no public raw-thread join handle: a canceled bootstrap or a final native return
+tail may finish later, but it must retain no launch request, process work or borrowed endpoint. The
+implementation must replace the incidental zero-thread statement with that precise lifetime promise,
+justify its synchronization rather than infer a portable Python memory model from the prototype, and
+contain raw-thread exceptions instead of leaking them through `sys.unraisablehook`. Repeated
+cancellations, interpreter shutdown and native Windows/macOS behavior remain proof gates. An OS
+process-creation call that does not return still has no hard interruption bound. No caller signal
+handler, public carrier signature or MANAGED lifecycle guarantee changes.
 
 ## Native adapter audit, 2026-09-19
 
