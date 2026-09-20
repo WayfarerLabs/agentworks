@@ -348,6 +348,9 @@ def run_owned_process(
     output: ProcessOutput,
     deadline: Deadline,
     env: Mapping[str, str] | None = None,
+    cwd: str | None = None,
+    pass_fds: tuple[int, ...] = (),
+    start_new_session: bool = False,
 ) -> ProcessResult:
     """Fairly pump bounded input and output without retaining borrowed endpoints."""
     stdout = _Output(output.capture_limit, output.stdout_sink)
@@ -362,6 +365,12 @@ def run_owned_process(
             stderr=subprocess.PIPE,
             bufsize=0,
             env=env,
+            cwd=cwd,
+            pass_fds=pass_fds,
+            start_new_session=start_new_session,
+            shell=False,
+            close_fds=True,
+            preexec_fn=None,
         )
     except (OSError, ValueError):
         return ProcessResult(False, None, None, stdout.report(), stderr.report(), ProcessFailure.DISPATCH)
