@@ -563,6 +563,22 @@ resource. A lock row alone is not a remote fencing mechanism. Never replay uncer
 discover whether it happened. Recovery needs an explicit handoff of the same operation, not an
 unconditional delete-and-reacquire or a second overlapping recovery attempt.
 
+The initial database primitive stores one claim per core-selected resource kind/name, with a fresh
+operation ID, bounded operation label and one of three states: reserved before possible dispatch,
+possible dispatch, or effects resolved. The caller commits possible dispatch before sending remote
+mutation; interruption then leaves that state intact. Only a reserved claim can be abandoned without
+remote evidence. Core records effects resolved only after obtaining no-further-effects evidence,
+then explicitly releases that exact claim. Every transition matches the resource, operation ID and
+previous state so a stale owner cannot alter a later claim. The ID is ownership identity, not a
+secret or an authentication boundary. Database inspection does not itself establish target state.
+
+These transitions must commit independently of any enclosing command transaction. A reservation
+rolled back after remote dispatch would lose the very ownership it needs to retain. Restoring or
+copying a database likewise does not prove target quiescence; recovery must account for remote work
+that the selected database snapshot does not describe before treating it as authoritative for new
+conflicting operations. Do not add lease clocks, automatic stale-owner deletion or a distributed
+coordination service to this primitive.
+
 The file composition serializes conflicting exchanges inside one operation too, including cleanup.
 Holding the outer operation scope does not license parallel writes to the same destination. JSON
 snapshot, merge and publication share the operation's ownership; regular publication rechecks its
