@@ -17,7 +17,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import Enum
 
-from agentworks.execution._file_paths import (
+from ._file_paths import (
     ConfinedOpenError,
     ConfinedOpenFailure,
     open_linux_confined,
