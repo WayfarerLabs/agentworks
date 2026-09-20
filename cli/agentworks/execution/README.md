@@ -51,7 +51,7 @@ ambient proxies are disabled, and provider exception text is not returned.
 `_process.py` supplies the standard-library-only process pump for workstation use and destination
 helper composition. `carriers/_subprocess.py` maps carrier input, retention and result policy around
 that core without changing its call signature. The core is compatible with Python 3.11 on POSIX;
-nonblocking Windows pipes require Python 3.12 or newer. Sharing this code does not itself implement
+non-blocking Windows pipes require Python 3.12 or newer. Sharing this code does not itself implement
 guest delivery, framing or workload supervision.
 
 The pump supports finite or explicitly enabled live input, separate bounded outputs, explicit
