@@ -203,14 +203,24 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       expiry while locked, then unlocks before emitting bytes. Private review at `2ad918bc` is
       clean; removing the final expiry check makes the absence and snapshot tests fail. Native
       acceptance and production FileAccess remain separate gates.
-- [ ] Compose the remaining inventory, metadata and publication exchanges. Preserve exact-leaf
+- [x] Deliver private locked inventory and metadata/ensure-directory exchanges. Validate complete
+      inventory framing and bounded entries, preserve metadata partial/uncertain effects, and keep
+      identity checks before lock and target access. All three private lanes are clean at
+      `fef0045d`; the combined file/scratch selection passes 604 tests. Native acceptance and public
+      FileAccess remain separate gates.
+- [ ] Compose the remaining publication and streaming-transfer exchanges. Preserve exact-leaf
       requests for approved-root operations through core-owned parent decomposition, without
       granting parent/sibling authority. Bind those operations in the complete FileAccess surface
       before the additive RunContext gate, not as a forwarding layer over legacy files.
-- [ ] Separate unverified scratch identity/length from final digest verification, permitting
-      one-pass upload without rewinding the source or using a whole-file host buffer. Add streaming
-      from one held source inode into a private snapshot, including source-change refusal, deadline
-      checks and exact cleanup evidence, before wiring snapshot/chunk/publication exchanges.
+- [x] Separate unverified scratch identity/length from final digest verification, permitting
+      one-pass upload without rewinding the source or using a whole-file host buffer. Add
+      cooperative acquisition/transfer expiry checks while retaining bounded exact cleanup after
+      expiry. Private review at `fef0045d` is clean; mutation tests prove final digest verification
+      and cleanup-only normalization remain necessary. This is a local primitive, not transfer
+      delivery.
+- [ ] Add streaming from one held source inode into a private snapshot, including source-change
+      refusal, deadline checks and exact cleanup evidence, before wiring snapshot/chunk/publication
+      exchanges.
 - [ ] Settle and fault-test cleanup ownership when the first scratch/snapshot creation reply or
       publication-stage cleanup-debt reply is lost. Missing identity is not absence; do not recover
       by replaying creation or scanning a prefix. Prove the bounded immutable ownership-receipt
@@ -563,6 +573,36 @@ isolation, rulesync, locked-SDD and diff checks pass. Generated test/build outpu
 live infrastructure was touched. Hosted checks pass at the preceding published `6edbd94c` in
 [run 35511446645](https://github.com/WayfarerLabs/agentworks/actions/runs/35511446645); the new
 progress publication still needs its own hosted confirmation.
+
+The inventory/metadata exchanges and scratch-finalization increment are privately reviewed at
+`fef0045d`. Inventory returns entries only after complete framing, length, digest, schema and
+carrier-stream checks. Metadata and directory convergence preserve known partial versus uncertain
+effects without replay. All four file guests share one concrete record writer. Review corrected
+missing response-key handling and made compatibility cases select Python 3.11 explicitly.
+
+Scratch creation now binds identity and length without requiring the final digest in advance;
+verification establishes the ready reference. Cooperative expiry stops further acquisition and
+transfer while retaining exact cleanup. An independent reproduction found that a slow successful
+directory creation could otherwise be followed by data creation after expiry. The correction
+prevents that new object, preserving only identity capture and mode normalization necessary for
+cleanup. Mutation experiments establish the need for both final digest verification and that cleanup
+normalization.
+
+All three private lanes are clean at `fef0045d`. The final full local suite passes 11,595 tests with
+12 skips; the file/scratch selection passes 604. Ruff, formatting and CI-scoped mypy (978 sources)
+pass. File lint, typer isolation, rulesync, locked-SDD and diff checks pass. Unchanged website code
+passes 160 Python and 103 Node tests and both deterministic build comparisons. A prior full run at
+`14fb93b3` emitted multiprocessing resource-tracker warnings from a database test; the final run did
+not, and no shared-memory files remained when checked. Owned test/build output was removed. No live
+infrastructure was touched.
+
+The bounded immutable ownership-receipt candidate has independent project and complexity review, not
+implementation acceptance. Lost replies, late requests and partial receipt cleanup remain explicit
+proof gates. Streaming source-to-scratch snapshots are now assigned for implementation;
+transfer/publication exchanges, full FileAccess, lifecycle, native acceptance and additive
+RunContext remain required. Shared SSH types are unchanged. Both macOS operator decisions remain
+pending. This increment consumes no public feedback/fix round. Hosted checks passed at prior
+published `63022be8`; fresh confirmation remains required after the next progress push.
 
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:

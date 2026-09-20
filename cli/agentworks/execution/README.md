@@ -435,12 +435,13 @@ limit is an internal candidate, not evidence that a complete encoded carrier req
 
 Cleanup removes only the recorded data object and empty directory, never unknown neighboring objects
 or a recursive prefix match. Errors retain closed facts and unresolved identity-bound cleanup debt.
-Begin, chunk writes, verification and range reads check caller expiry between filesystem calls and
-before reporting success. Publication preserves scratch deadline failures. Expiry does not prevent
-the bounded exact cleanup attempt; failed cleanup remains explicit debt. Creation preserves known
-acquisition facts through handled control-flow interruption; an unresolved debt is attached as a
-closed error cause while the original control exception propagates. Python ownership bookkeeping is
-not signal-atomic and repeated interruption is not a bounded cleanup guarantee.
+Begin, chunk writes, verification and range reads check caller expiry at acquisition, transfer and
+final-evidence checkpoints. Publication preserves scratch deadline failures. Expiry stops further
+acquisition, but permits identity capture and mode normalization needed for bounded exact cleanup;
+failed cleanup remains explicit debt. Creation preserves known acquisition facts through handled
+control-flow interruption; an unresolved debt is attached as a closed error cause while the original
+control exception propagates. Python ownership bookkeeping is not signal-atomic and repeated
+interruption is not a bounded cleanup guarantee.
 
 This primitive does not implement remote request validation, a wire protocol, helper deployment,
 execution staging or FileAccess. Filesystem calls have no hard interruption bound, and no crash
