@@ -113,6 +113,7 @@ def main(nonce: str) -> int:
         return _finish_failure(writer, FileReadFailure.IDENTITY_MISMATCH)
     try:
         expires_at = _expires_at(request.remaining_seconds)
+        _raise_if_expired(expires_at)
         snapshot = _snapshot(request, expires_at)
         _raise_if_expired(expires_at)
     except _SafeFailure as error:

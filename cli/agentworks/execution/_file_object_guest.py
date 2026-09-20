@@ -141,6 +141,14 @@ def main(nonce: str) -> int:
     if not matches_current_identity(request.identity):
         return _finish_failure(writer, FileObjectFailureControl(FileObjectFailureCode.IDENTITY_MISMATCH))
     expires_at = None if request.remaining_seconds is None else time.monotonic() + request.remaining_seconds
+    if expires_at is not None and time.monotonic() >= expires_at:
+        phase = FileObjectPhase.CONDITION
+        if request.operation is FileObjectOperation.STAT:
+            phase = FileObjectPhase.OBSERVATION
+        return _finish_failure(
+            writer,
+            FileObjectFailureControl(FileObjectFailureCode.OBJECT, FileObjectFailureKind.DEADLINE, phase),
+        )
     try:
         result = _operate(request, expires_at)
     except _SafeFailure as error:

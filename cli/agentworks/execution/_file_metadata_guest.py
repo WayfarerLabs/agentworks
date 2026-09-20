@@ -7,7 +7,14 @@ import sys
 import time
 from contextlib import suppress
 
-from ._file_metadata import MetadataError, MetadataResult, ensure_directory, set_metadata
+from ._file_metadata import (
+    MetadataError,
+    MetadataFailureKind,
+    MetadataPhase,
+    MetadataResult,
+    ensure_directory,
+    set_metadata,
+)
 from ._file_metadata_protocol import (
     MAX_REQUEST_BYTES,
     FileMetadataFailureCode,
@@ -127,6 +134,15 @@ def main(nonce: str) -> int:
     if not matches_current_identity(request.identity):
         return _finish_failure(writer, FileMetadataFailureControl(FileMetadataFailureCode.IDENTITY_MISMATCH))
     expires_at = None if request.remaining_seconds is None else time.monotonic() + request.remaining_seconds
+    if expires_at is not None and time.monotonic() >= expires_at:
+        return _finish_failure(
+            writer,
+            FileMetadataFailureControl(
+                FileMetadataFailureCode.METADATA,
+                MetadataFailureKind.DEADLINE,
+                MetadataPhase.OBSERVATION,
+            ),
+        )
     failure: FileMetadataFailureControl | None = None
     result: FileMetadataResultControl | None = None
     try:

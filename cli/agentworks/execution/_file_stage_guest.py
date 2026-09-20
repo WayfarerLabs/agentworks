@@ -203,6 +203,8 @@ def main(nonce: str) -> int:
     if not matches_current_identity(request.identity):
         return _finish_failure(writer, FileStageFailureControl(FileStageFailureCode.IDENTITY_MISMATCH))
     expires_at = _expires_at(request.remaining_seconds)
+    if _expired(expires_at):
+        return _finish_failure(writer, FileStageFailureControl(FileStageFailureCode.DEADLINE))
     failure: FileStageFailureControl | None = None
     result: _OperationResult = None
     try:
