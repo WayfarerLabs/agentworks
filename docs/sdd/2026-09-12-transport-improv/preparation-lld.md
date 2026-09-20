@@ -103,19 +103,32 @@ application-start claim. Literal commands receive no application shell and execu
 An execution target binds a workload account and a carrier delivery account. Neither is caller
 selectable. Preparation chooses one of three private identity plans:
 
-| Delivery and request                | Private plan                                                                                       |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Delivery already uses workload user | Enter the trusted bootstrap directly and verify the expected UID and primary/supplementary groups. |
-| Workload user requests granted root | Enter through fixed `sudo -n --` bootstrap argv, then verify UID 0 before reading payload fields.  |
-| Provider delivery starts as root    | Resolve the bound account and enter it with a fixed demotion helper, then verify its UID/groups.   |
+| Delivery and request                | Private plan                                                                                                 |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Delivery already uses workload user | Enter the trusted bootstrap directly and verify the expected UID and primary/supplementary groups.           |
+| Workload user requests granted root | Enter through fixed `sudo -n --user=#0 --` bootstrap argv, then verify root identity before workload access. |
+| Provider delivery starts as root    | Resolve the bound account and enter it with a fixed demotion helper, then verify its UID/groups.             |
 
 <!-- cspell:ignore setpriv -->
 
 The demotion candidate on Debian is `/usr/bin/setpriv` with an exact resolved UID, primary GID,
-initialized supplementary groups, and a reset helper environment. The account name and expected
-identity are trusted target data, never public request fields. If `setpriv` availability or group
+explicit supplementary groups, and cleared inheritable/ambient capabilities. A fixed `env -i`
+launcher establishes the helper environment after the transition. It does not ask `setpriv` to
+derive a shell or environment from the account. The account name and expected identity are trusted
+target data, never public request fields. Numeric identity metadata may appear in the fixed wrapper
+argv; workload source, paths, environment and stdin may not. If `setpriv` availability or group
 behavior cannot be established on every bootstrap image, the implementation must select and prove a
 different shared launcher before QGA demotion is enabled. It may not leave an ordinary call as root.
+
+One private identity plan binds the transition and expected UID/GID/groups for both execution and
+file helpers. The manifest carries the expectation, not a request to select privileges. A root-sudo
+plan requires a root expectation, and a demotion plan requires a non-root expectation; invalid
+combinations refuse before delivery. The destination verifies identity before accessing workload
+paths or launching the application, including Linux real, effective and saved IDs and normalized
+group membership. Delivery selection does not infer a fallback or grant permission. Capability
+bounding-set restrictions and `no_new_privs` belong to the independently selected protection
+profile, not ordinary account selection. This candidate still requires actual root-demotion, sudo
+and native-platform proof before production use.
 
 The sudo wrapper consumes the same manifest from stdin after privilege change. Source, input, and
 environment never appear in sudo argv or environment assignments. A failure before the inner

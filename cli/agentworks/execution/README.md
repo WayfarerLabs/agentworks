@@ -131,12 +131,29 @@ work; it is not the eventual public script/file transfer contract.
 
 The carrier does not demote QGA's root identity or grant permission to use it. Only an explicitly
 authorized proof composition may construct it. Shared identity/elevation binding, permission-scoped
-access, complete platform coverage and production integration are not implemented here.
+access, complete platform coverage and production integration remain incomplete; the private helper
+plans below do not enable production use.
 
 Run the local evidence from `cli/` with `uv run pytest tests/execution`. The reusable vectors in
 `tests.execution.conformance` require an explicitly supplied carrier. Their local process oracle
 does not establish SSH or live Proxmox compatibility. The native carrier is isolated from the plugin
 registry because importing that registry currently loads legacy execution modules.
+
+## Private helper identity plans
+
+Buffered inline execution and file reads take one `IdentityPlan`, binding the expected account to an
+explicit transition. `DIRECT` uses the delivery identity, `SUDO_ROOT` selects UID 0 through
+non-interactive sudo, and `DEMOTE` uses fixed `setpriv` arguments for a non-root UID, primary GID
+and normalized groups. Demotion clears inheritable/ambient capabilities, not the bounding set or
+permission to gain privileges later. Protection profiles are separate. Invalid plan combinations
+refuse before payload preparation; a failed wrapper never triggers fallback or replay.
+
+The fixed launcher gives Python a minimal environment. Trusted numeric identity metadata may appear
+in wrapper argv; workload source, paths, environment and input remain in stdin. Linux helpers verify
+real/effective/saved IDs and normalized groups before workload access. Unsupported destination
+runtimes refuse with closed evidence. The host import remains workstation-neutral. Account
+resolution, actual sudo/root-demotion acceptance and native integration remain open; these private
+plans are not grants and do not activate permissions.
 
 ## Private inline preparation
 
@@ -149,22 +166,23 @@ environment, working directory and finite stdin travel in the bounded stdin mani
 argv. On Linux, scripts use an inherited memory file separately from application stdin. The caller
 must bind the expected destination identity. The host validates bounded helper evidence and keeps
 carrier status separate; it does not infer application success or an eager start acknowledgment.
-This candidate is not wired to production RunContext and does not yet supply staging, elevation,
-terminal I/O or managed lifetime.
+This candidate is not wired to production RunContext and does not yet supply staging, terminal I/O
+or managed lifetime.
 
 ## Private inline file reads
 
-`_file_read.py` composes a bounded, same-identity Linux file read through one carrier attempt. The
+`_file_read.py` composes a bounded, identity-bound Linux file read through one carrier attempt. The
 core selects a trusted root and relative path; the helper checks the expected UID, GID and groups
 before opening the target. Absolute root traversal refuses links, and the existing snapshot reader
 also refuses descendant mount crossings and unsupported objects. Missing roots or files produce an
 absent observation, not an I/O success with empty bytes.
 
-Paths and other request values travel only in sensitive stdin. A file-specific collector validates
-the complete nonce-bound response, length, digest and metadata before releasing bytes. Noise,
-reflection, truncation or invalid records cannot become a successful read, and carrier completion is
-reported separately. Helper code uses the fixed module packager; it creates no guest files, spool or
-lock. The destination needs compatible Python 3.11 or newer with zlib already available.
+Workload paths and request payload travel only in sensitive stdin. A file-specific collector
+validates the complete nonce-bound response, length, digest and metadata before releasing bytes.
+Noise, reflection, truncation or invalid records cannot become a successful read, and carrier
+completion is reported separately. Helper code uses the fixed module packager; it creates no guest
+files, spool or lock. The destination needs compatible Python 3.11 or newer with zlib already
+available.
 
 An exceptional exit clears collector-owned response state and the reader's partial record before
 propagating the exception. This is not secure erasure of Python memory or traceback locals; callers
@@ -172,8 +190,8 @@ must not render private frame locals. Snapshot bytes and metadata remain hidden 
 representations.
 
 This is not production FileAccess or native platform acceptance. It does not provide stat-only
-observations, mutation, elevation, transaction locking, macOS support or a hard elapsed-time bound
-for filesystem reads. It assumes a cooperative execution identity, not hostile same-user isolation.
+observations, mutation, transaction locking, macOS support or a hard elapsed-time bound for
+filesystem reads. It assumes a cooperative execution identity, not hostile same-user isolation.
 
 ## Private terminal handoff preparation
 

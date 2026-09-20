@@ -5,6 +5,48 @@
 
 ## Findings
 
+### Explicit Linux helper identity transitions
+
+<!-- cspell:ignore setpriv -->
+
+Bookworm's util-linux 2.38.1 provides non-PAM, non-setuid `setpriv`, including numeric
+real/effective IDs, explicit supplementary groups and inheritable/ambient capability controls. Its
+documented failure behavior does not execute the requested program when a selected option cannot be
+applied. The helper candidate uses these controls before a fixed minimal environment and Python
+bootstrap; it does not use account-derived shell/environment defaults. The helper then checks the
+expected identity before workload access. Non-interactive sudo remains a separate selected
+root-entry plan. Neither raw wrapper status nor stderr establishes application execution or a
+precise refusal phase.
+
+Decision: prove this existing Debian launcher for shared execution and files instead of adding
+privilege-changing Python syscalls. Keep protection-profile controls separate from account
+selection. Bookworm documentation establishes the option floor, not deployment on every supported
+image or live native acceptance.
+
+Source:
+[Bookworm setpriv manual](https://manpages.debian.org/bookworm/util-linux/setpriv.1.en.html).
+
+The implementation sets saved IDs to the requested effective IDs as well as setting real IDs. The
+shared helper check can therefore require equal real/effective/saved identity. With a nonzero target
+UID, empty inheritable/ambient sets and ordinary unprivileged `env`/Python executables, exec removes
+active capabilities. The unchanged bounding set still permits later privilege gains through
+privileged executables; this is account selection, not containment. Numeric group lists replace
+supplementary groups, and the helper compares normalized membership including the primary GID. Sudo
+policy deviations from the expected full identity must refuse before workload access.
+
+Sources:
+[Bookworm setpriv source](https://sources.debian.org/src/util-linux/2.38.1-5%2Bdeb12u3/sys-utils/setpriv.c/),
+[capability exec rules](https://manpages.debian.org/bookworm/manpages/capabilities.7.en.html),
+[Bookworm sudo manual](https://manpages.debian.org/bookworm/sudo/sudo.8.en.html).
+
+Debian marks util-linux Essential and lists `/usr/bin/setpriv` in the Bookworm package. The current
+provisioning lists rely on that base-image property rather than explicitly installing the package.
+Standard-package presence does not prove a stripped image supplies the fixed executable; retain
+native image/runtime validation.
+
+Sources: [Bookworm package](https://packages.debian.org/bookworm/util-linux),
+[amd64 file list](https://packages.debian.org/bookworm/amd64/util-linux/filelist).
+
 ### Shared preparation above delivery
 
 PyInfra's connector documentation separates command preparation from connector execution. Its
