@@ -390,6 +390,14 @@ confirmed partial changes and uncertain attempts, retaining closed completed-ste
 owns path validation, the trusted parent and the transaction lock. These private functions provide
 neither a public file service nor native or elevated acceptance.
 
+`_file_metadata_exchange.py` delivers `set_file_metadata` and `ensure_file_directory` through one
+sensitive finite-input carrier attempt. The fixed helper verifies execution identity before taking
+the system transaction lock, confines the parent and leaf, and emits its result after releasing
+the lock. Numeric metadata ownership is separate from execution identity. Missing parents refuse;
+directory creation does not create intermediate components. Complete failure records preserve
+known changes and uncertain attempts; lost observation after possible dispatch remains uncertain
+and never triggers replay. A control interruption carries a closed mutation-uncertainty marker.
+
 ## Private directory inventory
 
 `_file_inventory.py` reads a bounded Linux directory inventory beneath a borrowed trusted root and
@@ -401,8 +409,14 @@ is observed but its children are not enumerated.
 Results are sorted by relative UTF-8 path bytes. Entry, name and encoded-output limits fail rather
 than returning a truncated result. The shared encoder defines the exact compact JSON byte count,
 including framing. Disappearance or observed replacement conflicts. The result is a bounded set of
-observations, not a coherent snapshot against external writers. Carrier delivery and public
-`FileAccess` composition are not implemented by this private primitive.
+observations, not a coherent snapshot against external writers.
+
+`_file_inventory_exchange.py` delivers one `list_directory` request using sensitive finite input and
+delivered-output sinks. Its fixed helper checks identity before acquiring the system lock, encodes
+the bounded inventory while locked, and releases the lock before emitting frames. Missing targets
+remain distinct from empty directories. The host returns entries only after verifying complete
+framing, byte length, digest, entry schema and both carrier streams. Neither exchange implements
+public `FileAccess` composition or establishes native platform acceptance.
 
 ## Private scratch transfer
 
