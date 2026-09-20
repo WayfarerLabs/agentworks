@@ -64,6 +64,13 @@ def test_exact_pid_native_wait_covers_every_exit_without_eager_entry_claim(inter
     assert observations == [["exit", code] for code in range(256)]
 
 
+def test_public_launch_controls_select_native_fork_exec_and_create_session(interpreter: Path) -> None:
+    routes, session_check = _run("public-launch", interpreter)
+
+    assert routes == ["fork-exec"]
+    assert session_check == ["exit", 0]
+
+
 def test_native_error_channel_rejects_launch_failures(interpreter: Path) -> None:
     (missing, non_executable, bad_cwd), no_children = _run("launch-failures", interpreter)
 
