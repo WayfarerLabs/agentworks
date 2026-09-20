@@ -8,7 +8,7 @@
 
 ## Preparation must remain deliverable
 
-The current buffered `execution/preparation.py:149-155` places the invocation envelope in finite
+The current buffered `execution/preparation.py:113-118` places the invocation envelope in finite
 carrier stdin. It contains arguments, environment, script source and application input. Replacing
 that input with a borrowed terminal would discard the envelope. Sending it unmodified through an
 echoing remote PTY could expose sensitive bytes and change their interpretation. This is a source
