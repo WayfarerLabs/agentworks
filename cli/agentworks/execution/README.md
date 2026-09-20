@@ -281,6 +281,14 @@ bounded-memory content digest. Linux metadata-only observation uses a path-only 
 not require file-read authority. `FileSnapshot.revision` carries the content-bound observation; its
 `stat` and `digest` properties expose those same values without duplicating them.
 
+`_file_spool.py` copies one held regular source into private scratch in bounded chunks, returning a
+verified ready reference and the source's content-bound revision. It checks source length, EOF,
+digest and held/named metadata before returning; later chunk reads use the private copy rather than
+the public source. The caller owns the cooperating-writer lock and both parent descriptors. Expiry
+is checked after source descriptors close, including initial absence. Failure attempts exact scratch
+cleanup and preserves unresolved cleanup debt. This local primitive does not deliver a remote
+download or reconcile a lost creation reply.
+
 ## Private file publication
 
 `_file_publication.py` supplies Linux same-directory publication beneath a borrowed parent

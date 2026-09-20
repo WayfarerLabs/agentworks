@@ -219,9 +219,11 @@ content without requiring a host spool solely to precompute a digest.
 A download snapshot copies one held source inode into private scratch in bounded chunks while
 holding the transaction lock. Source identity/metadata and the copied length/digest must agree
 before the snapshot is ready. Chunk retrieval then reads that private snapshot outside the lock,
-never successive ranges of the changing public source. The existing bounded-memory read and
-digest-only observation do not implement this streaming snapshot; its substrate remains to be built
-and proved.
+never successive ranges of the changing public source. The private `_file_spool.py` candidate now
+composes held-source observation and scratch transfer to implement that local copy. It verifies
+length, EOF, digest and final source identity/metadata, checks expiry after source closure even for
+absence, and retains exact cleanup debt on failure. Remote snapshot/chunk delivery and lost-reply
+reconciliation remain unimplemented; local copying alone does not prove them.
 
 The first creation acknowledgment remains a transfer-design gate. Today the helper chooses the
 scratch name and records its inode identities before returning them; losing that reply leaves the
