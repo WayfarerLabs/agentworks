@@ -14,6 +14,7 @@ a returned handle; this pump does not satisfy the launch-interruption contract.
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import time
 from contextlib import suppress
@@ -182,19 +183,83 @@ class ProcessResult:
     failure: Failure | None
 
 
-def _cleanup(process: subprocess.Popen[bytes]) -> bool:
+@dataclass
+class _ProcessStatus:
+    """Own the one status observation path for a constructed process."""
+
+    process: subprocess.Popen[bytes]
+    status: int | None = None
+    lost: bool = False
+
+    def poll(self) -> int | None:
+        if self.status is not None or self.lost:
+            return self.status
+        if os.name == "nt":
+            self.status = self.process.poll()
+            return self.status
+        while True:
+            try:
+                pid, wait_status = os.waitpid(self.process.pid, os.WNOHANG)
+                break
+            except InterruptedError:
+                continue
+            except ChildProcessError:
+                self.lost = True
+                # Popen has no "reaped with unknown status" state. Retire only
+                # its destructor bookkeeping; ProcessResult never reads this.
+                self.process.returncode = 0
+                return None
+        if pid == 0:
+            return None
+        if pid != self.process.pid:
+            raise OSError("exact-PID wait returned a different process")
+        self.status = os.waitstatus_to_exitcode(wait_status)
+        self.process.returncode = self.status
+        return self.status
+
+
+def _cleanup(status: _ProcessStatus) -> bool:
     """Close owned pipes and bound local kill and reap, even on interruption."""
+    process = status.process
     for pipe in (process.stdin, process.stdout, process.stderr):
         if pipe is not None:
             with suppress(OSError):
                 pipe.close()
-    try:
-        if process.poll() is None:
-            process.kill()
-        process.wait(timeout=_CLEANUP_SECONDS)
-    except (OSError, subprocess.TimeoutExpired):
+    if status.lost:
         return False
-    return True
+    if os.name == "nt":
+        try:
+            if status.poll() is None:
+                process.kill()
+            status.status = process.wait(timeout=_CLEANUP_SECONDS)
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return True
+
+    try:
+        running = status.poll() is None
+    except OSError:
+        running = True
+    if status.lost:
+        return False
+    if running:
+        try:
+            os.kill(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except OSError:
+            return False
+    cleanup_deadline = time.monotonic() + _CLEANUP_SECONDS
+    while True:
+        try:
+            if status.poll() is not None:
+                return True
+        except OSError:
+            pass
+        remaining = cleanup_deadline - time.monotonic()
+        if status.lost or remaining <= 0:
+            return False
+        time.sleep(min(_POLL_SECONDS, remaining))
 
 
 def output_retention(io: CarrierIO) -> Retention:
@@ -242,6 +307,7 @@ def run_process(
     except (OSError, ValueError):
         return ProcessResult(False, None, None, stdout.report(), stderr.report(), Failure.DISPATCH)
 
+    status = _ProcessStatus(process)
     failure: Failure | None = None
     exit_status: int | None = None
     post_exit_drain: _PostExitDrain | None = None
@@ -254,7 +320,10 @@ def run_process(
         input_state = _Input.from_io(io)
         output_first = True
         while True:
-            exit_status = process.poll()
+            exit_status = status.poll()
+            if status.lost:
+                failure = Failure.OBSERVATION
+                break
             if deadline.expired:
                 failure = Failure.DEADLINE
                 break
@@ -318,13 +387,14 @@ def run_process(
         raise
     finally:
         # Preserve natural completion even when an I/O failure wins the race.
-        if exit_status is None:
-            exit_status = process.poll()
-        cleaned = _cleanup(process)
+        if exit_status is None and not status.lost:
+            with suppress(OSError):
+                exit_status = status.poll()
+        cleaned = _cleanup(status)
         if not cleaned and interruption is not None:
             interruption.add_note("Local carrier process cleanup did not complete within its bound.")
     if not cleaned:
         failure = Failure.OBSERVATION
     elif failure is None and (stdout.limited or stderr.limited):
         failure = Failure.OUTPUT_LIMIT
-    return ProcessResult(True, process.returncode, exit_status, stdout.report(), stderr.report(), failure)
+    return ProcessResult(True, status.status, exit_status, stdout.report(), stderr.report(), failure)

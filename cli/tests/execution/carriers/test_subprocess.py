@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -71,6 +72,18 @@ def execute(
     )
 
 
+def fresh_process_result(script: str) -> object:
+    completed = subprocess.run(
+        [sys.executable, "-I", "-c", script],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=True,
+        timeout=10,
+    )
+    assert completed.stderr == b""
+    return json.loads(completed.stdout)
+
+
 def assert_closed(children: list[subprocess.Popen[bytes]]) -> None:
     assert children
     for child in children:
@@ -126,6 +139,168 @@ def test_binary_streams_remain_separate_and_unattributed(children: list[subproce
     assert result.stderr.data == b"\x80err\n"
     assert result.stdout.complete and result.stderr.complete
     assert result.stdout.provenance == result.stderr.provenance == Provenance.UNKNOWN
+    assert result.failure is None
+    assert_closed(children)
+
+
+@pytest.mark.parametrize("code", [0, 42, 255])
+def test_exact_wait_preserves_every_representative_exit(children: list[subprocess.Popen[bytes]], code: int) -> None:
+    result = execute(f"import sys; sys.exit({code})")
+
+    assert result.local_status == result.exit_status == code
+    assert result.failure is None
+    assert_closed(children)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="SIGCHLD is a POSIX process-global setting")
+def test_ignored_sigchld_in_fresh_process_never_becomes_exit_zero() -> None:
+    result = fresh_process_result(
+        """
+import json, signal, sys
+from agentworks.execution.carrier import CarrierIO, Deadline
+from agentworks.execution.carriers._subprocess import run_process
+signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+result = run_process(
+    [sys.executable, '-c', 'import sys; sys.exit(42)'],
+    io=CarrierIO(), deadline=Deadline.after(3),
+)
+print(json.dumps([result.local_status, result.exit_status, result.failure]))
+"""
+    )
+
+    assert result == [None, None, "observation"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="waitpid ownership is POSIX-specific")
+def test_competing_reaper_in_fresh_process_loses_status_without_guessing() -> None:
+    result = fresh_process_result(
+        """
+import json, os, subprocess, sys, threading, time
+from agentworks.execution.carrier import CarrierIO, Deadline
+from agentworks.execution.carriers._subprocess import run_process
+original_popen = subprocess.Popen
+reaped = []
+reapers = []
+def spawn(*args, **kwargs):
+    process = original_popen(*args, **kwargs)
+    entered = threading.Event()
+    def reap():
+        entered.set()
+        reaped.append(os.waitpid(process.pid, 0)[1])
+    thread = threading.Thread(target=reap)
+    thread.start()
+    entered.wait()
+    time.sleep(.02)
+    reapers.append(thread)
+    return process
+subprocess.Popen = spawn
+result = run_process(
+    [sys.executable, '-c', 'import sys,time; time.sleep(.1); sys.exit(42)'],
+    io=CarrierIO(), deadline=Deadline.after(3),
+)
+subprocess.Popen = original_popen
+reapers[0].join(2)
+print(json.dumps([result.local_status, result.exit_status, result.failure,
+                  os.waitstatus_to_exitcode(reaped[0])]))
+"""
+    )
+
+    assert result == [None, None, "observation", 42]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="waitpid ownership is POSIX-specific")
+def test_known_wait_loss_never_uses_reused_numeric_pid(monkeypatch: pytest.MonkeyPatch) -> None:
+    process = subprocess.Popen(
+        [sys.executable, "-c", "pass"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    os.waitpid(process.pid, 0)
+    status = _subprocess._ProcessStatus(process)
+    assert status.poll() is None and status.lost
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("known-lost process identity was reused")
+
+    monkeypatch.setattr(os, "kill", forbidden)
+    monkeypatch.setattr(os, "waitpid", forbidden)
+    monkeypatch.setattr(Popen, "poll", forbidden)
+    monkeypatch.setattr(Popen, "wait", forbidden)
+    monkeypatch.setattr(Popen, "kill", forbidden)
+    assert not _subprocess._cleanup(status)
+    assert status.status is None
+    assert process.returncode == 0  # Internal destructor bookkeeping only.
+    assert process.stdout is not None and process.stdout.closed
+    assert process.stderr is not None and process.stderr.closed
+
+
+@pytest.mark.skipif(os.name == "nt", reason="waitpid ownership is POSIX-specific")
+def test_unexpected_wait_error_still_kills_and_reaps(monkeypatch: pytest.MonkeyPatch) -> None:
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    status = _subprocess._ProcessStatus(process)
+    original_waitpid = os.waitpid
+    failed = False
+
+    def fail_once(pid: int, options: int) -> tuple[int, int]:
+        nonlocal failed
+        if pid == process.pid and not failed:
+            failed = True
+            raise OSError("secret-wait-canary")
+        return original_waitpid(pid, options)
+
+    monkeypatch.setattr(os, "waitpid", fail_once)
+    with pytest.raises(OSError, match="secret-wait-canary"):
+        status.poll()
+    assert _subprocess._cleanup(status)
+    assert status.status == -9
+    assert not status.lost
+    assert process.stdout is not None and process.stdout.closed
+    assert process.stderr is not None and process.stderr.closed
+
+
+@pytest.mark.skipif(os.name == "nt", reason="waitpid ownership is POSIX-specific")
+def test_interrupted_exact_wait_retries_same_owned_pid(monkeypatch: pytest.MonkeyPatch) -> None:
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import sys; sys.exit(42)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    status = _subprocess._ProcessStatus(process)
+    original_waitpid = os.waitpid
+    interrupted = False
+
+    def interrupt_once(pid: int, options: int) -> tuple[int, int]:
+        nonlocal interrupted
+        if pid == process.pid and not interrupted:
+            interrupted = True
+            raise InterruptedError
+        return original_waitpid(pid, options)
+
+    monkeypatch.setattr(os, "waitpid", interrupt_once)
+    until = time.monotonic() + 2
+    while status.poll() is None and time.monotonic() < until:
+        time.sleep(0.01)
+    assert interrupted
+    assert status.status == 42
+    assert _subprocess._cleanup(status)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows retains handle-backed Popen waiting")
+def test_windows_waiting_never_calls_posix_waitpid(
+    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(os, "waitpid", lambda *args: pytest.fail("Windows called waitpid"))
+
+    result = execute("import sys; sys.exit(42)")
+
+    assert result.local_status == result.exit_status == 42
     assert result.failure is None
     assert_closed(children)
 
@@ -867,16 +1042,26 @@ def test_failed_reap_is_observation_failure(
     children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     original = Popen.wait
+    original_waitpid = os.waitpid
 
     def wait(process: Popen[bytes], timeout: float | None = None) -> int:
         if process is children[-1]:
             raise subprocess.TimeoutExpired("secret-canary", timeout)
         return original(process, timeout=timeout)
 
+    def waitpid(pid: int, options: int) -> tuple[int, int]:
+        if children and pid == children[-1].pid:
+            raise OSError("secret-canary")
+        return original_waitpid(pid, options)
+
     with monkeypatch.context() as context:
-        context.setattr(Popen, "wait", wait)
+        if os.name == "nt":
+            context.setattr(Popen, "wait", wait)
+        else:
+            context.setattr(os, "waitpid", waitpid)
         result = execute("import time; time.sleep(30)", seconds=0.1)
     assert result.failure == Failure.OBSERVATION
+    assert result.local_status is None
     assert result.exit_status is None
     assert "secret-canary" not in repr(result)
     children[-1].wait(timeout=2)
@@ -887,6 +1072,8 @@ def test_failed_reap_during_interruption_adds_safe_note(
     children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     original_wait = Popen.wait
+    original_waitpid = os.waitpid
+    waitpid_calls = 0
 
     def advance(output: _subprocess._Output, pipe: Any) -> tuple[bool, bool]:
         raise KeyboardInterrupt()
@@ -896,9 +1083,20 @@ def test_failed_reap_during_interruption_adds_safe_note(
             raise subprocess.TimeoutExpired("secret-canary", timeout)
         return original_wait(process, timeout=timeout)
 
+    def waitpid(pid: int, options: int) -> tuple[int, int]:
+        nonlocal waitpid_calls
+        if children and pid == children[-1].pid:
+            waitpid_calls += 1
+            if waitpid_calls > 2:
+                raise OSError("secret-canary")
+        return original_waitpid(pid, options)
+
     with monkeypatch.context() as context:
         context.setattr(_subprocess._Output, "advance", advance)
-        context.setattr(Popen, "wait", wait)
+        if os.name == "nt":
+            context.setattr(Popen, "wait", wait)
+        else:
+            context.setattr(os, "waitpid", waitpid)
         with pytest.raises(KeyboardInterrupt) as raised:
             execute("import time; time.sleep(30)")
     assert raised.value.__notes__
