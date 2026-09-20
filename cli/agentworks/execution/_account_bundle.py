@@ -1,4 +1,4 @@
-"""Fixed source bundle for the private account-resolution helper."""
+"""Fixed source bundle for the private account-database helper."""
 
 from __future__ import annotations
 
