@@ -154,6 +154,12 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       workload access. At `c3cebea5`, all three private review lanes are clean, including portable
       identity stubs and mutation-proven payload assertions. Account resolution, actual sudo/root
       transitions, native acceptance and production RunContext remain separate gates.
+- [x] Resolve a core-bound destination account's IDs/groups through a private read-only helper and
+      one carrier attempt. At `1688da5d`, all three private review lanes are clean and all 42 new
+      account tests pass. Local Python 3.11 lookup and lookup-to-inline composition preserve the
+      distinction between database membership and actual process credentials. This adds no public
+      account selector, privilege transition, staging or permission enforcement; native acceptance
+      and production composition remain separate gates.
 - [ ] Accept the preparation/result and file-operation LLDs after private review and disposition of
       their helper/runtime, launch-evidence, cross-identity locking, and platform prerequisites.
 - [ ] Jointly accept and prove the privately implemented carrier sink extension with the SSH owner
@@ -402,8 +408,18 @@ under the delivery identity and feeds the existing identity plan. It uses a boun
 reply, no staging or privilege change, and no public account selector. The developer's focused suite
 passes 64 tests; execution tests pass 1,151 with six skips. Real distribution-Python-3.11 lookup and
 lookup-to-inline composition run locally. The latter correctly refuses this container's differing
-database and inherited group memberships. Private review and final gates are pending. This does not
-close native identity-transition, Darwin acceptance or production composition gates.
+database and inherited group memberships. Private review and final gates were pending at that
+integration pin. This does not close native identity-transition, Darwin acceptance or production
+composition gates.
+
+All three private lanes are subsequently clean at `1688da5d`. Review removed duplicate encoder
+validation and a redundant result-construction check, deleted an unrelated directory assertion that
+could not detect helper staging, and strengthened the account-payload assertion with a unique
+substring canary. An actual argv-embedding mutation fails that assertion. The final full suite
+passes 11,073 tests with 12 skips; Ruff, formatting and CI-scoped mypy (942 sources) pass. Website
+gates at that pin pass 160 Python tests, 103 Node tests and both deterministic build comparisons.
+Temporary build outputs were removed and no live infrastructure was touched. These private
+corrections consume no public feedback/fix round.
 
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
