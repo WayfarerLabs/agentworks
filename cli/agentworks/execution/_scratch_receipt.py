@@ -280,12 +280,14 @@ def reconcile_scratch_ownership(
     except (OSError, ValueError):
         return ScratchOwnershipUncertainty()
     finally:
-        if receipt_fd is not None:
-            with suppress(OSError):
-                os.close(receipt_fd)
-        if directory_fd is not None:
-            with suppress(OSError):
-                os.close(directory_fd)
+        try:
+            if receipt_fd is not None:
+                with suppress(OSError):
+                    os.close(receipt_fd)
+        finally:
+            if directory_fd is not None:
+                with suppress(OSError):
+                    os.close(directory_fd)
 
 
 def cleanup_owned_scratch(parent_fd: int, debt: ScratchCleanupDebt) -> ScratchReceiptFailureKind | None:

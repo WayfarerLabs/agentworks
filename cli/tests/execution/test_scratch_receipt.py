@@ -286,3 +286,48 @@ def test_reconcile_checks_deadline_after_receipt_read(tmp_path: Path, monkeypatc
     monkeypatch.setattr(os, "pread", original_pread)
     cleanup_scratch(parent_fd, reference)
     os.close(parent_fd)
+
+
+def test_reconcile_close_interrupt_still_closes_both_owned_descriptors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    token, reference = _begin(parent_fd, 0)
+    context = current_receipt_context(ScratchOperation.STAGE)
+    original_open_directory = receipt_module._open_directory
+    original_open_receipt = receipt_module._open_receipt
+    original_close = os.close
+    opened: dict[str, int] = {}
+    closed: list[int] = []
+
+    def record_directory(parent: int, name: str) -> int:
+        descriptor = original_open_directory(parent, name)
+        opened["directory"] = descriptor
+        return descriptor
+
+    def record_receipt(directory: int) -> int:
+        descriptor = original_open_receipt(directory)
+        opened["receipt"] = descriptor
+        return descriptor
+
+    def close_then_interrupt(descriptor: int) -> None:
+        original_close(descriptor)
+        closed.append(descriptor)
+        if descriptor == opened["receipt"]:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(receipt_module, "_open_directory", record_directory)
+    monkeypatch.setattr(receipt_module, "_open_receipt", record_receipt)
+    monkeypatch.setattr(os, "close", close_then_interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        reconcile_scratch_ownership(parent_fd, token, context)
+
+    assert closed == [opened["receipt"], opened["directory"]]
+    for descriptor in closed:
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
+
+    monkeypatch.setattr(os, "close", original_close)
+    cleanup_scratch(parent_fd, reference)
+    os.close(parent_fd)
