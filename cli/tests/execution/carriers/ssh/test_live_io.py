@@ -212,8 +212,7 @@ def test_live_delivery_does_not_turn_ssh_255_into_remote_completion(
     stderr = ShortSink(3, stall_every=3)
     report = execute(
         monkeypatch,
-        "import sys; sys.stdout.buffer.write(b'out\\x00\\xff'); "
-        "sys.stderr.buffer.write(b'err\\x80'); sys.exit(255)",
+        "import sys; sys.stdout.buffer.write(b'out\\x00\\xff'); sys.stderr.buffer.write(b'err\\x80'); sys.exit(255)",
         CarrierIO(output=SinkOutput(stdout, stderr, require_live=True)),
     )
 
