@@ -96,6 +96,30 @@ The [lifecycle design](execution-lifecycle-lld.md#lifecycle-waiting-and-attachme
 start/attachment constraints. This extension adds neither an asynchronous pump handle nor a new
 detached-job protocol.
 
+### Same-terminal preparation experiment
+
+The next proof starts with a single terminal session, not mandatory remote temporary-file staging.
+The proposed sequence is remote terminal setup with echo and input transformations disabled, an
+acknowledgment that the payload channel is ready, an exact bounded payload read, restoration of the
+application terminal settings, and a separate acknowledgment permitting interactive input. The
+sender must not release payload before the first acknowledgment or user input before the second.
+Payload completion is length-delimited, not EOF, and the reader must not consume bytes belonging to
+interactive use. Source and application input remain separate. These are experimental acceptance
+conditions, not a production wire format or a claimed implementation.
+
+Shared preparation owns the handshake, framing and transition to application presentation. The SSH
+carrier owns local terminal handles, client invocation, resize and restoration; it must not
+interpret application frames. The experiment must cover the remote bootstrap and the local OpenSSH
+endpoint separately. Replacing OpenSSH stdin with a pipe is not a complete terminal adapter: OpenSSH
+8.5 reads terminal setup and window dimensions from its input descriptor. An owned local PTY/console
+relay is one candidate, not an accepted dependency. No terminal type is frozen until that ownership
+and supported-platform behavior are proved with the SSH lane.
+
+The [prior-art investigation](prior-art-research.md#terminal-bootstrap-prior-art) records the
+relevant implementations and their limitations. A local synthetic PTY proves only that fixture; it
+does not establish actual SSH delivery, native Windows/macOS behavior or application-start evidence.
+The buffered and live-byte increments can proceed independently of this terminal gate.
+
 ## Joint proof and disposition
 
 Before integrating these extensions, demonstrate each applicable case on supported workstation

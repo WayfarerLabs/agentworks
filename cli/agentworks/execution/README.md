@@ -4,12 +4,12 @@ This package currently implements a bounded, internal Linux execution proof. Pro
 and RunContext still use the existing stack. These modules are not a permission-scoped public API;
 they must not be handed directly to capability consumers.
 
-`carrier.py` defines the buffered adapter boundary. Preparation supplies literal bootstrap argv;
-CarrierIO holds the only finite input source. A report distinguishes submitted/unknown dispatch,
-observed remote command-chain completion, local status, raw stream provenance, completeness and
-retention. Completion can belong to an account shell that refused before the bootstrap ran; it is
-not independent proof of bootstrap or application execution. Local status alone is not a guest exit.
-Payload fields have no diagnostic representation.
+`carrier.py` defines the adapter boundary, including candidate borrowed byte endpoints. Preparation
+supplies literal bootstrap argv; CarrierIO holds the only input source. A report distinguishes
+submitted/unknown dispatch, observed remote command-chain completion, local status, raw stream
+provenance, completeness and retention. Completion can belong to an account shell that refused
+before the bootstrap ran; it is not independent proof of bootstrap or application execution. Local
+status alone is not a guest exit. Payload fields have no diagnostic representation.
 
 `Failure.INPUT` records failed or incomplete required input delivery; intentional consumer closure
 is not automatically a failure. `Failure.OUTPUT` records failed output collection, including a
@@ -48,11 +48,24 @@ system/default trust context. An explicit bundle selects that trust source, not 
 bypass. The API hostname must match the certificate; there is no server-name override. Redirects and
 ambient proxies are disabled, and provider exception text is not returned.
 
-`carriers/_subprocess.py` supplies a shared finite-input process pump with separate bounded outputs,
-explicit environment binding and bounded local cleanup. Its result records local process facts, with
-unknown stream provenance; each carrier owns interpretation as delivery evidence. It does not infer
-guest dispatch or termination. SSH still uses its private pump until its owning lane adapts the call
-sites and removes that copy; the shared module adds no streaming or terminal support.
+`carriers/_subprocess.py` supplies a shared process pump with finite or explicitly enabled live
+input, separate bounded outputs, explicit environment binding and bounded local cleanup. Borrowed
+byte endpoints must return without waiting on external I/O. The pump never closes them or changes
+their descriptor flags. Short sink writes retain a bounded pending suffix; temporary stalls are not
+EOF. Endpoint failures preserve independently observed completion and mark incomplete delivery.
+
+`SinkOutput` feeds transient raw carrier bytes to trusted collectors and reports `DELIVERED` with no
+retained bytes, including on sensitive calls. These are private preparation endpoints, not plugin
+callbacks or permission to display sensitive output. Existing sensitive capture/discard calls still
+suppress retained bytes. A carrier must explicitly enable live I/O in the pump; otherwise live input
+or a sink requiring live delivery refuses before process creation. Buffered Proxmox observations can
+feed the same sink interface without advertising live I/O, retaining truncation and deadline facts.
+
+The pump's result records local process facts with unknown stream provenance; each carrier owns
+interpretation as delivery evidence. It does not infer guest dispatch or termination. The SSH code
+in this branch still uses its private buffered pump; its owning implementation lane has adopted the
+shared pump separately. A compatibility refusal for the old adapter and joint SSH byte-I/O proof are
+required before integrating the candidate extension. No terminal support is enabled by these types.
 
 The cleanup guard covers the I/O loop, not process construction or the intervening initialization. A
 real SIGINT probe on Linux with CPython 3.12.13 interrupted construction after child creation and

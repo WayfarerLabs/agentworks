@@ -113,7 +113,9 @@ directory-depth retraction. The agreed documentation corrections and the separat
 passed project, complexity and correctness review at `ac18444f`. The operator subsequently
 authorized publication, and those corrections plus later privately reviewed increments were pushed
 at `8fec9e07`; its hosted checks passed. Round closure and a new checkpoint handoff remain
-outstanding. No second round has begun.
+outstanding. No second round has begun. The operator subsequently authorized continued
+implementation and confirmed three public feedback/fix loops remain available for the completed PR.
+Intermediate pushes and private reviews are not public handoffs.
 
 SSH's implementation continues in #832. Its owner agreed to transport extracting the shared bounded
 subprocess pump, while SSH retains environment sanitation, carrier-specific report interpretation,
@@ -132,6 +134,15 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       null, strict input checks and byte/depth bounds. At `ac18444f`, all 69 focused cases and the
       three private review lanes pass. This returns proposed bytes or a skip decision only; no
       filesystem publication, FileAccess wiring or permission boundary is claimed.
+- [x] Add distribution `python3` to the shared early provisioning package list, retaining the Phase
+      B package for existing guests. The implementation is included here; local tests cover
+      native-bootstrap and cloud-init rendering. Existing-VM native recovery, live provisioning and
+      helper compatibility retain their separate acceptance gates.
+- [x] Demonstrate the two-phase bootstrap handoff on an owned local Linux PTY with Python 3.11. The
+      executable experiment and tests are included here. Payload-ready precedes sensitive transfer;
+      interactive-ready follows terminal restoration. Premature input retains raw carriage-return
+      semantics, while post-handoff input receives canonical translation. This is not SSH delivery,
+      workstation-platform acceptance or application-start proof.
 - [ ] Accept the preparation/result and file-operation LLDs after private review and disposition of
       their helper/runtime, launch-evidence, cross-identity locking, and platform prerequisites.
 - [ ] Jointly accept and prove the carrier sink extension with the SSH owner before changing
@@ -141,8 +152,8 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
 
 The [operator ruling](frd.md#file-safety-and-guest-runtime-rulings) approves adding `python3` to
 early guest provisioning, with helper code compatible with Bookworm's distribution Python. The
-baseline still installs it only during Phase B; implementation and existing-VM native recovery must
-establish the earlier prerequisite. macOS platform hosts must provide preinstalled Python 3.11 or
+package addition is implemented; live provisioning and existing-VM native recovery must establish
+availability on their actual paths. macOS platform hosts must provide preinstalled Python 3.11 or
 newer; detect missing, unsupported, or Xcode-shim interpreters and report clean actionable errors
 without implicit installation or an installation prompt. Prerequisite checks, file-only no-staging
 readiness and exact direct-launch evidence retain their own implementation and proof obligations.
@@ -154,12 +165,14 @@ close the earlier ancestor-rename/hard-link adversarial gate. Unsupported object
 before publication; required workflows still need an implemented safe path or explicit disposition,
 not silent omission.
 
-SSH's implementation at `632bf288` is waiting on transport-owned shared I/O types and terminal
-preparation, plus production target/trust composition. The reviewed finite subprocess pump is now
-published at `8fec9e07`; SSH owns adoption at its call sites. This does not close the launch
-interruption gate. Next, settle and jointly prove live source/sink reports and terminal preparation
-without passing the sensitive preparation envelope through a PTY. Full file/lifecycle implementation
-is not a prerequisite for that bounded shared-boundary proof.
+SSH's implementation at `4fcfeaa8` includes transport `e85e9f5c` and adopts the reviewed finite
+subprocess pump. It still needs transport-owned shared I/O types and terminal preparation, plus
+production target/trust composition. Pump adoption does not close the launch interruption gate.
+Next, settle and jointly prove live source/sink reports and terminal preparation with a synchronized
+payload-to-interactive handoff. A raw envelope through an unprepared PTY is not accepted. The
+[same-terminal experiment](carrier-io-lld.md#same-terminal-preparation-experiment) separates remote
+bootstrap feasibility from the remaining local client adapter proof. Full file/lifecycle
+implementation is not a prerequisite for that bounded shared-boundary proof.
 
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:

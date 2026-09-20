@@ -283,6 +283,31 @@ and intermediary-refusal measurements inform honest outcome interpretation; they
 R7's run-membership identity lookup. Future live charters must name workstation and target axes,
 resource/cleanup limits and any newly required beds rather than inherit nonexistent coverage.
 
+## Terminal bootstrap prior art
+
+The operator directed using existing bootstrap-to-interactive patterns as the starting point. A
+same-terminal proof therefore precedes committing to a separate staging operation. This is an
+implementation investigation, not a relaxation of sensitivity, terminal ownership or platform
+requirements.
+
+| Source                                                                                                                                                                                                       | Observed mechanism                                                                                                                                                  | Consequence for this effort                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Kitty Python bootstrap at `719c61a1`](https://github.com/kovidgoyal/kitty/blob/719c61a12bf192bdaaf8dc3e26acb4f853dfd7fa/shell-integration/ssh/bootstrap.py)                                                 | Disables echo before requesting setup data over the controlling TTY, reads a marker-delimited base64 transfer, applies setup, restores echo and executes the shell. | Useful phase ordering, not a drop-in transport. Its terminal-emulator integration and file extraction are not requirements here.                                  |
+| [Pexpect endpoint API](https://pexpect.readthedocs.io/en/stable/api/pexpect.html) and [echo-race discussion](https://pexpect.readthedocs.io/en/stable/commonissues.html#timing-issue-with-send-and-sendline) | Separates automated credential entry from human interaction; documents sending before echo is disabled as a disclosure race.                                        | Require an explicit ready acknowledgment rather than a timing delay or merely seeing a prompt. Local no-echo state alone does not establish the remote PTY state. |
+| [OpenSSH 8.5 session setup](https://github.com/openssh/openssh-portable/blob/V_8_5_P1/ssh.c#L2051) and [resize delivery](https://github.com/openssh/openssh-portable/blob/V_8_5_P1/channels.c#L4429)         | Session setup uses stdin; resize reads the channel's input descriptor with a terminal ioctl.                                                                        | Piping a prelude into `ssh -tt` does not by itself preserve terminal sizing. Prove the local endpoint mechanism with SSH before selecting shared terminal types.  |
+
+These are primary implementation/documentation sources, not platform acceptance results. Kitty's
+bootstrap is GPLv3; this investigation reuses the conceptual pattern, not its source code. Its
+handling of already-echoed leading data is not a secrecy guarantee we can adopt. Base64 is transport
+encoding, not encryption or redaction.
+
+The [carrier I/O experiment](carrier-io-lld.md#same-terminal-preparation-experiment) uses separate
+payload-ready and interactive-ready phases, exact bounded reads, and no payload EOF. The proof must
+demonstrate no secret reflection, preservation of the first interactive input, terminal restoration
+and failure before application launch on malformed/truncated input. Client-side relay, real SSH,
+supported workstation coverage and honest application-start evidence remain open; none is
+established by studying this prior art.
+
 ## Early Python investigation, 2026-09-19
 
 At the time of this audit the operator authorized investigation, not installation or a new runtime
