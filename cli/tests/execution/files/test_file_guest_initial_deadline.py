@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 from collections.abc import Callable
 from types import ModuleType
@@ -43,7 +42,7 @@ from agentworks.execution._helper_identity import IdentityExpectation
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the file helpers require Linux")
 
 _NONCE = "0" * 32
-_IDENTITY = IdentityExpectation(os.geteuid(), os.getegid(), tuple(sorted(set(os.getgroups()) | {os.getegid()})))
+_IDENTITY = IdentityExpectation(1000, 1000, (1000,))
 _CASES = (
     (
         _file_read_guest,
