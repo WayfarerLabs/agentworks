@@ -186,8 +186,42 @@ def begin_scratch(
             _create_object(directory_fd, acquisition)
             object_fd = acquisition.object_fd
             assert object_fd is not None and acquisition.object is not None
-            # Object acquisition and directory normalization preserve enough
-            # exact state for cleanup. No verification work starts after expiry.
+            assert acquisition.parent is not None
+            assert acquisition.directory is not None
+            assert acquisition.object is not None
+            try:
+                _check_deadline(expires_at, ScratchPhase.BEGIN)
+                observed_object = _fstat(object_fd, ScratchPhase.BEGIN)
+                _require_object_stat(
+                    observed_object,
+                    acquisition.object,
+                    acquisition.uid,
+                    acquisition.gid,
+                    ScratchPhase.BEGIN,
+                )
+                if observed_object.st_size != 0:
+                    raise ScratchTransferError(ScratchFailureKind.CONFLICT, ScratchPhase.BEGIN)
+                if _list_directory(directory_fd, ScratchPhase.BEGIN) != {_DATA_NAME}:
+                    raise ScratchTransferError(ScratchFailureKind.CONFLICT, ScratchPhase.BEGIN)
+                _check_deadline(expires_at, ScratchPhase.BEGIN)
+                ownership = _create_receipt(
+                    directory_fd,
+                    bytes(token),
+                    context,
+                    acquisition.parent,
+                    acquisition.directory,
+                    acquisition.object,
+                    acquisition.gid,
+                    expected_length,
+                    acquisition.receipt,
+                    expires_at,
+                )
+            except BaseException:
+                # Both fixed objects inherit a setgid parent's group before
+                # cleanup-only normalization removes the inherited bit.
+                with suppress(ScratchTransferError):
+                    _set_mode(directory_fd, _DIRECTORY_MODE, ScratchPhase.BEGIN)
+                raise
             _set_mode(directory_fd, _DIRECTORY_MODE, ScratchPhase.BEGIN)
             _check_deadline(expires_at, ScratchPhase.BEGIN)
             _require_directory_stat(
@@ -197,33 +231,12 @@ def begin_scratch(
                 acquisition.gid,
                 ScratchPhase.BEGIN,
             )
-            observed_object = _fstat(object_fd, ScratchPhase.BEGIN)
             _require_object_stat(
-                observed_object,
+                _fstat(object_fd, ScratchPhase.BEGIN),
                 acquisition.object,
                 acquisition.uid,
                 acquisition.gid,
                 ScratchPhase.BEGIN,
-            )
-            if observed_object.st_size != 0:
-                raise ScratchTransferError(ScratchFailureKind.CONFLICT, ScratchPhase.BEGIN)
-            if _list_directory(directory_fd, ScratchPhase.BEGIN) != {_DATA_NAME}:
-                raise ScratchTransferError(ScratchFailureKind.CONFLICT, ScratchPhase.BEGIN)
-            _check_deadline(expires_at, ScratchPhase.BEGIN)
-            assert acquisition.parent is not None
-            assert acquisition.directory is not None
-            assert acquisition.object is not None
-            ownership = _create_receipt(
-                directory_fd,
-                bytes(token),
-                context,
-                acquisition.parent,
-                acquisition.directory,
-                acquisition.object,
-                acquisition.gid,
-                expected_length,
-                acquisition.receipt,
-                expires_at,
             )
             if _list_directory(directory_fd, ScratchPhase.BEGIN) != {_DATA_NAME, _RECEIPT_NAME}:
                 raise ScratchTransferError(ScratchFailureKind.CONFLICT, ScratchPhase.BEGIN)

@@ -168,6 +168,9 @@ def test_follow_on_write_validates_receipt_before_mutating_data(tmp_path: Path, 
 def test_partial_receipt_creation_failure_is_cleaned_by_exact_acquisition(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    tmp_path.chmod(0o2700)
+    if not tmp_path.stat().st_mode & stat.S_ISGID:
+        pytest.skip("filesystem does not retain setgid on the parent directory")
     parent_fd = _open_parent(tmp_path)
     original_write = os.write
     calls = 0

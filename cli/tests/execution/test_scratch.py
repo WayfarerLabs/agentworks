@@ -173,7 +173,7 @@ def test_reopened_operation_close_interrupt_attempts_both_descriptors(
     os.close(parent_fd)
 
 
-def test_begin_preserves_setgid_until_data_creation(
+def test_begin_preserves_setgid_until_fixed_object_creation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -181,7 +181,7 @@ def test_begin_preserves_setgid_until_data_creation(
     if not tmp_path.stat().st_mode & stat.S_ISGID:
         pytest.skip("filesystem does not retain setgid on the parent directory")
     original_open = os.open
-    directory_modes_at_data_creation: list[int] = []
+    directory_modes_at_object_creation: dict[str, int] = {}
 
     def observe_data_creation(
         path: object,
@@ -190,9 +190,9 @@ def test_begin_preserves_setgid_until_data_creation(
         *,
         dir_fd: int | None = None,
     ) -> int:
-        if path == scratch_module._DATA_NAME:
+        if path in {scratch_module._DATA_NAME, receipt_module._RECEIPT_NAME}:
             assert dir_fd is not None
-            directory_modes_at_data_creation.append(os.fstat(dir_fd).st_mode)
+            directory_modes_at_object_creation[str(path)] = os.fstat(dir_fd).st_mode
         return original_open(path, flags, mode, dir_fd=dir_fd)  # type: ignore[arg-type]
 
     monkeypatch.setattr(os, "open", observe_data_creation)
@@ -201,10 +201,39 @@ def test_begin_preserves_setgid_until_data_creation(
     reference = begin_scratch(parent_fd, 0)
     directory = _scratch_directory(tmp_path)
     data_path = directory / scratch_module._DATA_NAME
-    assert len(directory_modes_at_data_creation) == 1
-    assert directory_modes_at_data_creation[0] & stat.S_ISGID
+    assert set(directory_modes_at_object_creation) == {
+        scratch_module._DATA_NAME,
+        receipt_module._RECEIPT_NAME,
+    }
+    assert all(mode & stat.S_ISGID for mode in directory_modes_at_object_creation.values())
     assert stat.S_IMODE(directory.stat().st_mode) == 0o700
     assert stat.S_IMODE(data_path.stat().st_mode) == 0o600
+    cleanup_scratch(parent_fd, reference)
+    os.close(parent_fd)
+
+
+def test_begin_preserves_alternate_inherited_group_for_both_fixed_objects(tmp_path: Path) -> None:
+    alternate_groups = sorted(set(os.getgroups()) - {os.getegid()})
+    if not alternate_groups:
+        pytest.skip("no alternate supplementary group is available")
+    alternate_gid = alternate_groups[0]
+    try:
+        os.chown(tmp_path, -1, alternate_gid)
+    except OSError as error:
+        pytest.skip(f"alternate supplementary group is unavailable in this filesystem: {error.errno}")
+    tmp_path.chmod(0o2700)
+    observed_parent = tmp_path.stat()
+    if observed_parent.st_gid != alternate_gid or not observed_parent.st_mode & stat.S_ISGID:
+        pytest.skip("filesystem does not retain the alternate setgid parent")
+
+    parent_fd = _open_parent(tmp_path)
+    reference = begin_scratch(parent_fd, 0)
+    directory = _scratch_directory(tmp_path)
+    data = directory / scratch_module._DATA_NAME
+    receipt = directory / receipt_module._RECEIPT_NAME
+    assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+    assert (data.stat().st_gid, stat.S_IMODE(data.stat().st_mode)) == (alternate_gid, 0o600)
+    assert (receipt.stat().st_gid, stat.S_IMODE(receipt.stat().st_mode)) == (alternate_gid, 0o400)
     cleanup_scratch(parent_fd, reference)
     os.close(parent_fd)
 
