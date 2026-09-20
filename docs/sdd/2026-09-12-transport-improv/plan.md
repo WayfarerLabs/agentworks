@@ -222,6 +222,18 @@ distribution Python 3.11. Ruff, mypy, file lint, typer isolation, rulesync, lock
 gates pass. These remain private building blocks: FileAccess, remote helper delivery, locking,
 platform acceptance and additive RunContext composition are not complete.
 
+At `1a5958fa`, all three private review lanes are clean for the exact-child wait correction, the
+SSH-owned compatibility guard and its shared-type integration tests, and the lifecycle
+clarifications. Repeated review exposed two post-exit scheduling defects: a newly pending stream
+could permit another fresh read in the same pass, and alternating pending streams could keep the
+collection timer paused indefinitely. Separate mutation-tested regressions now cover both
+transitions. Test callbacks no longer compete with the pump's reaper, and the external-reaper
+fixture explicitly establishes ordering. The final head passes 10,541 non-integration tests with 12
+skips; the full execution suite passes 620 with five skips. Ruff, formatting, mypy, file lint, typer
+isolation, rulesync, locked-SDD and website gates pass. This is a draft implementation progress
+push, not joint live-I/O acceptance or a completed public feedback/fix round. Launch-interruption,
+native-platform, helper, lifecycle and production RunContext gates remain open.
+
 SSH's implementation at `174187d2` includes transport `a885ef5a` and adopts the reviewed finite
 subprocess pump. Its owner has separately supplied the buffered compatibility guard integrated here.
 It still needs the extended shared I/O implementation and terminal preparation, plus production
