@@ -660,7 +660,14 @@ def test_deadline_budget_includes_process_startup(
     assert_closed(children)
 
 
-def test_natural_exit_is_observed_despite_unsent_input(children: list[subprocess.Popen[bytes]], tmp_path: Path) -> None:
+@pytest.mark.parametrize("live", [False, True])
+def test_natural_exit_is_observed_despite_unsent_input(
+    children: list[subprocess.Popen[bytes]], tmp_path: Path, live: bool
+) -> None:
+    class EndlessSource:
+        def try_read(self, limit: int) -> bytes:
+            return b"x" * limit
+
     release = tmp_path / "release"
     done = tmp_path / "done"
     descendant = (
@@ -677,7 +684,8 @@ def test_natural_exit_is_observed_despite_unsent_input(children: list[subprocess
         "sys.stdout.write('parent'); sys.exit(23)"
     )
     try:
-        result = execute(script, io=CarrierIO(input=FiniteInput(b"x" * 2_000_000)), seconds=None)
+        input = LiveInput(EndlessSource()) if live else FiniteInput(b"x" * 2_000_000)
+        result = execute(script, io=CarrierIO(input=input), seconds=None, live_stdio=live)
         assert result.failure == Failure.INPUT
         assert result.local_status == result.exit_status == 23
         assert result.stdout.data == b"parent"
@@ -690,7 +698,7 @@ def test_natural_exit_is_observed_despite_unsent_input(children: list[subprocess
         assert done.exists()
 
 
-def test_live_input_early_close_preserves_observed_exit(children: list[subprocess.Popen[bytes]]) -> None:
+def test_live_input_early_close_preserves_only_observed_evidence(children: list[subprocess.Popen[bytes]]) -> None:
     class EndlessSource:
         def __init__(self) -> None:
             self.calls = 0
@@ -701,15 +709,50 @@ def test_live_input_early_close_preserves_observed_exit(children: list[subproces
 
     source = EndlessSource()
     result = execute(
-        "import sys; sys.stdout.buffer.write(b'parent'); sys.exit(23)",
+        "import sys; sys.stdin.buffer.read(1); sys.stdin.close(); sys.stdout.buffer.write(b'parent'); sys.exit(23)",
         io=CarrierIO(input=LiveInput(source)),
         seconds=None,
         live_stdio=True,
     )
     assert source.calls > 0
     assert result.failure == Failure.INPUT
-    assert result.local_status == result.exit_status == 23
-    assert result.stdout.data == b"parent"
+    assert result.local_status is not None
+    assert result.exit_status in (None, 23)
+    assert b"parent".startswith(result.stdout.data)
+    if result.exit_status is not None:
+        assert result.local_status == result.exit_status
+    assert_closed(children)
+
+
+def test_status_first_observed_during_cleanup_is_not_exit_evidence(
+    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class EndlessSource:
+        def try_read(self, limit: int) -> bytes:
+            return b"x" * limit
+
+    def hide_status_until_cleanup(status: process_core._ProcessStatus) -> None:
+        return None
+
+    def observe_during_cleanup(status: process_core._ProcessStatus) -> bool:
+        for pipe in (status.process.stdin, status.process.stdout, status.process.stderr):
+            if pipe is not None:
+                pipe.close()
+        status.status = status.process.wait(timeout=2)
+        return True
+
+    monkeypatch.setattr(process_core._ProcessStatus, "poll", hide_status_until_cleanup)
+    monkeypatch.setattr(process_core, "_cleanup", observe_during_cleanup)
+    result = execute(
+        "import os,sys; os.read(0,1); os.close(0); sys.exit(23)",
+        io=CarrierIO(input=LiveInput(EndlessSource())),
+        seconds=2,
+        live_stdio=True,
+    )
+
+    assert result.failure == Failure.INPUT
+    assert result.local_status == 23
+    assert result.exit_status is None
     assert_closed(children)
 
 

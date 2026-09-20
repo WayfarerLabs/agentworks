@@ -9,10 +9,31 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from agentworks.execution._process import ProcessResult, StreamResult
 
 CORE_PATH = Path(__file__).parents[2] / "agentworks" / "execution" / "_process.py"
 PYTHON_311 = Path("/usr/bin/python3.11")
+
+
+@pytest.fixture(scope="module", params=[Path(sys.executable), PYTHON_311], ids=["current", "distribution-3.11"])
+def interpreter(request: pytest.FixtureRequest) -> Path:
+    python: Path = request.param
+    if python == PYTHON_311:
+        if not python.is_file():
+            pytest.skip("This host has no /usr/bin/python3.11 compatibility interpreter")
+        version = subprocess.run(
+            [str(python), "-I", "-S", "-B", "-c", "import sys; print(*sys.version_info[:2])"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            check=True,
+            timeout=5,
+            text=True,
+        )
+        if version.stdout.strip() != "3 11":
+            pytest.skip(f"Expected Python 3.11 at {python}, found {version.stdout.strip()}")
+    return python
 
 
 def test_process_core_has_only_standard_library_dependencies() -> None:
@@ -38,7 +59,8 @@ def test_process_result_representation_hides_nested_stream_bytes() -> None:
     assert secret.decode() not in repr(result)
 
 
-def test_python311_core_reuse_roundtrips_binary_input_and_exit_status() -> None:
+@pytest.mark.windows
+def test_standalone_core_reuse_roundtrips_binary_input_and_exit_status(interpreter: Path) -> None:
     bootstrap = r"""
 import hashlib
 import importlib.util
@@ -80,7 +102,7 @@ print(json.dumps({
 }))
 """
     completed = subprocess.run(
-        [str(PYTHON_311), "-I", "-S", "-B", "-c", bootstrap, str(CORE_PATH)],
+        [str(interpreter), "-I", "-S", "-B", "-c", bootstrap, str(CORE_PATH)],
         stdin=subprocess.DEVNULL,
         capture_output=True,
         check=True,
