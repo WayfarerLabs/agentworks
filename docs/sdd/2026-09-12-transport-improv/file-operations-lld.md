@@ -222,23 +222,28 @@ before the snapshot is ready. Chunk retrieval then reads that private snapshot o
 never successive ranges of the changing public source. The private `_file_spool.py` candidate now
 composes held-source observation and scratch transfer to implement that local copy. It verifies
 length, EOF, digest and final source identity/metadata, checks expiry after source closure even for
-absence, and retains exact cleanup debt on failure. Remote snapshot/chunk delivery and lost-reply
-reconciliation remain unimplemented; local copying alone does not prove them.
+absence, and retains exact cleanup debt on failure. Core supplies its token and identity before
+dispatch, and the local receipt binds the copy to the snapshot operation. Remote snapshot/chunk
+delivery and lost-reply reconciliation through a carrier remain unimplemented; local copying and
+receipt recovery alone do not prove them.
 
-The first creation acknowledgment remains a transfer-design gate. Today the helper chooses the
-scratch name and records its inode identities before returning them; losing that reply leaves the
-host without an exact cleanup reference. The same issue applies to snapshot creation and to
-unreported publication-stage cleanup debt. An unavailable reference is not proof that no artifact
-exists. Preserve that uncertainty separately from known exact cleanup debt, never replay creation to
-recover a reference, and never scan a name prefix to infer ownership. Reconciliation of this case
-must be settled and fault-tested before the transfer exchange is accepted.
+The first creation acknowledgment remains a transfer-delivery gate. The helper derives the scratch
+name from core's fresh token and records its inode identities before returning them; losing that
+reply leaves the host without an exact cleanup reference until read-only reconciliation establishes
+ownership. The same issue applies to snapshot creation and to unreported publication-stage cleanup
+debt. An unavailable reference is not proof that no artifact exists. Preserve that uncertainty
+separately from known exact cleanup debt, never replay creation to recover a reference, and never
+scan a name prefix to infer ownership. Reconciliation of this case must be settled and fault-tested
+before the transfer exchange is accepted.
 
-The recovery candidate uses a small immutable ownership receipt, not a transfer registry. Core
+The local recovery candidate uses a small immutable ownership receipt, not a transfer registry. Core
 allocates a fresh random operation token before dispatch. The fixed helper derives one exact private
 directory name from it and attempts exclusive creation once. Before acknowledging successful
 creation, it writes and validates a bounded receipt binding the token, operation, execution
 identity, original authorized parent identity, declared length and acquired directory/data
-identities. A collision refuses; losing a reply never resubmits creation.
+identities. A collision refuses; losing a reply never resubmits creation. These private receipt
+mechanics are implemented in `_scratch_receipt.py`; remote reconciliation and publication-stage
+ownership are not yet implemented.
 
 Read-only reconciliation accepts the original core-bound context and token, not paths supplied by a
 receipt. It opens only that exact name and validates the receipt schema, ownership, permissions,

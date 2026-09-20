@@ -284,10 +284,12 @@ not require file-read authority. `FileSnapshot.revision` carries the content-bou
 `_file_spool.py` copies one held regular source into private scratch in bounded chunks, returning a
 verified ready reference and the source's content-bound revision. It checks source length, EOF,
 digest and held/named metadata before returning; later chunk reads use the private copy rather than
-the public source. The caller owns the cooperating-writer lock and both parent descriptors. Expiry
-is checked after source descriptors close, including initial absence. Failure attempts exact scratch
-cleanup and preserves unresolved cleanup debt. This local primitive does not deliver a remote
-download or reconcile a lost creation reply.
+the public source. The caller owns the cooperating-writer lock and both parent descriptors, and
+supplies the fresh operation token and execution identity before copying. The immutable receipt
+binds this operation to snapshot creation, not upload staging. Expiry is checked after source
+descriptors close, including initial absence. Failure attempts exact scratch cleanup and preserves
+unresolved cleanup debt. Local receipt reconciliation can recover cleanup ownership after a lost
+return, not the ready snapshot or its content revision. Remote download delivery remains unbuilt.
 
 Descriptor bookkeeping is not signal-atomic. An asynchronous interruption before an intermediate
 ancestor close can leave that descriptor open until helper exit; callers cannot assume leak-free
@@ -435,21 +437,34 @@ public `FileAccess` composition or establishes native platform acceptance.
 ## Private scratch transfer
 
 `_scratch.py` supplies POSIX destination-side scratch operations beneath a borrowed trusted parent
-descriptor. Each object has an unpredictable private directory and one fixed data file, with final
-modes 0700 and 0600. An identity-bound private reference carries its declared length. Final
-verification receives the whole-object SHA-256 after transfer and produces a ready reference
-carrying the verified digest; beginning an upload does not require consuming its source first.
-Operations reopen and check the recorded objects; observed replacement, links, special objects or
-changed ownership/mode refuse. The caller owns confinement and coordination between writers.
+descriptor. Core supplies a fresh 16-byte token before dispatch; the helper derives one exact
+private directory name and attempts exclusive creation once. The directory contains fixed data and
+receipt files, with final modes 0700, 0600 and 0400 respectively. An identity-bound private
+reference carries its declared length. Final verification receives the whole-object SHA-256 after
+transfer and produces a ready reference carrying the verified digest; beginning an upload does not
+require consuming its source first. Operations reopen and check the recorded objects; observed
+replacement, links, special objects or changed ownership/mode refuse. The caller owns confinement
+and coordination between writers.
+
+`_scratch_receipt.py` binds that token to the closed stage/snapshot operation, execution identity,
+original parent, declared length and exact acquired objects in a bounded immutable receipt. Active
+access checks that receipt before using scratch. Read-only reconciliation uses the original token
+and context under the caller's transaction lock, never a path recovered from disk. A valid receipt
+can recover historical ownership for exact cleanup even when data is incomplete or already removed;
+it cannot recover a ready content reference or authorize publication. Missing, partial, replaced or
+invalid receipts remain ownership uncertainty, not proof of absence. No prefix search, replay,
+transfer registry or reboot-durability guarantee is supplied.
 
 Writes use bounded exact offsets and a chunk digest. An exact previously written range may be
 retried after comparing its bytes; gaps, conflicting duplicates and partially overlapping chunks
 refuse. Whole-object length and digest verification precedes bounded reads. The 24 KiB raw chunk
 limit is an internal candidate, not evidence that a complete encoded carrier request fits.
 
-Cleanup removes only the recorded data object and empty directory, never unknown neighboring objects
-or a recursive prefix match. Errors retain closed facts and unresolved identity-bound cleanup debt.
-Begin, chunk writes, verification and range reads check caller expiry at acquisition, transfer and
+Cleanup removes the exact data object before its receipt, then the empty directory, never unknown
+neighboring objects or a recursive prefix match. Errors retain closed facts and unresolved
+identity-bound cleanup debt. Ownership does not prove that an earlier request can no longer arrive;
+remote dispatch ordering and publication-stage recovery remain separate implementation gates. Begin,
+chunk writes, verification and range reads check caller expiry at acquisition, transfer and
 final-evidence checkpoints. Publication preserves scratch deadline failures. Expiry stops further
 acquisition, but permits identity capture and mode normalization needed for bounded exact cleanup;
 failed cleanup remains explicit debt. Creation preserves known acquisition facts through handled
