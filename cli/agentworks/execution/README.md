@@ -211,7 +211,7 @@ requested file is absent.
 The host exposes one private `read_file` call, preparing and dispatching one attempt with the
 current remaining deadline. The guest derives its own monotonic expiry and holds the lock until its
 bounded immutable snapshot is materialized. It checks expiry before reporting either a snapshot or
-absence, then releases the lock before emitting file bytes. There is no replayable prepared-read
+absence, then releases the lock before emitting file bytes. There is no reusable prepared-read
 object or readiness-time setup. The budget bounds cooperative checks, not an individual blocked
 filesystem system call.
 
