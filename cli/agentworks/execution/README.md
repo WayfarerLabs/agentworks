@@ -289,7 +289,7 @@ supplies the fresh operation token and execution identity before copying. The im
 binds this operation to snapshot creation, not upload staging. Expiry is checked after source
 descriptors close, including initial absence. Failure attempts exact scratch cleanup and preserves
 unresolved cleanup debt. Local receipt reconciliation can recover cleanup ownership after a lost
-return, not the ready snapshot or its content revision. Remote download delivery remains unbuilt.
+return, not the ready snapshot or its content revision. Remote download delivery is not implemented.
 
 Descriptor bookkeeping is not signal-atomic. An asynchronous interruption before an intermediate
 ancestor close can leave that descriptor open until helper exit; callers cannot assume leak-free
@@ -451,9 +451,10 @@ original parent, declared length and exact acquired objects in a bounded immutab
 access checks that receipt before using scratch. Read-only reconciliation uses the original token
 and context under the caller's transaction lock, never a path recovered from disk. A valid receipt
 can recover historical ownership for exact cleanup even when data is incomplete or already removed;
-it cannot recover a ready content reference or authorize publication. Missing, partial, replaced or
-invalid receipts remain ownership uncertainty, not proof of absence. No prefix search, replay,
-transfer registry or reboot-durability guarantee is supplied.
+it cannot recover a ready content reference or authorize publication. Missing, partial or invalid
+receipts remain ownership uncertainty, not proof of absence. An active reference also binds the
+original receipt inode; historical recovery has no prior receipt inode to compare. No prefix search,
+replay, transfer registry or reboot-durability guarantee is supplied.
 
 Writes use bounded exact offsets and a chunk digest. An exact previously written range may be
 retried after comparing its bytes; gaps, conflicting duplicates and partially overlapping chunks

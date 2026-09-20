@@ -271,8 +271,9 @@ recorded name/inode; it never follows the inode into the public destination. Rem
 outstanding stages before their receipts. A missing stage is not evidence of successful publication.
 Interruption before ownership is recorded, or between receipt removal and final directory removal,
 can still leave uncertain cleanup. These limits do not become a journal, prefix scavenger, resumed
-upload promise or reboot-durability requirement. This candidate remains unimplemented and requires
-fault tests for lost replies, delayed dispatch, partial creation and interrupted cleanup.
+upload promise or reboot-durability requirement. Publication-stage recovery remains unimplemented;
+the complete remote exchange requires fault tests for lost replies, delayed dispatch, partial
+creation and interrupted cleanup.
 
 The delivery audit at `0ecb9a2e` found that one monolithic bundle plus a 24 KiB chunk nearly
 exhausts or exceeds the historical 64 KiB Proxmox whole-POST limit before its missing dispatcher is
