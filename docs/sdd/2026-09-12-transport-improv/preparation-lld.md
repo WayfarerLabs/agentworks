@@ -224,6 +224,29 @@ a base-image helper with a non-circular delivery story. Readiness cannot install
 helper. Until one option passes, the direct production path remains blocked rather than reducing
 exit-value coverage or acquiring a synthetic `STARTED` record.
 
+### Retrospective completion candidate
+
+The next bounded Python-helper proof separates evidence of completed execution from an eager launch
+acknowledgment. On the audited CPython 3.11 native fork/exec path, with no pre-exec callback, an
+intact exec-error channel and one reaper, an actual normal wait for the exact child can establish
+entry and completion retrospectively for every exit value from 0 through 255. It does not emit a
+synthetic earlier `STARTED`. This is an implementation candidate, not acceptance of a new result
+reducer or a relaxation of the production gate above.
+
+The helper must obtain the actual native wait status. `Popen.wait()` and `poll()` can substitute
+zero when child status is unavailable; neither is sufficient evidence. Ignored `SIGCHLD`, a
+competing reaper, a pre-exec callback, a broken error channel or a different spawn implementation
+invalidates the inference. The proof must isolate those cases and verify the selected interpreter
+path rather than infer it from Python's minimum version. See the
+[runtime research](prior-art-research.md#local-mechanism-evidence).
+
+A signaled child without independent entry evidence stays unknown. For scripts, the exact normal
+wait proves completion of the selected interpreter, not entry into the first script-body command.
+Detached launch, early running-state reporting and live application-output promotion retain their
+independent acknowledgment gate. Buffered capture may keep bounded bytes private until completion
+evidence is established. The current shell proof and its wait-code result gain no stronger meaning
+from this candidate.
+
 Application stdout and stderr can never inject control records because the bootstrap encodes them
 through dedicated descriptors. Raw account-shell output before bootstrap is not framed application
 output. The decoder discards it without retaining a diagnostic copy. This is robust against

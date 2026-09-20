@@ -393,6 +393,48 @@ obtained exact-PID ordinary wait statuses for exits 0, 42, and 255; a second wai
 `ChildProcessError`. Missing wait evidence must remain unknown. This candidate requires a fixed,
 single-reaper helper and proof on supported interpreter builds before changing the preparation gate.
 
+A further local probe on Debian's CPython 3.11.2 recovered all 256 normal exit values through an
+exact-child native wait. Missing executable, missing working directory and non-executable object
+raised before returning a process. Adversarial fixtures demonstrated the exclusions: pre-exec
+callbacks can exit normally without application entry, and a deliberately broken exec-error writer
+can make a failed launch appear to exit 255. These fixtures are not production callback options. The
+[3.11 native launch implementation](https://github.com/python/cpython/blob/v3.11.2/Modules/_posixsubprocess.c#L658-L703)
+and
+[parent error-pipe handling](https://github.com/python/cpython/blob/v3.11.2/Lib/subprocess.py#L1797-L1902)
+support this bounded inference. It excludes `posix_spawn`; the
+[documented WSL/QEMU exception](https://docs.python.org/3.11/library/subprocess.html#popen-constructor)
+is one reason not to generalize across launch implementations. Bookworm's measured fork/exec choice
+is not a promise about every future interpreter. The
+[preparation candidate](preparation-lld.md#retrospective-completion-candidate) keeps eager launch,
+signal ambiguity and native-platform acceptance separate.
+
+### Identity-neutral file locking
+
+Advisory locking attaches to a kernel object rather than a username. Linux permits exclusive `flock`
+on a read-only descriptor; duplicate and forked descriptors share its lifetime, and separate opens
+of the same inode contend. A local ext4 experiment on a temporary mode-0555 directory confirmed
+contention through aliases, bounded non-blocking acquisition and last-close release after fork. It
+did not lock the workstation root or exercise another identity. Sources:
+[Linux flock](https://man7.org/linux/man-pages/man2/flock.2.html) and
+[util-linux directory locking](https://man7.org/linux/man-pages/man1/flock.1.html).
+
+Apple's
+[flock contract](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/flock.2.html)
+and [XNU dispatch](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/kern_descrip.c)
+support a common vnode lock domain, but filesystem implementations and security policy can refuse
+it. Generic XNU directory support is not live APFS acceptance. Network filesystems also change Linux
+semantics; in particular an exclusive NFS lock can require write access. Do not infer a portable
+lock from the Python function's availability.
+
+The candidate remains one fixed, protected Agentworks lock inode shared by every helper identity,
+not a per-effective-user cache. Root ownership is not intrinsically required: a stable host-account
+namespace can suffice if all bound identities can open the same inode and other in-scope identities
+cannot replace it. Core setup must preserve that inode throughout helper use. Provisioned Debian
+state and the actual macOS host namespace still need selection and cross-identity tests; a new admin
+installation or host prerequisite would need operator direction. Locking `/` avoids new state but
+shares an unrelated third-party lock namespace, so it is not selected. This investigation does not
+close the file LLD's transaction-lock gate.
+
 ### Decisions still required
 
 The new-guest package and preinstalled macOS host runtime choices are settled, but their
