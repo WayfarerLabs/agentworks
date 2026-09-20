@@ -26,7 +26,7 @@ from agentworks.execution._file_stage_protocol import (
 )
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, FileRecordReader, FileWireError
 from agentworks.execution._helper_launcher import IdentityPlan, build_helper_argv
-from agentworks.execution._scratch import ScratchPhase
+from agentworks.execution._scratch import ScratchPhase, _cleanup_debt
 from agentworks.execution.carrier import (
     CarrierIO,
     Dispatch,
@@ -174,7 +174,12 @@ class _FileStageCollector:
         expected_phase = (
             ScratchPhase.BEGIN if self._request.operation is FileStageOperation.BEGIN else ScratchPhase.WRITE
         )
-        return failure.phase is expected_phase
+        if failure.phase is not expected_phase:
+            return False
+        if self._request.operation is FileStageOperation.CHUNK:
+            assert isinstance(self._request, FileStageChunkRequest)
+            return failure.cleanup_debt == _cleanup_debt(self._request.reference)
+        return True
 
     def _fail(self, error: FileStageObservationError) -> None:
         if self._error is None:

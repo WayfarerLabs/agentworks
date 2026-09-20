@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 
 import pytest
 
@@ -34,6 +35,7 @@ from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._scratch import ScratchFailureKind, ScratchPhase, ScratchReference
 from agentworks.execution._scratch_receipt import (
+    _RECEIPT_BUILD_MODE,
     _RECEIPT_MODE,
     ScratchCleanupDebt,
     ScratchOwnership,
@@ -329,6 +331,92 @@ def test_truncated_refusal_never_exposes_parsed_cleanup_debt(plan: IdentityPlan)
     assert result.observation.state is FileStageObservationState.UNCERTAIN
     assert result.observation.failure is None
     assert result.observation.error is FileWireError.TRUNCATED
+
+
+def _chunk_refusal(
+    plan: IdentityPlan,
+    debt_change: Callable[[ScratchCleanupDebt], ScratchCleanupDebt | None],
+    *,
+    code: FileStageFailureCode = FileStageFailureCode.SCRATCH,
+):
+    begin_request = FileStageBeginRequest(
+        "0" * 32,
+        "/trusted/root",
+        "nested/target",
+        _TOKEN,
+        20_000,
+        plan.expected,
+        1.0,
+    )
+    reference = _reference(begin_request)
+
+    def refusal(request: FileStageRequest) -> bytes:
+        failure = (
+            FileStageFailureControl(code)
+            if code is not FileStageFailureCode.SCRATCH
+            else FileStageFailureControl(
+                code,
+                ScratchFailureKind.IO,
+                ScratchPhase.WRITE,
+                debt_change(_debt(request)),
+            )
+        )
+        return _records(request, FileRecordKind.FAILED, encode_file_stage_failure(failure))
+
+    data = b"chunk"
+    return stage_chunk(
+        TranscriptCarrier(refusal),
+        trusted_root_path=begin_request.root_path,
+        relative_path=begin_request.relative_path,
+        token=_TOKEN,
+        reference=reference,
+        offset=0,
+        data=data,
+        chunk_digest=hashlib.sha256(data).digest(),
+        plan=plan,
+        deadline=Deadline.after(1),
+    )
+
+
+def test_chunk_scratch_refusal_exposes_only_matching_reference_debt(plan: IdentityPlan) -> None:
+    result = _chunk_refusal(plan, lambda debt: debt)
+
+    assert result.observation.state is FileStageObservationState.REFUSED
+    assert result.observation.failure is not None
+    assert result.observation.failure.cleanup_debt is not None
+
+
+@pytest.mark.parametrize(
+    "debt_change",
+    [
+        lambda _debt: None,
+        lambda debt: replace(debt, _parent=_Identity(9, 2)),
+        lambda debt: replace(debt, _directory=_Identity(9, 3)),
+        lambda debt: replace(debt, _object=_Identity(9, 4)),
+        lambda debt: replace(debt, _receipt=_Identity(9, 5)),
+        lambda debt: replace(debt, _receipt_modes=(_RECEIPT_BUILD_MODE, _RECEIPT_MODE)),
+        lambda debt: replace(debt, _gid=9999),
+    ],
+    ids=["absent", "parent", "directory", "data", "receipt", "receipt-mode", "gid"],
+)
+def test_chunk_scratch_refusal_rejects_debt_not_equal_to_request_reference(
+    plan: IdentityPlan,
+    debt_change: Callable[[ScratchCleanupDebt], ScratchCleanupDebt | None],
+) -> None:
+    result = _chunk_refusal(plan, debt_change)
+
+    assert result.observation.state is FileStageObservationState.UNCERTAIN
+    assert result.observation.error is FileStageObservationError.CONTROL
+    assert result.observation.failure is None
+
+
+def test_chunk_prescratch_refusal_accepts_non_scratch_failure_without_debt(plan: IdentityPlan) -> None:
+    result = _chunk_refusal(plan, lambda _debt: None, code=FileStageFailureCode.ROOT_REFUSED)
+
+    assert result.observation.state is FileStageObservationState.REFUSED
+    assert result.observation.failure is not None
+    assert result.observation.failure.code is FileStageFailureCode.ROOT_REFUSED
+    assert result.observation.failure.cleanup_debt is None
 
 
 @pytest.mark.parametrize(
