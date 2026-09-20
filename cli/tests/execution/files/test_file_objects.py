@@ -511,12 +511,3 @@ def test_remove_lost_acknowledgement_is_uncertain_and_exact(tmp_path: Path, monk
     assert error.kind is FileObjectFailureKind.UNCERTAIN
     assert not target.exists()
     assert adjacent.read_bytes() == b"keep"
-
-
-def test_inputs_reject_before_filesystem_io(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    parent_fd = _open_parent(tmp_path)
-    os.close(parent_fd)
-    monkeypatch.setattr(objects_module, "_open_observed", lambda *_args: pytest.fail("filesystem was touched"))
-    for name in ("", ".", "..", "nested/name", "nul\x00name"):
-        with pytest.raises(ValueError):
-            stat_file_object(parent_fd, name, expires_at=None)

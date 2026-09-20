@@ -1,6 +1,7 @@
 """Private Linux filesystem-object observation and conditional removal.
 
-The caller owns the trusted parent descriptor and cooperating-writer lock.
+The caller owns the trusted parent descriptor and cooperating-writer lock,
+and supplies an already-validated single leaf name.
 Linux ``openat2`` confines the exact leaf without requiring read authority.
 External writers can still race the final check and removal syscall; this
 module makes no adversarial compare-and-swap claim.
@@ -77,7 +78,6 @@ def stat_file_object(
     expires_at: float | None,
 ) -> FileRevision | None:
     """Return metadata-only revision evidence for one supported exact leaf."""
-    _validate_leaf_name(leaf_name)
     _require_linux(FileObjectPhase.OBSERVATION)
     _raise_if_expired(expires_at, FileObjectPhase.OBSERVATION)
     observed = _open_observed(parent_fd, leaf_name, FileObjectPhase.OBSERVATION, expires_at)
@@ -103,7 +103,6 @@ def remove_file_object(
     expires_at: float | None,
 ) -> bool:
     """Remove the exact matching leaf, or return ``False`` when initially absent."""
-    _validate_leaf_name(leaf_name)
     _require_linux(FileObjectPhase.CONDITION)
     _raise_if_expired(expires_at, FileObjectPhase.CONDITION)
 
@@ -298,17 +297,6 @@ def _fstat(descriptor: int, phase: FileObjectPhase) -> os.stat_result:
     if observed is None:
         raise FileObjectError(FileObjectFailureKind.IO, phase)
     return observed
-
-
-def _validate_leaf_name(leaf_name: str) -> None:
-    if type(leaf_name) is not str or not leaf_name or leaf_name in {".", ".."}:
-        raise ValueError("File object leaf must be a simple nonempty name")
-    if "/" in leaf_name or "\x00" in leaf_name:
-        raise ValueError("File object leaf must be a simple nonempty name")
-    try:
-        os.fsencode(leaf_name)
-    except UnicodeEncodeError:
-        raise ValueError("File object leaf is not encodable") from None
 
 
 def _require_linux(phase: FileObjectPhase) -> None:

@@ -1,6 +1,8 @@
 # Transport Improvements: Design and Delivery Sequence
 
-- Status: Additive implementation started from merged #830; production remains unchanged
+- Status: Additive implementation started from merged #830; production execution factories and
+  RunContext remain unchanged. New-guest bootstrap now installs distribution Python and provisions
+  the shared file transaction lock; provisioning validation is required.
 - Delivery vehicle: Design PR #830, then additive implementation, consumer migration PR(s), and
   final removal/activation PR; all labeled `sdd:transport-improv`
 - Requirements: [FRD](frd.md)
