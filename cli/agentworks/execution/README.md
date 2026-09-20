@@ -114,18 +114,18 @@ cleanup authority, and verify their guest-side cleanup independently.
 
 ## Input accounting
 
-The 262,144-byte preparation bound and 65,536-byte native-delivery bound apply to the complete
-encoded envelope, not raw application stdin. Script source, argv, environment, cwd and framing share
-it; base64 expands payload bytes. For example, a sh script containing `/bin/cat` with no env or cwd
-fits 196,554 raw stdin bytes at preparation, but 49,098 through native delivery. Literal `/bin/cat`
-argv gives 196,551/49,095 instead. These are composition-specific examples, not general stdin
-guarantees.
+The 262,144-byte preparation bound applies to the complete encoded envelope, not raw application
+stdin. Script source, argv, environment, cwd and framing share it; base64 expands payload bytes.
+Native delivery separately limits both the input field and the complete serialized HTTP body to
+65,536 bytes. The latter includes bootstrap argv, JSON framing and escaping and preserves
+compatibility with older supported Proxmox HTTP servers. Neither limit is a raw-stdin allowance.
 
 After `prepare(...)`, `len(prepared.io.input.data)` gives the exact encoded size (the input is a
-`FiniteInput`). Check it against the chosen carrier's documented limit before delivery; oversized
-native input raises `ValidationError` before any dispatch. Preparation itself rejects an envelope
-over 262,144 bytes. This bounded proof has no automatic chunking or staging fallback for larger
-work; it is not the eventual public script/file transfer contract.
+`FiniteInput`), but this alone cannot establish native request acceptance. The carrier also measures
+the complete JSON body and raises `ValidationError` before dispatch if either bound is exceeded.
+Preparation itself rejects an envelope over 262,144 bytes. This bounded proof has no automatic
+chunking or staging fallback for larger work; it is not the eventual public script/file transfer
+contract.
 
 ## Scope and checks
 
@@ -318,6 +318,26 @@ supplies the same inode to every execution identity. The primitive alone does no
 machine-wide setup or cross-identity availability. It must not enclose child creation: a fork can
 inherit the descriptor and prolong the lock. Local contention and cleanup tests are not native macOS
 or ordinary/elevated acceptance. This private primitive is not wired into file delivery yet.
+
+Debian new-guest bootstrap invokes `_file_lock_setup.py` through a fixed standalone bundle after
+installing distribution Python. It provisions `/var/lib/agentworks/execution/files.lock` as root,
+validates protected ancestors, preserves valid existing objects and refuses unsafe ones. Only new
+core-owned objects have inherited ACLs removed and modes finalized; existing access ACLs refuse.
+Setup leaves unrelated state alone. File operations and readiness never invoke setup. Existing-guest
+recovery, cross-identity access and macOS host setup are not supplied by this create-time hook.
+
+## Private object observation and removal
+
+`_file_objects.py` observes a supported Linux regular file, directory or Unix socket without
+requiring content-read permission. It uses confined path-only descriptors and checks named/held
+identity and metadata. Observed links, multiply linked regular files and other special objects
+refuse. Removal requires exact kind and revision; digest-bearing regular revisions also recheck
+content through the bounded revision reader. Only empty directories can be removed. Initial absence
+returns unchanged; interrupted or ambiguous mutation is not reported as unchanged.
+
+The caller owns the trusted parent and transaction lock. Removal neither checks tmux liveness nor
+provides atomic compare-and-remove against external writers. Session code must coordinate server
+absence before supplying a socket revision. No recursive removal or FIFO creation is exposed.
 
 ## Private scratch transfer
 

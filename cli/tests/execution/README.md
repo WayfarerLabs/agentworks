@@ -77,8 +77,9 @@ remain distinct from the requested script interpreter and need separately scoped
 
 Record exact guest Bash/coreutils versions, not just executable presence. Locally, the fault tests
 have measured Bash 5.2.15; a documented 5.1 minimum is not evidence of a 5.1 run. Near-limit input
-checks must account for the complete encoded envelope: 262,144 bytes at preparation, 65,536 for
-native delivery, shared among all request fields. Record pre-dispatch refusal separately from
-provider acceptance, and preserve actual boundary values rather than generalizing one raw-stdin
-example. Close the report with independent process, provider-record and test-resource cleanup
-observations, including the disposition of any unfinished provisioning from the run.
+checks must account for the complete encoded envelope: 262,144 bytes at preparation. Native delivery
+has separate 65,536-byte limits for its input field and complete serialized HTTP body, including
+bootstrap argv and JSON escaping. Record pre-dispatch refusal separately from provider acceptance,
+and preserve actual boundary values rather than generalizing one raw-stdin example. Close the report
+with independent process, provider-record and test-resource cleanup observations, including the
+disposition of any unfinished provisioning from the run.

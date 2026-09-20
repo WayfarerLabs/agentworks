@@ -462,10 +462,43 @@ def test_unprepared_or_oversized_input_refused_before_effect(wire: MagicMock, pa
     wire.assert_not_called()
 
 
-def test_input_limit_does_not_count_bootstrap_argv(wire: MagicMock) -> None:
-    report = execute(CarrierIO(input=FiniteInput(b"x" * 65_536)))
-    assert report.completion == ExitStatus(code=0)
-    assert len(json.loads(wire.call_args_list[0].kwargs["body"])["input-data"]) == 65_536
+@pytest.mark.parametrize("extra_bytes", [0, 1])
+def test_complete_http_body_limit_includes_bootstrap_and_framing(wire: MagicMock, extra_bytes: int) -> None:
+    argv = ("/usr/bin/python3", "-c", 'print("fixed bootstrap")')
+    overhead = len(json.dumps({"command": argv, "input-data": ""}).encode("ascii"))
+    payload = b"x" * (65_536 - overhead + extra_bytes)
+    carrier = ProxmoxCarrier(connection())
+    invocation = PreparedInvocation(argv)
+    carrier_io = CarrierIO(input=FiniteInput(payload))
+    if extra_bytes:
+        with pytest.raises(ValidationError):
+            carrier.execute(invocation, io=carrier_io, deadline=Deadline(None))
+        wire.assert_not_called()
+    else:
+        report = carrier.execute(invocation, io=carrier_io, deadline=Deadline(None))
+        assert report.completion == ExitStatus(code=0)
+        body = wire.call_args_list[0].kwargs["body"]
+        assert len(body) == 65_536
+        assert json.loads(body)["input-data"].encode("ascii") == payload
+
+
+@pytest.mark.parametrize(
+    "argv,payload",
+    [
+        (("/bin/true",), b"x" * 65_536),
+        (("/bin/true",), b"\n" * 40_000),
+        (("/bin/true", "x" * 65_536), b""),
+        (("/bin/true", '"' * 40_000), b""),
+    ],
+)
+def test_http_limit_refuses_oversized_argv_or_escaped_input(
+    wire: MagicMock, argv: tuple[str, ...], payload: bytes
+) -> None:
+    with pytest.raises(ValidationError):
+        ProxmoxCarrier(connection()).execute(
+            PreparedInvocation(argv), io=CarrierIO(input=FiniteInput(payload)), deadline=Deadline(None)
+        )
+    wire.assert_not_called()
 
 
 def test_optional_features_are_passively_absent(wire: MagicMock) -> None:

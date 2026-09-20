@@ -39,6 +39,9 @@ from agentworks.execution.carrier import (
 )
 
 _MAX_INPUT_BYTES = 65_536
+# Older supported PVE 8 HTTP servers limit the complete POST, independently
+# of the guest-agent input field. Include argv and JSON escaping in this bound.
+_MAX_REQUEST_BYTES = 65_536
 
 
 @dataclass(frozen=True)
@@ -165,6 +168,8 @@ class ProxmoxCarrier:
         if len(input_data) > _MAX_INPUT_BYTES:
             raise ValidationError("Prepared Proxmox input exceeds the provider input limit")
         body = json.dumps({"command": invocation.argv, "input-data": input_data.decode("ascii")}).encode("ascii")
+        if len(body) > _MAX_REQUEST_BYTES:
+            raise ValidationError("Prepared Proxmox request exceeds the supported HTTP body limit")
         if deadline.expired:
             return _incomplete(Dispatch.NOT_SENT, io, Failure.DEADLINE)
         try:
