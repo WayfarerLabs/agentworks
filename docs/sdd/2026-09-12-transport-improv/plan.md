@@ -208,6 +208,18 @@ suite passes 549 with four skips. Ruff, mypy, file lint, rulesync and locked-SDD
 is private implementation evidence, not native platform acceptance or a completed additive
 RunContext handoff.
 
+At `6d089f67`, the private Linux publication primitive and retained exec-evidence experiment pass
+project, complexity and generic correctness review. Publication uses caller-owned staging state,
+preserves supported access metadata, refuses unsupported objects and retains exact cleanup debt;
+acquisition and post-rename interruption regressions pass. Arbitrary asynchronous interruption and
+complete helper ownership remain unproved. The same seven exec-evidence cases assert their complete
+results under the current interpreter and distribution Python 3.11, without accepting a production
+launcher or eager application-start claim. The exact head passes 10,517 non-integration tests with
+11 skips; the execution suite passes 596 with four skips. All 33 publication cases also pass under
+distribution Python 3.11. Ruff, mypy, file lint, typer isolation, rulesync, locked-SDD and website
+gates pass. These remain private building blocks: FileAccess, remote helper delivery, locking,
+platform acceptance and additive RunContext composition are not complete.
+
 SSH's implementation at `4fcfeaa8` includes transport `e85e9f5c` and adopts the reviewed finite
 subprocess pump. It still needs transport-owned shared I/O types and terminal preparation, plus
 production target/trust composition. Pump adoption does not close the launch interruption gate.
