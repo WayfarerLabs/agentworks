@@ -25,8 +25,14 @@ CASES = (
     "competing-reaper",
     "adversarial",
     "broken-error-channel",
+    "wait-failure",
 )
-CANARIES = ("argument-canary-4691", "environment-canary-0d3a", "input-canary-e670")
+CANARIES = (
+    "missing-argument-canary-9c27",
+    "argument-canary-4691",
+    "environment-canary-0d3a",
+    "input-canary-e670",
+)
 
 
 def _run(case: str, python: Path | None = None) -> Any:
@@ -49,11 +55,12 @@ def test_exact_pid_native_wait_covers_every_exit_without_eager_entry_claim() -> 
 
 
 def test_native_error_channel_rejects_launch_failures() -> None:
-    missing, non_executable, bad_cwd = _run("launch-failures")
+    (missing, non_executable, bad_cwd), no_children = _run("launch-failures")
 
     assert missing == ["FileNotFoundError", errno.ENOENT]
     assert non_executable == ["PermissionError", errno.EACCES]
     assert bad_cwd == ["FileNotFoundError", errno.ENOENT]
+    assert no_children is True
 
 
 @pytest.mark.parametrize(
@@ -75,8 +82,12 @@ def test_preexec_and_signal_counterexamples_bound_the_inference() -> None:
     assert killed_before_exec == killed_after_exec == ["signal", 9]
 
 
-def test_broken_error_writer_makes_missing_exec_look_like_exit_255() -> None:
+def test_forced_native_error_writer_failure_makes_missing_exec_look_like_exit_255() -> None:
     assert _run("broken-error-channel") == ["exit", 255]
+
+
+def test_unexpected_raw_wait_failure_kills_and_reaps_owned_child() -> None:
+    assert _run("wait-failure") is True
 
 
 def test_complete_closed_experiment_runs_on_distribution_python_311() -> None:
@@ -100,3 +111,4 @@ def test_complete_closed_experiment_runs_on_distribution_python_311() -> None:
     assert results["competing-reaper"][0] == ["unknown"]
     assert results["adversarial"][1] == results["adversarial"][2]
     assert results["broken-error-channel"] == ["exit", 255]
+    assert results["wait-failure"] is True

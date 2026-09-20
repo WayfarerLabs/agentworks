@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
-"""Closed-case CPython exec-evidence experiment, not a production API."""
+"""Closed-case native CPython exec-evidence experiment, not a production API.
+
+The fixture forces CPython's private spawn selector to the fork/exec path. That
+is experiment control, not an accepted production configuration or a claim
+about how current or future CPython versions otherwise select their mechanism.
+Every launched child has fixed, immediately terminating code and is explicitly
+waited; an unexpected wait failure kills and reaps the one owned PID.
+"""
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import platform
@@ -19,6 +27,9 @@ _MISSING = "/agw-exec-evidence/missing-argument-canary-9c27"
 _ARG_CANARY = "argument-canary-4691"
 _ENV = {"PATH": "/usr/bin:/bin", "CANARY": "environment-canary-0d3a"}
 
+# Test-only mechanism selection. Production must not rely on this private knob.
+subprocess._USE_POSIX_SPAWN = False  # type: ignore[misc]
+
 
 def _child(exit_code: int) -> subprocess.Popen[bytes]:
     return subprocess.Popen(
@@ -33,10 +44,17 @@ def _child(exit_code: int) -> subprocess.Popen[bytes]:
 
 
 def _wait(process: subprocess.Popen[bytes]) -> list[object]:
-    try:
-        waited_pid, status = os.waitpid(process.pid, 0)
-    except ChildProcessError:
-        return ["unknown"]
+    while True:
+        try:
+            waited_pid, status = os.waitpid(process.pid, 0)
+            break
+        except InterruptedError:
+            continue
+        except ChildProcessError:
+            return ["unknown"]
+        except BaseException:
+            _kill_and_reap(process)
+            raise
     if waited_pid != process.pid:
         return ["unknown"]
     process.returncode = os.waitstatus_to_exitcode(status)
@@ -45,6 +63,16 @@ def _wait(process: subprocess.Popen[bytes]) -> list[object]:
     if os.WIFSIGNALED(status):
         return ["signal", os.WTERMSIG(status)]
     return ["unknown"]
+
+
+def _kill_and_reap(process: subprocess.Popen[bytes]) -> None:
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(process.pid, signal.SIGKILL)
+    try:
+        _, status = os.waitpid(process.pid, 0)
+    except ChildProcessError:
+        return
+    process.returncode = os.waitstatus_to_exitcode(status)
 
 
 def _sweep() -> object:
@@ -76,11 +104,45 @@ def _launch_failures() -> object:
             fixture.write(b"input-canary-e670\n")
         os.chmod(non_executable, 0o600)
         missing_cwd = os.path.join(directory, "missing-cwd")
-        return [
+        failures = [
             _launch_error([_MISSING, _ARG_CANARY]),
             _launch_error([non_executable, _ARG_CANARY]),
             _launch_error([sys.executable, "-I", "-S", "-B", "-c", "pass", _ARG_CANARY], cwd=missing_cwd),
         ]
+        return [failures, _no_children()]
+
+
+def _no_children() -> bool:
+    try:
+        os.waitpid(-1, os.WNOHANG)
+    except ChildProcessError:
+        return True
+    return False
+
+
+def _wait_failure() -> object:
+    process = _child(60)
+    original_waitpid = os.waitpid
+    failed_once = False
+
+    def fail_once(pid: int, options: int) -> tuple[int, int]:
+        nonlocal failed_once
+        if not failed_once:
+            failed_once = True
+            raise OSError("fixture wait failure")
+        return original_waitpid(pid, options)
+
+    os.waitpid = fail_once
+    try:
+        try:
+            _wait(process)
+        except OSError:
+            pass
+        else:
+            raise AssertionError("fixture wait failure was not raised")
+    finally:
+        os.waitpid = original_waitpid
+    return _no_children()
 
 
 def _lost_wait(mode: str) -> object:
@@ -173,6 +235,7 @@ _CASES = {
     "exit-sweep": _sweep,
     "ignored-sigchld": lambda: _lost_wait("ignored"),
     "launch-failures": _launch_failures,
+    "wait-failure": _wait_failure,
 }
 
 
