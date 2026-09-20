@@ -145,8 +145,8 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       workstation-platform acceptance or application-start proof.
 - [ ] Accept the preparation/result and file-operation LLDs after private review and disposition of
       their helper/runtime, launch-evidence, cross-identity locking, and platform prerequisites.
-- [ ] Jointly accept and prove the carrier sink extension with the SSH owner before changing
-      `CarrierIO` or sensitive-output handling.
+- [ ] Jointly accept and prove the privately implemented carrier sink extension with the SSH owner
+      before enabling its production use or exposing it through RunContext.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
       access. The models-only checkpoint is not additive-surface completion.
 
@@ -164,6 +164,21 @@ object checks and explicit trust assumptions, but do not build same-user namespa
 close the earlier ancestor-rename/hard-link adversarial gate. Unsupported objects or metadata refuse
 before publication; required workflows still need an implemented safe path or explicit disposition,
 not silent omission.
+
+The byte-endpoint work unit now includes borrowed live input, delivered-output retention, the shared
+subprocess pump and buffered QGA sink delivery. Private review caught the post-exit pipe timer
+incorrectly limiting healthy sink backpressure. The correction keeps one accumulated collection
+budget while pending sink delivery consumes the original operation deadline. The lexical
+provisioning tests from the initial package increment were removed; package coverage and the
+separate live-provisioning gate remain. These corrections do not establish production or joint SSH
+acceptance. Before publication of the new types, the old SSH adapter in this branch must explicitly
+refuse unsupported I/O shapes instead of silently interpreting them as EOF or discard. That small
+adapter guard has been requested from its SSH owner.
+
+The [Darwin prerequisite candidate](preparation-lld.md#darwin-inline-prerequisite-candidate) keeps
+runtime selection above carriers and checks interpreter compatibility inside the inline invocation.
+It does not install Python, execute the known Xcode shim, or add a preliminary readiness probe.
+Implementation and native macOS proof remain open.
 
 SSH's implementation at `4fcfeaa8` includes transport `e85e9f5c` and adopts the reviewed finite
 subprocess pump. It still needs transport-owned shared I/O types and terminal preparation, plus

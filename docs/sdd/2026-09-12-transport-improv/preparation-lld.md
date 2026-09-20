@@ -288,11 +288,12 @@ policy, and nonce. Source and stdin decode into separate descriptors. The comple
 has one conservative transport-owned limit proven across every required carrier; 32 KiB is the
 candidate, not an accepted constant until QGA whole-request testing confirms it.
 
-The bootstrap argv contains only fixed helper source, non-sensitive protocol constants, and the
-nonce. It contains no command argument, source, environment value, cwd, or stdin bytes. Inline
-delivery installs no guest file. The measured buffered proof uses no Python or Agentworks
-installation; the production helper may use the explicitly approved early guest Python prerequisite,
-subject to Bookworm compatibility and a new no-staging proof. Readiness never installs it.
+The bootstrap argv contains only fixed helper source, non-sensitive protocol constants, a trusted
+runtime path selected by target composition when needed, and the nonce. It contains no application
+command argument, source, environment value, cwd, or stdin bytes. Inline delivery installs no guest
+file. The measured buffered proof uses no Python or Agentworks installation; the production helper
+may use the explicitly approved early guest Python prerequisite, subject to Bookworm compatibility
+and a new no-staging proof. Readiness never installs it.
 
 ### Private staging path
 
@@ -369,6 +370,44 @@ The current Linux bootstrap cannot be relabeled Darwin-compatible: account looku
 metadata, and process APIs differ. The Darwin helper must prove the supported platform mechanics
 without creating a circular bootstrap dependency. Until that proof passes, production platform-host
 scripts and managed jobs remain blocked rather than downgraded.
+
+### Darwin inline prerequisite candidate
+
+Runtime selection belongs to shared preparation and target composition, not SSH. The candidate uses
+one explicitly bound absolute interpreter path, or the fixed candidates `/opt/homebrew/bin/python3`
+and `/usr/local/bin/python3` in that order. These cover the documented Homebrew prefixes and
+Python.org installer links. A custom installation requires an explicit bound path; this candidate
+adds no public configuration field or PATH discovery.
+
+An explicit path is the sole candidate. Otherwise, the first existing directory entry wins,
+including a broken symlink. Missing entries allow selection of the next fixed path; an unusable,
+unsupported, or shim selection does not trigger fallback. This makes a stale installation an
+actionable failure rather than silently changing the runtime. No interpreter is executed during
+selection.
+
+A fixed, non-login system shell checks the selected object for regular-file and executable status,
+then compares its device/inode identity with `/usr/bin/python3` using `test -ef`. The comparison
+rejects direct selection and symlink or hard-link aliases without executing the system shim or
+implementing a path-resolution framework. It does not identify an arbitrary copied shim or malicious
+wrapper; the selected installation and target account are trusted prerequisites. Native macOS proof
+must establish the chosen shell's identity-test behavior. If no independent candidate exists, the
+presence of the known system path gives a shim-only diagnostic; otherwise the diagnostic is missing
+Python. Never invoke `xcrun`, `xcode-select`, a package manager, or the shim to classify that state.
+
+Selection and helper entry share one carrier invocation. The selected interpreter runs fixed source
+with `-I -S -B`: isolate Python environment/user-site settings, skip site initialization, and
+prevent bytecode writes. A small trampoline compatible with older Python 3 checks the version before
+entering the Python 3.11 helper in the same process. This is not a preliminary readiness probe or
+staging operation. A valid nonce-bound prerequisite response reports a closed failure category;
+missing responses and transport failures remain observation/connection failures, never evidence of
+an absent interpreter. Diagnostics use the bound host, selected path, failure category and remedy,
+not raw interpreter or account-shell output.
+
+This remains an implementation candidate. Acceptance needs Intel and Apple Silicon macOS evidence
+for independent installations, explicit paths, shim aliases, broken selections, old interpreters, no
+developer-tools installation prompt, no readiness writes, and interrupted observation. Primary
+sources and their limits are recorded in
+[runtime prior art](prior-art-research.md#macos-python-prerequisite).
 
 ## Public result and check behavior
 

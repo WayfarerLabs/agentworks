@@ -493,6 +493,36 @@ conformance. Unit tests do not establish these distinctions against supported sh
 carrier remains outside production composition pending the live cases above and the shared
 launch-interruption ownership gate.
 
+## macOS Python prerequisite
+
+The approved host prerequisite is preinstalled Python 3.11 or newer, not implicit developer-tools
+installation. Apple's
+[command-line tools FAQ](https://developer.apple.com/library/archive/technotes/tn2339/_index.html)
+describes the `/usr/bin` developer-tool shims. Python's
+[macOS documentation](https://docs.python.org/3.13/using/mac.html) identifies `/usr/bin/python3` as
+the Apple development-tools runtime and documents the installer links under `/usr/local/bin`.
+Neither source proves that running a particular host's system path is harmless, so the candidate
+does not execute that path to inspect it.
+
+[Homebrew installation documentation](https://docs.brew.sh/Installation) identifies its Apple
+Silicon and Intel prefixes; its
+[runtime documentation](https://docs.brew.sh/Language-Runtimes-and-Packages) locates `python3` in
+the prefix's `bin` directory. This supports the two fixed discovery candidates, not discovery of
+arbitrary custom installations. An explicit bound path handles those installations.
+
+The
+[Bash conditional-expression reference](https://www.gnu.org/software/bash/manual/bash.html#Bash-Conditional-Expressions)
+defines `-ef` as device/inode equality and states that file tests follow symlinks. This suggests a
+small alias check against the known shim without a custom symlink resolver. It remains an inference
+pending proof with the shipped macOS shell. The
+[Python command-line reference](https://docs.python.org/3/using/cmdline.html) supplies the isolated,
+no-site, no-bytecode invocation flags. Those flags do not prove the complete helper performs no
+writes; the inline readiness test must establish that separately.
+
+The [preparation candidate](preparation-lld.md#darwin-inline-prerequisite-candidate) records the
+selection, refusal and observation rules. Native macOS installation, shim-alias, no-prompt and
+no-write evidence remain outstanding. No Linux fixture substitutes for those measurements.
+
 ## Claims not relied upon
 
 - A common API makes every backend interactive.
