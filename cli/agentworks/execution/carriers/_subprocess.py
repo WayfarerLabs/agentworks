@@ -258,8 +258,8 @@ def run_process(
             if deadline.expired:
                 failure = Failure.DEADLINE
                 break
+            pending_delivery = stdout.pending is not None or stderr.pending is not None
             if exit_status is not None:
-                pending_delivery = stdout.pending is not None or stderr.pending is not None
                 if post_exit_drain is None:
                     post_exit_drain = _PostExitDrain(paused=pending_delivery)
                 elif post_exit_drain.update(paused=pending_delivery):
@@ -268,12 +268,14 @@ def run_process(
                     failure = Failure.OUTPUT
                     break
             progressed = False
-            outputs = (
+            outputs = list(
                 ((stdout, process.stdout), (stderr, process.stderr))
                 if output_first
                 else ((stderr, process.stderr), (stdout, process.stdout))
             )
             output_first = not output_first
+            if exit_status is not None and pending_delivery:
+                outputs = [item for item in outputs if item[0].pending is not None]
             for output, pipe in outputs:
                 try:
                     output_progressed, output_failed = output.advance(pipe)

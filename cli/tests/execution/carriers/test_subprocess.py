@@ -620,6 +620,89 @@ def test_post_exit_short_writes_are_delivered_fairly(children: list[subprocess.P
     assert_closed(children)
 
 
+@pytest.mark.parametrize(
+    ("stall_seconds", "deadline_seconds", "expected_failure"),
+    [(0.3, 2.0, Failure.OUTPUT), (None, 0.5, Failure.DEADLINE)],
+)
+def test_post_exit_pending_delivery_stops_fresh_reads_from_other_stream(
+    children: list[subprocess.Popen[bytes]],
+    tmp_path: Path,
+    stall_seconds: float | None,
+    deadline_seconds: float,
+    expected_failure: Failure,
+) -> None:
+    class CountingSink:
+        def __init__(self) -> None:
+            self.bytes_written = 0
+
+        def try_write(self, data: memoryview) -> int | None:
+            self.bytes_written += len(data)
+            return len(data)
+
+    stderr = CountingSink()
+
+    class StalledSink:
+        def __init__(self) -> None:
+            self.started_at: float | None = None
+            self.data = bytearray()
+            self.stderr_after_exit: list[int] = []
+
+        def try_write(self, data: memoryview) -> int | None:
+            now = time.monotonic()
+            if self.started_at is None:
+                self.started_at = now
+            if children[-1].poll() is not None:
+                self.stderr_after_exit.append(stderr.bytes_written)
+            if stall_seconds is None or now - self.started_at < stall_seconds:
+                return None
+            self.data.extend(data)
+            return len(data)
+
+    release = tmp_path / "release"
+    done = tmp_path / "done"
+    descendant = (
+        "import os,pathlib,time; "
+        f"release=pathlib.Path({str(release)!r}); done=pathlib.Path({str(done)!r}); "
+        "end=time.monotonic()+5\n"
+        "while not release.exists() and time.monotonic()<end:\n"
+        " try: os.write(2,b'e'*65536)\n"
+        " except OSError: break\n"
+        "done.touch()"
+    )
+    script = (
+        "import subprocess,sys; "
+        "sys.stdout.buffer.write(b'payload'); sys.stdout.buffer.flush(); "
+        f"subprocess.Popen([sys.executable,'-c',{descendant!r}], "
+        "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)"
+    )
+    stdout = StalledSink()
+    try:
+        result = execute(
+            script,
+            io=CarrierIO(output=SinkOutput(stdout, stderr)),
+            seconds=deadline_seconds,
+        )
+        assert len(stdout.stderr_after_exit) > 5
+        assert len(set(stdout.stderr_after_exit)) == 1
+        stderr_before_release = stdout.stderr_after_exit[0]
+        assert result.local_status == result.exit_status == 0
+        assert result.failure == expected_failure
+        assert not result.stderr.complete
+        if stall_seconds is None:
+            assert stdout.data == b""
+            assert stderr.bytes_written == stderr_before_release
+        else:
+            assert stdout.data == b"payload"
+            assert stderr.bytes_written > stderr_before_release
+        assert_closed(children)
+    finally:
+        release.touch()
+        until = time.monotonic() + 5
+        while not done.exists() and time.monotonic() < until:
+            time.sleep(0.01)
+        assert done.exists()
+
+
 def test_input_pipe_failure_is_safe(children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch) -> None:
     def write(fd: int, data: bytes) -> int:
         raise OSError("secret-canary")
