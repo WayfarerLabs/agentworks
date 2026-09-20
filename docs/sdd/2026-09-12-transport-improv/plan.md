@@ -187,7 +187,7 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       Prove every final envelope against both complete Proxmox HTTP-body and workstation
       process-command bounds; no executable-helper staging fallback. The Proxmox compatibility floor
       remains 64 KiB even on providers accepting larger requests.
-- [ ] Review and integrate private held-object metadata, bounded inventory, search-only root
+- [x] Review and integrate private held-object metadata, bounded inventory, search-only root
       traversal and read-only fixed lock-namespace composition. Preserve explicit partial/uncertain
       mutation facts and requested-depth completeness without claiming public FileAccess or native
       acceptance.
@@ -498,6 +498,25 @@ temporary build outputs were removed. No live infrastructure was touched. All th
 lanes rechecked the correction pin. Native privileged setup, cross-identity contention, complete
 file delivery, lifecycle and additive RunContext remain open; both macOS operator decisions are
 still pending. No public review/test signal is raised and no public fix round is consumed.
+
+The metadata/inventory increment is privately reviewed at `4e8921eb`. Linux metadata convergence
+uses verified held-object procfs references, supports required directory set-group-ID modes and
+preserves explicit completed versus uncertain mutation facts. Inventory returns complete results
+within the requested depth with exact entry/name/encoded bounds. Shared file framing now has one
+concrete codec, while read schemas remain operation-specific. Root and fixed lock-namespace walks
+use path-only descriptors without unnecessary directory read authority; neither installs state.
+
+All three independent lanes are clear on the correction pin. Review moved invalid directory-mode
+refusal before target I/O, added a deadline check after final ACL verification, removed duplicate
+inventory serialization and redundant metadata error reconstruction, and preserved handled-control
+descriptor cleanup. Final local suite: 11,282 passed, 12 skipped. The combined file and Proxmox
+request/trust/sink suite passes 448 without skips. Ruff, formatting, strict mypy (957 sources), file
+lint, typer isolation, rulesync, locked-SDD and diff checks pass. Unchanged website code passes 160
+Python and 103 Node tests plus both deterministic build comparisons. No live infrastructure was
+touched. This is a private increment, not complete FileAccess or a public feedback round. The next
+implementation step is the concrete stat/removal helper exchange; public composition, native and
+cross-identity acceptance, lifecycle and additive RunContext remain open. Both macOS operator
+decisions remain pending.
 
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
