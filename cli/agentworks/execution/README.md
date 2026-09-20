@@ -422,7 +422,9 @@ public `FileAccess` composition or establishes native platform acceptance.
 
 `_scratch.py` supplies POSIX destination-side scratch operations beneath a borrowed trusted parent
 descriptor. Each object has an unpredictable private directory and one fixed data file, with final
-modes 0700 and 0600. An identity-bound private reference carries its declared length and SHA-256.
+modes 0700 and 0600. An identity-bound private reference carries its declared length. Final
+verification receives the whole-object SHA-256 after transfer and produces a ready reference
+carrying the verified digest; beginning an upload does not require consuming its source first.
 Operations reopen and check the recorded objects; observed replacement, links, special objects or
 changed ownership/mode refuse. The caller owns confinement and coordination between writers.
 
@@ -433,10 +435,12 @@ limit is an internal candidate, not evidence that a complete encoded carrier req
 
 Cleanup removes only the recorded data object and empty directory, never unknown neighboring objects
 or a recursive prefix match. Errors retain closed facts and unresolved identity-bound cleanup debt.
-Creation preserves known acquisition facts through handled control-flow interruption; an unresolved
-debt is attached as a closed error cause while the original control exception propagates. Python
-ownership bookkeeping is not signal-atomic and repeated interruption is not a bounded cleanup
-guarantee.
+Begin, chunk writes, verification and range reads check caller expiry between filesystem calls and
+before reporting success. Publication preserves scratch deadline failures. Expiry does not prevent
+the bounded exact cleanup attempt; failed cleanup remains explicit debt. Creation preserves known
+acquisition facts through handled control-flow interruption; an unresolved debt is attached as a
+closed error cause while the original control exception propagates. Python ownership bookkeeping is
+not signal-atomic and repeated interruption is not a bounded cleanup guarantee.
 
 This primitive does not implement remote request validation, a wire protocol, helper deployment,
 execution staging or FileAccess. Filesystem calls have no hard interruption bound, and no crash
