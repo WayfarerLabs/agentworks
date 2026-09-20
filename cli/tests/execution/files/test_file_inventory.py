@@ -81,6 +81,22 @@ def test_inventory_reports_nested_tree_to_requested_depth(tmp_path: Path) -> Non
     assert all(entry.revision.digest is None for entry in medium)
 
 
+def test_none_deadline_is_an_explicit_unbounded_inventory(tmp_path: Path) -> None:
+    (tmp_path / "regular").write_bytes(b"content")
+    root_fd = _open_directory(tmp_path)
+    try:
+        entries = inventory_directory(
+            root_fd,
+            max_entries=1,
+            max_depth=1,
+            max_encoded_bytes=_LARGE_LIMIT,
+            expires_at=None,
+        )
+    finally:
+        os.close(root_fd)
+    assert [entry.relative_path for entry in entries] == ["regular"]
+
+
 def test_inventory_sorts_relative_utf8_paths_bytewise(tmp_path: Path) -> None:
     names = ["z", "snowman-☃", "e-acute-é", "alpha"]
     for name in names:
@@ -293,7 +309,7 @@ def test_disappearance_after_enumeration_is_a_conflict(tmp_path: Path, monkeypat
     root_fd = _open_directory(tmp_path)
     real_observe = inventory_module._observe
 
-    def disappearing_observe(parent_fd: int, name: str, expires_at: float):
+    def disappearing_observe(parent_fd: int, name: str, expires_at: float | None):
         target.unlink()
         return real_observe(parent_fd, name, expires_at)
 
@@ -372,7 +388,7 @@ def test_deadline_during_traversal_returns_no_partial_inventory(
     expires_at = time.monotonic() + 60.0
     checks = 0
 
-    def expire_after_one_entry(_expires_at: float) -> None:
+    def expire_after_one_entry(_expires_at: float | None) -> None:
         nonlocal checks
         checks += 1
         if checks == 4:

@@ -84,7 +84,7 @@ class _InventoryState:
     max_entries: int
     max_encoded_bytes: int
     root_device: int
-    expires_at: float
+    expires_at: float | None
 
 
 def inventory_directory(
@@ -93,13 +93,14 @@ def inventory_directory(
     max_entries: int,
     max_depth: int,
     max_encoded_bytes: int,
-    expires_at: float,
+    expires_at: float | None,
 ) -> tuple[FileInventoryEntry, ...]:
     """Return a complete bounded inventory beneath a borrowed directory.
 
-    Numeric limits and the finite guest-monotonic expiry are typed,
-    already-validated interior values. Depth one reports immediate children.
-    Directories at the requested boundary are observed but never opened.
+    Numeric limits and the finite-or-unbounded guest-monotonic expiry are
+    typed, already-validated interior values. Depth one reports immediate
+    children. Directories at the requested boundary are observed but never
+    enumerated.
     """
     if sys.platform != "linux":
         raise FileInventoryError(FileInventoryFailureKind.UNSUPPORTED)
@@ -219,15 +220,13 @@ def _encode_record(entry: FileInventoryEntry) -> bytes:
     return json.dumps(record, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
 
-def _observe(parent_fd: int, name: str, expires_at: float) -> FileRevision:
+def _observe(parent_fd: int, name: str, expires_at: float | None) -> FileRevision:
     try:
         revision = stat_file_object(parent_fd, name, expires_at=expires_at)
     except FileObjectError as error:
         raise FileInventoryError(_object_failure(error.kind)) from None
     if revision is None:
         raise FileInventoryError(FileInventoryFailureKind.CONFLICT)
-    if revision.digest is not None:
-        raise FileInventoryError(FileInventoryFailureKind.IO)
     return revision
 
 
@@ -235,7 +234,7 @@ def _require_named_identity(
     parent_fd: int,
     name: str,
     expected: FileRevision,
-    expires_at: float,
+    expires_at: float | None,
 ) -> None:
     current = _observe(parent_fd, name, expires_at)
     if _identity(current.stat) != _identity(expected.stat) or revision_kind(current) is not FileKind.DIRECTORY:
@@ -311,8 +310,8 @@ def _fstat(descriptor: int) -> os.stat_result:
     return observed
 
 
-def _raise_if_expired(expires_at: float) -> None:
-    if time.monotonic() >= expires_at:
+def _raise_if_expired(expires_at: float | None) -> None:
+    if expires_at is not None and time.monotonic() >= expires_at:
         raise FileInventoryError(FileInventoryFailureKind.DEADLINE)
 
 
