@@ -367,6 +367,13 @@ deterministic build comparisons pass. The Python website run also emitted a serv
 entire CLI directory, outside CI's scope, reports missing hatchling build-hook stubs; the required
 `agentworks/ tests/` invocation passes. No dependency or unrelated website code was changed.
 
+Hosted [run 35503399897](https://github.com/WayfarerLabs/agentworks/actions/runs/35503399897) at
+`b0d62063` passes Windows and Linux 3.12/3.14, but the Linux 3.13 import test assumes its blocked
+modules were not preloaded. The helper import succeeds; the test's final assertion fails. The
+test-only correction at `ed19ee21` explicitly marks those modules unavailable, like the existing
+terminal test. All three private review lanes are clean; negative import probes still fail, and the
+four focused import tests pass. Runtime code is unchanged.
+
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
 
