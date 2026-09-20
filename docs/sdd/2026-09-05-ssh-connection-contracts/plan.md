@@ -187,6 +187,12 @@ transport's files, shared supervision or consumer migration.
 The [implementation progress record](phase2-results.md) pins the completed independent code and
 local validation separately from the remaining shared integration and platform acceptance.
 
+Shared subprocess adoption introduces an implementation dependency on transport #833, pinned at
+`e85e9f5c4752ae926315fa7c0e69b871de42e4fc`. #832 stacks on its implementation branch; transport
+lands first. Buffered adapter validation does not close the shared launch-interruption gate, live
+I/O, terminal preparation or additive RunContext delivery. Terminal/PTY work is proceeding in
+parallel in the transport lane, as confirmed by the operator.
+
 ### Complete the carrier and migration
 
 - [ ] Finish the SSH LLD for R1-R5: complete connection validation, installed-client/path policy,

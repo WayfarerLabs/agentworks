@@ -71,10 +71,11 @@ their own authentication-offer evidence; the old PoC record is unchanged.
 
 ## Process and evidence
 
-`client.py` owns version gating and mapping into the shared report. `_io.py` owns one subprocess and
-its pipes. EOF input uses the null device; finite bytes use a pipe. A single-thread pump performs
-bounded, fair reads and short writes on non-blocking pipes, closing stdin once all bytes are sent.
-Python 3.12 is the project minimum and adds Windows pipe support to
+`client.py` owns version gating and mapping into the shared report. SSH's `_io.py` supplies client
+environment policy and output provenance to transport's `carriers/_subprocess.py`, which owns the
+subprocess and its pipes. EOF input uses the null device; finite bytes use a pipe. Its single-thread
+pump performs bounded, fair reads and short writes on non-blocking pipes, closing stdin once all
+bytes are sent. Python 3.12 is the project minimum and adds Windows pipe support to
 [`os.set_blocking`](https://docs.python.org/3.12/library/os.html#os.set_blocking).
 
 Windows client spawning removes two OpenSSH-private variables from a copy of the child environment:
@@ -97,9 +98,18 @@ commands or payload-bearing diagnostics.
 
 One deadline covers local preparation, client startup and I/O. Expiry stops local observation and
 closes owned handles. Local kill/reap has an additional bounded 0.5-second cleanup allowance; it
-does not renew execution or establish guest cancellation. KeyboardInterrupt propagates after
-cleanup. After observed client exit, drainage has at most 0.1 seconds and still requires actual EOF
-for completeness. Inherited descendant handles cannot cause an unbounded drain.
+does not renew execution or establish guest cancellation. Interruption inside the guarded I/O loop
+propagates after cleanup. After observed client exit, drainage has at most 0.1 seconds and still
+requires actual EOF for completeness. Inherited descendant handles cannot cause an unbounded drain.
+
+Launch interruption remains an acceptance gap. The cleanup guard begins after process construction
+and loop-state initialization; interruption earlier can leave a child alive, even before Python
+returns its handle. Transport's
+[startup evidence](../2026-09-12-transport-improv/prior-art-research.md#local-process-startup-and-interruption)
+records the real Linux reproduction and unresolved cross-platform ownership mechanism. The former
+SSH-local pump had the same gap. Shared extraction does not close it, and loop-interruption tests do
+not establish production launch-interruption conformance. Forwarding's separate process launch also
+needs that ownership proof.
 
 Live measurements confirm that guest workloads and bootstrap descendants can survive local
 observation expiry. The shared
@@ -129,10 +139,15 @@ status observed before cleanup can establish completion.
 ## Shared I/O integration checkpoint, 2026-09-19
 
 Transport implementation [PR #833](https://github.com/WayfarerLabs/agentworks/pull/833) at
-`6f20bdb5930ccf09c278c419acf784a65bc79dad` leaves `carrier.py` buffered-only. Its carrier I/O LLD is
-a candidate, not concrete live/terminal types. The bounded borrowed-endpoint approach fits the SSH
-pump's fair non-blocking pipe operations; exact endpoint and report types remain transport's to
-supply and accept through joint proof. SSH does not create substitute common types while waiting.
+`e85e9f5c4752ae926315fa7c0e69b871de42e4fc` supplies the shared finite-input subprocess pump and
+canonical invocation models. SSH adopts that pump while retaining environment filtering and
+carrier-specific evidence, and imports `Command` from `execution.models` in its independence
+fixture. This is an actual implementation dependency; #832 stacks on #833.
+
+The carrier interface remains buffered-only. Its I/O LLD is a candidate, not concrete live/terminal
+types. Exact endpoint and report types remain transport's to supply and accept through joint proof.
+SSH does not create substitute common types while waiting. The operator confirmed that terminal/PTY
+work is proceeding in parallel with #833; the SSH terminal notes are input to that joint work.
 
 The [terminal LLD](terminal-lld.md) records local feasibility evidence and the unresolved
 prepared-input interface. Terminal integration additionally needs explicit borrowed handles and
