@@ -54,11 +54,11 @@ file checks instead of blanket machine-wide destination locking and privileged h
 completed lock experiments below remain historical records; the lock implementation and its
 associated pending acceptance gates are superseded by this ruling.
 
-- [ ] Remove destination lock acquisition, setup, bundled dependencies and lock-only failure codes
+- [x] Remove destination lock acquisition, setup, bundled dependencies and lock-only failure codes
       from the private file helpers and new-guest provisioning. Preserve Python installation,
       identity checks, object refusal, revisions, bounds, expiry and exact cleanup evidence. Prove
       bounded read/stat and file operations work without an installed lock namespace.
-- [ ] Implement atomic database operation admission for conflicting resource scopes, with durable
+- [x] Implement atomic database operation admission for conflicting resource scopes, with durable
       ownership and explicit terminal release. Keep SQL transactions short; do not hold a database
       write lock during remote execution or coordinate independent databases through a new service.
 - [ ] Carry the same operation ownership through core orchestration, RunContext and nested file
@@ -75,6 +75,19 @@ associated pending acceptance gates are superseded by this ruling.
       administrator-installed file lock. Keep Linux guest MANAGED guarantees unchanged.
 - [ ] Complete the private reviews and gates for this replacement, update permanent collateral, and
       publish the corrected design and implementation as part of the still-draft effort.
+
+The first implementation increment is privately reviewed at `063cd0bc` by the project, complexity
+and generic correctness lanes. It removes the lock/setup stack and supplies `Database.operations`,
+not production operation coordination. Admission through core orchestration, nested RunContext and
+file exchanges, resource-key selection and operation-specific recovery remain unchecked above.
+
+Review restored initial deadline refusal before filesystem access in all five helper families,
+preserved phase and known cleanup debt for all four staging operations, corrected unsafe backup
+retry guidance and removed redundant typed-interior validation. The eight-case deadline regression
+uses synthetic identity rather than Unix-only calls during collection. Final reviewers each pass 34
+affected deadline/staging tests. No native VM or host acceptance is claimed. The independent local
+launch-owner cleanup-entry interrupt gap remains open and is documented in the preparation LLD; this
+increment does not introduce global signal handling or declare launch conformance.
 
 ## Buffered PoC checkpoint record
 
