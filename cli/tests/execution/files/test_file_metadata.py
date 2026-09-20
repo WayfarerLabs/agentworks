@@ -572,6 +572,22 @@ def test_mode_authority_refuses_setuid_and_regular_special_bits(tmp_path: Path) 
     assert regular_error.effect is directory_error.effect is MetadataEffect.UNCHANGED
 
 
+def test_invalid_directory_mode_refuses_before_observation_or_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    os.close(parent_fd)
+    monkeypatch.setattr(metadata_module, "_open_observed", lambda *_args: pytest.fail("object was observed"))
+
+    error = _failure(_ensure, parent_fd, "missing", 0o4770)
+
+    assert error.kind is MetadataFailureKind.UNSUPPORTED
+    assert error.effect is MetadataEffect.UNCHANGED
+    assert error.completed_steps == ()
+    assert error.attempted_step is None
+    assert not (tmp_path / "missing").exists()
+
+
 def test_observation_descriptor_is_closed_on_success_and_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

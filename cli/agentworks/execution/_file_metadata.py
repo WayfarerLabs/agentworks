@@ -166,6 +166,8 @@ def _run_metadata(
         try:
             _require_linux(state)
             _check_deadline(expires_at, state)
+            if create:
+                _require_metadata_kind(FileKind.DIRECTORY, mode, state)
             observed = _open_observed(parent_fd, leaf_name, FileObjectPhase.CONDITION, expires_at)
             if observed is None:
                 if not create:
@@ -181,6 +183,8 @@ def _run_metadata(
                     else MetadataFailureKind.CONFLICT
                 )
                 raise _error(kind, state)
+            if not create:
+                _require_metadata_kind(observed.kind, mode, state)
             result = _converge(
                 parent_fd,
                 leaf_name,
@@ -192,7 +196,7 @@ def _run_metadata(
                 state,
             )
         except MetadataError as error:
-            failure = _with_state(error, state)
+            failure = error
         except FileObjectError as error:
             failure = _object_error(error, state)
         except BaseException as error:
@@ -252,7 +256,6 @@ def _converge(
     expires_at: float | None,
     state: _MutationState,
 ) -> MetadataResult:
-    _require_metadata_kind(observed.kind, mode, state)
     current, bridge = _verify_target(parent_fd, leaf_name, observed, expires_at, state)
     _verify_access_acl(bridge, current, state)
 
@@ -387,21 +390,10 @@ def _object_error(error: FileObjectError, state: _MutationState) -> MetadataErro
     return _error(kind, state)
 
 
-def _with_state(error: MetadataError, state: _MutationState) -> MetadataError:
-    if error.completed_steps or error.attempted_step is not None:
-        return error
-    return _error(error.kind, state, phase=error.phase)
-
-
-def _error(
-    kind: MetadataFailureKind,
-    state: _MutationState,
-    *,
-    phase: MetadataPhase | None = None,
-) -> MetadataError:
+def _error(kind: MetadataFailureKind, state: _MutationState) -> MetadataError:
     return MetadataError(
         kind,
-        state.phase if phase is None else phase,
+        state.phase,
         completed_steps=tuple(state.completed_steps),
         attempted_step=state.attempted_step,
     )
