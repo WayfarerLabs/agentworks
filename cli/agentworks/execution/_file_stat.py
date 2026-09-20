@@ -20,7 +20,7 @@ class FileStat:
 
 @dataclass(frozen=True, slots=True, repr=False)
 class FileRevision:
-    """Private regular-file observation, optionally bound to its content."""
+    """Private filesystem-object observation, optionally bound to regular bytes."""
 
     stat: FileStat
     digest: bytes | None = None
