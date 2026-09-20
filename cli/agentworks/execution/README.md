@@ -172,11 +172,13 @@ chunks, and binds the returned bytes to their digest and before/after metadata. 
 the root descriptor and owns any cooperating-writer lock. The reader creates no files or locks and
 does not expose FileAccess, publication or permission enforcement.
 
-The POSIX component walk detects different-filesystem crossings through `st_dev`; it cannot detect
-same-filesystem bind mounts or establish `openat2` confinement. It refuses observed changes but does
-not contain a malicious same-user process or supply external-writer compare-and-swap. Regular-file
-reads can block in the filesystem, so this primitive provides no hard elapsed-time bound. Complete
-helper delivery, locking, platform guarantees and production composition remain separate work.
+On Linux x86-64 and AArch64, every descendant open uses `openat2` beneath the borrowed root with
+symlink, magic-link and mount crossings forbidden. Unsupported kernels or architectures refuse
+without a weaker fallback. Other POSIX platforms retain the separate component walk and `st_dev`
+checks, which do not detect same-filesystem bind mounts. Neither path contains a malicious same-user
+process or supplies external-writer compare-and-swap. Regular-file reads can block in the
+filesystem, so this primitive provides no hard elapsed-time bound. Complete helper delivery,
+locking, platform guarantees and production composition remain separate work.
 
 ## Private file publication
 

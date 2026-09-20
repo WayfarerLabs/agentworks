@@ -233,10 +233,13 @@ the trusted root descriptor and assumes the caller owns any cooperating-writer l
 neither locks nor files. Local fixtures cover object refusal, observed replacement, byte bounds and
 owned-descriptor cleanup. This is not FileAccess or native platform acceptance.
 
-Its common POSIX walk detects changed `st_dev`, not same-filesystem bind mounts, and a regular-file
-read has no hard elapsed-time bound. It therefore does not accept or replace the complete Linux
-lookup candidate below, resolve helper cancellation, or close the readiness and cross-identity
-locking gates. Required platform confinement still needs its separately proved mechanism.
+On Linux x86-64 and AArch64, `_file_paths.py` now supplies `openat2` for every descendant open with
+the four resolution restrictions below. Kernel/ABI unavailability refuses without a weaker fallback.
+The separate non-Linux POSIX walk detects changed `st_dev`, not same-filesystem bind mounts. Local
+Linux fixtures exercise real symlink, proc descriptor magic-link and descendant-mount refusal;
+same-filesystem bind-mount and native macOS proof remain open. A regular-file read still has no hard
+elapsed-time bound. This increment does not resolve helper cancellation or close readiness,
+cross-identity locking and complete platform acceptance.
 
 The private `_file_publication.py` increment implements Linux sibling publication for complete
 in-memory bytes beneath a caller-owned parent descriptor. It uses no-replace rename for creation,

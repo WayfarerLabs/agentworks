@@ -309,7 +309,19 @@ import discovery exposed the guest module's eager POSIX account-database import.
 `22511320` defers that import until guest default-shell lookup and adds a fresh-process regression
 with the module unavailable; it does not skip the independence check. At `3b10267a`, the full local
 non-integration suite passes 10,934 tests with 12 skips, with Ruff, formatting, strict mypy and file
-lint passing. Hosted Windows confirmation of the correction remains pending.
+lint passing. Hosted Windows confirmation subsequently passes in
+[run 35499698325](https://github.com/WayfarerLabs/agentworks/actions/runs/35499698325) at
+`616508bc`. That run's Linux 3.13 job exposes a test-only assumption: `pwd` was already loaded
+before the import finder guard. The correction at `728b556d` marks the module unavailable
+explicitly, preserving the regression without changing runtime behavior. Fresh hosted confirmation
+remains pending.
+
+The fixed helper's packaged sources now use zlib compression before ASCII armoring; caller payload
+remains in stdin. At `728b556d`, the minimal `/bin/true` request with identity 1001 measures 18,583
+fixed-source bytes, 18,697 argv bytes including terminators, a 249-byte manifest and a 19,060-byte
+Proxmox JSON body. The full local suite passes 10,934 tests with 12 skips, including the helper's
+actual distribution-Python-3.11 execution cases. Ruff, formatting, strict mypy and file lint pass.
+These are local delivery-size and compatibility facts, not native provider acceptance.
 
 The [terminal input proposal](carrier-io-lld.md#proposed-terminal-input-adapter) now gives bootstrap
 EOF a terminal-only handoff meaning, preserves preparation-owned readiness parsing and keeps
