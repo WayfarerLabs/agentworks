@@ -11,7 +11,7 @@ uv run pytest tests/execution/carriers/ssh/ -m 'not integration'
 The process fixtures use synthetic Python children and temporary files. The shared conformance
 fixture substitutes a local POSIX-shell executable for SSH, exercising the real quoting and pipe
 pump without authentication or a server. SSH-boundary live-I/O regressions exercise borrowed input,
-separate binary output sinks, partial writes, temporary backpressure, endpoint faults, interruption
+separate binary output sinks, partial writes, temporary sink stalls, endpoint faults, interruption
 cleanup and ambiguous status 255. An installed-client test uses fresh fixture keys and one owned
 loopback sshd to exercise sensitive binary live duplex delivery through the real client. Other
 installed-client tests parse `ssh -G` options and drive a real client against an owned loopback peer
