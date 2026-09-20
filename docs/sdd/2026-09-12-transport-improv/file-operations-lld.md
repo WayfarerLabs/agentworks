@@ -116,9 +116,11 @@ from permission to mutate descendants or the trusted parent.
 `read_file` returns `None` only for absence. It opens regular files nonblocking and rejects every
 other object before reading, so a FIFO or device cannot hang the operation. `stat` reports the
 closed `FileKind` set above and rejects links or unsupported special objects. `list_directory` never
-follows links, crosses a descendant mount, or returns partial data: exceeding an entry, depth, name,
-or encoded-output bound is a limit error. Sorting is bytewise by relative UTF-8 path so SSH and QGA
-return the same order.
+follows links or crosses a descendant mount. Its requested depth defines the inventory: depth 1
+includes immediate children, and directories at the boundary are reported but not opened. Results
+are complete within that requested depth; exceeding an entry, name or encoded-output bound is an
+error, never truncation. Unsupported depths refuse before traversal. Sorting is bytewise by relative
+UTF-8 path so SSH and QGA return the same order.
 
 `upload` streams into `write_file`; `download` streams one snapshot to a private local sibling and
 replaces only after verification. Local links/special objects are refused. Windows-local publication
@@ -341,6 +343,28 @@ resulting owner/group/mode and effective ACL are verified. After the first syste
 leave a known partial change; it is not described as atomic or unchanged. Recursive metadata and
 arbitrary ACL/security attribute mutation are not exposed. The same partial-effect rule applies when
 `ensure_directory` has created its final component but cannot finish metadata convergence.
+
+The first metadata implementation supports regular files and directories, not socket metadata.
+Regular-file requested modes contain ordinary permission bits only. Directory modes additionally
+support set-group-ID and sticky bits; current tmux socket directories and shared workspaces require
+set-group-ID modes such as 02770. Set-user-ID requests refuse. This is explicit metadata authority,
+not permission inherited from a content write; ordinary kernel privilege checks still apply.
+
+On Bookworm Linux, the candidate uses the already confined path-only descriptor through
+`/proc/self/fd/<descriptor>` for ownership and mode changes. Direct `fchmod` does not support such
+descriptors, and the newer empty-path chmod API is unavailable on Bookworm's kernel. This fixed
+procfs bridge refers to the held inode rather than re-opening the mutable caller pathname. Verify
+its identity against the held descriptor and recheck the named object before changing it. Missing or
+incompatible procfs refuses; there is no fallback to a mutable pathname or a content-read open.
+Apply ownership only when needed, then mode, preserving the kernel's ordinary ACL-mask interaction.
+Verify the resulting identity, owner/group/mode and access ACL. Do not copy or enumerate arbitrary
+extended attributes for an in-place change.
+
+Create a missing directory with mode 0700, preserving inherited ACLs, then converge metadata on its
+held inode. Do not remove a newly created public directory when a later step fails: it may already
+contain other work. Record completed creation/ownership/mode steps, and distinguish known partial
+changes from an uncertain attempted change. These local mechanisms need privileged and native
+filesystem proof before public enablement; no malicious same-user namespace guarantee is added.
 
 ## Cooperating writers and honest limits
 
