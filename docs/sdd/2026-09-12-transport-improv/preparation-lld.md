@@ -233,6 +233,13 @@ entry and completion retrospectively for every exit value from 0 through 255. It
 synthetic earlier `STARTED`. This is an implementation candidate, not acceptance of a new result
 reducer or a relaxation of the production gate above.
 
+The retained [exec-evidence experiment](../../../cli/tests/execution/exec_evidence_probe.py) forces
+the native fork/exec branch with a test-only CPython switch. Its closed cases cover all 256 exit
+values, missing wait evidence, invalid launch inputs and the counterexamples below, including a
+distribution Python 3.11 run. The switch is not a production launcher recommendation. This fixture
+neither proves ordinary runtime-path selection nor implements framing, source/input transfer,
+application cancellation or carrier delivery.
+
 The helper must obtain the actual native wait status. `Popen.wait()` and `poll()` can substitute
 zero when child status is unavailable; neither is sufficient evidence. Ignored `SIGCHLD`, a
 competing reaper, a pre-exec callback, a broken error channel or a different spawn implementation
