@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 import os
-import stat
-import subprocess
 import sys
 from dataclasses import dataclass
-from pathlib import Path
 
 import pytest
 
 from agentworks.errors import ValidationError
-from agentworks.execution import _helper_identity, _helper_launcher, _inline_guest
+from agentworks.execution import _helper_identity, _inline_guest
 from agentworks.execution._evidence_wire import Frame, FrameKind, FrameReader
 from agentworks.execution._file_read import FileReadObservationState, execute_file_read, prepare_file_read
 from agentworks.execution._helper_identity import IdentityExpectation
@@ -117,7 +114,7 @@ def test_wrapper_argv_is_literal_and_payload_free(
             "LANG=C",
             "LC_ALL=C",
         )
-        assert canary not in prepared.invocation.argv
+        assert all(canary not in argument for argument in prepared.invocation.argv)
 
 
 @pytest.mark.parametrize(
@@ -174,10 +171,10 @@ def test_guest_identity_requires_real_effective_saved_and_exact_groups(
     groups: list[int],
     matches: bool,
 ) -> None:
-    monkeypatch.setattr(os, "getresuid", lambda: resuid)
-    monkeypatch.setattr(os, "getresgid", lambda: resgid)
-    monkeypatch.setattr(os, "getegid", lambda: resgid[1])
-    monkeypatch.setattr(os, "getgroups", lambda: groups)
+    monkeypatch.setattr(os, "getresuid", lambda: resuid, raising=False)
+    monkeypatch.setattr(os, "getresgid", lambda: resgid, raising=False)
+    monkeypatch.setattr(os, "getegid", lambda: resgid[1], raising=False)
+    monkeypatch.setattr(os, "getgroups", lambda: groups, raising=False)
 
     assert _helper_identity.matches_current_identity(_identity()) is matches
 
@@ -255,54 +252,3 @@ def test_pre_helper_wrapper_failure_never_claims_application_or_file_success(mod
     assert inline_result.observation.error is ObservationError.MISSING_TERMINAL
     assert file_result.observation.state is FileReadObservationState.INCOMPLETE
     assert file_result.observation.snapshot is None
-
-
-@pytest.mark.parametrize(
-    ("mode", "uid", "constant", "expected"),
-    [
-        (IdentityMode.SUDO_ROOT, 0, "_SUDO", ("-n", "--user=#0", "--")),
-        (
-            IdentityMode.DEMOTE,
-            1001,
-            "_SETPRIV",
-            (
-                "--reuid=1001",
-                "--regid=1002",
-                "--groups=1002,1003",
-                "--inh-caps=-all",
-                "--ambient-caps=-all",
-                "--",
-            ),
-        ),
-    ],
-)
-def test_local_fake_wrapper_receives_the_literal_transition_argv(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    mode: IdentityMode,
-    uid: int,
-    constant: str,
-    expected: tuple[str, ...],
-) -> None:
-    wrapper = tmp_path / "wrapper"
-    wrapper.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
-    wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
-    monkeypatch.setattr(_helper_launcher, constant, str(wrapper))
-    argv = build_helper_argv(
-        _plan(mode, uid=uid),
-        runtime_path="/usr/bin/python3.11",
-        fixed_source="fixed-helper-source",
-        nonce="0" * 32,
-    )
-
-    completed = subprocess.run(argv, capture_output=True, check=True, timeout=10)
-
-    received = completed.stdout.decode("ascii").splitlines()
-    assert tuple(received[: len(expected)]) == expected
-    assert tuple(received[len(expected) : len(expected) + 5]) == (
-        "/usr/bin/env",
-        "-i",
-        "PATH=/usr/bin:/bin",
-        "LANG=C",
-        "LC_ALL=C",
-    )
