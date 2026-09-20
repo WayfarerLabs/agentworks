@@ -183,7 +183,7 @@ def begin_scratch(parent_fd: int, expected_length: int, expected_digest: bytes) 
         except BaseException as error:
             control = error
     finally:
-        close_control = _close_acquisition(acquisition)
+        close_control = _close_descriptors(acquisition.object_fd, acquisition.directory_fd)
 
     if failure is None and control is None and close_control is None:
         assert result is not None
@@ -723,10 +723,6 @@ def _acquisition_debt(acquisition: _ScratchAcquisition) -> ScratchCleanupDebt | 
         acquisition.uid,
         acquisition.gid,
     )
-
-
-def _close_acquisition(acquisition: _ScratchAcquisition) -> BaseException | None:
-    return _close_descriptors(acquisition.object_fd, acquisition.directory_fd)
 
 
 def _close_descriptors(*descriptors: int | None) -> BaseException | None:
