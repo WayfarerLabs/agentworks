@@ -12,9 +12,12 @@ from agentworks.execution.carrier import (
     CarrierIO,
     CarrierReport,
     ChannelFeatures,
+    Discard,
     Dispatch,
+    EndOfInput,
     ExitStatus,
     Failure,
+    FiniteInput,
     Provenance,
 )
 from agentworks.execution.carriers.ssh._io import output_retention, run_process
@@ -47,6 +50,11 @@ class SSHCarrier:
         """Validate locally, then spend the remaining original budget on one attempt."""
         if deadline.expired:
             return _not_sent(io, Failure.DEADLINE)
+        # The shared I/O boundary can accept modes this carrier does not support.
+        if not isinstance(io.input, EndOfInput | FiniteInput):
+            return _not_sent(io, Failure.INPUT)
+        if not isinstance(io.output, Capture | Discard):
+            return _not_sent(io, Failure.OUTPUT)
         try:
             validate_connection_files(self._connection)
             argv = build_ssh_argv(self._connection, invocation)
