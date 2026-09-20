@@ -189,6 +189,7 @@ def test_request_rejects_extra_invalid_nonfinite_and_out_of_range_fields(
         b"\xff",
         b"{" + b'"x":' + b'"a"' * 40_000 + b"}",
     ],
+    ids=["duplicate-key", "noncanonical", "non-object", "invalid-encoding", "oversized"],
 )
 def test_request_rejects_duplicate_noncanonical_invalid_and_oversized_json(data: bytes) -> None:
     with pytest.raises(FileMetadataRequestError) as raised:

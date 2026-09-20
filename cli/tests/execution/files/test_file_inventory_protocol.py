@@ -146,6 +146,7 @@ def test_request_rejects_invalid_fields(field: str, supplied: object) -> None:
         b"\xff",
         b"{" + b'"x":' + b'"a"' * 40_000 + b"}",
     ],
+    ids=["duplicate-key", "noncanonical", "non-object", "invalid-encoding", "oversized"],
 )
 def test_request_rejects_duplicate_noncanonical_invalid_and_oversized_json(data: bytes) -> None:
     with pytest.raises(FileInventoryRequestError):
