@@ -231,6 +231,42 @@ exists. Preserve that uncertainty separately from known exact cleanup debt, neve
 recover a reference, and never scan a name prefix to infer ownership. Reconciliation of this case
 must be settled and fault-tested before the transfer exchange is accepted.
 
+The recovery candidate uses a small immutable ownership receipt, not a transfer registry. Core
+allocates a fresh random operation token before dispatch. The fixed helper derives one exact private
+directory name from it and attempts exclusive creation once. Before acknowledging successful
+creation, it writes and validates a bounded receipt binding the token, operation, execution
+identity, original authorized parent identity, declared length and acquired directory/data
+identities. A collision refuses; losing a reply never resubmits creation.
+
+Read-only reconciliation accepts the original core-bound context and token, not paths supplied by a
+receipt. It opens only that exact name and validates the receipt schema, ownership, permissions,
+links, context and identities. Recovered ownership permits exact cleanup, not publication: a ready
+content reference still requires complete length/digest verification. Incomplete or already-removed
+data can retain historical ownership evidence. Missing, partial or invalid receipts remain uncertain
+and do not authorize adopting the current occupant of a name.
+
+Ownership evidence is not evidence that a helper has stopped. The existing transaction lock must
+serialize creation, transfer mutation, snapshotting, publication, reconciliation and cleanup. A
+missing receipt may precede a delayed request, so observing absence cannot certify terminal cleanup.
+The implementation must prove the ordering around completed creation and subsequent mutation;
+neither a receipt alone nor transport loss establishes quiescence.
+
+Every follow-on mutation must validate the still-existing exact operation receipt under that lock
+before creating any artifact. After cleanup, a delayed chunk or publication request therefore
+refuses instead of recreating state. Locking alone does not establish this: the current publication
+primitive creates its sibling stage before reopening scratch, so its future exchange must admit the
+operation before calling the primitive. This is a concrete prerequisite, not a tombstone service.
+
+Publication retains a sibling stage in the actual destination directory for its access-metadata
+semantics. Its candidate ownership record is separately bounded and immutable, rather than a rewrite
+of the sole creation receipt. Recovery binds that stage to the original authorized parent and
+recorded name/inode; it never follows the inode into the public destination. Remove owned data and
+outstanding stages before their receipts. A missing stage is not evidence of successful publication.
+Interruption before ownership is recorded, or between receipt removal and final directory removal,
+can still leave uncertain cleanup. These limits do not become a journal, prefix scavenger, resumed
+upload promise or reboot-durability requirement. This candidate remains unimplemented and requires
+fault tests for lost replies, delayed dispatch, partial creation and interrupted cleanup.
+
 The delivery audit at `0ecb9a2e` found that one monolithic bundle plus a 24 KiB chunk nearly
 exhausts or exceeds the historical 64 KiB Proxmox whole-POST limit before its missing dispatcher is
 added. The largest existing per-module representation also exceeds Windows' 32,767-character process
