@@ -265,6 +265,21 @@ accidental hooks, not hostile same-user forgery.
 
 ## Required carrier I/O extension
 
+The workstation pump and destination Python helper share one private standard-library process core,
+not independently maintained copies of pipe scheduling and wait handling. Carrier adapters retain
+carrier types, sensitivity/retention policy and report mapping. The shared core owns exact status,
+bounded duplex progress, short writes, post-exit collection and known-process cleanup. Extraction
+must preserve the existing Windows handle-backed behavior and all host pump tests; a POSIX guest
+consumer does not narrow the workstation contract.
+
+The inline helper may embed that exact packaged source as fixed bootstrap code. This is distinct
+from application source: caller argv, script, environment, cwd and input remain data on stdin and
+are never interpolated into helper code. Source composition must not install files or import an
+Agentworks installation on the destination. Its final encoded request, including fixed argv and JSON
+escaping, needs the same native whole-request proof as the manifest. The current QGA input guard
+counts only `input-data`, not fixed helper argv or the complete request. Neither extraction nor
+embedding resolves the separately recorded launch-interruption or application-entry gates.
+
 Sensitive and discard modes require the pending [carrier I/O candidate](carrier-io-lld.md), or an
 equivalent jointly accepted seam. The method signature stays:
 
