@@ -248,12 +248,27 @@ def test_expired_deadline_refuses_before_open(tmp_path: Path, monkeypatch: pytes
 
 
 def test_deadline_is_checked_after_acquisition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import fcntl
+
     parent_fd = _provision_lock(tmp_path)
-    observed_times = iter([0.0, 0.0, 0.0, 2.0])
-    monkeypatch.setattr(time, "monotonic", lambda: next(observed_times))
+    contender = os.open(tmp_path / "files.lock", os.O_RDONLY)
+    original_flock = lock_module._flock_nonblocking
+    now = 0.0
+
+    def acquiring_flock(descriptor: int) -> bool:
+        nonlocal now
+        acquired = original_flock(descriptor)
+        assert acquired
+        now = 2.0
+        return acquired
+
+    monkeypatch.setattr(time, "monotonic", lambda: now)
+    monkeypatch.setattr(lock_module, "_flock_nonblocking", acquiring_flock)
     try:
         assert _failure(parent_fd, expires_at=1.0).kind is FileLockFailureKind.DEADLINE
+        fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
     finally:
+        os.close(contender)
         os.close(parent_fd)
 
 

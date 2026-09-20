@@ -398,20 +398,14 @@ def _write(descriptor: int, content: memoryview) -> int:
     return _os_call(os.write, descriptor, content, kind=PublicationFailureKind.IO, phase=PublicationPhase.CONTENT)
 
 
-def _pread(
-    descriptor: int,
-    size: int,
-    offset: int,
-    *,
-    phase: PublicationPhase = PublicationPhase.CONDITION,
-) -> bytes:
+def _pread(descriptor: int, size: int, offset: int) -> bytes:
     return _os_call(
         os.pread,
         descriptor,
         size,
         offset,
         kind=PublicationFailureKind.IO,
-        phase=phase,
+        phase=PublicationPhase.CONDITION,
     )
 
 
@@ -639,44 +633,18 @@ def _observe_published(
     expires_at: float | None,
 ) -> FileRevision:
     _check_deadline(expires_at, PublicationPhase.PUBLICATION)
-    before = _fstat(stage_fd, PublicationPhase.PUBLICATION)
-    named_before = _stat_at(parent_fd, leaf_name, PublicationPhase.PUBLICATION)
-    if (
-        named_before is None
-        or not stat.S_ISREG(before.st_mode)
-        or before.st_nlink != 1
-        or _ObjectIdentity(before.st_dev, before.st_ino) != identity
-        or _ObjectIdentity(named_before.st_dev, named_before.st_ino) != identity
-        or _snapshot_stat(named_before) != _snapshot_stat(before)
-    ):
+    revision = _observe_descriptor_revision(
+        stage_fd,
+        parent_fd,
+        leaf_name,
+        identity.device,
+        include_digest=True,
+        expires_at=expires_at,
+    )
+    assert revision.digest is not None
+    if revision.stat.inode != identity.inode or not hmac.compare_digest(revision.digest, digest):
         raise FilePublicationError(PublicationFailureKind.UNCERTAIN, PublicationPhase.PUBLICATION)
-
-    observed_digest = hashlib.sha256()
-    offset = 0
-    while offset < before.st_size:
-        _check_deadline(expires_at, PublicationPhase.PUBLICATION)
-        block = _pread(
-            stage_fd,
-            min(64 * 1024, before.st_size - offset),
-            offset,
-            phase=PublicationPhase.PUBLICATION,
-        )
-        if not block:
-            raise FilePublicationError(PublicationFailureKind.UNCERTAIN, PublicationPhase.PUBLICATION)
-        observed_digest.update(block)
-        offset += len(block)
-
-    _check_deadline(expires_at, PublicationPhase.PUBLICATION)
-    after = _fstat(stage_fd, PublicationPhase.PUBLICATION)
-    named_after = _stat_at(parent_fd, leaf_name, PublicationPhase.PUBLICATION)
-    if (
-        _snapshot_stat(after) != _snapshot_stat(before)
-        or named_after is None
-        or _snapshot_stat(named_after) != _snapshot_stat(before)
-        or not hmac.compare_digest(observed_digest.digest(), digest)
-    ):
-        raise FilePublicationError(PublicationFailureKind.UNCERTAIN, PublicationPhase.PUBLICATION)
-    return FileRevision(_snapshot_stat(after), observed_digest.digest())
+    return revision
 
 
 def _rename_noreplace(parent_fd: int, stage_name: str, leaf_name: str) -> None:
