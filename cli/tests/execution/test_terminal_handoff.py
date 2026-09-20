@@ -225,6 +225,7 @@ class TerminalProcess:
             termios.tcsetattr(self.slave, termios.TCSANOW, mode)
         self.original_mode = termios.tcgetattr(self.slave)
         self.raw_output = bytearray()
+        self._withheld_payload: bytes | None = None
         try:
             self.process = subprocess.Popen(
                 list(prepared.invocation.argv),
@@ -252,12 +253,18 @@ class TerminalProcess:
         while True:
             chunk = self.prepared.bootstrap.try_read(13)
             if chunk is not None:
-                self._write_all(chunk)
-                break
+                self._withheld_payload = chunk
+                return
             data = self._read(max(0.0, deadline - time.monotonic()))
             if not data:
                 raise AssertionError("payload-ready marker did not arrive")
             assert self.prepared.stdout.try_write(memoryview(data)) == len(data)
+
+    def send_payload(self) -> None:
+        if self._withheld_payload is None:
+            raise AssertionError("payload-ready marker has not arrived")
+        self._write_all(self._withheld_payload)
+        self._withheld_payload = None
         while True:
             chunk = self.prepared.bootstrap.try_read(13)
             if chunk is None:
@@ -342,6 +349,7 @@ def test_actual_pty_keeps_source_environment_and_empty_arg_off_terminal_input(
     payload_mode = termios.tcgetattr(running.slave)
     assert not payload_mode[3] & (termios.ECHO | termios.ICANON)
     assert source not in running.raw_output and secret not in running.raw_output
+    running.send_payload()
     running.wait_for_handoff()
     assert termios.tcgetattr(running.slave) == running.original_mode
 
@@ -377,6 +385,7 @@ def test_actual_pty_native_shell_inherits_default_sigpipe(
     running_processes.append(running)
 
     running.wait_for_payload_gate()
+    running.send_payload()
     running.wait_for_handoff()
     running.read_until_presented(presentation, b"SHELL-DONE!")
 
@@ -395,6 +404,7 @@ def test_actual_pty_restored_uppercase_output_mode_preserves_second_marker(
     running_processes.append(running)
 
     running.wait_for_payload_gate()
+    running.send_payload()
     running.wait_for_handoff()
 
     assert prepared.handed_off
