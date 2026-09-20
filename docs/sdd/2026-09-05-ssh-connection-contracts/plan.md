@@ -1,6 +1,6 @@
 # Independent SSH Carrier: Staged Delivery Plan
 
-- Updated: 2026-09-19
+- Updated: 2026-09-20
 - Requirements: [frd.md](frd.md)
 - Architecture: [hla.md](hla.md)
 - Shared contract:
