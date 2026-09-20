@@ -51,7 +51,7 @@ def file_lock(
 ) -> Iterator[None]:
     """Hold the fixed cooperative lock beneath a borrowed trusted parent.
 
-    ``expires_at`` is a guest-monotonic timestamp. ``None`` permits an
+    ``expires_at`` is a finite guest-monotonic timestamp. ``None`` permits an
     unbounded wait, while every retry remains nonblocking. The caller retains
     ownership of ``parent_fd`` and must establish the protected namespace and
     local-filesystem prerequisites before calling.

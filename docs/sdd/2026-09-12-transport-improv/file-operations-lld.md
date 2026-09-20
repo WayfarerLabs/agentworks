@@ -328,6 +328,12 @@ snapshot is materialized, then transfers chunks outside the lock. Stat releases 
 list materializes its bounded result before release. Inventory remains a bounded set of
 observations, not a globally coherent filesystem view.
 
+The request decoder validates the remaining time budget before file I/O: a finite nonnegative
+duration or the contract's explicit unbounded choice, never NaN or infinity. It derives a
+guest-local monotonic expiry; workstation monotonic timestamps cannot be used on the destination.
+Private filesystem primitives consume that validated expiry rather than acting as a second request
+decoder. The host's original deadline continues to bound the complete multi-attempt operation.
+
 Ordinary-user and elevated helpers must open the same lock. A per-user cache cannot satisfy that
 contract. Safe creation, permissions, lifecycle, and availability of an identity-neutral namespace
 before permission activation remain unproved on Debian and macOS. The migration inventory must find
