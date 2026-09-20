@@ -60,10 +60,11 @@ def install_fixed_lock_bundle(root: Path, monkeypatch: pytest.MonkeyPatch) -> st
 
 
 class LocalCarrier:
-    def __init__(self) -> None:
+    def __init__(self, *, dispatch_deadline: Deadline | None = None) -> None:
         self.calls = 0
         self.invocation: PreparedInvocation | None = None
         self.io: CarrierIO | None = None
+        self.dispatch_deadline = dispatch_deadline
 
     @property
     def features(self) -> ChannelFeatures:
@@ -73,7 +74,7 @@ class LocalCarrier:
         self.calls += 1
         self.invocation = invocation
         self.io = io
-        result = run_process(list(invocation.argv), io=io, deadline=deadline)
+        result = run_process(list(invocation.argv), io=io, deadline=self.dispatch_deadline or deadline)
         completion = None
         if result.exit_status is not None:
             completion = (

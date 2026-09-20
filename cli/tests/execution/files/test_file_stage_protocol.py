@@ -180,10 +180,21 @@ def test_request_refuses_extra_wrong_typed_nonfinite_and_invalid_fields(mutate) 
         b"\xff",
         b"{" + b'"x":' + b'"a"' * 40_000 + b"}",
     ],
+    ids=["duplicate-key", "noncanonical-space", "wrong-top-level", "non-ascii", "oversized"],
 )
 def test_request_refuses_duplicate_noncanonical_invalid_and_oversized_json(data: bytes) -> None:
     with pytest.raises(FileStageRequestError):
         decode_file_stage_request(data)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [b'{"code":"invalid_request","code":"invalid_request"}', b'{"code":NaN}'],
+    ids=["duplicate-key", "nonfinite"],
+)
+def test_response_refuses_duplicate_and_nonfinite_json(body: bytes) -> None:
+    with pytest.raises(FileStageControlError):
+        parse_file_stage_failure(body, _TOKEN, _IDENTITY)
 
 
 def test_request_decoder_does_not_retain_sensitive_manifest_fields() -> None:

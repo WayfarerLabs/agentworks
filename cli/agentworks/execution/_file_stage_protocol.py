@@ -126,28 +126,11 @@ def _json_bytes(value: object) -> bytes:
     return json.dumps(value, allow_nan=False, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("ascii")
 
 
-def _reject_json_constant(_value: str) -> None:
-    raise ValueError
-
-
-def _reject_duplicate_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
-    value: dict[str, object] = {}
-    for key, item in pairs:
-        if key in value:
-            raise ValueError
-        value[key] = item
-    return value
-
-
 def _load_json(data: bytes, *, request: bool) -> dict[str, object]:
     failed = False
     value: Any = None
     try:
-        value = json.loads(
-            data.decode("ascii"),
-            object_pairs_hook=_reject_duplicate_pairs,
-            parse_constant=_reject_json_constant,
-        )
+        value = json.loads(data.decode("ascii"))
     except (UnicodeDecodeError, ValueError, RecursionError):
         failed = True
     if failed:
@@ -217,11 +200,9 @@ def _identity_value(identity: IdentityExpectation) -> dict[str, object]:
     return {"egid": identity.egid, "euid": identity.euid, "groups": list(identity.groups)}
 
 
-def _bounded_integer(value: object, maximum: int, *, request: bool) -> int:
+def _bounded_integer(value: object, maximum: int) -> int:
     if type(value) is not int or not 0 <= value <= maximum:
-        if request:
-            raise _invalid_request()
-        raise FileStageControlError
+        raise _invalid_request()
     return value
 
 
@@ -316,7 +297,7 @@ def decode_file_stage_request(data: bytes) -> FileStageRequest:
             root_path,
             relative_path,
             token,
-            _bounded_integer(value["expected_length"], _MAX_OFFSET, request=True),
+            _bounded_integer(value["expected_length"], _MAX_OFFSET),
             identity,
             remaining,
         )
@@ -338,7 +319,7 @@ def decode_file_stage_request(data: bytes) -> FileStageRequest:
         relative_path,
         token,
         reference,
-        _bounded_integer(value["offset"], _MAX_OFFSET, request=True),
+        _bounded_integer(value["offset"], _MAX_OFFSET),
         data_value,
         _decode_bytes(value["chunk_sha256"], 32, exact=32),
         identity,

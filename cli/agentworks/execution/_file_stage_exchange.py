@@ -174,7 +174,7 @@ class _FileStageCollector:
         expected_phase = (
             ScratchPhase.BEGIN if self._request.operation is FileStageOperation.BEGIN else ScratchPhase.WRITE
         )
-        return failure.phase is expected_phase and failure.kind is not None
+        return failure.phase is expected_phase
 
     def _fail(self, error: FileStageObservationError) -> None:
         if self._error is None:

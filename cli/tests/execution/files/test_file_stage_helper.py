@@ -18,7 +18,7 @@ from agentworks.execution._file_stage_exchange import FileStageObservationState,
 from agentworks.execution._file_stage_protocol import MAX_STAGE_CHUNK_BYTES, FileStageFailureCode
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan, build_helper_argv
-from agentworks.execution._scratch import ScratchFailureKind
+from agentworks.execution._scratch import ScratchFailureKind, ScratchPhase
 from agentworks.execution._scratch_receipt import scratch_name
 from agentworks.execution.carrier import Deadline, Dispatch, PreparedInvocation
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
@@ -43,8 +43,17 @@ def fixed_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     return install_fixed_lock_bundle(tmp_path / "lock-root", monkeypatch)
 
 
-def _begin(root: Path, path: str, length: int, plan: IdentityPlan, *, runtime: str = sys.executable):
-    carrier = LocalCarrier()
+def _begin(
+    root: Path,
+    path: str,
+    length: int,
+    plan: IdentityPlan,
+    *,
+    runtime: str = sys.executable,
+    carrier: LocalCarrier | None = None,
+    deadline: Deadline | None = None,
+):
+    carrier = carrier or LocalCarrier()
     result = stage_begin(
         carrier,
         trusted_root_path=str(root),
@@ -52,7 +61,7 @@ def _begin(root: Path, path: str, length: int, plan: IdentityPlan, *, runtime: s
         token=_TOKEN,
         expected_length=length,
         plan=plan,
-        deadline=Deadline.after(15),
+        deadline=deadline or Deadline.after(15),
         runtime_path=runtime,
     )
     return carrier, result
@@ -235,6 +244,76 @@ def test_missing_fixed_lock_refuses_before_root_access(tmp_path: Path, plan: Ide
     assert result.observation.state is FileStageObservationState.REFUSED
     assert result.observation.failure is not None
     assert result.observation.failure.code is FileStageFailureCode.LOCK_MISSING
+
+
+def test_guest_deadline_after_missing_root_lookup_is_not_root_refusal(
+    tmp_path: Path,
+    plan: IdentityPlan,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    patch_source = """
+real_open_root=guest.open_linux_root
+def delayed_open_root(path):
+ result=real_open_root(path)
+ guest.time.sleep(0.03)
+ return result
+guest.open_linux_root=delayed_open_root
+"""
+    source = fixed_lock_source(tmp_path / "lock-root", patch_source)
+    monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
+    carrier = LocalCarrier(dispatch_deadline=Deadline.after(5))
+
+    _, result = _begin(
+        tmp_path / "missing-root",
+        "destination",
+        1,
+        plan,
+        carrier=carrier,
+        deadline=Deadline.after(0.01),
+    )
+
+    assert result.observation.state is FileStageObservationState.REFUSED
+    assert result.observation.failure is not None
+    assert result.observation.failure.code is FileStageFailureCode.LOCK_DEADLINE
+    assert result.observation.failure.cleanup_debt is None
+
+
+def test_guest_deadline_after_closed_success_retains_created_cleanup_debt(
+    tmp_path: Path,
+    plan: IdentityPlan,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    patch_source = """
+real_operate=guest._operate
+def delayed_operate(*args,**kwargs):
+ result=real_operate(*args,**kwargs)
+ guest.time.sleep(0.03)
+ return result
+guest._operate=delayed_operate
+"""
+    source = fixed_lock_source(tmp_path / "lock-root", patch_source)
+    monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
+    root = tmp_path / "approved"
+    root.mkdir()
+    carrier = LocalCarrier(dispatch_deadline=Deadline.after(5))
+
+    _, result = _begin(
+        root,
+        "destination",
+        1,
+        plan,
+        carrier=carrier,
+        deadline=Deadline.after(0.01),
+    )
+
+    assert result.observation.state is FileStageObservationState.REFUSED
+    failure = result.observation.failure
+    assert failure is not None and failure.code is FileStageFailureCode.SCRATCH
+    assert failure.kind is ScratchFailureKind.DEADLINE
+    assert failure.phase is ScratchPhase.BEGIN
+    assert failure.cleanup_debt is not None
+    assert result.observation.reference is None
+    assert (root / scratch_name(_TOKEN)).is_dir()
 
 
 def test_helper_records_and_receipt_tolerate_short_writes(

@@ -26,7 +26,15 @@ from ._file_stage_protocol import (
 )
 from ._file_wire import FileRecordKind, FileRecordWriter
 from ._helper_identity import matches_current_identity
-from ._scratch import ScratchReference, ScratchTransferError, begin_scratch, write_scratch_chunk
+from ._scratch import (
+    ScratchFailureKind,
+    ScratchPhase,
+    ScratchReference,
+    ScratchTransferError,
+    _cleanup_debt,
+    begin_scratch,
+    write_scratch_chunk,
+)
 
 
 class _SafeFailure(Exception):
@@ -49,6 +57,10 @@ def _expires_at(remaining_seconds: float | None) -> float | None:
     if remaining_seconds is None:
         return None
     return min(sys.float_info.max, time.monotonic() + remaining_seconds)
+
+
+def _expired(expires_at: float | None) -> bool:
+    return expires_at is not None and time.monotonic() >= expires_at
 
 
 def _lock_failure(error: FileLockError) -> FileStageFailureControl:
@@ -156,13 +168,30 @@ def main(nonce: str) -> int:
     if not matches_current_identity(request.identity):
         return _finish_failure(writer, FileStageFailureControl(FileStageFailureCode.IDENTITY_MISMATCH))
     expires_at = _expires_at(request.remaining_seconds)
+    failure: FileStageFailureControl | None = None
+    result: ScratchReference | None = None
     try:
         with system_file_lock(expires_at=expires_at):
-            result = _operate(request, expires_at)
+            try:
+                result = _operate(request, expires_at)
+            except _SafeFailure as error:
+                failure = error.failure
     except FileLockError as error:
         return _finish_failure(writer, _lock_failure(error))
-    except _SafeFailure as error:
-        return _finish_failure(writer, error.failure)
+    if _expired(expires_at):
+        if failure is None:
+            if isinstance(request, FileStageBeginRequest):
+                assert result is not None
+                phase = ScratchPhase.BEGIN
+                debt = _cleanup_debt(result)
+            else:
+                phase = ScratchPhase.WRITE
+                debt = _cleanup_debt(request.reference)
+            failure = FileStageFailureControl(FileStageFailureCode.SCRATCH, ScratchFailureKind.DEADLINE, phase, debt)
+        elif failure.code in {FileStageFailureCode.ROOT_REFUSED, FileStageFailureCode.PARENT_REFUSED}:
+            failure = FileStageFailureControl(FileStageFailureCode.LOCK_DEADLINE)
+    if failure is not None:
+        return _finish_failure(writer, failure)
     if isinstance(request, FileStageBeginRequest):
         assert result is not None
         body = encode_file_stage_begin_result(result)
