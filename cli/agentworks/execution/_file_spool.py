@@ -5,7 +5,10 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from enum import Enum
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
+
+if TYPE_CHECKING:
+    from ._helper_identity import IdentityExpectation
 
 from ._file_snapshot import (
     SnapshotFailureKind,
@@ -18,7 +21,6 @@ from ._file_stat import FileRevision
 from ._scratch import (
     _MAX_CHUNK_BYTES,
     ReadyScratchReference,
-    ScratchCleanupDebt,
     ScratchFailureKind,
     ScratchReference,
     ScratchTransferError,
@@ -28,6 +30,7 @@ from ._scratch import (
     verify_scratch,
     write_scratch_chunk,
 )
+from ._scratch_receipt import ScratchCleanupDebt, ScratchOperation, ScratchReceiptContext
 
 
 class SpoolSnapshotFailureKind(Enum):
@@ -68,16 +71,20 @@ def spool_snapshot(
     relative_path: str,
     scratch_parent_fd: int,
     max_bytes: int,
+    token: bytes,
+    identity: IdentityExpectation,
     *,
     expires_at: float | None = None,
 ) -> SpoolSnapshot | None:
     """Copy one held regular source into ready scratch using bounded chunks.
 
-    The caller owns both borrowed descriptors and its cooperating-writer lock.
-    ``None`` means initial source absence. A failure after scratch creation makes
-    one exact cleanup attempt outside the expired operation budget.
+    The caller owns both borrowed descriptors and its cooperating-writer lock,
+    and retains ``token`` and ``identity`` for lost-reply reconciliation.
+    ``None`` means initial source absence. A failure after scratch creation
+    makes one exact cleanup attempt outside the expired operation budget.
     """
     components = _validate_inputs(relative_path, max_bytes, expires_at)
+    receipt_context = ScratchReceiptContext(ScratchOperation.SNAPSHOT, identity)
     owned: ScratchReference | ReadyScratchReference | None = None
     ready: ReadyScratchReference | None = None
     source_revision: FileRevision | None = None
@@ -97,7 +104,13 @@ def spool_snapshot(
                 if source is None:
                     initially_absent = True
                 else:
-                    reference = begin_scratch(scratch_parent_fd, source.stat.size, expires_at=expires_at)
+                    reference = begin_scratch(
+                        scratch_parent_fd,
+                        source.stat.size,
+                        token,
+                        receipt_context,
+                        expires_at=expires_at,
+                    )
                     owned = reference
                     digest = hashlib.sha256()
                     offset = 0

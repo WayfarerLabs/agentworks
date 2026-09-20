@@ -24,6 +24,7 @@ from agentworks.execution._file_spool import (
 )
 from agentworks.execution._file_stat import FileStat
 from agentworks.execution._helper_bundle import build_helper_modules
+from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._scratch import (
     ReadyScratchReference,
     ScratchFailureKind,
@@ -33,9 +34,23 @@ from agentworks.execution._scratch import (
     cleanup_scratch,
     iter_ready_scratch,
     ready_scratch_contract,
+    reconcile_scratch_ownership,
+)
+from agentworks.execution._scratch_receipt import (
+    ScratchHistoricalOwnership,
+    ScratchOperation,
+    ScratchOwnershipUncertainty,
+    ScratchReceiptContext,
 )
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux confined spool snapshots")
+
+_TOKEN = bytes(range(16))
+
+
+def _identity() -> IdentityExpectation:
+    groups = tuple(sorted(set(os.getgroups()) | {os.getegid()}))
+    return IdentityExpectation(os.geteuid(), os.getegid(), groups)
 
 
 def _open_directory(path: Path) -> int:
@@ -73,7 +88,7 @@ def test_spool_returns_ready_copy_and_content_bound_source_revision(tmp_path: Pa
     target = source_root / "file"
     target.write_bytes(content)
     try:
-        result = spool_snapshot(source_fd, "file", scratch_fd, max(1, len(content)))
+        result = spool_snapshot(source_fd, "file", scratch_fd, max(1, len(content)), _TOKEN, _identity())
         assert isinstance(result, SpoolSnapshot)
         assert isinstance(result.ready, ReadyScratchReference)
         assert result.source.digest == hashlib.sha256(content).digest()
@@ -95,7 +110,7 @@ def test_ready_copy_and_revision_remain_private_after_public_source_changes(tmp_
     target = source_root / "file"
     target.write_bytes(original)
     try:
-        result = spool_snapshot(source_fd, "file", scratch_fd, len(original))
+        result = spool_snapshot(source_fd, "file", scratch_fd, len(original), _TOKEN, _identity())
         assert result is not None
         saved_revision = result.source
         saved_ready = result.ready
@@ -111,6 +126,30 @@ def test_ready_copy_and_revision_remain_private_after_public_source_changes(tmp_
         os.close(source_fd)
 
 
+def test_snapshot_receipt_recovers_lost_return_for_cleanup_only(tmp_path: Path) -> None:
+    source_root, _scratch_root, source_fd, scratch_fd = _directories(tmp_path)
+    (source_root / "file").write_bytes(b"receipt-bound snapshot")
+    token = os.urandom(16)
+    identity = _identity()
+    snapshot_context = ScratchReceiptContext(ScratchOperation.SNAPSHOT, identity)
+    try:
+        assert spool_snapshot(source_fd, "file", scratch_fd, 1024, token, identity) is not None
+
+        historical = reconcile_scratch_ownership(scratch_fd, token, snapshot_context)
+        assert isinstance(historical, ScratchHistoricalOwnership)
+        stage_context = ScratchReceiptContext(ScratchOperation.STAGE, identity)
+        assert isinstance(
+            reconcile_scratch_ownership(scratch_fd, token, stage_context),
+            ScratchOwnershipUncertainty,
+        )
+        with pytest.raises(ValueError):
+            ready_scratch_contract(historical)  # type: ignore[arg-type]
+        cleanup_scratch(scratch_fd, historical)
+    finally:
+        os.close(scratch_fd)
+        os.close(source_fd)
+
+
 def test_initial_absence_and_declared_oversize_create_no_scratch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -119,9 +158,9 @@ def test_initial_absence_and_declared_oversize_create_no_scratch(
     monkeypatch.setattr(spool_module, "begin_scratch", lambda *_args, **_kwargs: pytest.fail("scratch created"))
     monkeypatch.setattr(snapshot_module, "_read", lambda *_args: pytest.fail("source content read"))
     try:
-        assert spool_snapshot(source_fd, "missing", scratch_fd, 1) is None
+        assert spool_snapshot(source_fd, "missing", scratch_fd, 1, _TOKEN, _identity()) is None
         with pytest.raises(SpoolSnapshotError) as raised:
-            spool_snapshot(source_fd, "large", scratch_fd, 3)
+            spool_snapshot(source_fd, "large", scratch_fd, 3, _TOKEN, _identity())
         assert raised.value.kind is SpoolSnapshotFailureKind.LIMIT
         assert raised.value.cleanup_debt is None
         assert not tuple(scratch_root.iterdir())
@@ -161,7 +200,7 @@ def test_initial_absence_checks_expiry_after_lookup_and_close(
     monkeypatch.setattr(snapshot_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
     try:
         with pytest.raises(SpoolSnapshotError) as raised:
-            spool_snapshot(source_fd, relative_path, scratch_fd, 1, expires_at=5.0)
+            spool_snapshot(source_fd, relative_path, scratch_fd, 1, _TOKEN, _identity(), expires_at=5.0)
         assert raised.value.kind is SpoolSnapshotFailureKind.DEADLINE
         assert not tuple(scratch_root.iterdir())
     finally:
@@ -191,7 +230,7 @@ def test_short_scratch_writes_complete_with_bounded_source_memory(
     monkeypatch.setattr(snapshot_module, "_read", recording_read)
     monkeypatch.setattr(os, "pwrite", short_pwrite)
     try:
-        result = spool_snapshot(source_fd, "file", scratch_fd, len(content))
+        result = spool_snapshot(source_fd, "file", scratch_fd, len(content), _TOKEN, _identity())
         assert result is not None and _ready_bytes(scratch_fd, result) == content
         assert read_sizes and max(read_sizes) <= scratch_module._MAX_CHUNK_BYTES
         assert write_sizes and max(write_sizes) <= scratch_module._MAX_CHUNK_BYTES
@@ -235,7 +274,7 @@ def test_source_changes_during_copy_are_conflicts_without_partial_ready_result(
     monkeypatch.setattr(spool_module, "write_scratch_chunk", write_then_mutate)
     try:
         with pytest.raises(SpoolSnapshotError) as raised:
-            spool_snapshot(source_fd, "file", scratch_fd, len(content) + 16)
+            spool_snapshot(source_fd, "file", scratch_fd, len(content) + 16, _TOKEN, _identity())
         assert raised.value.kind is SpoolSnapshotFailureKind.CONFLICT
         assert raised.value.cleanup_debt is None
         assert not tuple(scratch_root.iterdir())
@@ -258,7 +297,7 @@ def test_source_links_are_refused_without_staging(tmp_path: Path, object_kind: s
         relative_path = "file"
     try:
         with pytest.raises(SpoolSnapshotError) as raised:
-            spool_snapshot(source_fd, relative_path, scratch_fd, 1024)
+            spool_snapshot(source_fd, relative_path, scratch_fd, 1024, _TOKEN, _identity())
         assert raised.value.kind is SpoolSnapshotFailureKind.UNSUPPORTED_OBJECT
         assert not tuple(scratch_root.iterdir())
     finally:
@@ -275,7 +314,7 @@ def test_descendant_mount_is_refused_without_staging(tmp_path: Path) -> None:
     scratch_fd = _open_directory(scratch_root)
     try:
         with pytest.raises(SpoolSnapshotError) as raised:
-            spool_snapshot(source_fd, "proc/version", scratch_fd, 4096)
+            spool_snapshot(source_fd, "proc/version", scratch_fd, 4096, _TOKEN, _identity())
         assert raised.value.kind is SpoolSnapshotFailureKind.UNSUPPORTED_OBJECT
         assert not tuple(scratch_root.iterdir())
     finally:
@@ -301,7 +340,7 @@ def test_midcopy_expiry_runs_exact_cleanup_outside_expired_budget(
     monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
     try:
         with pytest.raises(SpoolSnapshotError) as raised:
-            spool_snapshot(source_fd, "file", scratch_fd, len(content), expires_at=5.0)
+            spool_snapshot(source_fd, "file", scratch_fd, len(content), _TOKEN, _identity(), expires_at=5.0)
         assert raised.value.kind is SpoolSnapshotFailureKind.DEADLINE
         assert raised.value.cleanup_debt is None
         assert not tuple(scratch_root.iterdir())
@@ -339,7 +378,7 @@ def test_cleanup_failure_preserves_primary_closed_failure_and_exact_debt(
     monkeypatch.setattr(spool_module, "cleanup_scratch", refuse_cleanup)
     try:
         with pytest.raises(SpoolSnapshotError) as raised:
-            spool_snapshot(source_fd, target.name, scratch_fd, len(content))
+            spool_snapshot(source_fd, target.name, scratch_fd, len(content), _TOKEN, _identity())
         error = raised.value
         assert error.kind is SpoolSnapshotFailureKind.CONFLICT
         assert error.cleanup_debt is not None
@@ -371,7 +410,7 @@ def test_control_interruption_preserves_exact_cleanup_debt_as_closed_cause(
     monkeypatch.setattr(spool_module, "cleanup_scratch", refuse_cleanup)
     try:
         with pytest.raises(KeyboardInterrupt) as raised:
-            spool_snapshot(source_fd, "file", scratch_fd, 1024)
+            spool_snapshot(source_fd, "file", scratch_fd, 1024, _TOKEN, _identity())
         cause = raised.value.__cause__
         assert isinstance(cause, SpoolSnapshotError)
         assert cause.kind is SpoolSnapshotFailureKind.IO
@@ -391,11 +430,19 @@ def test_begin_debt_survives_source_close_interruption(tmp_path: Path, monkeypat
     def failed_begin(
         parent_fd: int,
         expected_length: int,
+        token: bytes,
+        context: ScratchReceiptContext,
         *,
         expires_at: float | None = None,
     ) -> ScratchReference:
         nonlocal created
-        created = scratch_module.begin_scratch(parent_fd, expected_length, expires_at=expires_at)
+        created = scratch_module.begin_scratch(
+            parent_fd,
+            expected_length,
+            token,
+            context,
+            expires_at=expires_at,
+        )
         debt = scratch_module._cleanup_debt(created)
         raise ScratchTransferError(ScratchFailureKind.IO, ScratchPhase.BEGIN, cleanup_debt=debt)
 
@@ -407,7 +454,7 @@ def test_begin_debt_survives_source_close_interruption(tmp_path: Path, monkeypat
     monkeypatch.setattr(snapshot_module, "_close", interrupting_close)
     try:
         with pytest.raises(KeyboardInterrupt) as raised:
-            spool_snapshot(source_fd, "file", scratch_fd, 1024)
+            spool_snapshot(source_fd, "file", scratch_fd, 1024, _TOKEN, _identity())
         cause = raised.value.__cause__
         assert isinstance(cause, SpoolSnapshotError)
         assert cause.kind is SpoolSnapshotFailureKind.IO
@@ -444,7 +491,7 @@ def test_scratch_is_verified_before_final_source_revalidation(tmp_path: Path, mo
     monkeypatch.setattr(spool_module, "verify_scratch", scratch_verify)
     monkeypatch.setattr(snapshot_module._HeldRegularFile, "verify", source_verify)
     try:
-        result = spool_snapshot(source_fd, "file", scratch_fd, 1024)
+        result = spool_snapshot(source_fd, "file", scratch_fd, 1024, _TOKEN, _identity())
         assert result is not None and events == ["scratch", "source"]
         cleanup_scratch(scratch_fd, result.ready)
     finally:
@@ -469,17 +516,28 @@ def test_fixed_modules_spool_under_current_and_python311(tmp_path: Path, runtime
     package = "_agw_spool_test"
     loader = build_helper_modules(
         package,
-        ("_file_stat", "_file_paths", "_file_snapshot", "_scratch", "_file_spool"),
+        (
+            "_file_stat",
+            "_file_paths",
+            "_file_snapshot",
+            "_helper_identity",
+            "_scratch_receipt",
+            "_scratch",
+            "_file_spool",
+        ),
     )
     source = loader + (
         "import hashlib,os\n"
         f"s=sys.modules[{(package + '._file_spool')!r}]\n"
         f"x=sys.modules[{(package + '._scratch')!r}]\n"
+        f"i=sys.modules[{(package + '._helper_identity')!r}]\n"
         f"r=os.open({str(source_root)!r},os.O_RDONLY|os.O_DIRECTORY)\n"
         f"p=os.open({str(scratch_root)!r},os.O_RDONLY|os.O_DIRECTORY)\n"
         f"expected=open({str(source_root / 'file')!r},'rb').read()\n"
+        "identity=i.IdentityExpectation(os.geteuid(),os.getegid(),"
+        "tuple(sorted(set(os.getgroups())|{os.getegid()})))\n"
         "try:\n"
-        f" q=s.spool_snapshot(r,'file',p,{len(content)})\n"
+        f" q=s.spool_snapshot(r,'file',p,{len(content)},bytes(range(16)),identity)\n"
         " assert q is not None\n"
         " assert q.source.digest==hashlib.sha256(expected).digest()\n"
         " assert b''.join(x.iter_ready_scratch(p,q.ready))==expected\n"
