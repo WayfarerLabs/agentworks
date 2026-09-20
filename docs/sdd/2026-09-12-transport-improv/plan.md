@@ -223,6 +223,11 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       exchanges. The local primitive at `5b58e8f5` passes all three private review lanes with the
       pre-existing signal-atomic descriptor-bookkeeping limitation retained explicitly; this does
       not complete remote snapshot delivery or helper lifecycle acceptance.
+- [x] Implement bounded immutable scratch ownership receipts, core-allocated tokens and
+      identity-bound snapshot creation. Historical reconciliation recovers exact cleanup ownership,
+      not ready content or publication authority. All three private lanes are clean at `5a9d3b8f`,
+      including post-cleanup deadline checks and inherited-group handling. This is local evidence;
+      remote reconciliation, dispatch ordering and publication-stage recovery remain open below.
 - [ ] Settle and fault-test cleanup ownership when the first scratch/snapshot creation reply or
       publication-stage cleanup-debt reply is lost. Missing identity is not absence; do not recover
       by replaying creation or scanning a prefix. Prove the bounded immutable ownership-receipt
@@ -634,6 +639,37 @@ stop. These constrain the next supervisor experiment; no managed lifecycle is im
 Creation receipts are under implementation. Transfer/publication exchanges, full FileAccess, native
 acceptance, lifecycle and additive RunContext remain required; both macOS decisions remain pending.
 No public feedback/fix round is consumed by this increment.
+
+The receipt increment is reviewed at `5a9d3b8f`. Core supplies a fresh token and execution identity
+before staging or snapshot creation. The immutable receipt binds the closed operation and original
+parent/object identities. Historical recovery permits cleanup only; active references separately
+bind the original receipt inode. Recovery neither proves that a delayed request cannot still arrive
+nor returns verified content. Remote exchange ordering and publication-stage recovery remain open.
+
+Private review corrected reconciliation expiry after missing-name lookup and descriptor closure,
+ensured the directory descriptor closes even when receipt closure interrupts, and removed redundant
+receipt decoding. The lead reproduced a real inherited-group failure and verified its fix outside
+the namespace sandbox. Both data and receipt inherit the parent's group before private directory
+mode is finalized. An early data-open failure now cleans its exactly owned empty directory; unknown
+objects remain untouched with explicit debt. Removing that normalization makes both new failure
+tests fail. The future snapshot helper must check its bound execution identity before any source
+access, including absence lookup; the local spool's receipt context is not that invocation boundary.
+
+Final full local suite: 11,634 passed, 13 skipped. The extra skip is the sandbox's unavailable
+alternate supplementary group; the committed regression passes separately outside that sandbox. The
+independent correctness lane also reports 1,713 execution tests passed, six skipped, and a Python
+3.11.2 receipt/transfer/reconciliation roundtrip. Ruff/format, CI-scoped mypy (982 sources), file
+lint, typer isolation, locked-SDD, rulesync and diff checks pass. Unchanged website gates pass 160
+Python and 103 Node tests plus both deterministic build comparisons. Owned temporary test/build
+output was removed and absence verified; no live infrastructure was touched. Hosted checks pass at
+the preceding snapshot increment `0e7a9edf` in
+[run 35518292881](https://github.com/WayfarerLabs/agentworks/actions/runs/35518292881); this receipt
+increment still needs hosted confirmation after publication.
+
+The staging exchange is assigned separately against these receipt types. Full FileAccess, native
+acceptance, launch ownership, lifecycle and additive RunContext remain required. Shared SSH types
+are unchanged, and both macOS operator decisions remain pending. This progress push consumes no
+public feedback/fix round; all three remain available for the completed PR.
 
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
