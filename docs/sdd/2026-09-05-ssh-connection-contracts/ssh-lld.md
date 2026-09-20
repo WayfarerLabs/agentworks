@@ -139,10 +139,15 @@ status observed before cleanup can establish completion.
 ## Shared I/O integration checkpoint, 2026-09-19
 
 Transport implementation [PR #833](https://github.com/WayfarerLabs/agentworks/pull/833) at
-`e85e9f5c4752ae926315fa7c0e69b871de42e4fc` supplies the shared finite-input subprocess pump and
+`a885ef5af256782abb827d6165cefd72a74e4e58` supplies the shared finite-input subprocess pump and
 canonical invocation models. SSH adopts that pump while retaining environment filtering and
 carrier-specific evidence, and imports `Command` from `execution.models` in its independence
 fixture. This is an actual implementation dependency; #832 stacks on #833.
+
+The buffered adapter rejects unfamiliar input/output modes before connection admission or client
+startup. This lets transport extend shared types without the older adapter silently converting new
+input to EOF or new output to discard. Actual live-mode adoption must replace the corresponding
+refusal and prove the real extended shapes; simulated future-mode tests do not establish support.
 
 The carrier interface remains buffered-only. Its I/O LLD is a candidate, not concrete live/terminal
 types. Exact endpoint and report types remain transport's to supply and accept through joint proof.
