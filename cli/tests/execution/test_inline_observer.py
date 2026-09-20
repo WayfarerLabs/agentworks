@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-import os
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import pytest
@@ -11,14 +11,23 @@ import pytest
 from agentworks.execution._evidence_wire import Frame, FrameKind, WireError, encode_frame
 from agentworks.execution._inline import execute_inline_candidate, prepare_inline_candidate
 from agentworks.execution._inline_control import (
+    ControlError,
+    FailureCode,
+    FailureFact,
+    FailurePhase,
     StreamEnd,
     StreamName,
     StreamRetention,
     WaitFact,
     WaitKind,
     empty_body,
+    encode_failure,
     encode_stream_end,
     encode_wait,
+    parse_empty,
+    parse_failure,
+    parse_stream_end,
+    parse_wait,
 )
 from agentworks.execution._inline_observer import ObservationError
 from agentworks.execution._inline_request import IdentityExpectation
@@ -75,11 +84,7 @@ class TranscriptCarrier:
 
 @pytest.fixture
 def identity() -> IdentityExpectation:
-    return IdentityExpectation(
-        os.geteuid(),
-        os.getegid(),
-        tuple(sorted(set(os.getgroups()) | {os.getegid()})),
-    )
+    return IdentityExpectation(1001, 1002, (1002, 1003))
 
 
 def _record(nonce: str, sequence: int, kind: FrameKind, body: bytes) -> bytes:
@@ -115,6 +120,25 @@ def _complete_transcript(nonce: str, *, stdout: bytes = b"", terminal: bool = Tr
     if terminal:
         records.append(_record(nonce, sequence, FrameKind.FINISHED, empty_body()))
     return b"".join(records)
+
+
+@pytest.mark.parametrize(
+    ("parser", "body"),
+    [
+        (parse_empty, b'{"value":1,"value":1}'),
+        (
+            parse_stream_end,
+            b'{"complete":true,"complete":true,"retained":0,"retention":"captured",'
+            b'"sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",'
+            b'"stream":"stdout","truncated":false}',
+        ),
+        (parse_wait, b'{"kind":"exit","kind":"exit","value":0}'),
+        (parse_failure, b'{"code":"invalid","code":"invalid","phase":"request"}'),
+    ],
+)
+def test_control_schemas_reject_duplicate_keys(parser: Callable[[bytes], object], body: bytes) -> None:
+    with pytest.raises(ControlError):
+        parser(body)
 
 
 def test_noise_reflection_requires_a_line_boundary_and_is_not_retained(identity: IdentityExpectation) -> None:
@@ -207,6 +231,29 @@ def test_malformed_matching_wire_never_produces_terminal_evidence(identity: Iden
 def test_started_record_is_rejected_by_candidate_grammar(identity: IdentityExpectation) -> None:
     prepared = prepare_inline_candidate(Command(["/bin/true"]), identity=identity)
     transcript = _record(prepared.nonce, 0, FrameKind.STARTED, empty_body())
+
+    result = execute_inline_candidate(
+        TranscriptCarrier(transcript),
+        prepared,
+        deadline=Deadline.after(1),
+    )
+
+    assert not result.observation.trusted_terminal
+    assert result.observation.error is ObservationError.ORDER
+
+
+@pytest.mark.parametrize("kind", [FrameKind.STDOUT, FrameKind.STDERR])
+def test_launch_failure_after_empty_data_frame_is_rejected(kind: FrameKind, identity: IdentityExpectation) -> None:
+    prepared = prepare_inline_candidate(Command(["/bin/true"]), identity=identity)
+    transcript = _record(prepared.nonce, 0, FrameKind.LAUNCHING, empty_body())
+    transcript += _record(prepared.nonce, 1, kind, b"")
+    transcript += _record(
+        prepared.nonce,
+        2,
+        FrameKind.FAILED,
+        encode_failure(FailureFact(FailurePhase.LAUNCH, FailureCode.DISPATCH)),
+    )
+    transcript += _record(prepared.nonce, 3, FrameKind.FINISHED, empty_body())
 
     result = execute_inline_candidate(
         TranscriptCarrier(transcript),

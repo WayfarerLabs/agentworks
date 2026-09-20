@@ -292,11 +292,3 @@ def test_script_helper_creates_no_directory_entry(identity: IdentityExpectation,
 
     assert result.observation.trusted_terminal
     assert set(tmp_path.iterdir()) == before
-
-
-def test_serialized_candidate_sizes_are_measured_without_provider_acceptance(identity: IdentityExpectation) -> None:
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), identity=identity)
-
-    assert prepared.manifest_bytes > 0
-    assert prepared.helper_source_bytes > 50_000
-    assert prepared.helper_argv_bytes > prepared.helper_source_bytes

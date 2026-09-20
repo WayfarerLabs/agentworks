@@ -15,7 +15,10 @@ from ._inline_control import (
     StreamName,
     StreamRetention,
     WaitFact,
-    validate_control_body,
+    parse_empty,
+    parse_failure,
+    parse_stream_end,
+    parse_wait,
 )
 from ._inline_request import OutputMode
 
@@ -57,6 +60,7 @@ class InlineObserver:
         self._output_mode = output_mode
         self._capture_limit = capture_limit
         self._launching = False
+        self._saw_data = False
         self._data = {StreamName.STDOUT: bytearray(), StreamName.STDERR: bytearray()}
         self._streams: dict[StreamName, StreamObservation] = {}
         self._wait: WaitFact | None = None
@@ -83,29 +87,28 @@ class InlineObserver:
         if frame.kind is FrameKind.STARTED:
             self._error = ObservationError.ORDER
             return
-        control = validate_control_body(frame.kind, frame.body)
         if frame.kind is FrameKind.LAUNCHING:
+            parse_empty(frame.body)
             if self._launching or self._failure is not None or self._streams or self._wait is not None:
                 self._error = ObservationError.ORDER
             else:
                 self._launching = True
             return
         if frame.kind is FrameKind.STREAM_END:
-            assert isinstance(control, StreamEnd)
-            self._accept_stream_end(control)
+            self._accept_stream_end(parse_stream_end(frame.body))
             return
         if frame.kind is FrameKind.WAITED:
-            assert isinstance(control, WaitFact)
+            wait = parse_wait(frame.body)
             if not self._launching or len(self._streams) != 2 or self._wait is not None or self._failure is not None:
                 self._error = ObservationError.ORDER
             else:
-                self._wait = control
+                self._wait = wait
             return
         if frame.kind is FrameKind.FAILED:
-            assert isinstance(control, FailureFact)
-            self._accept_failure(control)
+            self._accept_failure(parse_failure(frame.body))
             return
         if frame.kind is FrameKind.FINISHED:
+            parse_empty(frame.body)
             if self._valid_finish():
                 self._terminal = True
             else:
@@ -129,6 +132,7 @@ class InlineObserver:
             self._error = ObservationError.STREAM
             data.clear()
             return
+        self._saw_data = True
         data.extend(frame.body)
 
     def _accept_stream_end(self, end: StreamEnd) -> None:
@@ -170,7 +174,11 @@ class InlineObserver:
             FailurePhase.PREPARE,
         }
         launch_failure = (
-            self._launching and failure.phase is FailurePhase.LAUNCH and not self._streams and self._wait is None
+            self._launching
+            and failure.phase is FailurePhase.LAUNCH
+            and not self._saw_data
+            and not self._streams
+            and self._wait is None
         )
         post_wait = (
             self._launching

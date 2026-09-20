@@ -7,8 +7,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from ._evidence_wire import FrameKind
-
 _LOWER_HEX = frozenset("0123456789abcdef")
 _EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
@@ -105,21 +103,12 @@ def _json_bytes(value: object) -> bytes:
     return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("ascii")
 
 
-def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ControlError
-        result[key] = value
-    return result
-
-
 def _object(body: bytes, fields: set[str]) -> dict[str, Any]:
     failed = False
     value: Any = None
     try:
-        value = json.loads(body.decode("ascii"), object_pairs_hook=_unique_object)
-    except (UnicodeDecodeError, ValueError, RecursionError, ControlError):
+        value = json.loads(body.decode("ascii"))
+    except (UnicodeDecodeError, ValueError, RecursionError):
         failed = True
     if failed:
         raise ControlError
@@ -205,8 +194,6 @@ def parse_wait(body: bytes) -> WaitFact:
 
 
 def encode_failure(value: FailureFact) -> bytes:
-    if (value.phase, value.code) not in _FAILURE_PAIRS:
-        raise ControlError
     return _json_bytes({"code": value.code.value, "phase": value.phase.value})
 
 
@@ -223,17 +210,3 @@ def parse_failure(body: bytes) -> FailureFact:
     if (result.phase, result.code) not in _FAILURE_PAIRS:
         raise ControlError
     return result
-
-
-def validate_control_body(kind: FrameKind, body: bytes) -> StreamEnd | WaitFact | FailureFact | None:
-    """Decode one non-data frame according to its exact version-one schema."""
-    if kind in (FrameKind.LAUNCHING, FrameKind.FINISHED):
-        parse_empty(body)
-        return None
-    if kind is FrameKind.STREAM_END:
-        return parse_stream_end(body)
-    if kind is FrameKind.WAITED:
-        return parse_wait(body)
-    if kind is FrameKind.FAILED:
-        return parse_failure(body)
-    raise ControlError

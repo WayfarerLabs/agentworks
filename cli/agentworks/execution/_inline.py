@@ -56,9 +56,6 @@ class PreparedInlineCandidate:
     invocation: PreparedInvocation
     io: CarrierIO
     nonce: str
-    manifest_bytes: int
-    helper_source_bytes: int
-    helper_argv_bytes: int
     _reader: FrameReader = field(repr=False)
     _observer: InlineObserver = field(repr=False)
     _claimed: bool = field(default=False, init=False, repr=False)
@@ -181,8 +178,8 @@ def prepare_inline_candidate(
 ) -> PreparedInlineCandidate:
     """Validate all payload data and build one file-free Linux helper attempt."""
     _utf8(runtime_path)
-    if not posixpath.isabs(runtime_path):
-        raise ValidationError("Inline runtime path must be absolute")
+    if not posixpath.isabs(runtime_path) or "=" in runtime_path:
+        raise ValidationError("Inline runtime path must be an absolute non-assignment path")
     if cwd is not None:
         _utf8(cwd)
         if not posixpath.isabs(cwd):
@@ -231,9 +228,6 @@ def prepare_inline_candidate(
         FIXED_SOURCE,
         nonce,
     )
-    # Account for each argv terminator. This is a local serialization measurement,
-    # not evidence that a provider-specific request accepts the same size.
-    helper_argv_bytes = sum(len(argument.encode("utf-8")) + 1 for argument in fixed_argv)
     return PreparedInlineCandidate(
         invocation=PreparedInvocation(fixed_argv),
         io=CarrierIO(
@@ -242,9 +236,6 @@ def prepare_inline_candidate(
             sensitive=sensitive,
         ),
         nonce=nonce,
-        manifest_bytes=len(manifest_data),
-        helper_source_bytes=len(FIXED_SOURCE.encode("utf-8")),
-        helper_argv_bytes=helper_argv_bytes,
         _reader=reader,
         _observer=observer,
     )
@@ -257,8 +248,6 @@ def execute_inline_candidate(
     deadline: Deadline,
 ) -> InlineCandidateResult:
     """Make exactly one carrier call and interpret only helper-framed evidence."""
-    if not isinstance(prepared, PreparedInlineCandidate):
-        raise ValidationError("Inline execution requires a prepared candidate")
     prepared.claim()
     try:
         report = carrier.execute(prepared.invocation, io=prepared.io, deadline=deadline)

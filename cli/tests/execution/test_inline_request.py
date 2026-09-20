@@ -148,6 +148,12 @@ def test_boundary_errors_drop_payload_bearing_exception_context(identity: Identi
             lambda: prepare_inline_candidate(Command(["/bin/true"]), identity=identity, env=BrokenMapping()),
             ValidationError,
         ),
+        (
+            lambda: prepare_inline_candidate(
+                Command(["/bin/true"]), identity=identity, runtime_path=f"/tmp/{canary}=python"
+            ),
+            ValidationError,
+        ),
     ):
         with pytest.raises(error_type) as caught:
             action()
@@ -175,6 +181,9 @@ def test_boundary_errors_drop_payload_bearing_exception_context(identity: Identi
         lambda identity: prepare_inline_candidate(Command(["/bin/true"]), identity=identity, capture_limit=4_097),
         lambda identity: prepare_inline_candidate(Command(["/bin/true"]), identity=identity, capture_limit=True),
         lambda identity: prepare_inline_candidate(Command(["/bin/true"]), identity=identity, runtime_path="python3"),
+        lambda identity: prepare_inline_candidate(
+            Command(["/bin/true"]), identity=identity, runtime_path="/tmp/runtime=payload-canary"
+        ),
         lambda identity: prepare_inline_candidate(
             Command(["/bin/true"]),
             identity=IdentityExpectation(identity.euid, identity.egid, (identity.egid, identity.egid)),

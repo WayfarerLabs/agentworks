@@ -188,15 +188,6 @@ def _output(value: object) -> tuple[OutputMode, int]:
     return mode, limit
 
 
-def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise _invalid()
-        result[key] = value
-    return result
-
-
 def _json_bytes(value: object) -> bytes:
     return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("ascii")
 
@@ -216,7 +207,6 @@ def decode_manifest(data: bytes) -> InlineManifest:
     try:
         value = json.loads(
             data.decode("ascii"),
-            object_pairs_hook=_unique_object,
             parse_constant=_reject_constant,
         )
     except (UnicodeDecodeError, ValueError, RecursionError, ManifestError):
