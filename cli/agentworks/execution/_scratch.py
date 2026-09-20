@@ -183,13 +183,12 @@ def begin_scratch(
                 with suppress(ScratchTransferError):
                     _set_mode(directory_fd, _DIRECTORY_MODE, ScratchPhase.BEGIN)
                 raise
-            _create_object(directory_fd, acquisition)
-            object_fd = acquisition.object_fd
-            assert object_fd is not None and acquisition.object is not None
-            assert acquisition.parent is not None
-            assert acquisition.directory is not None
-            assert acquisition.object is not None
             try:
+                _create_object(directory_fd, acquisition)
+                object_fd = acquisition.object_fd
+                assert object_fd is not None and acquisition.object is not None
+                assert acquisition.parent is not None
+                assert acquisition.directory is not None
                 _check_deadline(expires_at, ScratchPhase.BEGIN)
                 observed_object = _fstat(object_fd, ScratchPhase.BEGIN)
                 _require_object_stat(
@@ -204,18 +203,21 @@ def begin_scratch(
                 if _list_directory(directory_fd, ScratchPhase.BEGIN) != {_DATA_NAME}:
                     raise ScratchTransferError(ScratchFailureKind.CONFLICT, ScratchPhase.BEGIN)
                 _check_deadline(expires_at, ScratchPhase.BEGIN)
-                ownership = _create_receipt(
-                    directory_fd,
-                    bytes(token),
-                    context,
-                    acquisition.parent,
-                    acquisition.directory,
-                    acquisition.object,
-                    acquisition.gid,
-                    expected_length,
-                    acquisition.receipt,
-                    expires_at,
-                )
+                try:
+                    ownership = create_receipt(
+                        directory_fd,
+                        bytes(token),
+                        context,
+                        acquisition.parent,
+                        acquisition.directory,
+                        acquisition.object,
+                        acquisition.gid,
+                        expected_length,
+                        acquisition.receipt,
+                        expires_at=expires_at,
+                    )
+                except ScratchReceiptError as error:
+                    raise ScratchTransferError(_map_receipt_failure(error.kind), ScratchPhase.BEGIN) from None
             except BaseException:
                 # Both fixed objects inherit a setgid parent's group before
                 # cleanup-only normalization removes the inherited bit.
@@ -348,9 +350,11 @@ def reconcile_scratch_ownership(
 ) -> ScratchHistoricalOwnership | ScratchOwnershipUncertainty:
     """Read-only recovery of receipt-backed ownership for exact cleanup."""
     try:
-        return _reconcile_receipt_ownership(parent_fd, token, context, expires_at=expires_at)
+        result = _reconcile_receipt_ownership(parent_fd, token, context, expires_at=expires_at)
     except ScratchReceiptError as error:
         raise ScratchTransferError(_map_receipt_failure(error.kind), ScratchPhase.RECONCILE) from None
+    _check_deadline(expires_at, ScratchPhase.RECONCILE)
+    return result
 
 
 def verify_scratch(
@@ -545,35 +549,6 @@ def _create_object(directory_fd: int, acquisition: _ScratchAcquisition) -> None:
     observed = _fstat(acquisition.object_fd, ScratchPhase.BEGIN)
     acquisition.object = _identity(observed)
     _set_mode(acquisition.object_fd, _OBJECT_MODE, ScratchPhase.BEGIN)
-
-
-def _create_receipt(
-    directory_fd: int,
-    token: bytes,
-    context: ScratchReceiptContext,
-    parent: _Identity,
-    directory: _Identity,
-    data: _Identity,
-    gid: int,
-    length: int,
-    acquisition: ScratchReceiptAcquisition,
-    expires_at: float | None,
-) -> ScratchOwnership:
-    try:
-        return create_receipt(
-            directory_fd,
-            token,
-            context,
-            parent,
-            directory,
-            data,
-            gid,
-            length,
-            acquisition,
-            expires_at=expires_at,
-        )
-    except ScratchReceiptError as error:
-        raise ScratchTransferError(_map_receipt_failure(error.kind), ScratchPhase.BEGIN) from None
 
 
 def _validate_receipt(

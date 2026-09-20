@@ -238,6 +238,68 @@ def test_begin_preserves_alternate_inherited_group_for_both_fixed_objects(tmp_pa
     os.close(parent_fd)
 
 
+def test_begin_data_open_failure_normalizes_owned_setgid_directory_for_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o2700)
+    if not tmp_path.stat().st_mode & stat.S_ISGID:
+        pytest.skip("filesystem does not retain setgid on the parent directory")
+    parent_fd = _open_parent(tmp_path)
+    original_open = os.open
+
+    def fail_data_open(path: object, *args: object, **kwargs: object) -> int:
+        if path == scratch_module._DATA_NAME:
+            raise OSError(errno.EIO, "fixture data open failure")
+        return original_open(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "open", fail_data_open)
+    error = _failure(begin_scratch, parent_fd, 0)
+    assert error.kind is ScratchFailureKind.IO
+    assert error.cleanup_debt is None
+    assert not list(tmp_path.iterdir())
+    os.close(parent_fd)
+
+
+def test_begin_data_open_failure_never_repairs_unknown_object(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o2700)
+    if not tmp_path.stat().st_mode & stat.S_ISGID:
+        pytest.skip("filesystem does not retain setgid on the parent directory")
+    parent_fd = _open_parent(tmp_path)
+    original_open = os.open
+
+    def create_unknown_then_fail(
+        path: object,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        if path == scratch_module._DATA_NAME:
+            descriptor = original_open(path, flags, 0o400, dir_fd=dir_fd)
+            os.close(descriptor)
+            raise OSError(errno.EIO, "fixture unknown data object")
+        return original_open(path, flags, mode, dir_fd=dir_fd)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "open", create_unknown_then_fail)
+    error = _failure(begin_scratch, parent_fd, 0)
+    debt = error.cleanup_debt
+    assert error.kind is ScratchFailureKind.IO
+    assert debt is not None and debt._object is None
+    directory = _scratch_directory(tmp_path)
+    data = directory / scratch_module._DATA_NAME
+    assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+    assert stat.S_IMODE(data.stat().st_mode) == 0o400
+
+    monkeypatch.setattr(os, "open", original_open)
+    data.unlink()
+    cleanup_scratch(parent_fd, debt)
+    os.close(parent_fd)
+
+
 def test_reference_can_be_reopened_in_a_fresh_process(tmp_path: Path) -> None:
     content = b"fresh process\x00binary\xff"
     parent_fd = _open_parent(tmp_path)

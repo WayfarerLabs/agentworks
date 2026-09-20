@@ -172,9 +172,6 @@ def create_receipt(
         observed_content = _pread_bounded(descriptor, expires_at)
         if not hmac.compare_digest(observed_content, content):
             raise ScratchReceiptError(ScratchReceiptFailureKind.CONFLICT)
-        decoded = _decode_receipt(observed_content, token, context, acquisition.identity)
-        if decoded != ownership:
-            raise ScratchReceiptError(ScratchReceiptFailureKind.CONFLICT)
         _check_deadline(expires_at)
         return ownership
     finally:
@@ -203,16 +200,7 @@ def validate_receipt(
         if named is None or _identity(named) != ownership._receipt:
             raise ScratchReceiptError(ScratchReceiptFailureKind.CONFLICT)
         content = _pread_bounded(descriptor, expires_at)
-        try:
-            decoded = _decode_receipt(
-                content,
-                ownership._token,
-                ownership._context,
-                ownership._receipt,
-            )
-        except ValueError:
-            raise ScratchReceiptError(ScratchReceiptFailureKind.CONFLICT) from None
-        if decoded != ownership:
+        if not hmac.compare_digest(content, _encode_receipt(ownership)):
             raise ScratchReceiptError(ScratchReceiptFailureKind.CONFLICT)
         _require_unchanged_receipt(directory_fd, descriptor, ownership, len(content))
         _check_deadline(expires_at)

@@ -291,6 +291,77 @@ def test_reconcile_checks_deadline_after_receipt_read(tmp_path: Path, monkeypatc
     os.close(parent_fd)
 
 
+def test_reconcile_checks_deadline_after_missing_name_lookup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    clock = [0.0]
+    original_stat_at = receipt_module._stat_at
+
+    def miss_then_expire(parent: int, name: str) -> os.stat_result | None:
+        result = original_stat_at(parent, name)
+        assert result is None
+        clock[0] = 10.0
+        return result
+
+    fake_time = SimpleNamespace(monotonic=lambda: clock[0])
+    monkeypatch.setattr(receipt_module, "_stat_at", miss_then_expire)
+    monkeypatch.setattr(receipt_module, "time", fake_time)
+    monkeypatch.setattr(scratch_module, "time", fake_time)
+    with pytest.raises(ScratchTransferError) as raised:
+        reconcile_scratch_ownership(
+            parent_fd,
+            os.urandom(16),
+            current_receipt_context(ScratchOperation.STAGE),
+            expires_at=5.0,
+        )
+    assert raised.value.kind is ScratchFailureKind.DEADLINE
+    assert raised.value.phase is ScratchPhase.RECONCILE
+    os.close(parent_fd)
+
+
+def test_reconcile_checks_deadline_after_final_descriptor_close(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    token, reference = _begin(parent_fd, 0)
+    clock = [0.0]
+    original_open_directory = receipt_module._open_directory
+    original_close = os.close
+    directory_fd: int | None = None
+
+    def record_directory(parent: int, name: str) -> int:
+        nonlocal directory_fd
+        directory_fd = original_open_directory(parent, name)
+        return directory_fd
+
+    def close_then_expire(descriptor: int) -> None:
+        original_close(descriptor)
+        if descriptor == directory_fd:
+            clock[0] = 10.0
+
+    fake_time = SimpleNamespace(monotonic=lambda: clock[0])
+    monkeypatch.setattr(receipt_module, "_open_directory", record_directory)
+    monkeypatch.setattr(os, "close", close_then_expire)
+    monkeypatch.setattr(receipt_module, "time", fake_time)
+    monkeypatch.setattr(scratch_module, "time", fake_time)
+    with pytest.raises(ScratchTransferError) as raised:
+        reconcile_scratch_ownership(
+            parent_fd,
+            token,
+            current_receipt_context(ScratchOperation.STAGE),
+            expires_at=5.0,
+        )
+    assert raised.value.kind is ScratchFailureKind.DEADLINE
+    assert raised.value.phase is ScratchPhase.RECONCILE
+
+    monkeypatch.setattr(os, "close", original_close)
+    cleanup_scratch(parent_fd, reference)
+    os.close(parent_fd)
+
+
 def test_reconcile_close_interrupt_still_closes_both_owned_descriptors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
