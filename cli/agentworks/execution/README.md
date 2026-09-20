@@ -150,10 +150,11 @@ refuse before payload preparation; a failed wrapper never triggers fallback or r
 
 The fixed launcher gives Python a minimal environment. Trusted numeric identity metadata may appear
 in wrapper argv; workload source, paths, environment and input remain in stdin. Linux helpers verify
-real/effective/saved IDs and normalized groups before workload access. Unsupported destination
-runtimes refuse with closed evidence. The host import remains workstation-neutral. Account
-resolution, actual sudo/root-demotion acceptance and native integration remain open; these private
-plans are not grants and do not activate permissions.
+real/effective/saved IDs and normalized groups before workload access. A non-Linux destination with
+a compatible interpreter returns closed refusal evidence; an interpreter that cannot start cannot
+provide that evidence. The host import remains workstation-neutral. Account resolution, actual
+sudo/root-demotion acceptance and native integration remain open; these private plans are not grants
+and do not activate permissions.
 
 ## Private inline preparation
 
