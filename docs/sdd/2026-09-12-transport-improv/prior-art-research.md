@@ -655,6 +655,27 @@ must account for both direct operation calls and worker-thread observations. The
 composition facts, not acceptance of a new signal policy or permission to put signal handling in
 RunContext. The launch-ownership gate remains open.
 
+An isolated follow-up on Linux arm64 tested retaining a `Popen` instance before calling its
+initializer. This does not close the gap: real SIGINT during construction left an adopted live child
+with `pid=None` and `_child_created=False` in eight of eight trials on each of Debian CPython 3.11.2
+and workstation CPython 3.12.13. The fixture independently adopted, killed and reaped the exact
+children. In the
+[CPython implementation](https://github.com/python/cpython/blob/v3.12.13/Lib/subprocess.py#L1791-L1902),
+the native launch returns before Python stores the PID on the instance. Retaining the instance does
+not make that handoff atomic. The
+[Windows implementation](https://github.com/python/cpython/blob/v3.12.13/Lib/subprocess.py#L1536-L1561)
+has a similar source-level handle-publication interval; this experiment provides no native Windows
+or macOS evidence.
+
+A one-shot launch-owner thread is a candidate, not the selected implementation. Local trials
+preserved exact child cleanup through repeated construction-time SIGINT, without replacing signal
+handlers. However, an early version relied on interruptible event/liveness synchronization and
+incorrectly concluded cleanup had finished. The thread's own startup handoff still needs proof:
+interruption must distinguish a never-started owner from one that will start later, without
+returning with a surviving thread or borrowed endpoint. The existing exclusion of hard real-time
+process-creation guarantees does not excuse lost ownership or change callback threading. Do not
+substitute a generic future cancellation or `Thread.is_alive()` check for this proof.
+
 ## Native adapter audit, 2026-09-19
 
 The existing finite-input carrier boundary permits non-production adapter proofs without selecting
