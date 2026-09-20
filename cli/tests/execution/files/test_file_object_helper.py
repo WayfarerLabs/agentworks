@@ -368,11 +368,15 @@ def test_complete_proxmox_post_fits_provider_bound_and_returns_typed_outcome(
         return status
 
     monkeypatch.setattr(carrier._wire, "request", request)
+    mismatched_plan = IdentityPlan(
+        IdentityExpectation((plan.expected.euid + 1) % (2**32), plan.expected.egid, plan.expected.groups),
+        IdentityMode.DIRECT,
+    )
     result = stat_file(
         carrier,
         trusted_root_path=str(root),
         relative_path="leaf",
-        plan=plan,
+        plan=mismatched_plan,
         deadline=Deadline.after(15),
         runtime_path=sys.executable,
     )
@@ -381,7 +385,4 @@ def test_complete_proxmox_post_fits_provider_bound_and_returns_typed_outcome(
     assert result.dispatch is Dispatch.SENT
     assert result.observation.state is FileObjectObservationState.REFUSED
     assert result.observation.failure is not None
-    assert result.observation.failure.code in {
-        FileObjectFailureCode.LOCK_MISSING,
-        FileObjectFailureCode.LOCK_UNSAFE,
-    }
+    assert result.observation.failure.code is FileObjectFailureCode.IDENTITY_MISMATCH
