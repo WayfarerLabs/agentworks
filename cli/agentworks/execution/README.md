@@ -480,11 +480,12 @@ carrier acceptance.
 
 ## Private file staging exchanges
 
-`_file_stage_exchange.py` delivers one stage creation or exact-offset chunk through a fixed Linux
-helper. Each request carries the original trusted root and nonempty destination path; the guest
-derives the scratch parent rather than accepting a path from a receipt. It checks execution identity
-before opening workload paths and holds the existing transaction lock through mutation. Missing or
-unsafe lock/parent state refuses without setup or repair.
+`_file_stage_exchange.py` delivers stage creation, exact-offset chunks, ownership reconciliation and
+exact cleanup through a fixed Linux helper. Each request carries the original trusted root and
+nonempty destination path; the guest derives the scratch parent rather than accepting a path from a
+receipt. It checks execution identity before opening workload paths and holds the existing
+transaction lock through mutation. Missing or unsafe lock/parent state refuses without setup or
+repair.
 
 The guest checks expiry after closing its owned path and lock descriptors, before emitting the
 result. If creation or a chunk write already happened, expiry retains exact cleanup debt rather than
@@ -498,13 +499,27 @@ does not publish content; the caller retains its original reference for later ex
 Returned chunk scratch-failure debt must match that reference exactly, including receipt mode;
 missing or conflicting debt is invalid control, not new cleanup authority.
 
+Reconciliation returns historical cleanup ownership only, never an active or ready content
+reference. It requires the complete recorded parent, directory, data and receipt identities and the
+final receipt mode. Missing or invalid receipts remain ownership uncertainty. Cleanup consumes the
+original identity-bound debt; a failure cannot substitute different debt. Explicit cleanup checks
+expiry after parent resolution and before its first deletion. Neither recovery nor cleanup proves
+that an earlier unobserved request can no longer arrive; delayed chunk requests must still validate
+their receipt and cannot recreate a cleaned stage.
+
 The private stage chunk cap is 12 KiB, below the scratch primitive's 24 KiB range cap. The complete
 manifest is limited to 32 KiB, and Proxmox independently enforces its full serialized body limit.
 Local tests exercise the actual request serializer, a fake provider executing the real helper, and
 Windows SSH command-line sizing for explicit fixtures. Those measurements do not establish native
 platform acceptance or fit for every connection/identity prefix.
 
-These entries are not complete upload or FileAccess operations. Remote reconciliation, exact cleanup
-delivery, snapshot retrieval and publication composition remain unfinished. The caller must retain
-the token, original binding and known references; an unavailable creation reply does not establish
-absence or quiescence.
+These entries are not complete upload or FileAccess operations. Snapshot retrieval and publication
+composition and recovery remain unfinished. The caller must retain the token, original binding and
+known references; an unavailable creation reply does not establish absence or quiescence.
+
+`_scratch_root.py` opens the fixed Linux `/tmp` directory without following symlinks and requires
+UID 0 and mode 01777. It creates and repairs nothing, ignores environment-selected temporary paths,
+and returns a caller-owned descriptor or a closed failure kind. Download snapshots can use this
+parent independently of read-only source authority. This private selection grants no access to
+arbitrary temporary-directory contents. macOS root selection and remote snapshot delivery are not
+implemented.

@@ -244,10 +244,11 @@ prevent other unprivileged users from renaming/removing those directories; malic
 processes remain outside the threat model. Exact parent/object identities and receipt validation
 still apply, and temporary-file cleanup or reboot can invalidate an observation without proving
 completion. The shared lock namespace supplies serialization only, not a target-user-writable
-storage directory. Root selection creates no object and is not part of readiness. The next local
-proof must cover a read-only source parent, unsafe/missing scratch roots, deadline and descriptor
-cleanup, and independence from payload environment. This Linux choice does not select the macOS host
-root or satisfy its filesystem proof gates.
+storage directory. Root selection creates no object and is not part of readiness. The private
+`_scratch_root.py` selector implements this admission. Local fixtures cover a non-root caller with a
+read-only source parent, unsafe/missing scratch roots, deadline and descriptor cleanup, and
+independence from payload environment. These fixtures do not establish native default-root
+acceptance or select the macOS host root.
 
 The first creation acknowledgment remains a transfer-delivery gate. The helper derives the scratch
 name from core's fresh token and records its inode identities before returning them; losing that
@@ -264,8 +265,9 @@ directory name from it and attempts exclusive creation once. Before acknowledgin
 creation, it writes and validates a bounded receipt binding the token, operation, execution
 identity, original authorized parent identity, declared length and acquired directory/data
 identities. A collision refuses; losing a reply never resubmits creation. These private receipt
-mechanics are implemented in `_scratch_receipt.py`; remote reconciliation and publication-stage
-ownership are not yet implemented.
+mechanics are implemented in `_scratch_receipt.py`. The private stage exchange now delivers
+reconciliation and exact cleanup; snapshot reconciliation and publication-stage ownership remain
+unimplemented.
 
 Read-only reconciliation accepts the original core-bound context and token, not paths supplied by a
 receipt. It opens only that exact name and validates the receipt schema, ownership, permissions,
@@ -315,17 +317,21 @@ grammars remain operation-specific. Unknown, duplicate, non-canonical or extra f
 field/line/decoded/total bounds must fit the complete carrier request. No request value becomes argv
 or shell source; fixed preparation bootstrap source cannot be reused for file operations.
 
-The private Linux `stage_begin` and `stage_chunk` exchanges now implement that delivery shape under
-the existing transaction lock. Every request retains the nonempty original destination path; the
-guest derives its parent after checking execution identity. A complete creation result must match
-the requested length before the host exposes its reference. Cleanup debt is data bound to the
-original token/context, not a returned name or path. Chunk scratch-failure debt must match the
-already-known active reference exactly; the response cannot introduce different cleanup ownership.
-Missing private parents refuse. Incomplete observation after possible dispatch remains uncertain; no
-replay or public absence is inferred. Guest expiry is checked after owned path and lock cleanup; a
-completed mutation retains exact cleanup debt when that final check expires instead of becoming a
-no-effects refusal. These exchanges alone do not implement remote cleanup/reconciliation or complete
-upload/publication.
+The private Linux `stage_begin`, `stage_chunk`, `stage_reconcile` and `stage_cleanup` exchanges now
+implement that delivery shape under the existing transaction lock. Every request retains the
+nonempty original destination path; the guest derives its parent after checking execution identity.
+A complete creation result must match the requested length before the host exposes its reference.
+Cleanup debt is data bound to the original token/context, not a returned name or path. Chunk
+scratch-failure debt must match the already-known active reference exactly; the response cannot
+introduce different cleanup ownership. Missing private parents refuse. Incomplete observation after
+possible dispatch remains uncertain; no replay or public absence is inferred. Guest expiry is
+checked after owned path and lock cleanup; a completed mutation retains exact cleanup debt when that
+final check expires instead of becoming a no-effects refusal. Reconciliation exposes only complete
+historical cleanup ownership, never a ready content reference; missing or invalid receipts remain
+ownership uncertainty. Explicit cleanup checks expiry before its first deletion and accepts only the
+original identity-bound debt. Returned cleanup failure debt must match it. These exchanges do not
+prove earlier-request quiescence or implement complete upload/publication; delayed chunk requests
+refuse after exact cleanup removes the receipt.
 
 Ordinary buffered capture cannot safely carry this protocol: sensitive input suppresses the
 response, while ordinary `Capture` can flow toward public execution results. Use the implemented
@@ -339,13 +345,14 @@ delivery/retention facts defined by the carrier I/O LLD; the collector alone own
 outcome. Ordinary sensitive-output suppression remains unchanged. This file schema, not a generic
 private raw-capture mode, decides which typed content may survive.
 
-Closed helper operations are `stage_begin`, `stage_chunk`, `publish`, `snapshot_begin`,
-`snapshot_chunk`, `stat`, `list`, `ensure_directory`, `set_metadata`, `remove`, and `cleanup`.
-Staging is created beside the destination with mode 0600 and an unpredictable helper-owned name.
-Chunks use exact offsets and hashes; final size and SHA-256 must match before publication. Snapshot
-chunks come from a private complete spool, not repeated reads of a changing source. The host checks
-the end-to-end size/digest too. No helper operation accepts executable names, arbitrary flags,
-environment, cwd, source text, callbacks, or a destination outside its single request.
+Closed helper operations are `stage_begin`, `stage_chunk`, `stage_reconcile`, `stage_cleanup`,
+`publish`, `snapshot_begin`, `snapshot_chunk`, `stat`, `list`, `ensure_directory`, `set_metadata`,
+`remove`, and `cleanup`. Staging is created beside the destination with mode 0600 and an
+unpredictable helper-owned name. Chunks use exact offsets and hashes; final size and SHA-256 must
+match before publication. Snapshot chunks come from a private complete spool, not repeated reads of
+a changing source. The host checks the end-to-end size/digest too. No helper operation accepts
+executable names, arbitrary flags, environment, cwd, source text, callbacks, or a destination
+outside its single request.
 
 ### No-staging readiness gate
 
