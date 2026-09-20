@@ -11,6 +11,7 @@ import stat
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -22,6 +23,7 @@ from agentworks.execution._scratch import (
     ScratchTransferError,
     begin_scratch,
     cleanup_scratch,
+    iter_ready_scratch,
     read_scratch_range,
     verify_scratch,
     write_scratch_chunk,
@@ -63,7 +65,7 @@ def test_binary_roundtrip_reopens_each_operation_and_accepts_duplicate_retry(tmp
     first = content[: scratch_module._MAX_CHUNK_BYTES]
     second = content[len(first) :]
     parent_fd = _open_parent(tmp_path)
-    reference = begin_scratch(parent_fd, len(content), _digest(content))
+    reference = begin_scratch(parent_fd, len(content))
     scratch = _scratch_directory(tmp_path)
     data_path = scratch / scratch_module._DATA_NAME
     assert stat.S_IMODE(scratch.stat().st_mode) == 0o700
@@ -78,7 +80,7 @@ def test_binary_roundtrip_reopens_each_operation_and_accepts_duplicate_retry(tmp
     write_scratch_chunk(parent_fd, reference, 0, first, _digest(first))
     assert data_path.stat().st_mtime_ns == before_retry.st_mtime_ns
     write_scratch_chunk(parent_fd, reference, len(first), second, _digest(second))
-    ready = verify_scratch(parent_fd, reference)
+    ready = verify_scratch(parent_fd, reference, _digest(content))
     assert isinstance(ready, ReadyScratchReference)
     assert read_scratch_range(parent_fd, ready, 251, 4096) == content[251 : 251 + 4096]
     assert read_scratch_range(parent_fd, ready, len(content), 0) == b""
@@ -104,9 +106,9 @@ def test_reopened_operation_close_interrupt_attempts_both_descriptors(
 ) -> None:
     content = b"reopened close"
     parent_fd = _open_parent(tmp_path)
-    reference = begin_scratch(parent_fd, len(content), _digest(content))
+    reference = begin_scratch(parent_fd, len(content))
     write_scratch_chunk(parent_fd, reference, 0, content, _digest(content))
-    ready = verify_scratch(parent_fd, reference)
+    ready = verify_scratch(parent_fd, reference, _digest(content))
     original_close = scratch_module._close_fd
     closed: list[int] = []
 
@@ -121,7 +123,7 @@ def test_reopened_operation_close_interrupt_attempts_both_descriptors(
         if operation == "write":
             write_scratch_chunk(parent_fd, reference, 0, content, _digest(content))
         elif operation == "verify":
-            verify_scratch(parent_fd, reference)
+            verify_scratch(parent_fd, reference, _digest(content))
         else:
             read_scratch_range(parent_fd, ready, 0, len(content))
     cause = _scratch_cause(raised.value)
@@ -166,7 +168,7 @@ def test_begin_preserves_setgid_until_data_creation(
     monkeypatch.setattr(os, "open", observe_data_creation)
 
     parent_fd = _open_parent(tmp_path)
-    reference = begin_scratch(parent_fd, 0, _digest(b""))
+    reference = begin_scratch(parent_fd, 0)
     directory = _scratch_directory(tmp_path)
     data_path = directory / scratch_module._DATA_NAME
     assert len(directory_modes_at_data_creation) == 1
@@ -180,7 +182,7 @@ def test_begin_preserves_setgid_until_data_creation(
 def test_reference_can_be_reopened_in_a_fresh_process(tmp_path: Path) -> None:
     content = b"fresh process\x00binary\xff"
     parent_fd = _open_parent(tmp_path)
-    reference = begin_scratch(parent_fd, len(content), _digest(content))
+    reference = begin_scratch(parent_fd, len(content))
     os.close(parent_fd)
     fixture = json.dumps(
         {
@@ -190,7 +192,7 @@ def test_reference_can_be_reopened_in_a_fresh_process(tmp_path: Path) -> None:
             "uid": reference._uid,
             "gid": reference._gid,
             "length": reference._length,
-            "digest": reference._digest.hex(),
+            "digest": _digest(content).hex(),
             "content": content.hex(),
         }
     ).encode()
@@ -203,7 +205,7 @@ from agentworks.execution._scratch import ScratchReference, _Identity, write_scr
 fixture = json.load(sys.stdin)
 reference = ScratchReference(
     fixture["name"], _Identity(*fixture["directory"]), _Identity(*fixture["object"]),
-    fixture["uid"], fixture["gid"], fixture["length"], bytes.fromhex(fixture["digest"]),
+    fixture["uid"], fixture["gid"], fixture["length"],
 )
 content = bytes.fromhex(fixture["content"])
 parent_fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY)
@@ -220,7 +222,7 @@ finally:
     )
     assert completed.returncode == 0
     parent_fd = _open_parent(tmp_path)
-    ready = verify_scratch(parent_fd, reference)
+    ready = verify_scratch(parent_fd, reference, _digest(content))
     assert read_scratch_range(parent_fd, ready, 0, len(content)) == content
     cleanup_scratch(parent_fd, reference)
     os.close(parent_fd)
@@ -229,7 +231,7 @@ finally:
 def test_gap_overlap_and_different_duplicate_refuse_without_writing(tmp_path: Path) -> None:
     content = b"abcdef"
     parent_fd = _open_parent(tmp_path)
-    reference = begin_scratch(parent_fd, len(content), _digest(content))
+    reference = begin_scratch(parent_fd, len(content))
     gap = _failure(write_scratch_chunk, parent_fd, reference, 1, b"b", _digest(b"b"))
     assert gap.kind is ScratchFailureKind.CONFLICT
     write_scratch_chunk(parent_fd, reference, 0, b"abc", _digest(b"abc"))
@@ -245,7 +247,7 @@ def test_gap_overlap_and_different_duplicate_refuse_without_writing(tmp_path: Pa
 def test_short_pwrite_completes_the_exact_chunk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     content = b"short writes must still complete"
     parent_fd = _open_parent(tmp_path)
-    reference = begin_scratch(parent_fd, len(content), _digest(content))
+    reference = begin_scratch(parent_fd, len(content))
     original_pwrite = os.pwrite
 
     def short_pwrite(descriptor: int, data: bytes, offset: int) -> int:
@@ -253,7 +255,7 @@ def test_short_pwrite_completes_the_exact_chunk(tmp_path: Path, monkeypatch: pyt
 
     monkeypatch.setattr(os, "pwrite", short_pwrite)
     write_scratch_chunk(parent_fd, reference, 0, content, _digest(content))
-    ready = verify_scratch(parent_fd, reference)
+    ready = verify_scratch(parent_fd, reference, _digest(content))
     assert read_scratch_range(parent_fd, ready, 0, len(content)) == content
     cleanup_scratch(parent_fd, reference)
     os.close(parent_fd)
@@ -261,7 +263,7 @@ def test_short_pwrite_completes_the_exact_chunk(tmp_path: Path, monkeypatch: pyt
 
 def test_chunk_digest_and_declared_length_bounds_are_enforced(tmp_path: Path) -> None:
     parent_fd = _open_parent(tmp_path)
-    reference = begin_scratch(parent_fd, 3, _digest(b"abc"))
+    reference = begin_scratch(parent_fd, 3)
     wrong_digest = _failure(write_scratch_chunk, parent_fd, reference, 0, b"abc", _digest(b"abd"))
     empty = _failure(write_scratch_chunk, parent_fd, reference, 0, b"", _digest(b""))
     beyond = _failure(write_scratch_chunk, parent_fd, reference, 1, b"abc", _digest(b"abc"))
@@ -274,30 +276,232 @@ def test_chunk_digest_and_declared_length_bounds_are_enforced(tmp_path: Path) ->
     os.close(parent_fd)
 
 
-def test_invalid_whole_contract_refuses_before_creating_scratch(tmp_path: Path) -> None:
+def test_invalid_length_refuses_before_creating_scratch(tmp_path: Path) -> None:
     parent_fd = _open_parent(tmp_path)
     with pytest.raises(ValueError):
-        begin_scratch(parent_fd, -1, _digest(b""))
-    with pytest.raises(ValueError):
-        begin_scratch(parent_fd, 0, b"short")
+        begin_scratch(parent_fd, -1)
     assert not list(tmp_path.iterdir())
     os.close(parent_fd)
 
 
 def test_verify_requires_complete_length_and_matching_whole_digest(tmp_path: Path) -> None:
     parent_fd = _open_parent(tmp_path)
-    incomplete = begin_scratch(parent_fd, 3, _digest(b"abc"))
-    length_error = _failure(verify_scratch, parent_fd, incomplete)
+    incomplete = begin_scratch(parent_fd, 3)
+    length_error = _failure(verify_scratch, parent_fd, incomplete, _digest(b"abc"))
     assert length_error.kind is ScratchFailureKind.INTEGRITY
     assert length_error.cleanup_debt is not None
     cleanup_scratch(parent_fd, incomplete)
 
-    wrong_whole = begin_scratch(parent_fd, 3, _digest(b"abd"))
+    wrong_whole = begin_scratch(parent_fd, 3)
     write_scratch_chunk(parent_fd, wrong_whole, 0, b"abc", _digest(b"abc"))
-    digest_error = _failure(verify_scratch, parent_fd, wrong_whole)
+    digest_error = _failure(verify_scratch, parent_fd, wrong_whole, _digest(b"abd"))
     assert digest_error.kind is ScratchFailureKind.INTEGRITY
     assert digest_error.phase is ScratchPhase.VERIFY
     cleanup_scratch(parent_fd, wrong_whole)
+    os.close(parent_fd)
+
+
+def test_final_digest_is_validated_only_when_transfer_is_verified(tmp_path: Path) -> None:
+    content = b"digest learned after transfer"
+    parent_fd = _open_parent(tmp_path)
+    reference = begin_scratch(parent_fd, len(content))
+    write_scratch_chunk(parent_fd, reference, 0, content, _digest(content))
+
+    with pytest.raises(ValueError):
+        verify_scratch(parent_fd, reference, b"short")
+    digest_error = _failure(verify_scratch, parent_fd, reference, _digest(b"different"))
+    assert digest_error.kind is ScratchFailureKind.INTEGRITY
+
+    ready = verify_scratch(parent_fd, reference, _digest(content))
+    assert read_scratch_range(parent_fd, ready, 0, len(content)) == content
+    cleanup_scratch(parent_fd, ready)
+    os.close(parent_fd)
+
+
+def test_begin_deadline_between_collisions_never_claims_or_removes_collision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    collision = tmp_path / f"{scratch_module._NAME_PREFIX}collision"
+    collision.mkdir(mode=0o700)
+    sentinel = collision / "sentinel"
+    sentinel.write_bytes(b"not owned")
+    parent_fd = _open_parent(tmp_path)
+    clock = [0.0]
+    original_mkdir = os.mkdir
+
+    def collide_then_expire(
+        path: object,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> None:
+        try:
+            original_mkdir(path, mode, dir_fd=dir_fd)  # type: ignore[arg-type]
+        finally:
+            clock[0] = 10.0
+
+    monkeypatch.setattr(secrets, "token_hex", lambda _length: "collision")
+    monkeypatch.setattr(os, "mkdir", collide_then_expire)
+    monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    with pytest.raises(ScratchTransferError) as raised:
+        begin_scratch(parent_fd, 0, expires_at=5.0)
+    assert raised.value.kind is ScratchFailureKind.DEADLINE
+    assert raised.value.phase is ScratchPhase.BEGIN
+    assert raised.value.cleanup_debt is None
+    assert sentinel.read_bytes() == b"not owned"
+    os.close(parent_fd)
+
+
+def test_begin_expiry_after_mutation_runs_exact_cleanup_outside_expired_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    clock = [0.0]
+    original_list = scratch_module._list_directory
+
+    def list_then_expire(directory_fd: int, phase: ScratchPhase) -> set[str]:
+        names = original_list(directory_fd, phase)
+        if phase is ScratchPhase.BEGIN:
+            clock[0] = 10.0
+        return names
+
+    monkeypatch.setattr(scratch_module, "_list_directory", list_then_expire)
+    monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    with pytest.raises(ScratchTransferError) as raised:
+        begin_scratch(parent_fd, 0, expires_at=5.0)
+    assert raised.value.kind is ScratchFailureKind.DEADLINE
+    assert raised.value.cleanup_debt is None
+    assert not list(tmp_path.iterdir())
+    os.close(parent_fd)
+
+
+def test_short_pwrite_loop_stops_at_deadline_with_exact_cleanup_debt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = b"partial write"
+    parent_fd = _open_parent(tmp_path)
+    reference = begin_scratch(parent_fd, len(content))
+    clock = [0.0]
+    original_pwrite = os.pwrite
+
+    def write_once_then_expire(descriptor: int, data: bytes, offset: int) -> int:
+        written = original_pwrite(descriptor, data[:1], offset)
+        clock[0] = 10.0
+        return written
+
+    monkeypatch.setattr(os, "pwrite", write_once_then_expire)
+    monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    with pytest.raises(ScratchTransferError) as raised:
+        write_scratch_chunk(
+            parent_fd,
+            reference,
+            0,
+            content,
+            _digest(content),
+            expires_at=5.0,
+        )
+    assert raised.value.kind is ScratchFailureKind.DEADLINE
+    assert raised.value.phase is ScratchPhase.WRITE
+    assert raised.value.cleanup_debt == scratch_module._cleanup_debt(reference)
+    assert (_scratch_directory(tmp_path) / scratch_module._DATA_NAME).read_bytes() == content[:1]
+    cleanup_scratch(parent_fd, raised.value.cleanup_debt)
+    os.close(parent_fd)
+
+
+def test_verify_hash_loop_stops_between_bounded_reads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = os.urandom(scratch_module._HASH_READ_BYTES + 1)
+    parent_fd = _open_parent(tmp_path)
+    reference = begin_scratch(parent_fd, len(content))
+    for offset in range(0, len(content), scratch_module._MAX_CHUNK_BYTES):
+        chunk = content[offset : offset + scratch_module._MAX_CHUNK_BYTES]
+        write_scratch_chunk(parent_fd, reference, offset, chunk, _digest(chunk))
+    clock = [0.0]
+    original_pread_exact = scratch_module._pread_exact
+    reads = 0
+
+    def read_once_then_expire(
+        descriptor: int,
+        offset: int,
+        length: int,
+        phase: ScratchPhase,
+        expires_at: float | None,
+    ) -> bytes:
+        nonlocal reads
+        block = original_pread_exact(descriptor, offset, length, phase, expires_at)
+        reads += 1
+        clock[0] = 10.0
+        return block
+
+    monkeypatch.setattr(scratch_module, "_pread_exact", read_once_then_expire)
+    monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    with pytest.raises(ScratchTransferError) as raised:
+        verify_scratch(parent_fd, reference, _digest(content), expires_at=5.0)
+    assert raised.value.kind is ScratchFailureKind.DEADLINE
+    assert raised.value.phase is ScratchPhase.VERIFY
+    assert reads == 1
+    cleanup_scratch(parent_fd, reference)
+    os.close(parent_fd)
+
+
+def test_read_checks_deadline_after_its_last_pread(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = b"last read deadline"
+    parent_fd = _open_parent(tmp_path)
+    reference = begin_scratch(parent_fd, len(content))
+    write_scratch_chunk(parent_fd, reference, 0, content, _digest(content))
+    ready = verify_scratch(parent_fd, reference, _digest(content))
+    clock = [0.0]
+    original_pread = os.pread
+
+    def read_then_expire(descriptor: int, length: int, offset: int) -> bytes:
+        block = original_pread(descriptor, length, offset)
+        clock[0] = 10.0
+        return block
+
+    monkeypatch.setattr(os, "pread", read_then_expire)
+    monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    with pytest.raises(ScratchTransferError) as raised:
+        read_scratch_range(parent_fd, ready, 0, len(content), expires_at=5.0)
+    assert raised.value.kind is ScratchFailureKind.DEADLINE
+    assert raised.value.phase is ScratchPhase.READ
+    assert raised.value.cleanup_debt == scratch_module._cleanup_debt(reference)
+    cleanup_scratch(parent_fd, ready)
+    os.close(parent_fd)
+
+
+def test_iteration_checks_deadline_after_the_last_yield(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = b"one range"
+    parent_fd = _open_parent(tmp_path)
+    reference = begin_scratch(parent_fd, len(content))
+    write_scratch_chunk(parent_fd, reference, 0, content, _digest(content))
+    ready = verify_scratch(parent_fd, reference, _digest(content))
+    clock = [0.0]
+    monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    chunks = iter_ready_scratch(parent_fd, ready, expires_at=5.0)
+
+    assert next(chunks) == content
+    clock[0] = 10.0
+    with pytest.raises(ScratchTransferError) as raised:
+        next(chunks)
+    assert raised.value.kind is ScratchFailureKind.DEADLINE
+    assert raised.value.cleanup_debt == scratch_module._cleanup_debt(reference)
+    cleanup_scratch(parent_fd, ready)
     os.close(parent_fd)
 
 
@@ -308,7 +512,7 @@ def test_observed_special_object_is_refused_and_never_cleaned(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     parent_fd = _open_parent(tmp_path)
-    reference = begin_scratch(parent_fd, 1, _digest(b"x"))
+    reference = begin_scratch(parent_fd, 1)
     directory = _scratch_directory(tmp_path)
     data_path = directory / scratch_module._DATA_NAME
     saved = directory / "saved"
@@ -347,7 +551,7 @@ def test_observed_special_object_is_refused_and_never_cleaned(
 
 def test_hard_link_and_mode_changes_are_refused(tmp_path: Path) -> None:
     parent_fd = _open_parent(tmp_path)
-    hardlinked = begin_scratch(parent_fd, 1, _digest(b"x"))
+    hardlinked = begin_scratch(parent_fd, 1)
     directory = _scratch_directory(tmp_path)
     data_path = directory / scratch_module._DATA_NAME
     other = directory / "other"
@@ -360,7 +564,7 @@ def test_hard_link_and_mode_changes_are_refused(tmp_path: Path) -> None:
     other.unlink()
     cleanup_scratch(parent_fd, hardlinked)
 
-    changed_mode = begin_scratch(parent_fd, 1, _digest(b"x"))
+    changed_mode = begin_scratch(parent_fd, 1)
     directory = _scratch_directory(tmp_path)
     data_path = directory / scratch_module._DATA_NAME
     data_path.chmod(0o640)
@@ -377,7 +581,7 @@ def test_hard_link_and_mode_changes_are_refused(tmp_path: Path) -> None:
 
 def test_regular_object_substitution_is_refused_without_deleting_impostor(tmp_path: Path) -> None:
     parent_fd = _open_parent(tmp_path)
-    reference = begin_scratch(parent_fd, 1, _digest(b"x"))
+    reference = begin_scratch(parent_fd, 1)
     directory = _scratch_directory(tmp_path)
     data_path = directory / scratch_module._DATA_NAME
     saved = directory / "saved"
@@ -397,7 +601,7 @@ def test_regular_object_substitution_is_refused_without_deleting_impostor(tmp_pa
 
 def test_directory_substitution_is_refused_without_deleting_impostor(tmp_path: Path) -> None:
     parent_fd = _open_parent(tmp_path)
-    reference = begin_scratch(parent_fd, 1, _digest(b"x"))
+    reference = begin_scratch(parent_fd, 1)
     directory = _scratch_directory(tmp_path)
     saved = tmp_path / "saved"
     directory.rename(saved)
@@ -419,7 +623,7 @@ def test_directory_substitution_is_refused_without_deleting_impostor(tmp_path: P
 
 def test_cleanup_refuses_unknown_entries_and_is_idempotent(tmp_path: Path) -> None:
     parent_fd = _open_parent(tmp_path)
-    reference = begin_scratch(parent_fd, 0, _digest(b""))
+    reference = begin_scratch(parent_fd, 0)
     directory = _scratch_directory(tmp_path)
     unknown = directory / "unknown"
     unknown.write_bytes(b"leave me")
@@ -437,9 +641,9 @@ def test_cleanup_refuses_unknown_entries_and_is_idempotent(tmp_path: Path) -> No
 def test_ready_read_refuses_changed_object_and_out_of_range_request(tmp_path: Path) -> None:
     content = b"verified"
     parent_fd = _open_parent(tmp_path)
-    reference = begin_scratch(parent_fd, len(content), _digest(content))
+    reference = begin_scratch(parent_fd, len(content))
     write_scratch_chunk(parent_fd, reference, 0, content, _digest(content))
-    ready = verify_scratch(parent_fd, reference)
+    ready = verify_scratch(parent_fd, reference, _digest(content))
     range_error = _failure(read_scratch_range, parent_fd, ready, len(content), 1)
     assert range_error.kind is ScratchFailureKind.LIMIT
     data_path = _scratch_directory(tmp_path) / scratch_module._DATA_NAME
@@ -466,7 +670,7 @@ def test_begin_identity_failure_retains_unknown_object_debt(
         return observed
 
     monkeypatch.setattr(os, "fstat", fail_regular_identity)
-    error = _failure(begin_scratch, parent_fd, 0, _digest(b""))
+    error = _failure(begin_scratch, parent_fd, 0)
     debt = error.cleanup_debt
     assert error.kind is ScratchFailureKind.IO
     assert debt is not None and debt._directory is not None and debt._object is None
@@ -497,7 +701,7 @@ def test_begin_interrupt_after_object_acquisition_closes_fd_and_retains_unknown_
 
     monkeypatch.setattr(os, "fstat", interrupt_regular_identity)
     with pytest.raises(KeyboardInterrupt) as raised:
-        begin_scratch(parent_fd, 0, _digest(b""))
+        begin_scratch(parent_fd, 0)
     cause = _scratch_cause(raised.value)
     debt = cause.cleanup_debt
     assert cause.kind is ScratchFailureKind.IO
@@ -540,7 +744,7 @@ def test_begin_fstat_failure_then_close_interrupt_retains_unknown_object_debt(
     monkeypatch.setattr(os, "fstat", fail_regular_identity)
     monkeypatch.setattr(scratch_module, "_close_fd", close_then_interrupt)
     with pytest.raises(KeyboardInterrupt) as raised:
-        begin_scratch(parent_fd, 0, _digest(b""))
+        begin_scratch(parent_fd, 0)
     cause = _scratch_cause(raised.value)
     debt = cause.cleanup_debt
     assert cause.kind is ScratchFailureKind.IO
@@ -584,7 +788,7 @@ def test_begin_preserves_identified_debt_and_original_control_when_cleanup_inter
     monkeypatch.setattr(scratch_module, "_set_mode", interrupt_after_identity)
     monkeypatch.setattr(scratch_module, "_cleanup_once", interrupt_cleanup)
     with pytest.raises(SystemExit, match="23") as raised:
-        begin_scratch(parent_fd, 0, _digest(b""))
+        begin_scratch(parent_fd, 0)
     cause = _scratch_cause(raised.value)
     debt = cause.cleanup_debt
     assert cause.kind is ScratchFailureKind.IO
@@ -623,7 +827,7 @@ def test_begin_close_interrupt_retains_complete_debt_and_closes_both_descriptors
     monkeypatch.setattr(scratch_module, "_close_fd", close_then_interrupt)
     monkeypatch.setattr(os, "unlink", deny_data_unlink)
     with pytest.raises(KeyboardInterrupt) as raised:
-        begin_scratch(parent_fd, 0, _digest(b""))
+        begin_scratch(parent_fd, 0)
     cause = _scratch_cause(raised.value)
     debt = cause.cleanup_debt
     assert debt is not None and debt._directory is not None and debt._object is not None
@@ -653,7 +857,7 @@ def test_begin_cleanup_interrupt_preserves_complete_debt_as_closed_cause(
     monkeypatch.setattr(scratch_module, "_list_directory", fail_begin_listing)
     monkeypatch.setattr(scratch_module, "_cleanup_once", lambda *_args: (_ for _ in ()).throw(KeyboardInterrupt))
     with pytest.raises(KeyboardInterrupt) as raised:
-        begin_scratch(parent_fd, 0, _digest(b""))
+        begin_scratch(parent_fd, 0)
     cause = _scratch_cause(raised.value)
     debt = cause.cleanup_debt
     assert cause.kind is ScratchFailureKind.CONFLICT
@@ -689,7 +893,7 @@ def test_interrupted_candidate_collision_is_never_deleted(
     monkeypatch.setattr(secrets, "token_hex", lambda _length: "collision")
     monkeypatch.setattr(os, "mkdir", interrupt_candidate_mkdir)
     with pytest.raises(KeyboardInterrupt) as raised:
-        begin_scratch(parent_fd, 0, _digest(b""))
+        begin_scratch(parent_fd, 0)
     debt = _scratch_cause(raised.value).cleanup_debt
     assert debt is not None and debt._directory is None and debt._object is None
     assert sentinel.read_bytes() == b"not owned"
@@ -706,7 +910,7 @@ def test_cleanup_stat_error_is_not_mistaken_for_absence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     parent_fd = _open_parent(tmp_path)
-    reference = begin_scratch(parent_fd, 0, _digest(b""))
+    reference = begin_scratch(parent_fd, 0)
     original_stat = os.stat
 
     def fail_scratch_stat(path: object, *args: object, **kwargs: object) -> os.stat_result:
@@ -728,7 +932,7 @@ def test_cleanup_unlink_failure_retains_exact_debt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     parent_fd = _open_parent(tmp_path)
-    reference = begin_scratch(parent_fd, 0, _digest(b""))
+    reference = begin_scratch(parent_fd, 0)
     original_unlink = os.unlink
 
     def fail_data_unlink(path: object, *args: object, **kwargs: object) -> None:
@@ -749,7 +953,7 @@ def test_cleanup_unlink_failure_retains_exact_debt(
 def test_errors_and_references_hide_names_bytes_and_digests(tmp_path: Path) -> None:
     secret = b"private-transfer-bytes"
     parent_fd = _open_parent(tmp_path)
-    reference = begin_scratch(parent_fd, len(secret), _digest(secret))
+    reference = begin_scratch(parent_fd, len(secret))
     error = _failure(write_scratch_chunk, parent_fd, reference, 1, secret[:1], _digest(secret[:1]))
     assert error.args == (ScratchFailureKind.CONFLICT.value, ScratchPhase.WRITE.value, True)
     assert reference._name not in repr(reference)

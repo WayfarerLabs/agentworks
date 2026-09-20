@@ -349,7 +349,7 @@ def _write_content(
     if isinstance(content, ScratchFileSource):
         expected_size, expected_digest = ready_scratch_contract(content.ready)
         try:
-            chunks = iter(iter_ready_scratch(content.parent_fd, content.ready))
+            chunks = iter(iter_ready_scratch(content.parent_fd, content.ready, expires_at=expires_at))
             while True:
                 _check_deadline(expires_at, PublicationPhase.CONTENT)
                 try:
@@ -362,6 +362,8 @@ def _write_content(
         except ScratchTransferError as error:
             if error.kind is ScratchFailureKind.UNSUPPORTED:
                 kind = PublicationFailureKind.UNSUPPORTED
+            elif error.kind is ScratchFailureKind.DEADLINE:
+                kind = PublicationFailureKind.DEADLINE
             elif error.kind is ScratchFailureKind.IO:
                 kind = PublicationFailureKind.IO
             else:

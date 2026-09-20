@@ -15,6 +15,7 @@ import hmac
 import os
 import secrets
 import stat
+import time
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
@@ -41,6 +42,7 @@ class ScratchFailureKind(Enum):
     CONFLICT = "conflict"
     LIMIT = "limit"
     INTEGRITY = "integrity"
+    DEADLINE = "deadline"
     IO = "io"
 
 
@@ -73,7 +75,7 @@ class ScratchCleanupDebt:
 
 @dataclass(frozen=True, repr=False)
 class ScratchReference:
-    """Identity and integrity contract for one private scratch object."""
+    """Identity and length contract for one private scratch object."""
 
     _name: str
     _directory: _Identity
@@ -81,7 +83,6 @@ class ScratchReference:
     _uid: int
     _gid: int
     _length: int
-    _digest: bytes
 
 
 @dataclass(frozen=True, repr=False)
@@ -89,6 +90,7 @@ class ReadyScratchReference:
     """A scratch reference whose whole object was verified successfully."""
 
     _reference: ScratchReference
+    _digest: bytes
     _modified_ns: int
     _changed_ns: int
 
@@ -130,9 +132,15 @@ class _OpenedScratch:
         return _close_descriptors(self.object_fd, self.directory_fd)
 
 
-def begin_scratch(parent_fd: int, expected_length: int, expected_digest: bytes) -> ScratchReference:
+def begin_scratch(
+    parent_fd: int,
+    expected_length: int,
+    *,
+    expires_at: float | None = None,
+) -> ScratchReference:
     """Create one private directory and fixed data object beneath ``parent_fd``."""
-    _validate_contract(expected_length, expected_digest)
+    _validate_contract(expected_length)
+    _check_deadline(expires_at, ScratchPhase.BEGIN)
     uid = os.geteuid()
     gid = os.getegid()
     acquisition = _ScratchAcquisition(uid, gid)
@@ -145,7 +153,7 @@ def begin_scratch(parent_fd: int, expected_length: int, expected_digest: bytes) 
             parent = _fstat(parent_fd, ScratchPhase.BEGIN)
             if not stat.S_ISDIR(parent.st_mode):
                 raise ScratchTransferError(ScratchFailureKind.UNSUPPORTED, ScratchPhase.BEGIN)
-            _create_directory(parent_fd, acquisition)
+            _create_directory(parent_fd, acquisition, expires_at)
             directory_fd = acquisition.directory_fd
             assert directory_fd is not None and acquisition.directory is not None
             _create_object(directory_fd, acquisition)
@@ -171,6 +179,7 @@ def begin_scratch(parent_fd: int, expected_length: int, expected_digest: bytes) 
                 raise ScratchTransferError(ScratchFailureKind.CONFLICT, ScratchPhase.BEGIN)
             if _list_directory(directory_fd, ScratchPhase.BEGIN) != {_DATA_NAME}:
                 raise ScratchTransferError(ScratchFailureKind.CONFLICT, ScratchPhase.BEGIN)
+            _check_deadline(expires_at, ScratchPhase.BEGIN)
             assert acquisition.name is not None
             result = ScratchReference(
                 acquisition.name,
@@ -179,7 +188,6 @@ def begin_scratch(parent_fd: int, expected_length: int, expected_digest: bytes) 
                 acquisition.uid,
                 acquisition.gid,
                 expected_length,
-                bytes(expected_digest),
             )
         except ScratchTransferError as error:
             failure = error
@@ -189,8 +197,13 @@ def begin_scratch(parent_fd: int, expected_length: int, expected_digest: bytes) 
         close_control = _close_descriptors(acquisition.object_fd, acquisition.directory_fd)
 
     if failure is None and control is None and close_control is None:
-        assert result is not None
-        return result
+        try:
+            _check_deadline(expires_at, ScratchPhase.BEGIN)
+        except ScratchTransferError as error:
+            failure = error
+        else:
+            assert result is not None
+            return result
 
     prior = failure
     if control is None and close_control is not None:
@@ -219,11 +232,14 @@ def write_scratch_chunk(
     offset: int,
     data: bytes,
     chunk_digest: bytes,
+    *,
+    expires_at: float | None = None,
 ) -> None:
     """Write one contiguous bounded chunk, or accept an exact duplicate."""
     failure = _validate_chunk(reference, offset, data, chunk_digest)
     if failure is not None:
         _raise_with_debt(failure, reference)
+    _check_reference_deadline(reference, expires_at, ScratchPhase.WRITE)
     opened: _OpenedScratch | None = None
     control: BaseException | None = None
     close_control: BaseException | None = None
@@ -234,7 +250,13 @@ def write_scratch_chunk(
         if size > reference._length or offset > size or (offset < size and end > size):
             raise ScratchTransferError(ScratchFailureKind.CONFLICT, ScratchPhase.WRITE)
         if offset < size:
-            existing = _pread_exact(opened.object_fd, offset, len(data), ScratchPhase.WRITE)
+            existing = _pread_exact(
+                opened.object_fd,
+                offset,
+                len(data),
+                ScratchPhase.WRITE,
+                expires_at,
+            )
             if not hmac.compare_digest(existing, data):
                 raise ScratchTransferError(ScratchFailureKind.CONFLICT, ScratchPhase.WRITE)
             observed = _fstat(opened.object_fd, ScratchPhase.WRITE)
@@ -242,7 +264,7 @@ def write_scratch_chunk(
             if observed.st_size != size:
                 raise ScratchTransferError(ScratchFailureKind.CONFLICT, ScratchPhase.WRITE)
         else:
-            _pwrite_all(opened.object_fd, offset, data)
+            _pwrite_all(opened.object_fd, offset, data, expires_at)
             observed = _fstat(opened.object_fd, ScratchPhase.WRITE)
             _require_reference_object(observed, reference, ScratchPhase.WRITE)
             if observed.st_size != end:
@@ -254,11 +276,19 @@ def write_scratch_chunk(
     finally:
         if opened is not None:
             close_control = opened.close()
-    _finish_operation(reference, ScratchPhase.WRITE, failure, control, close_control)
+    _finish_operation(reference, ScratchPhase.WRITE, failure, control, close_control, expires_at)
 
 
-def verify_scratch(parent_fd: int, reference: ScratchReference) -> ReadyScratchReference:
+def verify_scratch(
+    parent_fd: int,
+    reference: ScratchReference,
+    expected_digest: bytes,
+    *,
+    expires_at: float | None = None,
+) -> ReadyScratchReference:
     """Verify the complete declared length and SHA-256 digest."""
+    _validate_digest(expected_digest)
+    _check_reference_deadline(reference, expires_at, ScratchPhase.VERIFY)
     opened: _OpenedScratch | None = None
     failure: ScratchTransferError | None = None
     control: BaseException | None = None
@@ -272,17 +302,24 @@ def verify_scratch(parent_fd: int, reference: ScratchReference) -> ReadyScratchR
         digest = hashlib.sha256()
         offset = 0
         while offset < reference._length:
+            _check_deadline(expires_at, ScratchPhase.VERIFY)
             amount = min(_HASH_READ_BYTES, reference._length - offset)
-            block = _pread_exact(opened.object_fd, offset, amount, ScratchPhase.VERIFY)
+            block = _pread_exact(
+                opened.object_fd,
+                offset,
+                amount,
+                ScratchPhase.VERIFY,
+                expires_at,
+            )
             digest.update(block)
             offset += len(block)
         after = _fstat(opened.object_fd, ScratchPhase.VERIFY)
         _require_reference_object(after, reference, ScratchPhase.VERIFY)
         if not _same_verified_stat(before, after):
             raise ScratchTransferError(ScratchFailureKind.CONFLICT, ScratchPhase.VERIFY)
-        if not hmac.compare_digest(digest.digest(), reference._digest):
+        if not hmac.compare_digest(digest.digest(), expected_digest):
             raise ScratchTransferError(ScratchFailureKind.INTEGRITY, ScratchPhase.VERIFY)
-        ready = ReadyScratchReference(reference, after.st_mtime_ns, after.st_ctime_ns)
+        ready = ReadyScratchReference(reference, bytes(expected_digest), after.st_mtime_ns, after.st_ctime_ns)
     except ScratchTransferError as error:
         failure = error
     except BaseException as error:
@@ -290,15 +327,23 @@ def verify_scratch(parent_fd: int, reference: ScratchReference) -> ReadyScratchR
     finally:
         if opened is not None:
             close_control = opened.close()
-    _finish_operation(reference, ScratchPhase.VERIFY, failure, control, close_control)
+    _finish_operation(reference, ScratchPhase.VERIFY, failure, control, close_control, expires_at)
     assert ready is not None
     return ready
 
 
-def read_scratch_range(parent_fd: int, ready: ReadyScratchReference, offset: int, length: int) -> bytes:
+def read_scratch_range(
+    parent_fd: int,
+    ready: ReadyScratchReference,
+    offset: int,
+    length: int,
+    *,
+    expires_at: float | None = None,
+) -> bytes:
     """Read one exact bounded range from a previously verified object."""
     reference = ready._reference
     _validate_range(reference, offset, length)
+    _check_reference_deadline(reference, expires_at, ScratchPhase.READ)
     opened: _OpenedScratch | None = None
     failure: ScratchTransferError | None = None
     control: BaseException | None = None
@@ -307,7 +352,7 @@ def read_scratch_range(parent_fd: int, ready: ReadyScratchReference, offset: int
     try:
         opened = _open_scratch(parent_fd, reference, writable=False, phase=ScratchPhase.READ)
         _require_ready_stat(opened.object_stat, ready)
-        result = _pread_exact(opened.object_fd, offset, length, ScratchPhase.READ)
+        result = _pread_exact(opened.object_fd, offset, length, ScratchPhase.READ, expires_at)
         _require_ready_stat(_fstat(opened.object_fd, ScratchPhase.READ), ready)
     except ScratchTransferError as error:
         failure = error
@@ -316,7 +361,7 @@ def read_scratch_range(parent_fd: int, ready: ReadyScratchReference, offset: int
     finally:
         if opened is not None:
             close_control = opened.close()
-    _finish_operation(reference, ScratchPhase.READ, failure, control, close_control)
+    _finish_operation(reference, ScratchPhase.READ, failure, control, close_control, expires_at)
     assert result is not None
     return result
 
@@ -326,20 +371,32 @@ def ready_scratch_contract(ready: ReadyScratchReference) -> tuple[int, bytes]:
     if not isinstance(ready, ReadyScratchReference):
         raise ValueError("Ready scratch reference has an invalid type")
     reference = ready._reference
-    return reference._length, bytes(reference._digest)
+    return reference._length, bytes(ready._digest)
 
 
-def iter_ready_scratch(parent_fd: int, ready: ReadyScratchReference) -> Iterator[bytes]:
+def iter_ready_scratch(
+    parent_fd: int,
+    ready: ReadyScratchReference,
+    *,
+    expires_at: float | None = None,
+) -> Iterator[bytes]:
     """Yield verified scratch content in the transfer substrate's bounded ranges."""
     length, _ = ready_scratch_contract(ready)
     if length == 0:
-        read_scratch_range(parent_fd, ready, 0, 0)
+        read_scratch_range(parent_fd, ready, 0, 0, expires_at=expires_at)
         return
     offset = 0
     while offset < length:
-        block = read_scratch_range(parent_fd, ready, offset, min(_MAX_CHUNK_BYTES, length - offset))
+        block = read_scratch_range(
+            parent_fd,
+            ready,
+            offset,
+            min(_MAX_CHUNK_BYTES, length - offset),
+            expires_at=expires_at,
+        )
         yield block
         offset += len(block)
+    _check_reference_deadline(ready._reference, expires_at, ScratchPhase.READ)
 
 
 def cleanup_scratch(
@@ -354,13 +411,18 @@ def cleanup_scratch(
     raise ScratchTransferError(failure, ScratchPhase.CLEANUP, cleanup_debt=debt) from None
 
 
-def _create_directory(parent_fd: int, acquisition: _ScratchAcquisition) -> None:
+def _create_directory(
+    parent_fd: int,
+    acquisition: _ScratchAcquisition,
+    expires_at: float | None,
+) -> None:
     """Populate the caller-owned record after acquiring the directory.
 
     Pure Python cannot cover an asynchronous exception between a successful
     kernel call and assignment of its result to the acquisition record.
     """
     for _ in range(_NAME_ATTEMPTS):
+        _check_deadline(expires_at, ScratchPhase.BEGIN)
         candidate = _NAME_PREFIX + secrets.token_hex(16)
         acquisition.name = candidate
         error_number: int | None = None
@@ -379,6 +441,7 @@ def _create_directory(parent_fd: int, acquisition: _ScratchAcquisition) -> None:
         acquisition.name = None
         if error_number != errno.EEXIST:
             raise ScratchTransferError(ScratchFailureKind.IO, ScratchPhase.BEGIN)
+        _check_deadline(expires_at, ScratchPhase.BEGIN)
     raise ScratchTransferError(ScratchFailureKind.IO, ScratchPhase.BEGIN)
 
 
@@ -602,9 +665,12 @@ def _same_verified_stat(before: os.stat_result, after: os.stat_result) -> bool:
     )
 
 
-def _validate_contract(expected_length: int, expected_digest: bytes) -> None:
+def _validate_contract(expected_length: int) -> None:
     if expected_length < 0 or expected_length > _MAX_OFFSET:
         raise ValueError("Expected scratch length is outside the supported range")
+
+
+def _validate_digest(expected_digest: bytes) -> None:
     if len(expected_digest) != hashlib.sha256().digest_size:
         raise ValueError("Expected scratch digest must be a SHA-256 digest")
 
@@ -641,10 +707,11 @@ def _validate_range(reference: ScratchReference, offset: int, length: int) -> No
         _raise_with_debt(failure, reference)
 
 
-def _pwrite_all(descriptor: int, offset: int, data: bytes) -> None:
+def _pwrite_all(descriptor: int, offset: int, data: bytes, expires_at: float | None) -> None:
     position = 0
     failure = False
     while position < len(data):
+        _check_deadline(expires_at, ScratchPhase.WRITE)
         try:
             written = os.pwrite(descriptor, data[position:], offset + position)
         except OSError:
@@ -656,12 +723,20 @@ def _pwrite_all(descriptor: int, offset: int, data: bytes) -> None:
         position += written
     if failure:
         raise ScratchTransferError(ScratchFailureKind.IO, ScratchPhase.WRITE)
+    _check_deadline(expires_at, ScratchPhase.WRITE)
 
 
-def _pread_exact(descriptor: int, offset: int, length: int, phase: ScratchPhase) -> bytes:
+def _pread_exact(
+    descriptor: int,
+    offset: int,
+    length: int,
+    phase: ScratchPhase,
+    expires_at: float | None,
+) -> bytes:
     result = bytearray()
     failure: ScratchFailureKind | None = None
     while len(result) < length:
+        _check_deadline(expires_at, phase)
         try:
             block = os.pread(descriptor, length - len(result), offset + len(result))
         except OSError:
@@ -673,7 +748,24 @@ def _pread_exact(descriptor: int, offset: int, length: int, phase: ScratchPhase)
         result.extend(block)
     if failure is not None:
         raise ScratchTransferError(failure, phase)
+    _check_deadline(expires_at, phase)
     return bytes(result)
+
+
+def _check_deadline(expires_at: float | None, phase: ScratchPhase) -> None:
+    if expires_at is not None and time.monotonic() >= expires_at:
+        raise ScratchTransferError(ScratchFailureKind.DEADLINE, phase)
+
+
+def _check_reference_deadline(
+    reference: ScratchReference,
+    expires_at: float | None,
+    phase: ScratchPhase,
+) -> None:
+    try:
+        _check_deadline(expires_at, phase)
+    except ScratchTransferError as error:
+        _raise_with_debt(error, reference)
 
 
 def _set_mode(descriptor: int, mode: int, phase: ScratchPhase) -> None:
@@ -789,12 +881,18 @@ def _finish_operation(
     failure: ScratchTransferError | None,
     control: BaseException | None,
     close_control: BaseException | None,
+    expires_at: float | None,
 ) -> None:
     if control is None:
         control = close_control
     if control is not None:
         prior = failure or ScratchTransferError(ScratchFailureKind.IO, phase)
         _raise_control(control, prior=prior, cleanup_debt=_cleanup_debt(reference))
+    if failure is None:
+        try:
+            _check_deadline(expires_at, phase)
+        except ScratchTransferError as error:
+            failure = error
     if failure is not None:
         _raise_with_debt(failure, reference)
 

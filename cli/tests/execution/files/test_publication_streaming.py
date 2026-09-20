@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import os
 import sys
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -46,14 +48,15 @@ def _scratch_directory(path: Path) -> Path:
 
 
 def _ready_scratch(parent_fd: int, content: bytes) -> ReadyScratchReference:
-    digest = hashlib.sha256(content).digest()
-    reference = begin_scratch(parent_fd, len(content), digest)
+    reference = begin_scratch(parent_fd, len(content))
+    digest = hashlib.sha256()
     offset = 0
     while offset < len(content):
         chunk = content[offset : offset + scratch_module._MAX_CHUNK_BYTES]
         write_scratch_chunk(parent_fd, reference, offset, chunk, hashlib.sha256(chunk).digest())
+        digest.update(chunk)
         offset += len(chunk)
-    return verify_scratch(parent_fd, reference)
+    return verify_scratch(parent_fd, reference, digest.digest())
 
 
 def _failure(
@@ -79,13 +82,33 @@ def test_large_verified_scratch_is_copied_in_bounded_ranges(tmp_path: Path, monk
     parent_fd = _open_parent(tmp_path)
     ready = _ready_scratch(parent_fd, content)
     original_write = publication_module._write
+    original_read = scratch_module.read_scratch_range
     write_sizes: list[int] = []
+    read_sizes: list[int] = []
 
     def recording_write(descriptor: int, block: memoryview) -> int:
         write_sizes.append(len(block))
         return original_write(descriptor, block)
 
+    def recording_read(
+        scratch_parent_fd: int,
+        scratch_ready: ReadyScratchReference,
+        offset: int,
+        length: int,
+        *,
+        expires_at: float | None = None,
+    ) -> bytes:
+        read_sizes.append(length)
+        return original_read(
+            scratch_parent_fd,
+            scratch_ready,
+            offset,
+            length,
+            expires_at=expires_at,
+        )
+
     monkeypatch.setattr(publication_module, "_write", recording_write)
+    monkeypatch.setattr(scratch_module, "read_scratch_range", recording_read)
     try:
         revision = publish_file(
             parent_fd,
@@ -96,6 +119,8 @@ def test_large_verified_scratch_is_copied_in_bounded_ranges(tmp_path: Path, monk
         )
         assert (tmp_path / "target").read_bytes() == content
         assert revision.digest == hashlib.sha256(content).digest()
+        assert read_sizes and max(read_sizes) <= scratch_module._MAX_CHUNK_BYTES
+        assert sum(read_sizes) == len(content)
         assert write_sizes and max(write_sizes) <= scratch_module._MAX_CHUNK_BYTES
         cleanup_scratch(parent_fd, ready)
     finally:
@@ -116,7 +141,8 @@ def test_scratch_short_write_loop_obeys_deadline(tmp_path: Path, monkeypatch: py
         return original_write(descriptor, block[:1])
 
     monkeypatch.setattr(publication_module, "_write", short_write)
-    monkeypatch.setattr("agentworks.execution._file_publication.time.monotonic", lambda: next(moments))
+    monkeypatch.setattr(publication_module, "time", SimpleNamespace(monotonic=lambda: next(moments)))
+    monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: 0.0))
     try:
         error = _failure(parent_fd, ScratchFileSource(parent_fd, ready), expires_at=5.0)
         assert error.kind is PublicationFailureKind.DEADLINE
@@ -158,6 +184,26 @@ def test_changed_verified_scratch_refuses_without_publication(tmp_path: Path) ->
         assert error.kind is PublicationFailureKind.CONFLICT
         assert error.phase is PublicationPhase.CONTENT
         assert not (tmp_path / "target").exists()
+        cleanup_scratch(parent_fd, ready)
+    finally:
+        os.close(parent_fd)
+
+
+def test_scratch_iteration_deadline_remains_a_publication_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = b"scratch deadline"
+    parent_fd = _open_parent(tmp_path)
+    ready = _ready_scratch(parent_fd, content)
+    expires_at = time.monotonic() + 30.0
+    monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: expires_at))
+    try:
+        error = _failure(parent_fd, ScratchFileSource(parent_fd, ready), expires_at=expires_at)
+        assert error.kind is PublicationFailureKind.DEADLINE
+        assert error.phase is PublicationPhase.CONTENT
+        assert not (tmp_path / "target").exists()
+        assert not list(tmp_path.glob(f"{publication_module._STAGE_PREFIX}*"))
         cleanup_scratch(parent_fd, ready)
     finally:
         os.close(parent_fd)

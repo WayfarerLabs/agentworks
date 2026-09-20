@@ -26,21 +26,28 @@ _MODULE_NAMES = (
 )
 _DISPATCHER = """
 import hashlib, os, stat, sys
-from _agw_file._file_publication import Create, CreateMetadata, Match, publish_file
+from _agw_file._file_publication import Create, CreateMetadata, Match, ScratchFileSource, publish_file
 from _agw_file._file_snapshot import read_revision
+from _agw_file._scratch import begin_scratch, cleanup_scratch, verify_scratch, write_scratch_chunk
 
 parent_fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY)
 metadata = CreateMetadata(os.getuid(), os.getgid(), 0o640)
 try:
     first = publish_file(parent_fd, "target", b"first", condition=Create(), create_metadata=metadata)
     assert read_revision(parent_fd, "target", include_digest=True) == first
+    content = b"second"
+    reference = begin_scratch(parent_fd, len(content))
+    write_scratch_chunk(parent_fd, reference, 0, content[:3], hashlib.sha256(content[:3]).digest())
+    write_scratch_chunk(parent_fd, reference, 3, content[3:], hashlib.sha256(content[3:]).digest())
+    ready = verify_scratch(parent_fd, reference, hashlib.sha256(content).digest())
     second = publish_file(
         parent_fd,
         "target",
-        b"second",
+        ScratchFileSource(parent_fd, ready),
         condition=Match(first),
         create_metadata=metadata,
     )
+    cleanup_scratch(parent_fd, ready)
     assert read_revision(parent_fd, "target", include_digest=True) == second
     assert first.stat.inode != second.stat.inode
     assert second.digest == hashlib.sha256(b"second").digest()
