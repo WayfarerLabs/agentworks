@@ -148,6 +148,12 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       local Python 3.11 reads; the focused file, inline, terminal and import suite passes 404 cases.
       Native acceptance, stat-only operations, mutation, locking and FileAccess remain separate
       gates.
+- [x] Bind private buffered command/script and file-read preparation to one explicit identity plan.
+      The shared launcher selects direct delivery, non-interactive root sudo or fixed non-root
+      demotion; the guest checks Linux real/effective/saved IDs and normalized groups before
+      workload access. At `c3cebea5`, all three private review lanes are clean, including portable
+      identity stubs and mutation-proven payload assertions. Account resolution, actual sudo/root
+      transitions, native acceptance and production RunContext remain separate gates.
 - [ ] Accept the preparation/result and file-operation LLDs after private review and disposition of
       their helper/runtime, launch-evidence, cross-identity locking, and platform prerequisites.
 - [ ] Jointly accept and prove the privately implemented carrier sink extension with the SSH owner
@@ -373,6 +379,19 @@ modules were not preloaded. The helper import succeeds; the test's final asserti
 test-only correction at `ed19ee21` explicitly marks those modules unavailable, like the existing
 terminal test. All three private review lanes are clean; negative import probes still fail, and the
 four focused import tests pass. Runtime code is unchanged.
+
+All hosted checks subsequently pass at `4f60e9c4` in
+[run 35503894965](https://github.com/WayfarerLabs/agentworks/actions/runs/35503894965), including
+Windows Python 3.13 and Linux Python 3.12/3.13/3.14.
+
+At `c3cebea5`, explicit private helper identity plans pass all three review lanes after test-only
+corrections. The full final non-integration suite passes 11,031 tests with 12 skips; Ruff,
+formatting and CI-scoped mypy (936 sources) pass. File lint, typer isolation, rulesync and
+locked-SDD checks pass. Website validation at the runtime-identical `400a634a` passes 160 Python and
+103 Node tests plus both deterministic build comparisons; temporary build outputs were removed. The
+shared carrier interface remains unchanged. Actual privilege transitions, target account resolution,
+native acceptance, full files/lifecycle and additive RunContext remain open. No live infrastructure
+was touched and no public feedback/fix round is consumed.
 
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
