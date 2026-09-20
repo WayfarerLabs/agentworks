@@ -180,15 +180,16 @@ execution identity, select elevation or grant permission to apply the resulting 
 
 The private `_inline` candidate composes one carrier attempt with a fixed, standard-library-only
 Python helper. Fixed inline and terminal helpers share `_helper_bundle.py`, which compresses their
-packaged modules with standard-library zlib and ASCII-armors them to reduce carrier request size.
+packaged modules with standard-library `bz2` and ASCII-armors them to reduce carrier request size.
 Only core-selected packaged code uses that loader; it does not select modules from request data or
-install guest files. The destination Python must provide zlib. Caller arguments, script source,
+install guest files. The destination Python must provide `bz2`. Caller arguments, script source,
 environment, working directory and finite stdin travel in the bounded stdin manifest, not helper
 argv. On Linux, scripts use an inherited memory file separately from application stdin. The caller
 must bind the expected destination identity. The host validates bounded helper evidence and keeps
 carrier status separate; it does not infer application success or an eager start acknowledgment.
 This candidate is not wired to production RunContext and does not yet supply staging, terminal I/O
-or managed lifetime.
+or managed lifetime. It does not yet check interpreter/module prerequisites before the bundled
+loader runs; a Python version alone does not establish that the optional `bz2` module is available.
 
 ## Private inline file reads
 
@@ -204,7 +205,7 @@ shared bounded `AGWF1` record framing; the read schema remains concrete. A file-
 validates the complete nonce-bound response, length, digest and metadata before releasing bytes.
 Noise, reflection, truncation or invalid records cannot become a successful read, and carrier
 completion is reported separately. Helper code uses the fixed module packager; it creates no guest
-files, spool or lock. The destination needs compatible Python 3.11 or newer with zlib and the
+files, spool or lock. The destination needs compatible Python 3.11 or newer with `bz2` and the
 protected lock namespace already available. Missing or unsafe lock state refuses even if the
 requested file is absent.
 

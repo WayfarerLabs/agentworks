@@ -899,6 +899,35 @@ persistent executable or deployment handshake. Core alone selects the bundle. Fi
 must cover PVE 8/9, direct and forwarded node routes, requested identities, and supported SSH
 workstations. No fallback stages executable code when a request is too large.
 
+### Snapshot helper delivery sizing
+
+A local investigation at `64f67f2f` measured the eleven required snapshot modules plus a
+conservative surrogate using the existing stage protocol and guest. It used the real SSH argument
+builder, Windows command-line serialization, a demotion identity and a 288-byte request. Zlib's
+default compression produces a 37,291-character Windows command, above the 32,767-character limit.
+Its highest level still produces 36,831 characters. Standard-library `bz2` reduces that same command
+to 29,293 characters and the complete QGA-shaped JSON body to 28,692 bytes. Lzma also fits this
+surrogate but leaves only 1,236 characters of Windows headroom, versus 3,474 with `bz2`.
+
+The selected candidate replaces the single fixed bundler codec with `bz2`; it adds no codec option,
+fallback, source minification or executable staging. With a temporary implementation, 488 existing
+helper tests passed. A separate snapshot-union probe copied 49,183 bytes from an independent source
+root, verified bounded range retrieval and performed exact cleanup under Python 3.12.13 and Bookworm
+Python 3.11.2. Fifteen warm isolated full-base launches per runtime measured approximately 31 ms
+median with `bz2` versus 32 ms with zlib. This found no material startup regression locally; it is
+not a performance guarantee or a measurement of the future completed snapshot dispatcher.
+
+Python documents the [one-shot codec](https://docs.python.org/3.11/library/bz2.html), but optional
+extension availability is a separate prerequisite. Bookworm's
+[standard-library package](https://packages.debian.org/bookworm/libpython3.11-stdlib) depends on
+`libbz2-1.0`; the local distribution interpreter imports the extension in isolated mode. An
+arbitrary preinstalled macOS interpreter may omit it. Selected-runtime readiness must check the
+module and produce the approved clean prerequisite failure before dispatch, not rely on a bundled
+loader's unframed import traceback. That probe and native Windows/macOS/Proxmox proof remain
+required. Operation-family splitting can shrink range and cleanup bundles, but cannot remove the
+source-copy bundle's dependencies. Final requests and supported connection prefixes still need
+measured bounds.
+
 ## Held-object metadata and search-only traversal
 
 The Linux [open documentation](https://man7.org/linux/man-pages/man2/open.2.html) distinguishes

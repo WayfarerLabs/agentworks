@@ -201,6 +201,14 @@ caller-supplied module name, source, executable or fallback. Bundling compresses
 together once before ASCII armoring; this changes representation, not the request boundary. Every
 invocation verifies its bound identity before accessing workload paths.
 
+The next bundle representation uses one fixed standard-library `bz2` codec. Local measurements of
+the snapshot dependencies plus a conservative dispatcher surrogate exceed Windows command-line
+capacity with zlib, but fit with `bz2`; see the
+[sizing investigation](prior-art-research.md#snapshot-helper-delivery-sizing). This selects neither
+a codec option nor executable staging. Bookworm's distribution Python supplies the module; arbitrary
+Python builds may omit it. Selected-runtime readiness must prove that `bz2` imports and report a
+missing prerequisite cleanly before workload dispatch. No implicit macOS installation is allowed.
+
 Data staging and snapshot spools still reuse preparation's exact-offset, length/digest-verified
 scratch mechanics. The shared 24 KiB raw chunk is a candidate pending complete SSH/QGA request
 proof, not a file-layer constant. The private stage exchange uses a smaller 12 KiB raw chunk and a
@@ -333,6 +341,40 @@ original identity-bound debt. Returned cleanup failure debt must match it. These
 prove earlier-request quiescence or implement complete upload/publication; delayed chunk requests
 refuse after exact cleanup removes the receipt.
 
+### Snapshot exchange candidate
+
+Use a separate fixed snapshot family, not stage operations with a caller-selectable storage root.
+Every request carries the version, nonce, core token, execution identity and relative budget.
+`snapshot_begin` additionally carries the approved source root, nonempty relative source path and
+maximum byte count. After identity admission it acquires the fixed transaction lock, validates the
+fixed scratch parent, and copies one held source with `_file_spool.py`. A complete result is either
+initial absence or a ready scratch reference plus the content-bound source revision. The host must
+check that the ready length and digest agree with the source revision and requested bound. Source
+absence does not bypass prerequisite or final deadline checks.
+
+`snapshot_chunk` carries that ready reference and one exact offset/length, initially bounded to 12
+KiB. It uses the fixed scratch parent and existing unlocked range checks, never the original source
+path. The complete typed response binds the requested range, byte count and chunk digest; only then
+may its bounded bytes reach the private download composition. The host also checks whole download
+length and digest. Zero-byte snapshots require no nonempty range. Raw carrier output, truncated
+framing or conflicting ready facts cannot become file bytes or a successful download.
+
+`snapshot_reconcile` needs only the original core token and identity; `snapshot_cleanup` adds the
+known exact cleanup debt. Both operate under the fixed lock and fixed scratch root, independently of
+whether the source still exists or is readable. Reconciliation returns historical cleanup ownership
+only. Missing evidence remains uncertainty, and cleanup does not claim that an earlier unobserved
+creation cannot still arrive. Cleanup checks expiry before mutation and after descriptor closure,
+preserving exact debt. No operation accepts a returned path or allows a stage receipt to be reused
+as a snapshot receipt.
+
+Ready-reference wire fragments belong beside existing scratch reference/debt fragments. Shared
+source-revision fields should have one concrete codec reused by object and snapshot exchanges,
+without changing their external envelopes. Validation belongs at incoming request/result boundaries;
+the typed interior must not gain a second validation framework. Final source size, complete native
+request/output bounds, Windows serialization and cross-identity/native execution remain proof gates.
+
+### Private output delivery
+
 Ordinary buffered capture cannot safely carry this protocol: sensitive input suppresses the
 response, while ordinary `Capture` can flow toward public execution results. Use the implemented
 internal `SinkOutput(collector)` extension, subject to its outstanding joint SSH proof. The
@@ -346,13 +388,13 @@ outcome. Ordinary sensitive-output suppression remains unchanged. This file sche
 private raw-capture mode, decides which typed content may survive.
 
 Closed helper operations are `stage_begin`, `stage_chunk`, `stage_reconcile`, `stage_cleanup`,
-`publish`, `snapshot_begin`, `snapshot_chunk`, `stat`, `list`, `ensure_directory`, `set_metadata`,
-`remove`, and `cleanup`. Staging is created beside the destination with mode 0600 and an
-unpredictable helper-owned name. Chunks use exact offsets and hashes; final size and SHA-256 must
-match before publication. Snapshot chunks come from a private complete spool, not repeated reads of
-a changing source. The host checks the end-to-end size/digest too. No helper operation accepts
-executable names, arbitrary flags, environment, cwd, source text, callbacks, or a destination
-outside its single request.
+`publish`, `snapshot_begin`, `snapshot_chunk`, `snapshot_reconcile`, `snapshot_cleanup`, `stat`,
+`list`, `ensure_directory`, `set_metadata`, `remove`, and `cleanup`. Staging is created beside the
+destination with mode 0600 and an unpredictable helper-owned name. Chunks use exact offsets and
+hashes; final size and SHA-256 must match before publication. Snapshot chunks come from a private
+complete spool, not repeated reads of a changing source. The host checks the end-to-end size/digest
+too. No helper operation accepts executable names, arbitrary flags, environment, cwd, source text,
+callbacks, or a destination outside its single request.
 
 ### No-staging readiness gate
 
