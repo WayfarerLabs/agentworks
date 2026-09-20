@@ -1,9 +1,10 @@
 """Stdlib-only bounded I/O for one owned local process.
 
-Python 3.11 supports nonblocking anonymous pipes on Windows as well as POSIX.
-No thread or borrowed stream survives return. Execution uses the supplied
-deadline; killing and reaping the local process gets at most 0.5 seconds more.
-That allowance never resumes execution.
+Python 3.12 supports nonblocking anonymous pipes on Windows as well as POSIX.
+The core remains Python 3.11-compatible for POSIX guest-helper reuse. No thread
+or borrowed stream survives return. Execution uses the supplied deadline;
+killing and reaping the local process gets at most 0.5 seconds more. That
+allowance never resumes execution.
 
 Cleanup is guarded only after process construction and loop-state initialization.
 An earlier control-flow interruption can leave a child alive, including without
@@ -111,7 +112,7 @@ class ProcessOutput:
 
 @dataclass(frozen=True)
 class StreamResult:
-    data: bytes
+    data: bytes = field(repr=False)
     complete: bool
 
 

@@ -9,6 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from agentworks.execution._process import ProcessResult, StreamResult
+
 CORE_PATH = Path(__file__).parents[2] / "agentworks" / "execution" / "_process.py"
 PYTHON_311 = Path("/usr/bin/python3.11")
 
@@ -25,6 +27,15 @@ def test_process_core_has_only_standard_library_dependencies() -> None:
     )
 
     assert imported <= sys.stdlib_module_names
+
+
+def test_process_result_representation_hides_nested_stream_bytes() -> None:
+    secret = b"process-core-repr-canary"
+    stream = StreamResult(secret, complete=True)
+    result = ProcessResult(True, 0, 0, stream, stream, None)
+
+    assert secret.decode() not in repr(stream)
+    assert secret.decode() not in repr(result)
 
 
 def test_python311_core_reuse_roundtrips_binary_input_and_exit_status() -> None:

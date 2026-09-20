@@ -19,7 +19,7 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 from agentworks.errors import ValidationError
-from agentworks.execution._byte_io import SinkWriteError, try_write_to_sink
+from agentworks.execution._process import SinkWriteError, try_write_to_sink
 from agentworks.execution.carrier import (
     Capture,
     CapturedOutput,
