@@ -255,6 +255,23 @@ remain open. The Lima resource-lifetime candidate at `8bac9560` and shared proce
 or destination helper. These remain draft progress increments, not public feedback/fix rounds or
 readiness for production adoption.
 
+At `c89a349d`, the process pump is extracted into the private standard-library-only `_process`
+module, with carrier policy and report mapping retained in `carriers/_subprocess.py`. Standalone
+execution proves binary input/output and exit handling without importing Agentworks, on the current
+interpreter and distribution Python 3.11. The full suite at `2b22da86` passes 10,578 tests with 12
+skips; the final simplification removes one redundant source-inspection test and passes all 656
+execution cases with five skips, plus Ruff, formatting and strict mypy. Private review removed a
+redundant type check that could silently discard an unexpected failure. These are reuse and local
+process facts, not destination-helper or production-launch acceptance.
+
+Windows CI at `b59bf286` exposed a timing assumption in the live-input early-close test: exit 23
+could first be observed during cleanup, leaving completion legitimately unknown. The correction
+keeps that conservative runtime behavior and adds deterministic coverage for both pre-cleanup exit
+evidence and cleanup-only status. Fresh hosted Windows confirmation remains required. The
+[Darwin ownership investigation](prior-art-research.md#darwin-ownership-feasibility) separately
+identifies a public-mechanism gap for generic MANAGED host jobs. Its suggested narrower supervision
+contract awaits operator disposition; the current requirements remain unchanged.
+
 SSH's implementation at `174187d2` includes transport `a885ef5a` and adopts the reviewed finite
 subprocess pump. Its owner has separately supplied the buffered compatibility guard integrated here.
 It still needs the extended shared I/O implementation and terminal preparation, plus production
