@@ -225,6 +225,19 @@ platform mechanics remain unproved.
 
 ## Confinement and filesystem mechanics
 
+The private [`_file_snapshot.py`](../../../cli/agentworks/execution/_file_snapshot.py) experiment
+implements descriptor-relative bounded regular-file observation with standard-library Python 3.11
+syntax. It rejects observed special objects before leaf open, retains no-follow/nonblocking checks
+after that observation, and binds bytes to a digest and before/after identity/metadata. It borrows
+the trusted root descriptor and assumes the caller owns any cooperating-writer lock; it creates
+neither locks nor files. Local fixtures cover object refusal, observed replacement, byte bounds and
+owned-descriptor cleanup. This is not FileAccess or native platform acceptance.
+
+Its common POSIX walk detects changed `st_dev`, not same-filesystem bind mounts, and a regular-file
+read has no hard elapsed-time bound. It therefore does not accept or replace the complete Linux
+lookup candidate below, resolve helper cancellation, or close the readiness and cross-identity
+locking gates. Required platform confinement still needs its separately proved mechanism.
+
 All target operations occur in the helper process. Host-side normalization and grant checks reject
 untrusted requests early; destination-side traversal and observation enforce the bound operation.
 The guarantee assumes the authorized target identity is cooperating. A malicious process already

@@ -410,6 +410,13 @@ developer-tools installation prompt, no readiness writes, and interrupted observ
 sources and their limits are recorded in
 [runtime prior art](prior-art-research.md#macos-python-prerequisite).
 
+The local [runtime experiment](../../../cli/tests/execution/runtime_prerequisite_probe.py) uses the
+shared bounded subprocess pump and a fixed minimal environment. Its fixture paths exercise actual
+POSIX object/alias checks without touching a Mac or executing a system shim. Local Python 3.11.2
+establishes the positive trampoline path; the unsupported-version response is synthetic, not an
+observation of Python 3.9 or 3.10. No production selector, configuration field or helper wiring is
+enabled by these tests. The shared pump's process-construction interruption gap also remains open.
+
 ## Public result and check behavior
 
 `ExecutionResult` carries `DispatchEvidence`, application state, optional application status,

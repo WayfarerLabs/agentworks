@@ -1,6 +1,6 @@
 # Independent execution mechanics
 
-This package currently implements a bounded, internal Linux execution proof. Production factories
+This package contains internal execution and file-operation building blocks. Production factories
 and RunContext still use the existing stack. These modules are not a permission-scoped public API;
 they must not be handed directly to capability consumers.
 
@@ -53,6 +53,9 @@ input, separate bounded outputs, explicit environment binding and bounded local 
 byte endpoints must return without waiting on external I/O. The pump never closes them or changes
 their descriptor flags. Short sink writes retain a bounded pending suffix; temporary stalls are not
 EOF. Endpoint failures preserve independently observed completion and mark incomplete delivery.
+After child exit, pending sink delivery pauses all fresh pipe collection. Once both pending chunks
+clear, collection resumes against its accumulated budget; the original deadline separately bounds
+sink delivery. A stalled sink cannot exempt fresh reads from the other stream's collection budget.
 
 `SinkOutput` feeds transient raw carrier bytes to trusted collectors and reports `DELIVERED` with no
 retained bytes, including on sensitive calls. These are private preparation endpoints, not plugin
@@ -135,3 +138,17 @@ within caller-selected bounds; the implementation does not change process-global
 The return is proposed publication bytes or `None` for skip-existing, not evidence of a filesystem
 change. Destination observation, file-kind safety, concurrency and atomic publication belong to the
 file service, which is not implemented or wired to production yet.
+
+## Private file observations
+
+`_file_snapshot.py` reads a bounded regular-file snapshot relative to a borrowed trusted root
+descriptor. It refuses observed links, multiply linked files and special objects, reads in bounded
+chunks, and binds the returned bytes to their digest and before/after metadata. The caller retains
+the root descriptor and owns any cooperating-writer lock. The reader creates no files or locks and
+does not expose FileAccess, publication or permission enforcement.
+
+The POSIX component walk detects different-filesystem crossings through `st_dev`; it cannot detect
+same-filesystem bind mounts or establish `openat2` confinement. It refuses observed changes but does
+not contain a malicious same-user process or supply external-writer compare-and-swap. Regular-file
+reads can block in the filesystem, so this primitive provides no hard elapsed-time bound. Complete
+helper delivery, locking, platform guarantees and production composition remain separate work.

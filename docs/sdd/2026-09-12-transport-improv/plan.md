@@ -177,12 +177,28 @@ been requested from its SSH owner.
 
 At `354c7a17`, all three private code-review lanes are clean, and the corrected full local suite
 reports 10,413 passed and 11 skipped. The focused execution/provisioning suite reports 496 passed
-and four skipped. These are workstation tests, not live platform acceptance.
+and four skipped. These are workstation tests, not live platform acceptance. Subsequent
+combined-stream testing exposed a further gap: a pending sink paused accounting while the other pipe
+could keep collecting. The scheduler now suspends all fresh reads during post-exit pending delivery,
+then resumes the unchanged accumulated budget. Its correction is being reviewed with the next
+bounded work unit, rather than inheriting the earlier clean verdict.
+
+The safe ancestor `a885ef5a` is published with only early guest Python provisioning and the local
+PTY experiment, including the provisioning-test correction. Its execution package and RunContext are
+unchanged from `e85e9f5c`. The exact publication pin passes 10,370 local tests with 11 skips and all
+hosted checks. The branch retains that ancestor without changing the implementation tree. New I/O
+types remain local pending the SSH compatibility guard; this is a progress push, not a public review
+handoff.
 
 The [Darwin prerequisite candidate](preparation-lld.md#darwin-inline-prerequisite-candidate) keeps
 runtime selection above carriers and checks interpreter compatibility inside the inline invocation.
 It does not install Python, execute the known Xcode shim, or add a preliminary readiness probe.
-Implementation and native macOS proof remain open.
+Implementation and native macOS proof remain open. Its local executable experiment now reuses the
+shared pump and fixed minimal environment; the separate private file snapshot primitive implements
+bounded read-only observations. Their
+[runtime](preparation-lld.md#darwin-inline-prerequisite-candidate) and
+[filesystem](file-operations-lld.md#confinement-and-filesystem-mechanics) evidence descriptions keep
+production composition, native platform acceptance, full mount handling and locking gates open.
 
 SSH's implementation at `4fcfeaa8` includes transport `e85e9f5c` and adopts the reviewed finite
 subprocess pump. It still needs transport-owned shared I/O types and terminal preparation, plus
