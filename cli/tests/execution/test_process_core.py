@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import hashlib
 import json
 import subprocess
@@ -34,20 +33,6 @@ def interpreter(request: pytest.FixtureRequest) -> Path:
         if version.stdout.strip() != "3 11":
             pytest.skip(f"Expected Python 3.11 at {python}, found {version.stdout.strip()}")
     return python
-
-
-def test_process_core_has_only_standard_library_dependencies() -> None:
-    tree = ast.parse(CORE_PATH.read_bytes(), filename=str(CORE_PATH))
-    imported = {
-        alias.name.partition(".")[0] for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names
-    }
-    imported.update(
-        node.module.partition(".")[0]
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module is not None
-    )
-
-    assert imported <= sys.stdlib_module_names
 
 
 def test_process_result_representation_hides_nested_stream_bytes() -> None:

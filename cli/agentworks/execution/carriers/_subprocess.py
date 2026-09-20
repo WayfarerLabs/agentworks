@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ValidationError
 from agentworks.execution._process import Deadline as _Deadline
 from agentworks.execution._process import (
-    ProcessFailure,
     ProcessInput,
     ProcessOutput,
     StreamResult,
@@ -107,5 +106,5 @@ def run_process(
         exit_status=result.exit_status,
         stdout=_captured_output(result.stdout, retention),
         stderr=_captured_output(result.stderr, retention),
-        failure=Failure(result.failure.value) if isinstance(result.failure, ProcessFailure) else None,
+        failure=Failure(result.failure.value) if result.failure is not None else None,
     )
