@@ -750,7 +750,7 @@ def test_stalled_source_keeps_draining_until_deadline_and_stops_after_return(
 def test_sink_failure_preserves_independently_observed_exit(children: list[subprocess.Popen[bytes]]) -> None:
     class FailAfterExit:
         def try_write(self, data: memoryview) -> int | None:
-            if children[-1].poll() is None:
+            if children[-1].returncode is None:
                 return None
             raise RuntimeError("secret-sink-canary")
 
@@ -879,7 +879,7 @@ def test_post_exit_pending_delivery_stops_fresh_reads_from_other_stream(
             now = time.monotonic()
             if self.started_at is None:
                 self.started_at = now
-            if children[-1].poll() is not None:
+            if children[-1].returncode is not None:
                 self.stderr_after_exit.append(stderr.bytes_written)
             if stall_seconds is None or now - self.started_at < stall_seconds:
                 return None
