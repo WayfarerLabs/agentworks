@@ -771,6 +771,14 @@ establish that newer HTTP-server package on every installation. The file design 
 the 64 KiB whole-request floor, separately from the guest-agent input-field limit. Both checks
 belong before dispatch, and neither is proof that the request succeeds on a native backend.
 
+Output has a separate guest-agent bound. The inspected
+[QEMU 7.2 source](https://github.com/qemu/qemu/blob/v7.2.0/qga/commands.c) limits each captured
+guest-exec output stream to 16 MiB and reports truncation. The proposed 4 MiB encoded directory
+inventory therefore needs a complete framed-response size check, not comparison with the 64 KiB
+input limit. This source reading supports a bounded single-response candidate, not acceptance of
+every Proxmox package or intermediary. Native tests must verify the full response and preserve
+truncation as incomplete evidence; larger file transfers retain their separate chunk protocol.
+
 Compressing the trusted module sources together as one compact JSON value reduces the measured
 eight-module loader to 27,555 bytes. More importantly, a transfer-only bundle of identity, revision,
 scratch and protocol modules leaves about 18 KiB for its missing dispatcher and other request data

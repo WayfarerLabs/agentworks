@@ -191,15 +191,19 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       traversal and read-only fixed lock-namespace composition. Preserve explicit partial/uncertain
       mutation facts and requested-depth completeness without claiming public FileAccess or native
       acceptance.
-- [ ] Deliver concrete stat/removal helper exchanges using the shared framing, identity check and
+- [x] Deliver concrete stat/removal helper exchanges using the shared framing, identity check and
       fixed lock. Validate paths, revision/kind and relative time budget at the request boundary;
       prove no staging for stat and no replay after uncertain removal before extending the same
       composition to the remaining file operations.
-- [ ] Resolve metadata owner/group pairs through the fixed account helper without caller exec or
+- [x] Resolve metadata owner/group pairs through the fixed account helper without caller exec or
       identity transition. Preserve account lookup's independent full execution-identity result;
       prove that responses cannot cross the two operation kinds.
-- [ ] Bring bounded reads under the fixed transaction lock and guest-local relative budget, then
-      compose the remaining inventory, metadata and publication exchanges. Preserve exact-leaf
+- [x] Bring private bounded reads under the fixed transaction lock and guest-local relative budget.
+      One host call prepares and dispatches once; the guest materializes the snapshot and checks
+      expiry while locked, then unlocks before emitting bytes. Private review at `2ad918bc` is
+      clean; removing the final expiry check makes the absence and snapshot tests fail. Native
+      acceptance and production FileAccess remain separate gates.
+- [ ] Compose the remaining inventory, metadata and publication exchanges. Preserve exact-leaf
       requests for approved-root operations through core-owned parent decomposition, without
       granting parent/sibling authority. Bind those operations in the complete FileAccess surface
       before the additive RunContext gate, not as a forwarding layer over legacy files.
@@ -525,6 +529,29 @@ touched. This is a private increment, not complete FileAccess or a public feedba
 implementation step is the concrete stat/removal helper exchange; public composition, native and
 cross-identity acceptance, lifecycle and additive RunContext remain open. Both macOS operator
 decisions remain pending.
+
+The stat/removal, metadata-ownership lookup and locked-read exchanges are privately reviewed at
+`2ad918bc`. Object requests retain exact kind/revision conditions, closed relative budgets and
+uncertain-removal evidence without replay. Ownership lookup returns only numeric owner/group IDs,
+independently of execution identity. Read snapshots use the existing protected lock and emit after
+unlocking; missing lock state refuses even when the target is absent. Neither read nor stat creates
+prerequisite state. The full local suite at that pin passes 11,449 tests with 12 skips.
+
+All three private lanes found no material issues at that pin. Corrections clear sensitive exception
+chains, preserve Windows import-test selection and remove a Proxmox fixture's dependency on the
+host's lock state. Shared identity decoding and one-pass account request parsing remove duplicate
+checks. The subsequent cleanup at `b09e1212` deletes two unused account decoder wrappers and moves
+their unchanged malformed-input cases to the real guest entry point. Public FileAccess, native
+ordinary/elevated acceptance, lifecycle and additive RunContext remain open; this private work does
+not consume a public feedback/fix round.
+
+All three lanes also verified the narrow cleanup at `b09e1212`, and the full local suite again
+passes 11,449 tests with 12 skips. Ruff, formatting and CI-scoped mypy (966 sources) pass. Website
+gates pass 160 Python and 103 Node tests and both deterministic build comparisons. File lint, typer
+isolation, rulesync, locked-SDD and diff checks pass. Generated test/build outputs were removed; no
+live infrastructure was touched. Hosted checks pass at the preceding published `6edbd94c` in
+[run 35511446645](https://github.com/WayfarerLabs/agentworks/actions/runs/35511446645); the new
+progress publication still needs its own hosted confirmation.
 
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
