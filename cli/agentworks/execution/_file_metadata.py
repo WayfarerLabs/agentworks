@@ -293,6 +293,7 @@ def _converge(
     _verify_access_acl(bridge, current, state)
     if (current.stat.uid, current.stat.gid) != (uid, gid) or stat.S_IMODE(current.stat.mode) != mode:
         raise _error(MetadataFailureKind.METADATA, state)
+    _check_deadline(expires_at, state)
     return MetadataResult(bool(state.completed_steps), current)
 
 

@@ -9,6 +9,7 @@ import socket
 import stat
 import subprocess
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -71,6 +72,24 @@ def _require_setfacl() -> str:
     if command is None:
         pytest.skip("setfacl is required to provision the ACL fixture")
     return command
+
+
+def _expire_during_final_acl_observation(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_getxattr = os.getxattr
+    clock = [0.0]
+    reads = 0
+
+    def advancing_getxattr(path: str, attribute: str) -> bytes:
+        nonlocal reads
+        try:
+            return original_getxattr(path, attribute)
+        finally:
+            reads += 1
+            if reads == 2:
+                clock[0] = 2.0
+
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(os, "getxattr", advancing_getxattr)
 
 
 def test_regular_mode_zero_converges_without_content_access(tmp_path: Path) -> None:
@@ -302,6 +321,63 @@ def test_deadline_after_creation_reports_known_partial_effect(tmp_path: Path, mo
     assert error.effect is MetadataEffect.PARTIAL
     assert error.completed_steps == (MetadataStep.CREATION,)
     assert (tmp_path / "created").is_dir()
+
+
+def test_deadline_during_final_acl_observation_reports_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "target"
+    target.write_bytes(b"content")
+    target.chmod(0o600)
+    parent_fd = _open_parent(tmp_path)
+    _expire_during_final_acl_observation(monkeypatch)
+    try:
+        error = _failure(
+            set_metadata,
+            parent_fd,
+            target.name,
+            uid=os.getuid(),
+            gid=os.getgid(),
+            mode=0o600,
+            expires_at=1.0,
+        )
+    finally:
+        os.close(parent_fd)
+
+    assert error.kind is MetadataFailureKind.DEADLINE
+    assert error.phase is MetadataPhase.VERIFICATION
+    assert error.effect is MetadataEffect.UNCHANGED
+    assert error.completed_steps == ()
+    assert error.attempted_step is None
+
+
+def test_deadline_during_final_acl_observation_reports_completed_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "target"
+    target.write_bytes(b"content")
+    target.chmod(0o600)
+    parent_fd = _open_parent(tmp_path)
+    _expire_during_final_acl_observation(monkeypatch)
+    try:
+        error = _failure(
+            set_metadata,
+            parent_fd,
+            target.name,
+            uid=os.getuid(),
+            gid=os.getgid(),
+            mode=0o640,
+            expires_at=1.0,
+        )
+    finally:
+        os.close(parent_fd)
+
+    assert error.kind is MetadataFailureKind.DEADLINE
+    assert error.phase is MetadataPhase.VERIFICATION
+    assert error.effect is MetadataEffect.PARTIAL
+    assert error.completed_steps == (MetadataStep.MODE,)
+    assert error.attempted_step is None
+    assert stat.S_IMODE(target.stat().st_mode) == 0o640
 
 
 def test_failed_mode_syscall_reports_uncertain_attempt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
