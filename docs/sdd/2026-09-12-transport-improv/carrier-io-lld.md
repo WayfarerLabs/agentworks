@@ -94,6 +94,13 @@ presentation, not separate byte-exact guest stdout/stderr. There is no separate 
 console-mode restoration before enabling the mode; the byte protocol alone does not establish
 terminal feasibility.
 
+The private `_terminal_handoff.py` host adapters and `_terminal_guest.py` Linux guest implement the
+two-gate preparation candidate below, without adding a carrier terminal mode. Preparation is
+workstation-neutral; Linux and `memfd` are destination requirements. Local same-PTY tests exercise
+the fixed Python 3.11 guest, payload secrecy during setup, separate script-source/terminal-input
+descriptors, split acknowledgments, backpressure and pre-exec failure cleanup. These do not
+establish SSH delivery, supported native workstation mechanics or successful application entry.
+
 The [lifecycle design](execution-lifecycle-lld.md#lifecycle-waiting-and-attachment) owns public
 start/attachment constraints. This extension adds neither an asynchronous pump handle nor a new
 detached-job protocol.
