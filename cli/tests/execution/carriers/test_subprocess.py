@@ -440,6 +440,7 @@ def test_sensitive_sink_delivery_is_transient_not_retained(children: list[subpro
 @pytest.mark.parametrize(
     "response",
     [b"x" * (_subprocess._CHUNK + 1), "not-bytes", 0, True, ValueError("secret-source-canary")],
+    ids=["oversized", "text", "integer", "boolean", "exception"],
 )
 def test_invalid_live_source_response_is_input_failure(
     children: list[subprocess.Popen[bytes]], response: object

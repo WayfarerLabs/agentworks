@@ -233,12 +233,16 @@ entry and completion retrospectively for every exit value from 0 through 255. It
 synthetic earlier `STARTED`. This is an implementation candidate, not acceptance of a new result
 reducer or a relaxation of the production gate above.
 
-The retained [exec-evidence experiment](../../../cli/tests/execution/exec_evidence_probe.py) forces
-the native fork/exec branch with a test-only CPython switch. Its closed cases cover all 256 exit
-values, missing wait evidence, invalid launch inputs and the counterexamples below, including a
-distribution Python 3.11 run. The switch is not a production launcher recommendation. This fixture
-neither proves ordinary runtime-path selection nor implements framing, source/input transfer,
-application cancellation or carrier delivery.
+The retained [exec-evidence experiment](../../../cli/tests/execution/exec_evidence_probe.py) uses
+public launch controls: `shell=False`, `close_fds=True`, `preexec_fn=None` and
+`start_new_session=True`. A delegating observer records the actual native fork/exec route without
+forcing its selection, and child code verifies that the new process owns its session. Both checks
+pass on local CPython 3.12.13 and Debian CPython 3.11.2. The new session is a candidate ownership
+boundary, not descendant containment. The closed cases also cover all 256 exit values, missing wait
+evidence, invalid launch inputs and the counterexamples below on both interpreters. This is bounded
+local evidence, not a production launcher selection or a guarantee about future interpreters. The
+fixture does not implement framing, source/input transfer, application cancellation or carrier
+delivery, and native macOS acceptance remains open.
 
 The helper must obtain the actual native wait status. `Popen.wait()` and `poll()` can substitute
 zero when child status is unavailable; neither is sufficient evidence. Ignored `SIGCHLD`, a
