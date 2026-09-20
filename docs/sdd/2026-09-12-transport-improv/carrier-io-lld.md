@@ -107,16 +107,21 @@ parser or a callback that authorizes launch. Its proposed fields are:
 @dataclass(frozen=True)
 class TerminalInput:
     input_fd: int
+    output_fd: int
     term: str
     bootstrap: ByteSource
     sensitive: bool = False
 ```
 
-`input_fd` is an explicitly borrowed Python file descriptor (a CRT descriptor on Windows), not a
-process-global stdin lookup or an opaque Windows handle. `term` is the explicitly bound terminal
-type. Construction does no descriptor or terminal I/O. Carrier admission verifies usable native
-terminal input before dispatch; Windows and POSIX need their own implementations, not a claim that
-non-blocking pipe support supplies terminal support.
+`input_fd` and `output_fd` are explicitly borrowed Python file descriptors (CRT descriptors on
+Windows), not process-global stdio lookups or opaque Windows handles. The carrier uses `output_fd`
+only for native terminal facts such as geometry, never to bypass the presentation sink. Windows'
+[screen-buffer query](https://learn.microsoft.com/en-us/windows/console/getconsolescreenbufferinfo)
+requires an output handle with read access; input alone does not supply that fact. `term` is the
+explicitly bound terminal type. Construction does no descriptor or terminal I/O. Carrier admission
+verifies usable native terminal handles before dispatch; Windows and POSIX need their own
+implementations, not a claim that non-blocking pipe support supplies terminal support. Native proof
+must still establish the CRT descriptor mapping and required handle access.
 
 This input requires trusted `SinkOutput` collectors. Preparation does not set `require_live` merely
 because it selects a terminal: terminal and non-terminal live stdio are separate capabilities.
@@ -151,13 +156,13 @@ The proposed responsibility split is:
 
 One caller-facing endpoint supplies both explicit input and output; shared preparation binds both
 adapters from that endpoint. These are trusted internal collectors, not arbitrary plugin sinks whose
-destination the carrier must infer. Only input reaches the carrier as a native terminal descriptor;
-output reaches it through the existing trusted sinks. The presentation adapter must itself satisfy
-the bounded sink and restoration contract. This moves common display policy above the carrier
-instead of requiring SSH to interpret presentation phases. Terminal stdout is a combined guest
-presentation stream; separate client stderr remains raw carrier diagnostics, not a second byte-exact
-guest stream. Sensitive preparation is never consent to show raw setup output. Explicit live
-presentation follows FRD R4's separate selection.
+destination the carrier must infer. Both descriptors reach the carrier for native terminal plumbing;
+all display bytes pass through the existing trusted sinks. The presentation adapter must itself
+satisfy the bounded sink and restoration contract. This moves common display policy above the
+carrier instead of requiring SSH to interpret presentation phases. Terminal stdout is a combined
+guest presentation stream; separate client stderr remains raw carrier diagnostics, not a second
+byte-exact guest stream. Sensitive preparation is never consent to show raw setup output. Explicit
+live presentation follows FRD R4's separate selection.
 
 The preparation collector handles split or coalesced acknowledgments without displaying them. At
 interactive readiness it passes subsequent bytes from that same read to the selected presentation
