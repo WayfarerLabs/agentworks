@@ -45,7 +45,7 @@ class WireError(StrEnum):
 
 
 def _nonce_bytes(nonce: str) -> bytes:
-    if type(nonce) is not str or len(nonce) != 32 or any(character not in _LOWER_HEX for character in nonce):
+    if len(nonce) != 32 or any(character not in _LOWER_HEX for character in nonce):
         raise ValueError("evidence nonce must be 32 lowercase hexadecimal characters")
     return nonce.encode("ascii")
 
@@ -53,14 +53,7 @@ def _nonce_bytes(nonce: str) -> bytes:
 def encode_frame(nonce: str, frame: Frame) -> bytes:
     """Encode one canonical record from trusted helper state."""
     nonce_bytes = _nonce_bytes(nonce)
-    if (
-        not isinstance(frame, Frame)
-        or type(frame.sequence) is not int
-        or not 0 <= frame.sequence <= _MAX_SEQUENCE
-        or not isinstance(frame.kind, FrameKind)
-        or type(frame.body) is not bytes
-        or len(frame.body) > _MAX_BODY_BYTES
-    ):
+    if not 0 <= frame.sequence <= _MAX_SEQUENCE or len(frame.body) > _MAX_BODY_BYTES:
         raise ValueError("evidence frame is outside the version-one bounds")
     encoded_body = base64.b64encode(frame.body)
     record = (
@@ -76,8 +69,6 @@ def encode_frame(nonce: str, frame: Frame) -> bytes:
         )
         + b"\n"
     )
-    if len(record) > _MAX_RECORD_BYTES:
-        raise ValueError("evidence frame is outside the version-one bounds")
     return record
 
 
@@ -102,6 +93,7 @@ class FrameReader:
         self._own_tag = _MARKER + nonce_bytes
         self._on_frame = on_frame
         self._matched = 0
+        self._discarding_line = False
         self._record: bytearray | None = None
         self._next_sequence: int | None = 0
         self._error: WireError | None = None
@@ -117,10 +109,10 @@ class FrameReader:
         if self._finished or self._error is not None:
             return consumed
         for byte in data[:consumed]:
-            if self._record is None:
-                self._seek_own_tag(byte)
-            else:
+            if self._record is not None:
                 self._append_record_byte(byte)
+            else:
+                self._scan_line_start(byte)
             if self._error is not None:
                 break
         return consumed
@@ -132,16 +124,19 @@ class FrameReader:
             self._record = None
         self._finished = True
 
-    def _seek_own_tag(self, byte: int) -> None:
+    def _scan_line_start(self, byte: int) -> None:
+        if self._discarding_line:
+            if byte == ord("\n"):
+                self._discarding_line = False
+            return
         if byte == self._own_tag[self._matched]:
             self._matched += 1
             if self._matched == len(self._own_tag):
                 self._record = bytearray(self._own_tag)
                 self._matched = 0
-        elif byte == self._own_tag[0]:
-            self._matched = 1
         else:
             self._matched = 0
+            self._discarding_line = byte != ord("\n")
 
     def _append_record_byte(self, byte: int) -> None:
         assert self._record is not None
@@ -190,3 +185,4 @@ class FrameReader:
             self._error = error
         self._record = None
         self._matched = 0
+        self._discarding_line = False

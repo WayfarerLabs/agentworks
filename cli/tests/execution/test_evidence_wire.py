@@ -97,18 +97,37 @@ def test_byte_at_a_time_roundtrips_every_binary_value_at_body_limit() -> None:
 def test_noise_and_other_nonces_are_dropped_without_preventing_short_writes() -> None:
     frames: list[Frame] = []
     reader = FrameReader(NONCE, frames.append)
-    noise_canary = b"unretained-hook-noise\x00\xff" * 700
+    noise_canary = b"unretained-hook-noise\x00\xff" * 50_000
     other = encode_frame(OTHER_NONCE, Frame(93, FrameKind.FAILED, b"other-nonce-canary"))
     own = encode_frame(NONCE, Frame(0, FrameKind.WAITED, b"owned"))
+    stream = noise_canary + b"\n" + other + b"unterminated-hook-text\n" + own
 
-    writes = _feed(reader, noise_canary + other + b"unterminated-hook-text" + own)
+    writes = _feed(reader, stream)
     reader.finish()
 
     assert len(writes) > 1
-    assert any(written < len(noise_canary + other + b"unterminated-hook-text" + own) for written in writes)
+    assert any(written < len(stream) for written in writes)
     assert frames == [Frame(0, FrameKind.WAITED, b"owned")]
     assert reader.error is None
     assert noise_canary[:20].decode() not in repr(reader)
+
+
+def test_embedded_own_frame_is_noise_but_next_line_frame_is_accepted_across_splits() -> None:
+    embedded = encode_frame(NONCE, Frame(0, FrameKind.STDOUT, b"embedded-canary"))
+    separated = encode_frame(NONCE, Frame(0, FrameKind.STDOUT, b"accepted"))
+    stream = b"diagnostic-prefix" + embedded + separated
+
+    for boundary in range(len(stream) + 1):
+        frames: list[Frame] = []
+        reader = FrameReader(NONCE, frames.append)
+
+        _feed(reader, stream[:boundary])
+        _feed(reader, stream[boundary:])
+        reader.finish()
+
+        assert frames == [Frame(0, FrameKind.STDOUT, b"accepted")]
+        assert reader.error is None
+        assert "embedded-canary" not in repr(reader)
 
 
 @pytest.mark.parametrize(
