@@ -315,8 +315,8 @@ and whole-object SHA-256. A lost chunk acknowledgement permits another control r
 the owned scratch identity and fixed range make the write demonstrably idempotent. Blind append,
 application relaunch, or fallback to another carrier is forbidden. Final whole-object verification
 precedes `LAUNCHING` or execution of a delivered file-helper asset. This shared delivery mechanism
-does not select the file helper's runtime technology or prove that technology available before Phase
-B; that decision remains a separate implementation gate.
+does not establish runtime availability: the approved early guest Python prerequisite still needs
+implementation and phase-specific proof, and the macOS host adoption decision remains separate.
 
 Captured stdout and stderr spool separately. Each spool keeps at most `max_bytes + 1`; helper
 readers drain the remainder so a caller retention bound does not send SIGPIPE to the workload. The

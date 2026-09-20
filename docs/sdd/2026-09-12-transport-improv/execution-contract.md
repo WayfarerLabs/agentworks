@@ -37,11 +37,11 @@ production enforcement and any reliance on it wait for the removal gate.
 
 Operational invariants apply from the first new-stack release: bound identity/route and lifetime,
 explicit shell/elevation/profile selection, actual guest OS permissions, SSH trust, sensitivity,
-safe filesystem object handling and truthful outcomes. A requested MANAGED or CONTAINED profile must
-deliver its advertised protections even during coexistence; it does not confine other calls through
-the legacy API. Readiness's no-staging restriction remains an operation contract, not a deferred
-recipient permission. No claim of a file-only or profile-required recipient boundary is valid while
-legacy access remains.
+safe filesystem object handling and truthful outcomes. A requested MANAGED profile must deliver its
+advertised protections even during coexistence; it does not confine other calls through the legacy
+API. Readiness's no-staging restriction remains an operation contract, not a deferred recipient
+permission. No claim of a file-only or profile-required recipient boundary is valid while legacy
+access remains.
 
 ## Caller contract
 
@@ -237,10 +237,10 @@ may stage source without exposing `FileAccess`. Internal helpers cannot be reque
 to arbitrary execution through a file-only interface. Validate that boundary, not that no internal
 command was used. As FRD R9 states, an arbitrary foreground or detached execution grant already
 conveys the execution account's guest authority, including filesystem and configured sudo powers;
-these in-process views are not a plugin sandbox. The proposed CONTAINED profile adds reviewed
-guest-side protections, not Python-plugin isolation. Authorize the requested public action: `run`
-using shared launch/wait machinery does not require a public `start` grant. Existing-job operations
-recheck current authority and the bound job profile; possession of a reference is not a grant.
+these in-process views are not a plugin sandbox. MANAGED supplies lifecycle ownership, not hostile
+target-user containment. Authorize the requested public action: `run` using shared launch/wait
+machinery does not require a public `start` grant. Existing-job operations recheck current authority
+and the bound job profile; possession of a reference is not a grant.
 
 The public surface does not expose SSH credentials, provider task IDs, or a carrier constructor.
 `RunContext.admin_execution_target()` and `.agent_execution_target()` return
