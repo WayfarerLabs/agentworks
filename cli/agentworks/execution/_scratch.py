@@ -13,25 +13,57 @@ import errno
 import hashlib
 import hmac
 import os
-import secrets
 import stat
 import time
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, NoReturn
+
+from ._scratch_receipt import (
+    _DATA_MODE as _RECEIPT_DATA_MODE,
+)
+from ._scratch_receipt import (
+    _DATA_NAME as _RECEIPT_DATA_NAME,
+)
+from ._scratch_receipt import (
+    _DIRECTORY_MODE,
+    _RECEIPT_BUILD_MODE,
+    _RECEIPT_MODE,
+    _RECEIPT_NAME,
+    ScratchCleanupDebt,
+    ScratchHistoricalOwnership,
+    ScratchOwnership,
+    ScratchOwnershipUncertainty,
+    ScratchReceiptAcquisition,
+    ScratchReceiptContext,
+    ScratchReceiptError,
+    ScratchReceiptFailureKind,
+    _Identity,
+    cleanup_owned_scratch,
+    create_receipt,
+    matches_receipt_context,
+    matches_scratch_data,
+    matches_scratch_directory,
+    validate_receipt,
+)
+from ._scratch_receipt import (
+    reconcile_scratch_ownership as _reconcile_receipt_ownership,
+)
+from ._scratch_receipt import (
+    scratch_name as _scratch_name,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-_DATA_NAME = "data"
-_DIRECTORY_MODE = 0o700
-_OBJECT_MODE = 0o600
+_DATA_NAME = _RECEIPT_DATA_NAME
+_OBJECT_MODE = _RECEIPT_DATA_MODE
+scratch_name = _scratch_name
+
 # Internal candidate pending whole-request carrier proof.
 _MAX_CHUNK_BYTES = 24 * 1024
 _MAX_OFFSET = (1 << 63) - 1
-_NAME_ATTEMPTS = 16
-_NAME_PREFIX = ".agentworks-scratch-"
 _HASH_READ_BYTES = 64 * 1024
 
 
@@ -53,36 +85,15 @@ class ScratchPhase(Enum):
     WRITE = "write"
     VERIFY = "verify"
     READ = "read"
+    RECONCILE = "reconcile"
     CLEANUP = "cleanup"
-
-
-@dataclass(frozen=True, repr=False)
-class _Identity:
-    device: int
-    inode: int
-
-
-@dataclass(frozen=True, repr=False)
-class ScratchCleanupDebt:
-    """Exact private identity retained for bounded cleanup retry."""
-
-    _name: str
-    _directory: _Identity | None
-    _object: _Identity | None
-    _uid: int
-    _gid: int
 
 
 @dataclass(frozen=True, repr=False)
 class ScratchReference:
     """Identity and length contract for one private scratch object."""
 
-    _name: str
-    _directory: _Identity
-    _object: _Identity
-    _uid: int
-    _gid: int
-    _length: int
+    _ownership: ScratchOwnership
 
 
 @dataclass(frozen=True, repr=False)
@@ -116,10 +127,12 @@ class _ScratchAcquisition:
     uid: int
     gid: int
     name: str | None = None
+    parent: _Identity | None = None
     directory_fd: int | None = None
     object_fd: int | None = None
     directory: _Identity | None = None
     object: _Identity | None = None
+    receipt: ScratchReceiptAcquisition = field(default_factory=ScratchReceiptAcquisition)
 
 
 @dataclass(repr=False)
@@ -135,15 +148,20 @@ class _OpenedScratch:
 def begin_scratch(
     parent_fd: int,
     expected_length: int,
+    token: bytes,
+    context: ScratchReceiptContext,
     *,
     expires_at: float | None = None,
 ) -> ScratchReference:
     """Create one private directory and fixed data object beneath ``parent_fd``."""
     _validate_contract(expected_length)
+    name = scratch_name(token)
+    if not isinstance(context, ScratchReceiptContext):
+        raise ValueError("Scratch receipt context has an invalid type")
+    if not matches_receipt_context(context):
+        raise ScratchTransferError(ScratchFailureKind.CONFLICT, ScratchPhase.BEGIN)
     _check_deadline(expires_at, ScratchPhase.BEGIN)
-    uid = os.geteuid()
-    gid = os.getegid()
-    acquisition = _ScratchAcquisition(uid, gid)
+    acquisition = _ScratchAcquisition(context.identity.euid, context.identity.egid)
     failure: ScratchTransferError | None = None
     control: BaseException | None = None
     close_control: BaseException | None = None
@@ -153,7 +171,8 @@ def begin_scratch(
             parent = _fstat(parent_fd, ScratchPhase.BEGIN)
             if not stat.S_ISDIR(parent.st_mode):
                 raise ScratchTransferError(ScratchFailureKind.UNSUPPORTED, ScratchPhase.BEGIN)
-            _create_directory(parent_fd, acquisition, expires_at)
+            acquisition.parent = _identity(parent)
+            _create_directory(parent_fd, name, acquisition, expires_at)
             directory_fd = acquisition.directory_fd
             assert directory_fd is not None and acquisition.directory is not None
             try:
@@ -191,15 +210,25 @@ def begin_scratch(
             if _list_directory(directory_fd, ScratchPhase.BEGIN) != {_DATA_NAME}:
                 raise ScratchTransferError(ScratchFailureKind.CONFLICT, ScratchPhase.BEGIN)
             _check_deadline(expires_at, ScratchPhase.BEGIN)
-            assert acquisition.name is not None
-            result = ScratchReference(
-                acquisition.name,
+            assert acquisition.parent is not None
+            assert acquisition.directory is not None
+            assert acquisition.object is not None
+            ownership = _create_receipt(
+                directory_fd,
+                bytes(token),
+                context,
+                acquisition.parent,
                 acquisition.directory,
                 acquisition.object,
-                acquisition.uid,
                 acquisition.gid,
                 expected_length,
+                acquisition.receipt,
+                expires_at,
             )
+            if _list_directory(directory_fd, ScratchPhase.BEGIN) != {_DATA_NAME, _RECEIPT_NAME}:
+                raise ScratchTransferError(ScratchFailureKind.CONFLICT, ScratchPhase.BEGIN)
+            _check_deadline(expires_at, ScratchPhase.BEGIN)
+            result = ScratchReference(ownership)
         except ScratchTransferError as error:
             failure = error
         except BaseException as error:
@@ -255,10 +284,17 @@ def write_scratch_chunk(
     control: BaseException | None = None
     close_control: BaseException | None = None
     try:
-        opened = _open_scratch(parent_fd, reference, writable=True, phase=ScratchPhase.WRITE)
+        opened = _open_scratch(
+            parent_fd,
+            reference,
+            writable=True,
+            phase=ScratchPhase.WRITE,
+            expires_at=expires_at,
+        )
+        ownership = reference._ownership
         size = opened.object_stat.st_size
         end = offset + len(data)
-        if size > reference._length or offset > size or (offset < size and end > size):
+        if size > ownership._length or offset > size or (offset < size and end > size):
             raise ScratchTransferError(ScratchFailureKind.CONFLICT, ScratchPhase.WRITE)
         if offset < size:
             existing = _pread_exact(
@@ -290,6 +326,20 @@ def write_scratch_chunk(
     _finish_operation(reference, ScratchPhase.WRITE, failure, control, close_control, expires_at)
 
 
+def reconcile_scratch_ownership(
+    parent_fd: int,
+    token: bytes,
+    context: ScratchReceiptContext,
+    *,
+    expires_at: float | None = None,
+) -> ScratchHistoricalOwnership | ScratchOwnershipUncertainty:
+    """Read-only recovery of receipt-backed ownership for exact cleanup."""
+    try:
+        return _reconcile_receipt_ownership(parent_fd, token, context, expires_at=expires_at)
+    except ScratchReceiptError as error:
+        raise ScratchTransferError(_map_receipt_failure(error.kind), ScratchPhase.RECONCILE) from None
+
+
 def verify_scratch(
     parent_fd: int,
     reference: ScratchReference,
@@ -306,15 +356,22 @@ def verify_scratch(
     close_control: BaseException | None = None
     ready: ReadyScratchReference | None = None
     try:
-        opened = _open_scratch(parent_fd, reference, writable=False, phase=ScratchPhase.VERIFY)
+        opened = _open_scratch(
+            parent_fd,
+            reference,
+            writable=False,
+            phase=ScratchPhase.VERIFY,
+            expires_at=expires_at,
+        )
+        ownership = reference._ownership
         before = opened.object_stat
-        if before.st_size != reference._length:
+        if before.st_size != ownership._length:
             raise ScratchTransferError(ScratchFailureKind.INTEGRITY, ScratchPhase.VERIFY)
         digest = hashlib.sha256()
         offset = 0
-        while offset < reference._length:
+        while offset < ownership._length:
             _check_deadline(expires_at, ScratchPhase.VERIFY)
-            amount = min(_HASH_READ_BYTES, reference._length - offset)
+            amount = min(_HASH_READ_BYTES, ownership._length - offset)
             block = _pread_exact(
                 opened.object_fd,
                 offset,
@@ -361,7 +418,13 @@ def read_scratch_range(
     close_control: BaseException | None = None
     result: bytes | None = None
     try:
-        opened = _open_scratch(parent_fd, reference, writable=False, phase=ScratchPhase.READ)
+        opened = _open_scratch(
+            parent_fd,
+            reference,
+            writable=False,
+            phase=ScratchPhase.READ,
+            expires_at=expires_at,
+        )
         _require_ready_stat(opened.object_stat, ready)
         result = _pread_exact(opened.object_fd, offset, length, ScratchPhase.READ, expires_at)
         _require_ready_stat(_fstat(opened.object_fd, ScratchPhase.READ), ready)
@@ -382,7 +445,7 @@ def ready_scratch_contract(ready: ReadyScratchReference) -> tuple[int, bytes]:
     if not isinstance(ready, ReadyScratchReference):
         raise ValueError("Ready scratch reference has an invalid type")
     reference = ready._reference
-    return reference._length, bytes(ready._digest)
+    return reference._ownership._length, bytes(ready._digest)
 
 
 def iter_ready_scratch(
@@ -412,11 +475,18 @@ def iter_ready_scratch(
 
 def cleanup_scratch(
     parent_fd: int,
-    owned: ScratchReference | ReadyScratchReference | ScratchCleanupDebt,
+    owned: ScratchReference | ReadyScratchReference | ScratchHistoricalOwnership | ScratchCleanupDebt,
 ) -> None:
     """Remove only the exact verified object and its exact empty directory."""
     debt = _cleanup_debt(owned)
-    failure = _cleanup_once(parent_fd, debt)
+    try:
+        failure = _cleanup_once(parent_fd, debt)
+    except BaseException as control:
+        _raise_control(
+            control,
+            prior=ScratchTransferError(ScratchFailureKind.IO, ScratchPhase.CLEANUP),
+            cleanup_debt=debt,
+        )
     if failure is None:
         return
     raise ScratchTransferError(failure, ScratchPhase.CLEANUP, cleanup_debt=debt) from None
@@ -424,6 +494,7 @@ def cleanup_scratch(
 
 def _create_directory(
     parent_fd: int,
+    name: str,
     acquisition: _ScratchAcquisition,
     expires_at: float | None,
 ) -> None:
@@ -432,28 +503,19 @@ def _create_directory(
     Pure Python cannot cover an asynchronous exception between a successful
     kernel call and assignment of its result to the acquisition record.
     """
-    for _ in range(_NAME_ATTEMPTS):
-        _check_deadline(expires_at, ScratchPhase.BEGIN)
-        candidate = _NAME_PREFIX + secrets.token_hex(16)
-        acquisition.name = candidate
-        error_number: int | None = None
-        try:
-            os.mkdir(candidate, _DIRECTORY_MODE, dir_fd=parent_fd)
-        except OSError as error:
-            error_number = error.errno
-        if error_number is None:
-            acquisition.directory_fd = _open_directory(parent_fd, candidate, ScratchPhase.BEGIN)
-            observed = _fstat(acquisition.directory_fd, ScratchPhase.BEGIN)
-            acquisition.directory = _identity(observed)
-            if observed.st_uid != acquisition.uid:
-                raise ScratchTransferError(ScratchFailureKind.CONFLICT, ScratchPhase.BEGIN)
-            acquisition.gid = observed.st_gid
-            return
-        acquisition.name = None
-        if error_number != errno.EEXIST:
-            raise ScratchTransferError(ScratchFailureKind.IO, ScratchPhase.BEGIN)
-        _check_deadline(expires_at, ScratchPhase.BEGIN)
-    raise ScratchTransferError(ScratchFailureKind.IO, ScratchPhase.BEGIN)
+    _check_deadline(expires_at, ScratchPhase.BEGIN)
+    try:
+        os.mkdir(name, _DIRECTORY_MODE, dir_fd=parent_fd)
+    except OSError as error:
+        kind = ScratchFailureKind.CONFLICT if error.errno == errno.EEXIST else ScratchFailureKind.IO
+        raise ScratchTransferError(kind, ScratchPhase.BEGIN) from None
+    acquisition.name = name
+    acquisition.directory_fd = _open_directory(parent_fd, name, ScratchPhase.BEGIN)
+    observed = _fstat(acquisition.directory_fd, ScratchPhase.BEGIN)
+    acquisition.directory = _identity(observed)
+    if observed.st_uid != acquisition.uid:
+        raise ScratchTransferError(ScratchFailureKind.CONFLICT, ScratchPhase.BEGIN)
+    acquisition.gid = observed.st_gid
 
 
 def _create_object(directory_fd: int, acquisition: _ScratchAcquisition) -> None:
@@ -472,20 +534,77 @@ def _create_object(directory_fd: int, acquisition: _ScratchAcquisition) -> None:
     _set_mode(acquisition.object_fd, _OBJECT_MODE, ScratchPhase.BEGIN)
 
 
+def _create_receipt(
+    directory_fd: int,
+    token: bytes,
+    context: ScratchReceiptContext,
+    parent: _Identity,
+    directory: _Identity,
+    data: _Identity,
+    gid: int,
+    length: int,
+    acquisition: ScratchReceiptAcquisition,
+    expires_at: float | None,
+) -> ScratchOwnership:
+    try:
+        return create_receipt(
+            directory_fd,
+            token,
+            context,
+            parent,
+            directory,
+            data,
+            gid,
+            length,
+            acquisition,
+            expires_at=expires_at,
+        )
+    except ScratchReceiptError as error:
+        raise ScratchTransferError(_map_receipt_failure(error.kind), ScratchPhase.BEGIN) from None
+
+
+def _validate_receipt(
+    directory_fd: int,
+    ownership: ScratchOwnership,
+    phase: ScratchPhase,
+    expires_at: float | None,
+) -> None:
+    try:
+        validate_receipt(directory_fd, ownership, expires_at=expires_at)
+    except ScratchReceiptError as error:
+        raise ScratchTransferError(_map_receipt_failure(error.kind), phase) from None
+
+
+def _map_receipt_failure(kind: ScratchReceiptFailureKind) -> ScratchFailureKind:
+    return {
+        ScratchReceiptFailureKind.UNSUPPORTED: ScratchFailureKind.UNSUPPORTED,
+        ScratchReceiptFailureKind.CONFLICT: ScratchFailureKind.CONFLICT,
+        ScratchReceiptFailureKind.DEADLINE: ScratchFailureKind.DEADLINE,
+        ScratchReceiptFailureKind.IO: ScratchFailureKind.IO,
+    }[kind]
+
+
 def _open_scratch(
     parent_fd: int,
     reference: ScratchReference,
     *,
     writable: bool,
     phase: ScratchPhase,
+    expires_at: float | None,
 ) -> _OpenedScratch:
-    directory_stat = _stat_at(parent_fd, reference._name, phase)
+    ownership = reference._ownership
+    name = scratch_name(ownership._token)
+    parent = _fstat(parent_fd, phase)
+    if _identity(parent) != ownership._parent:
+        raise ScratchTransferError(ScratchFailureKind.CONFLICT, phase)
+    directory_stat = _stat_at(parent_fd, name, phase)
     if directory_stat is None:
         raise ScratchTransferError(ScratchFailureKind.CONFLICT, phase)
     _require_reference_directory(directory_stat, reference, phase)
-    directory_fd = _open_directory(parent_fd, reference._name, phase)
+    directory_fd = _open_directory(parent_fd, name, phase)
     try:
         _require_reference_directory(_fstat(directory_fd, phase), reference, phase)
+        _validate_receipt(directory_fd, reference._ownership, phase, expires_at)
         object_stat = _stat_at(directory_fd, _DATA_NAME, phase)
         if object_stat is None:
             raise ScratchTransferError(ScratchFailureKind.CONFLICT, phase)
@@ -533,65 +652,8 @@ def _open_at(parent_fd: int, name: str, flags: int, phase: ScratchPhase) -> int:
 
 
 def _cleanup_once(parent_fd: int, debt: ScratchCleanupDebt) -> ScratchFailureKind | None:
-    stat_ok, directory_stat = _try_stat_at(parent_fd, debt._name)
-    if not stat_ok:
-        return ScratchFailureKind.IO
-    if directory_stat is None:
-        return None
-    if debt._directory is None or not _matches_directory(directory_stat, debt._directory, debt._uid, debt._gid):
-        return ScratchFailureKind.CONFLICT
-    directory_fd: int | None = None
-    try:
-        directory_fd = _open_directory(parent_fd, debt._name, ScratchPhase.CLEANUP)
-        if not _matches_directory(
-            _fstat(directory_fd, ScratchPhase.CLEANUP),
-            debt._directory,
-            debt._uid,
-            debt._gid,
-        ):
-            return ScratchFailureKind.CONFLICT
-        names = _list_directory(directory_fd, ScratchPhase.CLEANUP)
-        if names - {_DATA_NAME}:
-            return ScratchFailureKind.CONFLICT
-        if _DATA_NAME in names:
-            object_ok, object_stat = _try_stat_at(directory_fd, _DATA_NAME)
-            if not object_ok:
-                return ScratchFailureKind.IO
-            if (
-                debt._object is None
-                or object_stat is None
-                or not _matches_object(
-                    object_stat,
-                    debt._object,
-                    debt._uid,
-                    debt._gid,
-                )
-            ):
-                return ScratchFailureKind.CONFLICT
-            try:
-                os.unlink(_DATA_NAME, dir_fd=directory_fd)
-            except OSError:
-                return ScratchFailureKind.IO
-        if _list_directory(directory_fd, ScratchPhase.CLEANUP):
-            return ScratchFailureKind.CONFLICT
-    except ScratchTransferError as error:
-        return error.kind
-    finally:
-        if directory_fd is not None:
-            with suppress(OSError):
-                os.close(directory_fd)
-    final_ok, final_stat = _try_stat_at(parent_fd, debt._name)
-    if not final_ok:
-        return ScratchFailureKind.IO
-    if final_stat is None:
-        return None
-    if not _matches_directory(final_stat, debt._directory, debt._uid, debt._gid):
-        return ScratchFailureKind.CONFLICT
-    try:
-        os.rmdir(debt._name, dir_fd=parent_fd)
-    except OSError:
-        return ScratchFailureKind.IO
-    return None
+    result = cleanup_owned_scratch(parent_fd, debt)
+    return None if result is None else _map_receipt_failure(result)
 
 
 def _require_reference_directory(
@@ -599,7 +661,14 @@ def _require_reference_directory(
     reference: ScratchReference,
     phase: ScratchPhase,
 ) -> None:
-    _require_directory_stat(observed, reference._directory, reference._uid, reference._gid, phase)
+    ownership = reference._ownership
+    _require_directory_stat(
+        observed,
+        ownership._directory,
+        ownership._context.identity.euid,
+        ownership._gid,
+        phase,
+    )
 
 
 def _require_reference_object(
@@ -607,7 +676,14 @@ def _require_reference_object(
     reference: ScratchReference,
     phase: ScratchPhase,
 ) -> None:
-    _require_object_stat(observed, reference._object, reference._uid, reference._gid, phase)
+    ownership = reference._ownership
+    _require_object_stat(
+        observed,
+        ownership._data,
+        ownership._context.identity.euid,
+        ownership._gid,
+        phase,
+    )
 
 
 def _require_directory_stat(
@@ -619,7 +695,7 @@ def _require_directory_stat(
 ) -> None:
     if not stat.S_ISDIR(observed.st_mode):
         raise ScratchTransferError(ScratchFailureKind.UNSUPPORTED, phase)
-    if not _matches_directory(observed, identity, uid, gid):
+    if not matches_scratch_directory(observed, identity, uid, gid):
         raise ScratchTransferError(ScratchFailureKind.CONFLICT, phase)
 
 
@@ -632,36 +708,16 @@ def _require_object_stat(
 ) -> None:
     if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1:
         raise ScratchTransferError(ScratchFailureKind.UNSUPPORTED, phase)
-    if not _matches_object(observed, identity, uid, gid):
+    if not matches_scratch_data(observed, identity, uid, gid):
         raise ScratchTransferError(ScratchFailureKind.CONFLICT, phase)
-
-
-def _matches_directory(observed: os.stat_result, identity: _Identity, uid: int, gid: int) -> bool:
-    return (
-        stat.S_ISDIR(observed.st_mode)
-        and _identity(observed) == identity
-        and observed.st_uid == uid
-        and observed.st_gid == gid
-        and stat.S_IMODE(observed.st_mode) == _DIRECTORY_MODE
-    )
-
-
-def _matches_object(observed: os.stat_result, identity: _Identity, uid: int, gid: int) -> bool:
-    return (
-        stat.S_ISREG(observed.st_mode)
-        and observed.st_nlink == 1
-        and _identity(observed) == identity
-        and observed.st_uid == uid
-        and observed.st_gid == gid
-        and stat.S_IMODE(observed.st_mode) == _OBJECT_MODE
-    )
 
 
 def _require_ready_stat(observed: os.stat_result, ready: ReadyScratchReference) -> None:
     reference = ready._reference
+    ownership = reference._ownership
     _require_reference_object(observed, reference, ScratchPhase.READ)
     if (
-        observed.st_size != reference._length
+        observed.st_size != ownership._length
         or observed.st_mtime_ns != ready._modified_ns
         or observed.st_ctime_ns != ready._changed_ns
     ):
@@ -692,11 +748,12 @@ def _validate_chunk(
     data: bytes,
     chunk_digest: bytes,
 ) -> ScratchTransferError | None:
+    length = reference._ownership._length
     if offset < 0 or offset > _MAX_OFFSET:
         return ScratchTransferError(ScratchFailureKind.LIMIT, ScratchPhase.WRITE)
     if not data or len(data) > _MAX_CHUNK_BYTES:
         return ScratchTransferError(ScratchFailureKind.LIMIT, ScratchPhase.WRITE)
-    if offset > reference._length or len(data) > reference._length - offset:
+    if offset > length or len(data) > length - offset:
         return ScratchTransferError(ScratchFailureKind.LIMIT, ScratchPhase.WRITE)
     if not hmac.compare_digest(hashlib.sha256(data).digest(), chunk_digest):
         return ScratchTransferError(ScratchFailureKind.INTEGRITY, ScratchPhase.WRITE)
@@ -704,14 +761,15 @@ def _validate_chunk(
 
 
 def _validate_range(reference: ScratchReference, offset: int, length: int) -> None:
+    expected_length = reference._ownership._length
     failure = None
     if (
         offset < 0
         or offset > _MAX_OFFSET
         or length < 0
         or length > _MAX_CHUNK_BYTES
-        or offset > reference._length
-        or length > reference._length - offset
+        or offset > expected_length
+        or length > expected_length - offset
     ):
         failure = ScratchTransferError(ScratchFailureKind.LIMIT, ScratchPhase.READ)
     if failure is not None:
@@ -815,15 +873,6 @@ def _stat_at(parent_fd: int, name: str, phase: ScratchPhase) -> os.stat_result |
     return result
 
 
-def _try_stat_at(parent_fd: int, name: str) -> tuple[bool, os.stat_result | None]:
-    try:
-        return True, os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-    except FileNotFoundError:
-        return True, None
-    except OSError:
-        return False, None
-
-
 def _list_directory(directory_fd: int, phase: ScratchPhase) -> set[str]:
     failed = False
     names: list[str] = []
@@ -845,8 +894,11 @@ def _acquisition_debt(acquisition: _ScratchAcquisition) -> ScratchCleanupDebt | 
         return None
     return ScratchCleanupDebt(
         acquisition.name,
+        acquisition.parent,
         acquisition.directory,
         acquisition.object,
+        acquisition.receipt.identity,
+        (_RECEIPT_BUILD_MODE, _RECEIPT_MODE),
         acquisition.uid,
         acquisition.gid,
     )
@@ -908,18 +960,30 @@ def _finish_operation(
         _raise_with_debt(failure, reference)
 
 
-def _cleanup_debt(owned: ScratchReference | ReadyScratchReference | ScratchCleanupDebt) -> ScratchCleanupDebt:
+def _cleanup_debt(
+    owned: ScratchReference | ReadyScratchReference | ScratchHistoricalOwnership | ScratchCleanupDebt,
+) -> ScratchCleanupDebt:
     if isinstance(owned, ReadyScratchReference):
         owned = owned._reference
+    if isinstance(owned, ScratchHistoricalOwnership):
+        ownership = owned._ownership
+        return _ownership_debt(ownership)
     if isinstance(owned, ScratchReference):
-        return ScratchCleanupDebt(
-            owned._name,
-            owned._directory,
-            owned._object,
-            owned._uid,
-            owned._gid,
-        )
+        return _ownership_debt(owned._ownership)
     return owned
+
+
+def _ownership_debt(ownership: ScratchOwnership) -> ScratchCleanupDebt:
+    return ScratchCleanupDebt(
+        scratch_name(ownership._token),
+        ownership._parent,
+        ownership._directory,
+        ownership._data,
+        ownership._receipt,
+        (_RECEIPT_MODE,),
+        ownership._context.identity.euid,
+        ownership._gid,
+    )
 
 
 def _raise_with_debt(error: ScratchTransferError, reference: ScratchReference) -> NoReturn:

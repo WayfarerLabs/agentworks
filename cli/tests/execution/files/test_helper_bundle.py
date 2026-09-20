@@ -18,6 +18,7 @@ _MODULE_NAMES = (
     "_file_stat",
     "_file_paths",
     "_file_snapshot",
+    "_scratch_receipt",
     "_scratch",
     "_file_lock",
     "_file_publication",
@@ -25,10 +26,11 @@ _MODULE_NAMES = (
     "_file_read_protocol",
 )
 _DISPATCHER = """
-import hashlib, os, stat, sys
+import hashlib, os, secrets, stat, sys
 from _agw_file._file_publication import Create, CreateMetadata, Match, ScratchFileSource, publish_file
 from _agw_file._file_snapshot import read_revision
 from _agw_file._scratch import begin_scratch, cleanup_scratch, verify_scratch, write_scratch_chunk
+from _agw_file._scratch_receipt import ScratchOperation, current_receipt_context
 
 parent_fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY)
 metadata = CreateMetadata(os.getuid(), os.getgid(), 0o640)
@@ -36,7 +38,9 @@ try:
     first = publish_file(parent_fd, "target", b"first", condition=Create(), create_metadata=metadata)
     assert read_revision(parent_fd, "target", include_digest=True) == first
     content = b"second"
-    reference = begin_scratch(parent_fd, len(content))
+    reference = begin_scratch(
+        parent_fd, len(content), secrets.token_bytes(16), current_receipt_context(ScratchOperation.STAGE)
+    )
     write_scratch_chunk(parent_fd, reference, 0, content[:3], hashlib.sha256(content[:3]).digest())
     write_scratch_chunk(parent_fd, reference, 3, content[3:], hashlib.sha256(content[3:]).digest())
     ready = verify_scratch(parent_fd, reference, hashlib.sha256(content).digest())

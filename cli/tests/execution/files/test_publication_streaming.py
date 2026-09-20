@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import secrets
 import sys
 import time
 from pathlib import Path
@@ -13,6 +14,7 @@ import pytest
 
 import agentworks.execution._file_publication as publication_module
 import agentworks.execution._scratch as scratch_module
+import agentworks.execution._scratch_receipt as receipt_module
 from agentworks.execution._file_publication import (
     Create,
     CreateMetadata,
@@ -29,6 +31,11 @@ from agentworks.execution._scratch import (
     verify_scratch,
     write_scratch_chunk,
 )
+from agentworks.execution._scratch_receipt import (
+    _NAME_PREFIX,
+    ScratchOperation,
+    current_receipt_context,
+)
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux file publication")
 
@@ -42,13 +49,18 @@ def _metadata() -> CreateMetadata:
 
 
 def _scratch_directory(path: Path) -> Path:
-    directories = list(path.glob(f"{scratch_module._NAME_PREFIX}*"))
+    directories = list(path.glob(f"{_NAME_PREFIX}*"))
     assert len(directories) == 1
     return directories[0]
 
 
 def _ready_scratch(parent_fd: int, content: bytes) -> ReadyScratchReference:
-    reference = begin_scratch(parent_fd, len(content))
+    reference = begin_scratch(
+        parent_fd,
+        len(content),
+        secrets.token_bytes(16),
+        current_receipt_context(ScratchOperation.STAGE),
+    )
     digest = hashlib.sha256()
     offset = 0
     while offset < len(content):
@@ -142,7 +154,9 @@ def test_scratch_short_write_loop_obeys_deadline(tmp_path: Path, monkeypatch: py
 
     monkeypatch.setattr(publication_module, "_write", short_write)
     monkeypatch.setattr(publication_module, "time", SimpleNamespace(monotonic=lambda: next(moments)))
-    monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: 0.0))
+    clock = SimpleNamespace(monotonic=lambda: 0.0)
+    monkeypatch.setattr(scratch_module, "time", clock)
+    monkeypatch.setattr(receipt_module, "time", clock)
     try:
         error = _failure(parent_fd, ScratchFileSource(parent_fd, ready), expires_at=5.0)
         assert error.kind is PublicationFailureKind.DEADLINE
@@ -197,7 +211,9 @@ def test_scratch_iteration_deadline_remains_a_publication_deadline(
     parent_fd = _open_parent(tmp_path)
     ready = _ready_scratch(parent_fd, content)
     expires_at = time.monotonic() + 30.0
-    monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: expires_at))
+    clock = SimpleNamespace(monotonic=lambda: expires_at)
+    monkeypatch.setattr(scratch_module, "time", clock)
+    monkeypatch.setattr(receipt_module, "time", clock)
     try:
         error = _failure(parent_fd, ScratchFileSource(parent_fd, ready), expires_at=expires_at)
         assert error.kind is PublicationFailureKind.DEADLINE

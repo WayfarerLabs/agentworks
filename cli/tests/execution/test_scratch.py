@@ -10,24 +10,29 @@ import secrets
 import stat
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 import agentworks.execution._scratch as scratch_module
+import agentworks.execution._scratch_receipt as receipt_module
 from agentworks.execution._scratch import (
     ReadyScratchReference,
     ScratchFailureKind,
     ScratchPhase,
     ScratchTransferError,
-    begin_scratch,
     cleanup_scratch,
     iter_ready_scratch,
     read_scratch_range,
     verify_scratch,
     write_scratch_chunk,
 )
+from agentworks.execution._scratch import (
+    begin_scratch as _begin_scratch,
+)
+from agentworks.execution._scratch_receipt import ScratchOperation, ScratchOwnership, current_receipt_context
 
 pytestmark = pytest.mark.skipif(
     os.name != "posix" or not hasattr(os, "pread") or not hasattr(os, "pwrite"),
@@ -37,6 +42,31 @@ pytestmark = pytest.mark.skipif(
 
 def _digest(data: bytes) -> bytes:
     return hashlib.sha256(data).digest()
+
+
+def begin_scratch(
+    parent_fd: int,
+    expected_length: int,
+    *,
+    expires_at: float | None = None,
+) -> scratch_module.ScratchReference:
+    token = bytes.fromhex(secrets.token_hex(16))
+    context = current_receipt_context(ScratchOperation.STAGE)
+    return _begin_scratch(parent_fd, expected_length, token, context, expires_at=expires_at)
+
+
+def _ownership(reference: scratch_module.ScratchReference) -> ScratchOwnership:
+    return reference._ownership
+
+
+def _reference_name(reference: scratch_module.ScratchReference) -> str:
+    return scratch_module.scratch_name(_ownership(reference)._token)
+
+
+def _set_clock(monkeypatch: pytest.MonkeyPatch, monotonic: Callable[[], float]) -> None:
+    clock = SimpleNamespace(monotonic=monotonic)
+    monkeypatch.setattr(scratch_module, "time", clock)
+    monkeypatch.setattr(receipt_module, "time", clock)
 
 
 def _open_parent(path: Path) -> int:
@@ -131,9 +161,9 @@ def test_reopened_operation_close_interrupt_attempts_both_descriptors(
     assert cause.kind is ScratchFailureKind.IO
     assert cause.phase is phase
     assert debt is not None
-    assert debt._name == reference._name
-    assert debt._directory == reference._directory
-    assert debt._object == reference._object
+    assert debt._name == _reference_name(reference)
+    assert debt._directory == _ownership(reference)._directory
+    assert debt._object == _ownership(reference)._data
     assert len(closed) == 2
     for descriptor in closed:
         with pytest.raises(OSError):
@@ -184,14 +214,21 @@ def test_reference_can_be_reopened_in_a_fresh_process(tmp_path: Path) -> None:
     parent_fd = _open_parent(tmp_path)
     reference = begin_scratch(parent_fd, len(content))
     os.close(parent_fd)
+    ownership = _ownership(reference)
     fixture = json.dumps(
         {
-            "name": reference._name,
-            "directory": [reference._directory.device, reference._directory.inode],
-            "object": [reference._object.device, reference._object.inode],
-            "uid": reference._uid,
-            "gid": reference._gid,
-            "length": reference._length,
+            "token": ownership._token.hex(),
+            "parent": [ownership._parent.device, ownership._parent.inode],
+            "directory": [ownership._directory.device, ownership._directory.inode],
+            "data": [ownership._data.device, ownership._data.inode],
+            "receipt": [reference._ownership._receipt.device, reference._ownership._receipt.inode],
+            "gid": ownership._gid,
+            "length": ownership._length,
+            "identity": {
+                "euid": ownership._context.identity.euid,
+                "egid": ownership._context.identity.egid,
+                "groups": list(ownership._context.identity.groups),
+            },
             "digest": _digest(content).hex(),
             "content": content.hex(),
         }
@@ -201,12 +238,23 @@ import hashlib
 import json
 import os
 import sys
-from agentworks.execution._scratch import ScratchReference, _Identity, write_scratch_chunk
-fixture = json.load(sys.stdin)
-reference = ScratchReference(
-    fixture["name"], _Identity(*fixture["directory"]), _Identity(*fixture["object"]),
-    fixture["uid"], fixture["gid"], fixture["length"],
+from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._scratch import ScratchReference, write_scratch_chunk
+from agentworks.execution._scratch_receipt import (
+    ScratchOperation, ScratchOwnership, ScratchReceiptContext, _Identity,
 )
+fixture = json.load(sys.stdin)
+identity = fixture["identity"]
+context = ScratchReceiptContext(
+    ScratchOperation.STAGE,
+    IdentityExpectation(identity["euid"], identity["egid"], tuple(identity["groups"])),
+)
+ownership = ScratchOwnership(
+    bytes.fromhex(fixture["token"]), context, _Identity(*fixture["parent"]),
+    _Identity(*fixture["directory"]), _Identity(*fixture["data"]),
+    fixture["gid"], fixture["length"], _Identity(*fixture["receipt"]),
+)
+reference = ScratchReference(ownership)
 content = bytes.fromhex(fixture["content"])
 parent_fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY)
 try:
@@ -318,11 +366,12 @@ def test_final_digest_is_validated_only_when_transfer_is_verified(tmp_path: Path
     os.close(parent_fd)
 
 
-def test_begin_deadline_between_collisions_never_claims_or_removes_collision(
+def test_begin_collision_is_one_attempt_and_never_claims_or_removes_collision(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    collision = tmp_path / f"{scratch_module._NAME_PREFIX}collision"
+    token_hex = "00" * 16
+    collision = tmp_path / scratch_module.scratch_name(bytes.fromhex(token_hex))
     collision.mkdir(mode=0o700)
     sentinel = collision / "sentinel"
     sentinel.write_bytes(b"not owned")
@@ -341,13 +390,13 @@ def test_begin_deadline_between_collisions_never_claims_or_removes_collision(
         finally:
             clock[0] = 10.0
 
-    monkeypatch.setattr(secrets, "token_hex", lambda _length: "collision")
+    monkeypatch.setattr(secrets, "token_hex", lambda _length: token_hex)
     monkeypatch.setattr(os, "mkdir", collide_then_expire)
-    monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    _set_clock(monkeypatch, lambda: clock[0])
 
     with pytest.raises(ScratchTransferError) as raised:
         begin_scratch(parent_fd, 0, expires_at=5.0)
-    assert raised.value.kind is ScratchFailureKind.DEADLINE
+    assert raised.value.kind is ScratchFailureKind.CONFLICT
     assert raised.value.phase is ScratchPhase.BEGIN
     assert raised.value.cleanup_debt is None
     assert sentinel.read_bytes() == b"not owned"
@@ -386,7 +435,7 @@ def test_begin_expiry_after_mkdir_normalizes_for_cleanup_without_creating_data(
 
     monkeypatch.setattr(os, "mkdir", create_then_expire)
     monkeypatch.setattr(os, "open", observe_data_creation)
-    monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    _set_clock(monkeypatch, lambda: clock[0])
 
     previous_umask = os.umask(0o077)
     try:
@@ -430,7 +479,7 @@ def test_begin_expiry_retains_exact_debt_when_cleanup_normalization_refuses(
 
     monkeypatch.setattr(os, "mkdir", create_then_expire)
     monkeypatch.setattr(scratch_module, "_set_mode", refuse_cleanup_normalization)
-    monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    _set_clock(monkeypatch, lambda: clock[0])
 
     with pytest.raises(ScratchTransferError) as raised:
         begin_scratch(parent_fd, 0, expires_at=5.0)
@@ -471,7 +520,7 @@ def test_begin_expiry_during_data_creation_performs_only_cleanup_bookkeeping(
 
     monkeypatch.setattr(os, "open", create_data_then_expire)
     monkeypatch.setattr(scratch_module, "_list_directory", record_listing)
-    monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    _set_clock(monkeypatch, lambda: clock[0])
 
     with pytest.raises(ScratchTransferError) as raised:
         begin_scratch(parent_fd, 0, expires_at=5.0)
@@ -499,7 +548,7 @@ def test_short_pwrite_loop_stops_at_deadline_with_exact_cleanup_debt(
         return written
 
     monkeypatch.setattr(os, "pwrite", write_once_then_expire)
-    monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    _set_clock(monkeypatch, lambda: clock[0])
 
     with pytest.raises(ScratchTransferError) as raised:
         write_scratch_chunk(
@@ -546,7 +595,7 @@ def test_verify_hash_loop_stops_between_bounded_reads(
         return block
 
     monkeypatch.setattr(scratch_module, "_pread_exact", read_once_then_expire)
-    monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    _set_clock(monkeypatch, lambda: clock[0])
 
     with pytest.raises(ScratchTransferError) as raised:
         verify_scratch(parent_fd, reference, _digest(content), expires_at=5.0)
@@ -575,7 +624,7 @@ def test_read_checks_deadline_after_its_last_pread(
         return block
 
     monkeypatch.setattr(os, "pread", read_then_expire)
-    monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    _set_clock(monkeypatch, lambda: clock[0])
 
     with pytest.raises(ScratchTransferError) as raised:
         read_scratch_range(parent_fd, ready, 0, len(content), expires_at=5.0)
@@ -596,7 +645,7 @@ def test_iteration_checks_deadline_after_the_last_yield(
     write_scratch_chunk(parent_fd, reference, 0, content, _digest(content))
     ready = verify_scratch(parent_fd, reference, _digest(content))
     clock = [0.0]
-    monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    _set_clock(monkeypatch, lambda: clock[0])
     chunks = iter_ready_scratch(parent_fd, ready, expires_at=5.0)
 
     assert next(chunks) == content
@@ -977,7 +1026,8 @@ def test_interrupted_candidate_collision_is_never_deleted(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    candidate = tmp_path / f"{scratch_module._NAME_PREFIX}collision"
+    token_hex = "00" * 16
+    candidate = tmp_path / scratch_module.scratch_name(bytes.fromhex(token_hex))
     candidate.mkdir(mode=0o700)
     sentinel = candidate / "sentinel"
     sentinel.write_bytes(b"not owned")
@@ -994,15 +1044,11 @@ def test_interrupted_candidate_collision_is_never_deleted(
             raise KeyboardInterrupt
         original_mkdir(path, mode, dir_fd=dir_fd)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(secrets, "token_hex", lambda _length: "collision")
+    monkeypatch.setattr(secrets, "token_hex", lambda _length: token_hex)
     monkeypatch.setattr(os, "mkdir", interrupt_candidate_mkdir)
     with pytest.raises(KeyboardInterrupt) as raised:
         begin_scratch(parent_fd, 0)
-    debt = _scratch_cause(raised.value).cleanup_debt
-    assert debt is not None and debt._directory is None and debt._object is None
-    assert sentinel.read_bytes() == b"not owned"
-    cleanup_error = _failure(cleanup_scratch, parent_fd, debt)
-    assert cleanup_error.kind is ScratchFailureKind.CONFLICT
+    assert raised.value.__cause__ is None
     assert sentinel.read_bytes() == b"not owned"
     os.close(parent_fd)
     sentinel.unlink()
@@ -1018,7 +1064,7 @@ def test_cleanup_stat_error_is_not_mistaken_for_absence(
     original_stat = os.stat
 
     def fail_scratch_stat(path: object, *args: object, **kwargs: object) -> os.stat_result:
-        if path == reference._name:
+        if path == _reference_name(reference):
             raise OSError(errno.EIO, "fixture cleanup observation failure")
         return original_stat(path, *args, **kwargs)  # type: ignore[arg-type]
 
@@ -1060,12 +1106,13 @@ def test_errors_and_references_hide_names_bytes_and_digests(tmp_path: Path) -> N
     reference = begin_scratch(parent_fd, len(secret))
     error = _failure(write_scratch_chunk, parent_fd, reference, 1, secret[:1], _digest(secret[:1]))
     assert error.args == (ScratchFailureKind.CONFLICT.value, ScratchPhase.WRITE.value, True)
-    assert reference._name not in repr(reference)
-    assert reference._name not in repr(error)
+    name = _reference_name(reference)
+    assert name not in repr(reference)
+    assert name not in repr(error)
     assert secret.decode() not in repr(error)
     assert _digest(secret).hex() not in repr(error)
     assert error.cleanup_debt is not None
-    assert reference._name not in repr(error.cleanup_debt)
+    assert name not in repr(error.cleanup_debt)
     assert error.__cause__ is None
     assert error.__context__ is None
     cleanup_scratch(parent_fd, reference)
