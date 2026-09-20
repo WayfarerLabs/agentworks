@@ -194,27 +194,36 @@ or managed lifetime.
 
 `_file_read.py` composes a bounded, identity-bound Linux file read through one carrier attempt. The
 core selects a trusted root and relative path; the helper checks the expected UID, GID and groups
-before opening the target. Absolute root traversal uses path-only descriptors and refuses links
-without requiring directory read permission. The existing snapshot reader also refuses descendant
-mount crossings and unsupported objects. Missing roots or files produce an absent observation, not
-an I/O success with empty bytes.
+before acquiring the existing fixed system file lock or opening the target. Absolute root traversal
+uses path-only descriptors and refuses links without requiring directory read permission. The
+existing snapshot reader also refuses descendant mount crossings and unsupported objects. Missing
+roots or files produce an absent observation, not an I/O success with empty bytes.
 
 Workload paths and request payload travel only in sensitive stdin. `_file_wire.py` supplies the
 shared bounded `AGWF1` record framing; the read schema remains concrete. A file-specific collector
 validates the complete nonce-bound response, length, digest and metadata before releasing bytes.
 Noise, reflection, truncation or invalid records cannot become a successful read, and carrier
 completion is reported separately. Helper code uses the fixed module packager; it creates no guest
-files, spool or lock. The destination needs compatible Python 3.11 or newer with zlib already
-available.
+files, spool or lock. The destination needs compatible Python 3.11 or newer with zlib and the
+protected lock namespace already available. Missing or unsafe lock state refuses even if the
+requested file is absent.
+
+The host exposes one private `read_file` call, preparing and dispatching one attempt with the
+current remaining deadline. The guest derives its own monotonic expiry and holds the lock until its
+bounded immutable snapshot is materialized. It checks expiry before reporting either a snapshot or
+absence, then releases the lock before emitting file bytes. There is no replayable prepared-read
+object or readiness-time setup. The budget bounds cooperative checks, not an individual blocked
+filesystem system call.
 
 An exceptional exit clears collector-owned response state and the reader's partial record before
 propagating the exception. This is not secure erasure of Python memory or traceback locals; callers
 must not render private frame locals. Snapshot bytes and metadata remain hidden from result
 representations.
 
-This is not production FileAccess or native platform acceptance. It does not provide stat-only
-observations, mutation, transaction locking, macOS support or a hard elapsed-time bound for
-filesystem reads. It assumes a cooperative execution identity, not hostile same-user isolation.
+This is not production FileAccess or native platform acceptance. This read helper does not provide
+mutation, macOS support or a hard elapsed-time bound for filesystem reads. Metadata-only stat uses
+the separate object exchange below. Both assume a cooperative execution identity, not hostile
+same-user isolation.
 
 ## Private terminal handoff preparation
 
@@ -327,7 +336,7 @@ rejects observed links or replacement without requiring directory read permissio
 local-filesystem locking semantics remain provisioning prerequisites, not results of this walk. The
 lock must not enclose child creation: a fork can inherit the descriptor and prolong ownership. Local
 contention and cleanup tests are not native macOS or ordinary/elevated acceptance. These private
-entries provide the transaction boundary for the private stat/removal helper exchange.
+entries provide the transaction boundary for the private read and stat/removal helper exchanges.
 
 Debian new-guest bootstrap invokes `_file_lock_setup.py` through a fixed standalone bundle after
 installing distribution Python. It provisions `/var/lib/agentworks/execution/files.lock` as root,

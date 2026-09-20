@@ -248,14 +248,16 @@ environment, cwd, source text, callbacks, or a destination outside its single re
 
 ### No-staging readiness gate
 
-The private Linux `_file_read.py` implementation now composes the existing snapshot reader with a
-fixed bundled helper and a file-specific `AGWF1` collector. It checks an explicitly bound identity
-before path access and sends caller paths only through sensitive stdin. Complete length, digest,
-metadata, framing and carrier-stream evidence are required before returning file bytes. Root or leaf
-absence remains distinct from refusal and incomplete observation. The helper performs no deployment,
-spool, mutation or lock creation. This implements a local bounded-read candidate, not stat-only
-support, transaction locking, production FileAccess or native SSH/QGA/macOS acceptance. The
-remaining readiness gates below still apply.
+The private Linux read and stat/removal exchanges use fixed bundled helpers and concrete `AGWF1`
+collectors. Each checks its bound identity before acquiring the existing protected system lock or
+accessing workload paths, which travel only through sensitive stdin. Read snapshots materialize
+under the lock and emit bytes only after unlocking; stat returns metadata without reading content.
+Read length, digest, metadata, framing and carrier-stream evidence must all agree before bytes
+return. Root or leaf absence remains distinct from refusal and incomplete observation; an absent
+target never bypasses the lock prerequisite. Both derive a guest-local expiry from the host's
+remaining duration. Neither read nor stat performs deployment, spool, mutation or lock creation.
+These are local private candidates, not production FileAccess or native SSH/QGA/macOS acceptance.
+The remaining readiness gates below still apply.
 
 Preparation readiness permits no helper deployment, private scratch, spool, or new lock state.
 FileAccess may expose only bounded `read_file` and `stat` there, and only through an
@@ -399,11 +401,11 @@ observations, not a globally coherent filesystem view.
 The request decoder validates paths and extracts a single nonempty leaf without separators, NUL or
 dot components before calling the private object primitives. Those typed interior helpers do not
 repeat the request decoder. The decoder also validates the remaining time budget before file I/O: a
-finite nonnegative duration or the contract's explicit unbounded choice, never NaN or infinity. It
-derives a guest-local monotonic expiry; workstation monotonic timestamps cannot be used on the
-destination. Private filesystem primitives consume that validated expiry rather than acting as a
-second request decoder. The host's original deadline continues to bound the complete multi-attempt
-operation.
+finite nonnegative duration encoded as a JSON float, or null for the explicit unbounded choice,
+never an integer, boolean, NaN or infinity. It derives a guest-local monotonic expiry; workstation
+monotonic timestamps cannot be used on the destination. Private filesystem primitives consume that
+validated expiry rather than acting as a second request decoder. The host's original deadline
+continues to bound the complete multi-attempt operation.
 
 Ordinary-user and elevated helpers must open the same lock. A per-user cache cannot satisfy that
 contract. Safe creation, permissions, lifecycle, and availability of an identity-neutral namespace
