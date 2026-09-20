@@ -170,9 +170,12 @@ and other visible extended attributes refuse. Unsupported metadata is not silent
 Errors carry closed kind/phase facts rather than filesystem messages or payloads. Cleanup concerns
 only the recorded staging name and identity, never a prefix scan. Failed cleanup retains a private
 debt value for exact-identity retry under the same parent; unknown identity requires inspection
-instead of automatic removal. Control-flow exceptions propagate, with any publication uncertainty or
-cleanup debt on a `FilePublicationError` cause. Repeated asynchronous interruption is not a bounded
-cleanup guarantee.
+instead of automatic removal. Control-flow exceptions propagate. When the publication boundary
+handles an interruption, it attaches observed publication uncertainty or cleanup debt as a
+`FilePublicationError` cause. This in-process primitive is not interruption-atomic: asynchronous
+exceptions can race Python bookkeeping, including recording a descriptor returned by the kernel.
+Repeated interruption has no bounded cleanup guarantee. Complete helper lifecycle and interruption
+acceptance remain open.
 
 Atomic visibility does not imply directory-entry crash durability, an external-writer
 compare-and-swap guarantee or a hard filesystem deadline. Native-platform acceptance and the
