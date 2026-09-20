@@ -25,6 +25,7 @@ from agentworks.execution._file_metadata import (
     ensure_directory,
     set_metadata,
 )
+from agentworks.execution._file_objects import FileObjectPhase, _ObservedObject, _open_observed
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux file metadata")
 
@@ -113,7 +114,7 @@ def test_converged_file_and_directory_are_unchanged(tmp_path: Path) -> None:
 def test_non_linux_refuses_before_parent_io(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     parent_fd = _open_parent(tmp_path)
     os.close(parent_fd)
-    monkeypatch.setattr(metadata_module.sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
 
     error = _failure(_set, parent_fd, "target", 0o600)
 
@@ -578,11 +579,15 @@ def test_observation_descriptor_is_closed_on_success_and_failure(
     target.write_bytes(b"content")
     target.chmod(0o600)
     parent_fd = _open_parent(tmp_path)
-    original_open = metadata_module._open_observed
     descriptors: list[int] = []
 
-    def recording_open(*args: object, **kwargs: object) -> object:
-        observed = original_open(*args, **kwargs)  # type: ignore[arg-type]
+    def recording_open(
+        object_parent_fd: int,
+        leaf_name: str,
+        phase: FileObjectPhase,
+        expires_at: float | None,
+    ) -> _ObservedObject | None:
+        observed = _open_observed(object_parent_fd, leaf_name, phase, expires_at)
         if observed is not None:
             descriptors.append(observed.descriptor)
         return observed
