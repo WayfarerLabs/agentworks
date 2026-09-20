@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution import _process as process_core
 from agentworks.execution.carrier import (
     Capture,
     CarrierIO,
@@ -29,7 +30,6 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
-from agentworks.execution.carriers import _subprocess
 from agentworks.execution.carriers._subprocess import ProcessResult, run_process
 
 pytestmark = pytest.mark.windows
@@ -213,7 +213,7 @@ def test_known_wait_loss_never_uses_reused_numeric_pid(monkeypatch: pytest.Monke
         stderr=subprocess.PIPE,
     )
     os.waitpid(process.pid, 0)
-    status = _subprocess._ProcessStatus(process)
+    status = process_core._ProcessStatus(process)
     assert status.poll() is None and status.lost
 
     def forbidden(*args: object, **kwargs: object) -> None:
@@ -224,7 +224,7 @@ def test_known_wait_loss_never_uses_reused_numeric_pid(monkeypatch: pytest.Monke
     monkeypatch.setattr(Popen, "poll", forbidden)
     monkeypatch.setattr(Popen, "wait", forbidden)
     monkeypatch.setattr(Popen, "kill", forbidden)
-    assert not _subprocess._cleanup(status)
+    assert not process_core._cleanup(status)
     assert status.status is None
     assert process.returncode == 0  # Internal destructor bookkeeping only.
     assert process.stdout is not None and process.stdout.closed
@@ -239,7 +239,7 @@ def test_unexpected_wait_error_still_kills_and_reaps(monkeypatch: pytest.MonkeyP
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    status = _subprocess._ProcessStatus(process)
+    status = process_core._ProcessStatus(process)
     original_waitpid = os.waitpid
     failed = False
 
@@ -253,7 +253,7 @@ def test_unexpected_wait_error_still_kills_and_reaps(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(os, "waitpid", fail_once)
     with pytest.raises(OSError, match="secret-wait-canary"):
         status.poll()
-    assert _subprocess._cleanup(status)
+    assert process_core._cleanup(status)
     assert status.status == -9
     assert not status.lost
     assert process.stdout is not None and process.stdout.closed
@@ -268,7 +268,7 @@ def test_interrupted_exact_wait_retries_same_owned_pid(monkeypatch: pytest.Monke
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    status = _subprocess._ProcessStatus(process)
+    status = process_core._ProcessStatus(process)
     original_waitpid = os.waitpid
     interrupted = False
 
@@ -285,7 +285,7 @@ def test_interrupted_exact_wait_retries_same_owned_pid(monkeypatch: pytest.Monke
         time.sleep(0.01)
     assert interrupted
     assert status.status == 42
-    assert _subprocess._cleanup(status)
+    assert process_core._cleanup(status)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="waitpid ownership is POSIX-specific")
@@ -301,7 +301,7 @@ def test_repeated_wait_interruptions_respect_operation_and_cleanup_bounds(
 
     with monkeypatch.context() as context:
         context.setattr(os, "waitpid", always_interrupted)
-        context.setattr(_subprocess, "_CLEANUP_SECONDS", 0.05)
+        context.setattr(process_core, "_CLEANUP_SECONDS", 0.05)
         started = time.monotonic()
         result = execute("import time; time.sleep(30)", seconds=0.05)
 
@@ -320,7 +320,7 @@ def test_stopped_wait_status_remains_pending_until_terminal_status(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    status = _subprocess._ProcessStatus(process)
+    status = process_core._ProcessStatus(process)
     original_waitpid = os.waitpid
     stopped = (signal.SIGSTOP << 8) | 0x7F
     reported_stop = False
@@ -336,7 +336,7 @@ def test_stopped_wait_status_remains_pending_until_terminal_status(
     monkeypatch.setattr(os, "waitpid", stop_once)
     assert status.poll() is None
     assert reported_stop and status.status is None and not status.lost
-    assert _subprocess._cleanup(status)
+    assert process_core._cleanup(status)
     assert status.status == -signal.SIGKILL
 
 
@@ -395,8 +395,8 @@ def test_live_duplex_handles_stalls_short_writes_and_binary_bytes(
     assert result.stdout.complete and result.stderr.complete
     assert result.exit_status == 0
     assert result.failure is None
-    assert source.limits and set(source.limits) == {_subprocess._CHUNK}
-    assert max(stdout.offers + stderr.offers) <= _subprocess._CHUNK
+    assert source.limits and set(source.limits) == {process_core._CHUNK}
+    assert max(stdout.offers + stderr.offers) <= process_core._CHUNK
     assert not source.closed and not stdout.closed and not stderr.closed
     assert_closed(children)
 
@@ -439,7 +439,7 @@ def test_sensitive_sink_delivery_is_transient_not_retained(children: list[subpro
 
 @pytest.mark.parametrize(
     "response",
-    [b"x" * (_subprocess._CHUNK + 1), "not-bytes", 0, True, ValueError("secret-source-canary")],
+    [b"x" * (process_core._CHUNK + 1), "not-bytes", 0, True, ValueError("secret-source-canary")],
     ids=["oversized", "text", "integer", "boolean", "exception"],
 )
 def test_invalid_live_source_response_is_input_failure(
@@ -587,10 +587,10 @@ def test_deadline_preserves_partial_evidence_and_reaps(
 ) -> None:
     markers = {b"partial", b"diagnostic"}
     observed: set[bytes] = set()
-    original_advance = _subprocess._Output.advance
+    original_advance = process_core._Output.advance
     spawn = subprocess.Popen
 
-    def advance(output: _subprocess._Output, pipe: Any) -> tuple[bool, bool]:
+    def advance(output: process_core._Output, pipe: Any) -> tuple[bool, bool]:
         progressed = original_advance(output, pipe)
         observed.update(marker for marker in markers if marker in output.data)
         return progressed
@@ -600,9 +600,13 @@ def test_deadline_preserves_partial_evidence_and_reaps(
         return spawn(argv, **kwargs)
 
     deadline = Deadline.after(10)
-    monkeypatch.setattr(_subprocess._Output, "advance", advance)
+    monkeypatch.setattr(process_core._Output, "advance", advance)
     monkeypatch.setattr(subprocess, "Popen", delayed_startup)
-    monkeypatch.setattr(Deadline, "expired", property(lambda value: observed == markers or value.remaining() == 0))
+    monkeypatch.setattr(
+        process_core.Deadline,
+        "expired",
+        property(lambda value: observed == markers or value.remaining() == 0),
+    )
     result = run_process(
         [
             sys.executable,
@@ -636,13 +640,13 @@ def test_deadline_budget_includes_process_startup(
         startup_offset = 2.0
         return child
 
-    def reject_output_read(output: _subprocess._Output, pipe: Any) -> tuple[bool, bool]:
+    def reject_output_read(output: process_core._Output, pipe: Any) -> tuple[bool, bool]:
         pytest.fail("Expired startup budget allowed an output observation cycle")
 
     monkeypatch.setattr(time, "monotonic", lambda: monotonic() + startup_offset)
     deadline = Deadline.after(1)
     monkeypatch.setattr(subprocess, "Popen", complete_startup)
-    monkeypatch.setattr(_subprocess._Output, "advance", reject_output_read)
+    monkeypatch.setattr(process_core._Output, "advance", reject_output_read)
     result = run_process(
         [sys.executable, "-c", "import time; time.sleep(30)"],
         io=CarrierIO(),
@@ -1091,13 +1095,13 @@ def test_descendant_output_handles_have_a_bounded_post_exit_drain(
         "sys.stdout.write('parent')"
     )
     if flood:
-        original = _subprocess._Output.advance
+        original = process_core._Output.advance
 
-        def advance(output: _subprocess._Output, pipe: Any) -> tuple[bool, bool]:
+        def advance(output: process_core._Output, pipe: Any) -> tuple[bool, bool]:
             progressed, failed = original(output, pipe)
             return progressed or not output.eof, failed
 
-        monkeypatch.setattr(_subprocess._Output, "advance", advance)
+        monkeypatch.setattr(process_core._Output, "advance", advance)
     try:
         started = time.monotonic()
         result = execute(script, io=CarrierIO(output=Capture(32)), seconds=None)
@@ -1172,10 +1176,10 @@ def test_interruption_reaps_before_propagating(
     monkeypatch: pytest.MonkeyPatch,
     interruption: type[BaseException],
 ) -> None:
-    def advance(output: _subprocess._Output, pipe: Any) -> tuple[bool, bool]:
+    def advance(output: process_core._Output, pipe: Any) -> tuple[bool, bool]:
         raise interruption()
 
-    monkeypatch.setattr(_subprocess._Output, "advance", advance)
+    monkeypatch.setattr(process_core._Output, "advance", advance)
     with pytest.raises(interruption):
         execute("import time; time.sleep(30)")
     assert_closed(children)
@@ -1219,7 +1223,7 @@ def test_failed_reap_during_interruption_adds_safe_note(
     original_waitpid = os.waitpid if os.name != "nt" else None
     waitpid_calls = 0
 
-    def advance(output: _subprocess._Output, pipe: Any) -> tuple[bool, bool]:
+    def advance(output: process_core._Output, pipe: Any) -> tuple[bool, bool]:
         raise KeyboardInterrupt()
 
     def wait(process: Popen[bytes], timeout: float | None = None) -> int:
@@ -1237,7 +1241,7 @@ def test_failed_reap_during_interruption_adds_safe_note(
         return original_waitpid(pid, options)
 
     with monkeypatch.context() as context:
-        context.setattr(_subprocess._Output, "advance", advance)
+        context.setattr(process_core._Output, "advance", advance)
         if os.name == "nt":
             context.setattr(Popen, "wait", wait)
         else:
