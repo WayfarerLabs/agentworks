@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys
 from contextlib import suppress
 from dataclasses import dataclass
 
 from ._evidence_wire import Frame, FrameKind, encode_frame
+from ._helper_identity import matches_current_identity
 from ._inline_control import (
     FailureCode,
     FailureFact,
@@ -83,15 +85,6 @@ class _Emitter:
 class _Launch:
     argv: list[str]
     source_fd: int | None
-
-
-def _identity_matches(manifest: InlineManifest) -> bool:
-    actual_groups = tuple(sorted(set(os.getgroups()) | {os.getegid()}))
-    return (
-        os.geteuid() == manifest.identity.euid
-        and os.getegid() == manifest.identity.egid
-        and actual_groups == manifest.identity.groups
-    )
 
 
 def _script_shell(manifest: InlineManifest) -> tuple[str, ScriptShell]:
@@ -221,7 +214,9 @@ def main(nonce: str) -> int:
         return _finish_failure(emitter, FailureFact(FailurePhase.REQUEST, code))
     if manifest.nonce != nonce:
         return _finish_failure(emitter, FailureFact(FailurePhase.REQUEST, FailureCode.NONCE))
-    if not _identity_matches(manifest):
+    if sys.platform != "linux":
+        return _finish_failure(emitter, FailureFact(FailurePhase.PREPARE, FailureCode.RUNTIME))
+    if not matches_current_identity(manifest.identity):
         return _finish_failure(emitter, FailureFact(FailurePhase.IDENTITY, FailureCode.MISMATCH))
 
     try:

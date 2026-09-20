@@ -1,4 +1,4 @@
-"""Private same-identity Linux inline execution and evidence candidate."""
+"""Private identity-bound Linux inline execution and evidence candidate."""
 
 from __future__ import annotations
 
@@ -9,10 +9,11 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
 from agentworks.execution._evidence_wire import FrameReader
+from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._helper_launcher import IdentityPlan, build_helper_argv
 from agentworks.execution._inline_bundle import FIXED_SOURCE
 from agentworks.execution._inline_observer import InlineObservation, InlineObserver
 from agentworks.execution._inline_request import (
-    IdentityExpectation,
     InlineManifest,
     InvocationKind,
     ManifestError,
@@ -38,7 +39,6 @@ if TYPE_CHECKING:
     from agentworks.execution.carrier import Carrier, Deadline, ExitStatus
 
 _DEFAULT_RUNTIME = "/usr/bin/python3"
-_HELPER_ENV = ("PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C")
 
 
 class _DiscardSink:
@@ -168,7 +168,7 @@ def _manifest(
 def prepare_inline_candidate(
     request: Command | Script,
     *,
-    identity: IdentityExpectation,
+    plan: IdentityPlan,
     stdin: bytes = b"",
     env: Mapping[str, str] | None = None,
     cwd: str | None = None,
@@ -177,9 +177,8 @@ def prepare_inline_candidate(
     runtime_path: str = _DEFAULT_RUNTIME,
 ) -> PreparedInlineCandidate:
     """Validate all payload data and build one file-free Linux helper attempt."""
-    _utf8(runtime_path)
-    if not posixpath.isabs(runtime_path) or "=" in runtime_path:
-        raise ValidationError("Inline runtime path must be an absolute non-assignment path")
+    nonce = secrets.token_hex(16)
+    fixed_argv = build_helper_argv(plan, runtime_path=runtime_path, fixed_source=FIXED_SOURCE, nonce=nonce)
     if cwd is not None:
         _utf8(cwd)
         if not posixpath.isabs(cwd):
@@ -192,11 +191,10 @@ def prepare_inline_candidate(
         output_mode, retained_limit = OutputMode.DISCARD, 0
     else:
         output_mode, retained_limit = OutputMode.CAPTURE, capture_limit
-    nonce = secrets.token_hex(16)
     manifest = _manifest(
         request,
         nonce=nonce,
-        identity=identity,
+        identity=plan.expected,
         stdin=stdin,
         env=env,
         cwd=cwd,
@@ -216,18 +214,6 @@ def prepare_inline_candidate(
 
     observer = InlineObserver(output_mode, retained_limit)
     reader = FrameReader(nonce, observer.accept)
-    fixed_argv = (
-        "/usr/bin/env",
-        "-i",
-        *_HELPER_ENV,
-        runtime_path,
-        "-I",
-        "-S",
-        "-B",
-        "-c",
-        FIXED_SOURCE,
-        nonce,
-    )
     return PreparedInlineCandidate(
         invocation=PreparedInvocation(fixed_argv),
         io=CarrierIO(

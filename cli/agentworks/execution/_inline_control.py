@@ -51,6 +51,7 @@ class FailureCode(StrEnum):
     MISMATCH = "mismatch"
     ACCOUNT = "account"
     SHELL = "shell"
+    RUNTIME = "runtime"
     SOURCE = "source"
     DISPATCH = "dispatch"
     INPUT = "input"
@@ -67,6 +68,7 @@ _FAILURE_PAIRS = frozenset(
         (FailurePhase.IDENTITY, FailureCode.MISMATCH),
         (FailurePhase.IDENTITY, FailureCode.ACCOUNT),
         (FailurePhase.IDENTITY, FailureCode.SHELL),
+        (FailurePhase.PREPARE, FailureCode.RUNTIME),
         (FailurePhase.PREPARE, FailureCode.SOURCE),
         (FailurePhase.LAUNCH, FailureCode.DISPATCH),
         (FailurePhase.OBSERVE, FailureCode.INPUT),

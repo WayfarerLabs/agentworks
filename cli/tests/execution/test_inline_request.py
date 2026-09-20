@@ -11,11 +11,12 @@ import pytest
 
 from agentworks.errors import ValidationError
 from agentworks.execution._evidence_wire import Frame, FrameKind, FrameReader
+from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._inline import PreparedInlineCandidate, prepare_inline_candidate
 from agentworks.execution._inline_control import ControlError, FailureCode, FailurePhase, parse_failure, parse_wait
 from agentworks.execution._inline_request import (
     MAX_MANIFEST_BYTES,
-    IdentityExpectation,
     ManifestError,
     ManifestErrorCode,
     decode_manifest,
@@ -44,18 +45,18 @@ def _exception_graph(error: BaseException) -> list[BaseException]:
 
 
 @pytest.fixture
-def identity() -> IdentityExpectation:
-    return IdentityExpectation(1001, 1002, (1002, 1003))
+def plan() -> IdentityPlan:
+    return IdentityPlan(IdentityExpectation(1001, 1002, (1002, 1003)), IdentityMode.DIRECT)
 
 
 @pytest.mark.windows
 def test_canonical_manifest_is_closed_ascii_and_keeps_payload_out_of_helper_argv(
-    identity: IdentityExpectation,
+    plan: IdentityPlan,
 ) -> None:
     canary = "inline-manifest-canary-8b30480f"
     prepared = prepare_inline_candidate(
         Command(["/bin/tool", canary]),
-        identity=identity,
+        plan=plan,
         stdin=canary.encode(),
         env={"VALUE": canary},
         cwd=f"/{canary}",
@@ -130,7 +131,7 @@ def test_guest_decoder_distinguishes_only_the_safe_oversize_category() -> None:
     assert caught.value.code is ManifestErrorCode.OVERSIZED
 
 
-def test_boundary_errors_drop_payload_bearing_exception_context(identity: IdentityExpectation) -> None:
+def test_boundary_errors_drop_payload_bearing_exception_context(plan: IdentityPlan) -> None:
     canary = "exception-graph-canary-b3627e"
 
     class BrokenMapping(Mapping[str, str]):
@@ -151,21 +152,19 @@ def test_boundary_errors_drop_payload_bearing_exception_context(identity: Identi
         (lambda: decode_manifest(f'{{"{canary}":'.encode()), ManifestError),
         (lambda: parse_wait(f'{{"kind":"{canary}","value":0}}'.encode()), ControlError),
         (
-            lambda: prepare_inline_candidate(Command(["/bin/echo", f"{canary}\ud800"]), identity=identity),
+            lambda: prepare_inline_candidate(Command(["/bin/echo", f"{canary}\ud800"]), plan=plan),
             ValidationError,
         ),
         (
-            lambda: prepare_inline_candidate(Command(["/bin/true"]), identity=identity, env={f"{canary}-": "x"}),
+            lambda: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, env={f"{canary}-": "x"}),
             ValidationError,
         ),
         (
-            lambda: prepare_inline_candidate(Command(["/bin/true"]), identity=identity, env=BrokenMapping()),
+            lambda: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, env=BrokenMapping()),
             ValidationError,
         ),
         (
-            lambda: prepare_inline_candidate(
-                Command(["/bin/true"]), identity=identity, runtime_path=f"/tmp/{canary}=python"
-            ),
+            lambda: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, runtime_path=f"/tmp/{canary}=python"),
             ValidationError,
         ),
     ):
@@ -182,34 +181,37 @@ def test_boundary_errors_drop_payload_bearing_exception_context(identity: Identi
 @pytest.mark.parametrize(
     "build",
     [
-        lambda identity: prepare_inline_candidate(Command(["/bin/echo", "bad\0arg"]), identity=identity),
-        lambda identity: prepare_inline_candidate(Command(["/bin/echo", "\ud800"]), identity=identity),
-        lambda identity: prepare_inline_candidate(Script("bad\0source", Shell.SH), identity=identity),
-        lambda identity: prepare_inline_candidate(Script("\ud800", Shell.SH), identity=identity),
-        lambda identity: prepare_inline_candidate(Command(["/bin/true"]), identity=identity, env={"BAD-NAME": "x"}),
-        lambda identity: prepare_inline_candidate(Command(["/bin/true"]), identity=identity, env={"ENV": "x"}),
-        lambda identity: prepare_inline_candidate(Command(["/bin/true"]), identity=identity, env={"_agw_x": "x"}),
-        lambda identity: prepare_inline_candidate(Command(["/bin/true"]), identity=identity, env={"VALUE": "bad\0"}),
-        lambda identity: prepare_inline_candidate(Command(["/bin/true"]), identity=identity, cwd="relative"),
-        lambda identity: prepare_inline_candidate(Command(["/bin/true"]), identity=identity, cwd="/bad\0cwd"),
-        lambda identity: prepare_inline_candidate(Command(["/bin/true"]), identity=identity, capture_limit=4_097),
-        lambda identity: prepare_inline_candidate(Command(["/bin/true"]), identity=identity, capture_limit=True),
-        lambda identity: prepare_inline_candidate(Command(["/bin/true"]), identity=identity, runtime_path="python3"),
-        lambda identity: prepare_inline_candidate(
-            Command(["/bin/true"]), identity=identity, runtime_path="/tmp/runtime=payload-canary"
+        lambda plan: prepare_inline_candidate(Command(["/bin/echo", "bad\0arg"]), plan=plan),
+        lambda plan: prepare_inline_candidate(Command(["/bin/echo", "\ud800"]), plan=plan),
+        lambda plan: prepare_inline_candidate(Script("bad\0source", Shell.SH), plan=plan),
+        lambda plan: prepare_inline_candidate(Script("\ud800", Shell.SH), plan=plan),
+        lambda plan: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, env={"BAD-NAME": "x"}),
+        lambda plan: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, env={"ENV": "x"}),
+        lambda plan: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, env={"_agw_x": "x"}),
+        lambda plan: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, env={"VALUE": "bad\0"}),
+        lambda plan: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, cwd="relative"),
+        lambda plan: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, cwd="/bad\0cwd"),
+        lambda plan: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, capture_limit=4_097),
+        lambda plan: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, capture_limit=True),
+        lambda plan: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, runtime_path="python3"),
+        lambda plan: prepare_inline_candidate(
+            Command(["/bin/true"]), plan=plan, runtime_path="/tmp/runtime=payload-canary"
         ),
-        lambda identity: prepare_inline_candidate(
+        lambda plan: prepare_inline_candidate(
             Command(["/bin/true"]),
-            identity=IdentityExpectation(identity.euid, identity.egid, (identity.egid, identity.egid)),
+            plan=IdentityPlan(
+                IdentityExpectation(plan.expected.euid, plan.expected.egid, (plan.expected.egid, plan.expected.egid)),
+                IdentityMode.DIRECT,
+            ),
         ),
     ],
 )
 def test_host_rejects_invalid_text_options_and_identity_before_dispatch(
-    build: Callable[[IdentityExpectation], PreparedInlineCandidate],
-    identity: IdentityExpectation,
+    build: Callable[[IdentityPlan], PreparedInlineCandidate],
+    plan: IdentityPlan,
 ) -> None:
     with pytest.raises(ValidationError):
-        build(identity)
+        build(plan)
 
 
 @pytest.mark.parametrize(
@@ -220,14 +222,14 @@ def test_host_rejects_invalid_text_options_and_identity_before_dispatch(
         Script("exit 0", Shell.USER_DEFAULT, login=True, interactive=True),
     ],
 )
-def test_host_refuses_unsupported_startup_modes(invocation: Script, identity: IdentityExpectation) -> None:
+def test_host_refuses_unsupported_startup_modes(invocation: Script, plan: IdentityPlan) -> None:
     with pytest.raises(ValidationError):
-        prepare_inline_candidate(invocation, identity=identity)
+        prepare_inline_candidate(invocation, plan=plan)
 
 
-def test_host_refuses_oversized_manifest_without_dispatch(identity: IdentityExpectation) -> None:
+def test_host_refuses_oversized_manifest_without_dispatch(plan: IdentityPlan) -> None:
     with pytest.raises(ValidationError) as caught:
-        prepare_inline_candidate(Command(["/bin/true"]), identity=identity, stdin=b"x" * MAX_MANIFEST_BYTES)
+        prepare_inline_candidate(Command(["/bin/true"]), plan=plan, stdin=b"x" * MAX_MANIFEST_BYTES)
 
     assert "x" * 64 not in str(caught.value)
 
@@ -240,10 +242,8 @@ def test_host_refuses_oversized_manifest_without_dispatch(identity: IdentityExpe
         (b"x" * (MAX_MANIFEST_BYTES + 1), FailureCode.OVERSIZED),
     ],
 )
-def test_actual_guest_revalidates_untrusted_manifest(
-    manifest: bytes, code: FailureCode, identity: IdentityExpectation
-) -> None:
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), identity=identity)
+def test_actual_guest_revalidates_untrusted_manifest(manifest: bytes, code: FailureCode, plan: IdentityPlan) -> None:
+    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
     invocation = (*prepared.invocation.argv[:-1], NONCE)
 
     completed = subprocess.run(invocation, input=manifest, capture_output=True, timeout=10, check=True)

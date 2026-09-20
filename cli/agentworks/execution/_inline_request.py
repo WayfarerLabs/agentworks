@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from ._helper_identity import IdentityExpectation
+
 MAX_CAPTURE_BYTES = 4_096
 MAX_MANIFEST_BYTES = 32_768
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z_0-9]*\Z")
@@ -48,13 +50,6 @@ class OutputMode(StrEnum):
     CAPTURE = "capture"
     DISCARD = "discard"
     SUPPRESS = "suppress"
-
-
-@dataclass(frozen=True, slots=True)
-class IdentityExpectation:
-    euid: int
-    egid: int
-    groups: tuple[int, ...]
 
 
 @dataclass(frozen=True, slots=True)

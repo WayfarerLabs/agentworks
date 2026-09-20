@@ -18,7 +18,9 @@ from agentworks.execution._file_read import (
     prepare_file_read,
     read_file,
 )
-from agentworks.execution._file_read_protocol import FileReadFailure, FileReadIdentity
+from agentworks.execution._file_read_protocol import FileReadFailure
+from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution.carrier import (
     CarrierIO,
     CarrierReport,
@@ -66,18 +68,17 @@ class LocalCarrier:
 
 
 @pytest.fixture
-def identity() -> FileReadIdentity:
-    return FileReadIdentity(
-        os.geteuid(),
-        os.getegid(),
-        tuple(sorted(set(os.getgroups()) | {os.getegid()})),
+def plan() -> IdentityPlan:
+    return IdentityPlan(
+        IdentityExpectation(os.geteuid(), os.getegid(), tuple(sorted(set(os.getgroups()) | {os.getegid()}))),
+        IdentityMode.DIRECT,
     )
 
 
 def _read(
     root: Path,
     leaf: str,
-    identity: FileReadIdentity,
+    plan: IdentityPlan,
     *,
     max_bytes: int = 1024,
     runtime_path: str = sys.executable,
@@ -88,7 +89,7 @@ def _read(
         trusted_root_path=str(root),
         relative_path=leaf,
         max_bytes=max_bytes,
-        identity=identity,
+        plan=plan,
         deadline=Deadline.after(15),
         runtime_path=runtime_path,
     )
@@ -99,7 +100,7 @@ def _read(
 @pytest.mark.parametrize("runtime", [Path(sys.executable), Path("/usr/bin/python3.11")], ids=["current", "system-3.11"])
 def test_binary_read_uses_one_sensitive_ascii_attempt_without_staging(
     tmp_path: Path,
-    identity: FileReadIdentity,
+    plan: IdentityPlan,
     runtime: Path,
 ) -> None:
     if not runtime.is_file():
@@ -112,7 +113,7 @@ def test_binary_read_uses_one_sensitive_ascii_attempt_without_staging(
     carrier, result = _read(
         tmp_path,
         target.name,
-        identity,
+        plan,
         max_bytes=len(content),
         runtime_path=str(runtime),
     )
@@ -138,22 +139,22 @@ def test_binary_read_uses_one_sensitive_ascii_attempt_without_staging(
 @pytest.mark.parametrize(("name", "content"), [("empty", b""), ("small", b"content")])
 def test_empty_and_small_regular_files_are_complete(
     tmp_path: Path,
-    identity: FileReadIdentity,
+    plan: IdentityPlan,
     name: str,
     content: bytes,
 ) -> None:
     (tmp_path / name).write_bytes(content)
 
-    _, result = _read(tmp_path, name, identity, max_bytes=max(1, len(content)))
+    _, result = _read(tmp_path, name, plan, max_bytes=max(1, len(content)))
 
     assert result.observation.state is FileReadObservationState.PRESENT
     assert result.observation.snapshot is not None
     assert result.observation.snapshot.data == content
 
 
-def test_absence_is_distinct_from_every_failure(tmp_path: Path, identity: FileReadIdentity) -> None:
-    _, result = _read(tmp_path, "missing", identity)
-    _, missing_root = _read(tmp_path / "missing-root", "file", identity)
+def test_absence_is_distinct_from_every_failure(tmp_path: Path, plan: IdentityPlan) -> None:
+    _, result = _read(tmp_path, "missing", plan)
+    _, missing_root = _read(tmp_path / "missing-root", "file", plan)
 
     assert result.observation.state is FileReadObservationState.ABSENT
     assert result.observation.snapshot is None
@@ -164,14 +165,14 @@ def test_absence_is_distinct_from_every_failure(tmp_path: Path, identity: FileRe
 
 def test_special_object_and_oversize_refusals_disclose_no_bytes(
     tmp_path: Path,
-    identity: FileReadIdentity,
+    plan: IdentityPlan,
 ) -> None:
     (tmp_path / "directory").mkdir()
     secret = b"oversize-secret-canary"
     (tmp_path / "large").write_bytes(secret)
 
-    _, directory = _read(tmp_path, "directory", identity)
-    _, oversized = _read(tmp_path, "large", identity, max_bytes=1)
+    _, directory = _read(tmp_path, "directory", plan)
+    _, oversized = _read(tmp_path, "large", plan, max_bytes=1)
 
     assert directory.observation.state is FileReadObservationState.REFUSED
     assert directory.observation.failure is FileReadFailure.UNSUPPORTED_OBJECT
@@ -183,9 +184,13 @@ def test_special_object_and_oversize_refusals_disclose_no_bytes(
     assert hashlib.sha256(secret).hexdigest() not in repr(oversized)
 
 
-def test_identity_mismatch_precedes_target_root_access(tmp_path: Path, identity: FileReadIdentity) -> None:
+def test_identity_mismatch_precedes_target_root_access(tmp_path: Path, plan: IdentityPlan) -> None:
     missing_root = tmp_path / "root-secret-canary"
-    mismatched = FileReadIdentity(identity.euid + 100_000, identity.egid, identity.groups)
+    expected = plan.expected
+    mismatched = IdentityPlan(
+        IdentityExpectation(expected.euid + 100_000, expected.egid, expected.groups),
+        IdentityMode.DIRECT,
+    )
 
     _, result = _read(missing_root, "file", mismatched)
 
@@ -197,7 +202,7 @@ def test_identity_mismatch_precedes_target_root_access(tmp_path: Path, identity:
 
 def test_symlinked_trusted_root_is_refused_without_path_disclosure(
     tmp_path: Path,
-    identity: FileReadIdentity,
+    plan: IdentityPlan,
 ) -> None:
     actual = tmp_path / "actual"
     actual.mkdir()
@@ -205,7 +210,7 @@ def test_symlinked_trusted_root_is_refused_without_path_disclosure(
     link = tmp_path / "root-link-canary"
     link.symlink_to(actual, target_is_directory=True)
 
-    carrier, result = _read(link, "file", identity)
+    carrier, result = _read(link, "file", plan)
 
     assert result.observation.state is FileReadObservationState.REFUSED
     assert result.observation.failure is FileReadFailure.ROOT_REFUSED
@@ -214,19 +219,19 @@ def test_symlinked_trusted_root_is_refused_without_path_disclosure(
     assert str(link) not in repr(result)
 
 
-def test_root_path_is_a_valid_request_and_absence_remains_complete(identity: FileReadIdentity) -> None:
-    _, result = _read(Path("/"), "agentworks-definitely-absent-file-read-fixture", identity)
+def test_root_path_is_a_valid_request_and_absence_remains_complete(plan: IdentityPlan) -> None:
+    _, result = _read(Path("/"), "agentworks-definitely-absent-file-read-fixture", plan)
 
     assert result.observation.state is FileReadObservationState.ABSENT
 
 
-def test_prepared_attempt_cannot_be_replayed(tmp_path: Path, identity: FileReadIdentity) -> None:
+def test_prepared_attempt_cannot_be_replayed(tmp_path: Path, plan: IdentityPlan) -> None:
     (tmp_path / "file").write_bytes(b"content")
     prepared = prepare_file_read(
         trusted_root_path=str(tmp_path),
         relative_path="file",
         max_bytes=1024,
-        identity=identity,
+        plan=plan,
         runtime_path=sys.executable,
     )
     carrier = LocalCarrier()
@@ -250,7 +255,7 @@ def test_prepared_attempt_cannot_be_replayed(tmp_path: Path, identity: FileReadI
     ],
 )
 def test_invalid_requests_refuse_before_carrier_construction(
-    identity: FileReadIdentity,
+    plan: IdentityPlan,
     root: str,
     leaf: str,
     bound: object,
@@ -260,57 +265,57 @@ def test_invalid_requests_refuse_before_carrier_construction(
             trusted_root_path=root,
             relative_path=leaf,
             max_bytes=bound,  # type: ignore[arg-type]
-            identity=identity,
+            plan=plan,
         )
 
 
 def test_prepared_request_and_result_representations_hide_paths_and_payload(
     tmp_path: Path,
-    identity: FileReadIdentity,
+    plan: IdentityPlan,
 ) -> None:
     secret_path = str(tmp_path / "path-canary")
     prepared: PreparedFileRead = prepare_file_read(
         trusted_root_path=secret_path,
         relative_path="leaf-canary",
         max_bytes=1,
-        identity=identity,
+        plan=plan,
     )
 
     assert secret_path not in repr(prepared)
     assert "leaf-canary" not in repr(prepared)
 
 
-def test_caller_bound_has_no_file_layer_ceiling(identity: FileReadIdentity) -> None:
+def test_caller_bound_has_no_file_layer_ceiling(plan: IdentityPlan) -> None:
     prepared = prepare_file_read(
         trusted_root_path="/trusted",
         relative_path="file",
         max_bytes=10**100,
-        identity=identity,
+        plan=plan,
     )
 
     assert len(prepared.io.input.data) < 1024  # type: ignore[union-attr]
 
 
-def test_request_manifest_has_an_independent_finite_bound(identity: FileReadIdentity) -> None:
+def test_request_manifest_has_an_independent_finite_bound(plan: IdentityPlan) -> None:
     with pytest.raises(ValidationError) as raised:
         prepare_file_read(
             trusted_root_path="/" + "a" * 30_000,
             relative_path="file",
             max_bytes=1,
-            identity=identity,
+            plan=plan,
         )
 
     assert raised.value.__cause__ is None
     assert raised.value.__context__ is None
 
 
-def test_invalid_utf8_path_is_not_retained_by_the_validation_exception(identity: FileReadIdentity) -> None:
+def test_invalid_utf8_path_is_not_retained_by_the_validation_exception(plan: IdentityPlan) -> None:
     with pytest.raises(ValidationError) as raised:
         prepare_file_read(
             trusted_root_path="/secret-\udcff-canary",
             relative_path="file",
             max_bytes=1,
-            identity=identity,
+            plan=plan,
         )
 
     assert raised.value.__cause__ is None

@@ -5,7 +5,14 @@ from __future__ import annotations
 from agentworks.execution._helper_bundle import build_helper_modules
 
 _PACKAGE = "_agw_inline"
-_MODULE_NAMES = ("_process", "_evidence_wire", "_inline_request", "_inline_control", "_inline_guest")
+_MODULE_NAMES = (
+    "_helper_identity",
+    "_process",
+    "_evidence_wire",
+    "_inline_request",
+    "_inline_control",
+    "_inline_guest",
+)
 
 
 FIXED_SOURCE = build_helper_modules(_PACKAGE, _MODULE_NAMES) + (

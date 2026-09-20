@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._inline import (
     InlineCandidateResult,
     PreparedInlineCandidate,
@@ -17,7 +19,6 @@ from agentworks.execution._inline import (
     prepare_inline_candidate,
 )
 from agentworks.execution._inline_control import FailureCode, FailurePhase, StreamRetention, WaitFact, WaitKind
-from agentworks.execution._inline_request import IdentityExpectation
 from agentworks.execution.carrier import (
     CarrierIO,
     CarrierReport,
@@ -75,34 +76,33 @@ def helper_runtime(request: pytest.FixtureRequest) -> str:
 
 
 @pytest.fixture
-def identity() -> IdentityExpectation:
-    return IdentityExpectation(
-        os.geteuid(),
-        os.getegid(),
-        tuple(sorted(set(os.getgroups()) | {os.getegid()})),
+def plan() -> IdentityPlan:
+    return IdentityPlan(
+        IdentityExpectation(os.geteuid(), os.getegid(), tuple(sorted(set(os.getgroups()) | {os.getegid()}))),
+        IdentityMode.DIRECT,
     )
 
 
 def _run(
     request: Command | Script,
-    identity: IdentityExpectation,
+    plan: IdentityPlan,
     *,
     helper_runtime: str = "/usr/bin/python3",
     carrier: LocalCarrier | None = None,
     **options: object,
 ) -> tuple[PreparedInlineCandidate, InlineCandidateResult, LocalCarrier]:
     selected_carrier = carrier or LocalCarrier()
-    prepared = prepare_inline_candidate(request, identity=identity, runtime_path=helper_runtime, **options)
+    prepared = prepare_inline_candidate(request, plan=plan, runtime_path=helper_runtime, **options)
     result = execute_inline_candidate(selected_carrier, prepared, deadline=Deadline.after(15))
     assert selected_carrier.calls == 1
     return prepared, result, selected_carrier
 
 
 @pytest.mark.parametrize("status", range(256))
-def test_literal_command_preserves_every_normal_exit(status: int, identity: IdentityExpectation) -> None:
+def test_literal_command_preserves_every_normal_exit(status: int, plan: IdentityPlan) -> None:
     _, result, _ = _run(
         Command(["/usr/bin/python3", "-I", "-S", "-B", "-c", f"raise SystemExit({status})"]),
-        identity,
+        plan,
     )
 
     assert result.observation.trusted_terminal
@@ -113,10 +113,10 @@ def test_literal_command_preserves_every_normal_exit(status: int, identity: Iden
     assert result.carrier_completion == ExitStatus(code=0)
 
 
-def test_signaled_command_keeps_exact_signal_separate(identity: IdentityExpectation) -> None:
+def test_signaled_command_keeps_exact_signal_separate(plan: IdentityPlan) -> None:
     _, result, _ = _run(
         Command(["/usr/bin/python3", "-c", "import os,signal; os.kill(os.getpid(), signal.SIGTERM)"]),
-        identity,
+        plan,
     )
 
     assert result.observation.wait is not None
@@ -125,11 +125,11 @@ def test_signaled_command_keeps_exact_signal_separate(identity: IdentityExpectat
     assert result.observation.trusted_terminal
 
 
-def test_literal_arguments_are_not_reparsed(identity: IdentityExpectation) -> None:
+def test_literal_arguments_are_not_reparsed(plan: IdentityPlan) -> None:
     arguments = ["space value", "'\"$()`;", "line1\nline2", "snowman-\u2603"]
     code = f"import sys;assert sys.argv[1:]=={arguments!r}"
 
-    _, result, _ = _run(Command(["/usr/bin/python3", "-I", "-S", "-B", "-c", code, *arguments]), identity)
+    _, result, _ = _run(Command(["/usr/bin/python3", "-I", "-S", "-B", "-c", code, *arguments]), plan)
 
     assert result.observation.wait == WaitFact(WaitKind.EXIT, 0)
     assert result.observation.trusted_terminal
@@ -138,7 +138,7 @@ def test_literal_arguments_are_not_reparsed(identity: IdentityExpectation) -> No
 @pytest.mark.parametrize("shell", [Shell.SH, Shell.BASH])
 def test_memfd_script_separates_source_binary_input_and_streams(
     shell: Shell,
-    identity: IdentityExpectation,
+    plan: IdentityPlan,
     helper_runtime: str,
 ) -> None:
     stdin = bytes(range(256)) * 40
@@ -154,7 +154,7 @@ def test_memfd_script_separates_source_binary_input_and_streams(
 
     prepared, result, _ = _run(
         Script(source, shell),
-        identity,
+        plan,
         helper_runtime=helper_runtime,
         stdin=stdin,
     )
@@ -167,16 +167,16 @@ def test_memfd_script_separates_source_binary_input_and_streams(
 
 
 def test_payload_environment_and_absolute_cwd_replace_helper_environment(
-    identity: IdentityExpectation,
+    plan: IdentityPlan,
     tmp_path: Path,
 ) -> None:
     _, env_result, _ = _run(
         Command(["/usr/bin/env", "-0"]),
-        identity,
+        plan,
         env={"ONLY_PAYLOAD": "present"},
         cwd=str(tmp_path),
     )
-    _, cwd_result, _ = _run(Command(["/bin/pwd"]), identity, cwd=str(tmp_path))
+    _, cwd_result, _ = _run(Command(["/bin/pwd"]), plan, cwd=str(tmp_path))
 
     assert env_result.observation.stdout is not None
     assert env_result.observation.stdout.data == b"ONLY_PAYLOAD=present\0"
@@ -184,8 +184,12 @@ def test_payload_environment_and_absolute_cwd_replace_helper_environment(
     assert cwd_result.observation.stdout.data == f"{tmp_path}\n".encode()
 
 
-def test_identity_mismatch_refuses_before_launch(identity: IdentityExpectation) -> None:
-    mismatched = IdentityExpectation(identity.euid + 100_000, identity.egid, identity.groups)
+def test_identity_mismatch_refuses_before_launch(plan: IdentityPlan) -> None:
+    expected = plan.expected
+    mismatched = IdentityPlan(
+        IdentityExpectation(expected.euid + 100_000, expected.egid, expected.groups),
+        IdentityMode.DIRECT,
+    )
     _, result, _ = _run(Command(["/bin/true"]), mismatched)
 
     observation = result.observation
@@ -198,14 +202,14 @@ def test_identity_mismatch_refuses_before_launch(identity: IdentityExpectation) 
     assert observation.failure.code is FailureCode.MISMATCH
 
 
-def test_unsupported_user_default_shell_refuses_without_fallback(identity: IdentityExpectation) -> None:
+def test_unsupported_user_default_shell_refuses_without_fallback(plan: IdentityPlan) -> None:
     import pwd
 
-    configured = pwd.getpwuid(identity.euid).pw_shell
+    configured = pwd.getpwuid(plan.expected.euid).pw_shell
     if configured in {"/bin/sh", "/usr/bin/sh", "/bin/bash", "/usr/bin/bash"}:
         pytest.skip("The local account has a supported default shell")
 
-    _, result, _ = _run(Script("exit 0\n", Shell.USER_DEFAULT), identity)
+    _, result, _ = _run(Script("exit 0\n", Shell.USER_DEFAULT), plan)
 
     assert result.observation.failure is not None
     assert result.observation.failure.phase is FailurePhase.IDENTITY
@@ -213,11 +217,11 @@ def test_unsupported_user_default_shell_refuses_without_fallback(identity: Ident
     assert not result.observation.launching
 
 
-def test_capture_overflow_retains_limit_and_reports_truncation(identity: IdentityExpectation) -> None:
+def test_capture_overflow_retains_limit_and_reports_truncation(plan: IdentityPlan) -> None:
     code = "import sys;sys.stdout.buffer.write(b'o'*6000);sys.stderr.buffer.write(b'e'*5000)"
     _, result, _ = _run(
         Command(["/usr/bin/python3", "-c", code]),
-        identity,
+        plan,
         capture_limit=4_096,
     )
 
@@ -231,7 +235,7 @@ def test_capture_overflow_retains_limit_and_reports_truncation(identity: Identit
     assert result.observation.trusted_terminal
 
 
-def test_sensitive_output_and_raw_reports_retain_no_canary(identity: IdentityExpectation) -> None:
+def test_sensitive_output_and_raw_reports_retain_no_canary(plan: IdentityPlan) -> None:
     canary = "inline-sensitive-canary-59ae814d"
     command = Command(
         [
@@ -246,7 +250,7 @@ def test_sensitive_output_and_raw_reports_retain_no_canary(identity: IdentityExp
 
     prepared, result, carrier = _run(
         command,
-        identity,
+        plan,
         stdin=canary.encode(),
         env={"SECRET": canary},
         sensitive=True,
@@ -268,10 +272,10 @@ def test_sensitive_output_and_raw_reports_retain_no_canary(identity: IdentityExp
     assert canary not in str(caught.value) and canary not in repr(caught.value)
 
 
-def test_discard_reports_safe_stream_facts_without_data(identity: IdentityExpectation) -> None:
+def test_discard_reports_safe_stream_facts_without_data(plan: IdentityPlan) -> None:
     _, result, _ = _run(
         Command(["/usr/bin/python3", "-c", "import sys;print('discarded');print('error',file=sys.stderr)"]),
-        identity,
+        plan,
         capture_limit=None,
     )
 
@@ -282,11 +286,11 @@ def test_discard_reports_safe_stream_facts_without_data(identity: IdentityExpect
         assert stream.retention is StreamRetention.DISCARDED
 
 
-def test_script_helper_creates_no_directory_entry(identity: IdentityExpectation, tmp_path: Path) -> None:
+def test_script_helper_creates_no_directory_entry(plan: IdentityPlan, tmp_path: Path) -> None:
     before = set(tmp_path.iterdir())
     _, result, _ = _run(
         Script("printf no-file\n", Shell.SH),
-        identity,
+        plan,
         cwd=str(tmp_path),
     )
 

@@ -1,4 +1,4 @@
-"""Destination entry point for one bounded same-identity Linux file read."""
+"""Destination entry point for one bounded identity-bound Linux file read."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from ._file_read_protocol import (
     encode_file_read_result,
 )
 from ._file_snapshot import FileSnapshot, SnapshotFailureKind, SnapshotReadError, read_snapshot
+from ._helper_identity import matches_current_identity
 
 
 class _Emitter:
@@ -39,15 +40,6 @@ class _Emitter:
                 raise OSError
             remaining = remaining[written:]
         self._sequence += 1
-
-
-def _identity_matches(request: FileReadRequest) -> bool:
-    actual_groups = tuple(sorted(set(os.getgroups()) | {os.getegid()}))
-    return (
-        os.geteuid() == request.identity.euid
-        and os.getegid() == request.identity.egid
-        and actual_groups == request.identity.groups
-    )
 
 
 def _open_trusted_root(path: str) -> int | None:
@@ -148,7 +140,7 @@ def main(nonce: str) -> int:
         return _finish_failure(emitter, FileReadFailure.NONCE_MISMATCH)
     if sys.platform != "linux":
         return _finish_failure(emitter, FileReadFailure.UNSUPPORTED_RUNTIME)
-    if not _identity_matches(request):
+    if not matches_current_identity(request.identity):
         return _finish_failure(emitter, FileReadFailure.IDENTITY_MISMATCH)
     try:
         snapshot = _snapshot(request)

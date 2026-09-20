@@ -11,6 +11,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from ._file_stat import FileStat
+from ._helper_identity import IdentityExpectation
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -89,20 +90,13 @@ class FileReadControlError(ValueError):
         super().__init__("invalid file-read control body")
 
 
-@dataclass(frozen=True, slots=True)
-class FileReadIdentity:
-    euid: int
-    egid: int
-    groups: tuple[int, ...]
-
-
 @dataclass(frozen=True, slots=True, repr=False)
 class FileReadRequest:
     nonce: str
     root_path: str
     relative_path: str
     max_bytes: int
-    identity: FileReadIdentity
+    identity: IdentityExpectation
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,7 +148,7 @@ def _decode_base64_text(value: object) -> str:
     return text
 
 
-def _identity(value: object) -> FileReadIdentity:
+def _identity(value: object) -> IdentityExpectation:
     if type(value) is not dict or set(value) != {"egid", "euid", "groups"}:
         raise _invalid_request()
     euid = value["euid"]
@@ -172,7 +166,7 @@ def _identity(value: object) -> FileReadIdentity:
         or egid not in groups
     ):
         raise _invalid_request()
-    return FileReadIdentity(euid, egid, tuple(groups))
+    return IdentityExpectation(euid, egid, tuple(groups))
 
 
 def _normalized_root(path: str) -> bool:

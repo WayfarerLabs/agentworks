@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.execution._file_read import FileReadObservationState, execute_file_read, prepare_file_read
-from agentworks.execution._file_read_protocol import FileReadIdentity
+from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution.carrier import Deadline, Dispatch, ExitStatus
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 
@@ -31,7 +32,10 @@ def test_file_read_through_buffered_proxmox_delivery(
         trusted_root_path=str(tmp_path),
         relative_path="file-path-canary",
         max_bytes=len(data),
-        identity=FileReadIdentity(os.geteuid(), os.getegid(), tuple(sorted(set(os.getgroups()) | {os.getegid()}))),
+        plan=IdentityPlan(
+            IdentityExpectation(os.geteuid(), os.getegid(), tuple(sorted(set(os.getgroups()) | {os.getegid()}))),
+            IdentityMode.DIRECT,
+        ),
         runtime_path=sys.executable,
     )
     carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.invalid", "node1", 101, "token", "synthetic"))

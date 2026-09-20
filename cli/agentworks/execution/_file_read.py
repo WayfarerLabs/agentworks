@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import posixpath
 import secrets
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -14,7 +13,6 @@ from agentworks.execution._file_read_bundle import FIXED_SOURCE
 from agentworks.execution._file_read_protocol import (
     FileReadControlError,
     FileReadFailure,
-    FileReadIdentity,
     FileReadRecord,
     FileReadRecordKind,
     FileReadRecordReader,
@@ -27,6 +25,7 @@ from agentworks.execution._file_read_protocol import (
     parse_file_read_failure,
     parse_file_read_result,
 )
+from agentworks.execution._helper_launcher import IdentityPlan, build_helper_argv
 from agentworks.execution.carrier import (
     CarrierIO,
     Dispatch,
@@ -42,7 +41,6 @@ if TYPE_CHECKING:
     from agentworks.execution.carrier import Carrier, Deadline, ExitStatus
 
 _DEFAULT_RUNTIME = "/usr/bin/python3"
-_HELPER_ENV = ("PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C")
 
 
 class FileReadObservationState(StrEnum):
@@ -253,23 +251,19 @@ def prepare_file_read(
     trusted_root_path: str,
     relative_path: str,
     max_bytes: int,
-    identity: FileReadIdentity,
+    plan: IdentityPlan,
     runtime_path: str = _DEFAULT_RUNTIME,
 ) -> PreparedFileRead:
-    """Validate and build one file-free same-identity Linux read attempt."""
+    """Validate and build one file-free identity-bound Linux read attempt."""
+    nonce = secrets.token_hex(16)
+    fixed_argv = build_helper_argv(plan, runtime_path=runtime_path, fixed_source=FIXED_SOURCE, nonce=nonce)
     root = _validate_text(trusted_root_path)
     leaf = _validate_text(relative_path)
-    runtime = _validate_text(runtime_path)
     if type(max_bytes) is not int or max_bytes <= 0:
         raise ValidationError("File-read byte bound must be a positive integer")
-    if type(identity) is not FileReadIdentity:
-        raise ValidationError("File read requires a bound identity expectation")
-    if not posixpath.isabs(runtime) or "=" in runtime:
-        raise ValidationError("File-read runtime path must be an absolute non-assignment path")
-    nonce = secrets.token_hex(16)
     request_failure: FileReadFailure | None = None
     try:
-        request_data = encode_file_read_request(FileReadRequest(nonce, root, leaf, max_bytes, identity))
+        request_data = encode_file_read_request(FileReadRequest(nonce, root, leaf, max_bytes, plan.expected))
     except FileReadRequestError as error:
         request_failure = error.failure
     if request_failure is FileReadFailure.OVERSIZED_REQUEST:
@@ -279,18 +273,6 @@ def prepare_file_read(
     collector = _FileReadCollector(max_bytes)
     reader = FileReadRecordReader(nonce, collector.accept)
     stderr = _DiagnosticSink()
-    fixed_argv = (
-        "/usr/bin/env",
-        "-i",
-        *_HELPER_ENV,
-        runtime,
-        "-I",
-        "-S",
-        "-B",
-        "-c",
-        FIXED_SOURCE,
-        nonce,
-    )
     return PreparedFileRead(
         invocation=PreparedInvocation(fixed_argv),
         io=CarrierIO(
@@ -341,7 +323,7 @@ def read_file(
     trusted_root_path: str,
     relative_path: str,
     max_bytes: int,
-    identity: FileReadIdentity,
+    plan: IdentityPlan,
     deadline: Deadline,
     runtime_path: str = _DEFAULT_RUNTIME,
 ) -> FileReadCandidateResult:
@@ -350,7 +332,7 @@ def read_file(
         trusted_root_path=trusted_root_path,
         relative_path=relative_path,
         max_bytes=max_bytes,
-        identity=identity,
+        plan=plan,
         runtime_path=runtime_path,
     )
     return execute_file_read(carrier, prepared, deadline=deadline)

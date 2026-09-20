@@ -9,6 +9,8 @@ from dataclasses import dataclass
 import pytest
 
 from agentworks.execution._evidence_wire import Frame, FrameKind, WireError, encode_frame
+from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._inline import execute_inline_candidate, prepare_inline_candidate
 from agentworks.execution._inline_control import (
     ControlError,
@@ -30,7 +32,6 @@ from agentworks.execution._inline_control import (
     parse_wait,
 )
 from agentworks.execution._inline_observer import ObservationError
-from agentworks.execution._inline_request import IdentityExpectation
 from agentworks.execution.carrier import (
     ByteSink,
     CapturedOutput,
@@ -83,8 +84,8 @@ class TranscriptCarrier:
 
 
 @pytest.fixture
-def identity() -> IdentityExpectation:
-    return IdentityExpectation(1001, 1002, (1002, 1003))
+def plan() -> IdentityPlan:
+    return IdentityPlan(IdentityExpectation(1001, 1002, (1002, 1003)), IdentityMode.DIRECT)
 
 
 def _record(nonce: str, sequence: int, kind: FrameKind, body: bytes) -> bytes:
@@ -141,9 +142,9 @@ def test_control_schemas_reject_duplicate_keys(parser: Callable[[bytes], object]
         parser(body)
 
 
-def test_noise_reflection_requires_a_line_boundary_and_is_not_retained(identity: IdentityExpectation) -> None:
+def test_noise_reflection_requires_a_line_boundary_and_is_not_retained(plan: IdentityPlan) -> None:
     canary = b"raw-hook-reflection-canary-09dba6"
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), identity=identity)
+    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
     same_line_decoy = canary + _record(prepared.nonce, 0, FrameKind.FINISHED, empty_body())
     carrier = TranscriptCarrier(same_line_decoy + _complete_transcript(prepared.nonce), stderr=canary)
 
@@ -155,8 +156,8 @@ def test_noise_reflection_requires_a_line_boundary_and_is_not_retained(identity:
     assert canary.decode() not in repr(result)
 
 
-def test_missing_terminal_preserves_independently_validated_wait(identity: IdentityExpectation) -> None:
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), identity=identity)
+def test_missing_terminal_preserves_independently_validated_wait(plan: IdentityPlan) -> None:
+    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
     carrier = TranscriptCarrier(_complete_transcript(prepared.nonce, terminal=False))
 
     result = execute_inline_candidate(carrier, prepared, deadline=Deadline.after(1))
@@ -166,8 +167,8 @@ def test_missing_terminal_preserves_independently_validated_wait(identity: Ident
     assert result.observation.error is ObservationError.MISSING_TERMINAL
 
 
-def test_truncated_matching_record_preserves_wait_but_not_terminal(identity: IdentityExpectation) -> None:
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), identity=identity)
+def test_truncated_matching_record_preserves_wait_but_not_terminal(plan: IdentityPlan) -> None:
+    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
     transcript = _complete_transcript(prepared.nonce, terminal=False)
     partial = _record(prepared.nonce, 5, FrameKind.FINISHED, empty_body())[:-1]
     carrier = TranscriptCarrier(transcript + partial)
@@ -179,8 +180,8 @@ def test_truncated_matching_record_preserves_wait_but_not_terminal(identity: Ide
     assert result.observation.error is not None
 
 
-def test_post_terminal_frame_revokes_terminal_evidence(identity: IdentityExpectation) -> None:
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), identity=identity)
+def test_post_terminal_frame_revokes_terminal_evidence(plan: IdentityPlan) -> None:
+    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
     transcript = _complete_transcript(prepared.nonce)
     transcript += _record(prepared.nonce, 5, FrameKind.FINISHED, empty_body())
 
@@ -195,9 +196,9 @@ def test_post_terminal_frame_revokes_terminal_evidence(identity: IdentityExpecta
     assert result.observation.error is ObservationError.POST_TERMINAL
 
 
-def test_sensitive_data_frame_is_rejected_without_retaining_reflection(identity: IdentityExpectation) -> None:
+def test_sensitive_data_frame_is_rejected_without_retaining_reflection(plan: IdentityPlan) -> None:
     canary = b"sensitive-frame-reflection-635a4d"
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), identity=identity, sensitive=True)
+    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan, sensitive=True)
     transcript = _record(prepared.nonce, 0, FrameKind.LAUNCHING, empty_body())
     transcript += _record(prepared.nonce, 1, FrameKind.STDOUT, canary)
 
@@ -213,8 +214,8 @@ def test_sensitive_data_frame_is_rejected_without_retaining_reflection(identity:
     assert canary.decode() not in repr(result)
 
 
-def test_malformed_matching_wire_never_produces_terminal_evidence(identity: IdentityExpectation) -> None:
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), identity=identity)
+def test_malformed_matching_wire_never_produces_terminal_evidence(plan: IdentityPlan) -> None:
+    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
     malformed = b"AGWE1 " + prepared.nonce.encode() + b" 0 LAUNCHING 2 not-canonical-base64\n"
 
     result = execute_inline_candidate(
@@ -228,8 +229,8 @@ def test_malformed_matching_wire_never_produces_terminal_evidence(identity: Iden
     assert result.observation.error is WireError.MALFORMED
 
 
-def test_started_record_is_rejected_by_candidate_grammar(identity: IdentityExpectation) -> None:
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), identity=identity)
+def test_started_record_is_rejected_by_candidate_grammar(plan: IdentityPlan) -> None:
+    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
     transcript = _record(prepared.nonce, 0, FrameKind.STARTED, empty_body())
 
     result = execute_inline_candidate(
@@ -243,8 +244,8 @@ def test_started_record_is_rejected_by_candidate_grammar(identity: IdentityExpec
 
 
 @pytest.mark.parametrize("kind", [FrameKind.STDOUT, FrameKind.STDERR])
-def test_launch_failure_after_empty_data_frame_is_rejected(kind: FrameKind, identity: IdentityExpectation) -> None:
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), identity=identity)
+def test_launch_failure_after_empty_data_frame_is_rejected(kind: FrameKind, plan: IdentityPlan) -> None:
+    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
     transcript = _record(prepared.nonce, 0, FrameKind.LAUNCHING, empty_body())
     transcript += _record(prepared.nonce, 1, kind, b"")
     transcript += _record(
@@ -268,9 +269,9 @@ def test_launch_failure_after_empty_data_frame_is_rejected(kind: FrameKind, iden
 @pytest.mark.parametrize("raw_status", [0, 255])
 def test_raw_carrier_status_never_substitutes_for_helper_terminal(
     raw_status: int,
-    identity: IdentityExpectation,
+    plan: IdentityPlan,
 ) -> None:
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), identity=identity)
+    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
 
     result = execute_inline_candidate(
         TranscriptCarrier(b"account-shell-noise\n", completion=raw_status),
@@ -285,8 +286,8 @@ def test_raw_carrier_status_never_substitutes_for_helper_terminal(
     assert result.observation.error is ObservationError.MISSING_TERMINAL
 
 
-def test_incomplete_carrier_stdout_revokes_otherwise_valid_terminal(identity: IdentityExpectation) -> None:
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), identity=identity)
+def test_incomplete_carrier_stdout_revokes_otherwise_valid_terminal(plan: IdentityPlan) -> None:
+    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
 
     result = execute_inline_candidate(
         TranscriptCarrier(_complete_transcript(prepared.nonce), stdout_complete=False),

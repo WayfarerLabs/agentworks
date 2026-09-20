@@ -23,7 +23,6 @@ from agentworks.execution._file_read_bundle import FIXED_SOURCE
 from agentworks.execution._file_read_protocol import (
     MAX_RECORD_BYTES,
     FileReadFailure,
-    FileReadIdentity,
     FileReadRecord,
     FileReadRecordKind,
     FileReadRequestError,
@@ -36,6 +35,8 @@ from agentworks.execution._file_read_protocol import (
     encode_file_read_result,
 )
 from agentworks.execution._file_stat import FileStat
+from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution.carrier import (
     ByteSink,
     CapturedOutput,
@@ -108,8 +109,8 @@ class InterruptingCarrier:
 
 
 @pytest.fixture
-def identity() -> FileReadIdentity:
-    return FileReadIdentity(1001, 1002, (1002, 1003))
+def plan() -> IdentityPlan:
+    return IdentityPlan(IdentityExpectation(1001, 1002, (1002, 1003)), IdentityMode.DIRECT)
 
 
 def _record(nonce: str, sequence: int, kind: FileReadRecordKind, body: bytes) -> bytes:
@@ -130,7 +131,7 @@ def _success(nonce: str, data: bytes) -> bytes:
 
 
 def _execute(
-    identity: FileReadIdentity,
+    plan: IdentityPlan,
     transcript: bytes | None = None,
     *,
     max_bytes: int = 32_000,
@@ -140,7 +141,7 @@ def _execute(
         trusted_root_path="/trusted/root-canary",
         relative_path="leaf-canary",
         max_bytes=max_bytes,
-        identity=identity,
+        plan=plan,
     )
     carrier = TranscriptCarrier(
         _success(prepared.nonce, b"payload") if transcript is None else transcript, **carrier_options
@@ -150,12 +151,12 @@ def _execute(
     return prepared, carrier, result
 
 
-def test_complete_transcript_is_authoritative_even_with_nonzero_carrier_status(identity: FileReadIdentity) -> None:
+def test_complete_transcript_is_authoritative_even_with_nonzero_carrier_status(plan: IdentityPlan) -> None:
     prepared = prepare_file_read(
         trusted_root_path="/trusted",
         relative_path="file",
         max_bytes=32_000,
-        identity=identity,
+        plan=plan,
     )
     data = bytes(range(256)) * 80
     carrier = TranscriptCarrier(_success(prepared.nonce, data), completion=23)
@@ -169,8 +170,8 @@ def test_complete_transcript_is_authoritative_even_with_nonzero_carrier_status(i
     assert len(carrier.stdout) > MAX_RECORD_BYTES
 
 
-def test_exit_zero_without_a_complete_transcript_is_not_success(identity: FileReadIdentity) -> None:
-    _, _, result = _execute(identity, b"")
+def test_exit_zero_without_a_complete_transcript_is_not_success(plan: IdentityPlan) -> None:
+    _, _, result = _execute(plan, b"")
 
     assert result.carrier_completion == ExitStatus(code=0)
     assert result.observation.state is FileReadObservationState.INCOMPLETE
@@ -221,7 +222,7 @@ def test_exit_zero_without_a_complete_transcript_is_not_success(identity: FileRe
     ],
 )
 def test_malformed_reflected_wrong_nonce_order_truncation_and_trailing_records_are_rejected(
-    identity: FileReadIdentity,
+    plan: IdentityPlan,
     build,
     expected_state: FileReadObservationState,
     expected_error: FileReadObservationError | FileReadWireError,
@@ -230,7 +231,7 @@ def test_malformed_reflected_wrong_nonce_order_truncation_and_trailing_records_a
         trusted_root_path="/trusted",
         relative_path="file",
         max_bytes=32,
-        identity=identity,
+        plan=plan,
     )
     carrier = TranscriptCarrier(build(prepared.nonce))
 
@@ -241,13 +242,13 @@ def test_malformed_reflected_wrong_nonce_order_truncation_and_trailing_records_a
     assert result.observation.snapshot is None
 
 
-def test_digest_mismatch_and_incomplete_stream_disclose_no_data_or_hash(identity: FileReadIdentity) -> None:
+def test_digest_mismatch_and_incomplete_stream_disclose_no_data_or_hash(plan: IdentityPlan) -> None:
     canary = b"private-payload-canary"
     prepared = prepare_file_read(
         trusted_root_path="/trusted/root-canary",
         relative_path="leaf-canary",
         max_bytes=len(canary),
-        identity=identity,
+        plan=plan,
     )
     metadata = FileStat(1, 2, stat.S_IFREG | 0o600, 1, 1001, 1002, len(canary), 3, 4)
     wrong = FileReadResultControl(b"x" * 32, metadata)
@@ -267,7 +268,7 @@ def test_digest_mismatch_and_incomplete_stream_disclose_no_data_or_hash(identity
         trusted_root_path="/trusted",
         relative_path="file",
         max_bytes=len(canary),
-        identity=identity,
+        plan=plan,
     )
     incomplete = execute_file_read(
         TranscriptCarrier(_success(prepared.nonce, canary), stdout_complete=False),
@@ -279,13 +280,13 @@ def test_digest_mismatch_and_incomplete_stream_disclose_no_data_or_hash(identity
     assert canary.decode() not in repr(incomplete)
 
 
-def test_result_metadata_must_bind_the_exact_stream_length(identity: FileReadIdentity) -> None:
+def test_result_metadata_must_bind_the_exact_stream_length(plan: IdentityPlan) -> None:
     data = b"content"
     prepared = prepare_file_read(
         trusted_root_path="/trusted",
         relative_path="file",
         max_bytes=32,
-        identity=identity,
+        plan=plan,
     )
     metadata = FileStat(1, 2, stat.S_IFREG | 0o600, 1, 1001, 1002, len(data) + 1, 3, 4)
     control = FileReadResultControl(hashlib.sha256(data).digest(), metadata)
@@ -302,12 +303,12 @@ def test_result_metadata_must_bind_the_exact_stream_length(identity: FileReadIde
     assert result.observation.snapshot is None
 
 
-def test_result_metadata_rejects_undefined_high_linux_mode_bits(identity: FileReadIdentity) -> None:
+def test_result_metadata_rejects_undefined_high_linux_mode_bits(plan: IdentityPlan) -> None:
     prepared = prepare_file_read(
         trusted_root_path="/trusted",
         relative_path="file",
         max_bytes=1,
-        identity=identity,
+        plan=plan,
     )
     metadata = FileStat(1, 2, 0x80000000 | stat.S_IFREG | 0o600, 1, 1001, 1002, 0, 3, 4)
     control = FileReadResultControl(hashlib.sha256(b"").digest(), metadata)
@@ -324,7 +325,7 @@ def test_result_metadata_rejects_undefined_high_linux_mode_bits(identity: FileRe
 
 @pytest.mark.parametrize("interruption_type", [KeyboardInterrupt, SystemExit, RuntimeError])
 def test_carrier_base_exception_clears_complete_transcript_state_before_propagation(
-    identity: FileReadIdentity,
+    plan: IdentityPlan,
     interruption_type: type[BaseException],
 ) -> None:
     canary = b"collector-interrupt-canary"
@@ -333,7 +334,7 @@ def test_carrier_base_exception_clears_complete_transcript_state_before_propagat
         trusted_root_path="/trusted",
         relative_path="file",
         max_bytes=len(canary),
-        identity=identity,
+        plan=plan,
     )
     interruption = interruption_type()
     carrier = InterruptingCarrier(_success(prepared.nonce, canary) + b"reader-interrupt-canary", interruption)
@@ -351,7 +352,7 @@ def test_carrier_base_exception_clears_complete_transcript_state_before_propagat
 
 @pytest.mark.parametrize("phase", ["reader", "collector"])
 def test_finalization_base_exception_clears_transcript_state_before_propagation(
-    identity: FileReadIdentity,
+    plan: IdentityPlan,
     monkeypatch: pytest.MonkeyPatch,
     phase: str,
 ) -> None:
@@ -360,7 +361,7 @@ def test_finalization_base_exception_clears_transcript_state_before_propagation(
         trusted_root_path="/trusted",
         relative_path="file",
         max_bytes=len(canary),
-        identity=identity,
+        plan=plan,
     )
     interruption = KeyboardInterrupt()
 
@@ -384,13 +385,13 @@ def test_finalization_base_exception_clears_transcript_state_before_propagation(
     assert prepared._reader._record == bytearray()
 
 
-def test_stderr_noise_is_rejected_without_retention(identity: FileReadIdentity) -> None:
+def test_stderr_noise_is_rejected_without_retention(plan: IdentityPlan) -> None:
     canary = b"raw-diagnostic-canary"
     prepared = prepare_file_read(
         trusted_root_path="/trusted",
         relative_path="file",
         max_bytes=32,
-        identity=identity,
+        plan=plan,
     )
     carrier = TranscriptCarrier(_success(prepared.nonce, b"content"), stderr=canary)
 
@@ -403,12 +404,12 @@ def test_stderr_noise_is_rejected_without_retention(identity: FileReadIdentity) 
     assert result.carrier_failure is None
 
 
-def test_absent_and_refusal_are_complete_typed_outcomes_without_payload(identity: FileReadIdentity) -> None:
+def test_absent_and_refusal_are_complete_typed_outcomes_without_payload(plan: IdentityPlan) -> None:
     prepared = prepare_file_read(
         trusted_root_path="/trusted",
         relative_path="file",
         max_bytes=32,
-        identity=identity,
+        plan=plan,
     )
     absent_transcript = _record(prepared.nonce, 0, FileReadRecordKind.ABSENT, empty_file_read_body()) + _record(
         prepared.nonce, 1, FileReadRecordKind.FINISHED, empty_file_read_body()
@@ -422,7 +423,7 @@ def test_absent_and_refusal_are_complete_typed_outcomes_without_payload(identity
         trusted_root_path="/trusted",
         relative_path="file",
         max_bytes=32,
-        identity=identity,
+        plan=plan,
     )
     refusal_transcript = _record(
         prepared.nonce,
@@ -437,12 +438,12 @@ def test_absent_and_refusal_are_complete_typed_outcomes_without_payload(identity
     assert refusal.observation.snapshot is None
 
 
-def test_oversized_record_is_bounded_and_rejected(identity: FileReadIdentity) -> None:
+def test_oversized_record_is_bounded_and_rejected(plan: IdentityPlan) -> None:
     prepared = prepare_file_read(
         trusted_root_path="/trusted",
         relative_path="file",
         max_bytes=32,
-        identity=identity,
+        plan=plan,
     )
     transcript = b"A" * (MAX_RECORD_BYTES + 20) + b"\n"
     result = execute_file_read(TranscriptCarrier(transcript), prepared, deadline=Deadline.after(1))
@@ -491,12 +492,12 @@ def test_fixed_helper_bundle_is_an_independent_stdlib_package(tmp_path: Path, in
     assert completed.stdout.isascii()
 
 
-def test_complete_qga_json_request_is_ascii_armored(identity: FileReadIdentity) -> None:
+def test_complete_qga_json_request_is_ascii_armored(plan: IdentityPlan) -> None:
     prepared = prepare_file_read(
         trusted_root_path="/trusted",
         relative_path="snowman-\u2603",
         max_bytes=1024,
-        identity=identity,
+        plan=plan,
     )
     input_data = prepared.io.input.data  # type: ignore[union-attr]
     body = json.dumps({"command": prepared.invocation.argv, "input-data": input_data.decode("ascii")}).encode("ascii")
