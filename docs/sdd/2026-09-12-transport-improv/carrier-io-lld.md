@@ -1,6 +1,7 @@
 # Carrier I/O: Implementation Candidate
 
-- Status: Transport-owned candidate for joint SSH review and proof, not an implemented interface.
+- Status: Byte-endpoint candidate implemented privately; joint SSH acceptance and terminal interface
+  remain open. No production enablement.
 - Baseline: `cea5e852`, with the accepted buffered SSH/QGA proof and #830 design.
 - Governing contract:
   [carrier input and stream ownership](execution-contract.md#input-and-stream-ownership).
@@ -75,10 +76,10 @@ absent. Public direct-streaming requests set it; internal control collection doe
 Sensitivity still prohibits retained raw carrier bytes. An explicit public live-presentation request
 is a separate preparation decision; a control collector is not consent to show secret-bearing
 output. Reports need an explicit delivered retention value rather than claiming that bytes passed to
-a sink were captured or silently discarded. The exact report amendment and completion-frame grammar
-are settled with the preparation LLD and SSH proof before implementation. A sink failure retains any
-independently observed completion plus incomplete output and `Failure.OUTPUT`; it cannot become
-successful execution.
+a sink were captured or silently discarded. The byte-endpoint experiment implements `DELIVERED`;
+the completion-frame grammar and joint SSH proof remain preparation acceptance gates. A sink failure
+retains any independently observed completion plus incomplete output and `Failure.OUTPUT`; it cannot
+become successful execution.
 
 The raw sink is private adapter-author machinery. It is not a callback capability exposed through
 RunContext file operations or a new plugin authority. The in-process trust limitation remains: a
