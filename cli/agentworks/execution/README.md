@@ -289,6 +289,12 @@ is checked after source descriptors close, including initial absence. Failure at
 cleanup and preserves unresolved cleanup debt. This local primitive does not deliver a remote
 download or reconcile a lost creation reply.
 
+Descriptor bookkeeping is not signal-atomic. An asynchronous interruption before an intermediate
+ancestor close can leave that descriptor open until helper exit; callers cannot assume leak-free
+reuse after catching arbitrary interruption. Retrying a numeric descriptor close without knowing
+whether it already completed can instead close a reused descriptor. Complete helper lifetime and
+interruption acceptance remain production gates.
+
 ## Private file publication
 
 `_file_publication.py` supplies Linux same-directory publication beneath a borrowed parent

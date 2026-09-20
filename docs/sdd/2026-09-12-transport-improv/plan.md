@@ -218,9 +218,11 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       expiry. Private review at `fef0045d` is clean; mutation tests prove final digest verification
       and cleanup-only normalization remain necessary. This is a local primitive, not transfer
       delivery.
-- [ ] Add streaming from one held source inode into a private snapshot, including source-change
+- [x] Add streaming from one held source inode into a private snapshot, including source-change
       refusal, deadline checks and exact cleanup evidence, before wiring snapshot/chunk/publication
-      exchanges.
+      exchanges. The local primitive at `5b58e8f5` passes all three private review lanes with the
+      pre-existing signal-atomic descriptor-bookkeeping limitation retained explicitly; this does
+      not complete remote snapshot delivery or helper lifecycle acceptance.
 - [ ] Settle and fault-test cleanup ownership when the first scratch/snapshot creation reply or
       publication-stage cleanup-debt reply is lost. Missing identity is not absence; do not recover
       by replaying creation or scanning a prefix. Prove the bounded immutable ownership-receipt
@@ -603,6 +605,35 @@ transfer/publication exchanges, full FileAccess, lifecycle, native acceptance an
 RunContext remain required. Shared SSH types are unchanged. Both macOS operator decisions remain
 pending. This increment consumes no public feedback/fix round. Hosted checks passed at prior
 published `63022be8`; fresh confirmation remains required after the next progress push.
+
+The source-to-scratch snapshot increment is reviewed at `5b58e8f5`. It copies bounded chunks from
+one held source, verifies length/EOF/digest and final source identity/metadata, and returns a ready
+private copy plus the source revision. Initial absence is checked for expiry after descriptor
+closure. Review reproduced and corrected skipped parent cleanup after a leaf-close interruption and
+lost scratch cleanup debt when source closure interrupted a failed creation. An independent mutation
+of final source verification fails four tests.
+
+The generic lane also reproduced an existing traversal limitation: an asynchronous exception before
+an intermediate ancestor close can leave that descriptor until helper exit. The same ordering
+predates this increment. It remains inside the documented non-signal-atomic bookkeeping limit; blind
+close retry is not added because interruption does not establish whether that numeric descriptor has
+already been closed. Complete helper lifetime/interruption remains a production gate, not an
+acceptance claim from these local primitives.
+
+The final local suite at that runtime pin passes 11,617 tests with 12 skips. Ruff/format, CI-scoped
+mypy (980 sources), file lint, typer isolation, locked-SDD, rulesync and diff checks pass. Website
+gates pass 160 Python and 103 Node tests plus both deterministic build comparisons. Owned temporary
+test/build output was removed. No live infrastructure was touched. All hosted checks pass at the
+preceding published CI correction `46f5d948` in
+[run 35517251196](https://github.com/WayfarerLabs/agentworks/actions/runs/35517251196); the snapshot
+increment still needs fresh hosted confirmation after publication.
+
+The focused systemd 252 source audit records helper acceptance separately from payload entry,
+completion retention across unit collection and independent boundary-emptiness observation after
+stop. These constrain the next supervisor experiment; no managed lifecycle is implemented by them.
+Creation receipts are under implementation. Transfer/publication exchanges, full FileAccess, native
+acceptance, lifecycle and additive RunContext remain required; both macOS decisions remain pending.
+No public feedback/fix round is consumed by this increment.
 
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
