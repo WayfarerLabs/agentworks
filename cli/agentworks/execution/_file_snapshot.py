@@ -1,7 +1,8 @@
 """Cooperative POSIX regular-file snapshots from a caller-owned root descriptor.
 
-This does not provide ``openat2`` confinement, malicious same-user protection,
-or a hard read deadline; ``st_dev`` cannot detect same-filesystem bind mounts.
+Linux lookup uses ``openat2`` confinement. Other POSIX platforms retain a
+separate component walk and do not claim equivalent mount-boundary enforcement.
+This does not provide malicious same-user protection or a hard read deadline.
 Callers own their root and writer lock.
 """
 
@@ -11,10 +12,18 @@ import errno
 import hashlib
 import os
 import stat
+import sys
 from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import Enum
 
+from agentworks.execution._file_paths import (
+    ConfinedOpenError,
+    ConfinedOpenFailure,
+    open_linux_confined,
+)
+
+_open_linux_confined = open_linux_confined
 _READ_CHUNK_BYTES = 64 * 1024
 _DESCRIPTOR_OPERATIONS_AVAILABLE = (
     os.name == "posix"
@@ -149,6 +158,16 @@ def _open_at(parent_fd: int, name: str, *, directory: bool) -> int | None:
         flags |= getattr(os, "O_DIRECTORY", 0)
     else:
         flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0)
+
+    if sys.platform == "linux":
+        try:
+            return _open_linux_confined(parent_fd, name, flags)
+        except ConfinedOpenError as error:
+            if error.kind is ConfinedOpenFailure.CONFLICT:
+                raise SnapshotReadError(SnapshotFailureKind.CONFLICT) from None
+            if error.kind is ConfinedOpenFailure.UNSUPPORTED_OBJECT:
+                raise SnapshotReadError(SnapshotFailureKind.UNSUPPORTED_OBJECT) from None
+            raise SnapshotReadError(SnapshotFailureKind.IO) from None
 
     error_number: int | None = None
     try:

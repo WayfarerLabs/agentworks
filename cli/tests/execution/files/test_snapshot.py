@@ -78,6 +78,16 @@ def test_malformed_relative_paths_are_rejected_before_io(tmp_path: Path, relativ
         read_snapshot(root_fd, relative_path, 1)
 
 
+def test_malformed_relative_path_never_reaches_confined_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root_fd = _open_root(tmp_path)
+    monkeypatch.setattr(snapshot_module, "_open_at", lambda *_args, **_kwargs: pytest.fail("path was opened"))
+    try:
+        with pytest.raises(ValueError):
+            read_snapshot(root_fd, "nested/../file", 1)
+    finally:
+        os.close(root_fd)
+
+
 @pytest.mark.parametrize("max_bytes", [0, -1, True, 1.0, float("inf")])
 def test_byte_bound_must_be_a_positive_integer(tmp_path: Path, max_bytes: object) -> None:
     root_fd = _open_root(tmp_path)
@@ -147,14 +157,24 @@ def test_regular_leaf_open_uses_nonblocking_nofollow_noctty_flags(
 ) -> None:
     (tmp_path / "file").write_bytes(b"content")
     root_fd = _open_root(tmp_path)
-    original_open = os.open
     observed_flags: list[int] = []
 
-    def recording_open(path: str, flags: int, *, dir_fd: int) -> int:
-        observed_flags.append(flags)
-        return original_open(path, flags, dir_fd=dir_fd)
+    if sys.platform == "linux":
+        original_confined_open = snapshot_module._open_linux_confined
 
-    monkeypatch.setattr(os, "open", recording_open)
+        def recording_confined_open(root_fd: int, path: str, flags: int) -> int | None:
+            observed_flags.append(flags)
+            return original_confined_open(root_fd, path, flags)
+
+        monkeypatch.setattr(snapshot_module, "_open_linux_confined", recording_confined_open)
+    else:
+        original_open = os.open
+
+        def recording_open(path: str, flags: int, *, dir_fd: int) -> int:
+            observed_flags.append(flags)
+            return original_open(path, flags, dir_fd=dir_fd)
+
+        monkeypatch.setattr(os, "open", recording_open)
     try:
         assert read_snapshot(root_fd, "file", 1024) is not None
     finally:
@@ -300,6 +320,21 @@ def test_descendant_procfs_device_boundary_is_refused() -> None:
         assert _failure_kind(root_fd, "proc/version", 4096) is SnapshotFailureKind.UNSUPPORTED_OBJECT
     finally:
         os.close(root_fd)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="real procfs magic links are Linux-specific")
+def test_procfs_magic_link_ancestor_is_refused() -> None:
+    proc = Path("/proc")
+    if not (proc / "self/fd").is_dir():
+        pytest.skip("procfs descriptor fixture is unavailable")
+    proc_fd = _open_root(proc)
+    target_fd = _open_root(Path("/tmp"))
+    try:
+        path = f"self/fd/{target_fd}/missing"
+        assert _failure_kind(proc_fd, path) is SnapshotFailureKind.UNSUPPORTED_OBJECT
+    finally:
+        os.close(target_fd)
+        os.close(proc_fd)
 
 
 def test_borrowed_root_survives_and_all_descendant_descriptors_close(
