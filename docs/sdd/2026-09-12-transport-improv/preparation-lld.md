@@ -396,12 +396,13 @@ Python. Never invoke `xcrun`, `xcode-select`, a package manager, or the shim to 
 
 Selection and helper entry share one carrier invocation. The selected interpreter runs fixed source
 with `-I -S -B`: isolate Python environment/user-site settings, skip site initialization, and
-prevent bytecode writes. A small trampoline compatible with older Python 3 checks the version before
-entering the Python 3.11 helper in the same process. This is not a preliminary readiness probe or
-staging operation. A valid nonce-bound prerequisite response reports a closed failure category;
-missing responses and transport failures remain observation/connection failures, never evidence of
-an absent interpreter. Diagnostics use the bound host, selected path, failure category and remedy,
-not raw interpreter or account-shell output.
+prevent bytecode writes. A small trampoline checks the version before entering the Python 3.11
+helper in the same process. Python 3.4 introduced `-I`; an older interpreter that rejects the
+startup flags cannot emit the prerequisite response and follows the observation-failure path. This
+is not a preliminary readiness probe or staging operation. A valid nonce-bound prerequisite response
+reports a closed failure category; missing responses and transport failures remain
+observation/connection failures, never evidence of an absent interpreter. Diagnostics use the bound
+host, selected path, failure category and remedy, not raw interpreter or account-shell output.
 
 This remains an implementation candidate. Acceptance needs Intel and Apple Silicon macOS evidence
 for independent installations, explicit paths, shim aliases, broken selections, old interpreters, no

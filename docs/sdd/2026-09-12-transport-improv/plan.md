@@ -167,13 +167,17 @@ not silent omission.
 
 The byte-endpoint work unit now includes borrowed live input, delivered-output retention, the shared
 subprocess pump and buffered QGA sink delivery. Private review caught the post-exit pipe timer
-incorrectly limiting healthy sink backpressure. The correction keeps one accumulated collection
-budget while pending sink delivery consumes the original operation deadline. The lexical
-provisioning tests from the initial package increment were removed; package coverage and the
-separate live-provisioning gate remain. These corrections do not establish production or joint SSH
-acceptance. Before publication of the new types, the old SSH adapter in this branch must explicitly
-refuse unsupported I/O shapes instead of silently interpreting them as EOF or discard. That small
-adapter guard has been requested from its SSH owner.
+incorrectly limiting temporary sink stalls. The correction keeps one accumulated collection budget
+while pending sink delivery consumes the original operation deadline. The lexical provisioning tests
+from the initial package increment were removed; package coverage and the separate live-provisioning
+gate remain. These corrections do not establish production or joint SSH acceptance. Before
+publication of the new types, the old SSH adapter in this branch must explicitly refuse unsupported
+I/O shapes instead of silently interpreting them as EOF or discard. That small adapter guard has
+been requested from its SSH owner.
+
+At `354c7a17`, all three private code-review lanes are clean, and the corrected full local suite
+reports 10,413 passed and 11 skipped. The focused execution/provisioning suite reports 496 passed
+and four skipped. These are workstation tests, not live platform acceptance.
 
 The [Darwin prerequisite candidate](preparation-lld.md#darwin-inline-prerequisite-candidate) keeps
 runtime selection above carriers and checks interpreter compatibility inside the inline invocation.
