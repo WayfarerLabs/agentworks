@@ -187,11 +187,12 @@ transport's files, shared supervision or consumer migration.
 The [implementation progress record](phase2-results.md) pins the completed independent code and
 local validation separately from the remaining shared integration and platform acceptance.
 
-Shared subprocess adoption introduces an implementation dependency on transport #833, pinned at
-`e85e9f5c4752ae926315fa7c0e69b871de42e4fc`. #832 stacks on its implementation branch; transport
-lands first. Buffered adapter validation does not close the shared launch-interruption gate, live
-I/O, terminal preparation or additive RunContext delivery. Terminal/PTY work is proceeding in
-parallel in the transport lane, as confirmed by the operator.
+Shared subprocess adoption introduces an implementation dependency on transport #833. Current
+integration uses `a885ef5af256782abb827d6165cefd72a74e4e58`; completed records retain the pins they
+validated. #832 stacks on its implementation branch; transport lands first. Buffered adapter
+validation does not close the shared launch-interruption gate, live I/O, terminal preparation or
+additive RunContext delivery. Terminal/PTY work is proceeding in parallel in the transport lane, as
+confirmed by the operator.
 
 ### Complete the carrier and migration
 
@@ -201,6 +202,11 @@ parallel in the transport lane, as confirmed by the operator.
       [phase2-results.md](phase2-results.md#shared-subprocess-adoption). This records buffered
       adoption only; launch-interruption ownership, live/terminal delivery and production
       composition remain open.
+- [x] Supply the standalone buffered-mode refusal in `678e487d` so transport can widen shared I/O
+      before SSH adopts the new modes. Validate its separate cherry-pick onto `a885ef5a`, existing
+      buffered behavior and refusal before admission/process work. The
+      [integration record](phase2-results.md#remaining-integration-and-acceptance) distinguishes
+      simulated future types from pending real-extension proof.
 - [ ] Finish the SSH LLD for R1-R5: complete connection validation, installed-client/path policy,
       config schema and conversion, trust preservation/enrollment/refusal, process/terminal and
       forwarding lifetimes, diagnostics and acceptance fixtures. Name the authority and refresh
