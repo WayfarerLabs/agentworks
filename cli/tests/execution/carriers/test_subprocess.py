@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -290,6 +291,58 @@ def test_interrupted_exact_wait_retries_same_owned_pid(monkeypatch: pytest.Monke
     assert interrupted
     assert status.status == 42
     assert _subprocess._cleanup(status)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="waitpid ownership is POSIX-specific")
+def test_repeated_wait_interruptions_respect_operation_and_cleanup_bounds(
+    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original_waitpid = os.waitpid
+
+    def always_interrupted(pid: int, options: int) -> tuple[int, int]:
+        if children and pid == children[-1].pid:
+            raise InterruptedError
+        return original_waitpid(pid, options)
+
+    with monkeypatch.context() as context:
+        context.setattr(os, "waitpid", always_interrupted)
+        context.setattr(_subprocess, "_CLEANUP_SECONDS", 0.05)
+        started = time.monotonic()
+        result = execute("import time; time.sleep(30)", seconds=0.05)
+
+    assert time.monotonic() - started < 0.5
+    assert result.local_status is None and result.exit_status is None
+    assert result.failure == Failure.OBSERVATION
+
+
+@pytest.mark.skipif(os.name == "nt", reason="waitpid ownership is POSIX-specific")
+def test_stopped_wait_status_remains_pending_until_terminal_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    status = _subprocess._ProcessStatus(process)
+    original_waitpid = os.waitpid
+    stopped = (signal.SIGSTOP << 8) | 0x7F
+    reported_stop = False
+    assert os.WIFSTOPPED(stopped)
+
+    def stop_once(pid: int, options: int) -> tuple[int, int]:
+        nonlocal reported_stop
+        if pid == process.pid and not reported_stop:
+            reported_stop = True
+            return pid, stopped
+        return original_waitpid(pid, options)
+
+    monkeypatch.setattr(os, "waitpid", stop_once)
+    assert status.poll() is None
+    assert reported_stop and status.status is None and not status.lost
+    assert _subprocess._cleanup(status)
+    assert status.status == -signal.SIGKILL
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows retains handle-backed Popen waiting")

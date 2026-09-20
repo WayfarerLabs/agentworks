@@ -9,6 +9,8 @@ dispatch nor target termination.
 Cleanup is guarded only after process construction and loop-state initialization.
 An earlier control-flow interruption can leave a child alive, including without
 a returned handle; this pump does not satisfy the launch-interruption contract.
+On POSIX, an external concurrent reaper can still create a PID exit/reuse race
+before lost ownership becomes observable; this pump does not close that gate.
 """
 
 from __future__ import annotations
@@ -197,22 +199,22 @@ class _ProcessStatus:
         if os.name == "nt":
             self.status = self.process.poll()
             return self.status
-        while True:
-            try:
-                pid, wait_status = os.waitpid(self.process.pid, os.WNOHANG)
-                break
-            except InterruptedError:
-                continue
-            except ChildProcessError:
-                self.lost = True
-                # Popen has no "reaped with unknown status" state. Retire only
-                # its destructor bookkeeping; ProcessResult never reads this.
-                self.process.returncode = 0
-                return None
+        try:
+            pid, wait_status = os.waitpid(self.process.pid, os.WNOHANG)
+        except InterruptedError:
+            return None
+        except ChildProcessError:
+            self.lost = True
+            # Popen has no "reaped with unknown status" state. Retire only
+            # its destructor bookkeeping; ProcessResult never reads this.
+            self.process.returncode = 0
+            return None
         if pid == 0:
             return None
         if pid != self.process.pid:
             raise OSError("exact-PID wait returned a different process")
+        if not os.WIFEXITED(wait_status) and not os.WIFSIGNALED(wait_status):
+            return None
         self.status = os.waitstatus_to_exitcode(wait_status)
         self.process.returncode = self.status
         return self.status
