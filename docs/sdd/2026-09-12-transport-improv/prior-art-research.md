@@ -153,16 +153,30 @@ the [migration inventory](migration-strategy.md) records consumer-by-consumer di
 
 The helper's held-directory/no-follow traversal (`:82-126`), staged ownership/mode/extended
 attributes and replacement (`:149-179`) are useful implementation inputs. Its expected-hash check at
-`:140` precedes unlink/rename without a remote cooperating-writer lock, and the fingerprint is not a
-complete file/metadata identity. Existing tests that edit before the helper runs do not prove the
-check-to-publication window. The earlier general warning about check-then-rename now has this
-specific migration example; it is not a claim that the shipped helper is a naive prefix check.
+`:140` precedes unlink/rename, and the fingerprint is not a complete file/metadata identity.
+Existing tests that edit before the helper runs do not prove the check-to-publication window. The
+earlier general warning about check-then-rename now has this specific migration example; it is not a
+claim that the shipped helper is a naive prefix check or evidence that a new machine-wide lock
+framework is required.
+
+`artifacts/publication.py:106-217` distinguishes whole-file publication with explicit modes from
+generated-section updates that preserve existing access metadata. The generated-section tests at
+`tests/artifacts/test_generated_sections.py:190-264` exercise ordinary extended attributes, POSIX
+access ACLs, copy refusal, and a default-ACL creation case. They are evidence about the shipped
+mechanism, not proof that every readable security attribute should survive replacement. Under the
+[file safety ruling](frd.md#file-safety-and-guest-runtime-rulings), the successor preserves the
+owner/mode/ACL semantics required by actual workflows, retains inherited creation behavior, and
+refuses unsupported required cases before publication. It does not blanket-clear new ACLs or blindly
+copy security attributes that an ordinary content write would clear.
 
 The release adds artifact publication and generated sections, per-facet activation maps, persistent
-session/run identity and guarded restart consent. It also makes Python3 an initialization package,
-not a universal early-bootstrap prerequisite. These affect target composition, metadata/conflict
-semantics, observation, rollback and test coverage. Preserve domain behavior while replacing runner
-delivery and public staging access; do not delete `artifacts/` or preserve a second file facade.
+session/run identity and guarded restart consent. At the inspected revision Python3 is an
+initialization package, not a universal early-bootstrap prerequisite. Later operator direction
+selects it for the new-guest early apt package list; that supersedes only the new-guest provisioning
+disposition. Existing recovery, macOS hosts, and no-staging readiness remain separate. These affect
+target composition, metadata/conflict semantics, observation, rollback and test coverage. Preserve
+domain behavior while replacing runner delivery and public staging access; do not delete
+`artifacts/` or preserve a second file facade.
 
 There are no FIFO-creation consumers in the inspected `cli/agentworks` tree. Actual runtime roots
 are `sessions/tmux.py:36,66`'s agent/admin tmux socket directories. Directory/mode management and
@@ -203,15 +217,16 @@ can follow relocated hierarchies, existing-descriptor rights, and metadata opera
 Landlock around this helper would not by itself establish the file contract's complete path and
 metadata confinement. This investigation did not run Landlock or prove an alternative on macOS.
 
-The accepted FRD excludes guest root, not hostile target-user processes. Cooperating-writer locks
-cannot constrain an unrelated process that can rename an ancestor or create an alias. Running the
-helper without elevation avoids adding root authority but does not establish a narrower recipient's
-path grant. The
-[file LLD's confinement gate](file-operations-lld.md#confinement-and-filesystem-mechanics) therefore
-remains open. Preserve it unless the operator explicitly changes the threat boundary; neither the
-future permission-enforcement date nor the in-process plugin trust limitation waives safe object
-handling. A solution retaining hostile same-user actors must establish enforced namespace/identity
-restrictions for these required writable paths, not merely repeat validation.
+These dated probes remain useful counterexamples to claims of absolute namespace confinement or
+same-inode equivalence. They did not test the proposed implementation and do not prove one. The
+later [file safety ruling](frd.md#file-safety-and-guest-runtime-rulings) explicitly excludes a
+malicious process already running as the authorized target user; compromise at that identity is
+already outside the useful file guarantee. Hostile same-user ancestor moves and hard-link additions
+are therefore no longer production gates. The design still validates untrusted requests and paths,
+refuses observed links and unsupported object types, handles opened objects conservatively, cleans
+up only operation-owned names, binds the authorized identity/elevation, and excludes guest root.
+Accidental and non-cooperating changes remain subject to the documented conflict and uncertainty
+rules.
 
 ### Managed foreground work and session containment
 
@@ -267,11 +282,14 @@ resource/cleanup limits and any newly required beds rather than inherit nonexist
 
 ## Early Python investigation, 2026-09-19
 
-The operator authorized investigation, not installation or a new runtime requirement. This audit
-uses implementation head `ae444f53`. The recommendation is to pursue a standard-library helper with
-an explicit early prerequisite, subject to the adoption and proof decisions below. Python removes
-some shell-level parsing and process-control difficulties; it does not establish confinement or
-prove that an application entered its executable.
+At the time of this audit the operator authorized investigation, not installation or a new runtime
+requirement. The audit uses implementation head `ae444f53` and recommended a standard-library helper
+with an explicit early prerequisite. The later
+[guest runtime ruling](frd.md#file-safety-and-guest-runtime-rulings) approves `python3` in the
+new-guest early apt package list and requires the helper to support Bookworm's distribution Python.
+It does not approve implicit runtime installation during readiness, existing-guest recovery, or a
+macOS host prerequisite. Python removes some shell-level parsing and process-control difficulties;
+it does not establish file safety or prove that an application entered its executable.
 
 ### Availability and adoption
 
@@ -279,8 +297,9 @@ Implementation paths below are relative to `cli/agentworks/`.
 
 - `capabilities/vm_platform/cloud_init.py:16` omits Python from `PROVISIONING_PACKAGES` and adds it
   in Phase B through `INIT_SYSTEM_PACKAGES`. The shared bootstrap installs its supplied package list
-  at `capabilities/vm_platform/bootstrap_script.py:117`. Moving the package earlier is a narrow
-  new-VM integration point, not proof that every existing VM or platform host has it.
+  at `capabilities/vm_platform/bootstrap_script.py:117`. This inspection identified the narrow
+  new-VM integration point. The later ruling authorizes adding `python3` there; implementation and
+  validation are still required, and this says nothing about an existing VM or platform host.
 - Existing-VM repair needs its own native bootstrap entry point, independent of the helper it
   installs. `native_files.py:241` currently recommends reinit when Python is absent, while
   `vms/manager/lifecycle.py:712` requires provisioned state and a valid Tailscale connection for
@@ -295,12 +314,12 @@ Implementation paths below are relative to `cli/agentworks/`.
   acquire it merely because the carrier works. Installation failure must remain an explicit
   bootstrap failure, with an actionable recovery path, not an automatic canonical-route fallback.
 
-The distribution packages currently use Python 3.11 on
+The distribution packages observed during the audit use Python 3.11 on
 [Bookworm](https://packages.debian.org/bookworm/python3) and Python 3.13 on
-[Trixie](https://packages.debian.org/trixie/python3). A helper compatible with the 3.11 standard
-library could use both distributions' maintained packages without copying the workstation CLI's
-runtime floor onto the guest. This is a compatibility proposal, not an instruction to install an old
-upstream release or a selected minimum.
+[Trixie](https://packages.debian.org/trixie/python3). The later ruling adopts the compatibility
+consequence: the helper must support Bookworm's maintained distribution `python3`, rather than copy
+the workstation CLI's runtime floor onto the guest. This observation did not itself install or
+validate the package.
 
 ### Local mechanism evidence
 
@@ -345,15 +364,18 @@ single-reaper helper and proof on supported interpreter builds before changing t
 
 ### Decisions still required
 
-Before selecting this substrate, settle the authorized bootstrap/adoption path for new guests,
-existing native-recovery targets, and supported platform hosts. Then prove no-staging invocation and
-exact result interpretation through the actual carriers, including launch interruption.
+The new-guest package choice is settled, but its early availability and helper compatibility still
+need implementation evidence. Settle the bootstrap/adoption path for existing native-recovery
+targets and supported macOS platform hosts. Then prove no-staging invocation and exact result
+interpretation through the actual carriers, including launch interruption. Readiness must refuse a
+missing prerequisite rather than install Python implicitly.
 
 The [OS module documentation](https://docs.python.org/3/library/os.html) describes
 platform-dependent descriptor APIs and Linux-only extended-attribute APIs. A Python helper therefore
-still needs a proved macOS metadata implementation. It does not close the file LLD's
-ancestor-rename, hard-link, cross-identity locking, or mount-confinement questions. Those remain
-independent acceptance gates.
+still needs a proved macOS metadata implementation. It also does not prove unique-sibling atomic
+publication, observed-link refusal, required owner/mode/ACL behavior, or cooperative conflict
+handling on supported filesystems. Those remain implementation acceptance gates within the revised
+threat boundary.
 
 ### Local process startup and interruption
 

@@ -6,7 +6,7 @@
 
 - Status: Proposed low-level design; implementation and live feasibility remain unproven.
 - Governing requirements: [FRD R7](frd.md#r7-files), including the
-  [2026-09-19 staged-permission ruling](frd.md#operator-rulings-2026-09-19).
+  [file safety and guest runtime rulings](frd.md#file-safety-and-guest-runtime-rulings).
 - Public boundary: [execution contract](execution-contract.md#file-operations-and-bound-policy).
 - Delivery:
   [plan steps 3 and 4](plan.md#3-reconcile-designs-and-publish-the-implementation-boundary).
@@ -28,10 +28,11 @@ dependency, check-then-rename conflict window, public runner, mutable staging sl
 string allowlist are not carried forward.
 
 The first slice needs one small file helper, invoked as a subprocess through the new `Carrier`.
-Shell built-ins do not expose the required descriptor-relative object handling. An early Python
-prerequisite and a packaged native executable are unresolved candidates. The operator authorized
-investigating early Python, not selecting or installing it. In every case, the helper is a closed
-operation protocol, not a daemon, agent, remote execution escape, or general file-policy engine.
+Shell built-ins do not expose the required descriptor-relative object handling. Debian guests use a
+standard-library Python helper compatible with Bookworm's distribution `python3`; new-guest early
+provisioning includes that package. Existing-guest recovery, macOS host adoption, and no-staging
+readiness still need their own prerequisite paths. In every case, the helper is a closed operation
+protocol, not a daemon, agent, remote execution escape, or general file-policy engine.
 
 Directory transfer and confined extraction remain required by R7 but are deliberately outside this
 first slice. Their absence blocks complete R7 acceptance, not delivery of the file-only vertical
@@ -87,8 +88,8 @@ callers may request up to 4,096 entries, depth 8, and 4 MiB encoded.
 def read_file(path: PurePosixPath, *, max_bytes: int, sudo: bool = False) -> ReadResult | None: ...
 def stat(path: PurePosixPath, *, sudo: bool = False) -> FileMetadata | None: ...
 def list_directory(path: PurePosixPath, *, limit: DirectoryLimit, sudo: bool = False) -> tuple[DirectoryEntry, ...]: ...
-def write_file(path, data, *, condition, create_metadata, preserve_existing_metadata=True, sudo=False) -> MutationResult: ...
-def upload(path, source, *, size, condition, create_metadata, preserve_existing_metadata=True, sudo=False) -> MutationResult: ...
+def write_file(path, data, *, condition, create_metadata, sudo=False) -> MutationResult: ...
+def upload(path, source, *, size, condition, create_metadata, sudo=False) -> MutationResult: ...
 def download(path, destination, *, max_bytes=None, sudo=False) -> FileMetadata: ...
 def update_json(path, document, *, strategy, create, create_metadata, max_bytes=DEFAULT_JSON_MAX_BYTES, max_depth=DEFAULT_JSON_MAX_DEPTH, sudo=False) -> MutationResult: ...
 def ensure_directory(path: PurePosixPath, *, metadata: NewMetadata, sudo: bool = False) -> MutationResult: ...
@@ -162,21 +163,21 @@ their resource domains and use snapshot plus `Match`; FileAccess accepts no tran
 
 ## Helper deployment and protocol
 
-The helper substrate is not selected. Early Python must prove its pre-Phase-B installation and
-descriptor APIs. A native candidate must prove its compiler/provenance pipeline, package layout,
-supported ABI/OS/CPU, and macOS execution behavior. Runtime download, on-target compilation, and a
-legacy-helper fallback are outside this design. File operations do not implicitly install a runtime;
-provisioning an early Python prerequisite is a separate pending operator decision.
+Debian guest operations use a standard-library helper that supports the Bookworm distribution's
+Python 3.11. New-guest provisioning adds `python3` to the early apt package list and must prove the
+interpreter is available before helper-dependent work. This does not install Python during a file
+operation or readiness check. Existing native-recovery targets without Python need an independent
+bootstrap path. macOS placement-host use still needs an operator-approved runtime/adoption decision
+and platform proof; new guest packages do not satisfy that host prerequisite. Runtime download,
+on-target compilation, elevation retry, and a legacy-helper fallback are outside this design.
 
-Whichever candidate is selected, `execution/file_helper.py` owns an operation-lifetime
-`HelperSession`. Helper delivery reuses the preparation LLD's private scratch transfer: a
-core-selected helper is written at exact offsets into operation-owned scratch and length/digest
-verified. It does not add a numbered-part/base64 deployment state machine. The shared 24 KiB raw
-chunk is a candidate pending SSH/QGA whole-request proof, not a file-layer constant. A native
-candidate also needs a proved fixed finalization step that makes only the verified owned object
-executable. An absolute-path `hello` under the clean core environment must match version, digest,
-OS/CPU, effective identity, and features. Close removes only recorded objects; uncertain cleanup is
-owner debt and never hides the primary outcome.
+`execution/file_helper.py` owns an operation-lifetime `HelperSession`. Helper delivery reuses the
+preparation LLD's private scratch transfer: a core-selected helper is written at exact offsets into
+operation-owned scratch and length/digest verified. It does not add a numbered-part/base64
+deployment state machine. The shared 24 KiB raw chunk is a candidate pending SSH/QGA whole-request
+proof, not a file-layer constant. An absolute-path `hello` under the clean core environment must
+match version, digest, interpreter, OS/CPU, effective identity, and features. Close removes only
+recorded objects; uncertain cleanup is owner debt and never hides the primary outcome.
 
 Every exchange is one `Carrier.execute` with literal absolute argv. Its ASCII `AGWF1` envelope has a
 32-hex request ID, one closed operation, unique named base64/decimal fields, and a terminator. The
@@ -215,78 +216,84 @@ must establish its prerequisite before entering readiness. Relocation to a stagi
 allowed only when the existing workflow contract permits it; a mandatory readiness read that cannot
 remain no-write is a delivery gate requiring operator decision. Absence never authorizes public
 execution or silent removal of a required workflow. The early-Python versus native-helper decision
-remains open.
+is settled for provisioned Debian guests; the already-available readiness substrate and the macOS
+host substrate remain open.
 
-## Confinement and filesystem mechanics
+## File safety and filesystem mechanics
 
-All target operations occur in the helper process. Host-side normalization and later grant checks
-are early refusals, never the security mechanism. The mechanics below are candidates, not an
-approved confinement design, until the ancestry and hard-link gates in this section are proved.
+All target operations occur in the helper process. Host-side normalization and grant checks reject
+untrusted requests early; destination-side traversal and observation enforce the bound operation.
+The guarantee assumes the authorized target identity is cooperating. A malicious process already
+running as that same target user is outside this file guarantee, as is guest root. Accidental or
+non-cooperating changes observed during an operation still produce conflict, refusal, or
+uncertainty.
 
 - The lookup candidate walks absolute ancestors from an open root descriptor. Linux uses `openat2`
   with `RESOLVE_BENEATH`, `RESOLVE_NO_SYMLINKS`, `RESOLVE_NO_MAGICLINKS`, and, once below a trusted
   policy root, `RESOLVE_NO_XDEV`. macOS walks one component at a time with
   `openat(..., O_NOFOLLOW | O_DIRECTORY)`, comparing object and filesystem identity before the final
-  operation. These primitives constrain lookup; they do not prove that a held directory remains
-  below the trusted root.
-- A directory FD remains a stable reference when its directory is renamed, including outside the
-  trusted tree, as documented by Linux
-  [`open(2)`](https://man7.org/linux/man-pages/man2/open.2.html). A final path check cannot close
-  the next rename or mount race. Before this candidate is approved, every supported platform/path
-  must either enforce trusted-ancestor rename and mount invariants for the operation or use another
-  proved mechanism. Required ordinary-user destinations cannot be silently excluded when that proof
-  fails.
-- Open regular leaves with no-follow and nonblocking flags, then verify by descriptor. Reject links,
-  devices, FIFOs, and unexpected sockets at observation. `st_nlink == 1` is not perpetual: a
-  same-user actor can add a hard link or rename/swap the leaf before elevated `fchown`/`fchmod`, so
-  the held inode may become reachable outside the grant. Rechecking does not close the system-call
-  race. Held-inode metadata, existing-directory convergence, and exposed staging in a link-capable
-  parent therefore share the hard confinement gate above; no existing open/no-follow primitive is
-  claimed to solve it.
-- Publication creates a sibling staging inode, writes and verifies all bytes, applies metadata,
-  syncs the staged file, revalidates the destination condition, and uses descriptor-relative rename.
-  Create-only uses Linux `renameat2(RENAME_NOREPLACE)` and macOS `renameatx_np(RENAME_EXCL)`; lack
-  of filesystem support is a refusal. Replacement uses the platform's atomic same-directory rename.
-  Atomic visibility is promised; crash durability of the directory entry is not yet promised.
+  operation. Path components are normalized and authorized before dispatch, then opened without
+  following links. A mount or object-identity change that is observed before publication is a
+  refusal. These checks do not claim immunity to a malicious same-user process moving an ancestor
+  after it has been opened.
+- Open regular leaves with no-follow and nonblocking flags, then verify by descriptor. Refuse
+  symbolic links, multiply linked regular files, devices, FIFOs, and unexpected sockets when
+  observed. Revalidate the held destination and staging objects before publication. This is safe
+  object handling for the stated cooperative boundary, not protection from a malicious same-user
+  process adding a hard link in the next system-call window.
+- Publication creates one unpredictable, operation-owned sibling in the destination directory,
+  writes and verifies all bytes, establishes the required metadata, syncs the staged file,
+  revalidates the destination condition, and uses descriptor-relative rename. Create-only uses Linux
+  `renameat2(RENAME_NOREPLACE)` and macOS `renameatx_np(RENAME_EXCL)`; lack of filesystem support is
+  a refusal. Replacement uses the platform's atomic same-directory rename. Replacement requires the
+  selected identity to have ordinary write authority for the existing file as well as sibling
+  creation/rename authority in its parent; atomic replacement must not bypass an otherwise
+  unwritable destination. Either missing authority is a refusal under that identity, with no
+  fallback or elevation retry. There is no cross-filesystem copy, direct-write, non-atomic fallback,
+  or retry with a different identity/elevation. Atomic visibility is promised; crash durability of
+  the directory entry is not yet promised. Replacement normally changes inode identity, so callers
+  cannot rely on same-inode equivalence or on already-open handles observing the new bytes.
 - Cleanup names and recorded inode identity belong to the operation. Cleanup never scans a prefix or
   removes a name whose identity changed. A cleanup failure leaves bounded debt for the owner; it
   does not authorize broader deletion.
 
-New files clear inherited ACLs/attributes before exact owner/group/mode is applied. Replacement with
-`preserve_existing_metadata=True` copies UID, GID, mode, all readable extended attributes, and
-access ACLs before rename. Any unsupported/denied copy leaves the old destination unchanged. macOS
-BSD flags that cannot be applied before rename are an explicit refusal, never silent loss.
+New files retain the destination directory's normal inherited ACL behavior. The helper begins with
+restrictive staging access, does not blanket-clear inherited ACLs or attributes, applies the
+requested owner/group/mode with the platform's ordinary ACL-mask interaction, and verifies the
+effective access metadata before publication. If the requested access result cannot be established,
+the helper refuses while the old destination is still unchanged.
+
+Existing generated-section updates require the direct-write-equivalent access profile used by the
+shipped workflow: UID, GID, permission bits, and access ACL. Whole-file workflows use their explicit
+create owner/group/mode and any required inherited ACL behavior. Additional extended attributes are
+preserved only when the migration inventory identifies a real workflow requirement and the platform
+can reproduce its ordinary-write semantics. Security attributes, capabilities, set-ID state, and
+flags that an ordinary content write would clear are not blindly copied to a replacement inode. An
+unrecognized or unsupported required metadata case refuses before publication rather than silently
+losing metadata or widening access.
 
 `set_metadata` changes owner/group, then mode on the held object. It preserves ordinary extended
-attributes. Preflight rejects a nontrivial access ACL whose effective mask would change under the
-requested mode. After the first system call, failure can leave a known partial change; it is not
-described as atomic or unchanged. Recursive metadata and arbitrary ACL/security attribute mutation
-are not exposed. The same partial-effect rule applies when `ensure_directory` has created its final
-component but cannot finish metadata convergence.
+attributes and uses the platform's ordinary chmod interaction with an existing access ACL. The
+resulting owner/group/mode and effective ACL are verified. After the first system call, failure can
+leave a known partial change; it is not described as atomic or unchanged. Recursive metadata and
+arbitrary ACL/security attribute mutation are not exposed. The same partial-effect rule applies when
+`ensure_directory` has created its final component but cannot finish metadata convergence.
 
 ## Cooperating writers and honest limits
 
-All cooperating helper filesystem transactions on one machine use one identity-neutral, exclusive
-machine-level lock. There is no path hierarchy or shared-lock protocol. Acquisition and the critical
-section obey the caller's deadline. Upload bytes may reach verified private scratch before locking;
-publication then locks, rechecks the condition, and renames. A read locks until its immutable
-snapshot is materialized, then transfers chunks outside the lock. Stat releases after observation;
-list materializes its bounded result before release. Inventory remains a bounded set of
-observations, not a globally coherent filesystem view.
+The file layer does not introduce a machine-wide lock service or cross-identity lock namespace.
+Resource owners serialize their own cooperating mutations to one destination. `Match` binds a
+mutation to an observed revision, and the helper revalidates that revision immediately before atomic
+publication or removal. A mismatch is a conflict; callers observe again before deciding whether to
+retry. Reads and inventory materialize one bounded snapshot before transfer and do not claim a
+globally coherent filesystem view.
 
-Ordinary-user and elevated helpers must open the same lock. A per-user cache cannot satisfy that
-contract. Safe creation, permissions, lifecycle, and availability of an identity-neutral namespace
-before permission activation remain unproved on Debian and macOS. The migration inventory must find
-every cross-identity path, and no affected consumer may migrate until the protocol is proven.
-Excluding a required admin/user workflow needs operator disposition.
-
-`Match` is atomic only with respect to those cooperating writers: the helper compares the revision
-and renames while holding the transaction lock. A non-cooperating process ignores the lock. No
-portable Debian/macOS primitive atomically compares an observed arbitrary destination revision and
-replaces or unlinks that same revision. Therefore an external writer can race the final check and
-rename/unlink window. Subject to the unresolved confinement gates, the helper refuses observed links
-and special objects, but it cannot promise external-writer compare-and-swap. Create-only no-replace
-remains atomic where the named filesystem supports the platform primitive.
+No portable Debian/macOS primitive atomically compares an arbitrary observed destination revision
+and replaces or unlinks that same revision. Final revalidation therefore detects changes completed
+before the check, not a non-cooperating write in the check-to-rename window. Create-only no-replace
+remains atomic where the named filesystem supports the platform primitive. Callers that cannot
+provide cooperative ownership, or that require adversarial external compare-and-swap, cannot use the
+initial mutation path without a different approved design.
 
 This limit is visible in documentation and tests. It is acceptable only where domain ownership or
 service coordination makes external writers non-adversarial. Tmux/session code must coordinate
@@ -305,11 +312,11 @@ There is no recursive removal and no FIFO path.
 ## Immediate mechanics versus deferred permission activation
 
 The [delivery-stage contract](execution-contract.md#delivery-stages-and-permission-activation) owns
-permission timing and immediate operational guarantees. The unproved confinement, cross-identity
-lock, helper, and no-staging candidates above remain hard enablement gates. During coexistence the
-file service constructs an exact-operation confinement request from the explicit destination;
-migration records the intended recipient action, root, identity, elevation, owner/group/mode, and
-content risk outside runtime policy.
+permission timing and immediate operational guarantees. The helper, metadata/platform, carrier I/O,
+and no-staging candidates above remain hard enablement gates. During coexistence the file service
+constructs an exact-operation confinement request from the explicit destination; migration records
+the intended recipient action, root, identity, elevation, owner/group/mode, and content risk outside
+runtime policy.
 
 At physical legacy removal, `file_policy.py` introduces the reviewed immutable catalog and bound
 recipient subsets into composition. The only values needed are exact-file versus subtree scope,
@@ -355,20 +362,20 @@ generated sections, and native inventory, but drive only the new API/helper.
 1. **Contract/JSON:** cover every bound and strategy, nested objects, atomic arrays/scalars,
    missing/empty/malformed input, duplicate keys, finite numbers, UTF-8, and literal `null` on both
    winning sides. Replace and skip-existing must not parse old bytes or disclose values.
-2. **Paths/objects:** cover ancestor/leaf links, Linux magic links, hard links, traversal/prefix
-   collisions, devices, nonblocking FIFO refusal, sockets, directories, and mount changes. Race
-   fixtures rename a held ancestor outside the root and add a hard link before held-inode metadata;
-   acceptance requires enforced invariants or another proved mechanism on every required path.
+2. **Paths/objects:** cover ancestor/leaf links, Linux magic links, observed hard links,
+   traversal/prefix collisions, devices, nonblocking FIFO refusal, sockets, directories, and mount
+   changes. Race fixtures verify conflict/refusal for changes observed before publication. Hostile
+   same-user ancestor moves and hard-link additions are outside the production guarantee, not
+   acceptance gates.
 3. **Publication/metadata:** cover every condition, chunk/partial failures, byte and digest checks,
-   pre-visibility metadata, Linux and macOS ACL/xattrs, BSD-flag refusal, lost acknowledgment,
-   in-place metadata partial effects, and cleanup debt. Every pre-rename publication failure leaves
-   the old inode unchanged.
-4. **Concurrency/lifecycle:** multiprocess whole-file and JSON writers preserve unique keys and
-   conflict on stale snapshots under the machine transaction lock; lock waits are bounded and
-   immutable snapshot/chunk transfer occurs outside it. Directory tests cover bounded inventory,
-   limits/order, exact creation, empty removal, and no implicit parents/recursive delete. Remove a
-   real tmux socket only after liveness proves absence; replacement yields conflict or uncertainty.
-   An external writer fixture demonstrates, but does not overclaim, the non-CAS limit.
+   inherited ACL behavior for creation, direct-write-equivalent access metadata for existing
+   generated sections, security-attribute refusal, lost acknowledgment, in-place metadata partial
+   effects, and cleanup debt. Every pre-rename publication failure leaves the old inode unchanged.
+4. **Concurrency/lifecycle:** cooperating whole-file and JSON workflows serialize per destination
+   and conflict on stale snapshots; non-cooperating races demonstrate the documented non-CAS limit.
+   Directory tests cover bounded inventory, limits/order, exact creation, empty removal, and no
+   implicit parents/recursive delete. Remove a real tmux socket only after liveness proves absence;
+   replacement yields conflict or uncertainty.
 5. **Carrier/bootstrap:** prove `SinkOutput` on SSH and QGA with reflected input,
    malformed/truncated envelopes, bounded parser state, and no raw retention. Prove shared private
    scratch helper delivery, the candidate 24 KiB bound, exact offsets/digests, native finalization
@@ -383,20 +390,20 @@ generated sections, and native inventory, but drive only the new API/helper.
 
 The following are not established by source inspection and must remain open in the lead's plan:
 
-- obtain the pending early-Python versus native-helper decision and prove the selection's
-  pre-Phase-B availability; if native is selected, approve its build, packaging, provenance,
-  ABI/OS/architecture, executable-finalization, and macOS execution cost;
+- prove early `python3` installation for new Debian guests and Bookworm Python 3.11 compatibility;
+  define existing-guest native recovery when Python is absent, without implicit readiness install;
+- decide the macOS placement-host helper/runtime adoption path and prove its metadata and execution
+  behavior; new-guest provisioning does not settle that host requirement;
 - jointly prove the carrier I/O LLD's `SinkOutput` on SSH and QGA without raw response retention;
 - reuse and prove preparation's private scratch transfer and candidate 24 KiB bound; do not add a
   file-specific deployment protocol;
 - prove a no-staging, already-available bounded read/stat substrate for every readiness workflow;
   establish a prerequisite earlier only where the workflow contract permits, otherwise treat a
   mandatory no-write read as a delivery gate requiring operator decision;
-- inventory finite transfer sizes, network/nonlocal filesystems, and every path written by multiple
-  effective identities or adversarial external writers; prove a cross-identity lock protocol for
-  required admin/user workflows;
-- prove enforced trusted-ancestor rename/mount and hardlink-add invariants, or another confinement
-  mechanism, for every required ordinary and elevated destination;
+- inventory finite transfer sizes, network/nonlocal filesystems, every authorized execution
+  identity/elevation choice, and each workflow's cooperating-writer ownership;
+- prove unique-sibling atomic rename and the required creation/update owner, mode, and ACL semantics
+  on every supported filesystem, refusing unsupported metadata before publication;
 - decide the supported macOS minimum and Windows-local download publication design;
 - complete directory transfer/confined extraction before claiming full R7;
 - inventory the exact future core catalog and recipient subsets before removal; and
@@ -404,4 +411,5 @@ The following are not established by source inspection and must remain open in t
   preservation, mount confinement, or conditional-removal assumptions.
 
 These gates are compatibility facts, not permission to import the legacy helper, expose exec to a
-file-only caller, relax confinement, silently drop metadata, or activate grants early.
+file-only caller, silently drop metadata, install a runtime during readiness, retry under broader
+elevation, or activate grants early.
