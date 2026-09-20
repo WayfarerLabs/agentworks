@@ -20,7 +20,8 @@ from agentworks.execution.carrier import (
     FiniteInput,
     Provenance,
 )
-from agentworks.execution.carriers.ssh._io import output_retention, run_process
+from agentworks.execution.carriers._subprocess import output_retention
+from agentworks.execution.carriers.ssh._io import run_process
 from agentworks.execution.carriers.ssh.connection import admit_connection, build_ssh_argv
 
 if TYPE_CHECKING:
