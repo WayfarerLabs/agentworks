@@ -22,6 +22,7 @@ from agentworks.execution._file_spool import (
     SpoolSnapshotFailureKind,
     spool_snapshot,
 )
+from agentworks.execution._file_stat import FileStat
 from agentworks.execution._helper_bundle import build_helper_modules
 from agentworks.execution._scratch import (
     ReadyScratchReference,
@@ -122,6 +123,45 @@ def test_initial_absence_and_declared_oversize_create_no_scratch(
             spool_snapshot(source_fd, "large", scratch_fd, 3)
         assert raised.value.kind is SpoolSnapshotFailureKind.LIMIT
         assert raised.value.cleanup_debt is None
+        assert not tuple(scratch_root.iterdir())
+    finally:
+        os.close(scratch_fd)
+        os.close(source_fd)
+
+
+@pytest.mark.parametrize("expiry_event", ["lookup", "close"])
+def test_initial_absence_checks_expiry_after_lookup_and_close(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    expiry_event: str,
+) -> None:
+    source_root, scratch_root, source_fd, scratch_fd = _directories(tmp_path)
+    clock = [0.0]
+    relative_path = "missing"
+    if expiry_event == "lookup":
+        original_path_stat = snapshot_module._path_snapshot_stat
+
+        def stat_then_expire(parent_fd: int, leaf_name: str) -> FileStat | None:
+            result = original_path_stat(parent_fd, leaf_name)
+            clock[0] = 10.0
+            return result
+
+        monkeypatch.setattr(snapshot_module, "_path_snapshot_stat", stat_then_expire)
+    else:
+        (source_root / "nested").mkdir()
+        relative_path = "nested/missing"
+        original_close = snapshot_module._close
+
+        def close_then_expire(descriptor: int) -> None:
+            original_close(descriptor)
+            clock[0] = 10.0
+
+        monkeypatch.setattr(snapshot_module, "_close", close_then_expire)
+    monkeypatch.setattr(snapshot_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    try:
+        with pytest.raises(SpoolSnapshotError) as raised:
+            spool_snapshot(source_fd, relative_path, scratch_fd, 1, expires_at=5.0)
+        assert raised.value.kind is SpoolSnapshotFailureKind.DEADLINE
         assert not tuple(scratch_root.iterdir())
     finally:
         os.close(scratch_fd)

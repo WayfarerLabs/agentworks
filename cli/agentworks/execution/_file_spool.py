@@ -81,6 +81,7 @@ def spool_snapshot(
     owned: ScratchReference | ReadyScratchReference | None = None
     ready: ReadyScratchReference | None = None
     source_revision: FileRevision | None = None
+    initially_absent = False
     primary: SpoolSnapshotFailureKind | None = None
     debt: ScratchCleanupDebt | None = None
     control: BaseException | None = None
@@ -93,40 +94,41 @@ def spool_snapshot(
             expires_at=expires_at,
         ) as source:
             if source is None:
-                return None
-            reference = begin_scratch(scratch_parent_fd, source.stat.size, expires_at=expires_at)
-            owned = reference
-            digest = hashlib.sha256()
-            offset = 0
-            while offset < source.stat.size:
-                chunk = source.read(
-                    min(_MAX_CHUNK_BYTES, source.stat.size - offset),
-                    expires_at=expires_at,
-                )
-                if not chunk:
+                initially_absent = True
+            else:
+                reference = begin_scratch(scratch_parent_fd, source.stat.size, expires_at=expires_at)
+                owned = reference
+                digest = hashlib.sha256()
+                offset = 0
+                while offset < source.stat.size:
+                    chunk = source.read(
+                        min(_MAX_CHUNK_BYTES, source.stat.size - offset),
+                        expires_at=expires_at,
+                    )
+                    if not chunk:
+                        raise SnapshotReadError(SnapshotFailureKind.CONFLICT)
+                    digest.update(chunk)
+                    write_scratch_chunk(
+                        scratch_parent_fd,
+                        reference,
+                        offset,
+                        chunk,
+                        hashlib.sha256(chunk).digest(),
+                        expires_at=expires_at,
+                    )
+                    offset += len(chunk)
+                if source.read(1, expires_at=expires_at):
                     raise SnapshotReadError(SnapshotFailureKind.CONFLICT)
-                digest.update(chunk)
-                write_scratch_chunk(
+                whole_digest = digest.digest()
+                ready = verify_scratch(
                     scratch_parent_fd,
                     reference,
-                    offset,
-                    chunk,
-                    hashlib.sha256(chunk).digest(),
+                    whole_digest,
                     expires_at=expires_at,
                 )
-                offset += len(chunk)
-            if source.read(1, expires_at=expires_at):
-                raise SnapshotReadError(SnapshotFailureKind.CONFLICT)
-            whole_digest = digest.digest()
-            ready = verify_scratch(
-                scratch_parent_fd,
-                reference,
-                whole_digest,
-                expires_at=expires_at,
-            )
-            owned = ready
-            source.verify(expires_at=expires_at)
-            source_revision = FileRevision(source.stat, whole_digest)
+                owned = ready
+                source.verify(expires_at=expires_at)
+                source_revision = FileRevision(source.stat, whole_digest)
         _check_deadline(expires_at)
     except SnapshotReadError as error:
         primary = _source_failure(error.kind)
@@ -141,6 +143,8 @@ def spool_snapshot(
             debt = scratch_cause.cleanup_debt
 
     if primary is None and control is None:
+        if initially_absent:
+            return None
         assert ready is not None and source_revision is not None
         return SpoolSnapshot(ready, source_revision)
 
