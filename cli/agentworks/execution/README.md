@@ -86,17 +86,21 @@ exclusive process ownership. Windows retains handle-backed `Popen` waiting.
 The private pump now uses a default-deny launch owner. A native thread starts with only an admission
 cell; an interrupted, unacknowledged start cancels that cell without releasing command data or
 dispatching work. Once admitted, the owner constructs, observes and cleans up the exact child while
-the caller pumps its borrowed byte endpoints. One continuous caller-side guard covers startup,
-admission and pumping. Control-flow exceptions propagate only after admitted ownership is settled;
-an incomplete cleanup remains explicit. The owner relinquishes command data and pipe capabilities
-before publishing its terminal observation. An inert bootstrap or final native-thread return tail
-may finish later, but cannot use borrowed endpoints or launch work.
+the caller pumps its borrowed byte endpoints. A caller-side guard covers startup, admission and
+pumping, but does not make asynchronous interruption atomic. On handled cleanup paths, control-flow
+exceptions propagate after admitted ownership is settled or incomplete cleanup is reported. The
+owner relinquishes command data and pipe capabilities before publishing its terminal observation. An
+inert bootstrap or final native-thread return tail may finish later, but cannot use borrowed
+endpoints or launch work.
 
 Local Linux tests exercise interrupted startup, admission and cleanup, including the interval after
 admission but before pumping. They do not establish native Windows/macOS acceptance or update the
-existing SSH-private copy. A deadline consumes startup time but cannot interrupt an OS
-process-creation call that has not returned; it is not a hard real-time bound over that call. This
-ownership mechanism does not contain descendants or cancel a guest workload.
+existing SSH-private copy. A separately reproduced SIGINT at entry to the cleanup loop can escape
+before the owner receives its stop request, leaving a live child and open pipes. This remains an
+open production gate; adding nested Python guards does not establish interrupt-atomic cleanup. A
+deadline consumes startup time but cannot interrupt an OS process-creation call that has not
+returned; it is not a hard real-time bound over that call. This ownership mechanism does not contain
+descendants or cancel a guest workload.
 
 `carriers/wsl2.py` is a private buffered candidate bound to an explicit local WSL executable,
 distribution and delivery user. It sends literal prepared argv through `--exec`, without selecting

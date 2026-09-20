@@ -329,9 +329,10 @@ guard. The owner retains the actual child through construction, status observati
 cleanup, including the interval before PID/readiness publication. Caller-side pumping preserves the
 existing byte-endpoint semantics. Before requesting final cleanup, the caller stops using the
 internal pipes; it propagates its first control-flow exception only after the owner has completed
-cleanup or reported the existing explicit incomplete-cleanup outcome. Repeated interrupts do not
-release ownership or dispatch again. Prepared source descriptors remain caller-owned and close in an
-outer `finally` after the carrier/helper has relinquished them.
+cleanup or reported the existing explicit incomplete-cleanup outcome. This is the required behavior,
+not yet established for arbitrary asynchronous interruption by the implementation below. Repeated
+interrupts must not release ownership or dispatch again. Prepared source descriptors remain
+caller-owned and close in an outer `finally` after the carrier/helper has relinquished them.
 
 The terminal observation proves the owner has relinquished operation resources, not that the native
 thread has finished its final return instructions. No background pump or task may touch a borrowed
@@ -341,13 +342,18 @@ Raw-thread exceptions must not leak request data through the interpreter's defau
 Preserve existing exact wait evidence, cleanup-induced exit distinctions and external-reaper
 uncertainty; thread ownership is not descendant containment or remote cancellation.
 
-The private shared pump now implements this candidate with lock-mediated publication and one
-continuous caller-side cleanup guard. Local tests inject interruption before native start returns,
-between request publication and admission, immediately after admission, during pumping and during
-cleanup. The inline helper also closes its prepared source descriptor across emission or launch
-failure. These checks extend the
+The private shared pump implements a candidate with lock-mediated publication and a caller-side
+cleanup guard. Local tests inject interruption before native start returns, between request
+publication and admission, immediately after admission, during pumping and during cleanup. The
+inline helper also closes its prepared source descriptor across emission or launch failure. These
+checks extend the
 [local admission experiment](prior-art-research.md#local-process-startup-and-interruption), not its
-platform scope. Native Windows/macOS behavior, interpreter shutdown, repeated startup cancellation
+platform scope. A separate real SIGINT experiment at entry to the cleanup loop leaves a live child
+and open pipes before fixture cleanup: the caller can escape before requesting the owner's stop.
+Nested Python guards relocate that asynchronous boundary rather than close it. Selecting an
+application-wide interrupt policy or a separate supervisor protocol requires an explicit design
+decision; neither is supplied or implicitly authorized by this candidate. This gap remains a
+production gate. Native Windows/macOS behavior, interpreter shutdown, repeated startup cancellation
 and the final bundled-helper size remain acceptance gates. The existing OS process-creation caveat
 still applies; no new hard real-time bound is promised.
 

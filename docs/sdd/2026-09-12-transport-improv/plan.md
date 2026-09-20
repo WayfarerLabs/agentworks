@@ -2,8 +2,9 @@
 
 - Status: Additive implementation started from merged #830; production execution factories and
   RunContext remain unchanged. New-guest bootstrap installs distribution Python. The private
-  destination-lock implementation and its setup are being removed under the coordination ruling
-  below; database operation ownership is not yet implemented.
+  destination-lock implementation and its setup have been removed under the coordination ruling
+  below. A database operation-ownership primitive is implemented but not yet wired into production
+  orchestration or RunContext; it does not yet prevent production operation conflicts.
 - Delivery vehicle: Design PR #830, then additive implementation, consumer migration PR(s), and
   final removal/activation PR; all labeled `sdd:transport-improv`
 - Requirements: [FRD](frd.md)
