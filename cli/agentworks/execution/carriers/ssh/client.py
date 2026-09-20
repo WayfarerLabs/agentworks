@@ -12,15 +12,10 @@ from agentworks.execution.carrier import (
     CarrierIO,
     CarrierReport,
     ChannelFeatures,
-    Discard,
     Dispatch,
-    EndOfInput,
     ExitStatus,
     Failure,
-    FiniteInput,
-    LiveInput,
     Provenance,
-    SinkOutput,
 )
 from agentworks.execution.carriers._subprocess import output_retention
 from agentworks.execution.carriers.ssh._io import run_process

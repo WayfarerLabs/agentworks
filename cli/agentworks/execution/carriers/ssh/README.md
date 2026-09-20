@@ -102,11 +102,12 @@ cleanup do not prove guest termination or authorize replay. Shared preparation a
 interpretation belong above this adapter.
 
 The carrier advertises `live_stdio` and accepts the shared `LiveInput` and `SinkOutput` modes.
-Borrowed sources and sinks remain caller-owned and are used only for the duration of the attempt.
-The shared process core handles bounded reads, partial sink writes and temporary sink stalls while
-the SSH adapter retains its environment filter and stream provenance. Delivered output is not
-retained in the report. Endpoint failure is reported on its input or output boundary and still
-performs bounded local client cleanup.
+`CarrierIO` validates the published mode shapes, and SSH supports every current shape without a
+second adapter allowlist. Borrowed sources and sinks remain caller-owned and are used only for the
+duration of the attempt. The shared process core handles bounded reads, partial sink writes and
+temporary sink stalls while the SSH adapter retains its environment filter and stream provenance.
+Delivered output is not retained in the report. Endpoint failure is reported on its input or output
+boundary and still performs bounded local client cleanup.
 
 The shared cleanup guard begins after process construction and loop-state initialization. This
 adapter does not claim that interruption during process launch is covered, and local cleanup never

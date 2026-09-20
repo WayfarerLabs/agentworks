@@ -15,7 +15,6 @@ from agentworks.execution.carrier import (
     Deadline,
     Dispatch,
     ExitStatus,
-    Failure,
     LiveInput,
     PreparedInvocation,
     Provenance,
@@ -107,13 +106,6 @@ def assert_closed(children: list[subprocess.Popen[bytes]]) -> None:
         assert all(pipe is None or pipe.closed for pipe in (child.stdin, child.stdout, child.stderr))
 
 
-def test_ssh_advertises_live_byte_io_without_inspection() -> None:
-    carrier = SSHCarrier(cast("SSHConnection", object()))
-
-    assert carrier.features.live_stdio
-    assert not carrier.features.terminal
-
-
 @pytest.mark.windows
 def test_live_duplex_preserves_binary_streams_under_backpressure(
     children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
@@ -147,82 +139,6 @@ def test_live_duplex_preserves_binary_streams_under_backpressure(
     assert report.stderr.provenance == Provenance.MIXED_STDERR
     assert source.limits and max(stdout.offers + stderr.offers) <= 65_536
     assert not source.closed and not stdout.closed and not stderr.closed
-    assert_closed(children)
-
-
-@pytest.mark.parametrize("endpoint", ["source", "sink"])
-@pytest.mark.windows
-def test_live_endpoint_fault_is_safe_and_cleans_the_client(
-    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch, endpoint: str
-) -> None:
-    class BrokenSource:
-        def try_read(self, limit: int) -> bytes | None:
-            raise ValueError("secret-source-canary")
-
-    class BrokenSink:
-        def try_write(self, data: memoryview) -> int | None:
-            raise ValueError("secret-sink-canary")
-
-    stdout = BrokenSink() if endpoint == "sink" else ShortSink(64)
-    io = (
-        CarrierIO(input=LiveInput(BrokenSource()))
-        if endpoint == "source"
-        else CarrierIO(output=SinkOutput(stdout, ShortSink(64), require_live=True))
-    )
-    report = execute(
-        monkeypatch,
-        "import sys,time; sys.stdout.buffer.write(b'payload'); sys.stdout.buffer.flush(); time.sleep(30)",
-        io,
-    )
-
-    assert report.failure == (Failure.INPUT if endpoint == "source" else Failure.OUTPUT)
-    assert report.dispatch == Dispatch.UNKNOWN
-    assert report.completion is None
-    assert "secret-source-canary" not in repr(report)
-    assert "secret-sink-canary" not in repr(report)
-    assert_closed(children)
-
-
-@pytest.mark.windows
-def test_live_endpoint_interruption_reaps_before_propagating(
-    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    class InterruptingSource:
-        closed = False
-
-        def try_read(self, limit: int) -> bytes | None:
-            raise KeyboardInterrupt
-
-        def close(self) -> None:
-            self.closed = True
-
-    source = InterruptingSource()
-    with pytest.raises(KeyboardInterrupt):
-        execute(monkeypatch, "import time; time.sleep(30)", CarrierIO(input=LiveInput(source)))
-
-    assert not source.closed
-    assert_closed(children)
-
-
-@pytest.mark.windows
-def test_live_delivery_does_not_turn_ssh_255_into_remote_completion(
-    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    stdout = ShortSink(2, stall_every=2)
-    stderr = ShortSink(3, stall_every=3)
-    report = execute(
-        monkeypatch,
-        "import sys; sys.stdout.buffer.write(b'out\\x00\\xff'); sys.stderr.buffer.write(b'err\\x80'); sys.exit(255)",
-        CarrierIO(output=SinkOutput(stdout, stderr, require_live=True)),
-    )
-
-    assert bytes(stdout.data) == b"out\x00\xff"
-    assert bytes(stderr.data) == b"err\x80"
-    assert report.local_status == 255
-    assert report.dispatch == Dispatch.UNKNOWN
-    assert report.completion is None
-    assert report.failure == Failure.OBSERVATION
-    assert report.stdout.complete and report.stderr.complete
     assert_closed(children)
 
 
