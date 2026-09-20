@@ -137,7 +137,6 @@ class OperationRepository:
 
     def claim(self, scope: OperationScope, operation_kind: str) -> OperationOwnership:
         """Reserve one unclaimed scope and return its fresh stale-owner fence."""
-        _validate_scope(scope)
         _validate_operation_kind(operation_kind)
         ownership = OperationOwnership(scope, uuid4().hex)
         now = _utc_now()
@@ -168,7 +167,6 @@ class OperationRepository:
 
     def inspect(self, scope: OperationScope) -> OperationClaim | None:
         """Return bounded non-secret persisted facts for one resource claim."""
-        _validate_scope(scope)
         row = self._connection.execute(
             "SELECT * FROM operation_claims WHERE resource_kind = ? AND resource_name = ?",
             (scope.resource_kind, scope.resource_name),
@@ -211,7 +209,6 @@ class OperationRepository:
         expected: OperationClaimState,
         target: OperationClaimState,
     ) -> OperationClaim:
-        _validate_ownership(ownership)
         updated_at = _utc_now()
         with self._standalone_transaction():
             cursor = self._connection.execute(
@@ -236,7 +233,6 @@ class OperationRepository:
             return self._decode_claim(row)
 
     def _delete(self, ownership: OperationOwnership, *, expected: OperationClaimState) -> None:
-        _validate_ownership(ownership)
         with self._standalone_transaction():
             cursor = self._connection.execute(
                 "DELETE FROM operation_claims "
@@ -311,6 +307,6 @@ class OperationRepository:
             raise StateError(
                 "persisted operation claim is malformed",
                 entity_kind="database",
-                hint="Restore a known-good backup or repair the state database before retrying.",
+                hint="Repair the state database and reconcile outstanding remote operations before retrying.",
             ) from None
         return OperationClaim(ownership, operation_kind, state, claimed_at, updated_at)
