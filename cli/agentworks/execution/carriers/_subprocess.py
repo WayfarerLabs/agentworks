@@ -345,9 +345,13 @@ def run_process(
                 else ((stderr, process.stderr), (stdout, process.stdout))
             )
             output_first = not output_first
-            if exit_status is not None and pending_delivery:
-                outputs = [item for item in outputs if item[0].pending is not None]
             for output, pipe in outputs:
+                if (
+                    exit_status is not None
+                    and output.pending is None
+                    and (stdout.pending is not None or stderr.pending is not None)
+                ):
+                    continue
                 try:
                     output_progressed, output_failed = output.advance(pipe)
                 except OSError:

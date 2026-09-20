@@ -848,6 +848,47 @@ def test_post_exit_short_writes_are_delivered_fairly(children: list[subprocess.P
     assert_closed(children)
 
 
+@pytest.mark.skipif(
+    os.name == "nt" or not all(hasattr(os, name) for name in ("waitid", "P_PID", "WEXITED", "WNOWAIT")),
+    reason="deterministic non-reaping exit observation requires POSIX waitid WNOWAIT",
+)
+def test_same_iteration_pending_transition_stops_fresh_other_stream_read(
+    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class StalledSink:
+        def try_write(self, data: memoryview) -> int | None:
+            return None
+
+    class CountingSink:
+        def __init__(self) -> None:
+            self.bytes_written = 0
+
+        def try_write(self, data: memoryview) -> int | None:
+            self.bytes_written += len(data)
+            return len(data)
+
+    spawn = subprocess.Popen
+
+    def completed_start(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        process = spawn(argv, **kwargs)
+        os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT)
+        return process
+
+    stderr = CountingSink()
+    monkeypatch.setattr(subprocess, "Popen", completed_start)
+    result = execute(
+        "import sys; sys.stdout.write('out'); sys.stdout.flush(); sys.stderr.write('err'); sys.stderr.flush()",
+        io=CarrierIO(output=SinkOutput(StalledSink(), stderr)),
+        seconds=0.05,
+    )
+
+    assert result.local_status == result.exit_status == 0
+    assert result.failure == Failure.DEADLINE
+    assert stderr.bytes_written == 0
+    assert not result.stdout.complete and not result.stderr.complete
+    assert_closed(children)
+
+
 @pytest.mark.parametrize(
     ("stall_seconds", "deadline_seconds", "expected_failure"),
     [(0.3, 2.0, Failure.OUTPUT), (None, 0.5, Failure.DEADLINE)],
