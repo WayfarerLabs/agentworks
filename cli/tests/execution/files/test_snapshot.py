@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import socket
+import stat
 import sys
 from dataclasses import FrozenInstanceError
 from pathlib import Path
@@ -98,31 +99,68 @@ def test_ancestor_and_leaf_links_are_refused(tmp_path: Path) -> None:
         os.close(root_fd)
 
 
-def test_multiply_linked_regular_file_is_refused(tmp_path: Path) -> None:
+def test_multiply_linked_regular_file_is_refused_before_opening(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     target = tmp_path / "file"
     target.write_bytes(b"content")
     os.link(target, tmp_path / "second-name")
     root_fd = _open_root(tmp_path)
+    monkeypatch.setattr(snapshot_module, "_open_at", lambda *_args, **_kwargs: pytest.fail("hard link was opened"))
     try:
         assert _failure_kind(root_fd, "file") is SnapshotFailureKind.UNSUPPORTED_OBJECT
     finally:
         os.close(root_fd)
 
 
-def test_fifo_directory_and_socket_are_refused_without_reading(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fifo_directory_and_socket_are_refused_without_opening(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     os.mkfifo(tmp_path / "fifo")
     (tmp_path / "directory").mkdir()
     socket_path = tmp_path / "socket"
     listener = socket.socket(socket.AF_UNIX)
     listener.bind(str(socket_path))
     root_fd = _open_root(tmp_path)
-    monkeypatch.setattr(snapshot_module, "_read", lambda *_: pytest.fail("special object was read"))
+    monkeypatch.setattr(snapshot_module, "_open_at", lambda *_args, **_kwargs: pytest.fail("special object was opened"))
     try:
         for name in ("fifo", "directory", "socket"):
             assert _failure_kind(root_fd, name) is SnapshotFailureKind.UNSUPPORTED_OBJECT
     finally:
         os.close(root_fd)
         listener.close()
+
+
+def test_device_is_refused_without_opening(monkeypatch: pytest.MonkeyPatch) -> None:
+    device = Path("/dev/null")
+    if not device.exists() or not stat.S_ISCHR(device.stat().st_mode):
+        pytest.skip("known character-device fixture is unavailable")
+    root_fd = _open_root(device.parent)
+    monkeypatch.setattr(snapshot_module, "_open_at", lambda *_args, **_kwargs: pytest.fail("device was opened"))
+    try:
+        assert _failure_kind(root_fd, device.name) is SnapshotFailureKind.UNSUPPORTED_OBJECT
+    finally:
+        os.close(root_fd)
+
+
+def test_regular_leaf_open_uses_nonblocking_nofollow_noctty_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "file").write_bytes(b"content")
+    root_fd = _open_root(tmp_path)
+    original_open = os.open
+    observed_flags: list[int] = []
+
+    def recording_open(path: str, flags: int, *, dir_fd: int) -> int:
+        observed_flags.append(flags)
+        return original_open(path, flags, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", recording_open)
+    try:
+        assert read_snapshot(root_fd, "file", 1024) is not None
+    finally:
+        os.close(root_fd)
+
+    required = os.O_NONBLOCK | os.O_NOFOLLOW | getattr(os, "O_NOCTTY", 0)
+    assert observed_flags and observed_flags[0] & required == required
 
 
 def test_limit_refuses_oversize_file_without_a_partial_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -230,6 +268,28 @@ def test_observed_name_replacement_is_a_conflict(tmp_path: Path, monkeypatch: py
         os.close(root_fd)
 
 
+def test_replacement_between_leaf_observation_and_open_is_a_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "file"
+    replacement = tmp_path / "replacement"
+    target.write_bytes(b"original")
+    replacement.write_bytes(b"different")
+    root_fd = _open_root(tmp_path)
+    original_open = snapshot_module._open_at
+
+    def replacing_open(parent_fd: int, name: str, *, directory: bool) -> int | None:
+        if not directory:
+            os.replace(replacement, target)
+        return original_open(parent_fd, name, directory=directory)
+
+    monkeypatch.setattr(snapshot_module, "_open_at", replacing_open)
+    try:
+        assert _failure_kind(root_fd, "file", 1024) is SnapshotFailureKind.CONFLICT
+    finally:
+        os.close(root_fd)
+
+
 @pytest.mark.skipif(sys.platform != "linux", reason="real procfs boundary is Linux-specific")
 def test_descendant_procfs_device_boundary_is_refused() -> None:
     if not Path("/proc/version").is_file():
@@ -269,6 +329,43 @@ def test_borrowed_root_survives_and_all_descendant_descriptors_close(
     monkeypatch.setattr(snapshot_module, "_close", tracking_close)
     try:
         assert read_snapshot(root_fd, "one/two/file", 1024) is not None
+        assert not owned
+        os.fstat(root_fd)
+    finally:
+        os.close(root_fd)
+
+
+def test_base_exception_during_directory_inspection_closes_owned_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "directory").mkdir()
+    root_fd = _open_root(tmp_path)
+    original_open = snapshot_module._open_at
+    original_close = snapshot_module._close
+    original_fstat = snapshot_module._fstat
+    owned: set[int] = set()
+
+    def tracking_open(parent_fd: int, name: str, *, directory: bool) -> int | None:
+        descriptor = original_open(parent_fd, name, directory=directory)
+        if descriptor is not None:
+            owned.add(descriptor)
+        return descriptor
+
+    def tracking_close(descriptor: int) -> None:
+        original_close(descriptor)
+        owned.remove(descriptor)
+
+    def interrupting_fstat(descriptor: int) -> os.stat_result:
+        if descriptor != root_fd:
+            raise SystemExit
+        return original_fstat(descriptor)
+
+    monkeypatch.setattr(snapshot_module, "_open_at", tracking_open)
+    monkeypatch.setattr(snapshot_module, "_close", tracking_close)
+    monkeypatch.setattr(snapshot_module, "_fstat", interrupting_fstat)
+    try:
+        with pytest.raises(SystemExit):
+            read_snapshot(root_fd, "directory/file", 1024)
         assert not owned
         os.fstat(root_fd)
     finally:

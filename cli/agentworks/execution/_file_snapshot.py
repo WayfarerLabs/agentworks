@@ -87,25 +87,29 @@ def read_snapshot(trusted_root_fd: int, relative_path: str, max_bytes: int) -> F
             child_fd = _open_at(parent_fd, component, directory=True)
             if child_fd is None:
                 return None
-            try:
-                child_stat = _fstat(child_fd)
-            except SnapshotReadError:
-                _close(child_fd)
-                raise
-            if not stat.S_ISDIR(child_stat.st_mode) or child_stat.st_dev != root_device:
-                _close(child_fd)
-                raise SnapshotReadError(SnapshotFailureKind.UNSUPPORTED_OBJECT)
-            if parent_owned:
-                _close(parent_fd)
+            previous_fd = parent_fd if parent_owned else None
             parent_fd = child_fd
             parent_owned = True
+            if previous_fd is not None:
+                _close(previous_fd)
+            child_stat = _fstat(parent_fd)
+            if not stat.S_ISDIR(child_stat.st_mode) or child_stat.st_dev != root_device:
+                raise SnapshotReadError(SnapshotFailureKind.UNSUPPORTED_OBJECT)
 
+        expected = _path_snapshot_stat(parent_fd, components[-1])
+        if expected is None:
+            return None
+        if not _is_supported_leaf(expected, root_device):
+            raise SnapshotReadError(SnapshotFailureKind.UNSUPPORTED_OBJECT)
+        if expected.size > max_bytes:
+            raise SnapshotReadError(SnapshotFailureKind.LIMIT)
         leaf_fd = _open_at(parent_fd, components[-1], directory=False)
         if leaf_fd is None:
-            return None
+            raise SnapshotReadError(SnapshotFailureKind.CONFLICT)
         try:
             return _snapshot_open_leaf(
                 leaf_fd,
+                expected=expected,
                 parent_fd=parent_fd,
                 leaf_name=components[-1],
                 root_device=root_device,
@@ -144,7 +148,7 @@ def _open_at(parent_fd: int, name: str, *, directory: bool) -> int | None:
     if directory:
         flags |= getattr(os, "O_DIRECTORY", 0)
     else:
-        flags |= getattr(os, "O_NONBLOCK", 0)
+        flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0)
 
     error_number: int | None = None
     try:
@@ -161,18 +165,17 @@ def _open_at(parent_fd: int, name: str, *, directory: bool) -> int | None:
 def _snapshot_open_leaf(
     leaf_fd: int,
     *,
+    expected: SnapshotStat,
     parent_fd: int,
     leaf_name: str,
     root_device: int,
     max_bytes: int,
 ) -> FileSnapshot:
     before = _snapshot_stat(_fstat(leaf_fd))
-    if not stat.S_ISREG(before.mode) or before.link_count != 1 or before.device != root_device or before.size < 0:
+    if not _is_supported_leaf(before, root_device):
         raise SnapshotReadError(SnapshotFailureKind.UNSUPPORTED_OBJECT)
-    if _path_snapshot_stat(parent_fd, leaf_name) != before:
+    if before != expected or _path_snapshot_stat(parent_fd, leaf_name) != before:
         raise SnapshotReadError(SnapshotFailureKind.CONFLICT)
-    if before.size > max_bytes:
-        raise SnapshotReadError(SnapshotFailureKind.LIMIT)
 
     content = bytearray()
     content_hash = hashlib.sha256()
@@ -191,6 +194,14 @@ def _snapshot_open_leaf(
     if after != before or named_after != before or len(content) != before.size:
         raise SnapshotReadError(SnapshotFailureKind.CONFLICT)
     return FileSnapshot(data=bytes(content), stat=before, digest=content_hash.digest())
+
+
+def _is_supported_leaf(observed: SnapshotStat, root_device: int) -> bool:
+    return (
+        stat.S_ISREG(observed.mode)
+        and (observed.link_count, observed.device) == (1, root_device)
+        and observed.size >= 0
+    )
 
 
 def _snapshot_stat(observed: os.stat_result) -> SnapshotStat:
