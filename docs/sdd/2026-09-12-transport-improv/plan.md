@@ -329,6 +329,17 @@ presentation above the carrier. Explicit input and output descriptors supply nat
 without process-global stdio lookup. This remains a candidate for joint native proof with SSH, not
 an enabled terminal mode or accepted platform evidence.
 
+At `35c72e84`, Linux snapshot lookup uses `openat2` for every descendant open without a weaker
+fallback, and private terminal preparation implements the nonce-bound two-gate source/collector and
+one-shot Linux guest. The host side is workstation-neutral. Private review corrected inherited
+Python signal dispositions and nonce transformation under restored terminal output modes, and
+removed unsupported same-process guest reuse. All three private lanes are clean. The full local
+suite passes 10,961 tests with 12 skips; Ruff, formatting, strict mypy, file lint, typer isolation,
+rulesync, locked-SDD, 160 Python/103 Node website tests and both deterministic build comparisons
+pass. Actual local Python 3.11 PTY and kernel lookup tests do not establish SSH/native workstation,
+same-filesystem bind-mount or macOS acceptance. Complete files, lifecycle and additive RunContext
+remain open; no public feedback/fix round is consumed.
+
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
 
