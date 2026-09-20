@@ -539,6 +539,87 @@ def test_sink_failure_preserves_independently_observed_exit(children: list[subpr
     assert_closed(children)
 
 
+def test_post_exit_budget_pauses_for_healthy_sink_backpressure(
+    children: list[subprocess.Popen[bytes]],
+) -> None:
+    class DelayedSink:
+        def __init__(self) -> None:
+            self.blocked_until: float | None = None
+            self.data = bytearray()
+
+        def try_write(self, data: memoryview) -> int | None:
+            if self.blocked_until is None:
+                self.blocked_until = time.monotonic() + 0.2
+            if time.monotonic() < self.blocked_until:
+                return None
+            self.data.extend(data)
+            return len(data)
+
+    stdout = DelayedSink()
+    started = time.monotonic()
+    result = execute(
+        "import sys; sys.stdout.buffer.write(b'payload'); sys.stdout.buffer.flush()",
+        io=CarrierIO(output=SinkOutput(stdout, ShortSink(64))),
+        seconds=3,
+    )
+    assert time.monotonic() - started >= 0.18
+    assert bytes(stdout.data) == b"payload"
+    assert result.local_status == result.exit_status == 0
+    assert result.failure is None
+    assert result.stdout.complete and result.stderr.complete
+    assert_closed(children)
+
+
+def test_permanently_stalled_post_exit_sink_uses_operation_deadline(
+    children: list[subprocess.Popen[bytes]],
+) -> None:
+    class StalledSink:
+        def try_write(self, data: memoryview) -> int | None:
+            return None
+
+    started = time.monotonic()
+    result = execute(
+        "import sys; sys.stdout.buffer.write(b'payload'); sys.stdout.buffer.flush()",
+        io=CarrierIO(output=SinkOutput(StalledSink(), ShortSink(64))),
+        seconds=0.25,
+    )
+    elapsed = time.monotonic() - started
+    assert 0.2 <= elapsed < 1
+    assert result.local_status == result.exit_status == 0
+    assert result.failure == Failure.DEADLINE
+    assert not result.stdout.complete
+    assert_closed(children)
+
+
+def test_post_exit_short_writes_are_delivered_fairly(children: list[subprocess.Popen[bytes]]) -> None:
+    class DelayedShortSink:
+        def __init__(self) -> None:
+            self.ready_at = 0.0
+            self.data = bytearray()
+
+        def try_write(self, data: memoryview) -> int | None:
+            now = time.monotonic()
+            if now < self.ready_at:
+                return None
+            written = min(2, len(data))
+            self.data.extend(data[:written])
+            self.ready_at = now + 0.02
+            return written
+
+    stdout = DelayedShortSink()
+    payload = b"short-write-payload" * 3
+    result = execute(
+        f"import sys; sys.stdout.buffer.write({payload!r}); sys.stdout.buffer.flush()",
+        io=CarrierIO(output=SinkOutput(stdout, ShortSink(64))),
+        seconds=3,
+    )
+    assert bytes(stdout.data) == payload
+    assert result.local_status == result.exit_status == 0
+    assert result.failure is None
+    assert result.stdout.complete and result.stderr.complete
+    assert_closed(children)
+
+
 def test_input_pipe_failure_is_safe(children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch) -> None:
     def write(fd: int, data: bytes) -> int:
         raise OSError("secret-canary")
@@ -625,6 +706,56 @@ def test_descendant_output_handles_have_a_bounded_post_exit_drain(
         assert result.local_status == result.exit_status == 0
         assert result.failure == Failure.OUTPUT
         assert not result.stdout.complete and not result.stderr.complete
+        assert_closed(children)
+    finally:
+        release.touch()
+        until = time.monotonic() + 5
+        while not done.exists() and time.monotonic() < until:
+            time.sleep(0.01)
+        assert done.exists()
+
+
+def test_ready_sink_does_not_reset_bounded_descendant_collection(
+    children: list[subprocess.Popen[bytes]], tmp_path: Path
+) -> None:
+    class CountingSink:
+        def __init__(self) -> None:
+            self.bytes_written = 0
+
+        def try_write(self, data: memoryview) -> int | None:
+            self.bytes_written += len(data)
+            return len(data)
+
+    release = tmp_path / "release"
+    done = tmp_path / "done"
+    descendant = (
+        "import os,pathlib,time; "
+        f"release=pathlib.Path({str(release)!r}); done=pathlib.Path({str(done)!r}); "
+        "end=time.monotonic()+5\n"
+        "while not release.exists() and time.monotonic()<end:\n"
+        " try: os.write(1,b'x'*65536)\n"
+        " except OSError: break\n"
+        "done.touch()"
+    )
+    script = (
+        "import subprocess,sys; "
+        f"subprocess.Popen([sys.executable,'-c',{descendant!r}], "
+        "stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+        "sys.stdout.buffer.write(b'parent'); sys.stdout.buffer.flush()"
+    )
+    stdout = CountingSink()
+    try:
+        started = time.monotonic()
+        result = execute(
+            script,
+            io=CarrierIO(output=SinkOutput(stdout, ShortSink(64))),
+            seconds=None,
+        )
+        assert time.monotonic() - started < 2
+        assert stdout.bytes_written > len(b"parent")
+        assert result.local_status == result.exit_status == 0
+        assert result.failure == Failure.OUTPUT
+        assert not result.stdout.complete
         assert_closed(children)
     finally:
         release.touch()

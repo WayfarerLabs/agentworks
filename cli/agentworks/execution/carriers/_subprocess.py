@@ -155,6 +155,22 @@ class _Input:
         return progressed, False
 
 
+@dataclass
+class _PostExitDrain:
+    remaining: float = _EXIT_DRAIN_SECONDS
+    checked_at: float = field(default_factory=time.monotonic)
+    paused: bool = False
+
+    def update(self, *, paused: bool) -> bool:
+        """Spend only time available for pipe collection, never sink backpressure."""
+        now = time.monotonic()
+        if not self.paused:
+            self.remaining -= now - self.checked_at
+        self.checked_at = now
+        self.paused = paused
+        return self.remaining <= 0
+
+
 @dataclass(frozen=True)
 class ProcessResult:
     started: bool
@@ -228,7 +244,7 @@ def run_process(
 
     failure: Failure | None = None
     exit_status: int | None = None
-    drain_until: float | None = None
+    post_exit_drain: _PostExitDrain | None = None
     interruption: BaseException | None = None
     try:
         for pipe in (process.stdin, process.stdout, process.stderr):
@@ -243,9 +259,10 @@ def run_process(
                 failure = Failure.DEADLINE
                 break
             if exit_status is not None:
-                if drain_until is None:
-                    drain_until = time.monotonic() + _EXIT_DRAIN_SECONDS
-                elif time.monotonic() >= drain_until:
+                pending_delivery = stdout.pending is not None or stderr.pending is not None
+                if post_exit_drain is None:
+                    post_exit_drain = _PostExitDrain(paused=pending_delivery)
+                elif post_exit_drain.update(paused=pending_delivery):
                     # A continuously writing descendant must not extend even
                     # an explicitly unbounded invocation after its client exits.
                     failure = Failure.OUTPUT
@@ -283,6 +300,11 @@ def run_process(
                     failure = Failure.INPUT
                     break
                 if stdout.eof and stderr.eof:
+                    break
+                assert post_exit_drain is not None
+                pending_delivery = stdout.pending is not None or stderr.pending is not None
+                if post_exit_drain.update(paused=pending_delivery):
+                    failure = Failure.OUTPUT
                     break
             if not progressed:
                 remaining = deadline.remaining()
