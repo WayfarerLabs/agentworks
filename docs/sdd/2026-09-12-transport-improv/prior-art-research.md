@@ -773,11 +773,19 @@ belong before dispatch, and neither is proof that the request succeeds on a nati
 
 Output has a separate guest-agent bound. The inspected
 [QEMU 7.2 source](https://github.com/qemu/qemu/blob/v7.2.0/qga/commands.c) limits each captured
-guest-exec output stream to 16 MiB and reports truncation. The proposed 4 MiB encoded directory
-inventory therefore needs a complete framed-response size check, not comparison with the 64 KiB
-input limit. This source reading supports a bounded single-response candidate, not acceptance of
-every Proxmox package or intermediary. Native tests must verify the full response and preserve
-truncation as incomplete evidence; larger file transfers retain their separate chunk protocol.
+guest-exec output stream to 16 MiB. The proposed 4 MiB encoded directory inventory therefore needs a
+complete framed-response size check, not comparison with the 64 KiB input limit. This source reading
+supports a bounded single-response candidate, not acceptance of every Proxmox package or
+intermediary. Native tests must verify the full response and preserve truncation as incomplete
+evidence; larger file transfers retain their separate chunk protocol.
+
+Do not rely on this version's truncation flags alone. Its status builder zero-initializes the result
+and sets the optional fields' presence flags without assigning their boolean values. The
+[schema](https://github.com/qemu/qemu/blob/v7.2.0/qga/qapi-schema.json) defines separate optional
+boolean values. This source reading raises a flag-reliability concern, not a measured result for a
+distribution package. Independent framing, terminal record, length and digest verification must
+remain mandatory even when provider flags report no truncation. Native acceptance must record the
+actual guest-agent version and exercise incomplete-output handling.
 
 Compressing the trusted module sources together as one compact JSON value reduces the measured
 eight-module loader to 27,555 bytes. More importantly, a transfer-only bundle of identity, revision,
