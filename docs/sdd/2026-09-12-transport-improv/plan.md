@@ -243,6 +243,18 @@ short parameter IDs: Windows CI at `4cf5261f` could not set pytest's environment
 checks subsequently pass at `e6860525`, including Windows Python 3.13 and Linux Python
 3.12/3.13/3.14; no production-launch or native-platform gate is closed by this test correction.
 
+At `9c1993ef`, the private scratch-transfer primitive passes all three review lanes. It reopens
+identity-bound objects, verifies bounded exact-offset transfers, and retains known cleanup debt.
+Review corrected acquisition/interruption ownership, setgid inheritance ordering and interrupted
+descriptor closing, and removed checks that did not strengthen the stated guarantees. All 29 scratch
+cases pass on the current interpreter and distribution Python 3.11; the runtime head passes 10,572
+non-integration tests with 12 skips. The corrected full execution suite passes 651 with five skips.
+FileAccess, wire validation, remote delivery, concurrency composition and native-platform acceptance
+remain open. The Lima resource-lifetime candidate at `8bac9560` and shared process-core design at
+`367553fa` separately pass project and complexity review; neither claims an implemented supervisor
+or destination helper. These remain draft progress increments, not public feedback/fix rounds or
+readiness for production adoption.
+
 SSH's implementation at `174187d2` includes transport `a885ef5a` and adopts the reviewed finite
 subprocess pump. Its owner has separately supplied the buffered compatibility guard integrated here.
 It still needs the extended shared I/O implementation and terminal preparation, plus production
