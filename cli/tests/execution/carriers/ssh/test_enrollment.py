@@ -18,9 +18,10 @@ import pytest
 
 from agentworks.errors import ValidationError
 from agentworks.execution.carrier import CapturedOutput, CarrierIO, Deadline, Failure
+from agentworks.execution.carriers._subprocess import ProcessResult
 from agentworks.execution.carriers.ssh import _trust_files as files
 from agentworks.execution.carriers.ssh import enrollment
-from agentworks.execution.carriers.ssh._io import _ProcessResult, run_process
+from agentworks.execution.carriers.ssh._io import run_process
 from agentworks.execution.carriers.ssh.connection import SSHConnection, admit_connection
 from agentworks.execution.carriers.ssh.enrollment import (
     SSHCreationProvenance,
@@ -46,18 +47,18 @@ class SyntheticEnrollment:
     connection: SSHConnection
     provenance: SSHCreationProvenance
     calls: list[list[str]]
-    action: Callable[[list[str]], _ProcessResult] | None = None
+    action: Callable[[list[str]], ProcessResult] | None = None
 
-    def run(self, argv: list[str], *, io: CarrierIO, deadline: Deadline) -> _ProcessResult:
+    def run(self, argv: list[str], *, io: CarrierIO, deadline: Deadline) -> ProcessResult:
         self.calls.append(argv)
         if self.action is not None:
             return self.action(argv)
         return self.ack(argv)
 
-    def ack(self, argv: list[str]) -> _ProcessResult:
+    def ack(self, argv: list[str]) -> ProcessResult:
         nonce = re.search(r"agw-enroll-[a-f0-9]{32}", argv[-1])
         assert nonce is not None
-        return _ProcessResult(True, 0, 0, CapturedOutput((nonce.group() + "\n").encode(), True), CapturedOutput(), None)
+        return ProcessResult(True, 0, 0, CapturedOutput((nonce.group() + "\n").encode(), True), CapturedOutput(), None)
 
     @property
     def bundle(self) -> ManagedSSHTrust:
@@ -138,7 +139,7 @@ def test_deadline_refuses_before_mutation(synthetic: SyntheticEnrollment, second
 def test_interruption_retains_written_bytes_for_strict_recovery(
     synthetic: SyntheticEnrollment, error: BaseException
 ) -> None:
-    def interrupted(argv: list[str]) -> _ProcessResult:
+    def interrupted(argv: list[str]) -> ProcessResult:
         (synthetic.directory / "known-hosts").write_bytes(b"retained key bytes\n")
         raise error
 
@@ -158,7 +159,7 @@ def test_interruption_retains_written_bytes_for_strict_recovery(
 def test_failed_ack_preserves_candidate_and_never_retries_first_contact(
     synthetic: SyntheticEnrollment, failure: Failure | None
 ) -> None:
-    synthetic.action = lambda argv: _ProcessResult(True, 255, 255, CapturedOutput(), CapturedOutput(), failure)
+    synthetic.action = lambda argv: ProcessResult(True, 255, 255, CapturedOutput(), CapturedOutput(), failure)
     with pytest.raises(SSHEnrollmentError):
         synthetic.enroll()
     with pytest.raises(SSHEnrollmentError):
@@ -223,7 +224,7 @@ def test_recovery_refuses_partial_or_mismatched_metadata(synthetic: SyntheticEnr
 
 
 def test_policy_refresh_during_first_ack_refuses_strict_connection(synthetic: SyntheticEnrollment) -> None:
-    def changing(argv: list[str]) -> _ProcessResult:
+    def changing(argv: list[str]) -> ProcessResult:
         status = trust_status(synthetic.bundle)
         refresh_trust(
             synthetic.bundle, sources=status.sources, authority="fixture", expected_generation=status.generation
@@ -420,7 +421,7 @@ def test_installed_ssh_positive_ack_without_saved_key_fails_strict_verification(
     original = run_process
     statuses: list[int | None] = []
 
-    def lose_saved_key(argv: list[str], *, io: CarrierIO, deadline: Deadline) -> _ProcessResult:
+    def lose_saved_key(argv: list[str], *, io: CarrierIO, deadline: Deadline) -> ProcessResult:
         if "StrictHostKeyChecking=accept-new" in argv:
             # Model a lost append independently of authentication: OpenSSH can
             # authenticate after failing to save a key. The strict attempt must
@@ -461,7 +462,7 @@ def test_partial_creation_never_reopens_first_contact(
 def test_interruption_is_not_masked_by_flush_failure(
     synthetic: SyntheticEnrollment, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def interrupt(argv: list[str]) -> _ProcessResult:
+    def interrupt(argv: list[str]) -> ProcessResult:
         raise KeyboardInterrupt
 
     synthetic.action = interrupt
@@ -511,7 +512,7 @@ def test_installed_ssh_recovery_retains_mismatching_primary(local_sshd: LocalSSH
 def test_interruption_during_failed_attempt_flush_is_preserved(
     synthetic: SyntheticEnrollment, monkeypatch: pytest.MonkeyPatch, interruption: type[BaseException]
 ) -> None:
-    synthetic.action = lambda argv: _ProcessResult(True, 255, 255, CapturedOutput(), CapturedOutput(), None)
+    synthetic.action = lambda argv: ProcessResult(True, 255, 255, CapturedOutput(), CapturedOutput(), None)
 
     def interrupt_flush(candidate: enrollment.SSHEnrollmentCandidate) -> None:
         raise interruption()
