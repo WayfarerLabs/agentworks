@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from contextlib import suppress
 
+from ._file_lock import FileLockError, FileLockFailureKind, system_file_lock
 from ._file_paths import ConfinedOpenError, open_linux_root
 from ._file_read_protocol import (
     MAX_REQUEST_BYTES,
@@ -60,11 +62,34 @@ def _failure_for_snapshot(error: SnapshotReadError) -> FileReadFailure:
         SnapshotFailureKind.UNSUPPORTED_OBJECT: FileReadFailure.UNSUPPORTED_OBJECT,
         SnapshotFailureKind.LIMIT: FileReadFailure.LIMIT,
         SnapshotFailureKind.CONFLICT: FileReadFailure.CONFLICT,
+        SnapshotFailureKind.DEADLINE: FileReadFailure.DEADLINE,
         SnapshotFailureKind.IO: FileReadFailure.IO,
     }[error.kind]
 
 
-def _snapshot(request: FileReadRequest) -> FileSnapshot | None:
+def _failure_for_lock(error: FileLockError) -> FileReadFailure:
+    return {
+        FileLockFailureKind.UNSUPPORTED: FileReadFailure.LOCK_UNSUPPORTED,
+        FileLockFailureKind.MISSING: FileReadFailure.LOCK_MISSING,
+        FileLockFailureKind.UNSAFE: FileReadFailure.LOCK_UNSAFE,
+        FileLockFailureKind.CONFLICT: FileReadFailure.LOCK_CONFLICT,
+        FileLockFailureKind.DEADLINE: FileReadFailure.LOCK_DEADLINE,
+        FileLockFailureKind.IO: FileReadFailure.LOCK_IO,
+    }[error.kind]
+
+
+def _expires_at(remaining_seconds: float | None) -> float | None:
+    if remaining_seconds is None:
+        return None
+    return min(sys.float_info.max, time.monotonic() + remaining_seconds)
+
+
+def _raise_if_expired(expires_at: float | None) -> None:
+    if expires_at is not None and time.monotonic() >= expires_at:
+        raise _SafeFailure(FileReadFailure.DEADLINE)
+
+
+def _snapshot(request: FileReadRequest, expires_at: float | None) -> FileSnapshot | None:
     try:
         root_fd = open_linux_root(request.root_path)
     except ConfinedOpenError:
@@ -72,7 +97,7 @@ def _snapshot(request: FileReadRequest) -> FileSnapshot | None:
     if root_fd is None:
         return None
     try:
-        return read_snapshot(root_fd, request.relative_path, request.max_bytes)
+        return read_snapshot(root_fd, request.relative_path, request.max_bytes, expires_at=expires_at)
     except SnapshotReadError as error:
         raise _SafeFailure(_failure_for_snapshot(error)) from None
     finally:
@@ -115,7 +140,12 @@ def main(nonce: str) -> int:
     if not matches_current_identity(request.identity):
         return _finish_failure(emitter, FileReadFailure.IDENTITY_MISMATCH)
     try:
-        snapshot = _snapshot(request)
+        expires_at = _expires_at(request.remaining_seconds)
+        with system_file_lock(expires_at=expires_at):
+            snapshot = _snapshot(request, expires_at)
+            _raise_if_expired(expires_at)
+    except FileLockError as error:
+        return _finish_failure(emitter, _failure_for_lock(error))
     except _SafeFailure as error:
         return _finish_failure(emitter, error.failure)
     if snapshot is None:

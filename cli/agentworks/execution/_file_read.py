@@ -1,4 +1,4 @@
-"""Host preparation and trusted observation for one private bounded file read."""
+"""Host dispatch and trusted observation for one private bounded file read."""
 
 from __future__ import annotations
 
@@ -217,24 +217,6 @@ class _FileReadCollector:
         return FileReadObservation(state=FileReadObservationState.REFUSED, failure=failure)
 
 
-@dataclass
-class PreparedFileRead:
-    """One non-replayable carrier attempt and its borrowed bounded collectors."""
-
-    invocation: PreparedInvocation
-    io: CarrierIO
-    nonce: str
-    _reader: FileRecordReader = field(repr=False)
-    _collector: _FileReadCollector = field(repr=False)
-    _stderr: _DiagnosticSink = field(repr=False)
-    _claimed: bool = field(default=False, init=False, repr=False)
-
-    def claim(self) -> None:
-        if self._claimed:
-            raise ValidationError("A file-read candidate cannot be dispatched more than once")
-        self._claimed = True
-
-
 def _validate_text(value: object) -> str:
     if type(value) is not str or "\0" in value:
         raise ValidationError("File-read paths must be valid non-NUL UTF-8 strings")
@@ -248,77 +230,6 @@ def _validate_text(value: object) -> str:
     return value
 
 
-def prepare_file_read(
-    *,
-    trusted_root_path: str,
-    relative_path: str,
-    max_bytes: int,
-    plan: IdentityPlan,
-    runtime_path: str = _DEFAULT_RUNTIME,
-) -> PreparedFileRead:
-    """Validate and build one file-free identity-bound Linux read attempt."""
-    nonce = secrets.token_hex(16)
-    fixed_argv = build_helper_argv(plan, runtime_path=runtime_path, fixed_source=FIXED_SOURCE, nonce=nonce)
-    root = _validate_text(trusted_root_path)
-    leaf = _validate_text(relative_path)
-    if type(max_bytes) is not int or max_bytes <= 0:
-        raise ValidationError("File-read byte bound must be a positive integer")
-    request_failure: FileReadFailure | None = None
-    try:
-        request_data = encode_file_read_request(FileReadRequest(nonce, root, leaf, max_bytes, plan.expected))
-    except FileReadRequestError as error:
-        request_failure = error.failure
-    if request_failure is FileReadFailure.OVERSIZED_REQUEST:
-        raise ValidationError("File-read request exceeds the 32768-byte manifest bound")
-    if request_failure is not None:
-        raise ValidationError("File-read request contains an invalid field")
-    collector = _FileReadCollector(max_bytes)
-    reader = FileRecordReader(nonce, collector.accept)
-    stderr = _DiagnosticSink()
-    return PreparedFileRead(
-        invocation=PreparedInvocation(fixed_argv),
-        io=CarrierIO(
-            input=FiniteInput(request_data, sensitive=True),
-            output=SinkOutput(reader, stderr, require_live=False),
-            sensitive=True,
-        ),
-        nonce=nonce,
-        _reader=reader,
-        _collector=collector,
-        _stderr=stderr,
-    )
-
-
-def execute_file_read(
-    carrier: Carrier,
-    prepared: PreparedFileRead,
-    *,
-    deadline: Deadline,
-) -> FileReadCandidateResult:
-    """Make exactly one carrier call and interpret only a complete typed transcript."""
-    try:
-        prepared.claim()
-        report = carrier.execute(prepared.invocation, io=prepared.io, deadline=deadline)
-        prepared._reader.finish()
-        delivered = report.stdout.retention is Retention.DELIVERED and report.stderr.retention is Retention.DELIVERED
-        observation = prepared._collector.finish(
-            prepared._reader.error,
-            streams_complete=delivered and report.stdout.complete and report.stderr.complete,
-            stderr_noise=prepared._stderr.saw_data,
-        )
-        return FileReadCandidateResult(
-            dispatch=report.dispatch,
-            carrier_completion=report.completion,
-            carrier_local_status=report.local_status,
-            carrier_failure=report.failure,
-            observation=observation,
-        )
-    except BaseException:
-        prepared._reader.abort()
-        prepared._collector.abort()
-        raise
-
-
 def read_file(
     carrier: Carrier,
     *,
@@ -329,12 +240,50 @@ def read_file(
     deadline: Deadline,
     runtime_path: str = _DEFAULT_RUNTIME,
 ) -> FileReadCandidateResult:
-    """Prepare and execute one bounded read without replay or target writes."""
-    prepared = prepare_file_read(
-        trusted_root_path=trusted_root_path,
-        relative_path=relative_path,
-        max_bytes=max_bytes,
-        plan=plan,
-        runtime_path=runtime_path,
+    """Validate and dispatch one bounded read without replay or target writes."""
+    nonce = secrets.token_hex(16)
+    fixed_argv = build_helper_argv(plan, runtime_path=runtime_path, fixed_source=FIXED_SOURCE, nonce=nonce)
+    root = _validate_text(trusted_root_path)
+    leaf = _validate_text(relative_path)
+    if type(max_bytes) is not int or max_bytes <= 0:
+        raise ValidationError("File-read byte bound must be a positive integer")
+    request_failure: FileReadFailure | None = None
+    try:
+        request_data = encode_file_read_request(
+            FileReadRequest(nonce, root, leaf, max_bytes, plan.expected, deadline.remaining())
+        )
+    except FileReadRequestError as error:
+        request_failure = error.failure
+    if request_failure is FileReadFailure.OVERSIZED_REQUEST:
+        raise ValidationError("File-read request exceeds the 32768-byte manifest bound")
+    if request_failure is not None:
+        raise ValidationError("File-read request contains an invalid field")
+    collector = _FileReadCollector(max_bytes)
+    reader = FileRecordReader(nonce, collector.accept)
+    stderr = _DiagnosticSink()
+    invocation = PreparedInvocation(fixed_argv)
+    io = CarrierIO(
+        input=FiniteInput(request_data, sensitive=True),
+        output=SinkOutput(reader, stderr, require_live=False),
+        sensitive=True,
     )
-    return execute_file_read(carrier, prepared, deadline=deadline)
+    try:
+        report = carrier.execute(invocation, io=io, deadline=deadline)
+        reader.finish()
+        delivered = report.stdout.retention is Retention.DELIVERED and report.stderr.retention is Retention.DELIVERED
+        observation = collector.finish(
+            reader.error,
+            streams_complete=delivered and report.stdout.complete and report.stderr.complete,
+            stderr_noise=stderr.saw_data,
+        )
+        return FileReadCandidateResult(
+            dispatch=report.dispatch,
+            carrier_completion=report.completion,
+            carrier_local_status=report.local_status,
+            carrier_failure=report.failure,
+            observation=observation,
+        )
+    except BaseException:
+        reader.abort()
+        collector.abort()
+        raise

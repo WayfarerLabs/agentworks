@@ -13,58 +13,20 @@ from agentworks.errors import ValidationError
 from agentworks.execution._file_read import (
     FileReadCandidateResult,
     FileReadObservationState,
-    PreparedFileRead,
-    execute_file_read,
-    prepare_file_read,
     read_file,
 )
 from agentworks.execution._file_read_protocol import FileReadFailure
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
-from agentworks.execution.carrier import (
-    CarrierIO,
-    CarrierReport,
-    ChannelFeatures,
-    Deadline,
-    Dispatch,
-    ExitStatus,
-    PreparedInvocation,
-)
-from agentworks.execution.carriers._subprocess import run_process
+from agentworks.execution.carrier import Deadline, ExitStatus
+from tests.execution.files._file_read_support import LocalCarrier, install_fixed_lock_bundle
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the file-read helper candidate requires Linux")
 
 
-class LocalCarrier:
-    def __init__(self) -> None:
-        self.calls = 0
-        self.invocation: PreparedInvocation | None = None
-        self.io: CarrierIO | None = None
-
-    @property
-    def features(self) -> ChannelFeatures:
-        return ChannelFeatures()
-
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-        self.calls += 1
-        self.invocation = invocation
-        self.io = io
-        result = run_process(list(invocation.argv), io=io, deadline=deadline)
-        completion = None
-        if result.exit_status is not None:
-            completion = (
-                ExitStatus(signal=-result.exit_status)
-                if result.exit_status < 0
-                else ExitStatus(code=result.exit_status)
-            )
-        return CarrierReport(
-            Dispatch.SENT if result.started else Dispatch.NOT_SENT,
-            completion,
-            result.local_status,
-            result.stdout,
-            result.stderr,
-            result.failure,
-        )
+@pytest.fixture(autouse=True)
+def fixed_lock_bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    return install_fixed_lock_bundle(tmp_path / "lock-root", monkeypatch)
 
 
 @pytest.fixture
@@ -247,21 +209,21 @@ def test_root_path_is_a_valid_request_and_absence_remains_complete(plan: Identit
     assert result.observation.state is FileReadObservationState.ABSENT
 
 
-def test_prepared_attempt_cannot_be_replayed(tmp_path: Path, plan: IdentityPlan) -> None:
+def test_one_shot_read_uses_exactly_one_carrier_attempt(tmp_path: Path, plan: IdentityPlan) -> None:
     (tmp_path / "file").write_bytes(b"content")
-    prepared = prepare_file_read(
+    carrier = LocalCarrier()
+
+    result = read_file(
+        carrier,
         trusted_root_path=str(tmp_path),
         relative_path="file",
         max_bytes=1024,
         plan=plan,
+        deadline=Deadline.after(15),
         runtime_path=sys.executable,
     )
-    carrier = LocalCarrier()
-    first = execute_file_read(carrier, prepared, deadline=Deadline.after(15))
 
-    assert first.observation.state is FileReadObservationState.PRESENT
-    with pytest.raises(ValidationError):
-        execute_file_read(carrier, prepared, deadline=Deadline.after(15))
+    assert result.observation.state is FileReadObservationState.PRESENT
     assert carrier.calls == 1
 
 
@@ -282,64 +244,88 @@ def test_invalid_requests_refuse_before_carrier_construction(
     leaf: str,
     bound: object,
 ) -> None:
+    carrier = LocalCarrier()
     with pytest.raises(ValidationError):
-        prepare_file_read(
+        read_file(
+            carrier,
             trusted_root_path=root,
             relative_path=leaf,
             max_bytes=bound,  # type: ignore[arg-type]
             plan=plan,
+            deadline=Deadline.after(15),
         )
+    assert carrier.calls == 0
 
 
-def test_prepared_request_and_result_representations_hide_paths_and_payload(
+def test_request_and_result_representations_hide_paths_and_payload(
     tmp_path: Path,
     plan: IdentityPlan,
 ) -> None:
     secret_path = str(tmp_path / "path-canary")
-    prepared: PreparedFileRead = prepare_file_read(
+    Path(secret_path).mkdir()
+    carrier = LocalCarrier()
+    result = read_file(
+        carrier,
         trusted_root_path=secret_path,
         relative_path="leaf-canary",
         max_bytes=1,
         plan=plan,
+        deadline=Deadline.after(15),
+        runtime_path=sys.executable,
     )
 
-    assert secret_path not in repr(prepared)
-    assert "leaf-canary" not in repr(prepared)
+    assert secret_path not in repr(carrier)
+    assert "leaf-canary" not in repr(carrier)
+    assert secret_path not in repr(result)
+    assert "leaf-canary" not in repr(result)
 
 
 def test_caller_bound_has_no_file_layer_ceiling(plan: IdentityPlan) -> None:
-    prepared = prepare_file_read(
+    carrier = LocalCarrier()
+    read_file(
+        carrier,
         trusted_root_path="/trusted",
         relative_path="file",
         max_bytes=10**100,
         plan=plan,
+        deadline=Deadline.after(15),
+        runtime_path=sys.executable,
     )
 
-    assert len(prepared.io.input.data) < 1024  # type: ignore[union-attr]
+    assert carrier.io is not None
+    assert len(carrier.io.input.data) < 1024  # type: ignore[union-attr]
 
 
 def test_request_manifest_has_an_independent_finite_bound(plan: IdentityPlan) -> None:
+    carrier = LocalCarrier()
     with pytest.raises(ValidationError) as raised:
-        prepare_file_read(
+        read_file(
+            carrier,
             trusted_root_path="/" + "a" * 30_000,
             relative_path="file",
             max_bytes=1,
             plan=plan,
+            deadline=Deadline.after(15),
         )
 
+    assert carrier.calls == 0
     assert raised.value.__cause__ is None
     assert raised.value.__context__ is None
 
 
 def test_invalid_utf8_path_is_not_retained_by_the_validation_exception(plan: IdentityPlan) -> None:
+    carrier = LocalCarrier()
     with pytest.raises(ValidationError) as raised:
-        prepare_file_read(
+        read_file(
+            carrier,
             trusted_root_path="/secret-\udcff-canary",
             relative_path="file",
             max_bytes=1,
             plan=plan,
+            deadline=Deadline.after(15),
         )
 
+    assert carrier.calls == 0
     assert raised.value.__cause__ is None
     assert raised.value.__context__ is None
     assert "canary" not in repr(raised.value)

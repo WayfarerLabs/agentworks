@@ -10,11 +10,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.execution._file_read import FileReadObservationState, execute_file_read, prepare_file_read
+from agentworks.execution._file_read import FileReadObservationState, read_file
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution.carrier import Deadline, Dispatch, ExitStatus
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
+from tests.execution.files._file_read_support import install_fixed_lock_bundle
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -22,22 +23,21 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the file-read guest requires Linux")
 
 
+@pytest.fixture
+def fixed_lock_bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    install_fixed_lock_bundle(tmp_path / "lock-root", monkeypatch)
+
+
 @pytest.mark.parametrize("fault", [None, "truncated", "stdout_noise", "stderr_noise"])
 def test_file_read_through_buffered_proxmox_delivery(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str | None
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fixed_lock_bundle: None,
+    fault: str | None,
 ) -> None:
+    del fixed_lock_bundle
     data = b"file-content-canary\x00\xff\r\n" * 1_024
     (tmp_path / "file-path-canary").write_bytes(data)
-    prepared = prepare_file_read(
-        trusted_root_path=str(tmp_path),
-        relative_path="file-path-canary",
-        max_bytes=len(data),
-        plan=IdentityPlan(
-            IdentityExpectation(os.geteuid(), os.getegid(), tuple(sorted(set(os.getgroups()) | {os.getegid()}))),
-            IdentityMode.DIRECT,
-        ),
-        runtime_path=sys.executable,
-    )
     carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.invalid", "node1", 101, "token", "synthetic"))
     requests: list[tuple[str, str]] = []
     status: dict[str, object] = {}
@@ -46,6 +46,7 @@ def test_file_read_through_buffered_proxmox_delivery(
         requests.append((method, suffix))
         if method == "POST":
             assert suffix == "exec" and body is not None and body.isascii()
+            assert len(body) <= 65_536
             envelope = json.loads(body)
             assert "file-path-canary" not in " ".join(envelope["command"])
             result = subprocess.run(
@@ -79,7 +80,18 @@ def test_file_read_through_buffered_proxmox_delivery(
         return status
 
     monkeypatch.setattr(carrier._wire, "request", request)
-    result = execute_file_read(carrier, prepared, deadline=Deadline.after(15))
+    result = read_file(
+        carrier,
+        trusted_root_path=str(tmp_path),
+        relative_path="file-path-canary",
+        max_bytes=len(data),
+        plan=IdentityPlan(
+            IdentityExpectation(os.geteuid(), os.getegid(), tuple(sorted(set(os.getgroups()) | {os.getegid()}))),
+            IdentityMode.DIRECT,
+        ),
+        deadline=Deadline.after(15),
+        runtime_path=sys.executable,
+    )
 
     assert requests == [("POST", "exec"), ("GET", "exec-status?pid=42")]
     assert result.dispatch is Dispatch.SENT and result.carrier_completion == ExitStatus(code=0)

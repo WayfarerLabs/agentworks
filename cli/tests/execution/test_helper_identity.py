@@ -11,7 +11,7 @@ import pytest
 from agentworks.errors import ValidationError
 from agentworks.execution import _helper_identity, _inline_guest
 from agentworks.execution._evidence_wire import Frame, FrameKind, FrameReader
-from agentworks.execution._file_read import FileReadObservationState, execute_file_read, prepare_file_read
+from agentworks.execution._file_read import FileReadObservationState, read_file
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan, build_helper_argv
 from agentworks.execution._inline import execute_inline_candidate, prepare_inline_candidate
@@ -98,23 +98,27 @@ def test_wrapper_argv_is_literal_and_payload_free(
         env={"CANARY": canary},
         cwd=f"/{canary}",
     )
-    file_read = prepare_file_read(
+    carrier = _PreHelperFailureCarrier()
+    read_file(
+        carrier,
         trusted_root_path=f"/{canary}",
         relative_path=canary,
         max_bytes=1,
         plan=plan,
+        deadline=Deadline.after(1),
     )
+    assert carrier.invocation is not None
 
-    for prepared in (inline, file_read):
-        assert prepared.invocation.argv[: len(prefix)] == prefix
-        assert prepared.invocation.argv[len(prefix) : len(prefix) + 5] == (
+    for invocation in (inline.invocation, carrier.invocation):
+        assert invocation.argv[: len(prefix)] == prefix
+        assert invocation.argv[len(prefix) : len(prefix) + 5] == (
             "/usr/bin/env",
             "-i",
             "PATH=/usr/bin:/bin",
             "LANG=C",
             "LC_ALL=C",
         )
-        assert all(canary not in argument for argument in prepared.invocation.argv)
+        assert all(canary not in argument for argument in invocation.argv)
 
 
 @pytest.mark.parametrize(
@@ -145,11 +149,13 @@ def test_invalid_identity_plan_is_rejected_before_payload_encoding(
         if kind == "inline":
             prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
         else:
-            prepare_file_read(
+            read_file(
+                _PreHelperFailureCarrier(),
                 trusted_root_path="/trusted",
                 relative_path="file",
                 max_bytes=1,
                 plan=plan,
+                deadline=Deadline.after(1),
             )
 
 
@@ -219,14 +225,16 @@ def test_inline_guest_refuses_unsupported_runtime_before_identity_or_workload_ac
 @dataclass
 class _PreHelperFailureCarrier:
     calls: int = 0
+    invocation: PreparedInvocation | None = None
 
     @property
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-        del invocation, io, deadline
+        del io, deadline
         self.calls += 1
+        self.invocation = invocation
         empty = CapturedOutput(complete=True, retention=Retention.DELIVERED)
         return CarrierReport(Dispatch.SENT, ExitStatus(code=127), 127, empty, empty)
 
@@ -237,13 +245,14 @@ def test_pre_helper_wrapper_failure_never_claims_application_or_file_success(mod
     carrier = _PreHelperFailureCarrier()
     inline = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
     inline_result = execute_inline_candidate(carrier, inline, deadline=Deadline.after(1))
-    file_read = prepare_file_read(
+    file_result = read_file(
+        carrier,
         trusted_root_path="/trusted",
         relative_path="file",
         max_bytes=1,
         plan=plan,
+        deadline=Deadline.after(1),
     )
-    file_result = execute_file_read(carrier, file_read, deadline=Deadline.after(1))
 
     assert carrier.calls == 2
     assert not inline_result.observation.launching

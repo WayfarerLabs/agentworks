@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import math
 import stat
 from dataclasses import dataclass
 from enum import StrEnum
@@ -21,7 +22,9 @@ _MAX_STAT_VALUE = 2**64 - 1
 _MIN_TIME_NS = -(2**63)
 _MAX_TIME_NS = 2**63 - 1
 _LOWER_HEX = frozenset("0123456789abcdef")
-_REQUEST_FIELDS = frozenset({"identity", "max_bytes", "nonce", "operation", "path", "root", "version"})
+_REQUEST_FIELDS = frozenset(
+    {"identity", "max_bytes", "nonce", "operation", "path", "remaining_seconds", "root", "version"}
+)
 _RESULT_FIELDS = frozenset(
     {
         "changed_ns",
@@ -46,10 +49,17 @@ class FileReadFailure(StrEnum):
     NONCE_MISMATCH = "nonce_mismatch"
     IDENTITY_MISMATCH = "identity_mismatch"
     UNSUPPORTED_RUNTIME = "unsupported_runtime"
+    LOCK_UNSUPPORTED = "lock_unsupported"
+    LOCK_MISSING = "lock_missing"
+    LOCK_UNSAFE = "lock_unsafe"
+    LOCK_CONFLICT = "lock_conflict"
+    LOCK_DEADLINE = "lock_deadline"
+    LOCK_IO = "lock_io"
     ROOT_REFUSED = "root_refused"
     UNSUPPORTED_OBJECT = "unsupported_object"
     LIMIT = "limit"
     CONFLICT = "conflict"
+    DEADLINE = "deadline"
     IO = "io"
 
 
@@ -75,6 +85,7 @@ class FileReadRequest:
     relative_path: str
     max_bytes: int
     identity: IdentityExpectation
+    remaining_seconds: float | None
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -136,6 +147,14 @@ def _identity(value: object) -> IdentityExpectation:
     return IdentityExpectation(euid, egid, tuple(groups))
 
 
+def _remaining_seconds(value: object) -> float | None:
+    if value is None:
+        return None
+    if type(value) is not float or not math.isfinite(value) or value < 0:
+        raise _invalid_request()
+    return value
+
+
 def encode_file_read_request(request: FileReadRequest) -> bytes:
     """Encode trusted host values and enforce the guest's complete boundary schema."""
     value = {
@@ -148,6 +167,7 @@ def encode_file_read_request(request: FileReadRequest) -> bytes:
         "nonce": request.nonce,
         "operation": "read",
         "path": base64.b64encode(request.relative_path.encode("utf-8")).decode("ascii"),
+        "remaining_seconds": request.remaining_seconds,
         "root": base64.b64encode(request.root_path.encode("utf-8")).decode("ascii"),
         "version": 1,
     }
@@ -200,6 +220,7 @@ def decode_file_read_request(data: bytes) -> FileReadRequest:
         relative_path=relative_path,
         max_bytes=maximum,
         identity=_identity(value["identity"]),
+        remaining_seconds=_remaining_seconds(value["remaining_seconds"]),
     )
 
 
