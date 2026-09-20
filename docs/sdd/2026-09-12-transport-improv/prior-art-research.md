@@ -343,8 +343,9 @@ name.
 A focused source audit narrows the supervisor proof without selecting a second carrier protocol.
 `Type=exec` acknowledges execution of the configured `ExecStart` binary. If that binary is the
 trusted Python helper, it does not prove entry into a subsequently launched payload. Switching to
-`Type=notify` does not create stronger evidence by itself, and CLOEXEC error-pipe EOF also occurs if
-a child dies before exec. Helper acceptance, payload evidence and readiness remain distinct.
+`Type=notify` does not create stronger evidence by itself, and close-on-exec error-pipe EOF also
+occurs if a child dies before exec. Helper acceptance, payload evidence and readiness remain
+distinct.
 
 Source: [v252 service types](https://github.com/systemd/systemd/blob/v252/man/systemd.service.xml).
 
