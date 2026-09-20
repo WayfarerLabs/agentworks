@@ -856,7 +856,11 @@ def test_same_iteration_pending_transition_stops_fresh_other_stream_read(
     children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class StalledSink:
+        def __init__(self) -> None:
+            self.calls = 0
+
         def try_write(self, data: memoryview) -> int | None:
+            self.calls += 1
             return None
 
     class CountingSink:
@@ -874,16 +878,18 @@ def test_same_iteration_pending_transition_stops_fresh_other_stream_read(
         os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT)
         return process
 
+    stdout = StalledSink()
     stderr = CountingSink()
     monkeypatch.setattr(subprocess, "Popen", completed_start)
     result = execute(
         "import sys; sys.stdout.write('out'); sys.stdout.flush(); sys.stderr.write('err'); sys.stderr.flush()",
-        io=CarrierIO(output=SinkOutput(StalledSink(), stderr)),
-        seconds=0.05,
+        io=CarrierIO(output=SinkOutput(stdout, stderr)),
+        seconds=0.5,
     )
 
     assert result.local_status == result.exit_status == 0
     assert result.failure == Failure.DEADLINE
+    assert stdout.calls > 1
     assert stderr.bytes_written == 0
     assert not result.stdout.complete and not result.stderr.complete
     assert_closed(children)
