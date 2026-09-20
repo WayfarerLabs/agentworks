@@ -250,13 +250,14 @@ same-filesystem bind-mount and native macOS proof remain open. A regular-file re
 elapsed-time bound. This increment does not resolve helper cancellation or close readiness,
 cross-identity locking and complete platform acceptance.
 
-The private `_file_publication.py` increment implements Linux sibling publication for complete
-in-memory bytes beneath a caller-owned parent descriptor. It uses no-replace rename for creation,
-snapshot revalidation for replacement, and preserves ordinary UID/GID/mode/access-ACL semantics
-while refusing unsupported metadata. The caller still owns confinement and transaction locking; the
-increment does not provide streaming upload, remote delivery, macOS support or FileAccess. Local
-fault and ACL fixtures are implementation evidence, not acceptance of the complete platform
-guarantees below.
+The private `_file_publication.py` candidate implements Linux sibling publication beneath a
+caller-owned parent descriptor. It accepts bytes or bounded streaming from verified scratch and
+explicit Create, Replace or Match conditions. Replace observes existing metadata without reading the
+old content; Match also checks content when its revision includes a digest. Publication preserves
+ordinary UID/GID/mode/access-ACL semantics while refusing unsupported metadata. The caller still
+owns confinement, transaction locking and scratch cleanup. This is not remote upload delivery, macOS
+support or FileAccess. Local fault and ACL fixtures are implementation evidence, not acceptance of
+the complete platform guarantees below.
 
 All target operations occur in the helper process. Host-side normalization and grant checks reject
 untrusted requests early; destination-side traversal and observation enforce the bound operation.
@@ -332,6 +333,31 @@ contract. Safe creation, permissions, lifecycle, and availability of an identity
 before permission activation remain unproved on Debian and macOS. The migration inventory must find
 every cross-identity path, and no affected consumer may migrate until the protocol is proven.
 Excluding a required admin/user workflow needs operator disposition.
+
+The Linux implementation candidate opens a fixed `files.lock` under a borrowed, trusted protected
+directory. It acquires an exclusive advisory lock through a fresh read-only descriptor, checks the
+named object's binding after acquisition, and closes the descriptor on exit. Acquisition uses
+nonblocking polling within the guest-local deadline. The lock must be an empty, single-link regular
+file owned by the trusted setup identity with mode 0444; the parent must belong to that identity and
+not be group/other writable. These checks do not establish the entire ancestor namespace or
+filesystem semantics. Trusted setup supplies that prerequisite. Transactions never create, repair,
+replace or unlink the lock. No fork or child launch belongs inside the file critical section:
+inherited descriptors can prolong lock ownership even when the initiating helper exits.
+
+For Debian guests, the proposed persistent location is `/var/lib/agentworks/execution/files.lock`,
+with root-owned protected ancestors. Setup must preserve an existing valid inode, refuse unsafe
+existing objects rather than repair them during use, and leave unrelated `/var/lib/agentworks` state
+alone. New-guest setup belongs immediately after shared bootstrap package installation. Reachable
+existing guests need convergence before the first Phase-B file operation. Native recovery for
+stranded guests needs an explicit independent setup path; ordinary reinitialization currently
+requires Tailscale reachability. These setup paths and cross-identity contention remain
+implementation and acceptance gates, not behavior supplied by the private lock primitive.
+
+SSH-accessed macOS platform hosts have no existing privileged setup lifecycle. A protected
+machine-wide lock there would add an administrator prerequisite; the operator decision is pending.
+Do not assume host sudo, install during readiness, substitute a per-user lock, or claim APFS proof
+from Linux fixtures. Missing prerequisites produce a clean refusal. Native filesystem and
+cross-identity proof is required before either platform enables file transactions.
 
 `Match` is atomic only with respect to those cooperating writers: the helper compares the revision
 and renames while holding the transaction lock. A non-cooperating process ignores the lock. No

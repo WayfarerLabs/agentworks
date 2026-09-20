@@ -513,6 +513,23 @@ installation or host prerequisite would need operator direction. Locking `/` avo
 shares an unrelated third-party lock namespace, so it is not selected. This investigation does not
 close the file LLD's transaction-lock gate.
 
+The setup-path audit at `aa82b8f2` identifies shared Debian bootstrap immediately after provisioning
+package installation as the new-guest insertion point. Lima, WSL2, Proxmox, Azure, EC2 and GCE all
+render that template. For already reachable guests, common `run_initialization` enters its mutation
+guard before Phase B; setup there can precede migrated file consumers. Neither path repairs a
+stranded existing guest: ordinary reinitialization requires completed provisioning and a Tailscale
+address, and create-time payloads are not a general upgrade mechanism. GCE already stores bootstrap
+state under `/var/lib/agentworks`, so setup must preserve unrelated contents there.
+
+Remote Lima currently runs host commands as the configured SSH login account, allocates
+account-owned temporary state, and does not request privileged host setup. Its guest-side sudo
+invocation is not evidence of host sudo availability. A root-protected machine-wide lock on macOS
+therefore requires an explicit new host prerequisite, not an implicit extension of Debian package
+approval. The operator has been asked; no host installation or cross-identity proof is claimed. Code
+anchors: `capabilities/vm_platform/bootstrap_script.py`, `vms/initializer/driver.py`,
+`vms/manager/lifecycle.py`, `capabilities/vm_platform/lima.py`, and `plugins/gcp/bootstrap.py` under
+`cli/agentworks/`.
+
 ### Decisions still required
 
 The new-guest package and preinstalled macOS host runtime choices are settled, but their

@@ -162,6 +162,14 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       and production composition remain separate gates.
 - [ ] Accept the preparation/result and file-operation LLDs after private review and disposition of
       their helper/runtime, launch-evidence, cross-identity locking, and platform prerequisites.
+- [ ] Implement private revision-aware publication with explicit Create/Replace/Match conditions,
+      bounded streaming from verified scratch, stat-only observations without old-content reads, and
+      a content-bound post-publication revision. Prove observed conflict, deadline and
+      uncertain-publication behavior without claiming atomicity against non-cooperating writers.
+- [ ] Implement the private read-only transaction-lock primitive and prove local contention,
+      deadline, refusal and release behavior. Then establish its protected namespace through
+      explicit setup and prove ordinary/elevated helpers contend on the same inode. Keep macOS
+      host-administrator setup pending operator disposition; readiness never installs the lock.
 - [ ] Jointly accept and prove the privately implemented carrier sink extension with the SSH owner
       before enabling its production use or exposing it through RunContext.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext

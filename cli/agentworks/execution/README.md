@@ -259,19 +259,36 @@ process or supplies external-writer compare-and-swap. Regular-file reads can blo
 filesystem, so this primitive provides no hard elapsed-time bound. Complete helper delivery,
 locking, platform guarantees and production composition remain separate work.
 
+`read_revision` can observe regular-file metadata without retaining content or can include a
+bounded-memory content digest. Linux metadata-only observation uses a path-only descriptor and does
+not require file-read authority. `FileSnapshot.revision` carries the content-bound observation; its
+`stat` and `digest` properties expose those same values without duplicating them.
+
 ## Private file publication
 
 `_file_publication.py` supplies Linux same-directory publication beneath a borrowed parent
-descriptor. It accepts complete bytes and either absence or a matching snapshot as the destination
-condition. Create-only publication uses `renameat2(RENAME_NOREPLACE)` without a fallback;
-replacement rechecks the snapshot before rename. The caller supplies confinement and any
-cooperating-writer lock. This primitive is not streaming upload, FileAccess or a remote helper.
+descriptor. It accepts bytes or a borrowed verified scratch source. `Create` requires absence,
+`Replace` requires an existing regular file, and `Match` requires the supplied revision. A revision
+binds metadata and optionally content; matching a content-bound revision hashes bounded chunks
+without retaining the old file. Create-only publication uses `renameat2(RENAME_NOREPLACE)` without a
+fallback. Replacement rechecks its observed condition before rename. The caller supplies
+confinement, the cooperating-writer lock and scratch cleanup. This primitive is not FileAccess or a
+remote upload helper.
 
 An unpredictable exclusive sibling receives the content and required metadata before publication.
 New files retain the directory's inherited ACL behavior with the requested owner, group and mode.
-Replacement requires ordinary destination read/write authority and preserves UID, GID, permission
-bits and the Linux access ACL. Observed links, multiply linked files, special objects, set-ID state
-and other visible extended attributes refuse. Unsupported metadata is not silently dropped.
+Replacement requires ordinary destination write authority and preserves UID, GID, permission bits
+and the Linux access ACL. Read authority is additionally needed for a content-bound match, not
+unconditional replacement. Observed links, multiply linked files, special objects, set-ID state and
+other visible extended attributes refuse. Unsupported metadata is not silently dropped.
+
+Scratch publication checks declared length and digest while copying bounded ranges, including
+validation of empty sources. The caller retains ownership of the scratch object. Hash/copy loops
+check a supplied guest-local monotonic deadline; a blocked filesystem call cannot be forcibly
+cancelled by these checks. A failure after publication was attempted can be uncertain rather than
+unchanged. Success returns a revision whose digest is rechecked against the held published file,
+with stable before/after metadata and name binding. Observed post-rename content changes therefore
+produce uncertainty instead of a revision carrying stale content evidence.
 
 Errors carry closed kind/phase facts rather than filesystem messages or payloads. Cleanup concerns
 only the recorded staging name and identity, never a prefix scan. Failed cleanup retains a private
@@ -286,6 +303,21 @@ acceptance remain open.
 Atomic visibility does not imply directory-entry crash durability, an external-writer
 compare-and-swap guarantee or a hard filesystem deadline. Native-platform acceptance and the
 complete file service remain separate work.
+
+## Private file transaction lock
+
+`_file_lock.py` borrows a trusted protected directory descriptor and opens its fixed `files.lock`
+read-only. It refuses missing or unsafe state, acquires one exclusive Linux advisory lock with
+deadline-bounded polling, checks that the name still binds the held object, and closes its owned
+descriptor on exit. Each transaction opens a fresh descriptor. The lock is an empty mode-0444
+single-link regular file owned by the trusted setup identity; its parent must have that owner and
+must not be group/other writable. No operation creates, repairs, replaces or unlinks lock state.
+
+The caller establishes the protected ancestor namespace and local-filesystem prerequisite, and
+supplies the same inode to every execution identity. The primitive alone does not establish that
+machine-wide setup or cross-identity availability. It must not enclose child creation: a fork can
+inherit the descriptor and prolong the lock. Local contention and cleanup tests are not native macOS
+or ordinary/elevated acceptance. This private primitive is not wired into file delivery yet.
 
 ## Private scratch transfer
 
