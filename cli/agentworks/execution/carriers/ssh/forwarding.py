@@ -9,12 +9,12 @@ import subprocess
 import time
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv6Address
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ConnectivityError, StateError, ValidationError
+from agentworks.execution._process import _cleanup, _ProcessStatus
 from agentworks.execution.carrier import Failure, PreparedInvocation
-from agentworks.execution.carriers._subprocess import _cleanup
 from agentworks.execution.carriers.ssh._io import _child_environment
 from agentworks.execution.carriers.ssh.client import check_client_version
 from agentworks.execution.carriers.ssh.connection import admit_connection, build_ssh_argv
@@ -84,14 +84,15 @@ class OwnedForwarding:
     process pipes; callers may close while another caller waits.
     """
 
-    def __init__(self, process: subprocess.Popen[bytes], marker: bytes) -> None:
-        self._process = process
+    def __init__(self, status: _ProcessStatus, marker: bytes) -> None:
+        self._status = status
+        self._process = status.process
         self._marker = marker
         self._ready = Event()
         self._done = Event()
         self._stop = Event()
         self._failure: Failure | None = None
-        self._status: int | None = None
+        self._status_lock = Lock()
         self._cleaned = False
         self._thread = Thread(target=self._drain, name="ssh-forwarding")
 
@@ -115,14 +116,19 @@ class OwnedForwarding:
             # Thread.start can be interrupted before Python publishes its
             # started state, even when a native worker may still appear.
             # Stop is already set, so that worker cannot begin pipe reads.
-            self._cleaned = _cleanup(self._process)
+            remaining = max(0.0, join_until - time.monotonic())
+            if self._status_lock.acquire(timeout=remaining):
+                try:
+                    self._cleaned = _cleanup(self._status)
+                finally:
+                    self._status_lock.release()
             if not self._done.wait(max(0.0, join_until - time.monotonic())):
-                raise ForwardingError(Failure.OBSERVATION, self._process.returncode) from None
+                raise ForwardingError(Failure.OBSERVATION, self._status.status) from None
             self._thread.join(timeout=max(0.0, join_until - time.monotonic()))
         if self._thread.is_alive():
-            raise ForwardingError(Failure.OBSERVATION, self._process.returncode)
+            raise ForwardingError(Failure.OBSERVATION, self._status.status)
         if not self._cleaned:
-            raise ForwardingError(Failure.OBSERVATION, self._process.returncode)
+            raise ForwardingError(Failure.OBSERVATION, self._status.status)
 
     def _close_preserving(self, error: BaseException | None) -> None:
         try:
@@ -139,9 +145,9 @@ class OwnedForwarding:
                 pass
             self.close()
             if self._failure is not None:
-                raise ForwardingError(self._failure, self._status)
-            assert self._status is not None
-            return self._status
+                raise ForwardingError(self._failure, self._status.status)
+            assert self._status.status is not None
+            return self._status.status
         except BaseException as error:
             self._close_preserving(error)
             raise
@@ -151,7 +157,7 @@ class OwnedForwarding:
             if deadline.expired:
                 raise ForwardingError(Failure.DEADLINE)
             if self._done.is_set():
-                raise ForwardingError(self._failure or Failure.OBSERVATION, self._status)
+                raise ForwardingError(self._failure or Failure.OBSERVATION, self._status.status)
             if self._ready.is_set():
                 return
             remaining = deadline.remaining()
@@ -163,8 +169,13 @@ class OwnedForwarding:
         outputs = [self._process.stdout, self._process.stderr]
         try:
             while not self._stop.is_set():
-                self._status = self._process.poll()
-                if self._status is not None:
+                with self._status_lock:
+                    status = self._status.poll()
+                    status_lost = self._status.lost
+                if status_lost:
+                    self._failure = Failure.OBSERVATION
+                    return
+                if status is not None:
                     return
                 progressed = False
                 for pipe in tuple(outputs):
@@ -197,12 +208,12 @@ class OwnedForwarding:
             self._failure = Failure.OBSERVATION
         finally:
             try:
-                self._cleaned = _cleanup(self._process)
+                with self._status_lock:
+                    self._cleaned = _cleanup(self._status)
             except OSError:
                 self._cleaned = False
             if not self._cleaned:
                 self._failure = Failure.OBSERVATION
-            self._status = self._process.returncode
             self._done.set()
 
 
@@ -249,22 +260,23 @@ def open_local_forwards(
         )
     except (OSError, ValueError):
         raise ForwardingError(Failure.DISPATCH) from None
+    status = _ProcessStatus(process)
     resource: OwnedForwarding | None = None
     try:
         for pipe in (process.stdin, process.stdout, process.stderr):
             assert pipe is not None
             os.set_blocking(pipe.fileno(), False)
-        resource = OwnedForwarding(process, (marker + "\n").encode("ascii"))
+        resource = OwnedForwarding(status, (marker + "\n").encode("ascii"))
         # Retain ownership before starting: Thread.start itself can interrupt.
         resource._thread.start()
         resource._await_ready(deadline)
         return resource
     except BaseException as error:
         if resource is None:
-            if not _cleanup(process):
+            if not _cleanup(status):
                 error.add_note("Local SSH forwarding cleanup did not complete within its bound.")
         else:
             resource._close_preserving(error)
         if isinstance(error, (OSError, RuntimeError)):
-            raise ForwardingError(Failure.OBSERVATION, process.returncode) from None
+            raise ForwardingError(Failure.OBSERVATION, status.status) from None
         raise

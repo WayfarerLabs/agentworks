@@ -19,8 +19,8 @@ from typing import Any
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution import _process as process_core
 from agentworks.execution.carrier import Deadline, Failure
-from agentworks.execution.carriers import _subprocess
 from agentworks.execution.carriers.ssh import forwarding
 from agentworks.execution.carriers.ssh.connection import SSHConnection, admit_connection
 from agentworks.execution.carriers.ssh.forwarding import ForwardingError, LocalForward, open_local_forwards
@@ -204,6 +204,30 @@ def test_diagnostics_drain_before_and_after_readiness(synthetic: SyntheticForwar
     synthetic.assert_closed()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="waitpid ownership is POSIX-specific")
+def test_lost_wait_status_never_becomes_forwarding_exit_zero() -> None:
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import sys; sys.exit(23)"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    os.waitpid(process.pid, 0)
+    status = process_core._ProcessStatus(process)
+    assert status.poll() is None and status.lost
+    assert process.returncode == 0  # Internal destructor bookkeeping only.
+    resource = forwarding.OwnedForwarding(status, b"unused\n")
+    resource._thread.start()
+
+    with pytest.raises(ForwardingError) as caught:
+        resource.wait()
+
+    assert caught.value.failure == Failure.OBSERVATION
+    assert caught.value.local_status is None
+    assert not resource._thread.is_alive()
+    assert all(pipe is None or pipe.closed for pipe in (process.stdin, process.stdout, process.stderr))
+
+
 def test_wait_interruption_closes_before_propagating(
     synthetic: SyntheticForwarding, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -266,11 +290,11 @@ def test_delayed_cleanup_reports_uncertainty_within_join_bound(
     synthetic: SyntheticForwarding, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     release = threading.Event()
-    original = _subprocess._cleanup
+    original = process_core._cleanup
 
-    def delayed(process: subprocess.Popen[bytes]) -> bool:
+    def delayed(status: process_core._ProcessStatus) -> bool:
         release.wait(timeout=5)
-        return original(process)
+        return original(status)
 
     monkeypatch.setattr(forwarding, "_cleanup", delayed)
     resource = synthetic.open()

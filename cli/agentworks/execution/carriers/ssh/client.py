@@ -1,4 +1,4 @@
-"""Independent buffered delivery through an explicitly configured OpenSSH client."""
+"""Independent byte delivery through an explicitly configured OpenSSH client."""
 
 from __future__ import annotations
 
@@ -18,7 +18,9 @@ from agentworks.execution.carrier import (
     ExitStatus,
     Failure,
     FiniteInput,
+    LiveInput,
     Provenance,
+    SinkOutput,
 )
 from agentworks.execution.carriers._subprocess import output_retention
 from agentworks.execution.carriers.ssh._io import run_process
@@ -45,7 +47,7 @@ class SSHCarrier:
 
     @property
     def features(self) -> ChannelFeatures:
-        return ChannelFeatures()
+        return ChannelFeatures(live_stdio=True)
 
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         """Refuse unsupported shared I/O shapes without connection or process work."""

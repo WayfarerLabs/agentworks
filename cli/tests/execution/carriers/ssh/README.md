@@ -10,8 +10,10 @@ uv run pytest tests/execution/carriers/ssh/ -m 'not integration'
 
 The process fixtures use synthetic Python children and temporary files. The shared conformance
 fixture substitutes a local POSIX-shell executable for SSH, exercising the real quoting and pipe
-pump without authentication or a server. Installed-client tests parse `ssh -G` options and drive a
-real client against an owned loopback peer that refuses before authentication. Forwarding tests also
+pump without authentication or a server. SSH-boundary live-I/O regressions exercise borrowed input,
+separate binary output sinks, partial writes, temporary backpressure, endpoint faults, interruption
+cleanup and ambiguous status 255. Installed-client tests parse `ssh -G` options and drive a real
+client against an owned loopback peer that refuses before authentication. Forwarding tests also
 start a fixture-owned loopback sshd when available and exercise authenticated delivery, listener
 refusal and cleanup. These local fixtures do not establish the supported workstation and provider
 matrix; report skips separately.
@@ -48,11 +50,11 @@ for observation in check_buffered_contract(carrier):
 The selected installed client must be OpenSSH 8.5 or newer. The initial shared vectors need Linux
 Bash 5.1 or newer, base64, GNU env with `--default-signal=PIPE`, and descriptor support on the
 destination; account-shell startup remains part of the live proof. The current candidate advertises
-neither live streams nor terminals. Run the same shared vectors against transport's native carrier,
-then its required fault and interruption lanes. Record workstation OS/client separately from VM
-platform/server, selected authentication/trust policy, measured prerequisites, gaps, and independent
-cleanup. Retain safe observation fields; do not publish credentials, key contents or raw sensitive
-diagnostics.
+live byte I/O but not terminals. Exercise the shared live source and sink cases through SSH in
+addition to the buffered vectors, then run the transport-required fault and interruption lanes.
+Record workstation OS/client separately from VM platform/server, selected authentication/trust
+policy, measured prerequisites, gaps, and independent cleanup. Retain safe observation fields; do
+not publish credentials, key contents or raw sensitive diagnostics.
 
 Failures remain evidence for the owners. In particular, local status 255 is ambiguous, strict trust
 failure does not authorize enrollment, and timeout does not confirm remote cancellation. Re-run
