@@ -87,6 +87,20 @@ including Python 3.12/3.13/3.14 and Windows Python 3.13 (**461 passed, 25 skippe
 establishes the correction on Windows CI; it does not supply terminal, provider or
 production-composition evidence.
 
+## Shared subprocess adoption
+
+Integration code `1b2c683293d5cddd8390b59146fd7fe3d03bf808` rebases the SSH work onto transport
+`e85e9f5c4752ae926315fa7c0e69b871de42e4fc`. SSH now uses the shared finite-input pump and cleanup,
+retaining its Windows environment filter, carrier stdout and mixed stderr provenance. The
+independence fixture imports `Command` from the canonical invocation models module.
+
+The combined execution suite passed **613 tests with 5 skips**, and the full local non-integration
+suite passed **10,581 tests with 12 skips**. Ruff and mypy passed, covering 939 Python files and 902
+typed source files respectively. File lint, locked-SDD, rulesync and typer-isolation checks passed;
+website checks passed 160 Python and 103 Node tests, and both site-base double builds were
+identical. These local results do not establish native Windows/macOS or full production integration
+acceptance.
+
 ## Remaining integration and acceptance
 
 Transport [#833](https://github.com/WayfarerLabs/agentworks/pull/833), observed at
