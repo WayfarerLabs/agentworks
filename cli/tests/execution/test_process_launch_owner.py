@@ -175,6 +175,49 @@ def test_interruption_between_request_store_and_admission_clears_capabilities(
     assert dispatches == 0
 
 
+def test_interruption_after_admission_remains_inside_continuous_cleanup_guard(
+    children: list[subprocess.Popen[bytes]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_start = _thread.start_new_thread
+    owners: list[process_core._LaunchOwner] = []
+    request_release_line = None
+    for instruction in dis.get_instructions(run_owned_process):
+        if instruction.opname == "DELETE_FAST" and instruction.argval == "request":
+            positions = instruction.positions
+            request_release_line = None if positions is None else positions.lineno
+            break
+    assert request_release_line is not None
+
+    def capture_owner(function: Callable[..., object], args: tuple[object, ...]) -> int:
+        owner = args[0]
+        assert isinstance(owner, process_core._LaunchOwner)
+        owners.append(owner)
+        return original_start(function, args)
+
+    def interrupt_after_admission(frame: Any, event: str, argument: object) -> Callable[..., object] | None:
+        if frame.f_code is run_owned_process.__code__ and event == "line" and frame.f_lineno == request_release_line:
+            raise KeyboardInterrupt("post-admission-guard-boundary")
+        return interrupt_after_admission
+
+    monkeypatch.setattr(_thread, "start_new_thread", capture_owner)
+    sys.settrace(interrupt_after_admission)
+    try:
+        with pytest.raises(KeyboardInterrupt, match="post-admission-guard-boundary"):
+            _run_sleeping_child()
+    finally:
+        sys.settrace(None)
+
+    assert len(owners) == 1
+    terminal_before_fixture = owners[0].snapshot().terminal
+    try:
+        assert terminal_before_fixture is not None
+    finally:
+        owners[0].stop_pump()
+        owners[0].wait_terminal()
+    _assert_exact_cleanup(children)
+
+
 @pytest.mark.skipif(os.name != "posix", reason="real SIGINT launch-boundary proof is POSIX-only")
 def test_sigint_after_admission_reaps_one_exact_child_before_propagating(
     children: list[subprocess.Popen[bytes]],

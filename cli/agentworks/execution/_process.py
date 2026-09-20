@@ -606,16 +606,16 @@ def _stop_and_wait(
 
 def _cancel_admission(
     owner: _LaunchOwner,
-    interruption: BaseException,
-) -> tuple[bool, BaseException]:
-    """Terminally cancel ambiguous admission while retaining its first error."""
+    interruption: BaseException | None,
+) -> tuple[bool, BaseException | None]:
+    """Terminally cancel ambiguous admission while retaining control flow."""
     while True:
         try:
             return owner.cancel_if_waiting(), interruption
         except BaseException as error:
             # The interruption that made launch ownership ambiguous remains the
             # caller-visible one; later interruptions only delay cancellation.
-            if isinstance(interruption, Exception) and not isinstance(error, Exception):
+            if interruption is None or (isinstance(interruption, Exception) and not isinstance(error, Exception)):
                 interruption = error
             continue
 
@@ -743,31 +743,22 @@ def run_owned_process(
         return ProcessResult(False, None, None, stdout.report(), stderr.report(), ProcessFailure.DISPATCH)
 
     owner = _LaunchOwner()
-    start_returned = False
-    try:
-        _thread.start_new_thread(_launch_owner_entry, (owner,))
-        start_returned = True
-        admitted = owner.admit(request)
-    except BaseException as error:
-        admitted, error = _cancel_admission(owner, error)
-        if admitted:
-            cleanup_terminal, preserved = _stop_and_wait(owner, error)
-            assert preserved is not None
-            error = preserved
-            if not cleanup_terminal.cleaned:
-                error.add_note("Local carrier process cleanup did not complete within its bound.")
-        if not start_returned and isinstance(error, Exception):
-            return ProcessResult(False, None, None, stdout.report(), stderr.report(), ProcessFailure.DISPATCH)
-        raise error
-    assert admitted
-    del request
-
     failure: ProcessFailure | None = None
     exit_status: int | None = None
     interruption: BaseException | None = None
     pipes: _ProcessPipes | None = None
-    terminal: _OwnerTerminal
+    terminal: _OwnerTerminal | None = None
+    start_returned = False
+    admitted = False
+    owner_admitted = False
+    ownership_settled = False
     try:
+        _thread.start_new_thread(_launch_owner_entry, (owner,))
+        start_returned = True
+        admitted = owner.admit(request)
+        if not admitted:
+            raise RuntimeError("local launch admission failed")
+        del request
         while pipes is None:
             snapshot = owner.snapshot()
             if snapshot.terminal is not None:
@@ -786,17 +777,36 @@ def run_owned_process(
 
         if pipes is not None:
             failure, exit_status = _pump_owned_pipes(owner, pipes, input, deadline, stdout, stderr)
-    except OSError:
-        failure = ProcessFailure.OBSERVATION
+    except OSError as error:
+        if admitted:
+            failure = ProcessFailure.OBSERVATION
+        else:
+            interruption = error
     except BaseException as error:
         interruption = error
     finally:
-        terminal, interruption = _stop_and_wait(owner, interruption)
-        exit_status = terminal.exit_status
-        if not terminal.cleaned and interruption is not None:
-            interruption.add_note("Local carrier process cleanup did not complete within its bound.")
+        while not ownership_settled:
+            try:
+                if admitted:
+                    owner_admitted = True
+                else:
+                    owner_admitted, interruption = _cancel_admission(owner, interruption)
+                if owner_admitted:
+                    terminal, interruption = _stop_and_wait(owner, interruption)
+                    exit_status = terminal.exit_status
+                    if not terminal.cleaned and interruption is not None:
+                        interruption.add_note("Local carrier process cleanup did not complete within its bound.")
+                ownership_settled = True
+            except BaseException as error:
+                if interruption is None or (isinstance(interruption, Exception) and not isinstance(error, Exception)):
+                    interruption = error
     if interruption is not None:
+        if not start_returned and isinstance(interruption, Exception):
+            return ProcessResult(False, None, None, stdout.report(), stderr.report(), ProcessFailure.DISPATCH)
         raise interruption
+    if not owner_admitted:
+        return ProcessResult(False, None, None, stdout.report(), stderr.report(), ProcessFailure.DISPATCH)
+    assert terminal is not None
     if terminal.dispatch_failed:
         failure = ProcessFailure.DISPATCH
     elif not terminal.cleaned or terminal.observation_failed:
