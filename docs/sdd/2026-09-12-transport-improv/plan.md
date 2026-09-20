@@ -267,7 +267,9 @@ process facts, not destination-helper or production-launch acceptance.
 Windows CI at `b59bf286` exposed a timing assumption in the live-input early-close test: exit 23
 could first be observed during cleanup, leaving completion legitimately unknown. The correction
 keeps that conservative runtime behavior and adds deterministic coverage for both pre-cleanup exit
-evidence and cleanup-only status. Fresh hosted Windows confirmation remains required. The
+evidence and cleanup-only status. All hosted checks at `37a36aae`, including Windows Python 3.13 and
+Linux Python 3.12/3.13/3.14, pass in
+[run 35496253664](https://github.com/WayfarerLabs/agentworks/actions/runs/35496253664). The
 [Darwin ownership investigation](prior-art-research.md#darwin-ownership-feasibility) separately
 identifies a public-mechanism gap for generic MANAGED host jobs. Its suggested narrower supervision
 contract awaits operator disposition; the current requirements remain unchanged.

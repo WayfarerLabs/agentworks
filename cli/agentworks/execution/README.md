@@ -138,6 +138,16 @@ Run the local evidence from `cli/` with `uv run pytest tests/execution`. The reu
 does not establish SSH or live Proxmox compatibility. The native carrier is isolated from the plugin
 registry because importing that registry currently loads legacy execution modules.
 
+## Private inline preparation
+
+The private `_inline` candidate composes one carrier attempt with a fixed, standard-library-only
+Python helper. Caller arguments, script source, environment, working directory and finite stdin
+travel in the bounded stdin manifest, not helper argv. On Linux, scripts use an inherited memory
+file separately from application stdin. The caller must bind the expected destination identity. The
+host validates bounded helper evidence and keeps carrier status separate; it does not infer
+application success or an eager start acknowledgment. This candidate is not wired to production
+RunContext and does not yet supply staging, elevation, terminal I/O or managed lifetime.
+
 ## Private JSON transformation
 
 `_json.py` supplies the local, bounded transformation for file-operation composition. It preserves
