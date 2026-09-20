@@ -75,6 +75,7 @@ def open_linux_root(path: str) -> int | None:
     flags = sum(flag for flag in required_flags if flag is not None)
 
     descriptor: int | None = None
+    return_descriptor = False
     try:
         descriptor = os.open("/", flags)
         for component in () if path == "/" else path[1:].split("/"):
@@ -83,10 +84,9 @@ def open_linux_root(path: str) -> int | None:
             descriptor = child
             with suppress(OSError):
                 os.close(previous)
+        return_descriptor = True
+        return descriptor
     except (OSError, UnicodeEncodeError, ValueError) as error:
-        if descriptor is not None:
-            with suppress(OSError):
-                os.close(descriptor)
         if isinstance(error, OSError) and error.errno == errno.ENOENT:
             return None
         if isinstance(error, OSError) and error.errno == errno.EAGAIN:
@@ -100,7 +100,10 @@ def open_linux_root(path: str) -> int | None:
         }:
             raise ConfinedOpenError(ConfinedOpenFailure.UNSUPPORTED_OBJECT) from None
         raise ConfinedOpenError(ConfinedOpenFailure.IO) from None
-    return descriptor
+    finally:
+        if not return_descriptor and descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
 
 
 def open_linux_confined(root_fd: int, relative_path: str, flags: int) -> int | None:

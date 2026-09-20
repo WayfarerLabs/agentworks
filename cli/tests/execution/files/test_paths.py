@@ -123,6 +123,35 @@ def test_linux_root_walk_closes_every_owned_descriptor_after_mid_walk_error(
     assert closed == [101, 102]
 
 
+@pytest.mark.parametrize("interruption_type", [KeyboardInterrupt, SystemExit])
+def test_linux_root_walk_closes_owned_descriptors_before_control_interruption_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+    interruption_type: type[BaseException],
+) -> None:
+    original_open = os.open
+    opened: list[int] = []
+    interruption = interruption_type()
+
+    def interrupting_open(path: str, flags: int, *, dir_fd: int | None = None) -> int:
+        if path == "interrupt":
+            raise interruption
+        descriptor = original_open("/", flags) if dir_fd is None else original_open(".", flags, dir_fd=dir_fd)
+        opened.append(descriptor)
+        return descriptor
+
+    monkeypatch.setattr(os, "open", interrupting_open)
+
+    with pytest.raises(interruption_type) as raised:
+        open_linux_root("/first/interrupt")
+
+    assert raised.value is interruption
+    assert len(opened) == 2
+    for descriptor in opened:
+        with pytest.raises(OSError) as closed:
+            os.fstat(descriptor)
+        assert closed.value.errno == errno.EBADF
+
+
 def test_actual_openat2_opens_nested_regular_file_and_borrows_root(tmp_path: Path) -> None:
     target = tmp_path / "nested" / "file"
     target.parent.mkdir()
