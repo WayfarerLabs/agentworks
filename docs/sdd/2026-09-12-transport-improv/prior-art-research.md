@@ -264,6 +264,16 @@ name.
 
 ### Lifecycle test-bed gaps
 
+For macOS mechanism selection, do not equate a launchd job with a Linux cgroup. Apple's
+[launchd property-list manual](https://github.com/apple-oss-distributions/launchd/blob/main/man/launchd.plist.5)
+describes remaining-process cleanup by shared process-group ID, not arbitrary descendant ancestry.
+XNU's [event header](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/event.h)
+explicitly marks `NOTE_TRACK`, `NOTE_TRACKERR` and `NOTE_CHILD` unsupported since macOS 10.5. A
+process-group wrapper or a copied BSD fork-tracking example therefore does not establish the
+required detached-descendant and verified-emptiness promises. This source review rules out those
+particular shortcuts, not every possible macOS supervisor. The host lifecycle mechanism and its
+native proof remain open; no private kernel API, privileged service or weaker profile is selected.
+
 The
 [complete tester report on #830](https://github.com/WayfarerLabs/agentworks/pull/830#issuecomment-5739120200)
 validates the design documents, not the unimplemented profiles. Its inventory at this checkpoint is:
