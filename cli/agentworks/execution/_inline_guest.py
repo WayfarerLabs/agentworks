@@ -224,37 +224,37 @@ def main(nonce: str) -> int:
     except _SafeFailure as error:
         return _finish_failure(emitter, error.fact)
 
-    emitter.emit(FrameKind.LAUNCHING, empty_body())
-    result = run_owned_process(
-        launch.argv,
-        input=ProcessInput(data=manifest.stdin),
-        output=(
-            ProcessOutput(capture_limit=manifest.capture_limit + 1)
-            if manifest.output_mode is OutputMode.CAPTURE
-            else ProcessOutput()
-        ),
-        deadline=Deadline(None),
-        env=dict(manifest.env),
-        cwd=manifest.cwd,
-        pass_fds=() if launch.source_fd is None else (launch.source_fd,),
-        start_new_session=True,
-    )
-    if not result.started:
+    failure: FailureFact | None = None
+    try:
+        emitter.emit(FrameKind.LAUNCHING, empty_body())
+        result = run_owned_process(
+            launch.argv,
+            input=ProcessInput(data=manifest.stdin),
+            output=(
+                ProcessOutput(capture_limit=manifest.capture_limit + 1)
+                if manifest.output_mode is OutputMode.CAPTURE
+                else ProcessOutput()
+            ),
+            deadline=Deadline(None),
+            env=dict(manifest.env),
+            cwd=manifest.cwd,
+            pass_fds=() if launch.source_fd is None else (launch.source_fd,),
+            start_new_session=True,
+        )
+        if not result.started:
+            failure = FailureFact(FailurePhase.LAUNCH, FailureCode.DISPATCH)
+        else:
+            _emit_stream(emitter, manifest, StreamName.STDOUT, result.stdout)
+            _emit_stream(emitter, manifest, StreamName.STDERR, result.stderr)
+            emitter.emit(FrameKind.WAITED, encode_wait(_wait_fact(result.exit_status)))
+            failure = _process_failure(result)
+    finally:
         if launch.source_fd is not None:
-            with suppress(OSError):
+            try:
                 os.close(launch.source_fd)
-        return _finish_failure(emitter, FailureFact(FailurePhase.LAUNCH, FailureCode.DISPATCH))
-
-    _emit_stream(emitter, manifest, StreamName.STDOUT, result.stdout)
-    _emit_stream(emitter, manifest, StreamName.STDERR, result.stderr)
-    emitter.emit(FrameKind.WAITED, encode_wait(_wait_fact(result.exit_status)))
-    failure = _process_failure(result)
-    if launch.source_fd is not None:
-        try:
-            os.close(launch.source_fd)
-        except OSError:
-            if failure is None:
-                failure = FailureFact(FailurePhase.CLEANUP, FailureCode.RESOURCE)
+            except OSError:
+                if failure is None:
+                    failure = FailureFact(FailurePhase.CLEANUP, FailureCode.RESOURCE)
     if failure is not None:
         emitter.emit(FrameKind.FAILED, encode_failure(failure))
     emitter.emit(FrameKind.FINISHED, empty_body())

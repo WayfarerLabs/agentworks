@@ -1,22 +1,27 @@
 """Stdlib-only bounded I/O for one owned local process.
 
 Python 3.12 supports nonblocking anonymous pipes on Windows as well as POSIX.
-The core remains Python 3.11-compatible for POSIX guest-helper reuse. No thread
-or borrowed stream survives return. Execution uses the supplied deadline;
-killing and reaping the local process gets at most 0.5 seconds more. That
-allowance never resumes execution.
+The core remains Python 3.11-compatible for POSIX guest-helper reuse. A private
+launch owner constructs and retains the process while the caller alone pumps
+borrowed endpoints. Return leaves no task using an endpoint or live process
+capability. A canceled, capability-free bootstrap or terminal native return
+tail may finish after return. Execution uses the supplied deadline; killing and
+reaping the local process gets at most 0.5 seconds more. That allowance never
+resumes execution.
 
-Cleanup is guarded only after process construction and loop-state initialization.
-An earlier control-flow interruption can leave a child alive, including without
-a returned handle. On POSIX, an external concurrent reaper can still create a
-PID exit/reuse race before lost ownership becomes observable.
+The launch admission handoff uses a condition lock for publication. It does not
+assume unsynchronized Python object writes are portable. On POSIX, an external
+concurrent reaper can still create a PID exit/reuse race before lost ownership
+becomes observable.
 """
 
 from __future__ import annotations
 
+import _thread
 import os
 import signal
 import subprocess
+import threading
 import time
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -297,6 +302,154 @@ class _ProcessStatus:
         return self.status
 
 
+class _Admission(StrEnum):
+    WAITING = "waiting"
+    ADMITTED = "admitted"
+    CANCELLED = "cancelled"
+
+
+@dataclass(frozen=True)
+class _LaunchRequest:
+    argv: tuple[str, ...] = field(repr=False)
+    input_piped: bool
+    env: tuple[tuple[str, str], ...] | None = field(default=None, repr=False)
+    cwd: str | None = field(default=None, repr=False)
+    pass_fds: tuple[int, ...] = field(default=(), repr=False)
+    start_new_session: bool = False
+
+
+@dataclass(frozen=True)
+class _ProcessPipes:
+    stdin: IO[bytes] | None = field(repr=False)
+    stdout: IO[bytes] = field(repr=False)
+    stderr: IO[bytes] = field(repr=False)
+
+
+@dataclass(frozen=True)
+class _OwnerTerminal:
+    started: bool
+    local_status: int | None
+    exit_status: int | None
+    cleaned: bool
+    dispatch_failed: bool = False
+    observation_failed: bool = False
+
+
+@dataclass(frozen=True)
+class _OwnerSnapshot:
+    pipes: _ProcessPipes | None
+    exit_status: int | None
+    observation_failed: bool
+    terminal: _OwnerTerminal | None
+
+
+class _LaunchOwner:
+    """Publish one admitted launch through lock-mediated immutable snapshots."""
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition()
+        self._admission = _Admission.WAITING
+        self._request: _LaunchRequest | None = None
+        self._pipes: _ProcessPipes | None = None
+        self._exit_status: int | None = None
+        self._observation_failed = False
+        self._pump_stopped = False
+        self._terminal: _OwnerTerminal | None = None
+
+    def admit(self, request: _LaunchRequest) -> bool:
+        with self._condition:
+            if self._admission is not _Admission.WAITING:
+                return False
+            self._request = request
+            self._admission = _Admission.ADMITTED
+            self._condition.notify_all()
+            return True
+
+    def cancel_if_waiting(self) -> bool:
+        """Cancel default-deny admission, returning whether launch was admitted."""
+        with self._condition:
+            if self._admission is _Admission.WAITING:
+                self._request = None
+                self._admission = _Admission.CANCELLED
+                self._condition.notify_all()
+            return self._admission is _Admission.ADMITTED
+
+    def take_request(self) -> _LaunchRequest | None:
+        with self._condition:
+            while self._admission is _Admission.WAITING:
+                self._condition.wait(_POLL_SECONDS)
+            if self._admission is _Admission.CANCELLED:
+                return None
+            request = self._request
+            self._request = None
+            assert request is not None
+            return request
+
+    def publish_ready(self, pipes: _ProcessPipes) -> None:
+        with self._condition:
+            self._pipes = pipes
+            self._condition.notify_all()
+
+    def publish_exit(self, status: int) -> None:
+        with self._condition:
+            if self._exit_status is None:
+                self._exit_status = status
+                self._condition.notify_all()
+
+    def publish_observation_failure(self) -> None:
+        with self._condition:
+            self._observation_failed = True
+            self._condition.notify_all()
+
+    def wait_for_pump_stop(self, status: _ProcessStatus) -> tuple[bool, int | None]:
+        """Observe exact status until the caller relinquishes all pipe use."""
+        while True:
+            if not self._observation_failed:
+                try:
+                    observed = status.poll()
+                except OSError:
+                    self.publish_observation_failure()
+                else:
+                    if observed is not None:
+                        self.publish_exit(observed)
+            with self._condition:
+                if self._pump_stopped:
+                    return self._observation_failed, self._exit_status
+                self._condition.wait(_POLL_SECONDS)
+
+    def stop_pump(self) -> None:
+        with self._condition:
+            self._pump_stopped = True
+            self._condition.notify_all()
+
+    def wait_until_pump_stopped(self) -> None:
+        with self._condition:
+            while not self._pump_stopped:
+                self._condition.wait(_POLL_SECONDS)
+
+    def snapshot(self) -> _OwnerSnapshot:
+        with self._condition:
+            return _OwnerSnapshot(
+                self._pipes,
+                self._exit_status,
+                self._observation_failed,
+                self._terminal,
+            )
+
+    def wait_terminal(self) -> _OwnerTerminal:
+        with self._condition:
+            while self._terminal is None:
+                self._condition.wait(_POLL_SECONDS)
+            return self._terminal
+
+    def publish_terminal(self, terminal: _OwnerTerminal) -> None:
+        with self._condition:
+            self._request = None
+            self._pipes = None
+            self._terminal = terminal
+            self._condition.notify_all()
+
+
 def _cleanup(status: _ProcessStatus) -> bool:
     """Close owned pipes and bound local kill and reap, even on interruption."""
     process = status.process
@@ -341,6 +494,221 @@ def _cleanup(status: _ProcessStatus) -> bool:
         time.sleep(min(_POLL_SECONDS, remaining))
 
 
+def _run_launch_owner(owner: _LaunchOwner) -> None:
+    """Own an admitted request and all process capabilities through cleanup."""
+    request = owner.take_request()
+    if request is None:
+        return
+
+    status: _ProcessStatus | None = None
+    process: subprocess.Popen[bytes] | None = None
+    pipes: _ProcessPipes | None = None
+    started = False
+    dispatch_failed = False
+    observation_failed = False
+    exit_status: int | None = None
+    cleaned = True
+    try:
+        try:
+            process = subprocess.Popen(
+                request.argv,
+                stdin=subprocess.PIPE if request.input_piped else subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0,
+                env=None if request.env is None else dict(request.env),
+                cwd=request.cwd,
+                pass_fds=request.pass_fds,
+                start_new_session=request.start_new_session,
+                shell=False,
+                close_fds=True,
+                preexec_fn=None,
+            )
+        except (OSError, ValueError):
+            dispatch_failed = True
+            return
+        started = True
+        status = _ProcessStatus(process)
+        assert process.stdout is not None and process.stderr is not None
+        pipes = _ProcessPipes(process.stdin, process.stdout, process.stderr)
+        request = None
+        owner.publish_ready(pipes)
+        observation_failed, exit_status = owner.wait_for_pump_stop(status)
+    except BaseException:
+        # Raw thread exceptions would expose request details through
+        # sys.unraisablehook. Keep the owner closed and report only a category.
+        observation_failed = started
+        dispatch_failed = not started
+        owner.publish_observation_failure()
+        if started:
+            if status is None:
+                assert process is not None
+                status = _ProcessStatus(process)
+            while True:
+                try:
+                    owner.wait_until_pump_stopped()
+                    break
+                except BaseException:
+                    continue
+    finally:
+        request = None
+        if status is not None:
+            try:
+                cleaned = _cleanup(status)
+            except BaseException:
+                cleaned = False
+            local_status = status.status
+            status = None
+            process = None
+            pipes = None
+        else:
+            local_status = None
+        owner.publish_terminal(
+            _OwnerTerminal(
+                started=started,
+                local_status=local_status,
+                exit_status=exit_status,
+                cleaned=cleaned,
+                dispatch_failed=dispatch_failed,
+                observation_failed=observation_failed,
+            )
+        )
+
+
+def _launch_owner_entry(owner: _LaunchOwner) -> None:
+    """Keep every raw native-thread failure away from sys.unraisablehook."""
+    with suppress(BaseException):
+        _run_launch_owner(owner)
+        # The owner path itself contains the normal fail-closed publication.
+        # This final guard exists only to keep raw thread diagnostics private.
+
+
+def _stop_and_wait(
+    owner: _LaunchOwner,
+    interruption: BaseException | None,
+) -> tuple[_OwnerTerminal, BaseException | None]:
+    """Preserve the first control exception until owner cleanup completes."""
+    stopped = False
+    while not stopped:
+        try:
+            owner.stop_pump()
+            stopped = True
+        except BaseException as error:
+            if interruption is None or (isinstance(interruption, Exception) and not isinstance(error, Exception)):
+                interruption = error
+    while True:
+        try:
+            return owner.wait_terminal(), interruption
+        except BaseException as error:
+            if interruption is None or (isinstance(interruption, Exception) and not isinstance(error, Exception)):
+                interruption = error
+
+
+def _cancel_admission(
+    owner: _LaunchOwner,
+    interruption: BaseException,
+) -> tuple[bool, BaseException]:
+    """Terminally cancel ambiguous admission while retaining its first error."""
+    while True:
+        try:
+            return owner.cancel_if_waiting(), interruption
+        except BaseException as error:
+            # The interruption that made launch ownership ambiguous remains the
+            # caller-visible one; later interruptions only delay cancellation.
+            if isinstance(interruption, Exception) and not isinstance(error, Exception):
+                interruption = error
+            continue
+
+
+def _pump_owned_pipes(
+    owner: _LaunchOwner,
+    pipes: _ProcessPipes,
+    input_spec: ProcessInput,
+    deadline: Deadline,
+    stdout: _Output,
+    stderr: _Output,
+) -> tuple[ProcessFailure | None, int | None]:
+    """Pump only caller-owned state while the launch owner observes status."""
+    for pipe in (pipes.stdin, pipes.stdout, pipes.stderr):
+        if pipe is not None:
+            os.set_blocking(pipe.fileno(), False)
+    input_state = _Input.from_spec(input_spec)
+    output_first = True
+    failure: ProcessFailure | None = None
+    exit_status: int | None = None
+    post_exit_drain: _PostExitDrain | None = None
+    while True:
+        snapshot = owner.snapshot()
+        exit_status = snapshot.exit_status
+        if snapshot.observation_failed:
+            failure = ProcessFailure.OBSERVATION
+            break
+        if deadline.expired:
+            failure = ProcessFailure.DEADLINE
+            break
+        pending_delivery = stdout.pending is not None or stderr.pending is not None
+        if exit_status is not None:
+            if post_exit_drain is None:
+                post_exit_drain = _PostExitDrain(paused=pending_delivery)
+            elif post_exit_drain.update(paused=pending_delivery):
+                # A continuously writing descendant must not extend even an
+                # explicitly unbounded invocation after its client exits.
+                failure = ProcessFailure.OUTPUT
+                break
+        progressed = False
+        outputs = list(
+            ((stdout, pipes.stdout), (stderr, pipes.stderr))
+            if output_first
+            else ((stderr, pipes.stderr), (stdout, pipes.stdout))
+        )
+        output_first = not output_first
+        if exit_status is not None and pending_delivery:
+            # Resume collection only after the drain clock is unpaused.
+            outputs = [item for item in outputs if item[0].pending is not None]
+        for output_state, pipe in outputs:
+            if (
+                exit_status is not None
+                and output_state.pending is None
+                and (stdout.pending is not None or stderr.pending is not None)
+            ):
+                continue
+            try:
+                output_progressed, output_failed = output_state.advance(pipe)
+            except OSError:
+                output_failed = True
+                output_progressed = False
+            progressed = output_progressed or progressed
+            if output_failed:
+                failure = ProcessFailure.OUTPUT
+                break
+        if failure is not None:
+            break
+        if pipes.stdin is not None and not pipes.stdin.closed:
+            if exit_status is not None and not input_state.complete:
+                failure = ProcessFailure.INPUT
+                break
+            input_progressed, input_failed = input_state.advance(pipes.stdin)
+            progressed = input_progressed or progressed
+            if input_failed:
+                failure = ProcessFailure.INPUT
+                break
+        if exit_status is not None:
+            if not input_state.complete:
+                failure = ProcessFailure.INPUT
+                break
+            if stdout.eof and stderr.eof:
+                break
+            assert post_exit_drain is not None
+            pending_delivery = stdout.pending is not None or stderr.pending is not None
+            if post_exit_drain.update(paused=pending_delivery):
+                failure = ProcessFailure.OUTPUT
+                break
+        if not progressed:
+            remaining = deadline.remaining()
+            time.sleep(_POLL_SECONDS if remaining is None else min(_POLL_SECONDS, remaining))
+    return failure, exit_status
+
+
 def run_owned_process(
     argv: list[str],
     *,
@@ -361,119 +729,85 @@ def run_owned_process(
     stderr = _Output(output.capture_limit, output.stderr_sink)
     if deadline.expired:
         return ProcessResult(False, None, None, stdout.report(), stderr.report(), ProcessFailure.DEADLINE)
+
     try:
-        process = subprocess.Popen(
-            argv,
-            stdin=subprocess.PIPE if input.piped else subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            bufsize=0,
-            env=env,
-            cwd=cwd,
-            pass_fds=pass_fds,
-            start_new_session=start_new_session,
-            shell=False,
-            close_fds=True,
-            preexec_fn=None,
+        request = _LaunchRequest(
+            tuple(argv),
+            input.piped,
+            None if env is None else tuple(env.items()),
+            cwd,
+            tuple(pass_fds),
+            start_new_session,
         )
     except (OSError, ValueError):
         return ProcessResult(False, None, None, stdout.report(), stderr.report(), ProcessFailure.DISPATCH)
 
-    status = _ProcessStatus(process)
+    owner = _LaunchOwner()
+    start_returned = False
+    try:
+        _thread.start_new_thread(_launch_owner_entry, (owner,))
+        start_returned = True
+        admitted = owner.admit(request)
+    except BaseException as error:
+        admitted, error = _cancel_admission(owner, error)
+        if admitted:
+            cleanup_terminal, preserved = _stop_and_wait(owner, error)
+            assert preserved is not None
+            error = preserved
+            if not cleanup_terminal.cleaned:
+                error.add_note("Local carrier process cleanup did not complete within its bound.")
+        if not start_returned and isinstance(error, Exception):
+            return ProcessResult(False, None, None, stdout.report(), stderr.report(), ProcessFailure.DISPATCH)
+        raise error
+    assert admitted
+    del request
+
     failure: ProcessFailure | None = None
     exit_status: int | None = None
-    post_exit_drain: _PostExitDrain | None = None
     interruption: BaseException | None = None
+    pipes: _ProcessPipes | None = None
+    terminal: _OwnerTerminal
     try:
-        for pipe in (process.stdin, process.stdout, process.stderr):
-            if pipe is not None:
-                os.set_blocking(pipe.fileno(), False)
-        assert process.stdout is not None and process.stderr is not None
-        input_state = _Input.from_spec(input)
-        output_first = True
-        while True:
-            exit_status = status.poll()
-            if status.lost:
+        while pipes is None:
+            snapshot = owner.snapshot()
+            if snapshot.terminal is not None:
+                break
+            if snapshot.pipes is not None:
+                pipes = snapshot.pipes
+                break
+            if snapshot.observation_failed:
                 failure = ProcessFailure.OBSERVATION
                 break
             if deadline.expired:
                 failure = ProcessFailure.DEADLINE
                 break
-            pending_delivery = stdout.pending is not None or stderr.pending is not None
-            if exit_status is not None:
-                if post_exit_drain is None:
-                    post_exit_drain = _PostExitDrain(paused=pending_delivery)
-                elif post_exit_drain.update(paused=pending_delivery):
-                    # A continuously writing descendant must not extend even
-                    # an explicitly unbounded invocation after its client exits.
-                    failure = ProcessFailure.OUTPUT
-                    break
-            progressed = False
-            outputs = list(
-                ((stdout, process.stdout), (stderr, process.stderr))
-                if output_first
-                else ((stderr, process.stderr), (stdout, process.stdout))
-            )
-            output_first = not output_first
-            if exit_status is not None and pending_delivery:
-                # Resume collection only after the drain clock is unpaused.
-                outputs = [item for item in outputs if item[0].pending is not None]
-            for output_state, pipe in outputs:
-                if (
-                    exit_status is not None
-                    and output_state.pending is None
-                    and (stdout.pending is not None or stderr.pending is not None)
-                ):
-                    continue
-                try:
-                    output_progressed, output_failed = output_state.advance(pipe)
-                except OSError:
-                    output_failed = True
-                    output_progressed = False
-                progressed = output_progressed or progressed
-                if output_failed:
-                    failure = ProcessFailure.OUTPUT
-                    break
-            if failure is not None:
-                break
-            if process.stdin is not None and not process.stdin.closed:
-                if exit_status is not None and not input_state.complete:
-                    failure = ProcessFailure.INPUT
-                    break
-                input_progressed, input_failed = input_state.advance(process.stdin)
-                progressed = input_progressed or progressed
-                if input_failed:
-                    failure = ProcessFailure.INPUT
-                    break
-            if exit_status is not None:
-                if not input_state.complete:
-                    failure = ProcessFailure.INPUT
-                    break
-                if stdout.eof and stderr.eof:
-                    break
-                assert post_exit_drain is not None
-                pending_delivery = stdout.pending is not None or stderr.pending is not None
-                if post_exit_drain.update(paused=pending_delivery):
-                    failure = ProcessFailure.OUTPUT
-                    break
-            if not progressed:
-                remaining = deadline.remaining()
-                time.sleep(_POLL_SECONDS if remaining is None else min(_POLL_SECONDS, remaining))
+            remaining = deadline.remaining()
+            time.sleep(_POLL_SECONDS if remaining is None else min(_POLL_SECONDS, remaining))
+
+        if pipes is not None:
+            failure, exit_status = _pump_owned_pipes(owner, pipes, input, deadline, stdout, stderr)
     except OSError:
         failure = ProcessFailure.OBSERVATION
     except BaseException as error:
         interruption = error
-        raise
     finally:
-        # Preserve natural completion even when an I/O failure wins the race.
-        if exit_status is None and not status.lost:
-            with suppress(OSError):
-                exit_status = status.poll()
-        cleaned = _cleanup(status)
-        if not cleaned and interruption is not None:
+        terminal, interruption = _stop_and_wait(owner, interruption)
+        exit_status = terminal.exit_status
+        if not terminal.cleaned and interruption is not None:
             interruption.add_note("Local carrier process cleanup did not complete within its bound.")
-    if not cleaned:
+    if interruption is not None:
+        raise interruption
+    if terminal.dispatch_failed:
+        failure = ProcessFailure.DISPATCH
+    elif not terminal.cleaned or terminal.observation_failed:
         failure = ProcessFailure.OBSERVATION
     elif failure is None and (stdout.limited or stderr.limited):
         failure = ProcessFailure.OUTPUT_LIMIT
-    return ProcessResult(True, status.status, exit_status, stdout.report(), stderr.report(), failure)
+    return ProcessResult(
+        terminal.started,
+        terminal.local_status,
+        exit_status,
+        stdout.report(),
+        stderr.report(),
+        failure,
+    )

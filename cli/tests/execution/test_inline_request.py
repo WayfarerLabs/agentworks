@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 from collections.abc import Callable, ItemsView, Iterator, Mapping
+from pathlib import Path
 
 import pytest
 
@@ -14,6 +15,7 @@ from agentworks.execution._evidence_wire import Frame, FrameKind, FrameReader
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._inline import PreparedInlineCandidate, prepare_inline_candidate
+from agentworks.execution._inline_bundle import FIXED_SOURCE
 from agentworks.execution._inline_control import ControlError, FailureCode, FailurePhase, parse_failure, parse_wait
 from agentworks.execution._inline_request import (
     MAX_MANIFEST_BYTES,
@@ -22,6 +24,7 @@ from agentworks.execution._inline_request import (
     decode_manifest,
 )
 from agentworks.execution.carrier import FiniteInput
+from agentworks.execution.carriers.ssh.connection import SSHConnection, build_ssh_argv
 from agentworks.execution.models import Command, Script, Shell
 
 NONCE = "0123456789abcdef0123456789abcdef"
@@ -89,6 +92,27 @@ def test_canonical_manifest_is_closed_ascii_and_keeps_payload_out_of_helper_argv
         "LANG=C",
         "LC_ALL=C",
     )
+
+
+def test_complete_inline_helper_fits_qga_and_windows_command_bounds(plan: IdentityPlan) -> None:
+    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
+    assert isinstance(prepared.io.input, FiniteInput)
+    input_data = prepared.io.input.data
+    qga_body = json.dumps({"command": prepared.invocation.argv, "input-data": input_data.decode("ascii")}).encode(
+        "ascii"
+    )
+    connection = SSHConnection(
+        "host.example",
+        "agent",
+        Path("/keys/identity"),
+        Path("/keys/known-hosts"),
+    )
+    ssh_argv = build_ssh_argv(connection, prepared.invocation)
+    windows_command = subprocess.list2cmdline(ssh_argv)
+
+    assert FIXED_SOURCE.isascii() and input_data.isascii() and qga_body.isascii()
+    assert len(FIXED_SOURCE) < len(qga_body) <= 65_536
+    assert len(FIXED_SOURCE) < len(ssh_argv[-1]) < len(windows_command) < 32_767
 
 
 @pytest.mark.windows

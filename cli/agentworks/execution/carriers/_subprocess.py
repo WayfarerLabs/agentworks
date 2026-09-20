@@ -1,8 +1,9 @@
 """Carrier adapter for the stdlib-only owned-process core.
 
 Process results establish neither guest dispatch nor target termination. The
-core's bounded cleanup does not close the process-construction interruption,
-concurrent external-reaper PID reuse, or arbitrary cleanup interruption gates.
+core's private owner closes the proved CPython/Linux process-construction
+interruption path. Native Windows and macOS remain unproved, and a concurrent
+external reaper can still make exact local status and cleanup uncertain.
 """
 
 from __future__ import annotations
