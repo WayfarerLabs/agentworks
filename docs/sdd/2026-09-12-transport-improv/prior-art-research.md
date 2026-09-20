@@ -419,15 +419,15 @@ is not a promise about every future interpreter. The
 signal ambiguity and native-platform acceptance separate.
 
 Linux process flags do not close the eager-start gap. In Bookworm's kernel,
-[`begin_new_exec()`](https://sources.debian.org/src/linux/6.1.176-1/fs/exec.c/#L1259)
-clears the fork-without-exec flag and closes close-on-exec descriptors before the ELF loader's
+[`begin_new_exec()`](https://sources.debian.org/src/linux/6.1.176-1/fs/exec.c/#L1259) clears the
+fork-without-exec flag and closes close-on-exec descriptors before the ELF loader's
 [remaining fallible checks](https://sources.debian.org/src/linux/6.1.176-1/fs/binfmt_elf.c/#L1239).
-A bounded local probe on Debian kernel 6.1.180 and Python 3.11.2 reproduced the counterexample:
-a malformed ELF file made `Popen` return and cleared that flag, then failed loader validation and
-died with SIGSEGV without entering the new image. The exact owned child was observed unreaped,
-then reaped, so PID reuse did not explain the result. A cleared flag plus error-pipe EOF therefore
-cannot acknowledge successful exec. Do not add a procfs flag reader to the helper: it would add
-Linux-specific machinery without proving eager start or resolving signaled completion.
+A bounded local probe on Debian kernel 6.1.180 and Python 3.11.2 reproduced the counterexample: a
+malformed ELF file made `Popen` return and cleared that flag, then failed loader validation and died
+from a segmentation-fault signal without entering the new image. The exact owned child was observed
+before reaping, then reaped, so PID reuse did not explain the result. A cleared flag plus error-pipe
+EOF therefore cannot acknowledge successful exec. Do not add a procfs flag reader to the helper: it
+would add Linux-specific machinery without proving eager start or resolving signaled completion.
 
 ### Identity-neutral file locking
 

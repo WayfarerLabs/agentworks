@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from collections.abc import Callable, ItemsView, Iterator, Mapping
@@ -46,11 +45,7 @@ def _exception_graph(error: BaseException) -> list[BaseException]:
 
 @pytest.fixture
 def identity() -> IdentityExpectation:
-    return IdentityExpectation(
-        os.geteuid(),
-        os.getegid(),
-        tuple(sorted(set(os.getgroups()) | {os.getegid()})),
-    )
+    return IdentityExpectation(1001, 1002, (1002, 1003))
 
 
 @pytest.mark.windows
@@ -222,8 +217,9 @@ def test_host_refuses_oversized_manifest_without_dispatch(identity: IdentityExpe
         (b"x" * (MAX_MANIFEST_BYTES + 1), FailureCode.OVERSIZED),
     ],
 )
-def test_actual_guest_revalidates_untrusted_manifest(manifest: bytes, code: FailureCode) -> None:
-    identity = IdentityExpectation(os.geteuid(), os.getegid(), tuple(sorted(set(os.getgroups()) | {os.getegid()})))
+def test_actual_guest_revalidates_untrusted_manifest(
+    manifest: bytes, code: FailureCode, identity: IdentityExpectation
+) -> None:
     prepared = prepare_inline_candidate(Command(["/bin/true"]), identity=identity)
     invocation = (*prepared.invocation.argv[:-1], NONCE)
 
