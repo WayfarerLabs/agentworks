@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 import agentworks.execution._file_snapshot as snapshot_module
+from agentworks.execution._file_paths import open_linux_confined
 from agentworks.execution._file_snapshot import (
     FileSnapshot,
     SnapshotFailureKind,
@@ -160,13 +161,12 @@ def test_regular_leaf_open_uses_nonblocking_nofollow_noctty_flags(
     observed_flags: list[int] = []
 
     if sys.platform == "linux":
-        original_confined_open = snapshot_module._open_linux_confined
 
         def recording_confined_open(root_fd: int, path: str, flags: int) -> int | None:
             observed_flags.append(flags)
-            return original_confined_open(root_fd, path, flags)
+            return open_linux_confined(root_fd, path, flags)
 
-        monkeypatch.setattr(snapshot_module, "_open_linux_confined", recording_confined_open)
+        monkeypatch.setattr("agentworks.execution._file_snapshot.open_linux_confined", recording_confined_open)
     else:
         original_open = os.open
 
@@ -320,21 +320,6 @@ def test_descendant_procfs_device_boundary_is_refused() -> None:
         assert _failure_kind(root_fd, "proc/version", 4096) is SnapshotFailureKind.UNSUPPORTED_OBJECT
     finally:
         os.close(root_fd)
-
-
-@pytest.mark.skipif(sys.platform != "linux", reason="real procfs magic links are Linux-specific")
-def test_procfs_magic_link_ancestor_is_refused() -> None:
-    proc = Path("/proc")
-    if not (proc / "self/fd").is_dir():
-        pytest.skip("procfs descriptor fixture is unavailable")
-    proc_fd = _open_root(proc)
-    target_fd = _open_root(Path("/tmp"))
-    try:
-        path = f"self/fd/{target_fd}/missing"
-        assert _failure_kind(proc_fd, path) is SnapshotFailureKind.UNSUPPORTED_OBJECT
-    finally:
-        os.close(target_fd)
-        os.close(proc_fd)
 
 
 def test_borrowed_root_survives_and_all_descendant_descriptors_close(

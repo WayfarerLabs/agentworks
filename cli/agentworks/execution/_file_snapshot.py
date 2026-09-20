@@ -23,7 +23,6 @@ from agentworks.execution._file_paths import (
     open_linux_confined,
 )
 
-_open_linux_confined = open_linux_confined
 _READ_CHUNK_BYTES = 64 * 1024
 _DESCRIPTOR_OPERATIONS_AVAILABLE = (
     os.name == "posix"
@@ -161,7 +160,7 @@ def _open_at(parent_fd: int, name: str, *, directory: bool) -> int | None:
 
     if sys.platform == "linux":
         try:
-            return _open_linux_confined(parent_fd, name, flags)
+            return open_linux_confined(parent_fd, name, flags)
         except ConfinedOpenError as error:
             if error.kind is ConfinedOpenFailure.CONFLICT:
                 raise SnapshotReadError(SnapshotFailureKind.CONFLICT) from None

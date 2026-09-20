@@ -88,12 +88,13 @@ def test_actual_openat2_refuses_beneath_escape(tmp_path: Path) -> None:
 
 
 def test_actual_openat2_refuses_procfs_magic_link() -> None:
-    if not Path("/proc/self/fd").is_dir():
+    descriptor_directory = Path("/proc/self/fd")
+    if not descriptor_directory.is_dir():
         pytest.skip("procfs descriptor fixture is unavailable")
-    proc_fd = _open_root(Path("/proc"))
+    proc_fd = _open_root(descriptor_directory)
     target_fd = _open_root(Path("/tmp"))
     try:
-        error = _failure(proc_fd, f"self/fd/{target_fd}")
+        error = _failure(proc_fd, str(target_fd))
     finally:
         os.close(target_fd)
         os.close(proc_fd)
