@@ -9,24 +9,21 @@ candidate. The runtime source is compatible with older Python 3 releases; its
 
 from __future__ import annotations
 
-import contextlib
 import os
 import re
 import secrets
-import selectors
-import signal
-import subprocess
-import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+
+from agentworks.execution.carrier import Capture, CarrierIO, Deadline
+from agentworks.execution.carriers._subprocess import run_process
 
 _SHELL = "/bin/sh"
 _DEFAULT_CANDIDATES = (Path("/opt/homebrew/bin/python3"), Path("/usr/local/bin/python3"))
 _SYSTEM_SHIM = Path("/usr/bin/python3")
 _MAX_CAPTURE = 1_024
-_READ_SIZE = 4_096
-_CLEANUP_SECONDS = 0.2
+_MINIMAL_ENV = {"LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin"}
 
 _CONTINUATION = "sys.stdout.write('AGW_RUNTIME_1:%s:ready:%s\\n' % (nonce, candidate_index))"
 _TRAMPOLINE = f"""import sys
@@ -97,74 +94,11 @@ class PrerequisiteObservation:
     selected_path: Path | None
 
 
-class _ObservationTimeout(Exception):
-    pass
-
-
 def _absolute(path: Path) -> Path:
     value = os.fspath(path)
     if not path.is_absolute() or "\0" in value:
         raise ValueError("runtime prerequisite paths must be absolute and contain no NUL")
     return path
-
-
-def _read_bounded(process: subprocess.Popen[bytes], deadline: float) -> tuple[bytes, bool]:
-    """Drain both child streams while retaining only bounded stdout."""
-    assert process.stdout is not None
-    assert process.stderr is not None
-    stdout_fd = process.stdout.fileno()
-    stderr_fd = process.stderr.fileno()
-    retained = bytearray()
-    overflow = False
-    selector = selectors.DefaultSelector()
-    selector.register(stdout_fd, selectors.EVENT_READ, True)
-    selector.register(stderr_fd, selectors.EVENT_READ, False)
-    try:
-        while selector.get_map():
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise _ObservationTimeout
-            for key, _ in selector.select(remaining):
-                chunk = os.read(key.fd, _READ_SIZE)
-                if not chunk:
-                    selector.unregister(key.fd)
-                    continue
-                if key.data:
-                    available = max(0, _MAX_CAPTURE + 1 - len(retained))
-                    retained.extend(chunk[:available])
-                    overflow = overflow or len(retained) > _MAX_CAPTURE or len(chunk) > available
-
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise _ObservationTimeout
-        try:
-            process.wait(timeout=remaining)
-        except subprocess.TimeoutExpired as error:
-            raise _ObservationTimeout from error
-        return bytes(retained[:_MAX_CAPTURE]), overflow
-    finally:
-        selector.close()
-
-
-def _signal_group(process: subprocess.Popen[bytes], signum: signal.Signals) -> None:
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(process.pid, signum)
-
-
-def _cleanup(process: subprocess.Popen[bytes]) -> None:
-    """Terminate and reap the experiment-owned process group."""
-    if process.poll() is None:
-        _signal_group(process, signal.SIGTERM)
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            process.wait(timeout=_CLEANUP_SECONDS)
-    _signal_group(process, signal.SIGKILL)
-    if process.poll() is None:
-        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
-            process.wait(timeout=_CLEANUP_SECONDS)
-    for stream in (process.stdout, process.stderr):
-        if stream is not None:
-            with contextlib.suppress(OSError):
-                stream.close()
 
 
 def _unknown() -> PrerequisiteObservation:
@@ -174,14 +108,10 @@ def _unknown() -> PrerequisiteObservation:
 def _interpret(
     raw: bytes,
     *,
-    returncode: int | None,
-    overflow: bool,
     nonce: str,
     candidates: tuple[Path, ...],
     shim: Path,
 ) -> PrerequisiteObservation:
-    if returncode != 0 or overflow:
-        return _unknown()
     match = re.fullmatch(
         rb"AGW_RUNTIME_1:([0-9a-f]{32}):(missing|shim|unsupported|unusable|ready):(-|s|[0-9]+)\n",
         raw,
@@ -236,29 +166,12 @@ def observe_runtime_prerequisite(
         *[os.fspath(path) for path in candidates],
     ]
 
-    try:
-        process = subprocess.Popen(
-            argv,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            start_new_session=True,
-        )
-    except OSError:
+    result = run_process(
+        argv,
+        io=CarrierIO(output=Capture(_MAX_CAPTURE)),
+        deadline=Deadline.after(timeout),
+        env=_MINIMAL_ENV,
+    )
+    if result.failure is not None or result.exit_status != 0 or not result.stdout.complete:
         return _unknown()
-
-    try:
-        try:
-            raw, overflow = _read_bounded(process, time.monotonic() + timeout)
-        except _ObservationTimeout:
-            return _unknown()
-        return _interpret(
-            raw,
-            returncode=process.returncode,
-            overflow=overflow,
-            nonce=nonce,
-            candidates=candidates,
-            shim=shim,
-        )
-    finally:
-        _cleanup(process)
+    return _interpret(result.stdout.data, nonce=nonce, candidates=candidates, shim=shim)

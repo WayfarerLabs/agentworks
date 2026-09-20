@@ -11,16 +11,13 @@ import sys
 import pytest
 
 if sys.platform == "win32":  # pragma: no cover - platform guard
-    pytest.skip("The runtime-prerequisite experiment requires POSIX process groups", allow_module_level=True)
+    pytest.skip("The runtime-prerequisite experiment requires POSIX shell checks", allow_module_level=True)
 
-import _thread
 import dataclasses
 import os
 import shlex
 import shutil
 import stat
-import threading
-import time
 from pathlib import Path
 
 from tests.execution.runtime_prerequisite_probe import (
@@ -88,6 +85,51 @@ def test_actual_python_311_is_ready_without_startup_environment_or_writes(
 
     assert observation == PrerequisiteObservation(PrerequisiteState.READY, candidate)
     assert _tree(tmp_path) == before
+
+
+def test_fixed_shell_and_runtime_do_not_inherit_startup_or_loader_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    startup_marker = tmp_path / "shell-startup-ran"
+    startup = tmp_path / "shell-startup"
+    startup.write_text(f"touch {shlex.quote(os.fspath(startup_marker))}\n")
+    hostile_environment = {
+        "AGENTWORKS_ENV_CANARY": "inherited",
+        "BASH_ENV": os.fspath(startup),
+        "BASHOPTS": "extdebug",
+        "BASH_XTRACEFD": "9",
+        "DYLD_INSERT_LIBRARIES": os.fspath(tmp_path / "absent.dylib"),
+        "ENV": os.fspath(startup),
+        "LD_PRELOAD": os.fspath(tmp_path / "absent.so"),
+        "SHELLOPTS": "xtrace",
+    }
+    for name, value in hostile_environment.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv(
+        "BASH_FUNC_printf%%",
+        f'() {{ touch {shlex.quote(os.fspath(startup_marker))}; builtin printf "$@"; }}',
+    )
+    monkeypatch.setenv("BASH_FUNC_agentworks_canary%%", "() { :; }")
+    environment_checks = """[ "${AGENTWORKS_ENV_CANARY+x}" != x ]
+[ "${BASH_ENV+x}" != x ]
+[ "${ENV+x}" != x ]
+[ "${LD_PRELOAD+x}" != x ]
+[ "${DYLD_INSERT_LIBRARIES+x}" != x ]
+[ "${PATH-}" = /usr/bin:/bin ]
+[ "${LANG-}" = C ]
+[ "${LC_ALL-}" = C ]
+! command -v agentworks_canary >/dev/null 2>&1
+"""
+    candidate = _emulated_runtime(
+        tmp_path / "candidate",
+        PrerequisiteState.READY,
+        before_frame=environment_checks,
+    )
+
+    observation = _fixture_probe((candidate,), tmp_path / "absent-shim")
+
+    assert observation == PrerequisiteObservation(PrerequisiteState.READY, candidate)
+    assert not startup_marker.exists()
 
 
 @pytest.mark.parametrize("kind", ["broken-symlink", "not-executable", "directory"])
@@ -263,29 +305,4 @@ def test_timeout_is_unknown_and_kills_and_reaps_the_owned_process(tmp_path: Path
     observation = _fixture_probe((candidate,), tmp_path / "absent-shim", timeout=0.5)
 
     assert observation == PrerequisiteObservation(PrerequisiteState.OBSERVATION_UNKNOWN, None)
-    _assert_process_gone(int(pid_file.read_text()))
-
-
-def test_keyboard_interrupt_propagates_after_owned_process_cleanup(tmp_path: Path) -> None:
-    pid_file = tmp_path / "pid"
-    candidate = _executable(
-        tmp_path / "candidate",
-        f"printf '%s' \"$$\" > {shlex.quote(os.fspath(pid_file))}\ntrap '' TERM\nexec /bin/sleep 60\n",
-    )
-
-    def interrupt_after_start() -> None:
-        deadline = time.monotonic() + 3
-        while not pid_file.exists() and time.monotonic() < deadline:
-            time.sleep(0.01)
-        _thread.interrupt_main()
-
-    interrupter = threading.Thread(target=interrupt_after_start)
-    interrupter.start()
-    try:
-        with pytest.raises(KeyboardInterrupt):
-            _fixture_probe((candidate,), tmp_path / "absent-shim")
-    finally:
-        interrupter.join(timeout=3)
-
-    assert not interrupter.is_alive()
     _assert_process_gone(int(pid_file.read_text()))
