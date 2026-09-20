@@ -193,7 +193,8 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       account selector, privilege transition, staging or permission enforcement; native acceptance
       and production composition remain separate gates.
 - [ ] Accept the preparation/result and file-operation LLDs after private review and disposition of
-      their helper/runtime, launch-evidence, cross-identity locking, and platform prerequisites.
+      their helper/runtime, launch-evidence, cross-identity operation coordination, and platform
+      prerequisites.
 - [x] Implement private revision-aware publication with explicit Create/Replace/Match conditions,
       bounded streaming from verified scratch, stat-only observations without old-content reads, and
       a content-bound post-publication revision. At `75aaaa5e`, all three private lanes are clean
@@ -204,10 +205,9 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       refusal and release tests. At `75aaaa5e`, all three private lanes are clean. The corrected
       post-acquisition deadline test is mutation-proven. Protected namespace setup, ordinary/admin
       sharing and native macOS acceptance remain separate gates.
-- [ ] Establish the transaction lock's protected namespace through explicit setup and prove
-      ordinary/elevated helpers contend on the same inode. Keep macOS host-administrator setup
-      pending operator disposition; readiness never installs the lock. Validate finite nonnegative
-      relative budgets at the file request boundary before deriving a guest-local expiry.
+- [ ] Validate finite nonnegative relative budgets at the file request boundary before deriving a
+      guest-local expiry. Keep deadline and post-cleanup evidence independent of the removed
+      destination-lock prerequisite.
 - [x] Review and validate private exact-kind revision-bound object stat/removal and the Debian
       create-time lock setup. Keep setup idempotent without replacing a valid lock inode;
       distinguish local fixture evidence from privileged native bootstrap and ordinary/admin
