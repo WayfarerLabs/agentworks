@@ -152,3 +152,28 @@ same-filesystem bind mounts or establish `openat2` confinement. It refuses obser
 not contain a malicious same-user process or supply external-writer compare-and-swap. Regular-file
 reads can block in the filesystem, so this primitive provides no hard elapsed-time bound. Complete
 helper delivery, locking, platform guarantees and production composition remain separate work.
+
+## Private file publication
+
+`_file_publication.py` supplies Linux same-directory publication beneath a borrowed parent
+descriptor. It accepts complete bytes and either absence or a matching snapshot as the destination
+condition. Create-only publication uses `renameat2(RENAME_NOREPLACE)` without a fallback;
+replacement rechecks the snapshot before rename. The caller supplies confinement and any
+cooperating-writer lock. This primitive is not streaming upload, FileAccess or a remote helper.
+
+An unpredictable exclusive sibling receives the content and required metadata before publication.
+New files retain the directory's inherited ACL behavior with the requested owner, group and mode.
+Replacement requires ordinary destination read/write authority and preserves UID, GID, permission
+bits and the Linux access ACL. Observed links, multiply linked files, special objects, set-ID state
+and other visible extended attributes refuse. Unsupported metadata is not silently dropped.
+
+Errors carry closed kind/phase facts rather than filesystem messages or payloads. Cleanup concerns
+only the recorded staging name and identity, never a prefix scan. Failed cleanup retains a private
+debt value for exact-identity retry under the same parent; unknown identity requires inspection
+instead of automatic removal. Control-flow exceptions propagate, with any publication uncertainty or
+cleanup debt on a `FilePublicationError` cause. Repeated asynchronous interruption is not a bounded
+cleanup guarantee.
+
+Atomic visibility does not imply directory-entry crash durability, an external-writer
+compare-and-swap guarantee or a hard filesystem deadline. Native-platform acceptance and the
+complete file service remain separate work.

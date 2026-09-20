@@ -238,6 +238,14 @@ read has no hard elapsed-time bound. It therefore does not accept or replace the
 lookup candidate below, resolve helper cancellation, or close the readiness and cross-identity
 locking gates. Required platform confinement still needs its separately proved mechanism.
 
+The private `_file_publication.py` increment implements Linux sibling publication for complete
+in-memory bytes beneath a caller-owned parent descriptor. It uses no-replace rename for creation,
+snapshot revalidation for replacement, and preserves ordinary UID/GID/mode/access-ACL semantics
+while refusing unsupported metadata. The caller still owns confinement and transaction locking; the
+increment does not provide streaming upload, remote delivery, macOS support or FileAccess. Local
+fault and ACL fixtures are implementation evidence, not acceptance of the complete platform
+guarantees below.
+
 All target operations occur in the helper process. Host-side normalization and grant checks reject
 untrusted requests early; destination-side traversal and observation enforce the bound operation.
 The guarantee assumes the authorized target identity is cooperating. A malicious process already
@@ -253,11 +261,11 @@ uncertainty.
   following links. A mount or object-identity change that is observed before publication is a
   refusal. These checks do not claim immunity to a malicious same-user process moving an ancestor
   after it has been opened.
-- Open regular leaves with no-follow and nonblocking flags, then verify by descriptor. Refuse
-  symbolic links, multiply linked regular files, devices, FIFOs, and unexpected sockets when
-  observed. Revalidate the held destination and staging objects before publication. This is safe
-  object handling for the stated cooperative boundary, not protection from a malicious same-user
-  process adding a hard link in the next system-call window.
+- Inspect leaves without following links before opening, then open regular leaves with no-follow and
+  nonblocking flags and verify by descriptor. Refuse symbolic links, multiply linked regular files,
+  devices, FIFOs, and unexpected sockets when observed. Revalidate the held destination and staging
+  objects before publication. This is safe object handling for the stated cooperative boundary, not
+  protection from a malicious same-user process adding a hard link in the next system-call window.
 - Publication creates one unpredictable, operation-owned sibling in the destination directory,
   writes and verifies all bytes, establishes the required metadata, syncs the staged file,
   revalidates the destination condition, and uses descriptor-relative rename. Create-only uses Linux
