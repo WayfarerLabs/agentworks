@@ -193,13 +193,6 @@ def test_payload_material_stays_off_fixed_argv_and_preparation_is_single_use() -
         prepared.claim()
 
 
-def test_non_linux_host_is_rejected_instead_of_relabelled(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sys, "platform", "darwin")
-
-    with pytest.raises(ValidationError):
-        prepare_terminal_handoff((b"/bin/true",), {}, b"", CollectSink())
-
-
 def test_source_descriptor_restores_original_or_closes_its_slot() -> None:
     result_read, result_write = os.pipe()
     child = os.fork()

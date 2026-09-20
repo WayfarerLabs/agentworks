@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import base64
-import os
 import secrets
 import struct
-import sys
 from dataclasses import dataclass, field
 from enum import StrEnum
 from importlib.resources import files
@@ -265,9 +263,7 @@ def prepare_terminal_handoff(
     source: bytes,
     presentation: ByteSink,
 ) -> PreparedTerminalHandoff:
-    """Build one no-staging Linux terminal preparation without dispatching it."""
-    if sys.platform != "linux" or not hasattr(os, "memfd_create"):
-        raise ValidationError("Terminal handoff preparation requires Linux memfd support")
+    """Build one no-staging terminal preparation for a Linux guest without dispatching it."""
     if not callable(getattr(presentation, "try_write", None)):
         raise ValidationError("Terminal handoff requires a trusted presentation sink")
     payload = _payload(argv, env, source)

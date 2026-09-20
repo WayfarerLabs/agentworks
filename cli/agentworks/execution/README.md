@@ -152,15 +152,16 @@ production RunContext and does not yet supply staging, elevation, terminal I/O o
 
 ## Private terminal handoff preparation
 
-`_terminal_handoff.py` and `_terminal_guest.py` provide a Linux-only, no-staging candidate for one
-same-terminal bootstrap attempt. A nonce-bound payload-ready marker releases one bounded frame from
-the host byte source. That frame keeps literal byte argv, environment and source off helper argv.
-The guest reads it with echo and terminal input transformations disabled, installs source on a Linux
-memory descriptor separate from terminal stdin, restores the terminal, then emits a distinct
-nonce-bound interactive-ready marker. Only then does the host source end preparation and permit a
-future carrier adapter to borrow keyboard input. The paired host sink suppresses setup and readiness
-bytes, handles split and coalesced markers, and forwards only bytes after interactive readiness to
-an explicitly selected trusted presentation sink with short-write flow control.
+`_terminal_handoff.py` provides platform-neutral host preparation for one no-staging, same-terminal
+bootstrap attempt targeting the Linux `_terminal_guest.py`. A nonce-bound payload-ready marker
+releases one bounded frame from the host byte source. That frame keeps literal byte argv,
+environment and source off helper argv. The guest reads it with echo and terminal input
+transformations disabled, installs source on a Linux memory descriptor separate from terminal stdin,
+restores the terminal, then emits a distinct nonce-bound interactive-ready marker. Only then does
+the host source end preparation and permit a future carrier adapter to borrow keyboard input. The
+paired host sink suppresses setup and readiness bytes, handles split and coalesced markers, and
+forwards only bytes after interactive readiness to an explicitly selected trusted presentation sink
+with short-write flow control.
 
 The preparation object has a single-use guard but does not dispatch or prove replay prevention by a
 carrier. Its readiness markers establish only handoff state, never application launch or exec
