@@ -172,6 +172,38 @@ been transformed before that boundary; no input flushing or promise to reverse p
 selected here. Production acquisition/queued-input policy, control-flow interruption and supported
 platform behavior still need joint acceptance.
 
+## Published preparation joint proof, 2026-09-20
+
+Transport `84ac8caf` now supplies the private `prepare_terminal_handoff()` implementation in
+`execution/_terminal_handoff.py` and its Linux guest bootstrap. Two local real-SSH runs, including
+an independent lead repetition, composed these unchanged modules at combined tree `704d658a` with
+the owned stdin PTY candidate. The environment was Linux 6.1.0-52-arm64, Python 3.11.2 and OpenSSH
+9.2p1 Debian-2+deb12u10. Fresh loopback credentials and owned PTYs replaced operator SSH state and
+terminals; no VM or cloud resource was used.
+
+The experimental relay polled the preparation source, drained each returned chunk, and treated its
+eventual EOF as the permanent keyboard handoff. It did not parse readiness records. Each run sent
+the bootstrap in 1,003 writes of at most five bytes. Only after EOF with no pending payload did it
+read the early keys `16 07 0d`; the remote terminal interpreted them once as `07 0a`. The supplied
+preparation sink filtered readiness and delivered presentation through three deliberate stalls and
+45 writes of at most five bytes.
+
+The remote application verified a 2,077-byte binary source and binary environment value by SHA-256.
+Distinct payload canaries were absent from fixed argv, observed raw stdout/stderr, presentation and
+retained result JSON. The original modes and 31 by 97 geometry reached the remote terminal, and an
+explicit size update plus `SIGWINCH` to the owned client propagated 42 by 113. Both clients exited
+zero. Exact borrowed modes, file-status and inheritable flags, and handle liveness were preserved;
+descriptor counts returned from four to four. Independent checks found no recorded server, client or
+remote-child PID and no fixture directory after cleanup.
+
+The reproducible scratch probe is `terminal_handoff_joint_probe.py`, SHA-256
+`9024dc082349eed7bdf0d7a601859d90b94a220374e2e71d2dc994fda5cdc622`, in the session-owned terminal
+handoff proof worktree. This establishes Linux clean-exit composition of the published preparation,
+not a production terminal carrier or shared-type acceptance. Native workstations, interruption,
+restoration failure, emulator sanitation and production completion reporting remain open. The
+restricted namespace could not complete server PTY setup; both successful runs used the approved
+host fixture without changing host configuration.
+
 ## Remaining proof
 
 The host experiment used bounded small writes and captured output, not a production relay. The
