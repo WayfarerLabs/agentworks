@@ -347,6 +347,26 @@ pass. Actual local Python 3.11 PTY and kernel lookup tests do not establish SSH/
 same-filesystem bind-mount or macOS acceptance. Complete files, lifecycle and additive RunContext
 remain open; no public feedback/fix round is consumed.
 
+The private no-staging file-read slice now composes the shared fixed-source packager, strict
+file-response framing and the existing snapshot reader. Local composition drives the actual Proxmox
+carrier against a fake provider and real helper subprocess; it is not native QGA evidence. Review
+removed duplicate size/metadata and terminal bookkeeping, rejected undefined Linux mode bits, and
+corrected retained collector/reader state on exceptions. A mutation-proven partial-record fixture at
+`5e832bd7` covers reader cleanup. This does not promise secure erasure of transient Python locals or
+asynchronous interruption atomicity.
+
+Project, complexity and generic correctness reviews are clean at `7aa08d0b`; project and complexity
+rechecks cover the test-only correction and final limitation wording. The corrective round is
+private implementation work, not one of the three authorized public feedback/fix rounds.
+
+At runtime pin `7aa08d0b`, the full local suite passes 11,009 tests with 12 skips. The final
+test-only correction passes all 124 file tests. Ruff, formatting, CI-scoped mypy (933 sources), file
+lint, typer isolation, rulesync, locked-SDD, 160 Python/103 Node website tests and both
+deterministic build comparisons pass. The Python website run also emitted a server-thread
+`BrokenPipeError` while returning success; no assertion failed. An extra mypy invocation over the
+entire CLI directory, outside CI's scope, reports missing hatchling build-hook stubs; the required
+`agentworks/ tests/` invocation passes. No dependency or unrelated website code was changed.
+
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
 

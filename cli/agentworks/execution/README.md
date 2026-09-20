@@ -166,6 +166,11 @@ reflection, truncation or invalid records cannot become a successful read, and c
 reported separately. Helper code uses the fixed module packager; it creates no guest files, spool or
 lock. The destination needs compatible Python 3.11 or newer with zlib already available.
 
+An exceptional exit clears collector-owned response state and the reader's partial record before
+propagating the exception. This is not secure erasure of Python memory or traceback locals; callers
+must not render private frame locals. Snapshot bytes and metadata remain hidden from result
+representations.
+
 This is not production FileAccess or native platform acceptance. It does not provide stat-only
 observations, mutation, elevation, transaction locking, macOS support or a hard elapsed-time bound
 for filesystem reads. It assumes a cooperative execution identity, not hostile same-user isolation.
