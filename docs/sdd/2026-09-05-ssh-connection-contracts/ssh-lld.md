@@ -151,9 +151,10 @@ canonical invocation models. SSH adopts that core while retaining environment fi
 carrier-specific evidence, and imports `Command` from `execution.models` in its independence
 fixture. This is an actual implementation dependency; #832 stacks on #833.
 
-The adapter now accepts finite/live byte input and capture/discard/sink output, and advertises live
-stdio. It continues rejecting unfamiliar input/output modes before connection admission or client
-startup. Future shared extensions cannot silently become EOF or discard. Terminal support remains
+The adapter accepts every current `CarrierIO` choice: EOF/finite/live byte input and
+capture/discard/sink output, and advertises live stdio. The temporary buffered-mode guard is retired
+after that adoption; `CarrierIO` validates its supported shapes at construction. New shared modes
+still require coordinated implementation and proof at the shared boundary. Terminal support remains
 disabled until its distinct handle and lifetime contract is implemented and proved.
 
 The shared carrier interface now includes `LiveInput`, `SinkOutput` and delivered-output retention.
@@ -186,10 +187,10 @@ These are implementation designs, not evidence that those mechanisms are shipped
 
 The [SSH test handoff](../../../cli/tests/execution/carriers/ssh/README.md) gives local commands and
 explicit live construction using the shared harness. Synthetic local executables test process I/O,
-quoting and shared framing. Installed-client tests check option interpretation offline and
-pre-authentication rejection against an owned local peer. A fresh isolated Python process blocks
-transport's retirement modules while executing the new binding. None of those tests establishes live
-authentication or platform coverage.
+quoting and shared framing. Installed-client tests include authenticated Linux loopback live-byte
+delivery, option interpretation and pre-authentication refusal. A fresh isolated Python process
+blocks transport's retirement modules while executing the new binding. These local tests do not
+establish supported workstation or provider coverage.
 
 The operator's integration tester combines pinned transport and SSH branches locally, records both
 inputs and the integrated revision, and exercises the shared acceptance cases using their authorized

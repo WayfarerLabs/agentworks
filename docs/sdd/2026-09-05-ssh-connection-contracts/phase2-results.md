@@ -104,26 +104,28 @@ acceptance.
 
 Transport [#833](https://github.com/WayfarerLabs/agentworks/pull/833), observed at
 `84ac8cafee8c6ac97587bcc98e8785b9be62de8a`, supplies the shared process core and concrete
-`LiveInput`/`SinkOutput` byte endpoints. SSH integration `8467d4e0` adopts those types, preserves
-unknown-mode refusal and uses the shared status owner for forwarding cleanup. Focused SSH tests
-passed 269 cases with five skips. The combined non-integration suite passed 12,002 tests with 14
-skips after updating a file-helper sizing fixture's SSH call site to explicit trust. Full Ruff and
-mypy passed, with 1,005 typed source files. Test-only follow-up `5986290d` adds an installed Linux
-OpenSSH live-byte case with fresh loopback credentials: sensitive binary input, partial/stalled
-sinks, stream provenance, empty retained report data and truthful exit 23 all passed. Private review
-and the final integrated gates remain in progress. Its private two-gate terminal preparation is also
-implemented, but a shared terminal endpoint type is not yet enabled or frozen. The operator
-confirmed #833 as the implementation source, with terminal/PTY work proceeding in parallel.
+`LiveInput`/`SinkOutput` byte endpoints. SSH integration `8467d4e0` adopts those types and uses the
+shared status owner for forwarding cleanup. Focused SSH tests passed 269 cases with five skips. The
+combined non-integration suite passed 12,002 tests with 14 skips after updating a file-helper sizing
+fixture's SSH call site to explicit trust. Full Ruff and mypy passed, with 1,005 typed source files.
+Test-only follow-up `5986290d` adds an installed Linux OpenSSH live-byte case with fresh loopback
+credentials: sensitive binary input, partial/stalled sinks, stream provenance, empty retained report
+data and truthful exit 23 all passed. Private review and the final integrated gates remain in
+progress. Its private two-gate terminal preparation is also implemented, but a shared terminal
+endpoint type is not yet enabled or frozen. The operator confirmed #833 as the implementation
+source, with terminal/PTY work proceeding in parallel.
 
-SSH integration `678e487d` incorporates that transport pin and adds a standalone buffered-mode guard
-for #833: unfamiliar shared input/output modes refuse before connection admission or process
-creation. Current constructor checks already exclude these shapes; the guard lets transport widen
-its types safely before SSH adopts them. Six simulated future-mode cases prove that boundary, not
-live-mode support. A clean cherry-pick onto transport `a885ef5a` passed its client and guard tests
-(53 passed, 4 skipped). The complete SSH combination passed 10,596 local tests with 12 skips, full
-Ruff/format and mypy. Three independent private reviews passed the guard; removing its input and
-output checks broke the corresponding four and two cases. Real widened types must be exercised when
-the extension is published.
+Earlier SSH integration `678e487d` incorporates transport `a885ef5a` and adds a standalone
+buffered-mode guard for #833: unfamiliar shared input/output modes refuse before connection
+admission or process creation. The then-current constructor checks already excluded these shapes;
+the guard let transport widen its types safely before SSH adopts them. Six simulated future-mode
+cases prove that boundary, not live-mode support. A clean cherry-pick onto transport `a885ef5a`
+passed its client and guard tests (53 passed, 4 skipped). The complete SSH combination passed 10,596
+local tests with 12 skips, full Ruff/format and mypy. Three independent private reviews passed the
+guard; removing its input and output checks broke the corresponding four and two cases. Transport
+retained that guard when it published the widened types. SSH now supports all current choices, so
+its duplicate allowlists and constructor-bypassing guard tests are retired. Shared constructor
+validation remains; future shared types still require coordinated adoption and proof.
 
 The [terminal experiment](terminal-lld.md#real-ssh-client-relay-experiment) demonstrates why an
 owned local stdin PTY is preferable to pipes for POSIX OpenSSH: geometry, resize and nondefault
