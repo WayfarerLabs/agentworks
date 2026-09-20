@@ -284,6 +284,25 @@ payload-to-interactive handoff. A raw envelope through an unprepared PTY is not 
 bootstrap feasibility from the remaining local client adapter proof. Full file/lifecycle
 implementation is not a prerequisite for that bounded shared-boundary proof.
 
+At `b1250da5`, the private Linux inline candidate delivers a fixed Python helper and a separate
+bounded stdin manifest in one carrier attempt. It verifies the bound identity, separates script
+source from application input with a memory file, and validates framed wait/output facts without
+inferring application success or eager start. All three private review lanes are clean. Review
+corrected false terminal evidence after contradictory output, portable identity fixtures and an
+interpreter-path refusal, and removed duplicate parsing and unused size bookkeeping. The execution
+suite passes 1,012 tests with five skips; the full non-integration suite passes 10,933 with 12
+skips. Ruff, formatting, strict mypy and file lint pass.
+
+A built-wheel check imports the candidate from the wheel, outside the checkout and without site
+initialization, then executes its packaged helper on distribution Python 3.11. It verifies separate
+script/stdin, all 256 stdout byte values, two binary stderr bytes and exact exit 255. Local
+serialization for `/bin/true` with identity 1001 measures 63,277 fixed-source bytes, 63,391 argv
+bytes including terminators, a 249-byte manifest and a 63,754-byte Proxmox JSON request body. These
+are measurements of the current candidate, not accepted provider limits. Native delivery, eager
+start, interruption ownership, staging, elevation, terminal preparation, lifecycle and production
+RunContext remain open; the candidate is not a completed additive delivery or a public feedback/fix
+round.
+
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
 
