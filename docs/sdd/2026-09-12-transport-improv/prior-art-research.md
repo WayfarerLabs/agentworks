@@ -947,6 +947,29 @@ representation adjustment, not an adopted codec option or proof of the missing e
 executable staging. Actual dispatcher execution, complete requests, all supported prefixes and
 native carrier acceptance remain required before selecting its production use.
 
+The first complete publication guest checkpoint, `4f1bef04`, adds its concrete debt wire, protocol
+and dispatcher to the required dependency closure. It does not fit the representative Windows SSH
+command even with base85. The developer measured the actual fixed source through
+`build_helper_argv`, `build_ssh_argv` and `subprocess.list2cmdline`; QGA measurements use the
+complete JSON command/input body, not just the input field.
+
+| Fixed armoring | Loader characters | Complete source characters | Windows direct / root / demotion | QGA body bytes, direct / root / demotion |
+| -------------- | ----------------- | -------------------------- | -------------------------------- | ---------------------------------------- |
+| Base64         | 36,618            | 36,715                     | 37,861 / 37,899 / 38,010         | 37,625 / 37,644 / 37,833                 |
+| Base85         | 34,355            | 34,452                     | 35,598 / 35,636 / 35,747         | 35,362 / 35,381 / 35,570                 |
+
+Both representative QGA shapes fit the existing 65,536-byte bound; every Windows shape exceeds
+32,767 characters. This is a failed sizing gate, not proof for maximum-length fields or native
+carriers. The isolated guest also imports and emits a framed invalid-request response under
+distribution Python 3.11; that does not yet establish a successful publication exchange. Base85
+remains an in-memory measurement, not an adopted implementation at this checkpoint.
+
+Two dependency corrections are under investigation before reconsidering delivery: move the plain
+stat-to-`FileStat` constructor into `_file_stat` so publication no longer loads the otherwise unused
+snapshot reader, and keep genuinely host-only response parsing outside the guest-loaded family.
+Neither may duplicate validation, remove correctness guards or introduce configurable codecs, source
+minification or executable staging. The actual resulting family must be measured again.
+
 ## Held-object metadata and search-only traversal
 
 The Linux [open documentation](https://man7.org/linux/man-pages/man2/open.2.html) distinguishes
