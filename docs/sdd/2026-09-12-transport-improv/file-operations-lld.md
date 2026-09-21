@@ -177,10 +177,11 @@ not preserved.
 
 Merge uses an internal bounded snapshot, applies the pure transformation locally, then publishes
 with `Match(snapshot.revision)`. The existing bytes and diff never leave the implementation. On a
-cooperating-writer conflict it repeats snapshot, merge, and conditional publication up to eight
-times within the caller's one deadline, then raises `ConflictError`. `replace` and `skip-existing`
-do not gain accidental old-document parsing. TOML and generated-section transformations stay in
-their resource domains and use snapshot plus `Match`; FileAccess accepts no transform callback.
+cooperating-writer conflict it repeats snapshot, merge, and conditional publication within a budget
+of eight total publication attempts and the caller's one deadline, then raises `ConflictError`.
+`replace` and `skip-existing` do not gain accidental old-document parsing. TOML and
+generated-section transformations stay in their resource domains and use snapshot plus `Match`;
+FileAccess accepts no transform callback.
 
 ## Helper deployment and protocol
 
