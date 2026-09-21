@@ -465,6 +465,38 @@ Snapshot chunks come from a private complete spool, not repeated reads of a chan
 host checks the end-to-end size/digest too. No helper operation accepts executable names, arbitrary
 flags, environment, cwd, source text, callbacks, or a destination outside its single request.
 
+### Owned download composition
+
+The private download coordinator composes snapshot creation, verified bounded chunks and exact
+scratch cleanup under one borrowed core operation. It reuses the concrete file dispatch gate used by
+upload and JSON; it does not introduce another claim or release ownership between chunks. One
+original deadline covers the whole transfer and any follow-on cleanup. The initial private entry
+requires a finite positive source bound supported by the snapshot protocol. Public `max_bytes=None`
+still needs composition with source-size observation; a private required bound must not become an
+undocumented public file-size ceiling.
+
+The coordinator writes only complete, verified chunk observations to a borrowed byte sink, handling
+short writes and temporary stalls without retaining the whole file. It tracks accepted bytes and the
+whole-stream digest, including an empty snapshot. The sink is a private composition seam, not a new
+public download overload: FileAccess must supply an owned local staging writer and publish only
+after successful transfer and verification. A partial or failed transfer never authorizes publishing
+that staging file. The coordinator neither closes the borrowed sink nor changes the local
+destination itself.
+
+Record source revision, ready reference, cleanup debt and runtime observations before settling each
+carrier attempt. Missing normal-chain completion stops further exchanges, even if a chunk arrived.
+Confirmed absence returns no file bytes. Sink failure stops transfer; exact known remote cleanup is
+allowed only with settled dispatch and remaining budget. Uncertain snapshot creation retains the
+original token and binding for recovery, never replays creation. Missing cleanup proof or lost
+ownership retains the corresponding obligation rather than turning a verified stream into success.
+Private results retain closed failure facts, byte counts and original recovery bindings, not file
+content or raw sink exceptions. Local publication and its cleanup obligations remain separate from
+remote scratch cleanup and must both be accounted for by the complete public operation.
+
+This is the next private composition boundary, not implemented download or Windows/macOS acceptance.
+The host-specific publication design and native evidence remain required before exposing download
+through FileAccess.
+
 ### No-staging readiness gate
 
 The private Linux read and stat/removal exchanges use fixed bundled helpers and concrete `AGWF1`

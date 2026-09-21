@@ -451,6 +451,12 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       within eight attempts and the original deadline. No uncertain dispatch, retained cleanup debt
       or missing termination evidence permits replay. Public FileAccess/result conversion and
       production ownership remain separate required gates.
+- [ ] Implement [owned download composition](file-operations-lld.md#owned-download-composition)
+      through the existing snapshot exchanges and shared borrowed dispatch gate. Verify binary
+      chunks, exact length/digest, empty and absent sources, short/stalled/failing sinks, one claim
+      and original deadline, and retained cleanup/uncertainty facts without replay. This private
+      stream coordinator does not complete local atomic publication or public FileAccess download;
+      those remain required, including optional public size bounds and native host metadata proof.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
       access. The models-only checkpoint is not additive-surface completion.
 
