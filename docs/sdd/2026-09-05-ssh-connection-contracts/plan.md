@@ -1,6 +1,6 @@
 # Independent SSH Carrier: Staged Delivery Plan
 
-- Updated: 2026-09-20
+- Updated: 2026-09-21
 - Requirements: [frd.md](frd.md)
 - Architecture: [hla.md](hla.md)
 - Shared contract:
@@ -207,6 +207,16 @@ confirmed by the operator.
       buffered behavior and refusal before admission/process work. The
       [integration record](phase2-results.md#remaining-integration-and-acceptance) distinguishes
       simulated future types from pending real-extension proof.
+- [x] Adopt transport `bb7ebb58` runtime selection and stdin helper framing in the SSH file
+      fixtures. Require positive runtime admission before helper observations, retain explicit SSH
+      trust in command-size fixtures, and repeat read, stage and snapshot delivery through installed
+      Linux OpenSSH. All three cases pass at `e852aef2`; production file and native acceptance
+      remain open.
+- [ ] Adopt the transport-owned `LocalProcessOwner` for forwarding, retaining ownership before
+      dispatch and stopping pipe borrowers before release. The operator authorized the scoped SSH
+      contribution on 2026-09-21; transport already published the extraction, so reuse it and keep
+      any integration-required shared correction separable. Terminal and RunContext remain with
+      transport.
 - [ ] Finish the SSH LLD for R1-R5: complete connection validation, installed-client/path policy,
       config schema and conversion, trust preservation/enrollment/refusal, process/terminal and
       forwarding lifetimes, diagnostics and acceptance fixtures. Name the authority and refresh
