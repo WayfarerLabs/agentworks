@@ -458,8 +458,9 @@ also covers READY followed by helper bytes. All three cases fail with the old wr
 Independent project and complexity reviews are clean, 71 focused tests pass, and the full suite
 passes 12,051 tests with 13 skips. All static, documentation and website gates pass again, including
 both deterministic builds. Representative account Windows command strings now measure 8,615/8,665
-characters for Linux/Darwin selection. Fixed-head hosted Windows confirmation remains pending; this
-CI correction neither expands supported workload platforms nor consumes a public feedback round.
+characters for Linux/Darwin selection. All hosted checks, including Windows, pass on `6d066728` in
+[run 35576186411](https://github.com/WayfarerLabs/agentworks/actions/runs/35576186411). This CI
+correction neither expands supported workload platforms nor consumes a public feedback round.
 
 Fixed file delivery has three clean private reviews at `72897a31`, with 11,958 full-suite passes and
 13 skips. The six production bundles produce parsed invalid-request transcripts under distribution

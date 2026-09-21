@@ -677,6 +677,15 @@ transition around the selector and keeping absent file observations separate fro
 refusal. Their implementation is under private review. Inline and terminal adoption remain open; the
 original runtime experiment above remains separate evidence rather than production dispatch.
 
+Terminal admission cannot simply reuse the pipe prefix unchanged. A local Linux `openpty` experiment
+at `75400d16` ran the actual runtime selector with a fixed no-op helper: the process exited zero,
+but the terminal line discipline changed the binary-written READY record's LF to CRLF before the
+terminal helper could configure raw mode. The binary-writer correction for Windows does not prevent
+this separate transformation. Terminal composition must prove prerequisite observation before its
+payload gate under actual initial terminal settings. Keep the non-terminal parser strict and
+application bytes unchanged after handoff; do not normalize the guest output stream to make a
+readiness fixture pass. This is a local mechanism finding, not native terminal acceptance.
+
 ## Public result and check behavior
 
 `ExecutionResult` carries `DispatchEvidence`, application state, optional application status,
