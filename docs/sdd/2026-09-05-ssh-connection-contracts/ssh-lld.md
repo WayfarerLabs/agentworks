@@ -109,14 +109,17 @@ applies. Completeness requires actual EOF and delivery of pending output. An exp
 operation can therefore still wait on a stalled sink; inherited descendant pipe collection alone
 cannot extend it indefinitely.
 
-Launch interruption remains an acceptance gap. The cleanup guard begins after process construction
-and loop-state initialization; interruption earlier can leave a child alive, even before Python
-returns its handle. Transport's
+Transport's shared core now constructs the client in a private launch owner, publishing pipe and
+status observations through a condition lock. The caller alone pumps borrowed byte endpoints; return
+waits for the owner's terminal cleanup observation. This addresses the measured Linux interruption
+during client construction without moving borrowed endpoint access to a background task. It does not
+establish complete interruption safety: transport still records a reproduced asynchronous
+interruption at cleanup-loop entry that can leave a child and pipes live. Its
 [startup evidence](../2026-09-12-transport-improv/prior-art-research.md#local-process-startup-and-interruption)
-records the real Linux reproduction and unresolved cross-platform ownership mechanism. The former
-SSH-local pump had the same gap. Shared extraction does not close it, and loop-interruption tests do
-not establish production launch-interruption conformance. Forwarding's separate process launch also
-needs that ownership proof.
+and [lifecycle design](../2026-09-12-transport-improv/execution-lifecycle-lld.md) retain the current
+limits. Concurrent external reaping can also make exact local ownership uncertain. Native platform
+proof and correction of the cleanup gap remain acceptance work. Forwarding still launches its client
+separately and needs the corresponding ownership implementation and proof.
 
 Live measurements confirm that guest workloads and bootstrap descendants can survive local
 observation expiry. The shared

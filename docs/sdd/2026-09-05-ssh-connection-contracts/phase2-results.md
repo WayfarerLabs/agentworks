@@ -143,12 +143,19 @@ Bootstrap EOF sufficed for the keyboard transition without SSH parsing readiness
 presentation stalls, early keys, resize, clean-exit restoration and fixture cleanup passed; the
 remaining production/native gates still apply.
 
-Transport's
+Current integration rebases onto transport `806741ca3cde218bbe5ca5dfd7bbe3d319eb9e32`. That
+increment replaces the destination file-lock prerequisite with transport-owned database
+coordination; SSH's independent trust-maintenance lock is unchanged. The file-helper test retains
+the current transport fixture names and SSH's explicit trust argument. The byte-adoption and
+terminal results above retain their original pins; they do not certify the newer process core.
+
+Transport's published launch owner now addresses the measured Linux process-construction
+interruption by retaining the client outside the caller's byte pump. Transport still records an
+asynchronous interruption at cleanup-loop entry that can leave a child and pipes live. See its
 [launch-interruption evidence](../2026-09-12-transport-improv/prior-art-research.md#local-process-startup-and-interruption)
-also applies to the former SSH pump: interruption before the cleanup guard can orphan the local
-child. Adoption preserves that known gap; tests of interruption inside the I/O loop cannot close it.
-Shared launch ownership and SSH forwarding's corresponding startup path remain production acceptance
-work.
+and [lifecycle design](../2026-09-12-transport-improv/execution-lifecycle-lld.md). Shared cleanup
+correction, native proof and SSH forwarding's separate startup path remain production acceptance
+work. The rebase's final validation and private reviews are in progress.
 
 Also outstanding are additive RunContext/platform composition, a genuine creation-flow provenance
 and publication binding, complete SSH-backed workflow evidence, and supported Linux/macOS/Windows

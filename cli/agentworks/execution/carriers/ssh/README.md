@@ -109,9 +109,9 @@ temporary sink stalls while the SSH adapter retains its environment filter and s
 Delivered output is not retained in the report. Endpoint failure is reported on its input or output
 boundary and still performs bounded local client cleanup.
 
-The shared cleanup guard begins after process construction and loop-state initialization. This
-adapter does not claim that interruption during process launch is covered, and local cleanup never
-establishes remote cancellation.
+The shared process core owns client construction separately from caller-driven byte I/O. Its
+remaining cleanup-interruption and native-platform gates also apply to this adapter; forwarding
+still has a separate launch path. Local cleanup never establishes remote cancellation.
 
 `open_local_forwards` accepts explicit `LocalForward` values with numeric bind addresses and literal
 destinations. The returned `OwnedForwarding` is a context manager with `wait()` and idempotent
