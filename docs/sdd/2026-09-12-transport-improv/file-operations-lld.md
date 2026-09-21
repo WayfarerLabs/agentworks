@@ -772,6 +772,14 @@ public result conversion or relinquishment, core captures the typed outcome and 
 including on exceptional exits. All user/admin file views share this operation state. No second file
 lock or protocol-aware recovery callback belongs in the generic database coordinator.
 
+The private download custody slice attaches one validated prepared workflow to `FileOperation`
+before running it. This preserves the original carrier, binding and token through outcome capture;
+completed capture retains only unfinished facts, not the sink or file bytes. Finishing a call
+removes its own record by identity, so it cannot erase a subsequently admitted call. Outcome
+retention precedes borrow release; a retention failure keeps the working state and serial borrow.
+This implements in-memory custody for that concrete path, not durable recovery, all file families,
+shared public views or the outer orchestration's release gate.
+
 Two decisions remain separate: whether old work can still cause effects, and who owns unfinished
 cleanup. Unresolved execution or coordination prevents conflicting admission and claim release.
 Proved-inert cleanup debt still needs an explicit owner, but does not by itself require indefinite

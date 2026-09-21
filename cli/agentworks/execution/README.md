@@ -535,8 +535,22 @@ observations are recorded before settlement, independently of expiry and unresol
 composition, upload, download, JSON and memory reads neither acquire nor close their borrow,
 including on escaping control flow. The caller keeps serial ownership through private-outcome
 capture before relinquishing it. These helpers do not release the database claim, replay a failed
-request or provide public FileAccess error reduction. Core outcome custody and durable recovery
-remain integration work; the borrow parameter alone does not implement them.
+request or provide public FileAccess error reduction. Complete core outcome custody and durable
+recovery remain integration work; the borrow parameter alone does not implement them.
+
+`_file_operation.FileOperation` privately composes one concrete download under a caller-supplied
+outer owner. It attaches validated working state, including the token and original carrier/binding,
+before dispatch. It captures returned or exceptional outcomes before relinquishing the borrow;
+unfinished records retain their exact facts without retaining the sink or its payload. Multiple
+unfinished records can coexist, and each completed call removes only its own active record. Outcome
+retention precedes borrow release; a retention failure leaves the working record and borrow in
+place. Pre-dispatch validation refusal releases its unused borrow.
+
+This custody path adds no claim or admission lock and never closes the outer owner. Retaining an
+unfinished record does not establish remote quiescence or authorize claim release. It covers private
+download calls, not complete user/admin FileAccess views, other file operations, durable crash
+recovery or production RunContext binding. Python bookkeeping is not signal-atomic, and an in-memory
+token is not a durable pre-dispatch recovery record.
 
 `_file_upload.py` composes staging, finite source consumption, publication and ordered cleanup under
 one borrowed owner. It consumes bounded chunks without rewinding or retaining the whole source and

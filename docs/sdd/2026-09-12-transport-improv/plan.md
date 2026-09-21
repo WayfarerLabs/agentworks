@@ -1301,6 +1301,13 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       that an unresolved attempt still prevents owner release after borrow closure. This
       prerequisite does not complete core outcome custody, durable recovery or production
       FileAccess.
+- [x] Implement concrete private download custody under the existing operation owner. Attach
+      validated working state before dispatch, retain original carrier/binding and unfinished
+      outcomes before borrow release, and keep multiple obligations without retaining sinks in
+      completed records. Tests cover pre-dispatch refusal, overlap, close/admission interleaving,
+      identity-keyed record removal, exceptional outcome capture and allocation/retention failures.
+      This download-only path does not complete shared public views, other file families, durable
+      recovery or the outer claim-release gate.
 - [ ] Complete the durable recovery handoff for file work, including pre-dispatch reconciliation
       identity and exact cleanup binding without storing payload contents. Test process loss before
       response, after response and during handoff. A surviving claim without recovery facts is not
@@ -1383,6 +1390,10 @@ passes 12,366 tests with 13 skips. Full Ruff/format, mypy (1043 sources), file l
 locked-SDD/rulesync, typer isolation and whitespace gates pass. Website gates pass 160 Python tests,
 103 Node tests and both deterministic double-build comparisons. No live infrastructure was
 exercised. This remains draft implementation, not a public review or native acceptance handoff.
+
+Hosted run `35610495863` at `8e586040` passes every required check, including Windows Python 3.13
+and Linux Python 3.12/3.13/3.14. It verifies the scoped initialization change on that native Windows
+run, not the identity of the earlier handle holder or freedom from every possible cleanup race.
 
 ### Buffered execution result checkpoint
 
