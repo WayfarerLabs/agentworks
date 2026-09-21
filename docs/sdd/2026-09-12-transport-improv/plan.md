@@ -1466,6 +1466,21 @@ remains unproved. Extending the wait cannot restore an already discarded input e
 source was changed: changing discontinuity behavior would require a separate behavior decision;
 bounded event/queue/frame evidence is the next diagnostic step if this recurs.
 
+All three private lanes accept the single-file custody increment at `95fb9db5` without outstanding
+findings. Review removed five unused borrowed-call wrappers and redundant immediate-fact identity
+checks. It also found and corrected two lower-exchange paths where failed uncertainty-fact
+allocation replaced the original control exception. Negative mutations prove both the guarded
+allocation and capture-before-borrow-close regressions. Project, complexity and independent
+correctness selections pass 191, 164 and 203 tests respectively. The accompanying public
+error-reduction design remains a proposal being implemented, not a completed public interface.
+
+That code pin passes 12,406 local tests with 13 skips. Full Ruff/format, mypy (1047 sources), file
+lint, locked-SDD/rulesync, typer isolation and whitespace checks pass. Website gates pass 160 Python
+tests, 103 Node tests and both deterministic double-build comparisons. No live infrastructure was
+exercised. Hosted validation remains pending, and this is still a draft implementation increment
+without a public review/test/merge signal. All three authorized public feedback/fix rounds remain
+available.
+
 ### Buffered execution result checkpoint
 
 - [x] Implement safe immutable application result values, honest wait/exit/signal precision and one
