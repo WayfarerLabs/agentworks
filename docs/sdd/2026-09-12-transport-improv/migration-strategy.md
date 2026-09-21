@@ -31,6 +31,39 @@ plugin initialization in a test is not proof of that independence.
 This refresh supplements the release-behavior baseline below. It does not mark any consumer migrated
 or establish the new lifecycle/file guarantees.
 
+### New-target composition inventory, 2026-09-21
+
+Read-only inspection at `449b297e` found that `VMPlatform.native_transport` and
+`ProvisionResult.native_transport` still expose only legacy targets. An additive new-stack
+composition seam must retain platform ownership of `VMRow.platform_metadata`; core must not decode
+provider keys itself or obtain new connection facts by constructing an old transport. Preserve the
+old hooks and callers during coexistence. New construction must state its actual delivery identity
+so account observation and DIRECT, root-entry or demotion plans do not guess from the requested
+recipient. Route and platform holds remain owned outside the target.
+
+- Proxmox owns node/VM-ID extraction and API-secret resolution. The new QGA carrier delivers as
+  root; an ordinary guest target needs observed account identity and an explicit demotion plan.
+  System-trust verification maps to the new carrier, but the old `verify_ssl=False` choice does not.
+  Add a supported explicit CA-bundle composition path and migration diagnostics rather than
+  weakening the new carrier's TLS checks. Remove the plugin's eager legacy-transport import before
+  claiming independent platform composition.
+- WSL2 owns distribution metadata and the explicit delivery user. The existing new carrier can
+  consume those facts, but the platform does not yet expose them through an independent hook.
+  Distribution lifetime remains separate from guest execution lifetime.
+- Local and remote Lima still lack independent carriers. Preserve platform-owned instance lookup;
+  replace legacy command-string execution with prepared invocation delivery and distinguish host
+  completion from guest evidence across the extra hop. Remote placement currently accepts one host
+  string, including `user@host` or ambient aliases. SSH's inspected `34a4eb71` connection contract
+  instead requires explicit endpoint/account/trust facts. Transport owns that placement migration
+  and explicit host OS/runtime binding, consuming SSH-owned policy rather than inventing another SSH
+  configuration parser or runner.
+
+These are implementation and compatibility gates, not new supported configuration or production
+factories. Exact additive hook types and provisioning-result composition still require their
+implementation review. Existing legacy trust behavior is unchanged by this inventory; required
+new-stack workflows must resolve incompatible settings before acceptance, without an insecure
+fallback or a dependency on an old target.
+
 ### Release baseline
 
 The current delivery implementations are SSH, Lima, remote Lima, WSL2, and Proxmox QGA. AWS, Azure,

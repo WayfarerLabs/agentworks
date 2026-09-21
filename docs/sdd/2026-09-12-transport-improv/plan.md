@@ -1186,6 +1186,13 @@ isolation, in coexistence releases. Operational safety and selected profile guar
       union target type, stack selector or forwarding adapter. Prove passive construction/access and
       composition-owned lifetime, no new effects on existing callers, and independent new-stack
       usability with legacy modules unavailable. Do not claim restricted recipient authority.
+- [ ] Add platform-owned new-stack connection/provisioning composition without decoding opaque VM
+      metadata in core or constructing legacy targets. Apply the
+      [2026-09-21 factory inventory](migration-strategy.md#new-target-composition-inventory-2026-09-21):
+      explicit carrier delivery identity, Proxmox CA-bundle/trust migration and import independence,
+      WSL2 distribution/user binding, independent Lima delivery and explicit SSH placement-host
+      endpoint/account/trust/OS facts. Preserve unchanged legacy hooks during coexistence; new
+      factories cannot obtain their inputs through those hooks.
 - [ ] Validate complete provisioning, native recovery without Tailscale, plugin operations, files,
       backup, host provisioning/rollback and interactive attachment through the new surface. Cover
       required operations, optional refusal, sensitivity and supported workstation/platform
