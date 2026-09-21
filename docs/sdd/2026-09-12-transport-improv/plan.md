@@ -281,6 +281,12 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       prefix forwarding, common loader imports, unchanged sensitive stdin, and clean selection
       refusals without staging, installation or an implicit preliminary probe. Native macOS proof
       and existing-guest bootstrap remain required, not satisfied by local selection fixtures.
+- [x] Apply private runtime admission to both account lookup kinds. Bind destination OS explicitly,
+      preserve first-existing selection and Darwin shim non-execution, check Python 3.11 and common
+      loader imports in the same invocation, and keep prerequisite evidence separate from carrier
+      facts and account results. Private review at `66aa55d8` is clean; synthetic faults execute the
+      actual trampoline and detect removal of its checks. File, inline, terminal and native adoption
+      remain part of the open integration gate above.
 - [x] Implement private revision-aware publication with explicit Create/Replace/Match conditions,
       bounded streaming from verified scratch, stat-only observations without old-content reads, and
       a content-bound post-publication revision. At `75aaaa5e`, all three private lanes are clean
@@ -387,7 +393,7 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       `86189dc2`; the combined local suite passes 11,902 tests with 13 skips. This does not complete
       remote publication delivery, upload composition, helper quiescence, FileAccess or native
       acceptance; complete carrier sizing remains an explicit gate above.
-- [ ] Deliver the private publication/reconciliation/cleanup family described in the file LLD. Bind
+- [x] Deliver the private publication/reconciliation/cleanup family described in the file LLD. Bind
       all cleanup evidence to the original destination, token and stage reference; refuse
       substituted identities and paths. Preserve confirmed publication, recovered ownership or
       completed cleanup when only the final descriptor-closure deadline expires. Prove the actual
@@ -404,6 +410,33 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       before enabling its production use or exposing it through RunContext.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
       access. The models-only checkpoint is not additive-surface completion.
+
+The publication and account-runtime increment has clean project, complexity and generic correctness
+reviews for the runtime at `66aa55d8`. The full local suite passes 12,050 tests with 13 skips;
+Ruff/format, full mypy (1016 sources), file lint, locked-SDD, rulesync, typer isolation and
+whitespace checks pass. Website validation passes 160 Python and 103 Node tests plus both
+deterministic double-build comparisons. Final test-selection bookkeeping at `e3176f11` restores the
+exact same tree. Pure prefix tests remain portable, while focused Windows CI selects the two
+subprocess trampoline cases according to CONTRIBUTING. No live infrastructure was exercised.
+
+Publication review corrected uncertain effects mislabeled as refusal, sensitive exception context,
+an inode-reuse assumption in test cleanup, impossible reconciliation debt and secondary failures
+overwriting prior mutation facts. Mutation tests detect removal of cleanup-progress binding,
+reconciliation-shape checks and failure-preserving cleanup binding. Production helper success covers
+Create, Replace and Match on the workstation interpreter and distribution Python 3.11; injected
+fault helpers are identified separately. The final fixed publication prefix is 36,212 bytes with a
+756-character bootstrap. Representative valid long-path publish/reconcile/cleanup requests across
+direct/root/demoted delivery produce 48,561 to 48,881-byte complete QGA bodies and 1,872 to
+1,982-character Windows SSH command strings. These are local serialization measurements, not native
+acceptance or universal request-fit guarantees.
+
+Account-runtime review corrected impossible Linux shim evidence and added tests that execute the
+actual trampoline under synthetic version/import failure rather than merely emitting expected
+records. Both guards are mutation-proven. The shared launcher preserves existing file/inline argv;
+only the two account entrypoints adopt runtime admission in this increment. Representative complete
+Windows SSH serialization of their shared account bundle measures 8,483 characters for Linux
+selection and 8,533 for Darwin selection. Native macOS selection, real older interpreters, remaining
+helper-family adoption and public diagnostic composition remain open.
 
 Fixed file delivery has three clean private reviews at `72897a31`, with 11,958 full-suite passes and
 13 skips. The six production bundles produce parsed invalid-request transcripts under distribution
