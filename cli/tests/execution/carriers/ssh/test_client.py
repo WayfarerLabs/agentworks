@@ -661,7 +661,9 @@ def test_installed_ssh_owns_fresh_pipe_handles(
             )
             report = carrier.execute(
                 PreparedInvocation(("true",)),
-                io=CarrierIO(input=FiniteInput(b"synthetic input")),
+                # Keep stdin piped without racing payload delivery against the
+                # fixture's deliberate pre-authentication disconnect.
+                io=CarrierIO(input=FiniteInput(b"")),
                 deadline=Deadline.after(5),
             )
             assert received and received[0].startswith(b"SSH-2.0-")

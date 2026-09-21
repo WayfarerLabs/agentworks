@@ -26,6 +26,7 @@ from agentworks.execution._inline_request import (
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution.carrier import FiniteInput
 from agentworks.execution.carriers.ssh.connection import SSHConnection, build_ssh_argv
+from agentworks.execution.carriers.ssh.trust import SSHTrustFiles
 from agentworks.execution.models import Command, Script, Shell
 
 NONCE = "0123456789abcdef0123456789abcdef"
@@ -108,13 +109,14 @@ def test_complete_inline_helper_fits_qga_and_windows_command_bounds(plan: Identi
     qga_body = json.dumps({"command": prepared.invocation.argv, "input-data": input_data.decode("ascii")}).encode(
         "ascii"
     )
+    trust = SSHTrustFiles((Path("/keys/known-hosts"),))
     connection = SSHConnection(
         "host.example",
         "agent",
         Path("/keys/identity"),
-        Path("/keys/known-hosts"),
+        trust,
     )
-    ssh_argv = build_ssh_argv(connection, prepared.invocation)
+    ssh_argv = build_ssh_argv(connection, prepared.invocation, trust=trust)
     windows_command = subprocess.list2cmdline(ssh_argv)
 
     assert FIXED_SOURCE.isascii() and input_data.isascii() and qga_body.isascii()
