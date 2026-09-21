@@ -537,12 +537,12 @@ recorded before settlement, independently of expiry and unresolved ownership. Th
 upload, download and JSON neither acquire nor close their borrow, including on escaping control
 flow. The caller keeps serial ownership through private-outcome capture before relinquishing it.
 These helpers do not release the database claim, replay a failed request or provide public
-FileAccess error reduction. Prepared bindings and working state can be attached before dispatch; the
+FileAccess error reduction. Original bindings and working state can be attached before dispatch; the
 borrow parameter alone does not provide core custody or durable recovery.
 
 `_file_operation.FileOperation` privately composes downloads, uploads, JSON updates, stat,
 inventory, conditional removal and metadata/directory convergence under a caller-supplied outer
-owner. It attaches validated working state, including the token and original carrier/binding, before
+owner. It attaches working state, including transfer tokens and original carrier/binding, before
 dispatch. It captures returned or exceptional outcomes before relinquishing the borrow; unfinished
 records retain their exact facts without retaining the sink or its payload. Multiple unfinished
 records can coexist, and each completed call removes only its own active record. Outcome retention
@@ -553,17 +553,18 @@ exceptional capture accepts only facts produced by that exact prepared call; fai
 those facts preserves the original control and attached state. Completed custody records retain
 neither sources nor JSON content.
 
-Single-file calls attach their validated operation-specific binding and working state before the
-first exchange. Metadata and directory calls keep owner/group resolution and mutation within that
-same borrow, recording lookup evidence before settlement. Completed unfinished records retain the
-original binding and typed outcome; failed fact capture leaves the prepared state attached. Ordinary
+Single-file calls attach their operation-specific binding and working state before the first
+exchange. The exchange validates its request before carrier dispatch. Metadata and directory calls
+validate names and options before lookup and keep resolution and mutation within the same borrow,
+recording lookup evidence before settlement. Completed unfinished records retain the original
+binding and typed outcome; failed fact capture leaves the prepared state attached. Ordinary
 in-memory reads use the snapshot/download composition, not an inline-read wrapper.
 
 This custody path adds no claim or admission lock and never closes the outer owner. Retaining an
-unfinished record does not establish remote quiescence or authorize claim release. It covers private
-these private file calls, not complete user/admin FileAccess views, durable crash recovery or
-production RunContext binding. Python bookkeeping is not signal-atomic, and an in-memory token is
-not a durable pre-dispatch recovery record.
+unfinished record does not establish remote quiescence or authorize claim release. It covers these
+private file calls, not complete user/admin FileAccess views, durable crash recovery or production
+RunContext binding. Python bookkeeping is not signal-atomic, and an in-memory token is not a durable
+pre-dispatch recovery record.
 
 `_file_upload.py` composes staging, finite source consumption, publication and ordered cleanup under
 one borrowed owner. It consumes bounded chunks without rewinding or retaining the whole source and

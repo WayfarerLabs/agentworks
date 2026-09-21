@@ -794,11 +794,13 @@ release; a retention failure keeps the working state and serial borrow. This imp
 custody for these concrete paths, not durable recovery, shared public views or the outer
 orchestration's release gate.
 
-Stat, inventory, conditional removal and metadata/directory convergence also attach their validated
-prepared binding and working state before dispatch. Metadata retains the owner/group lookup result
-before settlement under the same borrow as the mutation. Outcome capture keeps exact original
-bindings and unfinished facts, while failed capture leaves working state attached. This extends the
-same in-memory custody boundary; it does not establish a durable recovery handoff or public API.
+Stat, inventory, conditional removal and metadata/directory convergence also attach their original
+binding and working state before the first exchange. The exchange validates its request before
+carrier dispatch; metadata additionally validates names and options before lookup. Metadata retains
+the owner/group lookup result before settlement under the same borrow as the mutation. Outcome
+capture keeps exact original bindings and unfinished facts, while failed capture leaves working
+state attached. This extends the same in-memory custody boundary; it does not establish a durable
+recovery handoff or public API.
 
 Two decisions remain separate: whether old work can still cause effects, and who owns unfinished
 cleanup. Unresolved execution or coordination prevents conflicting admission and claim release.

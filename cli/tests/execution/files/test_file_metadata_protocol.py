@@ -692,7 +692,19 @@ def test_host_request_conversion_discards_encoder_chain(
     assert carrier.calls == 0
 
 
-def test_control_interruption_propagates_with_safe_uncertainty(plan: IdentityPlan) -> None:
+@pytest.mark.parametrize("fact_allocation_fails", [False, True])
+def test_control_interruption_propagates_with_safe_uncertainty(
+    plan: IdentityPlan, monkeypatch: pytest.MonkeyPatch, fact_allocation_fails: bool
+) -> None:
+    control = KeyboardInterrupt()
+    control.__cause__ = RuntimeError("prior call")
+
+    def fail_fact() -> FileMetadataMutationUncertain:
+        raise MemoryError
+
+    if fact_allocation_fails:
+        monkeypatch.setattr(exchange_module, "FileMetadataMutationUncertain", fail_fact)
+
     class InterruptingCarrier:
         @property
         def features(self) -> ChannelFeatures:
@@ -700,11 +712,15 @@ def test_control_interruption_propagates_with_safe_uncertainty(plan: IdentityPla
 
         def execute(self, invocation: object, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
             del invocation, io, deadline
-            raise KeyboardInterrupt
+            raise control
 
     with pytest.raises(KeyboardInterrupt) as raised:
         _set(InterruptingCarrier(), plan)
-    assert isinstance(raised.value.__cause__, FileMetadataMutationUncertain)
+    assert raised.value is control
+    if fact_allocation_fails:
+        assert raised.value.__cause__ is None
+    else:
+        assert isinstance(raised.value.__cause__, FileMetadataMutationUncertain)
 
 
 def test_sink_fault_propagates_with_safe_uncertainty_and_no_replay(plan: IdentityPlan) -> None:

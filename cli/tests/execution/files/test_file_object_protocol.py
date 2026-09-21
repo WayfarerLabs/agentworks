@@ -581,7 +581,19 @@ def test_noisy_wrong_nonce_truncated_and_stderr_remove_responses_are_uncertain(
     assert "diagnostic-canary" not in repr(result)
 
 
-def test_control_interruption_propagates_with_safe_remove_uncertainty(plan: IdentityPlan) -> None:
+@pytest.mark.parametrize("fact_allocation_fails", [False, True])
+def test_control_interruption_propagates_with_safe_remove_uncertainty(
+    plan: IdentityPlan, monkeypatch: pytest.MonkeyPatch, fact_allocation_fails: bool
+) -> None:
+    control = KeyboardInterrupt()
+    control.__cause__ = RuntimeError("prior call")
+
+    def fail_fact() -> FileObjectMutationUncertain:
+        raise MemoryError
+
+    if fact_allocation_fails:
+        monkeypatch.setattr(_file_object_exchange, "FileObjectMutationUncertain", fail_fact)
+
     class InterruptingCarrier:
         @property
         def features(self) -> ChannelFeatures:
@@ -589,7 +601,7 @@ def test_control_interruption_propagates_with_safe_remove_uncertainty(plan: Iden
 
         def execute(self, invocation: object, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
             del invocation, io, deadline
-            raise KeyboardInterrupt
+            raise control
 
     with pytest.raises(KeyboardInterrupt) as raised:
         remove_file(
@@ -602,4 +614,8 @@ def test_control_interruption_propagates_with_safe_remove_uncertainty(plan: Iden
             deadline=Deadline.after(1),
             runtime_selection=runtime_selection(),
         )
-    assert isinstance(raised.value.__cause__, FileObjectMutationUncertain)
+    assert raised.value is control
+    if fact_allocation_fails:
+        assert raised.value.__cause__ is None
+    else:
+        assert isinstance(raised.value.__cause__, FileObjectMutationUncertain)

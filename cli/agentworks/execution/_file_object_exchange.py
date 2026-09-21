@@ -307,7 +307,11 @@ def _exchange(
         reader.abort()
         collector.abort()
         if operation is FileObjectOperation.REMOVE and dispatch is not Dispatch.NOT_SENT:
-            raise control from FileObjectMutationUncertain()
+            try:
+                fact = FileObjectMutationUncertain()
+            except BaseException:
+                raise control from None
+            raise control from fact
         raise
     finally:
         runtime.clear()

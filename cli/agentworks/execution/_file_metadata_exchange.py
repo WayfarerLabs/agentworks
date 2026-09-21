@@ -319,7 +319,11 @@ def _exchange(
         )
     except BaseException as control:
         if dispatch is not Dispatch.NOT_SENT:
-            raise control from FileMetadataMutationUncertain()
+            try:
+                fact = FileMetadataMutationUncertain()
+            except BaseException:
+                raise control from None
+            raise control from fact
         raise
     finally:
         runtime.clear()
