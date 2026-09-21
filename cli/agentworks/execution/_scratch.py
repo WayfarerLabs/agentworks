@@ -353,7 +353,11 @@ def reconcile_scratch_ownership(
         result = _reconcile_receipt_ownership(parent_fd, token, context, expires_at=expires_at)
     except ScratchReceiptError as error:
         raise ScratchTransferError(_map_receipt_failure(error.kind), ScratchPhase.RECONCILE) from None
-    _check_deadline(expires_at, ScratchPhase.RECONCILE)
+    try:
+        _check_deadline(expires_at, ScratchPhase.RECONCILE)
+    except ScratchTransferError as error:
+        debt = _cleanup_debt(result) if isinstance(result, ScratchHistoricalOwnership) else None
+        raise ScratchTransferError(error.kind, error.phase, cleanup_debt=debt) from None
     return result
 
 

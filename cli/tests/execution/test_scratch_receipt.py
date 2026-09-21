@@ -291,6 +291,49 @@ def test_reconcile_checks_deadline_after_receipt_read(tmp_path: Path, monkeypatc
     os.close(parent_fd)
 
 
+@pytest.mark.parametrize("recorded", [True, False])
+def test_reconcile_final_expiry_retains_only_verified_cleanup_ownership(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    recorded: bool,
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    token, reference = _begin(parent_fd, 0)
+    context = current_receipt_context(ScratchOperation.STAGE)
+    clock = [0.0]
+    original_reconcile = receipt_module.reconcile_scratch_ownership
+
+    def reconcile_then_expire(
+        parent: int,
+        receipt_token: bytes,
+        receipt_context: receipt_module.ScratchReceiptContext,
+        *,
+        expires_at: float | None = None,
+    ) -> ScratchHistoricalOwnership | ScratchOwnershipUncertainty:
+        result = original_reconcile(parent, receipt_token, receipt_context, expires_at=expires_at)
+        clock[0] = 10.0
+        return result
+
+    monkeypatch.setattr(scratch_module, "_reconcile_receipt_ownership", reconcile_then_expire)
+    monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(receipt_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    try:
+        with pytest.raises(ScratchTransferError) as raised:
+            reconcile_scratch_ownership(
+                parent_fd,
+                token if recorded else os.urandom(16),
+                context,
+                expires_at=5.0,
+            )
+        assert raised.value.kind is ScratchFailureKind.DEADLINE
+        assert raised.value.phase is ScratchPhase.RECONCILE
+        expected_debt = scratch_module._cleanup_debt(reference) if recorded else None
+        assert raised.value.cleanup_debt == expected_debt
+    finally:
+        cleanup_scratch(parent_fd, reference)
+        os.close(parent_fd)
+
+
 def test_reconcile_checks_deadline_after_missing_name_lookup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
