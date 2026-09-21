@@ -25,8 +25,10 @@ SSH carrier and the fixture account's direct identity plan. They exercise bounde
 absence and limit refusal, then stage creation, exact-offset chunks, helper-backed reading,
 reconciliation and exact scratch cleanup with `/usr/bin/python3`. Each helper operation receives one
 carrier call with sensitive input, and payloads stay out of invocation and result representations.
-These loopback Linux cases are adapter evidence for transport's private helpers. They do not expose
-`FileAccess`, establish production grants or supply native workstation/provider acceptance.
+The same boundary downloads an immutable snapshot in exact chunks, including a nonzero offset, then
+recovers cleanup-only ownership and removes its exact fixed-root scratch object. These loopback
+Linux cases are adapter evidence for transport's private helpers. They do not expose `FileAccess`,
+establish production grants or supply native workstation/provider acceptance.
 
 For the operator's integration tester, combine the SSH and transport branches in a disposable local
 branch. Record both input commit IDs, the integrated commit, conflict resolutions and the installed
