@@ -65,7 +65,7 @@ from tests.execution.files._file_publication_support import (
 )
 from tests.execution.files._file_stage_support import fixture_source as stage_fixture_source
 from tests.execution.files._file_stage_support import install_fixture_bundle as install_stage_bundle
-from tests.execution.files._file_upload_support import BytesSource
+from tests.execution.files._file_upload_support import BytesSource, LostCallStdoutCarrier
 from tests.execution.files._file_upload_support import owner as _owner
 from tests.execution.files._file_upload_support import upload as _upload
 from tests.execution.files._runtime_support import runtime_nonce, runtime_ready_record
@@ -143,29 +143,6 @@ def deadline_cleanup(scratch_parent_fd,publication_parent_fd,debt,*args,**kwargs
  )
 guest.cleanup_publication_stage=deadline_cleanup
 """
-
-
-class LostCallStdoutCarrier:
-    def __init__(self, lost_call: int) -> None:
-        self._carrier = LocalCarrier()
-        self._lost_call = lost_call
-        self.calls = 0
-
-    @property
-    def features(self) -> ChannelFeatures:
-        return ChannelFeatures()
-
-    def execute(self, invocation, *, io, deadline) -> CarrierReport:
-        self.calls += 1
-        if self.calls != self._lost_call:
-            return self._carrier.execute(invocation, io=io, deadline=deadline)
-        assert isinstance(io.output, SinkOutput)
-        hidden = CarrierIO(
-            input=io.input,
-            output=SinkOutput(_DiscardSink(), io.output.stderr, require_live=False),
-            sensitive=io.sensitive,
-        )
-        return self._carrier.execute(invocation, io=hidden, deadline=deadline)
 
 
 class NonzeroCallCarrier:

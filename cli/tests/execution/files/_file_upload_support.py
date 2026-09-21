@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from agentworks.db import OperationResourceKind, OperationScope
 from agentworks.execution._file_publication import Create, CreateMetadata
 from agentworks.execution._file_upload import FileUploadOutcome, upload_file
-from agentworks.execution.carrier import Deadline
+from agentworks.execution.carrier import CarrierIO, CarrierReport, ChannelFeatures, Deadline, SinkOutput
 from agentworks.operations import OperationOwner
 from tests.execution.files._file_publication_support import LocalCarrier
 from tests.execution.files._runtime_support import runtime_selection
@@ -46,6 +46,36 @@ class BytesSource:
 
     def close(self) -> None:
         self.closed = True
+
+
+class _DiscardSink:
+    def try_write(self, data: memoryview) -> int:
+        return len(data)
+
+
+class LostCallStdoutCarrier:
+    """Run one selected call while discarding its otherwise-valid stdout."""
+
+    def __init__(self, lost_call: int) -> None:
+        self._carrier = LocalCarrier()
+        self._lost_call = lost_call
+        self.calls = 0
+
+    @property
+    def features(self) -> ChannelFeatures:
+        return ChannelFeatures()
+
+    def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        self.calls += 1
+        if self.calls != self._lost_call:
+            return self._carrier.execute(invocation, io=io, deadline=deadline)
+        assert isinstance(io.output, SinkOutput)
+        hidden = CarrierIO(
+            input=io.input,
+            output=SinkOutput(_DiscardSink(), io.output.stderr, require_live=False),
+            sensitive=io.sensitive,
+        )
+        return self._carrier.execute(invocation, io=hidden, deadline=deadline)
 
 
 def owner(database: Database) -> OperationOwner:

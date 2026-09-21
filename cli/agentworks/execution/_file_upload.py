@@ -10,6 +10,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
+from agentworks.execution._file_operation import BorrowedFileCarrier
 from agentworks.execution._file_paths import normalized_relative_path, normalized_root
 from agentworks.execution._file_publication import Create, CreateMetadata, Match, PublicationFailureKind, Replace
 from agentworks.execution._file_publication_exchange import (
@@ -49,15 +50,11 @@ from agentworks.execution._runtime_prerequisite import (
 )
 from agentworks.execution._scratch import ScratchFailureKind, ScratchReference, _cleanup_debt
 from agentworks.execution.carrier import (
-    CarrierIO,
-    CarrierReport,
-    ChannelFeatures,
     Deadline,
     Dispatch,
     ExitStatus,
-    PreparedInvocation,
 )
-from agentworks.operations import OperationAttempt, OperationBorrow, OperationOwner
+from agentworks.operations import OperationOwner
 
 if TYPE_CHECKING:
     from agentworks.execution._file_publication_wire import BoundPublicationCleanupDebt
@@ -150,7 +147,7 @@ class FileUploadControlFact(Exception):
 class _WorkingState:
     binding: FileUploadBinding
     token: bytes
-    borrow: OperationBorrow
+    operation: BorrowedFileCarrier
     bytes_consumed: int = 0
     staged_bytes: int = 0
     digest: bytes | None = None
@@ -168,30 +165,26 @@ class _WorkingState:
     stage_failure: FileStageFailureControl | None = None
     publication_failure: FilePublicationFailureControl | None = None
     runtime_prerequisite: RuntimePrerequisiteObservation | None = None
-    outstanding_attempt: OperationAttempt | None = None
-    coordination_uncertain: bool = False
-    borrow_closed: bool = False
 
     def fail(self, failure: FileUploadFailure) -> None:
         if self.failure is None:
             self.failure = failure
 
     def finish(self) -> FileUploadOutcome:
+        pending_remote_effects = self.pending_remote_effects or self.operation.pending_remote_effects
+        coordination_uncertain = self.operation.coordination_uncertain
         retain = (
-            self.pending_remote_effects
+            pending_remote_effects
             or self.scratch_debt is not None
             or self.publication_debt is not None
             or self.stage_ownership_uncertain
             or self.publication_ownership_uncertain
-            or self.outstanding_attempt is not None
-            or self.coordination_uncertain
+            or self.operation.has_outstanding_attempt
+            or coordination_uncertain
         )
-        if not self.borrow_closed:
-            self.borrow.close()
-            self.borrow_closed = True
         if self.publication_confirmed and self.failure is None and not retain:
             status = FileUploadStatus.COMPLETE
-        elif self.publication_uncertain or self.pending_remote_effects:
+        elif self.publication_uncertain or pending_remote_effects:
             status = FileUploadStatus.UNCERTAIN
         else:
             status = FileUploadStatus.FAILED
@@ -210,36 +203,18 @@ class _WorkingState:
             self.publication_uncertain,
             self.stage_ownership_uncertain,
             self.publication_ownership_uncertain,
-            self.pending_remote_effects,
+            pending_remote_effects,
             self.deadline_exceeded,
             self.failure,
             self.stage_failure,
             self.publication_failure,
             self.runtime_prerequisite,
-            self.coordination_uncertain,
+            coordination_uncertain,
             retain,
         )
 
 
-class _OwnedCarrier:
-    """Arm the borrowed owner at the last boundary before carrier dispatch."""
-
-    def __init__(self, carrier: Carrier, state: _WorkingState) -> None:
-        self._carrier = carrier
-        self._state = state
-
-    @property
-    def features(self) -> ChannelFeatures:
-        return self._carrier.features
-
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-        try:
-            attempt = self._state.borrow.begin_attempt()
-            self._state.outstanding_attempt = attempt
-        except BaseException:
-            self._state.coordination_uncertain = self._state.borrow.has_outstanding_attempt
-            raise
-        return self._carrier.execute(invocation, io=io, deadline=deadline)
+_OwnedCarrier = BorrowedFileCarrier
 
 
 def upload_file(
@@ -269,30 +244,50 @@ def upload_file(
         runtime_selection,
         owner,
     )
-    token = secrets.token_bytes(16)
     borrow = owner.borrow()
-    state = _WorkingState(binding, token, borrow)
-    workflow = _UploadWorkflow(carrier, source, canonical_condition, canonical_metadata, deadline, state)
+    operation = BorrowedFileCarrier(carrier, borrow)
+    try:
+        return _upload_file_borrowed(
+            operation,
+            source=source,
+            deadline=deadline,
+            inputs=(binding, canonical_condition, canonical_metadata),
+        )
+    finally:
+        borrow.close()
+
+
+def _upload_file_borrowed(
+    operation: BorrowedFileCarrier,
+    *,
+    source: ByteSource,
+    deadline: Deadline,
+    inputs: tuple[FileUploadBinding, Create | Replace | Match, CreateMetadata],
+) -> FileUploadOutcome:
+    """Run one validated upload without acquiring or closing its active borrow."""
+    binding, canonical_condition, canonical_metadata = inputs
+    state = _WorkingState(binding, secrets.token_bytes(16), operation)
+    workflow = _UploadWorkflow(operation, source, canonical_condition, canonical_metadata, deadline, state)
     try:
         return workflow.run()
     except (KeyboardInterrupt, SystemExit, GeneratorExit) as control:
-        if state.outstanding_attempt is not None:
+        if operation.outstanding_attempt is not None:
             state.pending_remote_effects = True
         try:
             workflow.cleanup_after_local_stop()
         except BaseException:
-            if state.outstanding_attempt is not None:
+            if operation.outstanding_attempt is not None:
                 state.pending_remote_effects = True
             state.fail(FileUploadFailure.CLEANUP)
         raise control from FileUploadControlFact(state.finish())
     except BaseException as control:
-        if state.outstanding_attempt is not None:
+        if operation.outstanding_attempt is not None:
             state.pending_remote_effects = True
-        elif not state.coordination_uncertain:
+        elif not operation.coordination_uncertain:
             try:
                 workflow.cleanup_after_local_stop()
             except BaseException:
-                if state.outstanding_attempt is not None:
+                if operation.outstanding_attempt is not None:
                     state.pending_remote_effects = True
                 state.fail(FileUploadFailure.CLEANUP)
         raise control from FileUploadControlFact(state.finish())
@@ -301,14 +296,14 @@ def upload_file(
 class _UploadWorkflow:
     def __init__(
         self,
-        carrier: Carrier,
+        carrier: BorrowedFileCarrier,
         source: ByteSource,
         condition: Create | Replace | Match,
         create_metadata: CreateMetadata,
         deadline: Deadline,
         state: _WorkingState,
     ) -> None:
-        self._carrier = _OwnedCarrier(carrier, state)
+        self._carrier = carrier
         self._source = source
         self._condition = condition
         self._create_metadata = create_metadata
@@ -333,7 +328,7 @@ class _UploadWorkflow:
         return self._state.finish()
 
     def cleanup_after_local_stop(self) -> None:
-        if not self._state.pending_remote_effects and not self._state.coordination_uncertain:
+        if not self._state.pending_remote_effects and not self._state.operation.coordination_uncertain:
             self._cleanup_after_failure()
 
     def _begin_stage(self) -> bool:
@@ -662,21 +657,11 @@ class _UploadWorkflow:
         dispatch: Dispatch,
         completion: ExitStatus | None,
     ) -> bool:
-        attempt = self._state.outstanding_attempt
-        if attempt is None:
-            if dispatch is not Dispatch.NOT_SENT:
-                self._state.coordination_uncertain = True
-            return False
-        if dispatch is Dispatch.NOT_SENT:
-            attempt.settle()
-            self._state.outstanding_attempt = None
-            return False
-        if dispatch is Dispatch.SENT and completion == ExitStatus(code=0):
-            attempt.settle()
-            self._state.outstanding_attempt = None
-            return True
-        self._state.pending_remote_effects = True
-        return False
+        normal = self._state.operation.settle(dispatch, completion)
+        self._state.pending_remote_effects = (
+            self._state.pending_remote_effects or self._state.operation.pending_remote_effects
+        )
+        return normal
 
     def _record_stage_observation(self, observation: FileStageObservation) -> None:
         if observation.cleanup_debt is not None:

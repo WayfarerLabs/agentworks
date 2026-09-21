@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import dataclass, field
 from typing import Literal, Never, cast
 
 from agentworks.errors import StateError, ValidationError
@@ -16,6 +17,61 @@ from agentworks.errors import StateError, ValidationError
 type _JsonStrategy = Literal["replace", "merge-overwrite", "merge-preserve", "skip-existing"]
 type _JsonValue = str | int | float | bool | None | list[_JsonValue] | dict[str, _JsonValue]
 type _JsonObject = dict[str, _JsonValue]
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class ValidatedJsonObject:
+    """One bounded object validated without retaining its encoded bytes."""
+
+    document: _JsonObject = field(repr=False)
+    max_bytes: int
+    max_depth: int
+
+
+def validate_json_object(content: bytes, *, max_bytes: int, max_depth: int) -> ValidatedJsonObject:
+    """Validate one bounded JSON object without destination-dependent work."""
+    _validate_limits(max_bytes=max_bytes, max_depth=max_depth)
+    return ValidatedJsonObject(
+        _parse_object(content, max_bytes=max_bytes, max_depth=max_depth),
+        max_bytes,
+        max_depth,
+    )
+
+
+def validate_json_source(source: bytes, *, max_bytes: int, max_depth: int) -> ValidatedJsonObject:
+    """Validate one source object before any destination observation."""
+    return validate_json_object(source, max_bytes=max_bytes, max_depth=max_depth)
+
+
+def serialize_json_source(source: ValidatedJsonObject) -> bytes:
+    """Serialize a validated source for replace or absent creation."""
+    return _serialize(source.document, max_bytes=source.max_bytes)
+
+
+def merge_json_source(
+    source: ValidatedJsonObject,
+    existing: bytes,
+    *,
+    preserve_existing: bool,
+) -> bytes:
+    """Merge one bounded immutable destination snapshot with a validated source."""
+    current = validate_json_object(existing, max_bytes=source.max_bytes, max_depth=source.max_depth)
+    return merge_json_objects(source, current, preserve_existing=preserve_existing)
+
+
+def merge_json_objects(
+    source: ValidatedJsonObject,
+    existing: ValidatedJsonObject,
+    *,
+    preserve_existing: bool,
+) -> bytes:
+    """Merge two validated objects and bound their deterministic result."""
+    if (source.max_bytes, source.max_depth) != (existing.max_bytes, existing.max_depth):
+        raise ValidationError("JSON merge inputs require identical bounds")
+    result = (
+        _merge(source.document, existing.document) if preserve_existing else _merge(existing.document, source.document)
+    )
+    return _serialize(result, max_bytes=source.max_bytes)
 
 
 def transform_json(
@@ -34,22 +90,17 @@ def transform_json(
     depth starts at one for the root object; nested arrays and objects each add
     one, while scalar leaves do not.
     """
-    _validate_limits(max_bytes=max_bytes, max_depth=max_depth)
-    document = _parse_object(source, max_bytes=max_bytes, max_depth=max_depth)
+    validated = validate_json_source(source, max_bytes=max_bytes, max_depth=max_depth)
 
     if existing is None:
         if not create:
             raise StateError("JSON destination is absent and creation is disabled")
-        result = document
+        return serialize_json_source(validated)
     elif strategy == "skip-existing":
         return None
     elif strategy == "replace":
-        result = document
-    else:
-        current = _parse_object(existing, max_bytes=max_bytes, max_depth=max_depth)
-        result = _merge(current, document) if strategy == "merge-overwrite" else _merge(document, current)
-
-    return _serialize(result, max_bytes=max_bytes)
+        return serialize_json_source(validated)
+    return merge_json_source(validated, existing, preserve_existing=strategy == "merge-preserve")
 
 
 def _validate_limits(*, max_bytes: int, max_depth: int) -> None:
