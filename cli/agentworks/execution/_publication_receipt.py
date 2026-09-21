@@ -8,7 +8,6 @@ import json
 import os
 import stat
 import time
-from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
 
@@ -375,6 +374,7 @@ def _reconcile_opened_publication_stage(
     if not stat.S_ISDIR(parent.st_mode):
         return PublicationStageOwnershipUncertainty()
     record_fd: int | None = None
+    prior: PublicationReceiptError | None = None
     try:
         record_fd = _open_record(scratch_directory_fd)
         record_stat = _fstat(record_fd)
@@ -389,10 +389,19 @@ def _reconcile_opened_publication_stage(
         if not hmac.compare_digest(content, expected):
             return PublicationStageOwnershipUncertainty()
         _require_unchanged_record(scratch_directory_fd, record_fd, candidate, len(expected))
+    except PublicationReceiptError as error:
+        prior = error
+        raise
     finally:
         if record_fd is not None:
-            with suppress(OSError):
+            try:
                 os.close(record_fd)
+            except OSError:
+                pass
+            except BaseException as control:
+                if prior is None:
+                    raise
+                raise control from prior
     stage = _stat_at(publication_parent_fd, candidate._stage_name)
     if stage is None or not _matches_stage(stage, candidate._publication_parent.device, candidate._stage):
         return PublicationStageOwnershipUncertainty()
@@ -454,10 +463,9 @@ def cleanup_publication_stage(
         prior = PublicationReceiptError(error.kind, cleanup_debt=debt)
         raise prior from None
     except BaseException as control:
-        prior = PublicationReceiptError(
-            PublicationReceiptFailureKind.IO,
-            cleanup_debt=debt,
-        )
+        cause = control.__cause__
+        kind = cause.kind if isinstance(cause, PublicationReceiptError) else PublicationReceiptFailureKind.IO
+        prior = PublicationReceiptError(kind, cleanup_debt=debt)
         raise control from prior
     finally:
         if opened is not None:
