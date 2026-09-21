@@ -192,7 +192,7 @@ class RuntimePrefixSink:
             if self._observation.state is not RuntimePrerequisiteState.READY:
                 self._invalid = True
                 return len(data)
-            return self._write_downstream(data)
+            return self.downstream.try_write(data)
 
         remaining = _MAX_RECORD_BYTES - len(self._prefix)
         scan_length = min(len(data), remaining + 1)
@@ -223,16 +223,10 @@ class RuntimePrefixSink:
         if self._observation.state is not RuntimePrerequisiteState.READY:
             self._invalid = True
             return len(data)
-        written = self._write_downstream(remainder)
+        written = self.downstream.try_write(remainder)
         if written is None:
             return consumed
         return consumed + written
-
-    def _write_downstream(self, data: memoryview) -> int | None:
-        written = self.downstream.try_write(data)
-        if written is not None and (type(written) is not int or not 1 <= written <= len(data)):
-            raise RuntimeError("Runtime downstream sink returned an invalid byte count")
-        return written
 
     @property
     def observation(self) -> RuntimePrerequisiteObservation:
@@ -258,13 +252,14 @@ def _interpret_record(
         return RuntimePrerequisiteObservation(RuntimePrerequisiteState.UNKNOWN, None)
     state = RuntimePrerequisiteState(match.group(2).decode("ascii"))
     token = match.group(3)
+    if state is RuntimePrerequisiteState.SHIM and system_shim is None:
+        return RuntimePrerequisiteObservation(RuntimePrerequisiteState.UNKNOWN, None)
     if state is RuntimePrerequisiteState.MISSING:
         if token == b"-":
             return RuntimePrerequisiteObservation(state, None)
         return RuntimePrerequisiteObservation(RuntimePrerequisiteState.UNKNOWN, None)
     if state is RuntimePrerequisiteState.SHIM and token == b"s":
-        if system_shim is None:
-            return RuntimePrerequisiteObservation(RuntimePrerequisiteState.UNKNOWN, None)
+        assert system_shim is not None
         return RuntimePrerequisiteObservation(state, system_shim)
     if not token.isdigit():
         return RuntimePrerequisiteObservation(RuntimePrerequisiteState.UNKNOWN, None)

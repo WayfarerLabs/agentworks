@@ -11,9 +11,6 @@ from pathlib import Path
 
 import pytest
 
-if sys.platform == "win32":  # pragma: no cover - platform guard
-    pytest.skip("The runtime selector requires POSIX shell checks", allow_module_level=True)
-
 from agentworks.execution import _runtime_prerequisite
 from agentworks.execution._runtime_prerequisite import (
     RuntimePrefixSink,
@@ -27,6 +24,7 @@ from agentworks.execution.carrier import CarrierIO, Deadline, Failure, FiniteInp
 from agentworks.execution.carriers._subprocess import ProcessResult, run_process
 
 _NONCE = "0123456789abcdef0123456789abcdef"
+_POSIX_ONLY = pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX shell checks")
 
 
 @dataclass
@@ -94,15 +92,43 @@ def _run(
     return prefix.observation, output, stderr, result
 
 
+def _run_trampoline(preamble: str) -> tuple[RuntimePrerequisiteObservation, _Sink, _Sink, ProcessResult]:
+    helper = "import os\nos.write(1,b'helper-entered')\n"
+    harness = preamble + "\nexec(compile(" + repr(_runtime_prerequisite._TRAMPOLINE) + ",'<runtime-test>','exec'))\n"
+    output = _Sink()
+    stderr = _Sink()
+    prefix = RuntimePrefixSink(_NONCE, (sys.executable,), output)
+    result = run_process(
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            "-B",
+            "-c",
+            harness,
+            _NONCE,
+            "0",
+            helper,
+        ],
+        io=CarrierIO(output=SinkOutput(prefix, stderr), sensitive=True),
+        deadline=Deadline.after(5),
+    )
+    return prefix.observation, output, stderr, result
+
+
 def _feed(sink: RuntimePrefixSink, content: bytes, chunks: tuple[int, ...]) -> None:
     offset = 0
     chunk_index = 0
+    attempts_remaining = max(100, len(content) * 2)
     while offset < len(content):
         size = chunks[chunk_index % len(chunks)]
         chunk_index += 1
         end = min(offset + size, len(content))
         pending = memoryview(content)[offset:end]
         while pending:
+            if attempts_remaining == 0:
+                pytest.fail("prefix sink did not consume input within the attempt budget")
+            attempts_remaining -= 1
             written = sink.try_write(pending)
             if written is None:
                 continue
@@ -110,9 +136,9 @@ def _feed(sink: RuntimePrefixSink, content: bytes, chunks: tuple[int, ...]) -> N
             offset += written
 
 
-def test_actual_python_admits_and_passes_binary_sensitive_input_unchanged(tmp_path: Path) -> None:
+@_POSIX_ONLY
+def test_actual_python_admits_and_passes_binary_sensitive_input_unchanged() -> None:
     payload = bytes(range(256)) * 17
-    marker = tmp_path / "must-not-be-written"
     helper = (
         "import os\n"
         "b=bytearray()\n"
@@ -134,7 +160,6 @@ def test_actual_python_admits_and_passes_binary_sensitive_input_unchanged(tmp_pa
     assert not stderr.data
     assert result.failure is None
     assert result.exit_status == 0
-    assert not marker.exists()
 
 
 def test_target_os_selects_fixed_candidates_without_host_inference() -> None:
@@ -155,7 +180,44 @@ def test_target_os_selects_fixed_candidates_without_host_inference() -> None:
     assert darwin_shim == "/usr/bin/python3"
 
 
+@pytest.mark.windows
+def test_synthetic_old_version_executes_production_trampoline_and_refuses() -> None:
+    observation, output, stderr, result = _run_trampoline("import sys\nsys.version_info=(3,10)")
+
+    assert observation == RuntimePrerequisiteObservation(
+        RuntimePrerequisiteState.UNSUPPORTED_VERSION,
+        sys.executable,
+    )
+    assert not output.data
+    assert not stderr.data
+    assert result.failure is None
+    assert result.exit_status == 0
+
+
+@pytest.mark.windows
+def test_synthetic_missing_bz2_executes_production_trampoline_and_refuses() -> None:
+    preamble = """import builtins
+real_import=builtins.__import__
+def blocked_import(name,globals=None,locals=None,fromlist=(),level=0):
+ if name=='bz2':raise ImportError
+ return real_import(name,globals,locals,fromlist,level)
+builtins.__import__=blocked_import
+"""
+
+    observation, output, stderr, result = _run_trampoline(preamble)
+
+    assert observation == RuntimePrerequisiteObservation(
+        RuntimePrerequisiteState.MISSING_MODULES,
+        sys.executable,
+    )
+    assert not output.data
+    assert not stderr.data
+    assert result.failure is None
+    assert result.exit_status == 0
+
+
 @pytest.mark.parametrize("kind", ["broken-symlink", "not-executable", "directory"])
+@_POSIX_ONLY
 def test_first_existing_unusable_entry_is_selected_without_fallback(
     kind: str,
     tmp_path: Path,
@@ -183,6 +245,7 @@ def test_first_existing_unusable_entry_is_selected_without_fallback(
     assert not fallback_marker.exists()
 
 
+@_POSIX_ONLY
 def test_missing_first_fixed_entry_selects_second(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     second = _emulated_runtime(tmp_path / "second", RuntimePrerequisiteState.READY)
     monkeypatch.setattr(
@@ -197,6 +260,7 @@ def test_missing_first_fixed_entry_selects_second(tmp_path: Path, monkeypatch: p
     assert observation == RuntimePrerequisiteObservation(RuntimePrerequisiteState.READY, os.fspath(second))
 
 
+@_POSIX_ONLY
 def test_explicit_absent_path_is_sole_candidate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fallback_marker = tmp_path / "fallback-ran"
     fallback = _emulated_runtime(
@@ -214,6 +278,7 @@ def test_explicit_absent_path_is_sole_candidate(tmp_path: Path, monkeypatch: pyt
 
 
 @pytest.mark.parametrize("alias_kind", ["direct", "symlink", "hardlink"])
+@_POSIX_ONLY
 def test_darwin_system_shim_alias_is_rejected_without_execution(
     alias_kind: str,
     tmp_path: Path,
@@ -237,6 +302,7 @@ def test_darwin_system_shim_alias_is_rejected_without_execution(
     assert not invoked.exists()
 
 
+@_POSIX_ONLY
 def test_darwin_shim_only_state_does_not_execute_system_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -252,6 +318,7 @@ def test_darwin_shim_only_state_does_not_execute_system_path(
     assert not invoked.exists()
 
 
+@_POSIX_ONLY
 def test_linux_does_not_classify_its_fixed_python_as_a_shim(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -269,6 +336,7 @@ def test_linux_does_not_classify_its_fixed_python_as_a_shim(
     "state",
     [RuntimePrerequisiteState.UNSUPPORTED_VERSION, RuntimePrerequisiteState.MISSING_MODULES],
 )
+@_POSIX_ONLY
 def test_synthetic_runtime_refusals_are_closed_and_do_not_enter_helper(
     state: RuntimePrerequisiteState,
     tmp_path: Path,
@@ -286,6 +354,7 @@ def test_synthetic_runtime_refusals_are_closed_and_do_not_enter_helper(
     assert not marker.exists()
 
 
+@_POSIX_ONLY
 def test_raw_runtime_diagnostic_is_not_retained_in_observation(tmp_path: Path) -> None:
     canary = "raw-runtime-canary-142b"
     runtime = _emulated_runtime(
@@ -346,6 +415,18 @@ def test_trailing_bytes_after_refusal_invalidate_transcript() -> None:
     assert not downstream.data
 
 
+def test_linux_shim_record_without_bound_shim_is_unknown() -> None:
+    downstream = _Sink()
+    sink = RuntimePrefixSink(_NONCE, ("/usr/bin/python3",), downstream)
+    record = f"AGW_RUNTIME_1:{_NONCE}:shim:0\n".encode("ascii")
+
+    _feed(sink, record, (len(record),))
+
+    assert sink.observation == RuntimePrerequisiteObservation(RuntimePrerequisiteState.UNKNOWN, None)
+    assert not downstream.data
+
+
+@_POSIX_ONLY
 def test_early_refusal_with_large_finite_input_remains_bounded_and_truthful(tmp_path: Path) -> None:
     observation, output, stderr, result = _run(
         RuntimeSelection(RuntimeTargetOS.LINUX, os.fspath(tmp_path / "absent")),
