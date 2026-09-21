@@ -156,7 +156,7 @@ def test_malformed_wire_envelope_is_not_execution_evidence(monkeypatch: pytest.M
 
 def test_wire_bounds_response_before_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agentworks.execution.carriers._proxmox_http._MAX_RESPONSE_BYTES", 10)
-    response = io.BytesIO(b'{"data":{"pid":42}}')
+    response = io.BytesIO(b"x" * 11)
     opener = MagicMock()
     opener.open.return_value = response
     monkeypatch.setattr(urllib.request, "build_opener", lambda *args: opener)

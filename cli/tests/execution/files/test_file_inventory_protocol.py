@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import json
 import os
 import stat
+import urllib.request
 from dataclasses import replace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -35,7 +38,13 @@ from agentworks.execution._file_inventory_protocol import (
     parse_file_inventory_result,
 )
 from agentworks.execution._file_stat import FileRevision, FileStat
-from agentworks.execution._file_wire import FileRecord, FileRecordKind, FileRecordReader, encode_file_record
+from agentworks.execution._file_wire import (
+    MAX_RECORD_BODY_BYTES,
+    FileRecord,
+    FileRecordKind,
+    FileRecordReader,
+    encode_file_record,
+)
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution.carrier import (
@@ -51,6 +60,8 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
+from agentworks.execution.carriers._proxmox_http import _request as _http_request
+from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 from tests.execution.files._runtime_support import (
     runtime_nonce,
     runtime_ready_record,
@@ -88,6 +99,43 @@ def _entry(path: str, *, mode: int = stat.S_IFREG | 0o600, links: int = 1) -> Fi
 
 def _json(value: object) -> bytes:
     return json.dumps(value, allow_nan=True, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("ascii")
+
+
+def _path_with_length(prefix: str, length: int) -> str:
+    parts = [prefix]
+    while len("/".join(parts)) < length:
+        remaining = length - len("/".join(parts))
+        if remaining == 1:
+            parts[-1] += "x"
+        else:
+            parts.append("x" * min(255, remaining - 1))
+    path = "/".join(parts)
+    assert len(path) == length and len(parts) <= MAX_DEPTH
+    return path
+
+
+def _maximum_encoded_inventory() -> tuple[bytes, tuple[FileInventoryEntry, ...]]:
+    def path_length_for_record(record_length: int) -> int:
+        path_length = record_length
+        for _ in range(3):
+            path = _path_with_length("0000", path_length)
+            actual = len(encode_inventory((_entry(path),))) - 2
+            if actual == record_length:
+                return path_length
+            path_length += record_length - actual
+        raise AssertionError("could not construct bounded inventory fixture")
+
+    # One 1,022-byte record, 4,095 1,023-byte records, commas and brackets
+    # fill the supported inventory body exactly.
+    short_path_length = path_length_for_record(1_022)
+    ordinary_path_length = path_length_for_record(1_023)
+    entries = tuple(
+        _entry(_path_with_length(f"{index:04x}", short_path_length if index == 0 else ordinary_path_length))
+        for index in range(MAX_ENTRIES)
+    )
+    encoded = encode_inventory(entries)
+    assert len(encoded) == MAX_ENCODED_BYTES
+    return encoded, entries
 
 
 def _exception_details(error: BaseException) -> str:
@@ -370,6 +418,98 @@ def test_exchange_uses_sensitive_finite_input_and_releases_verified_entries(monk
     assert carrier.io is not None and carrier.io.sensitive
     assert carrier.invocation is not None and "/srv/workspace" not in " ".join(carrier.invocation.argv)
     assert "target" not in carrier.invocation.argv
+
+
+def test_maximum_inventory_response_crosses_http_and_carrier_into_typed_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    encoded_inventory, expected_entries = _maximum_encoded_inventory()
+    stream = io.BytesIO()
+    stream.write(f"AGW_RUNTIME_1:{_NONCE}:ready:0\n".encode("ascii"))
+    sequence = 0
+    for offset in range(0, len(encoded_inventory), MAX_RECORD_BODY_BYTES):
+        stream.write(
+            encode_file_record(
+                _NONCE,
+                FileRecord(sequence, FileRecordKind.DATA, encoded_inventory[offset : offset + MAX_RECORD_BODY_BYTES]),
+            )
+        )
+        sequence += 1
+    stream.write(
+        encode_file_record(
+            _NONCE,
+            FileRecord(
+                sequence,
+                FileRecordKind.RESULT,
+                encode_file_inventory_result(
+                    FileInventoryResultControl(len(encoded_inventory), hashlib.sha256(encoded_inventory).digest())
+                ),
+            ),
+        )
+    )
+    stream.write(encode_file_record(_NONCE, FileRecord(sequence + 1, FileRecordKind.FINISHED, b"{}")))
+    status = {
+        "exited": True,
+        "exitcode": 0,
+        "out-data": stream.getvalue().decode("ascii"),
+        "err-data": "",
+        "out-truncated": False,
+        "err-truncated": False,
+    }
+    provider_response = json.dumps({"data": status}, ensure_ascii=True).encode("ascii")
+    assert len(provider_response) > MAX_ENCODED_BYTES
+
+    response = io.BytesIO(provider_response)
+    opener = MagicMock()
+    opener.open.return_value = response
+    monkeypatch.setattr(urllib.request, "build_opener", MagicMock(return_value=opener))
+    monkeypatch.setattr("agentworks.execution._file_inventory_exchange.secrets.token_hex", lambda _size: _NONCE)
+    carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.example:8006", "node1", 123, "token", "secret"))
+
+    def request(method: str, suffix: str, *, body: bytes | None = None, timeout: float | None) -> dict[str, object]:
+        del timeout
+        if method == "POST":
+            assert body is not None
+            return {"pid": 42}
+        assert suffix == "exec-status?pid=42" and body is None
+        encoded = _http_request(
+            {
+                "connection": {
+                    "api_url": "https://pve.example:8006",
+                    "node": "node1",
+                    "vmid": 123,
+                    "token_id": "token",
+                    "token_secret": "secret",
+                    "ca_bundle": None,
+                },
+                "method": "GET",
+                "suffix": suffix,
+                "body": None,
+                "timeout": 2.5,
+            }
+        )
+        parsed = json.loads(encoded)
+        assert type(parsed) is dict and type(parsed["data"]) is dict
+        return dict(parsed["data"])
+
+    monkeypatch.setattr(carrier._wire, "request", request)
+    result = list_directory(
+        carrier,
+        trusted_root_path="/srv/workspace",
+        relative_path="target",
+        max_entries=MAX_ENTRIES,
+        max_depth=MAX_DEPTH,
+        max_encoded_bytes=MAX_ENCODED_BYTES,
+        plan=IdentityPlan(_identity(), IdentityMode.DIRECT),
+        deadline=Deadline(None),
+        runtime_selection=runtime_selection(),
+    )
+
+    assert response.closed
+    assert result.dispatch is Dispatch.SENT and result.carrier_failure is None
+    observation = result.observation
+    assert observation is not None and observation.state is FileInventoryObservationState.PRESENT
+    assert observation.entries == expected_entries
 
 
 def test_exchange_refuses_invalid_host_limits_before_dispatch() -> None:
