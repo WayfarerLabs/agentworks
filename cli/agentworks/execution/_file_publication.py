@@ -27,6 +27,23 @@ if TYPE_CHECKING:
 
 from ._file_snapshot import _snapshot_stat
 from ._file_stat import FileRevision, FileStat
+from ._publication_receipt import (
+    _STAGE_PREFIX as _PUBLICATION_STAGE_PREFIX,
+)
+from ._publication_receipt import (
+    PublicationReceiptError,
+    PublicationReceiptFailureKind,
+    PublicationRecordAcquisition,
+    PublicationStageAdmission,
+    PublicationStageCleanupDebt,
+    PublicationStageOwnership,
+    admit_publication_stage,
+    cleanup_publication_stage,
+    remove_publication_record,
+)
+from ._publication_receipt import (
+    record_publication_stage as record_publication_stage,
+)
 from ._scratch import (
     ReadyScratchReference,
     ScratchFailureKind,
@@ -38,7 +55,7 @@ from ._scratch import (
 _ACCESS_ACL = "system.posix_acl_access"
 _RENAME_NOREPLACE = 1
 _STAGE_ATTEMPTS = 16
-_STAGE_PREFIX = ".agentworks-stage-"
+_STAGE_PREFIX = _PUBLICATION_STAGE_PREFIX
 _T = TypeVar("_T")
 
 
@@ -88,7 +105,7 @@ class FilePublicationError(Exception):
         kind: PublicationFailureKind,
         phase: PublicationPhase,
         *,
-        cleanup_debt: PublicationCleanupDebt | None = None,
+        cleanup_debt: PublicationCleanupDebt | PublicationStageCleanupDebt | None = None,
     ) -> None:
         self.kind = kind
         self.phase = phase
@@ -151,6 +168,10 @@ class _StageOwnership:
     name: str | None = None
     descriptor: int | None = None
     identity: _ObjectIdentity | None = None
+    admission: PublicationStageAdmission | None = None
+    publication: PublicationStageOwnership | PublicationStageCleanupDebt | None = None
+    record_acquisition: PublicationRecordAcquisition = field(default_factory=PublicationRecordAcquisition)
+    scratch_parent_fd: int | None = None
 
 
 @dataclass(frozen=True, repr=False)
@@ -187,11 +208,30 @@ def publish_file(
     close_control: BaseException | None = None
     try:
         try:
-            _create_stage(parent_fd, stage)
+            if isinstance(content, ScratchFileSource):
+                stage.admission = _admit_publication_stage(content, parent_fd, expires_at)
+                stage.scratch_parent_fd = content.parent_fd
+            _create_stage(
+                parent_fd,
+                stage,
+                exact_name=None if stage.admission is None else stage.admission.stage_name,
+            )
             stage_name = stage.name
             stage_fd = stage.descriptor
             stage_identity = stage.identity
             assert stage_name is not None and stage_fd is not None and stage_identity is not None
+            if stage.admission is not None:
+                try:
+                    stage.publication = record_publication_stage(
+                        stage.admission,
+                        parent_fd,
+                        stage_fd,
+                        stage.record_acquisition,
+                        expires_at=expires_at,
+                    )
+                except PublicationReceiptError as error:
+                    stage.publication = error.cleanup_debt
+                    raise _publication_receipt_error(error, PublicationPhase.STAGING) from None
             content_size, content_digest = _write_content(stage_fd, content, expires_at)
             if isinstance(condition, Create):
                 _prepare_create(stage_fd, parent_fd, create_metadata)
@@ -222,6 +262,15 @@ def publish_file(
                 content_digest,
                 expires_at,
             )
+            if stage.publication is not None:
+                assert stage.scratch_parent_fd is not None
+                try:
+                    remove_publication_record(stage.scratch_parent_fd, stage.publication)
+                except PublicationReceiptError as error:
+                    stage.publication = error.cleanup_debt
+                    raise _publication_receipt_error(error, PublicationPhase.CLEANUP) from None
+                stage.publication = None
+                stage.record_acquisition.identity = None
         except FilePublicationError as error:
             if rename_succeeded or (
                 publication_attempted
@@ -231,7 +280,11 @@ def publish_file(
                     PublicationFailureKind.UNSUPPORTED,
                 }
             ):
-                failure = FilePublicationError(PublicationFailureKind.UNCERTAIN, PublicationPhase.PUBLICATION)
+                failure = FilePublicationError(
+                    PublicationFailureKind.UNCERTAIN,
+                    PublicationPhase.PUBLICATION,
+                    cleanup_debt=error.cleanup_debt,
+                )
             else:
                 failure = error
         except BaseException as error:
@@ -260,7 +313,7 @@ def publish_file(
     raise FilePublicationError(
         failure.kind,
         failure.phase,
-        cleanup_debt=failure.cleanup_debt or cleanup_debt,
+        cleanup_debt=cleanup_debt,
     ) from None
 
 
@@ -306,7 +359,36 @@ def _validate_inputs(
         raise FilePublicationError(PublicationFailureKind.UNSUPPORTED, PublicationPhase.STAGING)
 
 
-def _create_stage(parent_fd: int, stage: _StageOwnership) -> None:
+def _admit_publication_stage(
+    content: ScratchFileSource,
+    parent_fd: int,
+    expires_at: float | None,
+) -> PublicationStageAdmission:
+    try:
+        return admit_publication_stage(
+            content.parent_fd,
+            content.ready,
+            parent_fd,
+            expires_at=expires_at,
+        )
+    except PublicationReceiptError as error:
+        raise _publication_receipt_error(error, PublicationPhase.STAGING) from None
+
+
+def _publication_receipt_error(
+    error: PublicationReceiptError,
+    phase: PublicationPhase,
+) -> FilePublicationError:
+    kind = {
+        PublicationReceiptFailureKind.UNSUPPORTED: PublicationFailureKind.UNSUPPORTED,
+        PublicationReceiptFailureKind.CONFLICT: PublicationFailureKind.CONFLICT,
+        PublicationReceiptFailureKind.DEADLINE: PublicationFailureKind.DEADLINE,
+        PublicationReceiptFailureKind.IO: PublicationFailureKind.IO,
+    }[error.kind]
+    return FilePublicationError(kind, phase, cleanup_debt=error.cleanup_debt)
+
+
+def _create_stage(parent_fd: int, stage: _StageOwnership, *, exact_name: str | None = None) -> None:
     """Acquire a stage and populate caller-owned state immediately.
 
     Pure Python cannot cover an asynchronous exception between ``os.open``
@@ -318,8 +400,9 @@ def _create_stage(parent_fd: int, stage: _StageOwnership) -> None:
     if not stat.S_ISDIR(parent.st_mode):
         raise FilePublicationError(PublicationFailureKind.UNSUPPORTED, PublicationPhase.STAGING)
     flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
-    for _ in range(_STAGE_ATTEMPTS):
-        candidate = _STAGE_PREFIX + secrets.token_hex(16)
+    attempts = 1 if exact_name is not None else _STAGE_ATTEMPTS
+    for _ in range(attempts):
+        candidate = _STAGE_PREFIX + secrets.token_hex(16) if exact_name is None else exact_name
         stage.name = candidate
         error_number: int | None = None
         try:
@@ -334,6 +417,8 @@ def _create_stage(parent_fd: int, stage: _StageOwnership) -> None:
                 raise FilePublicationError(PublicationFailureKind.UNSUPPORTED, PublicationPhase.STAGING)
             return
         stage.name = None
+        if exact_name is not None and error_number == errno.EEXIST:
+            raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.STAGING)
         if error_number != errno.EEXIST:
             raise FilePublicationError(PublicationFailureKind.IO, PublicationPhase.STAGING)
     raise FilePublicationError(PublicationFailureKind.IO, PublicationPhase.STAGING)
@@ -721,9 +806,20 @@ def _cleanup_owned_stage(
     stage: _StageOwnership,
     *,
     prior: FilePublicationError | None,
-) -> PublicationCleanupDebt | None:
+) -> PublicationCleanupDebt | PublicationStageCleanupDebt | None:
+    if stage.publication is not None:
+        assert stage.scratch_parent_fd is not None
+        try:
+            cleanup_publication_stage(stage.scratch_parent_fd, parent_fd, stage.publication)
+        except PublicationReceiptError as error:
+            assert error.cleanup_debt is not None
+            return error.cleanup_debt
+        stage.publication = None
+        return None
     if stage.name is None:
         return None
+    if stage.record_acquisition.identity is not None:
+        return PublicationCleanupDebt(stage.name, None, None)
     if stage.identity is None:
         return PublicationCleanupDebt(stage.name, None, None)
     return _cleanup_or_raise_control(parent_fd, stage.name, stage.identity, prior=prior)
@@ -744,6 +840,10 @@ def _close_publication_descriptors(
             _close(stage.descriptor)
         except BaseException as control:
             interrupted = control
+    if stage.admission is not None:
+        admission_control = stage.admission.close()
+        if admission_control is not None:
+            interrupted = admission_control
     return interrupted
 
 
@@ -779,7 +879,7 @@ def _raise_control(
     control: BaseException,
     *,
     prior: FilePublicationError | None = None,
-    cleanup_debt: PublicationCleanupDebt | None = None,
+    cleanup_debt: PublicationCleanupDebt | PublicationStageCleanupDebt | None = None,
 ) -> NoReturn:
     fact = prior or _control_fact(control)
     if cleanup_debt is not None:

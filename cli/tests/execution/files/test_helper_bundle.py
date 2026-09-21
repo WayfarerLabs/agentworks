@@ -28,6 +28,7 @@ _MODULE_NAMES = (
     "_file_snapshot",
     "_scratch_receipt",
     "_scratch",
+    "_publication_receipt",
     "_file_publication",
     "_file_wire",
     "_file_read_protocol",

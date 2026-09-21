@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 import agentworks.execution._file_publication as publication_module
+import agentworks.execution._publication_receipt as publication_receipt_module
 import agentworks.execution._scratch as scratch_module
 import agentworks.execution._scratch_receipt as receipt_module
 from agentworks.execution._file_publication import (
@@ -23,6 +24,11 @@ from agentworks.execution._file_publication import (
     PublicationPhase,
     ScratchFileSource,
     publish_file,
+)
+from agentworks.execution._publication_receipt import (
+    PublicationStageHistoricalOwnership,
+    cleanup_publication_stage,
+    reconcile_publication_stage,
 )
 from agentworks.execution._scratch import (
     ReadyScratchReference,
@@ -155,6 +161,7 @@ def test_scratch_short_write_loop_obeys_deadline(tmp_path: Path, monkeypatch: py
     monkeypatch.setattr(publication_module, "_write", short_write)
     monkeypatch.setattr(publication_module, "time", SimpleNamespace(monotonic=lambda: next(moments)))
     clock = SimpleNamespace(monotonic=lambda: 0.0)
+    monkeypatch.setattr(publication_receipt_module, "time", clock)
     monkeypatch.setattr(scratch_module, "time", clock)
     monkeypatch.setattr(receipt_module, "time", clock)
     try:
@@ -203,6 +210,52 @@ def test_changed_verified_scratch_refuses_without_publication(tmp_path: Path) ->
         os.close(parent_fd)
 
 
+def test_delayed_publication_after_scratch_cleanup_creates_no_artifact(tmp_path: Path) -> None:
+    parent_fd = _open_parent(tmp_path)
+    ready = _ready_scratch(parent_fd, b"verified")
+    cleanup_scratch(parent_fd, ready)
+
+    error = _failure(parent_fd, ScratchFileSource(parent_fd, ready))
+    assert error.kind is PublicationFailureKind.CONFLICT
+    assert error.phase is PublicationPhase.STAGING
+    assert not (tmp_path / "target").exists()
+    assert not list(tmp_path.glob(f"{publication_module._STAGE_PREFIX}*"))
+    os.close(parent_fd)
+
+
+def test_lost_record_ack_reconciles_cleanup_without_replaying_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    ready = _ready_scratch(parent_fd, b"verified")
+    original_record = publication_module.record_publication_stage
+
+    def record_then_interrupt(*args: object, **kwargs: object) -> None:
+        original_record(*args, **kwargs)  # type: ignore[arg-type]
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(publication_module, "record_publication_stage", record_then_interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        publish_file(
+            parent_fd,
+            "target",
+            ScratchFileSource(parent_fd, ready),
+            condition=Create(),
+            create_metadata=_metadata(),
+        )
+    assert not (tmp_path / "target").exists()
+    stages = list(tmp_path.glob(f"{publication_module._STAGE_PREFIX}*"))
+    assert len(stages) == 1
+
+    recovered = reconcile_publication_stage(parent_fd, ready, parent_fd)
+    assert isinstance(recovered, PublicationStageHistoricalOwnership)
+    cleanup_publication_stage(parent_fd, parent_fd, recovered)
+    cleanup_scratch(parent_fd, ready)
+    assert not stages[0].exists()
+    os.close(parent_fd)
+
+
 def test_scratch_iteration_deadline_remains_a_publication_deadline(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -214,10 +267,11 @@ def test_scratch_iteration_deadline_remains_a_publication_deadline(
     clock = SimpleNamespace(monotonic=lambda: expires_at)
     monkeypatch.setattr(scratch_module, "time", clock)
     monkeypatch.setattr(receipt_module, "time", clock)
+    monkeypatch.setattr(publication_receipt_module, "time", clock)
     try:
         error = _failure(parent_fd, ScratchFileSource(parent_fd, ready), expires_at=expires_at)
         assert error.kind is PublicationFailureKind.DEADLINE
-        assert error.phase is PublicationPhase.CONTENT
+        assert error.phase is PublicationPhase.STAGING
         assert not (tmp_path / "target").exists()
         assert not list(tmp_path.glob(f"{publication_module._STAGE_PREFIX}*"))
         cleanup_scratch(parent_fd, ready)
