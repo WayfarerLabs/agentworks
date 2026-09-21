@@ -151,6 +151,42 @@ change the helper's credentials. Its result kind is bound to its request, so fil
 be mistaken for a complete execution identity. File metadata selection and execution elevation
 remain independent choices.
 
+### Owned target identity preparation
+
+Core prepares one requested identity before constructing a passive execution or file view. Its
+inputs are the carrier, delivery account, bound workload account, explicit ordinary/root choice,
+runtime selection, deadline and already-acquired operation owner. These are composition inputs, not
+public request fields or a new permission grant. Canonical admin and agent targets normally use
+separate direct-login routes; native provisioning and recovery prepare the admin target.
+
+The composer resolves delivery and workload accounts, and the root account when elevation needs it,
+through the fixed account helper under one serial borrow. Identical account names reuse only that
+preparation's observation; there is no persistent account cache. Every exchange uses the same
+deadline and arms the owner immediately before actual carrier dispatch. A plan requires resolved
+account observations, independent normal helper termination, and remaining preparation budget.
+Incomplete observation, abnormal completion or uncertainty never supplies a usable plan. Record the
+observations and deadline facts separately from whether preparation succeeded.
+
+Ordinary execution selects direct entry when delivery already uses the bound identity, or exact
+demotion when delivery has UID zero and the workload does not. Root execution selects direct entry
+from root delivery or fixed sudo entry from the bound non-root workload identity. Non-root delivery
+through a different workload identity is refused by this initial composer, never silently elevated
+or treated as direct. Account lookup is not proof that sudo or demotion will succeed; the final
+helper still verifies its actual identity before accessing workload data.
+
+The existing carrier admission adapter is shared by account preparation and file workflows. It owns
+dispatch and termination evidence only; callers own their protocol facts. A lookup without
+termination proof retains unresolved ownership, while a proved terminal refusal may relinquish the
+borrow without closing the operation owner. Preparation neither releases the enclosing claim nor
+activates a route, retries a lookup, launches a workload or constructs a legacy transport.
+
+The sessions/console migration must separately disposition the existing admin-owned multi-console
+pane that enters an agent account with sudo. It is a real cross-user consumer, not a reason to infer
+agent authority for every native admin target. This remains required migration work; the initial
+three-plan composer does not claim to have migrated it.
+
+### Sudo bootstrap
+
 The sudo wrapper consumes the same manifest from stdin after privilege change. Source, input, and
 environment never appear in sudo argv or environment assignments. A failure before the inner
 bootstrap's first trusted frame cannot be classified as sudo refusal from raw nonzero status or

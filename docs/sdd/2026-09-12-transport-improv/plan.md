@@ -1315,6 +1315,21 @@ isolation, in coexistence releases. Operational safety and selected profile guar
       tmux/harness readiness, restart consent, legacy-run uncertainty and owned cleanup. Do not
       certify legacy detached descendants by moving only a surviving parent into a new cgroup.
 
+### Target identity composition checkpoint, 2026-09-21
+
+- [ ] Implement the private owned target identity composer described in the preparation LLD. Observe
+      delivery/workload/root account facts as needed under one borrowed owner and deadline; produce
+      only a supported direct, sudo-root or root-demotion plan. Keep account, termination, deadline
+      and unresolved-ownership evidence distinct. Test refusals, interrupted observation, normal and
+      abnormal completion, and actual helper composition without claiming native sudo or demotion
+      acceptance. Public RunContext and production activation wiring remain separate required gates,
+      not completed by this private increment.
+- [ ] During sessions/console migration, replace the admin-owned multi-console agent-pane sudo path
+      with an explicitly bound and proved cross-user execution path. The current three-plan identity
+      composer does not support non-root delivery into a different non-root workload identity. Do
+      not hide this gap with ambient sudo or expose native agent authority merely to make this
+      consumer fit.
+
 ## 7. Remove legacy and activate permissions
 
 - [ ] Require zero remaining legacy consumers, including direct/lazy imports and external plugin
