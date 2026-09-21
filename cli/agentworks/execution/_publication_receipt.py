@@ -222,6 +222,7 @@ def record_publication_stage(
 
     descriptor: int | None = None
     result: PublicationStageOwnership | None = None
+    prior: PublicationReceiptError | None = None
     try:
         flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
         try:
@@ -259,17 +260,19 @@ def record_publication_stage(
     except PublicationReceiptError as error:
         if acquisition.identity is None:
             raise
-        raise PublicationReceiptError(
+        prior = PublicationReceiptError(
             error.kind,
             cleanup_debt=_acquired_record_cleanup_debt(admission, stage, acquisition.identity),
-        ) from None
+        )
+        raise prior from None
     except BaseException as control:
         if acquisition.identity is None:
             raise
-        raise control from PublicationReceiptError(
+        prior = PublicationReceiptError(
             PublicationReceiptFailureKind.IO,
             cleanup_debt=_acquired_record_cleanup_debt(admission, stage, acquisition.identity),
         )
+        raise control from prior
     finally:
         if descriptor is not None:
             try:
@@ -279,10 +282,12 @@ def record_publication_stage(
             except BaseException as control:
                 if acquisition.identity is None:
                     raise
-                raise control from PublicationReceiptError(
-                    PublicationReceiptFailureKind.IO,
-                    cleanup_debt=_acquired_record_cleanup_debt(admission, stage, acquisition.identity),
-                )
+                if prior is None:
+                    prior = PublicationReceiptError(
+                        PublicationReceiptFailureKind.IO,
+                        cleanup_debt=_acquired_record_cleanup_debt(admission, stage, acquisition.identity),
+                    )
+                raise control from prior
     assert result is not None
     try:
         _check_deadline(expires_at)
@@ -323,6 +328,7 @@ def reconcile_publication_stage(
         return PublicationStageOwnershipUncertainty()
     opened: _OpenedScratchDirectory | None = None
     result: PublicationStageReconciliation = PublicationStageOwnershipUncertainty()
+    prior: PublicationReceiptError | None = None
     try:
         _check_deadline(expires_at)
         opened = _open_scratch_reference(scratch_parent_fd, reference, expires_at)
@@ -334,6 +340,7 @@ def reconcile_publication_stage(
         )
     except PublicationReceiptError as error:
         if error.kind is PublicationReceiptFailureKind.DEADLINE:
+            prior = error
             raise
         result = PublicationStageOwnershipUncertainty()
     except (OSError, ValueError, ScratchTransferError):
@@ -342,10 +349,12 @@ def reconcile_publication_stage(
         if opened is not None:
             close_control = opened.close()
             if close_control is not None:
-                raise close_control from PublicationReceiptError(
-                    PublicationReceiptFailureKind.IO,
-                    cleanup_debt=_reconciliation_cleanup_debt(result),
-                )
+                if prior is None:
+                    prior = PublicationReceiptError(
+                        PublicationReceiptFailureKind.IO,
+                        cleanup_debt=_reconciliation_cleanup_debt(result),
+                    )
+                raise close_control from prior
     try:
         _check_deadline(expires_at)
     except PublicationReceiptError as error:
@@ -408,6 +417,7 @@ def cleanup_publication_stage(
     ownership = debt._ownership
     opened: _OpenedScratchDirectory | None = None
     cleanup_complete = False
+    prior: PublicationReceiptError | None = None
     try:
         opened = _open_owned_scratch(scratch_parent_fd, ownership._scratch_ownership)
         parent = _fstat(publication_parent_fd)
@@ -439,21 +449,26 @@ def cleanup_publication_stage(
         cleanup_complete = True
     except PublicationReceiptError as error:
         if error.cleanup_debt is not None:
+            prior = error
             raise
-        raise PublicationReceiptError(error.kind, cleanup_debt=debt) from None
+        prior = PublicationReceiptError(error.kind, cleanup_debt=debt)
+        raise prior from None
     except BaseException as control:
-        raise control from PublicationReceiptError(
+        prior = PublicationReceiptError(
             PublicationReceiptFailureKind.IO,
             cleanup_debt=debt,
         )
+        raise control from prior
     finally:
         if opened is not None:
             close_control = opened.close()
             if close_control is not None:
-                raise close_control from PublicationReceiptError(
-                    PublicationReceiptFailureKind.IO,
-                    cleanup_debt=None if cleanup_complete else debt,
-                )
+                if prior is None:
+                    prior = PublicationReceiptError(
+                        PublicationReceiptFailureKind.IO,
+                        cleanup_debt=None if cleanup_complete else debt,
+                    )
+                raise close_control from prior
 
 
 def remove_publication_record(
