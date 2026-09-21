@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import posixpath
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -51,33 +50,9 @@ def _validate_plan(plan: IdentityPlan) -> IdentityExpectation:
     return expected
 
 
-def _validate_runtime_path(runtime_path: str) -> None:
-    failed = False
-    if type(runtime_path) is not str or "\0" in runtime_path:
-        failed = True
-    else:
-        try:
-            runtime_path.encode("utf-8")
-        except UnicodeEncodeError:
-            failed = True
-    if failed or not posixpath.isabs(runtime_path) or "=" in runtime_path:
-        raise ValidationError("Helper runtime must be an absolute non-assignment UTF-8 path")
-
-
 def build_clean_environment_argv(executable: str, *arguments: str) -> tuple[str, ...]:
     """Launch one fixed executable under the common cleared environment."""
     return (*_ENV, executable, *arguments)
-
-
-def build_clean_helper_argv(
-    *,
-    runtime_path: str,
-    fixed_source: str,
-    nonce: str,
-) -> tuple[str, ...]:
-    """Build one fixed helper launch under the carrier delivery identity."""
-    _validate_runtime_path(runtime_path)
-    return build_clean_environment_argv(runtime_path, "-I", "-S", "-B", "-c", fixed_source, nonce)
 
 
 def build_identity_argv(plan: IdentityPlan, fixed_argv: tuple[str, ...]) -> tuple[str, ...]:
@@ -105,16 +80,3 @@ def _identity_argv(
         "--",
         *fixed_argv,
     )
-
-
-def build_helper_argv(
-    plan: IdentityPlan,
-    *,
-    runtime_path: str,
-    fixed_source: str,
-    nonce: str,
-) -> tuple[str, ...]:
-    """Build one fixed helper launch with an explicit identity transition."""
-    expected = _validate_plan(plan)
-    helper = build_clean_helper_argv(runtime_path=runtime_path, fixed_source=fixed_source, nonce=nonce)
-    return _identity_argv(plan, expected, helper)

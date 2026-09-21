@@ -13,7 +13,7 @@ from agentworks.execution import _helper_identity, _inline_guest
 from agentworks.execution._evidence_wire import Frame, FrameKind, FrameReader
 from agentworks.execution._file_read import read_file
 from agentworks.execution._helper_identity import IdentityExpectation, decode_identity
-from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan, build_helper_argv
+from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._inline import execute_inline_candidate, prepare_inline_candidate
 from agentworks.execution._inline_control import FailureCode, FailurePhase, parse_failure
 from agentworks.execution._runtime_prerequisite import (
@@ -72,30 +72,6 @@ def test_wire_identity_decoder_rejects_invalid_shapes_without_retaining_input(va
         decode_identity(value)
 
     assert "identity-wire-canary" not in repr(raised.value.args)
-
-
-def test_direct_launcher_is_the_fixed_minimal_helper_environment() -> None:
-    argv = build_helper_argv(
-        _plan(IdentityMode.DIRECT),
-        runtime_path="/usr/bin/python3.11",
-        fixed_source="fixed-helper-source",
-        nonce="0" * 32,
-    )
-
-    assert argv == (
-        "/usr/bin/env",
-        "-i",
-        "PATH=/usr/bin:/bin",
-        "LANG=C",
-        "LC_ALL=C",
-        "/usr/bin/python3.11",
-        "-I",
-        "-S",
-        "-B",
-        "-c",
-        "fixed-helper-source",
-        "0" * 32,
-    )
 
 
 @pytest.mark.parametrize(

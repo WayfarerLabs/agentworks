@@ -14,7 +14,12 @@ from agentworks.execution._file_snapshot_bundle import FIXED_BUNDLE
 from agentworks.execution._file_snapshot_protocol import FileSnapshotBeginRequest, encode_file_snapshot_request
 from agentworks.execution._helper_bundle import build_helper_modules
 from agentworks.execution._helper_identity import IdentityExpectation
-from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan, build_helper_argv
+from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._runtime_prerequisite import (
+    RuntimeSelection,
+    RuntimeTargetOS,
+    build_runtime_identity_helper_argv,
+)
 from agentworks.execution.carrier import PreparedInvocation
 from agentworks.execution.carriers.ssh.connection import SSHConnection, build_ssh_argv
 
@@ -204,12 +209,12 @@ def test_snapshot_helper_retains_windows_and_qga_delivery_headroom() -> None:
         )
     )
     invocation = PreparedInvocation(
-        build_helper_argv(
+        build_runtime_identity_helper_argv(
             plan,
-            runtime_path="/usr/bin/python3",
+            selection=RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
             fixed_source=FIXED_BUNDLE.bootstrap,
             nonce="0" * 32,
-        )
+        )[0]
     )
     native_root = Path(Path.cwd().anchor)
     connection = SSHConnection(
