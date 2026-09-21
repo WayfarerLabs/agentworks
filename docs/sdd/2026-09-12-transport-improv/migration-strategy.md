@@ -59,6 +59,41 @@ scope. Finalization also remains explicit: returning from a legacy helper or lea
 does not prove that remote effects stopped. This inventory locates the integration work, not
 implemented production ownership or accepted recovery.
 
+### Recovery-target identity inventory, 2026-09-21
+
+The read-only audit at `368f5f0c` distinguishes logical admission from target identification.
+`db/models.py` stores VM name, site, hostname, timestamps and provider metadata, but no common
+guest-generation or boot identity. `last_started_at` is a successful start/create observation time,
+not such an identity. Session boot IDs belong to session process fingerprints observed after guest
+access. The operation claim stores a logical resource key and operation ID; it does not retain the
+VM row or its provider binding when `Database.delete_vm()` removes that row.
+
+| Platform | Existing persisted selector                 | Evidence supported by the current source                                                         |
+| -------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| GCP      | Project, zone, name and numeric instance ID | The platform explicitly verifies provider incarnation identity; this is not guest boot identity. |
+| AWS      | Create-returned EC2 instance ID             | Subsequent operations address that exact provider selector.                                      |
+| Azure    | ARM resource ID                             | Resource-group/name address; no separate VM generation is retained.                              |
+| Proxmox  | Node and VMID                               | Address coordinates; no persisted creation generation.                                           |
+| WSL2     | Distribution name                           | Name coordinate only.                                                                            |
+| Lima     | Instance name                               | Name coordinate only; remote placement-host identity is not in that VM metadata.                 |
+
+These classifications come from the platform implementations and their persisted metadata, not
+native replacement experiments. The provisional VM row has empty provider metadata before create
+dispatch; successful and retained-failure provisioning results supply it afterward. Core must
+therefore acquire logical ownership first and attach the actual target binding once available,
+before dispatching target-dependent file work. A current lookup by VM or site name must not silently
+replace the original binding during recovery. Site names and SSH routes are not canonical shared
+host identities.
+
+`NativeExecutionBinding` currently contains carrier, delivery account and runtime selection only.
+`prepare_target_identity` resolves execution accounts, not VM identity. Neither it nor the current
+RunContext supplies the durable target/recovery handoff. That integration must retain the original
+operation's relevant selectors and file recovery facts without persisting carrier credentials. This
+inventory does not introduce a mandatory new guest marker or claim a universal provider incarnation
+guarantee. Claims coordinate participating operations in one state database; when recovery lacks the
+target or no-further-effects evidence it needs, it must report that gap rather than reinterpret a
+name, timestamp or claim row as proof.
+
 ### Remaining-native-platform inventory, 2026-09-21
 
 The read-only inventory at `bf819094` covers Lima, AWS EC2, Azure VM and GCP GCE. The cloud native

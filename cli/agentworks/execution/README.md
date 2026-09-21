@@ -528,12 +528,15 @@ whole nested operation. Its first attempt commits possible dispatch before retur
 send work. Later attempts reuse the durable claim. Explicit close stops admission and refuses while
 a borrow or unresolved attempt remains; it does not infer remote quiescence from local return.
 
-`_file_operations.py` borrows that owner for bounded inline read, stat, inventory, conditional
-removal and metadata composition. Metadata name lookup and mutation share one borrow and deadline;
-successful lookup and normal helper termination are required before mutation. Candidate observations
-are recorded before settlement, independently of expiry and unresolved ownership. These calls close
-only their borrow, including on escaping control flow. They do not release the database claim,
-replay a failed request or provide public FileAccess error reduction.
+`_file_operations.py` uses the caller's active borrow for bounded inline read, stat, inventory,
+conditional removal and metadata composition. Metadata name lookup and mutation share one borrow and
+deadline; successful lookup and normal helper termination are required before mutation. Candidate
+observations are recorded before settlement, independently of expiry and unresolved ownership. This
+composition, upload, download, JSON and memory reads neither acquire nor close their borrow,
+including on escaping control flow. The caller keeps serial ownership through private-outcome
+capture before relinquishing it. These helpers do not release the database claim, replay a failed
+request or provide public FileAccess error reduction. Core outcome custody and durable recovery
+remain integration work; the borrow parameter alone does not implement them.
 
 `_file_upload.py` composes staging, finite source consumption, publication and ordered cleanup under
 one borrowed owner. It consumes bounded chunks without rewinding or retaining the whole source and

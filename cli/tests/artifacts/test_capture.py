@@ -481,7 +481,7 @@ def test_git_storage_limit_and_failure_cleanup(repository):
     assert not staging.exists()
 
 
-def test_git_storage_limit_does_not_interrupt_fixed_repository_initialization(monkeypatch, tmp_path):
+def test_git_storage_limit_does_not_interrupt_repository_initialization(monkeypatch, tmp_path):
     original = subprocess.Popen
     completed = tmp_path / "completed"
 

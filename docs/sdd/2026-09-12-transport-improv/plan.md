@@ -1295,6 +1295,12 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       cannot lose cleanup responsibility, and distinguish unresolved remote effects from
       proved-inert cleanup debt rather than using `requires_owner_retention` as a blanket claim
       release rule. Keep the coordinator free of file protocols and a second file lock.
+- [x] Change private upload, download, JSON, memory-read and single-file compositions to accept a
+      caller-owned `OperationBorrow` without acquiring or closing it. Nested compositions reuse the
+      same borrow. Focused lifetime tests cover normal, invalid and exceptional results and prove
+      that an unresolved attempt still prevents owner release after borrow closure. This
+      prerequisite does not complete core outcome custody, durable recovery or production
+      FileAccess.
 - [ ] Complete the durable recovery handoff for file work, including pre-dispatch reconciliation
       identity and exact cleanup binding without storing payload contents. Test process loss before
       response, after response and during handoff. A surviving claim without recovery facts is not
@@ -1353,6 +1359,20 @@ sources), file lint, locked-SDD/rulesync, typer isolation and whitespace gates p
 pass 160 Python tests, 103 Node tests and both deterministic double-build comparisons. No live
 infrastructure was exercised. The draft remains in implementation, with all three public
 feedback/fix rounds unused.
+
+Hosted run `35606895496` at `368f5f0c` confirms the import-test correction on Linux Python 3.13; the
+Linux 3.12 and 3.14 lanes also pass. Windows Python 3.13 instead fails during artifact-capture
+cleanup with `WinError 32` on the temporary bare repository's `objects` directory. The one-byte
+storage limit prevents initialization from returning successfully, so fetch is not reached. The
+traceback does not identify the process holding the directory or prove that termination caused the
+conflict.
+
+The scoped CI correction checks storage after template-free Git initialization exits, while keeping
+deadline and output checks active. Fetch and subsequent commands retain in-flight storage checks.
+This removes size-driven interruption from the failing initialization path without retries or
+suppressed cleanup errors. A synthetic slow-initializer regression proves that sequencing change,
+not native Windows handle cleanup. Windows confirmation remains required; this is not a general
+proof of descendant termination for interrupted Git operations.
 
 ### Buffered execution result checkpoint
 

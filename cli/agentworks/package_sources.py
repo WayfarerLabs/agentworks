@@ -420,9 +420,9 @@ class PackageCapture:
         if key not in self._repositories:
             repository = self.root / str(len(self._repositories))
             repository.mkdir()
-            # Empty bare initialization has fixed local growth. Let it release
-            # its directory handles before rejecting an undersized limit;
-            # remote acquisition remains continuously monitored below.
+            # Template-free initialization creates Git's local skeleton. Check
+            # storage after it exits, avoiding size-driven interruption during
+            # setup; remote acquisition remains continuously monitored below.
             self._run(repository, "init", "--bare", "--template=", check_storage_while_running=False)
             self._run(
                 repository,
