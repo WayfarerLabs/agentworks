@@ -23,14 +23,16 @@ workstation and provider matrix; report skips separately.
 The integration-marked file-delivery tests compose the production fixed helper bundles with the real
 SSH carrier and the fixture account's direct identity plan. They exercise bounded binary read, typed
 absence and limit refusal, then stage creation, exact-offset chunks, helper-backed reading,
-reconciliation and exact scratch cleanup with `/usr/bin/python3`. Each helper operation receives one
-carrier call with sensitive input, and payloads stay out of invocation and result representations.
-The same boundary downloads an immutable snapshot in exact chunks, including a nonzero offset, then
-recovers cleanup-only ownership and removes its exact fixed-root scratch object. These loopback
-Linux cases are adapter evidence for transport's private helpers. They do not expose `FileAccess`,
-establish production grants or supply native workstation/provider acceptance. The snapshot fixture
-requires `/tmp` to be a root-owned mode-1777 directory, matching the production helper prerequisite;
-namespaces that remap its owner skip that happy-path case before dispatch.
+reconciliation and exact scratch cleanup with an explicit Linux `/usr/bin/python3` runtime
+selection. Every operation requires a positive runtime-prerequisite result before its helper
+observation. The fixed helper prefix and request share sensitive stdin; the short bootstrap remains
+in argv. Each helper operation receives one carrier call, and payloads stay out of invocation and
+result representations. The same boundary downloads an immutable snapshot in exact chunks, including
+a nonzero offset, then recovers cleanup-only ownership and removes its exact fixed-root scratch
+object. These loopback Linux cases are adapter evidence for transport's private helpers. They do not
+expose `FileAccess`, establish production grants or supply native workstation/provider acceptance.
+The snapshot fixture requires `/tmp` to be a root-owned mode-1777 directory, matching the production
+helper prerequisite; namespaces that remap its owner skip that happy-path case before dispatch.
 
 For the operator's integration tester, combine the SSH and transport branches in a disposable local
 branch. Record both input commit IDs, the integrated commit, conflict resolutions and the installed
@@ -128,9 +130,11 @@ admission after a block or refresh. Raw trust files remain under their explicit 
 Forwarding's acknowledgment proves authenticated session establishment and successful local listener
 setup. It does not probe destination health. Its tests include occupied first/later listeners,
 separate address families, refused trust/authentication/command execution, and binary traffic.
-Record actual client/server versions and independently verify released listeners and fixture
-processes. Native Windows and macOS need their own observations; Linux loopback results do not
-establish their process or terminal behavior.
+Owner-boundary regressions cover inert worker admission, interruption after process admission,
+repeated close interruptions, natural exit versus cleanup kill, and delayed worker shutdown. Record
+actual client/server versions and independently verify released listeners and fixture processes.
+Native Windows and macOS need their own observations; Linux loopback results do not establish their
+process or terminal behavior.
 
 Enrollment fixtures exercise actual first-contact writes followed by strict verification, CA and
 revocation policy, mismatches, failed-authentication key retention and strict recovery. Fault cases

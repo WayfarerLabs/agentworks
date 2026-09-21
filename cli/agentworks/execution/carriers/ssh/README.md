@@ -110,8 +110,9 @@ Delivered output is not retained in the report. Endpoint failure is reported on 
 boundary and still performs bounded local client cleanup.
 
 The shared process core owns client construction separately from caller-driven byte I/O. Its
-remaining cleanup-interruption and native-platform gates also apply to this adapter; forwarding
-still has a separate launch path. Local cleanup never establishes remote cancellation.
+remaining cleanup-interruption and native-platform gates also apply to this adapter. Buffered/live
+execution and forwarding use the same process owner. Local cleanup never establishes remote
+cancellation.
 
 `open_local_forwards` accepts explicit `LocalForward` values with numeric bind addresses and literal
 destinations. The returned `OwnedForwarding` is a context manager with `wait()` and idempotent
@@ -124,10 +125,13 @@ authenticated held session and successful requested local binds. It does not pro
 health or later forwarding permission. Accounts that prohibit command execution cannot use this
 mechanism. Separate IPv4/IPv6 requests must each succeed.
 
-An owned worker drains the client's pipes while the caller holds the resource, retaining no raw
-client diagnostics. Closing ends owned stdin, kills/reaps the local client within a bounded
-allowance and joins the worker. Unproven local cleanup raises an observation failure. No cleanup
-claim extends to a remote process after connection loss.
+The shared owner is retained before launch. An owned worker starts inert and may drain the client's
+pipes only after shared startup returns, retaining no raw client diagnostics. Closing prevents
+further worker pipe access, settles the shared owner and checks worker termination. The local
+kill/reap allowance is bounded; process construction and total settlement have no proven hard time
+bound. Unproven local cleanup or worker termination raises an observation failure. Cleanup kill
+status is not a natural client exit, and no cleanup claim extends to a remote process after
+connection loss.
 
 The [SSH test guide](../../../../tests/execution/carriers/ssh/README.md) distinguishes local fixture
 coverage from supported-platform integration evidence.

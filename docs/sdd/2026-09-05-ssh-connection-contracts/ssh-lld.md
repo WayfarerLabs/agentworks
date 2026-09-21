@@ -118,8 +118,10 @@ interruption at cleanup-loop entry that can leave a child and pipes live. Its
 [startup evidence](../2026-09-12-transport-improv/prior-art-research.md#local-process-startup-and-interruption)
 and [lifecycle design](../2026-09-12-transport-improv/execution-lifecycle-lld.md) retain the current
 limits. Concurrent external reaping can also make exact local ownership uncertain. Native platform
-proof and correction of the cleanup gap remain acceptance work. Forwarding still launches its client
-separately and needs the corresponding ownership implementation and proof.
+proof and correction of the cleanup gap remain acceptance work. Forwarding adopts the same
+`LocalProcessOwner` with a separately gated drain worker; its
+[ownership design](forwarding-lld.md#launch-ownership-integration) and measured evidence distinguish
+this adoption from complete native acceptance.
 
 Live measurements confirm that guest workloads and bootstrap descendants can survive local
 observation expiry. The shared
