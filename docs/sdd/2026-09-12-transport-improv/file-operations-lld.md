@@ -294,9 +294,10 @@ receipt alone nor transport loss establishes quiescence.
 
 Every follow-on mutation must validate the still-existing exact operation receipt before creating
 any artifact. After cleanup, a delayed chunk or publication request therefore refuses instead of
-recreating state. Database exclusion alone does not establish this: the current publication
-primitive creates its sibling stage before reopening scratch, so its future exchange must admit the
-operation before calling the primitive. This is a concrete prerequisite, not a tombstone service.
+recreating state. Database exclusion alone does not establish this. Scratch-backed `publish_file`
+now validates and holds its receipt before creating the sibling; the future exchange must preserve
+that primitive-owned admission and prove operation ordering, not duplicate its checks. This is a
+concrete prerequisite, not a tombstone service.
 
 Publication retains a sibling stage in the actual destination directory for its access-metadata
 semantics. Its candidate ownership record is separately bounded and immutable, rather than a rewrite

@@ -303,6 +303,13 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       requests for approved-root operations through core-owned parent decomposition, without
       granting parent/sibling authority. Bind those operations in the complete FileAccess surface
       before the additive RunContext gate, not as a forwarding layer over legacy files.
+- [ ] Measure the complete publication helper family and carrier framing before accepting its
+      delivery shape. At `5f5ef96d`, the standalone publication test fixture is 31,880 source
+      characters, or 31,916 in a minimal Windows Python command. The actual demoting helper and SSH
+      serialization produce 33,108 Windows command characters, exceeding 32,767. Dropping the unused
+      read-protocol module while retaining framing reduces that fixture to 31,076; its dispatcher is
+      still a test, not the production exchange. Select only actual family dependencies and prove
+      complete Windows and Proxmox request bounds without an implicit executable-staging fallback.
 - [x] Deliver private stage creation and exact-offset chunk exchanges using sensitive input,
       complete typed observations, original destination binding and the fixed transaction lock. All
       three private lanes are clean at `85d27904`, including post-cleanup expiry and exact chunk
