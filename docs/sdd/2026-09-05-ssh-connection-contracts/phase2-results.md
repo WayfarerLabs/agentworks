@@ -100,6 +100,29 @@ website checks passed 160 Python and 103 Node tests, and both site-base double b
 identical. These local results do not establish native Windows/macOS or full production integration
 acceptance.
 
+## Real SSH file-helper delivery
+
+Test revision `9375234d`, integrated with transport `806741ca`, adds two real OpenSSH cases using
+transport's current fixed helper bundles and result decoding. Both passed in the implementation
+worktree and an independent lead repeat. The lead repeat used the local host because its sandboxed
+fixture could not start sshd and skipped both cases; that skipped run supplies no acceptance
+evidence. The passing bed was Linux 6.1.0-52-arm64 with OpenSSH 9.2p1 Debian-2+deb12u10, project
+Python 3.12.13 and guest-helper `/usr/bin/python3` 3.11.2. Every case used fresh loopback keys/trust
+and the fixture account's direct identity, without operator configuration, remote infrastructure or
+elevation.
+
+The read case proves exact binary data and SHA-256 plus distinct typed absence and size-limit
+refusal. The transfer case proves stage creation, two exact-offset/digest chunks, helper readback,
+receipt reconciliation and typed cleanup of the exact scratch artifact. Each of the nine operations
+uses one carrier call. Raw carrier reports declare delivered retention and contain no output bytes;
+payload canaries are absent from invocation and result representations. The stage root is empty
+following cleanup. The lead independently found no process referring to the owned fixture directory,
+then removed and verified absence of that directory, including credentials and read fixtures.
+
+These cases supply SSH boundary evidence for the private read/staging helpers. They do not close
+production FileAccess, malformed-response and interruption coverage, publication, database
+coordination, elevation, native workstation/provider or full file-only workflow acceptance.
+
 ## Remaining integration and acceptance
 
 Transport [#833](https://github.com/WayfarerLabs/agentworks/pull/833), observed at
