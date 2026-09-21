@@ -438,6 +438,17 @@ Windows SSH serialization of their shared account bundle measures 8,483 characte
 selection and 8,533 for Darwin selection. Native macOS selection, real older interpreters, remaining
 helper-family adoption and public diagnostic composition remain open.
 
+Hosted run `35575344113` at `cbd9a66f` passed all gates except Windows and its aggregate gate: both
+actual trampoline refusal tests observed UNKNOWN because Python text output translated the
+protocol's LF to CRLF. At `f646b04d`, all three runtime records use binary ASCII output; parsing
+remains strict. The subprocess fixture now reproduces Windows text translation on every host and
+also covers READY followed by helper bytes. All three cases fail with the old writer restored.
+Independent project and complexity reviews are clean, 71 focused tests pass, and the full suite
+passes 12,051 tests with 13 skips. All static, documentation and website gates pass again, including
+both deterministic builds. Representative account Windows command strings now measure 8,615/8,665
+characters for Linux/Darwin selection. Fixed-head hosted Windows confirmation remains pending; this
+CI correction neither expands supported workload platforms nor consumes a public feedback round.
+
 Fixed file delivery has three clean private reviews at `72897a31`, with 11,958 full-suite passes and
 13 skips. The six production bundles produce parsed invalid-request transcripts under distribution
 Python 3.11. Successful operation tests separately cover every family: object/inventory use the
