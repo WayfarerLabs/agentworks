@@ -291,21 +291,40 @@ Transport's
 publishes `ae1ce293` after clean private reviews and hosted validation. It removes the candidate's
 post-wait helper-failure veto from terminal/lifecycle completion and adds fixed transient-unit
 collection. It changes neither the shared process pump nor SSH interfaces. The requested second
-native round retains both prior material findings as retest obligations, including systemd 252 and
-the unavailable Proxmox 9 cell; green local checks alone do not close them.
+native round retests both prior material findings, including systemd 252 and the previously
+unavailable Proxmox 9 cell; green local checks alone do not close them.
 
 Local SSH rebase `3c7ede4d64c4034d87dca88aa1e42bbc00b55284` has no conflicts or SSH-source edits.
 Its full tree `5857ccbc0f66e8591b56cba8bf78282275757ced` exactly equals the requested composition of
 transport `ae1ce293` and published SSH `b57b45df1`; the CLI tree is
 `77a52a47fb94ae74eb7106f41b156eed8b2e7bea`. This proves source equivalence, not native acceptance.
-The published SSH pin remains unchanged while the complete native report is pending.
+The published SSH pin stayed unchanged until the complete native report arrived.
 
 The combined non-integration suite passes **12,707 tests with 14 skips**. Full Ruff/format, mypy
 (1,067 sources), file lint, locked-SDD, rulesync and typer-isolation checks pass. Website Python and
 Node suites and deterministic double builds for both site bases pass. Earlier SSH runtime reviews
 and live evidence retain their recorded pins; this dependency rebase introduces no SSH behavior.
-Terminal delivery, RunContext composition, production creation binding and full supported-platform
-acceptance remain open.
+
+The
+[complete second native report](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-5769116518)
+uses composed head `73cdc437013c503bb9b893c6447896c895b06a4b` with the identical CLI tree above. It
+verifies both fixes through SSH on Debian 12/systemd 252 and Debian 13/systemd 257, plus QGA on
+Proxmox 8.4.21 and 9.2.11 with the corresponding guests. Immediate-exit, delayed-exit and partial
+reader cases retain stable lifecycle completion and honest input-failure facts. Four repeated
+invalid-identity starts per cell leave no failed unit or cgroup, while successful and nonzero exits
+retain wait, stream and boundary evidence.
+
+The tester also repeats identity/group selection, child-cgroup placement, detached-descendant
+cleanup, binary stream fidelity, forgery resistance, honest observation interruption without replay,
+and absence of staging. The report verifies teardown at provider, unit, cgroup, process and scratch
+layers. Its composed gates pass, including **12,708 non-integration tests with 13 skips** on the
+tester's workstation. These measured results resolve the two reported candidate defects and the
+previously missing Proxmox 9 cell; they do not turn lifecycle completion into overall success.
+
+The workstation axis is still Linux-only. Native asymmetric stream failure and `waitpid` fault
+injection remain unmeasured. Terminal delivery, RunContext composition, production creation binding
+and full supported-platform SSH acceptance remain open. Publishing this dependency update does not
+consume an SSH public feedback/fix round or authorize a ready signal.
 
 ## Remaining integration and acceptance
 
