@@ -29,8 +29,6 @@ from agentworks.execution._file_upload import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from agentworks.execution._file_publication import Create, CreateMetadata, Match, Replace
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution._runtime_prerequisite import RuntimeSelection
@@ -215,7 +213,7 @@ class FileOperation:
             outcome = prepared.run()
         except BaseException as control:
             fact = control.__cause__
-            if isinstance(fact, FileUploadControlFact) and prepared.control_outcome is fact.outcome:
+            if isinstance(fact, FileUploadControlFact):
                 try:
                     self._capture_upload(active, fact.outcome)
                 except BaseException:
@@ -274,7 +272,7 @@ class FileOperation:
             outcome = prepared.run()
         except BaseException as control:
             fact = control.__cause__
-            if isinstance(fact, FileJsonControlFact) and prepared.control_outcome is fact.outcome:
+            if isinstance(fact, FileJsonControlFact):
                 try:
                     self._capture_json_update(active, fact.outcome)
                 except BaseException:
@@ -287,51 +285,30 @@ class FileOperation:
     def _capture(self, active: _ActiveFileDownload, outcome: FileDownloadOutcome) -> None:
         active.outcome = outcome
         active.prepared.release_sink()
-        unfinished = (
-            UnfinishedFileDownload(active.carrier, active.binding, outcome)
-            if outcome.requires_owner_retention
-            else None
-        )
-        self._complete_capture(active, self._active_downloads, unfinished, self._retain_unfinished)
+        if outcome.requires_owner_retention:
+            self._retain_unfinished(UnfinishedFileDownload(active.carrier, active.binding, outcome))
+        active.borrow.close()
+        self._active_downloads.pop(id(active))
 
     def _retain_unfinished(self, download: UnfinishedFileDownload) -> None:
         self._unfinished_downloads.append(download)
 
     def _capture_upload(self, active: _ActiveFileUpload, outcome: FileUploadOutcome) -> None:
         active.outcome = outcome
-        unfinished = (
-            UnfinishedFileUpload(active.carrier, active.binding, outcome) if outcome.requires_owner_retention else None
-        )
-        self._complete_capture(active, self._active_uploads, unfinished, self._retain_unfinished_upload)
+        if outcome.requires_owner_retention:
+            self._retain_unfinished_upload(UnfinishedFileUpload(active.carrier, active.binding, outcome))
+        active.borrow.close()
+        self._active_uploads.pop(id(active))
 
     def _retain_unfinished_upload(self, upload: UnfinishedFileUpload) -> None:
         self._unfinished_uploads.append(upload)
 
     def _capture_json_update(self, active: _ActiveFileJsonUpdate, outcome: FileJsonOutcome) -> None:
         active.outcome = outcome
-        unfinished = (
-            UnfinishedFileJsonUpdate(active.carrier, active.binding, outcome)
-            if outcome.requires_owner_retention
-            else None
-        )
-        self._complete_capture(
-            active,
-            self._active_json_updates,
-            unfinished,
-            self._retain_unfinished_json_update,
-        )
-
-    @staticmethod
-    def _complete_capture[BindingT, PreparedT, OutcomeT, UnfinishedT](
-        active: _ActiveFileCall[BindingT, PreparedT, OutcomeT],
-        active_calls: dict[int, _ActiveFileCall[BindingT, PreparedT, OutcomeT]],
-        unfinished: UnfinishedT | None,
-        retain: Callable[[UnfinishedT], None],
-    ) -> None:
-        if unfinished is not None:
-            retain(unfinished)
+        if outcome.requires_owner_retention:
+            self._retain_unfinished_json_update(UnfinishedFileJsonUpdate(active.carrier, active.binding, outcome))
         active.borrow.close()
-        active_calls.pop(id(active))
+        self._active_json_updates.pop(id(active))
 
     def _retain_unfinished_json_update(self, update: UnfinishedFileJsonUpdate) -> None:
         self._unfinished_json_updates.append(update)

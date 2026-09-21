@@ -291,7 +291,7 @@ def _prepare_upload_borrowed(
     binding, canonical_condition, canonical_metadata = inputs
     state = _WorkingState(binding, secrets.token_bytes(16), operation)
     workflow = _UploadWorkflow(operation, source, canonical_condition, canonical_metadata, deadline, state)
-    return _PreparedUpload(binding, source, state, workflow)
+    return _PreparedUpload(binding, state, workflow)
 
 
 @dataclass(slots=True, repr=False)
@@ -299,7 +299,6 @@ class _PreparedUpload:
     """Validated upload state attachable to core custody before dispatch."""
 
     binding: FileUploadBinding
-    source: ByteSource
     state: _WorkingState
     workflow: _UploadWorkflow
     control_outcome: FileUploadOutcome | None = field(default=None, init=False)

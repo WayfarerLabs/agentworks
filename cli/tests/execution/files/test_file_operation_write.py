@@ -317,7 +317,8 @@ def test_local_write_refusals_close_predispatch_borrows(
             )
 
         assert upload_carrier.calls == json_carrier.calls == 0
-        assert operation.active_uploads == operation.active_json_updates == ()
+        assert operation.active_uploads == ()
+        assert operation.active_json_updates == ()
         owner.close()
     finally:
         database.close()
@@ -447,7 +448,7 @@ def test_upload_retention_failure_preserves_original_control_and_attached_source
         assert isinstance(fact, FileUploadControlFact)
         active = operation.active_uploads[0]
         assert active.outcome is fact.outcome is captured[0].outcome
-        assert active.prepared.source is source
+        assert active.prepared.workflow._source is source  # noqa: SLF001
         assert active.prepared.state.token == fact.outcome.token
         assert operation.unfinished_uploads == ()
         with pytest.raises(StateError):
@@ -494,7 +495,6 @@ def test_json_child_allocation_failure_keeps_preattached_token_and_original_cont
         child = active.prepared.state.active_upload
         assert child is not None
         assert child.state.token != previous.token
-        assert child.source is child.workflow._source  # noqa: SLF001
         assert operation.unfinished_json_updates == ()
         with pytest.raises(StateError):
             owner.borrow()
@@ -553,10 +553,9 @@ def test_json_child_capture_failure_does_not_reuse_unrelated_upload_fact(
 
     def fail_child_capture(
         self: _JsonState,
-        upload: _file_upload._PreparedUpload,  # noqa: SLF001
         outcome: _file_upload.FileUploadOutcome,
     ) -> None:
-        del self, upload, outcome
+        del self, outcome
         raise control from prior_fact
 
     monkeypatch.setattr(_JsonState, "capture_upload", fail_child_capture)

@@ -186,14 +186,7 @@ class _State:
         if replace:
             self.runtime_prerequisite = observation
 
-    def attach_upload(self, upload: _PreparedUpload) -> None:
-        if self.active_upload is not None:
-            raise AssertionError("JSON update already has an attached child upload")
-        self.active_upload = upload
-
-    def capture_upload(self, upload: _PreparedUpload, outcome: FileUploadOutcome) -> None:
-        if self.active_upload is not upload:
-            raise AssertionError("JSON update lost its attached child upload")
+    def capture_upload(self, outcome: FileUploadOutcome) -> None:
         self.upload_outcome = outcome
         if outcome.runtime_prerequisite is not None:
             self.record_runtime(outcome.runtime_prerequisite)
@@ -307,7 +300,6 @@ class _PreparedJsonUpdate:
     binding: FileJsonBinding
     state: _State
     workflow: _JsonWorkflow
-    control_outcome: FileJsonOutcome | None = field(default=None, init=False)
 
     def run(self) -> FileJsonOutcome:
         try:
@@ -319,14 +311,13 @@ class _PreparedJsonUpdate:
                 if not isinstance(cause, FileUploadControlFact) or child.control_outcome is not cause.outcome:
                     raise control from None
                 try:
-                    self.state.capture_upload(child, cause.outcome)
+                    self.state.capture_upload(cause.outcome)
                 except BaseException:
                     raise control from cause
             try:
                 self.state.deadline_exceeded = self.state.deadline_exceeded or self.workflow.deadline.expired
                 outcome = self.state.finish()
                 fact = FileJsonControlFact(outcome)
-                self.control_outcome = outcome
             except BaseException:
                 raise control from None
             raise control from fact
@@ -545,9 +536,9 @@ class _JsonWorkflow:
             deadline=self._deadline,
             inputs=(binding, condition, self._inputs.create_metadata),
         )
-        self._state.attach_upload(upload)
+        self._state.active_upload = upload
         outcome = upload.run()
-        self._state.capture_upload(upload, outcome)
+        self._state.capture_upload(outcome)
         return outcome
 
     def _complete_upload(self, outcome: FileUploadOutcome) -> FileJsonOutcome:
