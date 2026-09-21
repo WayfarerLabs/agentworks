@@ -57,6 +57,7 @@ from agentworks.execution.carrier import (
     SinkOutput,
 )
 from agentworks.operations import OperationOwner
+from tests.execution.files._file_deadline_support import AdmittedTimeoutCarrier
 from tests.execution.files._file_publication_support import (
     LocalCarrier,
 )
@@ -727,7 +728,7 @@ def test_real_carrier_timeout_records_deadline_with_unresolved_stage_begin(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    carrier = LocalCarrier()
+    carrier = AdmittedTimeoutCarrier(monkeypatch, startup_delay=0.15)
     try:
         outcome = _upload(
             owner,
@@ -736,10 +737,10 @@ def test_real_carrier_timeout_records_deadline_with_unresolved_stage_begin(
             7,
             plan,
             carrier=carrier,
-            deadline=Deadline.after(0.1),
+            deadline=Deadline.after(30),
         )
 
-        assert carrier.calls == 1
+        assert carrier.calls == 1 and carrier.admitted
         assert outcome.status is FileUploadStatus.UNCERTAIN
         assert outcome.failure is FileUploadFailure.TERMINATION
         assert outcome.deadline_exceeded and outcome.pending_remote_effects

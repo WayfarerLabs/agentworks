@@ -24,6 +24,7 @@ from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
 from agentworks.execution.carrier import CarrierReport, Deadline, ExitStatus
+from tests.execution.files._file_deadline_support import AdmittedTimeoutCarrier
 from tests.execution.files._file_download_support import (
     BytesSink,
     LostCallStdoutCarrier,
@@ -196,7 +197,7 @@ def test_real_carrier_timeout_records_deadline_with_unresolved_begin(
     install_fixture_bundle(monkeypatch, scratch, "import time; time.sleep(1)")
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
-    carrier = LocalCarrier()
+    carrier = AdmittedTimeoutCarrier(monkeypatch, startup_delay=0.15)
     sink = BytesSink()
     try:
         outcome = download(
@@ -206,10 +207,10 @@ def test_real_carrier_timeout_records_deadline_with_unresolved_begin(
             64,
             plan,
             carrier=carrier,
-            deadline=Deadline.after(0.1),
+            deadline=Deadline.after(30),
         )
 
-        assert carrier.calls == 1 and sink.calls == 0
+        assert carrier.calls == 1 and carrier.admitted and sink.calls == 0
         assert outcome.status is FileDownloadStatus.UNCERTAIN
         assert outcome.failure is FileDownloadFailure.TERMINATION
         assert outcome.deadline_exceeded and outcome.pending_remote_effects
