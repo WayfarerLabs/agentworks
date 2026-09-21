@@ -721,6 +721,24 @@ neither honors our preparation-controlled startup policy nor turns local zero in
 dispatch. Native Lima needs provider discovery composed with the shared SSH policy and delivery, or
 another proved mechanism; no legacy wrapper should be copied as the new carrier.
 
+A 2026-09-21 refresh against Lima v2.2.0 confirms that explicit `--shell` still receives
+[login startup](https://github.com/lima-vm/lima/blob/v2.2.0/cmd/limactl/shell.go), although a
+stopped instance now returns an error when start is not requested. Do not generalize the older
+zero-status case to every Lima version. The current
+[SSH discovery command](https://github.com/lima-vm/lima/blob/v2.2.0/cmd/limactl/show-ssh.go) is
+deprecated in favor of an instance SSH config, but blindly importing that config would also import
+[disabled host-key checking](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/sshutil/sshutil.go).
+Neither option supplies the independent stack's trust policy.
+
+The [instance inspector](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/store/instance.go) obtains
+the active local SSH port from the host agent; the
+[default account](https://github.com/lima-vm/lima/blob/v2.2.0/pkg/osutil/user.go) derives from the
+host user with platform/name fallbacks. Agentworks' template does not bind this account to its
+separately provisioned VM admin. The native adapter must discover endpoint facts and deliberately
+select an authenticated guest account, rather than report the configured admin as the identity of
+`limactl shell`. This is source evidence only; direct guest SSH, remote-host forwarding and trust
+migration still require implementation and native proof.
+
 The
 [WSL command parser at a366853f](https://github.com/microsoft/WSL/blob/a366853fa06b46b0797a5d359321a870a6aafce0/src/windows/common/WslClient.cpp#L1803-L1842)
 supports a direct-exec path using Windows argument parsing instead of the user's shell. This makes
