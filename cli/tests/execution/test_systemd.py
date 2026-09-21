@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import signal
 import subprocess
@@ -16,9 +17,22 @@ import pytest
 
 from agentworks.errors import ValidationError
 from agentworks.execution import systemd
-from agentworks.execution._evidence_wire import FrameReader
+from agentworks.execution._evidence_wire import Frame, FrameKind, FrameReader, encode_frame
 from agentworks.execution._helper_identity import IdentityExpectation
-from agentworks.execution._inline_control import FailureCode, FailureFact, FailurePhase, WaitFact, WaitKind
+from agentworks.execution._inline_control import (
+    FailureCode,
+    FailureFact,
+    FailurePhase,
+    StreamEnd,
+    StreamName,
+    StreamRetention,
+    WaitFact,
+    WaitKind,
+    empty_body,
+    encode_failure,
+    encode_stream_end,
+    encode_wait,
+)
 from agentworks.execution._inline_observer import InlineObservation, InlineObserver, ObservationError
 from agentworks.execution._inline_request import OutputMode
 from agentworks.execution.carrier import (
@@ -137,6 +151,41 @@ def _write(sink: ByteSink, data: bytes) -> None:
         written = sink.try_write(remaining)
         assert written is not None and 0 < written <= len(remaining)
         remaining = remaining[written:]
+
+
+def _terminal_observation(
+    run: ManagedRun,
+    *,
+    wait: WaitFact | None = None,
+    failure: FailureFact | None = None,
+    carrier_stdout_complete: bool = True,
+) -> InlineObservation:
+    """Build one grammar-valid terminal transcript through the real observer."""
+    if wait is None:
+        wait = WaitFact(WaitKind.EXIT, 0)
+    observer = InlineObserver(OutputMode.CAPTURE, 4_096)
+    reader = FrameReader(run.token, observer.accept)
+
+    def record(sequence: int, kind: FrameKind, body: bytes) -> bytes:
+        return encode_frame(run.token, Frame(sequence, kind, body))
+
+    def stream_end(stream: StreamName) -> bytes:
+        return encode_stream_end(
+            StreamEnd(stream, 0, hashlib.sha256(b"").hexdigest(), True, False, StreamRetention.CAPTURED)
+        )
+
+    records = [
+        record(0, FrameKind.LAUNCHING, empty_body()),
+        record(1, FrameKind.STREAM_END, stream_end(StreamName.STDOUT)),
+        record(2, FrameKind.STREAM_END, stream_end(StreamName.STDERR)),
+        record(3, FrameKind.WAITED, encode_wait(wait)),
+    ]
+    if failure is not None:
+        records.append(record(4, FrameKind.FAILED, encode_failure(failure)))
+    records.append(record(5 if failure is not None else 4, FrameKind.FINISHED, empty_body()))
+    _write(reader, b"".join(records))
+    reader.finish()
+    return observer.finish(reader.error, carrier_stdout_complete=carrier_stdout_complete)
 
 
 def _report(stdout: bytes = b"", *, status: int = 0, dispatch: Dispatch = Dispatch.SENT) -> CarrierReport:
@@ -270,7 +319,7 @@ def test_boundary_marker_survives_asymmetric_stdout_output_failure() -> None:
     boundary = sink.finish(report)
     assert boundary.state is BoundaryState.EMPTY
     assert boundary.failure is Failure.OUTPUT
-    helper = InlineObservation(False, None, None, WaitFact(WaitKind.EXIT, 0), None, True, None)
+    helper = _terminal_observation(run)
     result = systemd.ManagedForegroundResult(
         run,
         PrerequisiteState.READY,
@@ -285,7 +334,7 @@ def test_boundary_marker_survives_asymmetric_stdout_output_failure() -> None:
 
 def test_unknown_payload_wait_is_not_complete() -> None:
     run = ManagedRun.fresh()
-    helper = InlineObservation(False, None, None, WaitFact(WaitKind.UNKNOWN, None), None, True, None)
+    helper = _terminal_observation(run, wait=WaitFact(WaitKind.UNKNOWN, None))
     result = systemd.ManagedForegroundResult(
         run,
         PrerequisiteState.READY,
@@ -312,7 +361,7 @@ def test_valid_post_wait_helper_failure_remains_terminal_lifecycle_evidence(
 ) -> None:
     run = ManagedRun.fresh()
     failure = FailureFact(phase, code)
-    helper = InlineObservation(False, None, None, WaitFact(WaitKind.EXIT, 0), failure, True, None)
+    helper = _terminal_observation(run, failure=failure)
     result = systemd.ManagedForegroundResult(
         run,
         PrerequisiteState.READY,
@@ -326,18 +375,28 @@ def test_valid_post_wait_helper_failure_remains_terminal_lifecycle_evidence(
     assert result.complete
 
 
-@pytest.mark.parametrize("boundary_state", (BoundaryState.POPULATED, BoundaryState.INVALID))
-def test_helper_error_or_nonempty_boundary_is_not_complete(boundary_state: BoundaryState) -> None:
+def test_terminal_helper_carrier_error_is_not_complete() -> None:
     run = ManagedRun.fresh()
-    helper = InlineObservation(
-        False,
+    helper = _terminal_observation(run, carrier_stdout_complete=False)
+    assert helper.trusted_terminal
+    assert helper.error is ObservationError.CARRIER
+    result = systemd.ManagedForegroundResult(
+        run,
+        PrerequisiteState.READY,
+        Dispatch.SENT,
+        ExitStatus(code=0),
         None,
-        None,
-        WaitFact(WaitKind.EXIT, 0),
-        None,
-        True,
-        ObservationError.CARRIER if boundary_state is BoundaryState.INVALID else None,
+        helper,
+        systemd.BoundaryObservation(run, BoundaryState.EMPTY, ExitStatus(code=0), Dispatch.SENT, ExitStatus(code=0)),
     )
+    assert not result.complete
+
+
+@pytest.mark.parametrize("boundary_state", (BoundaryState.POPULATED, BoundaryState.INVALID))
+def test_nonempty_boundary_is_not_complete(boundary_state: BoundaryState) -> None:
+    run = ManagedRun.fresh()
+    helper = _terminal_observation(run)
+    assert helper.error is None
     result = systemd.ManagedForegroundResult(
         run,
         PrerequisiteState.READY,
