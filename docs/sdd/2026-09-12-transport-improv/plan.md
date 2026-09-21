@@ -1318,6 +1318,12 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       and discard partial memory buffers. Fault tests prove inert cleanup debt survives failed
       result allocation and complete-download allocation failure does not strand a borrow. No
       compatibility bridge, new claim, public view or durable recovery is introduced.
+- [x] Extend private `FileOperation` custody to uploads and JSON updates. Attach validated parent
+      and nested upload state before dispatch, preserve exact original exceptional facts before
+      borrow release, and retain child token/state when fact construction fails. Completed custody
+      omits source streams and JSON bytes. Local tests cover all JSON strategies, no-op, overlap,
+      multiple cleanup obligations, uncertain publication and failed capture; public reduction,
+      other file families and durable recovery remain incomplete.
 - [ ] Complete the durable recovery handoff for file work, including pre-dispatch reconciliation
       identity and exact cleanup binding without storing payload contents. Test process loss before
       response, after response and during handoff. A surviving claim without recovery facts is not
@@ -1420,9 +1426,9 @@ gates pass 160 Python tests, 103 Node tests and both deterministic double-build 
 infrastructure was exercised. Hosted validation of this increment remains pending; the draft has no
 review/test/merge signal and all three public feedback/fix rounds remain available.
 
-Hosted run `35614666650` at `2f34621e` subsequently passes every required check, including
-Windows Python 3.13 and Linux Python 3.12/3.13/3.14. This validates the selected workstation tests;
-it does not establish native backend acceptance or complete the remaining public composition gates.
+Hosted run `35614666650` at `2f34621e` subsequently passes every required check, including Windows
+Python 3.13 and Linux Python 3.12/3.13/3.14. This validates the selected workstation tests; it does
+not establish native backend acceptance or complete the remaining public composition gates.
 
 ### Buffered execution result checkpoint
 

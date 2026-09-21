@@ -280,22 +280,6 @@ def _prepare_upload(
     )
 
 
-def _upload_file_borrowed(
-    operation: BorrowedFixedHelperCarrier,
-    *,
-    source: ByteSource,
-    deadline: Deadline,
-    inputs: tuple[FileUploadBinding, Create | Replace | Match, CreateMetadata],
-) -> FileUploadOutcome:
-    """Run one validated upload without acquiring or closing its active borrow."""
-    return _prepare_upload_borrowed(
-        operation,
-        source=source,
-        deadline=deadline,
-        inputs=inputs,
-    ).run()
-
-
 def _prepare_upload_borrowed(
     operation: BorrowedFixedHelperCarrier,
     *,
