@@ -665,6 +665,23 @@ read/merge/publication and cleanup, not just individual exchanges. Private file 
 upload token, original destination binding, content references and cleanup debt. These values are
 working state, not another claim lifetime or a generic transaction framework.
 
+The concrete core owner permits one active serial borrower and one outstanding attempt. Before
+dispatch, the borrower records unresolved state in memory, then commits the first possible-dispatch
+transition. Later exchanges re-arm that in-memory state within the same durable claim. The file
+workflow records returned effects, references and cleanup debt before acknowledging no further
+effects; only the current borrow can settle its outstanding attempt. The coordinator does not
+interpret carrier reports or file protocols.
+
+Closing the owner and admitting a borrow share the same guard. Close first prevents new dispatch; an
+active borrow prevents release and requires explicit later finalization. A returning borrower may
+record the outstanding attempt's facts but cannot start another exchange after close. The last
+borrower does not implicitly release the claim. Only final settlement transitions the durable claim
+to resolved, followed by exact-owner release. Never attempt release before it is safe, or assume a
+failed database call committed or rolled back. A safe release may have committed before
+interruption; do not compensate by claiming the resource again. Cleanup debt remains distinct from
+possible future effects and must be returned or retained with its original binding, even after
+normal helper exit.
+
 Sequential fixed-helper calls also need a separate lifetime decision. For the exact supported
 foreground launch chain, the candidate termination rule is submitted dispatch plus an independently
 observed remote exit code of zero. The helper creates no background work, and its supported launcher
