@@ -567,6 +567,11 @@ transcripts. Read-only lookup or staging uncertainty does not imply destination 
 generic dispatch/observation failures do not establish network failure. These reducers do not
 dispatch work or manage ownership; public FileAccess integration remains incomplete.
 
+Download outcomes retain the first primary failure's exchange phase, dispatch and carrier failure.
+Later cleanup does not replace that diagnostic cause; its independent cleanup and ownership facts
+still update. Local sink failures and escaping control without a carrier report leave those exchange
+facts absent.
+
 This custody path adds no claim or admission lock and never closes the outer owner. Retaining an
 unfinished record does not establish remote quiescence or authorize claim release. It covers these
 private file calls, not complete user/admin FileAccess views, durable crash recovery or production

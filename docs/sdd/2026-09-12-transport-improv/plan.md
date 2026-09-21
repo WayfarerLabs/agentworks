@@ -1303,9 +1303,13 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
 - [x] Add concrete private result reducers for stat, inventory, removal, metadata, download,
       memory-read, upload and JSON outcomes. Preserve closed diagnostic facts, known destination
       change and partial/uncertain mutation evidence without exposing private outcome objects.
-      Generic carrier failures do not imply connectivity loss. These reducers neither manage
-      custody nor complete public FileAccess; upload/download exchange-detail retention and
-      production integration remain required.
+      Generic carrier failures do not imply connectivity loss. These reducers neither manage custody
+      nor complete public FileAccess; upload/download exchange-detail retention and production
+      integration remain required.
+- [x] Retain the first primary download failure's exchange phase, dispatch and carrier failure. Keep
+      helper failure details coherent with that primary failure while later cleanup updates
+      independent cleanup/effect facts. Local sink failures and controls without a carrier report do
+      not invent exchange evidence. Public reducer consumption remains a separate step.
 - [x] Change private upload, download, JSON, memory-read and single-file compositions to accept a
       caller-owned `OperationBorrow` without acquiring or closing it. Nested compositions reuse the
       same borrow. Focused lifetime tests cover normal, invalid and exceptional results and prove
