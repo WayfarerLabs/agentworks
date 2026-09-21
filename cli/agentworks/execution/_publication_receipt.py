@@ -458,42 +458,13 @@ def cleanup_publication_stage(
 
 def remove_publication_record(
     scratch_parent_fd: int,
+    publication_parent_fd: int,
     ownership: PublicationStageOwnership | PublicationStageCleanupDebt,
 ) -> None:
     """Remove a record after the caller has independently proved publication."""
     debt = _cleanup_debt(ownership)
     record_only = PublicationStageCleanupDebt(debt._ownership, True)
-    opened: _OpenedScratchDirectory | None = None
-    cleanup_complete = False
-    try:
-        opened = _open_owned_scratch(scratch_parent_fd, record_only._ownership._scratch_ownership)
-        record = _stat_at(opened.directory_fd, _RECORD_NAME)
-        if record is None:
-            cleanup_complete = True
-            return
-        _require_record_stat(record, record_only._ownership, record_only._ownership._record_modes)
-        try:
-            os.unlink(_RECORD_NAME, dir_fd=opened.directory_fd)
-        except OSError:
-            raise PublicationReceiptError(PublicationReceiptFailureKind.IO, cleanup_debt=record_only) from None
-        cleanup_complete = True
-    except PublicationReceiptError as error:
-        if error.cleanup_debt is not None:
-            raise
-        raise PublicationReceiptError(error.kind, cleanup_debt=record_only) from None
-    except BaseException as control:
-        raise control from PublicationReceiptError(
-            PublicationReceiptFailureKind.IO,
-            cleanup_debt=record_only,
-        )
-    finally:
-        if opened is not None:
-            close_control = opened.close()
-            if close_control is not None:
-                raise close_control from PublicationReceiptError(
-                    PublicationReceiptFailureKind.IO,
-                    cleanup_debt=None if cleanup_complete else record_only,
-                )
+    cleanup_publication_stage(scratch_parent_fd, publication_parent_fd, record_only)
 
 
 def _open_scratch(

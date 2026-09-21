@@ -272,15 +272,17 @@ def publish_file(
             if stage.publication is not None:
                 assert stage.scratch_parent_fd is not None
                 try:
-                    remove_publication_record(stage.scratch_parent_fd, stage.publication)
+                    remove_publication_record(stage.scratch_parent_fd, parent_fd, stage.publication)
                 except PublicationReceiptError as error:
                     stage.publication = error.cleanup_debt
                     raise _publication_receipt_error(error, PublicationPhase.CLEANUP) from None
                 except BaseException as interruption:
                     receipt_error = _publication_receipt_control_fact(interruption)
-                    if receipt_error is None or receipt_error.cleanup_debt is None:
+                    if receipt_error is None:
                         raise
                     stage.publication = receipt_error.cleanup_debt
+                    if receipt_error.cleanup_debt is None:
+                        stage.record_acquisition.identity = None
                     raise interruption from FilePublicationError(
                         PublicationFailureKind.UNCERTAIN,
                         PublicationPhase.PUBLICATION,

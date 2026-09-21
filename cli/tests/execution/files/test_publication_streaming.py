@@ -426,6 +426,47 @@ def test_record_unlink_interruption_after_rename_preserves_uncertainty_and_exact
     os.close(parent_fd)
 
 
+def test_completed_record_cleanup_interruption_invents_no_debt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    ready = _ready_scratch(parent_fd, b"verified")
+    interrupt = KeyboardInterrupt()
+    opened_directory = publication_receipt_module._OpenedScratchDirectory
+    original_close = opened_directory.close
+    closes = 0
+
+    def interrupt_first_close(
+        opened: publication_receipt_module._OpenedScratchDirectory,
+    ) -> BaseException | None:
+        nonlocal closes
+        closes += 1
+        result = original_close(opened)
+        return interrupt if closes == 1 else result
+
+    monkeypatch.setattr(opened_directory, "close", interrupt_first_close)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        publish_file(
+            parent_fd,
+            "target",
+            ScratchFileSource(parent_fd, ready),
+            condition=Create(),
+            create_metadata=_metadata(),
+        )
+    assert raised.value is interrupt
+    cause = raised.value.__cause__
+    assert isinstance(cause, FilePublicationError)
+    assert cause.kind is PublicationFailureKind.UNCERTAIN
+    assert cause.phase is PublicationPhase.PUBLICATION
+    assert cause.cleanup_debt is None
+    assert (tmp_path / "target").read_bytes() == b"verified"
+    assert not (_scratch_directory(tmp_path) / publication_receipt_module._RECORD_NAME).exists()
+
+    cleanup_scratch(parent_fd, ready)
+    os.close(parent_fd)
+
+
 def test_scratch_iteration_deadline_remains_a_publication_deadline(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
