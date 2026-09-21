@@ -255,7 +255,7 @@ def test_truncated_matching_record_preserves_wait_but_not_terminal(plan: Identit
     assert observation is not None
     assert observation.wait == WaitFact(WaitKind.EXIT, 23)
     assert not observation.trusted_terminal
-    assert observation.error is not None
+    assert observation.error is WireError.TRUNCATED
 
 
 def test_post_terminal_frame_revokes_terminal_evidence(plan: IdentityPlan) -> None:
@@ -329,6 +329,53 @@ def test_started_record_is_rejected_by_candidate_grammar(plan: IdentityPlan) -> 
     assert observation.error is ObservationError.ORDER
 
 
+@pytest.mark.parametrize(
+    ("transcript", "error"),
+    [
+        (
+            lambda nonce: _complete_transcript(nonce, terminal=False),
+            ObservationError.CARRIER,
+        ),
+        (
+            lambda nonce: _complete_transcript(nonce) + _record(nonce, 5, FrameKind.FINISHED, empty_body()),
+            ObservationError.POST_TERMINAL,
+        ),
+        (
+            lambda nonce: _record(nonce, 0, FrameKind.STARTED, empty_body()),
+            ObservationError.ORDER,
+        ),
+        (
+            lambda nonce: _complete_transcript(nonce) + _record(nonce, 6, FrameKind.FINISHED, empty_body())[:-1],
+            WireError.TRUNCATED,
+        ),
+        (
+            lambda nonce: (
+                _complete_transcript(nonce) + b"AGWE1 " + nonce.encode() + b" 6 LAUNCHING 2 not-canonical-base64\n"
+            ),
+            WireError.MALFORMED,
+        ),
+    ],
+    ids=["missing-terminal", "post-terminal", "order", "truncated", "malformed"],
+)
+def test_incomplete_carrier_does_not_trust_invalid_transcript(
+    plan: IdentityPlan,
+    transcript: Callable[[str], bytes],
+    error: ObservationError | WireError,
+) -> None:
+    prepared = _prepare(plan)
+
+    result = execute_inline_candidate(
+        TranscriptCarrier(transcript(prepared.nonce), stdout_complete=False),
+        prepared,
+        deadline=Deadline.after(1),
+    )
+    observation = result.observation
+
+    assert observation is not None
+    assert not observation.trusted_terminal
+    assert observation.error is error
+
+
 @pytest.mark.parametrize("kind", [FrameKind.STDOUT, FrameKind.STDERR])
 def test_launch_failure_after_empty_data_frame_is_rejected(kind: FrameKind, plan: IdentityPlan) -> None:
     prepared = _prepare(plan)
@@ -376,7 +423,7 @@ def test_raw_carrier_status_never_substitutes_for_helper_terminal(
     assert observation.error is ObservationError.MISSING_TERMINAL
 
 
-def test_incomplete_carrier_stdout_revokes_otherwise_valid_terminal(plan: IdentityPlan) -> None:
+def test_incomplete_carrier_stdout_preserves_valid_terminal(plan: IdentityPlan) -> None:
     prepared = _prepare(plan)
 
     result = execute_inline_candidate(
@@ -388,5 +435,5 @@ def test_incomplete_carrier_stdout_revokes_otherwise_valid_terminal(plan: Identi
 
     assert observation is not None
     assert observation.wait == WaitFact(WaitKind.EXIT, 23)
-    assert not observation.trusted_terminal
+    assert observation.trusted_terminal
     assert observation.error is ObservationError.CARRIER

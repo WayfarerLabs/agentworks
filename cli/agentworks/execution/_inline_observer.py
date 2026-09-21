@@ -201,6 +201,7 @@ class InlineObserver:
     def finish(self, wire_error: WireError | None, *, carrier_stdout_complete: bool) -> InlineObservation:
         """Close observation while preserving independently validated facts."""
         error: ObservationError | WireError | None = self._error or wire_error
+        trusted_terminal = self._terminal and error is None
         if error is None and (not carrier_stdout_complete or not self._terminal):
             error = ObservationError.CARRIER if not carrier_stdout_complete else ObservationError.MISSING_TERMINAL
         return InlineObservation(
@@ -209,6 +210,6 @@ class InlineObserver:
             stderr=self._streams.get(StreamName.STDERR),
             wait=self._wait,
             failure=self._failure,
-            trusted_terminal=self._terminal and error is None,
+            trusted_terminal=trusted_terminal,
             error=error,
         )
