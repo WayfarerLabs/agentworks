@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import re
 import secrets
-import subprocess
 import time
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv6Address
@@ -13,7 +12,13 @@ from threading import Event, Lock, Thread
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ConnectivityError, StateError, ValidationError
-from agentworks.execution._process import _cleanup, _ProcessStatus
+from agentworks.execution._process import (
+    LocalProcessOwner,
+    LocalProcessPipes,
+    LocalProcessRequest,
+    LocalProcessTerminal,
+    _retain_control_exception,
+)
 from agentworks.execution.carrier import Failure, PreparedInvocation
 from agentworks.execution.carriers.ssh._io import _child_environment
 from agentworks.execution.carriers.ssh.client import check_client_version
@@ -22,7 +27,7 @@ from agentworks.execution.carriers.ssh.connection import admit_connection, build
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from types import TracebackType
-    from typing import Self
+    from typing import IO, Self
 
     from agentworks.execution.carrier import Deadline
     from agentworks.execution.carriers.ssh.connection import SSHConnection
@@ -30,6 +35,7 @@ if TYPE_CHECKING:
 _POLL_SECONDS = 0.01
 _CHUNK = 65_536
 _JOIN_SECONDS = 1.0
+_EXIT_DRAIN_SECONDS = 0.1
 
 
 @dataclass(frozen=True)
@@ -84,16 +90,19 @@ class OwnedForwarding:
     process pipes; callers may close while another caller waits.
     """
 
-    def __init__(self, status: _ProcessStatus, marker: bytes) -> None:
-        self._status = status
-        self._process = status.process
+    def __init__(self, owner: LocalProcessOwner, marker: bytes) -> None:
+        self._owner = owner
         self._marker = marker
         self._ready = Event()
         self._done = Event()
         self._stop = Event()
+        self._drain_admitted = Event()
         self._failure: Failure | None = None
-        self._status_lock = Lock()
-        self._cleaned = False
+        self._borrow_lock = Lock()
+        self._close_lock = Lock()
+        self._terminal: LocalProcessTerminal | None = None
+        self._worker_start_attempted = False
+        self._worker_stopped = False
         self._thread = Thread(target=self._drain, name="ssh-forwarding")
 
     def __enter__(self) -> Self:
@@ -105,49 +114,110 @@ class OwnedForwarding:
         self._close_preserving(exc)
 
     def close(self) -> None:
-        """End owned stdin, then kill/reap locally within the cleanup allowance."""
-        self._stop.set()
-        join_until = time.monotonic() + _JOIN_SECONDS
-        # The worker uses only nonblocking pipe reads, an interruptible 10ms
-        # poll and the shared bounded kill/reap. Joining leaves no drainer alive.
-        try:
-            self._thread.join(timeout=_JOIN_SECONDS)
-        except RuntimeError:
-            # Thread.start can be interrupted before Python publishes its
-            # started state, even when a native worker may still appear.
-            # Stop is already set, so that worker cannot begin pipe reads.
-            remaining = max(0.0, join_until - time.monotonic())
-            if self._status_lock.acquire(timeout=remaining):
-                try:
-                    self._cleaned = _cleanup(self._status)
-                finally:
-                    self._status_lock.release()
-            if not self._done.wait(max(0.0, join_until - time.monotonic())):
-                raise ForwardingError(Failure.OBSERVATION, self._status.status) from None
-            self._thread.join(timeout=max(0.0, join_until - time.monotonic()))
-        if self._thread.is_alive():
-            raise ForwardingError(Failure.OBSERVATION, self._status.status)
-        if not self._cleaned:
-            raise ForwardingError(Failure.OBSERVATION, self._status.status)
+        """Stop pipe use, then settle the shared process owner exactly once."""
+        self._settle(None)
+
+    def _start(self, request: LocalProcessRequest) -> None:
+        """Start the inert drainer, then admit it only after owner startup."""
+        self._worker_start_attempted = True
+        self._thread.start()
+        self._owner.start(request)
+        self._drain_admitted.set()
 
     def _close_preserving(self, error: BaseException | None) -> None:
+        if error is None or not isinstance(error, Exception):
+            self._settle(error)
+            return
         try:
-            self.close()
+            self._settle(None)
         except ForwardingError:
-            if error is None:
-                raise
             error.add_note("Local SSH forwarding cleanup did not complete within its bound.")
+
+    def _settle(self, interruption: BaseException | None) -> LocalProcessTerminal:
+        while True:
+            try:
+                if self._close_lock.acquire(timeout=_POLL_SECONDS):
+                    break
+            except BaseException as error:
+                interruption = _retain_control_exception(interruption, error)
+        try:
+            worker_stopped, interruption = self._stop_worker(interruption)
+            terminal = self._terminal
+            if terminal is None:
+                while True:
+                    try:
+                        terminal = self._owner.close()
+                        break
+                    except BaseException as error:
+                        interruption = _retain_control_exception(interruption, error)
+                        terminal = self._owner.snapshot().terminal
+                        if terminal is not None:
+                            break
+                self._terminal = terminal
+        finally:
+            self._close_lock.release()
+
+        cleanup_complete = worker_stopped and terminal is not None and terminal.cleaned
+        if interruption is not None:
+            if not cleanup_complete:
+                interruption.add_note("Local SSH forwarding cleanup did not complete within its bound.")
+            raise interruption
+        if not cleanup_complete:
+            raise ForwardingError(
+                Failure.OBSERVATION,
+                None if terminal is None else terminal.local_status,
+            )
+        assert terminal is not None
+        if terminal.observation_failed:
+            raise ForwardingError(Failure.OBSERVATION, terminal.local_status)
+        return terminal
+
+    def _stop_worker(self, interruption: BaseException | None) -> tuple[bool, BaseException | None]:
+        while True:
+            try:
+                with self._borrow_lock:
+                    self._stop.set()
+                break
+            except BaseException as error:
+                interruption = _retain_control_exception(interruption, error)
+
+        if not self._worker_start_attempted:
+            self._worker_stopped = True
+            return True, interruption
+        if self._worker_stopped:
+            return True, interruption
+
+        wait_until = time.monotonic() + _JOIN_SECONDS
+        while not self._done.is_set():
+            remaining = wait_until - time.monotonic()
+            if remaining <= 0:
+                return False, interruption
+            try:
+                self._done.wait(min(_POLL_SECONDS, remaining))
+            except BaseException as error:
+                interruption = _retain_control_exception(interruption, error)
+        while self._thread.is_alive():
+            remaining = wait_until - time.monotonic()
+            if remaining <= 0:
+                return False, interruption
+            try:
+                self._thread.join(timeout=min(_POLL_SECONDS, remaining))
+            except BaseException as error:
+                interruption = _retain_control_exception(interruption, error)
+        self._worker_stopped = True
+        return True, interruption
 
     def wait(self) -> int:
         """Return the local client's status; interruption closes and propagates."""
         try:
             while not self._done.wait(_POLL_SECONDS):
                 pass
-            self.close()
+            terminal = self._settle(None)
             if self._failure is not None:
-                raise ForwardingError(self._failure, self._status.status)
-            assert self._status.status is not None
-            return self._status.status
+                raise ForwardingError(self._failure, terminal.local_status)
+            if terminal.exit_status is None:
+                raise ForwardingError(Failure.OBSERVATION, terminal.local_status)
+            return terminal.exit_status
         except BaseException as error:
             self._close_preserving(error)
             raise
@@ -157,63 +227,107 @@ class OwnedForwarding:
             if deadline.expired:
                 raise ForwardingError(Failure.DEADLINE)
             if self._done.is_set():
-                raise ForwardingError(self._failure or Failure.OBSERVATION, self._status.status)
+                snapshot = self._owner.snapshot()
+                local_status = snapshot.terminal.local_status if snapshot.terminal is not None else snapshot.exit_status
+                raise ForwardingError(self._failure or Failure.OBSERVATION, local_status)
             if self._ready.is_set():
                 return
             remaining = deadline.remaining()
             self._done.wait(_POLL_SECONDS if remaining is None else min(_POLL_SECONDS, remaining))
 
-    def _drain(self) -> None:
+    def _configure_pipe(self, pipe: IO[bytes]) -> bool:
+        with self._borrow_lock:
+            if self._stop.is_set():
+                return False
+            os.set_blocking(pipe.fileno(), False)
+            return True
+
+    def _read(self, pipe: IO[bytes]) -> bytes | None:
+        with self._borrow_lock:
+            if self._stop.is_set():
+                return None
+            return os.read(pipe.fileno(), _CHUNK)
+
+    def _drain_pipes(self, pipes: LocalProcessPipes) -> None:
         received = bytearray()
-        assert self._process.stdout is not None and self._process.stderr is not None
-        outputs = [self._process.stdout, self._process.stderr]
-        try:
-            while not self._stop.is_set():
-                with self._status_lock:
-                    status = self._status.poll()
-                    status_lost = self._status.lost
-                if status_lost:
+        outputs = [pipes.stdout, pipes.stderr]
+        exit_seen_at: float | None = None
+        for pipe in (pipes.stdin, *outputs):
+            if pipe is not None:
+                try:
+                    configured = self._configure_pipe(pipe)
+                except OSError:
                     self._failure = Failure.OBSERVATION
                     return
-                if status is not None:
+                if not configured:
                     return
-                progressed = False
-                for pipe in tuple(outputs):
-                    try:
-                        chunk = os.read(pipe.fileno(), _CHUNK)
-                    except BlockingIOError:
-                        continue
-                    if not chunk:
-                        outputs.remove(pipe)
-                        if pipe is self._process.stdout and not self._ready.is_set():
-                            self._failure = Failure.INVALID_RESPONSE
-                            return
-                    progressed |= bool(chunk)
-                    if pipe is self._process.stdout and not self._ready.is_set():
-                        # Require the marker first, then discard later stdout.
-                        # A pipe read may contain both; chunk boundaries must
-                        # not change acceptance or increase retained bytes.
-                        received.extend(chunk[: len(self._marker) - len(received)])
-                        if not self._marker.startswith(received):
-                            self._failure = Failure.INVALID_RESPONSE
-                            return
-                        if received == self._marker:
-                            self._ready.set()
-                            received.clear()
-                if not progressed:
-                    self._stop.wait(_POLL_SECONDS)
+        while not self._stop.is_set():
+            snapshot = self._owner.snapshot()
+            if snapshot.observation_failed:
+                self._failure = Failure.OBSERVATION
+                return
+            progressed = False
+            for pipe in tuple(outputs):
+                try:
+                    chunk = self._read(pipe)
+                except BlockingIOError:
+                    continue
+                if chunk is None:
+                    return
+                if not chunk:
+                    outputs.remove(pipe)
+                    if pipe is pipes.stdout and not self._ready.is_set():
+                        self._failure = Failure.INVALID_RESPONSE
+                        return
+                progressed |= bool(chunk)
+                if pipe is pipes.stdout and not self._ready.is_set():
+                    received.extend(chunk[: len(self._marker) - len(received)])
+                    if not self._marker.startswith(received):
+                        self._failure = Failure.INVALID_RESPONSE
+                        return
+                    if received == self._marker:
+                        self._ready.set()
+                        received.clear()
+            if snapshot.exit_status is not None:
+                if exit_seen_at is None:
+                    exit_seen_at = time.monotonic()
+                if not outputs:
+                    if not self._ready.is_set():
+                        self._failure = Failure.INVALID_RESPONSE
+                    return
+                if time.monotonic() - exit_seen_at >= _EXIT_DRAIN_SECONDS:
+                    self._failure = Failure.OUTPUT if self._ready.is_set() else Failure.INVALID_RESPONSE
+                    return
+            if not progressed:
+                self._stop.wait(_POLL_SECONDS)
+
+    def _drain(self) -> None:
+        try:
+            while not self._drain_admitted.is_set():
+                if self._stop.wait(_POLL_SECONDS):
+                    return
+            while not self._stop.is_set():
+                snapshot = self._owner.snapshot()
+                if snapshot.observation_failed:
+                    self._failure = Failure.OBSERVATION
+                    return
+                if snapshot.terminal is not None:
+                    if snapshot.terminal.dispatch_failed:
+                        self._failure = Failure.DISPATCH
+                    elif not snapshot.terminal.cleaned or snapshot.terminal.observation_failed:
+                        self._failure = Failure.OBSERVATION
+                    elif not self._ready.is_set():
+                        self._failure = Failure.INVALID_RESPONSE
+                    return
+                if snapshot.pipes is not None:
+                    self._drain_pipes(snapshot.pipes)
+                    return
+                self._stop.wait(_POLL_SECONDS)
         except OSError:
             self._failure = Failure.OUTPUT
         except Exception:
             self._failure = Failure.OBSERVATION
         finally:
-            try:
-                with self._status_lock:
-                    self._cleaned = _cleanup(self._status)
-            except OSError:
-                self._cleaned = False
-            if not self._cleaned:
-                self._failure = Failure.OBSERVATION
             self._done.set()
 
 
@@ -250,33 +364,27 @@ def open_local_forwards(
     if deadline.expired:
         raise ForwardingError(Failure.DEADLINE)
     try:
-        process = subprocess.Popen(
-            argv,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            bufsize=0,
-            env=_child_environment(),
+        environment = _child_environment()
+        request = LocalProcessRequest(
+            tuple(argv),
+            True,
+            None if environment is None else tuple(environment.items()),
         )
     except (OSError, ValueError):
         raise ForwardingError(Failure.DISPATCH) from None
-    status = _ProcessStatus(process)
-    resource: OwnedForwarding | None = None
+    owner = LocalProcessOwner()
+    resource = OwnedForwarding(owner, (marker + "\n").encode("ascii"))
     try:
-        for pipe in (process.stdin, process.stdout, process.stderr):
-            assert pipe is not None
-            os.set_blocking(pipe.fileno(), False)
-        resource = OwnedForwarding(status, (marker + "\n").encode("ascii"))
-        # Retain ownership before starting: Thread.start itself can interrupt.
-        resource._thread.start()
+        resource._start(request)
+        del request
         resource._await_ready(deadline)
         return resource
     except BaseException as error:
-        if resource is None:
-            if not _cleanup(status):
-                error.add_note("Local SSH forwarding cleanup did not complete within its bound.")
-        else:
-            resource._close_preserving(error)
+        resource._close_preserving(error)
         if isinstance(error, (OSError, RuntimeError)):
-            raise ForwardingError(Failure.OBSERVATION, status.status) from None
+            terminal = owner.snapshot().terminal
+            raise ForwardingError(
+                Failure.OBSERVATION,
+                None if terminal is None else terminal.local_status,
+            ) from None
         raise
