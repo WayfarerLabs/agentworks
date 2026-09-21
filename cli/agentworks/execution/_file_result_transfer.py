@@ -4,20 +4,31 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Never
 
-from ._file_download import FileDownloadFailure, FileDownloadOutcome, FileDownloadStatus
+from ._file_download import (
+    FileDownloadFailure,
+    FileDownloadFailurePhase,
+    FileDownloadOutcome,
+    FileDownloadStatus,
+)
 from ._file_json import FileJsonChange, FileJsonFailure, FileJsonOutcome, FileJsonStatus
 from ._file_publication import PublicationFailureKind, PublicationPhase
-from ._file_publication_protocol import FilePublicationFailureCode
+from ._file_publication_protocol import FilePublicationFailureCode, FilePublicationFailureControl
 from ._file_result import (
+    _carrier_reason,
     _metadata,
+    _mutation_failure_reason,
     _object_failure_reason,
+    _ownership_failure_reason,
     _raise_reason,
     _raise_uncertain,
     _read_failure_reason,
     _runtime_reason,
 )
 from ._file_spool import SpoolSnapshotFailureKind
-from ._file_upload import FileUploadFailure, FileUploadOutcome, FileUploadStatus
+from ._file_stage_protocol import FileStageFailureCode, FileStageFailureControl
+from ._file_upload import FileUploadFailure, FileUploadFailurePhase, FileUploadOutcome, FileUploadStatus
+from ._scratch import ScratchFailureKind
+from .carrier import Dispatch
 from .files import (
     Change,
     FileFailureReason,
@@ -80,26 +91,55 @@ def reduce_file_memory_read(
 
 
 def _raise_download_failure(outcome: FileDownloadOutcome, *, entity_kind: str, entity_name: str) -> Never:
-    if outcome.deadline_exceeded:
-        reason = FileFailureReason.DEADLINE
-    elif outcome.coordination_uncertain or outcome.pending_remote_effects:
-        reason = FileFailureReason.COORDINATION
-    elif outcome.requires_owner_retention or outcome.cleanup_debt is not None or outcome.snapshot_ownership_uncertain:
-        reason = FileFailureReason.CLEANUP
-    else:
-        reason = {
-            None: FileFailureReason.INCOMPLETE_RESPONSE,
-            FileDownloadFailure.DEADLINE: FileFailureReason.DEADLINE,
+    _raise_reason(
+        _download_phase(outcome),
+        _download_reason(outcome),
+        entity_kind=entity_kind,
+        entity_name=entity_name,
+    )
+
+
+def _download_phase(outcome: FileDownloadOutcome) -> FileOperationPhase:
+    if outcome.failure_phase is not None:
+        return {
+            FileDownloadFailurePhase.SNAPSHOT_BEGIN: FileOperationPhase.OBSERVATION,
+            FileDownloadFailurePhase.SNAPSHOT_CHUNK: FileOperationPhase.TRANSFER,
+            FileDownloadFailurePhase.SNAPSHOT_RECONCILE: FileOperationPhase.CLEANUP,
+            FileDownloadFailurePhase.SNAPSHOT_CLEANUP: FileOperationPhase.CLEANUP,
+        }[outcome.failure_phase]
+    if outcome.failure is FileDownloadFailure.CLEANUP:
+        return FileOperationPhase.CLEANUP
+    return FileOperationPhase.TRANSFER
+
+
+def _download_reason(outcome: FileDownloadOutcome) -> FileFailureReason:
+    failure = outcome.failure
+    if failure is not None:
+        if failure is FileDownloadFailure.DEADLINE:
+            return FileFailureReason.DEADLINE
+        if failure is FileDownloadFailure.RUNTIME_PREREQUISITE:
+            return _optional_runtime_reason(outcome.runtime_prerequisite)
+        if failure is FileDownloadFailure.SNAPSHOT:
+            return _snapshot_reason(outcome)
+        if outcome.carrier_failure is not None:
+            return _carrier_reason(outcome.carrier_failure)
+        if failure is FileDownloadFailure.OBSERVATION and outcome.failure_dispatch is Dispatch.NOT_SENT:
+            return FileFailureReason.CARRIER_DISPATCH
+        return {
             FileDownloadFailure.SINK: FileFailureReason.SINK,
             FileDownloadFailure.SINK_CONTRACT: FileFailureReason.SINK_CONTRACT,
-            FileDownloadFailure.SNAPSHOT: _snapshot_reason(outcome),
             FileDownloadFailure.CLEANUP: FileFailureReason.CLEANUP,
             FileDownloadFailure.OBSERVATION: FileFailureReason.INVALID_RESPONSE,
-            FileDownloadFailure.RUNTIME_PREREQUISITE: _optional_runtime_reason(outcome.runtime_prerequisite),
             FileDownloadFailure.TERMINATION: FileFailureReason.TERMINATION,
             FileDownloadFailure.INTEGRITY: FileFailureReason.INTEGRITY,
-        }[outcome.failure]
-    _raise_reason(FileOperationPhase.TRANSFER, reason, entity_kind=entity_kind, entity_name=entity_name)
+        }[failure]
+    if outcome.deadline_exceeded:
+        return FileFailureReason.DEADLINE
+    if outcome.coordination_uncertain or outcome.pending_remote_effects:
+        return FileFailureReason.COORDINATION
+    if outcome.requires_owner_retention or outcome.cleanup_debt is not None or outcome.snapshot_ownership_uncertain:
+        return FileFailureReason.CLEANUP
+    return FileFailureReason.INCOMPLETE_RESPONSE
 
 
 def _snapshot_reason(outcome: FileDownloadOutcome) -> FileFailureReason:
@@ -131,91 +171,158 @@ def reduce_file_upload(
     entity_name: str,
 ) -> MutationResult:
     """Reduce one upload without exposing private staging or cleanup state."""
-    if outcome.status is FileUploadStatus.COMPLETE and _upload_success(outcome):
+    if outcome.status is FileUploadStatus.COMPLETE and not outcome.deadline_exceeded:
         assert outcome.revision is not None
         return MutationResult(Change.CHANGED, _revision_from_file_revision(outcome.revision))
     if outcome.publication_uncertain or outcome.publication_ownership_uncertain:
+        phase = _upload_phase(outcome)
         _raise_uncertain(
-            FileOperationPhase.PUBLICATION,
+            phase,
             _upload_reason(outcome),
             entity_kind=entity_kind,
             entity_name=entity_name,
-            dispatch=None,
+            dispatch=outcome.failure_dispatch if phase is FileOperationPhase.PUBLICATION else None,
         )
     if outcome.pending_remote_effects or outcome.coordination_uncertain:
-        # Upload does not retain which concrete exchange owns this uncertainty.
-        # Only a publication-specific fact can make it target uncertainty.
-        if outcome.publication_confirmed:
-            _raise_reason(
-                FileOperationPhase.CLEANUP,
-                _upload_reason(outcome),
-                entity_kind=entity_kind,
-                entity_name=entity_name,
-                effect=Change.CHANGED,
-            )
         _raise_reason(
-            FileOperationPhase.TRANSFER,
-            FileFailureReason.COORDINATION,
+            _upload_phase(outcome),
+            _upload_reason(outcome),
             entity_kind=entity_kind,
             entity_name=entity_name,
+            effect=Change.CHANGED if outcome.publication_confirmed else None,
         )
     effect = Change.CHANGED if outcome.publication_confirmed else None
-    phase = FileOperationPhase.CLEANUP if effect is not None else _upload_phase(outcome)
-    _raise_reason(phase, _upload_reason(outcome), entity_kind=entity_kind, entity_name=entity_name, effect=effect)
-
-
-def _upload_success(outcome: FileUploadOutcome) -> bool:
-    return (
-        outcome.publication_confirmed
-        and outcome.revision is not None
-        and outcome.revision.digest is not None
-        and outcome.revision.stat.size == outcome.binding.expected_size
-        and outcome.bytes_consumed == outcome.binding.expected_size
-        and outcome.staged_bytes == outcome.binding.expected_size
-        and outcome.content_digest == outcome.revision.digest
-        and not outcome.deadline_exceeded
-        and outcome.failure is None
-        and outcome.scratch_cleanup_debt is None
-        and outcome.publication_cleanup_debt is None
-        and not outcome.stage_ownership_uncertain
-        and not outcome.publication_ownership_uncertain
-        and not outcome.pending_remote_effects
-        and not outcome.coordination_uncertain
-        and not outcome.requires_owner_retention
+    _raise_reason(
+        _upload_phase(outcome),
+        _upload_reason(outcome),
+        entity_kind=entity_kind,
+        entity_name=entity_name,
+        effect=effect,
     )
 
 
 def _upload_reason(outcome: FileUploadOutcome) -> FileFailureReason:
+    failure = outcome.failure
+    if failure is FileUploadFailure.OWNERSHIP:
+        return _upload_ownership_reason(outcome)
+    if failure is FileUploadFailure.DEADLINE:
+        return FileFailureReason.DEADLINE
+    if failure is FileUploadFailure.STAGE and outcome.stage_failure is not None:
+        return _stage_reason(outcome.stage_failure)
+    if failure is FileUploadFailure.PUBLICATION and outcome.publication_failure is not None:
+        return _publication_reason(outcome.publication_failure)
+    if failure is FileUploadFailure.RUNTIME_PREREQUISITE:
+        runtime_reason = _optional_runtime_reason(outcome.runtime_prerequisite)
+        if runtime_reason is not FileFailureReason.RUNTIME_UNKNOWN:
+            return runtime_reason
+    if outcome.carrier_failure is not None:
+        return _carrier_reason(outcome.carrier_failure)
+    if failure is FileUploadFailure.OBSERVATION and outcome.failure_dispatch is Dispatch.NOT_SENT:
+        return FileFailureReason.CARRIER_DISPATCH
+    if failure is not None:
+        return {
+            FileUploadFailure.SOURCE: FileFailureReason.SOURCE,
+            FileUploadFailure.SOURCE_CONTRACT: FileFailureReason.SOURCE_CONTRACT,
+            FileUploadFailure.STAGE: FileFailureReason.REFUSED,
+            FileUploadFailure.PUBLICATION: FileFailureReason.REFUSED,
+            FileUploadFailure.CLEANUP: FileFailureReason.CLEANUP,
+            FileUploadFailure.OBSERVATION: FileFailureReason.INVALID_RESPONSE,
+            FileUploadFailure.RUNTIME_PREREQUISITE: FileFailureReason.RUNTIME_UNKNOWN,
+            FileUploadFailure.TERMINATION: FileFailureReason.TERMINATION,
+        }[failure]
     if outcome.deadline_exceeded:
         return FileFailureReason.DEADLINE
-    failure = outcome.failure
-    if failure is FileUploadFailure.PUBLICATION and outcome.publication_failure is not None:
-        publication = outcome.publication_failure
-        if publication.code is FilePublicationFailureCode.PUBLICATION and publication.publication_kind is not None:
-            return {
-                PublicationFailureKind.UNSUPPORTED: FileFailureReason.UNSUPPORTED,
-                PublicationFailureKind.CONFLICT: FileFailureReason.CONFLICT,
-                PublicationFailureKind.WRITE_AUTHORITY: FileFailureReason.REFUSED,
-                PublicationFailureKind.METADATA: FileFailureReason.REFUSED,
-                PublicationFailureKind.DEADLINE: FileFailureReason.DEADLINE,
-                PublicationFailureKind.IO: FileFailureReason.IO,
-                PublicationFailureKind.UNCERTAIN: FileFailureReason.IO,
-            }[publication.publication_kind]
+    if outcome.pending_remote_effects or outcome.coordination_uncertain:
+        return FileFailureReason.COORDINATION
+    if outcome.requires_owner_retention:
+        return FileFailureReason.CLEANUP
+    return FileFailureReason.INCOMPLETE_RESPONSE
+
+
+def _upload_ownership_reason(outcome: FileUploadOutcome) -> FileFailureReason:
+    result = outcome.ownership_result
+    if result is None:
+        return FileFailureReason.DEADLINE if outcome.deadline_exceeded else FileFailureReason.INCOMPLETE_RESPONSE
+    observation = result.observation
+    helper_reason = (
+        _ownership_failure_reason(observation.failure)
+        if observation is not None and observation.failure is not None
+        else None
+    )
+    return _mutation_failure_reason(
+        result,
+        helper_reason=helper_reason,
+        deadline_exceeded=outcome.deadline_exceeded,
+        fallback=FileFailureReason.INVALID_RESPONSE,
+    )
+
+
+def _scratch_reason(kind: ScratchFailureKind | None) -> FileFailureReason:
+    if kind is None:
+        return FileFailureReason.INVALID_RESPONSE
     return {
-        None: FileFailureReason.INCOMPLETE_RESPONSE,
-        FileUploadFailure.DEADLINE: FileFailureReason.DEADLINE,
-        FileUploadFailure.SOURCE: FileFailureReason.SOURCE,
-        FileUploadFailure.SOURCE_CONTRACT: FileFailureReason.SOURCE_CONTRACT,
-        FileUploadFailure.STAGE: FileFailureReason.REFUSED,
-        FileUploadFailure.PUBLICATION: FileFailureReason.REFUSED,
-        FileUploadFailure.CLEANUP: FileFailureReason.CLEANUP,
-        FileUploadFailure.OBSERVATION: FileFailureReason.INVALID_RESPONSE,
-        FileUploadFailure.RUNTIME_PREREQUISITE: _optional_runtime_reason(outcome.runtime_prerequisite),
-        FileUploadFailure.TERMINATION: FileFailureReason.TERMINATION,
-    }[failure]
+        ScratchFailureKind.UNSUPPORTED: FileFailureReason.UNSUPPORTED,
+        ScratchFailureKind.CONFLICT: FileFailureReason.CONFLICT,
+        ScratchFailureKind.LIMIT: FileFailureReason.LIMIT,
+        ScratchFailureKind.INTEGRITY: FileFailureReason.INTEGRITY,
+        ScratchFailureKind.DEADLINE: FileFailureReason.DEADLINE,
+        ScratchFailureKind.IO: FileFailureReason.IO,
+    }[kind]
+
+
+def _stage_reason(failure: FileStageFailureControl) -> FileFailureReason:
+    code = failure.code
+    if code is FileStageFailureCode.SCRATCH:
+        return _scratch_reason(failure.kind)
+    return {
+        FileStageFailureCode.INVALID_REQUEST: FileFailureReason.INVALID_RESPONSE,
+        FileStageFailureCode.OVERSIZED_REQUEST: FileFailureReason.INVALID_RESPONSE,
+        FileStageFailureCode.NONCE_MISMATCH: FileFailureReason.INVALID_RESPONSE,
+        FileStageFailureCode.IDENTITY_MISMATCH: FileFailureReason.REFUSED,
+        FileStageFailureCode.UNSUPPORTED_RUNTIME: FileFailureReason.RUNTIME_UNSUPPORTED_VERSION,
+        FileStageFailureCode.DEADLINE: FileFailureReason.DEADLINE,
+        FileStageFailureCode.ROOT_REFUSED: FileFailureReason.REFUSED,
+        FileStageFailureCode.PARENT_REFUSED: FileFailureReason.REFUSED,
+    }[code]
+
+
+def _publication_reason(failure: FilePublicationFailureControl) -> FileFailureReason:
+    code = failure.code
+    if code is FilePublicationFailureCode.SCRATCH:
+        return _scratch_reason(failure.scratch_kind)
+    if code is FilePublicationFailureCode.PUBLICATION and failure.publication_kind is not None:
+        return {
+            PublicationFailureKind.UNSUPPORTED: FileFailureReason.UNSUPPORTED,
+            PublicationFailureKind.CONFLICT: FileFailureReason.CONFLICT,
+            PublicationFailureKind.WRITE_AUTHORITY: FileFailureReason.REFUSED,
+            PublicationFailureKind.METADATA: FileFailureReason.REFUSED,
+            PublicationFailureKind.DEADLINE: FileFailureReason.DEADLINE,
+            PublicationFailureKind.IO: FileFailureReason.IO,
+            PublicationFailureKind.UNCERTAIN: FileFailureReason.IO,
+        }[failure.publication_kind]
+    return {
+        FilePublicationFailureCode.INVALID_REQUEST: FileFailureReason.INVALID_RESPONSE,
+        FilePublicationFailureCode.OVERSIZED_REQUEST: FileFailureReason.INVALID_RESPONSE,
+        FilePublicationFailureCode.NONCE_MISMATCH: FileFailureReason.INVALID_RESPONSE,
+        FilePublicationFailureCode.IDENTITY_MISMATCH: FileFailureReason.REFUSED,
+        FilePublicationFailureCode.UNSUPPORTED_RUNTIME: FileFailureReason.RUNTIME_UNSUPPORTED_VERSION,
+        FilePublicationFailureCode.DEADLINE: FileFailureReason.DEADLINE,
+        FilePublicationFailureCode.ROOT_REFUSED: FileFailureReason.REFUSED,
+        FilePublicationFailureCode.PARENT_REFUSED: FileFailureReason.REFUSED,
+        FilePublicationFailureCode.RECEIPT: FileFailureReason.INTEGRITY,
+        FilePublicationFailureCode.PUBLICATION: FileFailureReason.INVALID_RESPONSE,
+    }[code]
 
 
 def _upload_phase(outcome: FileUploadOutcome) -> FileOperationPhase:
+    if outcome.failure_phase is not None:
+        return {
+            FileUploadFailurePhase.OWNERSHIP: FileOperationPhase.OWNERSHIP_LOOKUP,
+            FileUploadFailurePhase.STAGE_BEGIN: FileOperationPhase.TRANSFER,
+            FileUploadFailurePhase.STAGE_CHUNK: FileOperationPhase.TRANSFER,
+            FileUploadFailurePhase.PUBLICATION: FileOperationPhase.PUBLICATION,
+            FileUploadFailurePhase.STAGE_CLEANUP: FileOperationPhase.CLEANUP,
+        }[outcome.failure_phase]
     failure = outcome.publication_failure
     if failure is not None and failure.publication_phase is not None:
         return {
@@ -240,61 +347,52 @@ def reduce_file_json(
     entity_name: str,
 ) -> MutationResult:
     """Reduce a bounded JSON workflow while preserving publication evidence."""
-    if outcome.status is FileJsonStatus.COMPLETE and _json_success(outcome):
+    if outcome.status is FileJsonStatus.COMPLETE and not outcome.deadline_exceeded:
         change = Change.CHANGED if outcome.change is FileJsonChange.CHANGED else Change.UNCHANGED
         revision = None if outcome.revision is None else _revision_from_file_revision(outcome.revision)
         return MutationResult(change, revision)
     upload = outcome.upload_outcome
     if upload is not None and (upload.publication_uncertain or upload.publication_ownership_uncertain):
+        phase = _upload_phase(upload)
         _raise_uncertain(
-            FileOperationPhase.PUBLICATION,
+            phase,
             _upload_reason(upload),
             entity_kind=entity_kind,
             entity_name=entity_name,
-            dispatch=None,
+            dispatch=upload.failure_dispatch if phase is FileOperationPhase.PUBLICATION else None,
         )
     if outcome.pending_remote_effects or outcome.coordination_uncertain:
-        if upload is not None and upload.publication_confirmed:
-            _raise_reason(
-                FileOperationPhase.CLEANUP,
-                _json_reason(outcome),
-                entity_kind=entity_kind,
-                entity_name=entity_name,
-                effect=Change.CHANGED,
-            )
+        phase = _upload_phase(upload) if upload is not None else _json_phase(outcome)
+        reason = _upload_reason(upload) if upload is not None else _json_reason(outcome)
         _raise_reason(
-            FileOperationPhase.TRANSFER,
-            FileFailureReason.COORDINATION,
+            phase,
+            reason,
             entity_kind=entity_kind,
             entity_name=entity_name,
+            effect=Change.CHANGED if upload is not None and upload.publication_confirmed else None,
         )
     effect = Change.CHANGED if upload is not None and upload.publication_confirmed else None
+    phase = _upload_phase(upload) if upload is not None else _json_phase(outcome)
     _raise_reason(
-        _json_phase(outcome), _json_reason(outcome), entity_kind=entity_kind, entity_name=entity_name, effect=effect
-    )
-
-
-def _json_success(outcome: FileJsonOutcome) -> bool:
-    return (
-        outcome.change is not None
-        and (outcome.change is FileJsonChange.UNCHANGED or outcome.revision is not None)
-        and outcome.failure is None
-        and not outcome.deadline_exceeded
-        and not outcome.pending_remote_effects
-        and not outcome.coordination_uncertain
-        and not outcome.requires_owner_retention
+        phase,
+        _json_reason(outcome),
+        entity_kind=entity_kind,
+        entity_name=entity_name,
+        effect=effect,
     )
 
 
 def _json_reason(outcome: FileJsonOutcome) -> FileFailureReason:
-    if outcome.deadline_exceeded:
-        return FileFailureReason.DEADLINE
     if outcome.failure is FileJsonFailure.READ and outcome.read_failure is not None:
         return _read_failure_reason(outcome.read_failure)
     if outcome.failure is FileJsonFailure.OBJECT and outcome.object_failure is not None:
         return _object_failure_reason(outcome.object_failure)
-    if outcome.failure is FileJsonFailure.PUBLICATION and outcome.upload_outcome is not None:
+    if outcome.failure in {FileJsonFailure.PUBLICATION, FileJsonFailure.CLEANUP} and outcome.upload_outcome is not None:
         return _upload_reason(outcome.upload_outcome)
+    if outcome.failure is FileJsonFailure.DEADLINE:
+        return FileFailureReason.DEADLINE
+    if outcome.failure is None and outcome.deadline_exceeded:
+        return FileFailureReason.DEADLINE
     return {
         None: FileFailureReason.INCOMPLETE_RESPONSE,
         FileJsonFailure.DEADLINE: FileFailureReason.DEADLINE,

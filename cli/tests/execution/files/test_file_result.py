@@ -31,6 +31,7 @@ from agentworks.execution._account_protocol import FileOwnershipFailure
 from agentworks.execution._file_download import (
     FileDownloadBinding,
     FileDownloadFailure,
+    FileDownloadFailurePhase,
     FileDownloadOutcome,
     FileDownloadStatus,
 )
@@ -104,6 +105,7 @@ from agentworks.execution._file_stat import FileRevision, FileStat
 from agentworks.execution._file_upload import (
     FileUploadBinding,
     FileUploadFailure,
+    FileUploadFailurePhase,
     FileUploadOutcome,
     FileUploadStatus,
 )
@@ -115,11 +117,23 @@ from agentworks.execution._runtime_prerequisite import (
     RuntimeSelection,
     RuntimeTargetOS,
 )
-from agentworks.execution.carrier import Deadline, Dispatch, ExitStatus
+from agentworks.execution.carrier import (
+    CapturedOutput,
+    CarrierIO,
+    CarrierReport,
+    ChannelFeatures,
+    Deadline,
+    Dispatch,
+    ExitStatus,
+    Failure,
+    PreparedInvocation,
+    Retention,
+    SinkOutput,
+)
 from agentworks.execution.files import Change, FileFailureReason, FileOperationPhase, NewMetadata
 from agentworks.operations import OperationOwner
 from tests.execution.files._file_read_support import LocalCarrier
-from tests.execution.files._runtime_support import runtime_selection
+from tests.execution.files._runtime_support import runtime_ready_record, runtime_selection
 
 _READY = RuntimePrerequisiteObservation(RuntimePrerequisiteState.READY, "/usr/bin/python3")
 _PLAN = IdentityPlan(IdentityExpectation(1001, 1002, (1002,)), IdentityMode.DIRECT)
@@ -178,6 +192,34 @@ def _object_candidate(observation: FileObjectObservation) -> FileObjectCandidate
 
 def _metadata_candidate(observation: FileMetadataObservation) -> FileMetadataCandidateResult:
     return FileMetadataCandidateResult(Dispatch.SENT, _EXIT, 0, None, _READY, observation)
+
+
+class _ClosedFailureCarrier:
+    def __init__(self, dispatch: Dispatch, failure: Failure, *, admit_runtime: bool = False) -> None:
+        self.dispatch = dispatch
+        self.failure = failure
+        self.admit_runtime = admit_runtime
+
+    @property
+    def features(self) -> ChannelFeatures:
+        return ChannelFeatures()
+
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        del deadline
+        if self.admit_runtime:
+            assert isinstance(io.output, SinkOutput)
+            remaining = memoryview(runtime_ready_record(invocation))
+            while remaining:
+                written = io.output.stdout.try_write(remaining)
+                assert written is not None and written > 0
+                remaining = remaining[written:]
+        delivered = CapturedOutput(complete=False, retention=Retention.DELIVERED)
+        return CarrierReport(
+            self.dispatch,
+            stdout=delivered,
+            stderr=delivered,
+            failure=self.failure,
+        )
 
 
 def _upload_outcome(**changes: object) -> FileUploadOutcome:
@@ -294,6 +336,48 @@ def test_real_helpers_reduce_stat_inventory_and_conflict_without_private_state(t
         database.close()
 
 
+def test_real_operation_retains_carrier_failure_across_runtime_unknown_and_mutation_uncertainty(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "state.db")
+    owner = OperationOwner.acquire(
+        database.operations,
+        OperationScope(OperationResourceKind.VM, "file-result-failure-vm"),
+        "file-result",
+    )
+    operation = FileOperation(owner)
+    try:
+        stat_outcome = operation.stat(
+            _ClosedFailureCarrier(Dispatch.NOT_SENT, Failure.DISPATCH),
+            trusted_root_path="/sensitive/root",
+            relative_path="private-name",
+            plan=_PLAN,
+            deadline=Deadline.after(30),
+            runtime_selection=_RUNTIME,
+        )
+        with pytest.raises(ExternalError) as raised_stat:
+            reduce_file_stat(stat_outcome, **_CONTEXT)
+        assert _error_details(raised_stat.value).reason is FileFailureReason.CARRIER_DISPATCH
+
+        remove_outcome = operation.remove(
+            _ClosedFailureCarrier(Dispatch.SENT, Failure.DEADLINE, admit_runtime=True),
+            trusted_root_path="/sensitive/root",
+            relative_path="private-name",
+            expected_kind=PrivateFileKind.REGULAR,
+            expected_revision=_REVISION,
+            plan=_PLAN,
+            deadline=Deadline.after(30),
+            runtime_selection=_RUNTIME,
+        )
+        assert remove_outcome.pending_remote_effects
+        with pytest.raises(UncertainOutcomeError) as raised_remove:
+            reduce_file_remove(remove_outcome, **_CONTEXT)
+        assert raised_remove.value.dispatch is Dispatch.SENT
+        assert _error_details(raised_remove.value).reason is FileFailureReason.DEADLINE
+    finally:
+        database.close()
+
+
 @pytest.mark.parametrize(
     ("outcome", "exception", "reason"),
     [
@@ -393,6 +477,19 @@ def test_removal_conflict_and_missing_observation_never_become_unchanged() -> No
         reduce_file_remove(OwnedFileOutcome(_remove_binding(), missing), **_CONTEXT)
     assert raised.value.dispatch is Dispatch.SENT
 
+    removal_failure = FileObjectFailureControl(
+        FileObjectFailureCode.OBJECT,
+        FileObjectFailureKind.IO,
+        FileObjectPhase.REMOVAL,
+    )
+    refused_removal = FileObjectObservation(FileObjectObservationState.REFUSED, failure=removal_failure)
+    with pytest.raises(ExternalError) as raised_removal:
+        reduce_file_remove(
+            OwnedFileOutcome(_remove_binding(), _object_candidate(refused_removal)),
+            **_CONTEXT,
+        )
+    assert _error_details(raised_removal.value).phase is FileOperationPhase.REMOVAL
+
 
 def test_metadata_partial_and_uncertain_priorities_preserve_closed_steps() -> None:
     partial_failure = FileMetadataFailureControl(
@@ -423,7 +520,7 @@ def test_metadata_partial_and_uncertain_priorities_preserve_closed_steps() -> No
             ),
             **_CONTEXT,
         )
-    assert _error_details(raised_coordination.value).reason is FileFailureReason.COORDINATION
+    assert _error_details(raised_coordination.value).reason is FileFailureReason.REFUSED
     assert raised_coordination.value.completed_steps == (MetadataStep.OWNERSHIP,)
 
 
@@ -482,6 +579,101 @@ def test_upload_success_and_confirmed_publication_cleanup_failure_remain_distinc
     assert _error_details(raised.value).reason is FileFailureReason.CLEANUP
 
 
+def test_upload_creation_ownership_failures_preserve_closed_lookup_diagnostics() -> None:
+    for failure, expected in (
+        (FileOwnershipFailure.MISSING_OWNER, FileFailureReason.MISSING_OWNER),
+        (FileOwnershipFailure.MISSING_GROUP, FileFailureReason.MISSING_GROUP),
+    ):
+        ownership = FileOwnershipResolutionResult(
+            Dispatch.SENT,
+            _EXIT,
+            0,
+            None,
+            _READY,
+            FileOwnershipObservation(AccountObservationState.REFUSED, failure=failure),
+        )
+        outcome = _upload_outcome(
+            status=FileUploadStatus.FAILED,
+            publication_confirmed=False,
+            revision=None,
+            failure=FileUploadFailure.OWNERSHIP,
+            ownership_result=ownership,
+            failure_phase=FileUploadFailurePhase.OWNERSHIP,
+            failure_dispatch=Dispatch.SENT,
+        )
+        with pytest.raises(StateError) as raised:
+            reduce_file_upload(outcome, **_CONTEXT)
+        assert _error_details(raised.value).phase is FileOperationPhase.OWNERSHIP_LOOKUP
+        assert _error_details(raised.value).reason is expected
+
+    runtime = FileOwnershipResolutionResult(
+        Dispatch.SENT,
+        _EXIT,
+        0,
+        None,
+        RuntimePrerequisiteObservation(RuntimePrerequisiteState.SHIM, None),
+        None,
+    )
+    outcome = _upload_outcome(
+        status=FileUploadStatus.FAILED,
+        publication_confirmed=False,
+        revision=None,
+        failure=FileUploadFailure.OWNERSHIP,
+        ownership_result=runtime,
+        failure_phase=FileUploadFailurePhase.OWNERSHIP,
+        failure_dispatch=Dispatch.SENT,
+    )
+    with pytest.raises(ExternalError) as raised_runtime:
+        reduce_file_upload(outcome, **_CONTEXT)
+    assert _error_details(raised_runtime.value).reason is FileFailureReason.RUNTIME_SHIM
+
+
+@pytest.mark.parametrize(
+    ("failure_phase", "expected_dispatch"),
+    [
+        (FileUploadFailurePhase.PUBLICATION, Dispatch.SENT),
+        (FileUploadFailurePhase.STAGE_CHUNK, None),
+        (FileUploadFailurePhase.STAGE_CLEANUP, None),
+    ],
+)
+def test_upload_uncertainty_exposes_only_publication_dispatch(
+    failure_phase: FileUploadFailurePhase,
+    expected_dispatch: Dispatch | None,
+) -> None:
+    outcome = _upload_outcome(
+        status=FileUploadStatus.UNCERTAIN,
+        publication_confirmed=False,
+        publication_uncertain=True,
+        revision=None,
+        failure=FileUploadFailure.TERMINATION,
+        failure_phase=failure_phase,
+        failure_dispatch=Dispatch.SENT,
+        carrier_failure=Failure.DEADLINE,
+        pending_remote_effects=True,
+    )
+    with pytest.raises(UncertainOutcomeError) as raised:
+        reduce_file_upload(outcome, **_CONTEXT)
+    assert raised.value.dispatch is expected_dispatch
+    assert _error_details(raised.value).reason is FileFailureReason.DEADLINE
+
+
+def test_upload_late_custody_does_not_mask_confirmed_change_or_first_failure() -> None:
+    outcome = _upload_outcome(
+        status=FileUploadStatus.FAILED,
+        failure=FileUploadFailure.CLEANUP,
+        failure_phase=FileUploadFailurePhase.STAGE_CLEANUP,
+        failure_dispatch=Dispatch.SENT,
+        carrier_failure=Failure.OUTPUT,
+        pending_remote_effects=True,
+    )
+    with pytest.raises(ExternalError) as raised:
+        reduce_file_upload(outcome, **_CONTEXT)
+    details = _error_details(raised.value)
+    assert details.phase is FileOperationPhase.CLEANUP
+    assert details.reason is FileFailureReason.CARRIER_OUTPUT
+    assert details.effect is Change.CHANGED
+
+
 def test_staging_coordination_uncertainty_is_not_destination_uncertainty() -> None:
     failed = _upload_outcome(
         status=FileUploadStatus.UNCERTAIN,
@@ -490,10 +682,10 @@ def test_staging_coordination_uncertainty_is_not_destination_uncertainty() -> No
         failure=FileUploadFailure.STAGE,
         pending_remote_effects=True,
     )
-    with pytest.raises(ExternalError) as raised:
+    with pytest.raises(StateError) as raised:
         reduce_file_upload(failed, **_CONTEXT)
     assert not isinstance(raised.value, UncertainOutcomeError)
-    assert _error_details(raised.value).reason is FileFailureReason.COORDINATION
+    assert _error_details(raised.value).reason is FileFailureReason.REFUSED
 
 
 def test_memory_read_and_json_preserve_data_revision_and_changed_state() -> None:
@@ -545,6 +737,67 @@ def test_complete_download_late_deadline_and_cleanup_debt_never_publish_success(
     with pytest.raises(ExternalError) as raised_cleanup:
         reduce_file_memory_read(FileMemoryReadOutcome(cleanup_failed, _DATA), **_CONTEXT)
     assert _error_details(raised_cleanup.value).reason is FileFailureReason.CLEANUP
+
+
+@pytest.mark.parametrize(
+    ("changes", "phase", "reason", "exception"),
+    [
+        (
+            {
+                "failure": FileDownloadFailure.TERMINATION,
+                "failure_phase": FileDownloadFailurePhase.SNAPSHOT_CHUNK,
+                "failure_dispatch": Dispatch.SENT,
+                "carrier_failure": Failure.OUTPUT_LIMIT,
+            },
+            FileOperationPhase.TRANSFER,
+            FileFailureReason.CARRIER_OUTPUT_LIMIT,
+            ExternalError,
+        ),
+        (
+            {
+                "failure": FileDownloadFailure.OBSERVATION,
+                "failure_phase": FileDownloadFailurePhase.SNAPSHOT_BEGIN,
+                "failure_dispatch": Dispatch.NOT_SENT,
+            },
+            FileOperationPhase.OBSERVATION,
+            FileFailureReason.CARRIER_DISPATCH,
+            ExternalError,
+        ),
+        (
+            {
+                "failure": FileDownloadFailure.SNAPSHOT,
+                "snapshot_failure": FileSnapshotFailureControl(
+                    FileSnapshotFailureCode.SPOOL,
+                    spool_kind=SpoolSnapshotFailureKind.LIMIT,
+                ),
+                "failure_phase": FileDownloadFailurePhase.SNAPSHOT_CHUNK,
+                "failure_dispatch": Dispatch.SENT,
+                "pending_remote_effects": True,
+                "requires_owner_retention": True,
+            },
+            FileOperationPhase.TRANSFER,
+            FileFailureReason.LIMIT,
+            LimitExceededError,
+        ),
+    ],
+)
+def test_download_preserves_first_exchange_failure_ahead_of_later_custody_state(
+    changes: dict[str, object],
+    phase: FileOperationPhase,
+    reason: FileFailureReason,
+    exception: type[AgentworksError],
+) -> None:
+    outcome = FileDownloadOutcome(
+        FileDownloadStatus.FAILED,
+        FileDownloadBinding("/sensitive/root", "private-name", len(_DATA), _PLAN, _RUNTIME),
+        b"private-token",
+        0,
+    )
+    with pytest.raises(exception) as raised:
+        reduce_file_memory_read(FileMemoryReadOutcome(replace(outcome, **changes)), **_CONTEXT)
+    assert _error_details(raised.value).phase is phase
+    assert _error_details(raised.value).reason is reason
+    assert not isinstance(raised.value, UncertainOutcomeError)
 
 
 def test_runtime_failures_keep_closed_reasons_without_connectivity_claims() -> None:

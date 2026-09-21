@@ -79,6 +79,7 @@ class FileOperationPhase(StrEnum):
     INVENTORY = "inventory"
     TRANSFER = "transfer"
     CONDITION = "condition"
+    REMOVAL = "removal"
     CREATION = "creation"
     METADATA = "metadata"
     PUBLICATION = "publication"
