@@ -5,13 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agentworks.execution._file_download import FileDownloadOutcome, FileDownloadStatus, download_file
+from agentworks.execution._file_download import FileDownloadOutcome, FileDownloadStatus
 
 if TYPE_CHECKING:
+    from agentworks.execution._file_operation import FileOperation
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution._runtime_prerequisite import RuntimeSelection
     from agentworks.execution.carrier import Carrier, Deadline
-    from agentworks.operations import OperationBorrow
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -43,12 +43,12 @@ def read_file(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
-    borrow: OperationBorrow,
+    operation: FileOperation,
 ) -> FileMemoryReadOutcome:
     """Materialize one complete verified download within the caller's bound."""
     sink = _MemorySink()
     try:
-        download = download_file(
+        download = operation.download(
             carrier,
             trusted_root_path=trusted_root_path,
             relative_path=relative_path,
@@ -57,7 +57,6 @@ def read_file(
             plan=plan,
             deadline=deadline,
             runtime_selection=runtime_selection,
-            borrow=borrow,
         )
         data = bytes(sink.data) if download.status is FileDownloadStatus.COMPLETE else None
         return FileMemoryReadOutcome(download, data)
