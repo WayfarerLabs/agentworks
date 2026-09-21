@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import grp
 import os
-import pwd
 import stat
 import sys
 from collections.abc import Callable
@@ -95,10 +93,14 @@ def _owner(database: Database) -> OperationOwner:
 
 
 def _owner_name() -> str:
+    import pwd
+
     return pwd.getpwuid(os.geteuid()).pw_name
 
 
 def _group_name() -> str:
+    import grp
+
     return grp.getgrgid(os.getegid()).gr_name
 
 
