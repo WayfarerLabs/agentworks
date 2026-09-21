@@ -1,0 +1,815 @@
+"""Owned composition checks for private single-file exchanges."""
+
+from __future__ import annotations
+
+import os
+import sys
+from collections.abc import Iterator
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+
+from agentworks.db import Database, OperationClaimState, OperationResourceKind, OperationScope
+from agentworks.errors import StateError, ValidationError
+from agentworks.execution import _file_operations as operations
+from agentworks.execution._account import (
+    AccountObservationState,
+    FileOwnershipObservation,
+    FileOwnershipResolutionResult,
+)
+from agentworks.execution._account_protocol import FileOwnership, FileOwnershipFailure
+from agentworks.execution._file_inventory_exchange import (
+    FileInventoryCandidateResult,
+    FileInventoryObservation,
+    FileInventoryObservationState,
+)
+from agentworks.execution._file_metadata_exchange import (
+    FileMetadataCandidateResult,
+    FileMetadataObservation,
+    FileMetadataObservationState,
+)
+from agentworks.execution._file_object_exchange import (
+    FileObjectCandidateResult,
+    FileObjectObservation,
+    FileObjectObservationState,
+)
+from agentworks.execution._file_objects import FileKind
+from agentworks.execution._file_read import (
+    FileReadCandidateResult,
+    FileReadObservation,
+    FileReadObservationState,
+)
+from agentworks.execution._file_stat import FileRevision, FileStat
+from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
+from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._runtime_prerequisite import (
+    RuntimePrerequisiteObservation,
+    RuntimePrerequisiteState,
+    RuntimeSelection,
+    RuntimeTargetOS,
+)
+from agentworks.execution.carrier import (
+    CapturedOutput,
+    CarrierIO,
+    CarrierReport,
+    ChannelFeatures,
+    Deadline,
+    Dispatch,
+    ExitStatus,
+    PreparedInvocation,
+)
+from agentworks.operations import OperationAttempt, OperationOwner
+from tests.execution.files._file_read_support import LocalCarrier
+
+pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the fixed file helpers require Linux")
+
+_READY = RuntimePrerequisiteObservation(RuntimePrerequisiteState.READY, "/usr/bin/python3")
+_PLAN = IdentityPlan(IdentityExpectation(1001, 1002, (1002,)), IdentityMode.DIRECT)
+_RUNTIME = RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3")
+_NORMAL_EXIT = ExitStatus(code=0)
+_REVISION = FileRevision(FileStat(1, 2, 0o100600, 1, 1001, 1002, 0, 3, 4))
+
+
+class ControlStop(BaseException):
+    pass
+
+
+class SyntheticCarrier:
+    def __init__(
+        self,
+        dispatch: Dispatch = Dispatch.SENT,
+        completion: ExitStatus | None = _NORMAL_EXIT,
+        *,
+        control: BaseException | None = None,
+        expire_on_return: bool = False,
+    ) -> None:
+        self.dispatch = dispatch
+        self.completion = completion
+        self.control = control
+        self.expire_on_return = expire_on_return
+        self.calls = 0
+
+    @property
+    def features(self) -> ChannelFeatures:
+        return ChannelFeatures()
+
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        del invocation, io
+        self.calls += 1
+        if self.control is not None:
+            raise self.control
+        if self.expire_on_return:
+            object.__setattr__(deadline, "expires_at", 0.0)
+        return CarrierReport(
+            self.dispatch,
+            self.completion,
+            local_status=0,
+            stdout=CapturedOutput(),
+            stderr=CapturedOutput(),
+        )
+
+
+@pytest.fixture
+def owned(tmp_path: Path) -> Iterator[tuple[Database, OperationOwner]]:
+    database = Database(tmp_path / "state.db")
+    owner = OperationOwner.acquire(
+        database.operations,
+        OperationScope(OperationResourceKind.VM, "file-operation-vm"),
+        "file-operation",
+    )
+    try:
+        yield database, owner
+    finally:
+        database.close()
+
+
+def _report(operation: BorrowedFixedHelperCarrier, deadline: Deadline) -> CarrierReport:
+    return operation.execute(PreparedInvocation(("fixed-helper",)), io=CarrierIO(), deadline=deadline)
+
+
+def _read_result(
+    operation: BorrowedFixedHelperCarrier,
+    deadline: Deadline,
+    observation: FileReadObservation,
+) -> FileReadCandidateResult:
+    report = _report(operation, deadline)
+    return FileReadCandidateResult(
+        report.dispatch,
+        report.completion,
+        report.local_status,
+        report.failure,
+        _READY,
+        observation,
+    )
+
+
+@pytest.mark.parametrize(
+    ("entrypoint", "exchange_name", "result"),
+    [
+        (
+            operations.read_file,
+            "exchange_read_file",
+            FileReadCandidateResult(
+                Dispatch.SENT,
+                ExitStatus(code=0),
+                0,
+                None,
+                _READY,
+                FileReadObservation(FileReadObservationState.ABSENT),
+            ),
+        ),
+        (
+            operations.stat_file,
+            "exchange_stat_file",
+            FileObjectCandidateResult(
+                Dispatch.SENT,
+                ExitStatus(code=0),
+                0,
+                None,
+                _READY,
+                FileObjectObservation(FileObjectObservationState.ABSENT),
+            ),
+        ),
+        (
+            operations.list_directory,
+            "exchange_list_directory",
+            FileInventoryCandidateResult(
+                Dispatch.SENT,
+                ExitStatus(code=0),
+                0,
+                None,
+                _READY,
+                FileInventoryObservation(FileInventoryObservationState.NOT_FOUND),
+            ),
+        ),
+        (
+            operations.remove_file,
+            "exchange_remove_file",
+            FileObjectCandidateResult(
+                Dispatch.SENT,
+                ExitStatus(code=0),
+                0,
+                None,
+                _READY,
+                FileObjectObservation(FileObjectObservationState.UNCHANGED),
+            ),
+        ),
+    ],
+    ids=["read", "stat", "list", "remove"],
+)
+def test_single_exchange_entrypoints_preserve_typed_result_and_settle(
+    owned: tuple[Database, OperationOwner],
+    monkeypatch: pytest.MonkeyPatch,
+    entrypoint,
+    exchange_name: str,
+    result,
+) -> None:
+    _, owner = owned
+    carrier = SyntheticCarrier()
+    seen_operations: list[BorrowedFixedHelperCarrier] = []
+
+    def exchange(operation: BorrowedFixedHelperCarrier, **kwargs: object):
+        deadline = kwargs["deadline"]
+        assert isinstance(deadline, Deadline)
+        report = _report(operation, deadline)
+        seen_operations.append(operation)
+        return replace(
+            result,
+            dispatch=report.dispatch,
+            carrier_completion=report.completion,
+            carrier_local_status=report.local_status,
+        )
+
+    monkeypatch.setattr(operations, exchange_name, exchange)
+    arguments = {
+        "trusted_root_path": "/approved",
+        "relative_path": "target",
+        "plan": _PLAN,
+        "deadline": Deadline.after(15),
+        "runtime_selection": _RUNTIME,
+        "owner": owner,
+    }
+    if entrypoint is operations.read_file:
+        arguments["max_bytes"] = 1024
+    elif entrypoint is operations.list_directory:
+        arguments.update(max_entries=10, max_depth=1, max_encoded_bytes=4096)
+    elif entrypoint is operations.remove_file:
+        arguments.update(expected_kind=FileKind.REGULAR, expected_revision=_REVISION)
+
+    outcome = entrypoint(carrier, **arguments)
+
+    assert outcome.result == result
+    assert outcome.ownership_result is None
+    assert not outcome.deadline_exceeded
+    assert not outcome.requires_owner_retention
+    assert carrier.calls == 1 and len(seen_operations) == 1
+    owner.close()
+
+
+@pytest.mark.parametrize(
+    ("dispatch", "completion", "retained"),
+    [
+        (Dispatch.NOT_SENT, None, False),
+        (Dispatch.SENT, ExitStatus(code=0), False),
+        (Dispatch.SENT, ExitStatus(code=7), True),
+        (Dispatch.SENT, None, True),
+        (Dispatch.UNKNOWN, None, True),
+    ],
+)
+def test_settlement_uses_only_supported_termination_evidence(
+    owned: tuple[Database, OperationOwner],
+    monkeypatch: pytest.MonkeyPatch,
+    dispatch: Dispatch,
+    completion: ExitStatus | None,
+    retained: bool,
+) -> None:
+    _, owner = owned
+    carrier = SyntheticCarrier(dispatch, completion)
+
+    def exchange(operation: BorrowedFixedHelperCarrier, **kwargs: object) -> FileReadCandidateResult:
+        deadline = kwargs["deadline"]
+        assert isinstance(deadline, Deadline)
+        return _read_result(operation, deadline, FileReadObservation(FileReadObservationState.ABSENT))
+
+    monkeypatch.setattr(operations, "exchange_read_file", exchange)
+
+    outcome = operations.read_file(
+        carrier,
+        trusted_root_path="/approved",
+        relative_path="target",
+        max_bytes=1,
+        plan=_PLAN,
+        deadline=Deadline.after(15),
+        runtime_selection=_RUNTIME,
+        owner=owner,
+    )
+
+    assert outcome.result is not None and outcome.result.dispatch is dispatch
+    assert outcome.pending_remote_effects is retained
+    assert outcome.requires_owner_retention is retained
+    if not retained:
+        owner.close()
+
+
+def test_local_preparation_failure_never_arms_or_dispatches(
+    owned: tuple[Database, OperationOwner],
+) -> None:
+    database, owner = owned
+    carrier = SyntheticCarrier()
+
+    with pytest.raises(ValidationError) as raised:
+        operations.read_file(
+            carrier,
+            trusted_root_path="/approved",
+            relative_path="target",
+            max_bytes=0,
+            plan=_PLAN,
+            deadline=Deadline.after(15),
+            runtime_selection=_RUNTIME,
+            owner=owner,
+        )
+
+    fact = raised.value.__cause__
+    assert isinstance(fact, operations.OwnedFileControlFact)
+    assert fact.outcome.result is None
+    assert not fact.outcome.requires_owner_retention
+    assert carrier.calls == 0
+    claim = database.operations.inspect(owner.ownership.scope)
+    assert claim is not None and claim.state is OperationClaimState.RESERVED
+    owner.close()
+
+
+def test_expired_deadline_returns_before_borrow_or_dispatch(
+    owned: tuple[Database, OperationOwner],
+) -> None:
+    database, owner = owned
+    carrier = SyntheticCarrier()
+
+    outcome = operations.stat_file(
+        carrier,
+        trusted_root_path="/approved",
+        relative_path="target",
+        plan=_PLAN,
+        deadline=Deadline.after(0),
+        runtime_selection=_RUNTIME,
+        owner=owner,
+    )
+
+    assert outcome.result is None and outcome.deadline_exceeded
+    assert not outcome.requires_owner_retention and carrier.calls == 0
+    claim = database.operations.inspect(owner.ownership.scope)
+    assert claim is not None and claim.state is OperationClaimState.RESERVED
+    owner.close()
+
+
+@pytest.mark.parametrize("completion", [ExitStatus(code=0), ExitStatus(code=9)], ids=["normal", "abnormal"])
+def test_deadline_after_return_is_independent_of_operation_facts(
+    owned: tuple[Database, OperationOwner],
+    monkeypatch: pytest.MonkeyPatch,
+    completion: ExitStatus,
+) -> None:
+    _, owner = owned
+    carrier = SyntheticCarrier(completion=completion, expire_on_return=True)
+
+    def exchange(operation: BorrowedFixedHelperCarrier, **kwargs: object) -> FileReadCandidateResult:
+        deadline = kwargs["deadline"]
+        assert isinstance(deadline, Deadline)
+        return _read_result(operation, deadline, FileReadObservation(FileReadObservationState.ABSENT))
+
+    monkeypatch.setattr(operations, "exchange_read_file", exchange)
+    outcome = operations.read_file(
+        carrier,
+        trusted_root_path="/approved",
+        relative_path="target",
+        max_bytes=1,
+        plan=_PLAN,
+        deadline=Deadline.after(15),
+        runtime_selection=_RUNTIME,
+        owner=owner,
+    )
+
+    assert outcome.result is not None and outcome.deadline_exceeded
+    assert outcome.requires_owner_retention is (completion.code != 0)
+    if not outcome.requires_owner_retention:
+        owner.close()
+
+
+@pytest.mark.parametrize("entrypoint_name", ["set_metadata", "ensure_directory"])
+def test_metadata_lookup_and_mutation_share_one_borrow_and_preserve_both_results(
+    owned: tuple[Database, OperationOwner],
+    monkeypatch: pytest.MonkeyPatch,
+    entrypoint_name: str,
+) -> None:
+    _, owner = owned
+    carrier = SyntheticCarrier()
+    operations_seen: list[BorrowedFixedHelperCarrier] = []
+
+    def resolve(
+        operation: BorrowedFixedHelperCarrier,
+        trusted_owner: str,
+        trusted_group: str,
+        deadline: Deadline,
+        runtime_selection: RuntimeSelection,
+    ) -> FileOwnershipResolutionResult:
+        del trusted_owner, trusted_group, runtime_selection
+        report = _report(operation, deadline)
+        operations_seen.append(operation)
+        return FileOwnershipResolutionResult(
+            report.dispatch,
+            report.completion,
+            report.local_status,
+            report.failure,
+            _READY,
+            FileOwnershipObservation(
+                AccountObservationState.RESOLVED,
+                ownership=FileOwnership(123, 456),
+            ),
+        )
+
+    operation_result = FileMetadataCandidateResult(
+        Dispatch.SENT,
+        ExitStatus(code=0),
+        0,
+        None,
+        _READY,
+        FileMetadataObservation(FileMetadataObservationState.UNCHANGED),
+    )
+
+    def mutate(operation: BorrowedFixedHelperCarrier, **kwargs: object) -> FileMetadataCandidateResult:
+        assert kwargs["uid"] == 123 and kwargs["gid"] == 456
+        deadline = kwargs["deadline"]
+        assert isinstance(deadline, Deadline)
+        report = _report(operation, deadline)
+        operations_seen.append(operation)
+        return replace(
+            operation_result,
+            dispatch=report.dispatch,
+            carrier_completion=report.completion,
+            carrier_local_status=report.local_status,
+        )
+
+    monkeypatch.setattr(operations, "resolve_file_ownership", resolve)
+    monkeypatch.setattr(
+        operations,
+        "set_file_metadata" if entrypoint_name == "set_metadata" else "ensure_file_directory",
+        mutate,
+    )
+    entrypoint = getattr(operations, entrypoint_name)
+
+    outcome = entrypoint(
+        carrier,
+        trusted_root_path="/approved",
+        relative_path="target",
+        trusted_owner="owner",
+        trusted_group="group",
+        mode=0o750,
+        plan=_PLAN,
+        deadline=Deadline.after(15),
+        runtime_selection=_RUNTIME,
+        owner=owner,
+    )
+
+    assert outcome.ownership_result is not None
+    assert outcome.ownership_result.observation is not None
+    assert outcome.result == operation_result
+    assert len(operations_seen) == 2 and operations_seen[0] is operations_seen[1]
+    assert carrier.calls == 2 and not outcome.requires_owner_retention
+    owner.close()
+
+
+@pytest.mark.parametrize(
+    ("runtime", "observation", "completion", "deadline_expired"),
+    [
+        (
+            _READY,
+            FileOwnershipObservation(
+                AccountObservationState.REFUSED,
+                failure=FileOwnershipFailure.MISSING_OWNER,
+            ),
+            ExitStatus(code=0),
+            False,
+        ),
+        (
+            RuntimePrerequisiteObservation(RuntimePrerequisiteState.MISSING, None),
+            None,
+            ExitStatus(code=0),
+            False,
+        ),
+        (_READY, FileOwnershipObservation(AccountObservationState.INCOMPLETE), ExitStatus(code=0), False),
+        (
+            _READY,
+            FileOwnershipObservation(
+                AccountObservationState.RESOLVED,
+                ownership=FileOwnership(123, 456),
+            ),
+            ExitStatus(code=7),
+            False,
+        ),
+        (
+            _READY,
+            FileOwnershipObservation(
+                AccountObservationState.RESOLVED,
+                ownership=FileOwnership(123, 456),
+            ),
+            ExitStatus(code=0),
+            True,
+        ),
+    ],
+    ids=["refused", "runtime", "incomplete", "abnormal", "expired"],
+)
+def test_metadata_lookup_must_be_ready_resolved_normal_and_within_deadline(
+    owned: tuple[Database, OperationOwner],
+    monkeypatch: pytest.MonkeyPatch,
+    runtime: RuntimePrerequisiteObservation,
+    observation: FileOwnershipObservation | None,
+    completion: ExitStatus,
+    deadline_expired: bool,
+) -> None:
+    _, owner = owned
+    carrier = SyntheticCarrier(completion=completion, expire_on_return=deadline_expired)
+    mutation_calls = 0
+
+    def resolve(
+        operation: BorrowedFixedHelperCarrier,
+        trusted_owner: str,
+        trusted_group: str,
+        deadline: Deadline,
+        runtime_selection: RuntimeSelection,
+    ) -> FileOwnershipResolutionResult:
+        del trusted_owner, trusted_group, runtime_selection
+        report = _report(operation, deadline)
+        return FileOwnershipResolutionResult(
+            report.dispatch,
+            report.completion,
+            report.local_status,
+            report.failure,
+            runtime,
+            observation,
+        )
+
+    def mutate(operation: BorrowedFixedHelperCarrier, **kwargs: object) -> FileMetadataCandidateResult:
+        nonlocal mutation_calls
+        del operation, kwargs
+        mutation_calls += 1
+        raise AssertionError("metadata mutation must remain gated")
+
+    monkeypatch.setattr(operations, "resolve_file_ownership", resolve)
+    monkeypatch.setattr(operations, "set_file_metadata", mutate)
+
+    outcome = operations.set_metadata(
+        carrier,
+        trusted_root_path="/approved",
+        relative_path="target",
+        trusted_owner="owner",
+        trusted_group="group",
+        mode=0o640,
+        plan=_PLAN,
+        deadline=Deadline.after(15),
+        runtime_selection=_RUNTIME,
+        owner=owner,
+    )
+
+    assert outcome.ownership_result is not None and outcome.result is None
+    assert outcome.deadline_exceeded is deadline_expired
+    assert mutation_calls == 0 and carrier.calls == 1
+    retained = completion != ExitStatus(code=0)
+    assert outcome.requires_owner_retention is retained
+    if not retained:
+        owner.close()
+
+
+@pytest.mark.parametrize(
+    ("trusted_owner", "mode"),
+    [("bad\0owner", 0o640), ("owner", -1)],
+    ids=["owner", "mode"],
+)
+def test_metadata_canonical_validation_precedes_lookup(
+    owned: tuple[Database, OperationOwner],
+    monkeypatch: pytest.MonkeyPatch,
+    trusted_owner: str,
+    mode: int,
+) -> None:
+    database, owner = owned
+    carrier = SyntheticCarrier()
+    lookup_calls = 0
+
+    def resolve(*args: object, **kwargs: object) -> FileOwnershipResolutionResult:
+        nonlocal lookup_calls
+        del args, kwargs
+        lookup_calls += 1
+        raise AssertionError("invalid metadata must not start lookup")
+
+    monkeypatch.setattr(operations, "resolve_file_ownership", resolve)
+
+    with pytest.raises(ValidationError):
+        operations.set_metadata(
+            carrier,
+            trusted_root_path="/approved",
+            relative_path="target",
+            trusted_owner=trusted_owner,
+            trusted_group="group",
+            mode=mode,
+            plan=_PLAN,
+            deadline=Deadline.after(15),
+            runtime_selection=_RUNTIME,
+            owner=owner,
+        )
+
+    assert lookup_calls == 0 and carrier.calls == 0
+    claim = database.operations.inspect(owner.ownership.scope)
+    assert claim is not None and claim.state is OperationClaimState.RESERVED
+    owner.close()
+
+
+def test_settlement_failure_retains_previously_returned_fact(
+    owned: tuple[Database, OperationOwner],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, owner = owned
+    carrier = SyntheticCarrier()
+    observation = FileReadObservation(FileReadObservationState.ABSENT)
+
+    def exchange(operation: BorrowedFixedHelperCarrier, **kwargs: object) -> FileReadCandidateResult:
+        deadline = kwargs["deadline"]
+        assert isinstance(deadline, Deadline)
+        return _read_result(operation, deadline, observation)
+
+    def fail_settle(attempt: OperationAttempt) -> None:
+        del attempt
+        raise RuntimeError("settlement-canary")
+
+    monkeypatch.setattr(operations, "exchange_read_file", exchange)
+    monkeypatch.setattr(OperationAttempt, "settle", fail_settle)
+
+    with pytest.raises(RuntimeError, match="settlement-canary") as raised:
+        operations.read_file(
+            carrier,
+            trusted_root_path="/approved",
+            relative_path="target",
+            max_bytes=1,
+            plan=_PLAN,
+            deadline=Deadline.after(15),
+            runtime_selection=_RUNTIME,
+            owner=owner,
+        )
+
+    fact = raised.value.__cause__
+    assert isinstance(fact, operations.OwnedFileControlFact)
+    assert fact.outcome.result is not None and fact.outcome.result.observation is observation
+    assert fact.outcome.coordination_uncertain
+    assert fact.outcome.requires_owner_retention
+
+
+def test_metadata_lookup_fact_is_recorded_before_settlement(
+    owned: tuple[Database, OperationOwner],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, owner = owned
+    carrier = SyntheticCarrier()
+    ownership_result: FileOwnershipResolutionResult | None = None
+
+    def resolve(
+        operation: BorrowedFixedHelperCarrier,
+        trusted_owner: str,
+        trusted_group: str,
+        deadline: Deadline,
+        runtime_selection: RuntimeSelection,
+    ) -> FileOwnershipResolutionResult:
+        nonlocal ownership_result
+        del trusted_owner, trusted_group, runtime_selection
+        report = _report(operation, deadline)
+        ownership_result = FileOwnershipResolutionResult(
+            report.dispatch,
+            report.completion,
+            report.local_status,
+            report.failure,
+            _READY,
+            FileOwnershipObservation(
+                AccountObservationState.RESOLVED,
+                ownership=FileOwnership(123, 456),
+            ),
+        )
+        return ownership_result
+
+    def fail_settle(attempt: OperationAttempt) -> None:
+        del attempt
+        raise RuntimeError("lookup-settlement-canary")
+
+    monkeypatch.setattr(operations, "resolve_file_ownership", resolve)
+    monkeypatch.setattr(OperationAttempt, "settle", fail_settle)
+
+    with pytest.raises(RuntimeError, match="lookup-settlement-canary") as raised:
+        operations.set_metadata(
+            carrier,
+            trusted_root_path="/approved",
+            relative_path="target",
+            trusted_owner="owner",
+            trusted_group="group",
+            mode=0o640,
+            plan=_PLAN,
+            deadline=Deadline.after(15),
+            runtime_selection=_RUNTIME,
+            owner=owner,
+        )
+
+    fact = raised.value.__cause__
+    assert isinstance(fact, operations.OwnedFileControlFact)
+    assert fact.outcome.ownership_result is ownership_result
+    assert fact.outcome.result is None
+    assert fact.outcome.coordination_uncertain
+    assert fact.outcome.requires_owner_retention
+
+
+@pytest.mark.parametrize("control", [RuntimeError("ordinary-canary"), ControlStop("base-canary")])
+def test_escaping_carrier_control_retains_safe_private_facts(
+    owned: tuple[Database, OperationOwner],
+    monkeypatch: pytest.MonkeyPatch,
+    control: BaseException,
+) -> None:
+    _, owner = owned
+    carrier = SyntheticCarrier(control=control)
+
+    def exchange(operation: BorrowedFixedHelperCarrier, **kwargs: object) -> FileReadCandidateResult:
+        deadline = kwargs["deadline"]
+        assert isinstance(deadline, Deadline)
+        return _read_result(operation, deadline, FileReadObservation(FileReadObservationState.ABSENT))
+
+    monkeypatch.setattr(operations, "exchange_read_file", exchange)
+
+    with pytest.raises(type(control)) as raised:
+        operations.read_file(
+            carrier,
+            trusted_root_path="/approved/private-canary",
+            relative_path="target-canary",
+            max_bytes=1,
+            plan=_PLAN,
+            deadline=Deadline.after(15),
+            runtime_selection=_RUNTIME,
+            owner=owner,
+        )
+
+    assert raised.value is control
+    fact = raised.value.__cause__
+    assert isinstance(fact, operations.OwnedFileControlFact)
+    assert fact.outcome.result is None
+    assert fact.outcome.pending_remote_effects
+    assert fact.outcome.requires_owner_retention
+    assert "canary" not in repr(fact) and "canary" not in repr(fact.outcome)
+
+
+def test_owner_close_during_dispatch_retains_the_interrupted_attempt(
+    owned: tuple[Database, OperationOwner],
+) -> None:
+    _, owner = owned
+
+    class ClosingCarrier(SyntheticCarrier):
+        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+            del invocation, io, deadline
+            self.calls += 1
+            owner.close()
+            raise AssertionError("active owner close must refuse")
+
+    carrier = ClosingCarrier()
+
+    with pytest.raises(StateError) as raised:
+        operations.read_file(
+            carrier,
+            trusted_root_path="/approved",
+            relative_path="target",
+            max_bytes=1,
+            plan=_PLAN,
+            deadline=Deadline.after(15),
+            runtime_selection=_RUNTIME,
+            owner=owner,
+        )
+
+    fact = raised.value.__cause__
+    assert isinstance(fact, operations.OwnedFileControlFact)
+    assert fact.outcome.pending_remote_effects
+    assert fact.outcome.requires_owner_retention
+    assert carrier.calls == 1
+
+
+def test_real_linux_read_preserves_present_and_absent_observations(
+    tmp_path: Path,
+) -> None:
+    plan = IdentityPlan(
+        IdentityExpectation(os.geteuid(), os.getegid(), tuple(sorted(set(os.getgroups()) | {os.getegid()}))),
+        IdentityMode.DIRECT,
+    )
+    target = tmp_path / "payload"
+    target.write_bytes(b"owned-read-content")
+    database = Database(tmp_path / "real-state.db")
+    carrier = LocalCarrier()
+    try:
+        for index, (relative_path, state) in enumerate(
+            [
+                (target.name, FileReadObservationState.PRESENT),
+                ("absent", FileReadObservationState.ABSENT),
+            ]
+        ):
+            owner = OperationOwner.acquire(
+                database.operations,
+                OperationScope(OperationResourceKind.VM, f"real-read-{index}"),
+                "file-read",
+            )
+            outcome = operations.read_file(
+                carrier,
+                trusted_root_path=str(tmp_path),
+                relative_path=relative_path,
+                max_bytes=1024,
+                plan=plan,
+                deadline=Deadline.after(15),
+                runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable),
+                owner=owner,
+            )
+            assert outcome.result is not None and outcome.result.observation is not None
+            assert outcome.result.observation.state is state
+            assert not outcome.requires_owner_retention
+            owner.close()
+    finally:
+        database.close()
+
+    assert carrier.calls == 2
