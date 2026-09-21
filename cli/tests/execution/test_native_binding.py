@@ -70,7 +70,7 @@ def _block_legacy_imports(monkeypatch: pytest.MonkeyPatch) -> None:
         return original_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr(builtins, "__import__", guarded_import)
-    sys.modules.pop("agentworks.plugins.proxmox.transport", None)
+    monkeypatch.delitem(sys.modules, "agentworks.plugins.proxmox.transport", raising=False)
 
 
 def test_wsl2_binding_is_passive_and_uses_recorded_distribution_and_admin(
@@ -142,12 +142,15 @@ def test_proxmox_binding_rejects_legacy_tls_bypass_before_secret_delivery() -> N
     secrets = _Secrets({"native-binding-token": _SECRET})
     platform = ProxmoxPlatform("pve-site", {**_PROXMOX_CONFIG, "verify_ssl": False})
 
-    with pytest.raises(ConfigError, match="requires TLS certificate verification"):
+    with pytest.raises(ConfigError) as raised:
         platform.native_execution_binding(
             _vm(metadata={"vmid": "101"}),
             RunContext(secrets=secrets),
         )
 
+    assert raised.value.entity_kind == "vm-site"
+    assert raised.value.entity_name == "pve-site"
+    assert _SECRET not in repr(raised.value)
     assert secrets.requests == []
 
 
@@ -183,5 +186,8 @@ def test_proxmox_api_ca_load_failure_is_scoped_and_secret_free(monkeypatch: pyte
 def test_unimplemented_platform_hook_fails_without_making_old_subclass_abstract() -> None:
     platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
 
-    with pytest.raises(StateError, match="has not implemented its native execution binding"):
+    with pytest.raises(StateError) as raised:
         platform.native_execution_binding(_vm(metadata={"instance_name": "vm-one"}), RunContext())
+
+    assert raised.value.entity_kind == "vm-platform"
+    assert raised.value.entity_name == "lima"
