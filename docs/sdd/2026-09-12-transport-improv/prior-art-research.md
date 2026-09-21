@@ -1013,6 +1013,30 @@ set-group-ID modes, so directory metadata must support those explicitly; regular
 limited to ordinary permission bits. Privileged ownership transitions and native filesystem proof
 remain open.
 
+## Windows-local download publication
+
+<!-- cspell:ignore ReplaceFileW DACLs -->
+
+The Windows download publisher still needs native proof; copying the existing `.partial` plus
+`os.replace` pattern does not establish the required access-metadata behavior.
+
+Microsoft's
+[ReplaceFileW contract](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew)
+describes preservation of DACLs and several file attributes. Its ignore-merge/ignore-ACL options
+explicitly permit losing that information, so they cannot supply the preservation guarantee. The
+documented failure cases also matter: without a backup path, error 1176 can leave the original name
+absent; error 1177 can move the original to a different name. Inference: wrapping this function and
+treating every false return as an unchanged destination is incorrect. A native candidate needs
+defined publication-failure and exact recovery ownership, not a rename retry loop. No Windows
+publication API is selected by this source review.
+
+Python's [temporary-file contract](https://docs.python.org/3.12/library/tempfile.html) supports
+explicit destination-local temporary paths, exclusive creation and binary I/O. Windows sharing rules
+can prevent deletion or reopening until other handles close, and denied cleanup may leave a file
+behind. Decision: the local publisher must own its temporary names and handle lifetime, retain
+cleanup debt on failure, and prove access metadata on Windows itself. Linux helper tests and Windows
+command serialization are not that evidence.
+
 ## Claims not relied upon
 
 - A common API makes every backend interactive.

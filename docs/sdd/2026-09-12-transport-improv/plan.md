@@ -70,7 +70,9 @@ associated pending acceptance gates are superseded by this ruling.
       `gated_vm_boundary` enters `activation_gate` before assembling its ordinary operation context,
       and `LiveVMNode` constructs a separate gate context. Context factories, harness setup's
       explicit held-guard chain and realization teardown without arguments must retain the same
-      core-owned operation when migrated. Adding a field to RunContext alone is insufficient.
+      core-owned operation when migrated. Adding a field to RunContext alone is insufficient. The
+      [2026-09-21 integration inventory](migration-strategy.md#owned-boundary-integration-inventory-2026-09-21)
+      identifies common boundaries, bypassing activation roots and retained teardown paths.
 - [ ] Select shared platform-host resource keys before enabling their admission. Canonical VM names
       are available before create dispatch; site names and authored SSH routes are not canonical
       host identities. Do not silently treat different aliases or users as independent hosts.

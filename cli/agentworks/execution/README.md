@@ -336,9 +336,16 @@ the proposed serialized result. These are rejection thresholds, not overrides of
 capacity. Standard-library nesting and integer-conversion limits can also cause a safe refusal even
 within caller-selected bounds; the implementation does not change process-global interpreter limits.
 
-The return is proposed publication bytes or `None` for skip-existing, not evidence of a filesystem
-change. Destination observation, file-kind safety, concurrency and atomic publication belong to the
-file service, which is not implemented or wired to production yet.
+The pure transformation returns proposed publication bytes or `None` for skip-existing, not evidence
+of a filesystem change. `_file_json.py` composes destination stat/read and upload under one borrowed
+core operation. Replace and skip-existing use metadata observation without reading old content.
+Merges publish against the observed revision, retrying only confirmed publication condition
+conflicts, with eight total attempts under the original deadline. Uncertain dispatch, missing
+termination evidence or retained cleanup debt stops the workflow without replay.
+
+Private outcomes distinguish change, failure and uncertainty and preserve the upload's recovery
+facts without embedding JSON content. Public FileAccess, error normalization, production ownership
+and recovery remain unimplemented; these private calls are not a production RunContext surface.
 
 ## Private file observations
 
@@ -477,6 +484,10 @@ previous attempt was not sent. Missing completion stops further calls, including
 Publication evidence, remaining cleanup obligations and possible future effects are distinct. The
 caller retains the original binding and token for unresolved work. These private mechanics do not
 acquire production ownership before activation or provide crash recovery.
+
+`_file_operation.py` owns the concrete dispatch gate shared by upload and JSON composition. Only the
+outer workflow closes its borrow; a nested upload cannot release the JSON operation's ownership
+between observation and conditional publication.
 
 ## Private object observation and removal
 

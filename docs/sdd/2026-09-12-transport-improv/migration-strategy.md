@@ -31,6 +31,34 @@ plugin initialization in a test is not proof of that independence.
 This refresh supplements the release-behavior baseline below. It does not mark any consumer migrated
 or establish the new lifecycle/file guarantees.
 
+### Owned-boundary integration inventory, 2026-09-21
+
+The read-only audit at `faf99365` locates admission before effects without moving legacy commands
+onto the new stack. `vms/manager/boundary.py` already has the database and canonical VM before
+`_gated_vm_boundary` enters activation, but builds its ordinary RunContext only afterward. The new
+owned boundary belongs around that sequence, not inside a passive accessor or the shared activation
+engine. Existing gated and live-only boundary calls remain unchanged until their consumer migrates.
+
+Propagation has three distinct seams:
+
+- `LiveVMNode._gate_ops_ctx` constructs the activation context independently. Bind the original
+  owner into the new workflow's node before activation, then preserve it through `_platform_ops_ctx`
+  and subsequent explicit context reconstruction.
+- Agent create/reinit, workspace create, session create/start/restart, VM reinit and VM rekey have
+  activation paths outside the common gated boundary. Their eventual migration must adopt the owned
+  boundary before the gate; adding one common wrapper does not cover those paths automatically.
+- VM creation starts without an activation gate. Ownership must precede platform creation and cover
+  bootstrap, the platform power hold, initialization and rollback. `RealizationLog` invokes retained
+  nodes' no-argument teardown; pending VM/agent/workspace nodes must carry the original owner into
+  nested deletion rather than acquire a second claim.
+
+The descriptive capability `OperationScope` is not the database claim's `OperationScope`. In
+particular, a batch's SYSTEM description cannot become a system-wide claim in the current exact-VM
+repository. Explicit resource admission and later hierarchy remain distinct from context display
+scope. Finalization also remains explicit: returning from a legacy helper or leaving an ExitStack
+does not prove that remote effects stopped. This inventory locates the integration work, not
+implemented production ownership or accepted recovery.
+
 ### New-target composition inventory, 2026-09-21
 
 Read-only inspection at `449b297e` found that `VMPlatform.native_transport` and

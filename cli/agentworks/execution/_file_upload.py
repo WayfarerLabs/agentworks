@@ -214,9 +214,6 @@ class _WorkingState:
         )
 
 
-_OwnedCarrier = BorrowedFileCarrier
-
-
 def upload_file(
     carrier: Carrier,
     *,

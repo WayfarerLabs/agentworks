@@ -11,9 +11,9 @@ from pathlib import Path
 import pytest
 
 import agentworks.execution._file_publication_exchange as publication_exchange
-import agentworks.execution._file_upload as file_upload
 from agentworks.db import Database, OperationClaimState
 from agentworks.errors import StateError, ValidationError
+from agentworks.execution._file_operation import BorrowedFileCarrier
 from agentworks.execution._file_publication import Create, CreateMetadata, Match
 from agentworks.execution._file_publication_protocol import FilePublicationFailureCode, FilePublicationRequestError
 from agentworks.execution._file_stat import FileRevision, FileStat
@@ -294,7 +294,7 @@ def test_interrupt_at_owned_carrier_handoff_exports_coordination_uncertainty(
     carrier = LocalCarrier()
     target_instruction = next(
         instruction
-        for instruction in dis.get_instructions(file_upload._OwnedCarrier.execute)  # noqa: SLF001
+        for instruction in dis.get_instructions(BorrowedFileCarrier.execute)
         if instruction.opname == "STORE_ATTR" and instruction.argval == "outstanding_attempt"
     )
     assert target_instruction.positions is not None
@@ -305,11 +305,7 @@ def test_interrupt_at_owned_carrier_handoff_exports_coordination_uncertainty(
     def interrupt_at_handoff(frame, event, arg):
         nonlocal interrupted
         del arg
-        if (  # noqa: SLF001
-            frame.f_code is file_upload._OwnedCarrier.execute.__code__
-            and event == "line"
-            and frame.f_lineno == target_line
-        ):
+        if frame.f_code is BorrowedFileCarrier.execute.__code__ and event == "line" and frame.f_lineno == target_line:
             interrupted = True
             raise KeyboardInterrupt
         return interrupt_at_handoff
