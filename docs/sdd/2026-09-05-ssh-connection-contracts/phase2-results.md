@@ -112,12 +112,18 @@ and the fixture account's direct identity, without operator configuration, remot
 elevation.
 
 The read case proves exact binary data and SHA-256 plus distinct typed absence and size-limit
-refusal. The transfer case proves stage creation, two exact-offset/digest chunks, helper readback,
-receipt reconciliation and typed cleanup of the exact scratch artifact. Each of the nine operations
-uses one carrier call. Raw carrier reports declare delivered retention and contain no output bytes;
-payload canaries are absent from invocation and result representations. The stage root is empty
-following cleanup. The lead independently found no process referring to the owned fixture directory,
-then removed and verified absence of that directory, including credentials and read fixtures.
+refusal. The transfer case proves stage creation, two exact-offset/digest chunks, reading through
+the helper, receipt reconciliation and typed cleanup of the exact scratch artifact. Each of the nine
+operations uses one carrier call. Raw carrier reports declare delivered retention and contain no
+output bytes; payload canaries are absent from invocation and result representations. The stage root
+is empty following cleanup. The lead independently found no process referring to the owned fixture
+directory, then removed and verified absence of that directory, including credentials and read
+fixtures.
+
+Project, complexity and correctness reviews are clean at `6cc50745`; the latter two also reran both
+cases successfully. Full Ruff/format and mypy (1,005 source files), file lint, locked-SDD and
+whitespace checks pass for this test/documentation increment. Earlier full-suite and website results
+remain pinned to their integrated revisions; hosted CI records the new published head separately.
 
 These cases supply SSH boundary evidence for the private read/staging helpers. They do not close
 production FileAccess, malformed-response and interruption coverage, publication, database
