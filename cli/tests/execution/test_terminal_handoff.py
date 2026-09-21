@@ -388,13 +388,13 @@ class TerminalProcess:
         prepared: PreparedTerminalHandoff,
         *,
         cwd: Path | None = None,
-        output_flags: int = 0,
+        output_flags: int | None = None,
     ) -> None:
         self.prepared = prepared
         self.master, self.slave = pty.openpty()
-        if output_flags:
+        if output_flags is not None:
             mode = termios.tcgetattr(self.slave)
-            mode[1] |= output_flags
+            mode[1] = output_flags
             termios.tcsetattr(self.slave, termios.TCSANOW, mode)
         self.original_mode = termios.tcgetattr(self.slave)
         self.raw_output = bytearray()
@@ -499,9 +499,11 @@ def running_processes() -> Iterator[list[TerminalProcess]]:
             process.close()
 
 
+@pytest.mark.parametrize("output_processing", [False, True], ids=["lf", "crlf"])
 def test_actual_pty_keeps_source_environment_and_empty_arg_off_terminal_input(
     tmp_path: Path,
     running_processes: list[TerminalProcess],
+    output_processing: bool,
 ) -> None:
     source = bytes(range(256)) * 4 + b"\r\nsource-canary-913c"
     secret = b"environment\n\xff-secret"
@@ -515,7 +517,8 @@ def test_actual_pty_keeps_source_environment_and_empty_arg_off_terminal_input(
         runtime_selection=_RUNTIME_SELECTION,
     )
     before = set(tmp_path.iterdir())
-    running = TerminalProcess(prepared, cwd=tmp_path)
+    output_flags = termios.OPOST | termios.ONLCR if output_processing else 0
+    running = TerminalProcess(prepared, cwd=tmp_path, output_flags=output_flags)
     running_processes.append(running)
     process_path = Path(f"/proc/{running.process.pid}")
 
@@ -524,7 +527,8 @@ def test_actual_pty_keeps_source_environment_and_empty_arg_off_terminal_input(
         RuntimePrerequisiteState.READY,
         "/usr/bin/python3",
     )
-    assert _runtime_record(prepared, ending=b"\r\n") in running.raw_output
+    ending = b"\r\n" if output_processing else b"\n"
+    assert _runtime_record(prepared, ending=ending) in running.raw_output
     payload_mode = termios.tcgetattr(running.slave)
     assert not payload_mode[3] & (termios.ECHO | termios.ICANON)
     assert source not in running.raw_output and secret not in running.raw_output
@@ -587,7 +591,7 @@ def test_actual_pty_restored_uppercase_output_mode_preserves_second_marker(
         CollectSink(),
         runtime_selection=_RUNTIME_SELECTION,
     )
-    running = TerminalProcess(prepared, output_flags=termios.OPOST | uppercase_output)
+    running = TerminalProcess(prepared, output_flags=termios.OPOST | termios.ONLCR | uppercase_output)
     running_processes.append(running)
 
     running.wait_for_payload_gate()
