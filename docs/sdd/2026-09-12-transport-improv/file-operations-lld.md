@@ -525,9 +525,12 @@ in-budget success guarantee. A complete normal-chain observation can survive a l
 without discarding proved absence, changes, verification or cleanup, and must not turn the status
 alone into an ordinary success. Apply the same interpretation to upload and JSON composition.
 
-This is the next private composition boundary, not implemented download or Windows/macOS acceptance.
-The host-specific publication design and native evidence remain required before exposing download
-through FileAccess.
+The private memory-read adapter uses the shared `FileOperation` download boundary, capturing
+unfinished facts before final byte/result allocation. Failed allocation discards the temporary
+buffer without discarding the already-retained download outcome or inventing a second claim.
+
+This is private composition, not public download or Windows/macOS acceptance. The host-specific
+publication design and native evidence remain required before exposing download through FileAccess.
 
 ### No-staging readiness gate
 

@@ -339,12 +339,14 @@ the separate object exchange below. Both assume a cooperative execution identity
 same-user isolation.
 
 `_file_memory_read.py` supplies a separate private in-memory read over the owned snapshot/chunk
-download. The caller's byte limit bounds the snapshot, independently of a carrier's single-response
-capacity. Only a complete verified download with completed cleanup returns bytes; absence and
-failures retain the original download outcome without exposing partial data. Its temporary buffer is
-cleared on every exit, which is not secure memory erasure. This adapter introduces no retry,
-fallback or additional claim and is not the no-staging readiness path. Production FileAccess and
-core recovery handoff remain separate integration work.
+download through the shared `FileOperation`. Core retains unfinished download facts before final
+byte/result allocation, so an allocation failure cannot discard that cleanup responsibility. The
+caller's byte limit bounds the snapshot, independently of a carrier's single-response capacity. Only
+a complete verified download with completed cleanup returns bytes; absence and failures retain the
+original download outcome without exposing partial data. Its temporary buffer is cleared on every
+exit, which is not secure memory erasure. This adapter introduces no retry, fallback or additional
+claim and is not the no-staging readiness path. Production FileAccess and durable recovery handoff
+remain separate integration work.
 
 ## Private terminal handoff preparation
 
@@ -532,11 +534,11 @@ a borrow or unresolved attempt remains; it does not infer remote quiescence from
 conditional removal and metadata composition. Metadata name lookup and mutation share one borrow and
 deadline; successful lookup and normal helper termination are required before mutation. Candidate
 observations are recorded before settlement, independently of expiry and unresolved ownership. This
-composition, upload, download, JSON and memory reads neither acquire nor close their borrow,
-including on escaping control flow. The caller keeps serial ownership through private-outcome
-capture before relinquishing it. These helpers do not release the database claim, replay a failed
-request or provide public FileAccess error reduction. Complete core outcome custody and durable
-recovery remain integration work; the borrow parameter alone does not implement them.
+composition, upload, download and JSON neither acquire nor close their borrow, including on escaping
+control flow. The caller keeps serial ownership through private-outcome capture before relinquishing
+it. These helpers do not release the database claim, replay a failed request or provide public
+FileAccess error reduction. Complete core outcome custody and durable recovery remain integration
+work; the borrow parameter alone does not implement them.
 
 `_file_operation.FileOperation` privately composes one concrete download under a caller-supplied
 outer owner. It attaches validated working state, including the token and original carrier/binding,

@@ -1308,6 +1308,11 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       identity-keyed record removal, exceptional outcome capture and allocation/retention failures.
       This download-only path does not complete shared public views, other file families, durable
       recovery or the outer claim-release gate.
+- [x] Route the private memory-read adapter through shared `FileOperation` custody. Retain the
+      original download outcome before byte/result allocation, preserve original control identity,
+      and discard partial memory buffers. Fault tests prove inert cleanup debt survives failed
+      result allocation and complete-download allocation failure does not strand a borrow. No
+      compatibility bridge, new claim, public view or durable recovery is introduced.
 - [ ] Complete the durable recovery handoff for file work, including pre-dispatch reconciliation
       identity and exact cleanup binding without storing payload contents. Test process loss before
       response, after response and during handoff. A surviving claim without recovery facts is not
