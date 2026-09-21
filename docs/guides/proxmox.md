@@ -133,7 +133,8 @@ spec:
     storage: data
     bridge: vmbr0
     pool: agentworks
-    verify_ssl: false
+    verify_ssl: true
+    # ca_bundle: "~/.config/agentworks/proxmox-ca.pem"
 ```
 
 `agw resource explain vm-platform/proxmox` documents every field above with its type, whether it is
@@ -264,5 +265,10 @@ repository, then rerun the script. The script does not alter package sources.
 
 ### Self-signed certificate errors
 
-Set `verify_ssl: false` in the site's `platform` table. This is common for homelab setups without a
-trusted CA.
+Export the cluster CA certificate as a PEM bundle on the workstation and set `ca_bundle` in the
+site's `platform` table. Agentworks verifies the API hostname against that CA. Omit `ca_bundle` when
+the cluster certificate already chains to normal workstation trust.
+
+Existing `verify_ssl: false` sites retain their legacy API behavior, but independent native
+execution refuses that setting. Enable verification and select the cluster CA bundle instead;
+Agentworks neither installs certificates nor downgrades TLS verification automatically.

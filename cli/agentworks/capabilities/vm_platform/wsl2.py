@@ -15,13 +15,11 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.debian_release import code_owned_release_value
-from agentworks.capabilities.vm_platform.wsl2_bootstrap import run_wsl2_bootstrap
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import StateError
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
-from agentworks.transports import WSL2Transport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -30,6 +28,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.resources.graph import Readiness
     from agentworks.transports import Transport
 
@@ -762,6 +761,9 @@ class WSL2Platform(VMPlatform):
                 # WSL2's generated script is its primary create-time bootstrap,
                 # so it stays inside the same distro rollback span. The manager
                 # owns the progress sink and persists the returned IP later.
+                from agentworks.capabilities.vm_platform.wsl2_bootstrap import run_wsl2_bootstrap
+                from agentworks.transports import WSL2Transport
+
                 native_transport = WSL2Transport(distro_name=distro_name, user=admin_username)
                 tailscale_ip = run_wsl2_bootstrap(
                     native_transport,
@@ -896,7 +898,29 @@ class WSL2Platform(VMPlatform):
         config: Config | None = None,
     ) -> Transport:
         # ctx is unused: wsl.exe is local and needs no backend credential.
+        from agentworks.transports import WSL2Transport
+
         return WSL2Transport(distro_name=self._distro_name(vm), user=vm.admin_username)
+
+    def native_execution_binding(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        config: Config | None = None,
+    ) -> NativeExecutionBinding:
+        """Bind literal local WSL delivery without probing or starting it."""
+        from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+        from agentworks.execution.binding import NativeExecutionBinding
+        from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
+
+        del ctx, config
+        account = vm.admin_username
+        return NativeExecutionBinding(
+            WSL2Carrier(WSL2Connection(self._distro_name(vm), account, "wsl")),
+            account,
+            RuntimeSelection(RuntimeTargetOS.LINUX),
+        )
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         distro_name = self._distro_name(vm)

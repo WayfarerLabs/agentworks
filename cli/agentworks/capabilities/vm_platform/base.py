@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from agentworks.capabilities.base import Capability, idempotent_op
-from agentworks.errors import ProvisioningError
+from agentworks.errors import ProvisioningError, StateError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow, VMStatus
     from agentworks.debian import DebianRelease
+    from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.transports import ExecTransport
 
 
@@ -346,6 +347,26 @@ class VMPlatform(Capability):
         ``config.operator.ssh_private_key`` for the public-IP path),
         distinct from the bound ``platform_config``.
         """
+
+    def native_execution_binding(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        config: Config | None = None,
+    ) -> NativeExecutionBinding:
+        """Build this platform's required independent native carrier binding.
+
+        The concrete default keeps existing platform implementations usable
+        during additive delivery, but calling an unfinished hook fails rather
+        than treating native execution as optional.
+        """
+        del vm, ctx, config
+        raise StateError(
+            f"VM platform '{self.name}' has not implemented its native execution binding",
+            entity_kind="vm-platform",
+            entity_name=self.name,
+        )
 
     def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op
         """Hook called once the VM's Tailscale node is up during create.
