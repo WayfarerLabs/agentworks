@@ -222,6 +222,7 @@ def test_directory_entry_requires_relative_posix_path() -> None:
         PurePosixPath(".."),
         PurePosixPath("child/../sibling"),
         PurePosixPath("nul\0name"),
+        PurePosixPath("bad\ud800"),
     ):
         with pytest.raises(ValidationError):
             DirectoryEntry(path, metadata)

@@ -109,10 +109,7 @@ def _decode_revision_token(token: bytes) -> _FileRevision:
         failed = True
     if failed or revision is None:
         raise _RevisionTokenError
-    try:
-        canonical = _canonical_json(_encode_file_revision(revision))
-    except (TypeError, ValueError, RecursionError):
-        raise _RevisionTokenError from None
+    canonical = _canonical_json(_encode_file_revision(revision))
     if canonical != token:
         raise _RevisionTokenError
     return revision
@@ -234,6 +231,10 @@ class DirectoryEntry:
     def __post_init__(self) -> None:
         if type(self.relative_path) is not PurePosixPath or type(self.metadata) is not FileMetadata:
             raise ValidationError("Directory entries require exact path and metadata values")
+        try:
+            str(self.relative_path).encode("utf-8")
+        except UnicodeEncodeError:
+            raise ValidationError("Directory entry paths must be valid UTF-8") from None
         if (
             self.relative_path.is_absolute()
             or not self.relative_path.parts
