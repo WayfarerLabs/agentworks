@@ -198,7 +198,8 @@ unusable, unsupported-version and missing-module records give closed diagnostics
 records remain unknown. A complete received prerequisite refusal survives a concurrent carrier input
 failure, but establishes neither process quiescence nor permission to retry. The account observation
 is absent unless runtime admission occurred. The seven file families and buffered inline execution
-use the same prerequisite boundary; terminal execution has not yet adopted it.
+use the same prerequisite boundary. Private terminal preparation uses the same selector and record
+decoder with the terminal-specific framing described below.
 
 Both request and reply are bounded to 32 KiB. A complete, nonce-bound response and complete
 delivered streams are required to return identity metadata. Missing accounts and closed helper
@@ -296,8 +297,9 @@ same-user isolation.
 ## Private terminal handoff preparation
 
 `_terminal_handoff.py` provides platform-neutral host preparation for one no-staging, same-terminal
-bootstrap attempt targeting the Linux `_terminal_guest.py`. A nonce-bound payload-ready marker
-releases one bounded frame from the host byte source. That frame keeps literal byte argv,
+bootstrap attempt targeting the Linux `_terminal_guest.py`. It requires explicit `RuntimeSelection`
+and observes runtime readiness before accepting the helper's payload-ready marker. Only that second
+gate releases one bounded frame from the host byte source. That frame keeps literal byte argv,
 environment and source off helper argv. The guest reads it with echo and terminal input
 transformations disabled, installs source on a Linux memory descriptor separate from terminal stdin,
 restores the terminal, then emits a distinct nonce-bound interactive-ready marker. Only then does
@@ -307,12 +309,22 @@ forwards only bytes after interactive readiness to an explicitly selected truste
 with short-write flow control. Before exec, the one-shot guest resets Python-ignored pipe and
 file-size signals to their operating-system defaults without changing unrelated signal dispositions.
 
+The initial terminal settings can transform the runtime record before the helper enters raw mode.
+The sink accepts only its nonce-bound canonical or entirely uppercase control record, with LF or
+CRLF, and suppresses preceding setup noise. It normalizes that bounded record alone; pipe parsing
+and application output remain unchanged. A malformed bound record fails closed. Complete readiness
+or refusal evidence survives later handoff failure; a refusal stops the endpoint without claiming
+that all later terminal bytes were observed.
+
 The preparation object has a single-use guard but does not dispatch or prove replay prevention by a
 carrier. Its readiness markers establish only handoff state, never application launch or exec
 evidence. Invalid ordering, truncated readiness and endpoint failures close the adapters without
 retaining payload or presentation causes. The candidate is private and is not a `TerminalInput`
 implementation or a production feature. SSH still owns native workstation PTY plumbing, terminal
 metadata, keyboard borrowing, resize, restoration and the joint acceptance proof before enablement.
+The future transport-owned execution wrapper must call the readiness sink's `finish()` when the
+carrier attempt ends. Neither the carrier nor the generic byte-sink protocol performs that
+finalization today; preparation-only tests are not production terminal acceptance.
 
 ## Private JSON transformation
 

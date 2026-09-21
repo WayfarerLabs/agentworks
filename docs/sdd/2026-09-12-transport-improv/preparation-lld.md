@@ -676,9 +676,10 @@ exercise Linux selection, real Python 3.11 lookup and fixture-based Darwin selec
 macOS acceptance. The seven file exchange families also adopt it, applying the selected identity
 transition around the selector and keeping absent file observations separate from prerequisite
 refusal. Buffered inline preparation also requires explicit runtime selection, placing prerequisite
-observation before its unchanged helper framing and retaining one-attempt semantics. These file and
-inline implementations are under private review. Terminal adoption remains open; the original
-runtime experiment above remains separate evidence rather than production dispatch.
+observation before its unchanged helper framing and retaining one-attempt semantics. The file and
+inline implementations have completed private review. Private terminal preparation now composes
+runtime admission as described below and is under review; carrier integration remains open. The
+original runtime experiment above remains separate evidence rather than production dispatch.
 
 Terminal admission cannot simply reuse the pipe prefix unchanged. A local Linux `openpty` experiment
 at `75400d16` ran the actual runtime selector with a fixed no-op helper: the process exited zero,
