@@ -16,6 +16,7 @@ from agentworks.execution import _file_download
 from agentworks.execution._file_download import (
     FileDownloadControlFact,
     FileDownloadFailure,
+    FileDownloadFailurePhase,
     FileDownloadStatus,
     download_file,
 )
@@ -23,7 +24,16 @@ from agentworks.execution._file_snapshot_exchange import FileSnapshotObservation
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
-from agentworks.execution.carrier import CarrierReport, Deadline, ExitStatus
+from agentworks.execution.carrier import (
+    Carrier,
+    CarrierIO,
+    CarrierReport,
+    Deadline,
+    Dispatch,
+    ExitStatus,
+    Failure,
+    SinkOutput,
+)
 from tests.execution.files._file_deadline_support import AdmittedTimeoutCarrier
 from tests.execution.files._file_download_support import (
     BytesSink,
@@ -134,6 +144,42 @@ class _StalledSink:
         return None
 
 
+class _DiscardSink:
+    def try_write(self, data: memoryview) -> int:
+        return len(data)
+
+
+class _CarrierFactInjector:
+    def __init__(
+        self,
+        inner: Carrier,
+        failures: dict[int, Failure],
+        *,
+        lost_calls: frozenset[int] = frozenset(),
+    ) -> None:
+        self.inner = inner
+        self.failures = failures
+        self.lost_calls = lost_calls
+        self.calls = 0
+
+    @property
+    def features(self):
+        return self.inner.features
+
+    def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        self.calls += 1
+        selected_io = io
+        if self.calls in self.lost_calls:
+            assert isinstance(io.output, SinkOutput)
+            selected_io = CarrierIO(
+                input=io.input,
+                output=SinkOutput(_DiscardSink(), io.output.stderr, require_live=False),
+                sensitive=io.sensitive,
+            )
+        report = self.inner.execute(invocation, io=selected_io, deadline=deadline)
+        return replace(report, failure=self.failures.get(self.calls))
+
+
 @pytest.mark.parametrize(
     ("sink", "failure"),
     [
@@ -160,6 +206,9 @@ def test_bad_sink_is_sanitized_and_snapshot_is_cleaned(
 
         assert outcome.status is FileDownloadStatus.FAILED
         assert outcome.failure is failure and outcome.accepted_bytes == 0
+        assert outcome.failure_phase is None
+        assert outcome.failure_dispatch is None
+        assert outcome.carrier_failure is None
         assert "sink-secret-canary" not in repr(outcome)
         assert outcome.cleanup_debt is None and not outcome.requires_owner_retention
         assert not tuple(scratch.iterdir())
@@ -225,6 +274,39 @@ def test_real_carrier_timeout_records_deadline_with_unresolved_begin(
         assert outcome.deadline_exceeded and outcome.pending_remote_effects
         assert outcome.requires_owner_retention
         assert not tuple(scratch.iterdir())
+    finally:
+        database.close()
+
+
+def test_expired_deadline_before_dispatch_has_no_exchange_facts(
+    tmp_path: Path,
+    roots: tuple[Path, Path],
+    plan: IdentityPlan,
+) -> None:
+    source, _ = roots
+    source.joinpath("source").write_bytes(b"payload")
+    database = Database(tmp_path / "state.db")
+    operation_owner = owner(database)
+    borrow = operation_owner.borrow()
+    carrier = LocalCarrier()
+    try:
+        outcome = download(
+            borrow,
+            source,
+            BytesSink(),
+            64,
+            plan,
+            carrier=carrier,
+            deadline=Deadline.after(0),
+        )
+
+        assert carrier.calls == 0
+        assert outcome.failure is FileDownloadFailure.DEADLINE
+        assert outcome.failure_phase is None
+        assert outcome.failure_dispatch is None
+        assert outcome.carrier_failure is None
+        borrow.close()
+        operation_owner.close()
     finally:
         database.close()
 
@@ -334,6 +416,38 @@ def test_lost_creation_observation_reconciles_and_cleans_without_replay(
         database.close()
 
 
+def test_begin_failure_facts_survive_distinct_reconcile_and_cleanup_failures(
+    tmp_path: Path,
+    roots: tuple[Path, Path],
+    plan: IdentityPlan,
+) -> None:
+    source, scratch = roots
+    source.joinpath("source").write_bytes(b"payload")
+    database = Database(tmp_path / "state.db")
+    operation_owner = owner(database)
+    borrow = operation_owner.borrow()
+    carrier = _CarrierFactInjector(
+        LocalCarrier(),
+        {
+            1: Failure.DISPATCH,
+            2: Failure.OBSERVATION,
+            3: Failure.OUTPUT,
+        },
+        lost_calls=frozenset({1, 3}),
+    )
+    try:
+        outcome = download(borrow, source, BytesSink(), 64, plan, carrier=carrier)
+
+        assert carrier.calls == 3
+        assert outcome.failure is FileDownloadFailure.OBSERVATION
+        assert outcome.failure_phase is FileDownloadFailurePhase.SNAPSHOT_BEGIN
+        assert outcome.failure_dispatch is Dispatch.SENT
+        assert outcome.carrier_failure is Failure.DISPATCH
+        assert outcome.cleanup_debt is not None and not tuple(scratch.iterdir())
+    finally:
+        database.close()
+
+
 def test_lost_chunk_observation_hands_no_bytes_then_cleans_known_snapshot(
     tmp_path: Path,
     roots: tuple[Path, Path],
@@ -359,6 +473,34 @@ def test_lost_chunk_observation_hands_no_bytes_then_cleans_known_snapshot(
         database.close()
 
 
+def test_chunk_failure_facts_survive_later_cleanup_failure(
+    tmp_path: Path,
+    roots: tuple[Path, Path],
+    plan: IdentityPlan,
+) -> None:
+    source, scratch = roots
+    source.joinpath("source").write_bytes(b"payload")
+    database = Database(tmp_path / "state.db")
+    operation_owner = owner(database)
+    borrow = operation_owner.borrow()
+    carrier = _CarrierFactInjector(
+        LocalCarrier(),
+        {2: Failure.OUTPUT, 3: Failure.INPUT},
+        lost_calls=frozenset({2, 3}),
+    )
+    try:
+        outcome = download(borrow, source, BytesSink(), 64, plan, carrier=carrier)
+
+        assert carrier.calls == 3
+        assert outcome.failure is FileDownloadFailure.OBSERVATION
+        assert outcome.failure_phase is FileDownloadFailurePhase.SNAPSHOT_CHUNK
+        assert outcome.failure_dispatch is Dispatch.SENT
+        assert outcome.carrier_failure is Failure.OUTPUT
+        assert outcome.cleanup_debt is not None and not tuple(scratch.iterdir())
+    finally:
+        database.close()
+
+
 def test_lost_cleanup_observation_retains_exact_debt(
     tmp_path: Path,
     roots: tuple[Path, Path],
@@ -379,6 +521,34 @@ def test_lost_cleanup_observation_retains_exact_debt(
         assert outcome.failure is FileDownloadFailure.CLEANUP
         assert outcome.cleanup_debt is not None and outcome.requires_owner_retention
         assert not tuple(scratch.iterdir())
+    finally:
+        database.close()
+
+
+def test_cleanup_failure_retains_its_exchange_facts(
+    tmp_path: Path,
+    roots: tuple[Path, Path],
+    plan: IdentityPlan,
+) -> None:
+    source, scratch = roots
+    source.joinpath("source").write_bytes(b"payload")
+    database = Database(tmp_path / "state.db")
+    operation_owner = owner(database)
+    borrow = operation_owner.borrow()
+    carrier = _CarrierFactInjector(
+        LocalCarrier(),
+        {3: Failure.OUTPUT_LIMIT},
+        lost_calls=frozenset({3}),
+    )
+    try:
+        outcome = download(borrow, source, BytesSink(), 64, plan, carrier=carrier)
+
+        assert carrier.calls == 3 and outcome.stream_verified
+        assert outcome.failure is FileDownloadFailure.CLEANUP
+        assert outcome.failure_phase is FileDownloadFailurePhase.SNAPSHOT_CLEANUP
+        assert outcome.failure_dispatch is Dispatch.SENT
+        assert outcome.carrier_failure is Failure.OUTPUT_LIMIT
+        assert outcome.cleanup_debt is not None and not tuple(scratch.iterdir())
     finally:
         database.close()
 
@@ -532,10 +702,14 @@ def test_helper_declared_deadline_stops_before_sink_delivery(
     operation_owner = owner(database)
     borrow = operation_owner.borrow()
     sink = BytesSink()
+    carrier = _CarrierFactInjector(LocalCarrier(), {1: Failure.DEADLINE})
     try:
-        outcome = download(borrow, source, sink, 64, plan)
+        outcome = download(borrow, source, sink, 64, plan, carrier=carrier)
 
         assert outcome.failure is FileDownloadFailure.DEADLINE
+        assert outcome.failure_phase is FileDownloadFailurePhase.SNAPSHOT_BEGIN
+        assert outcome.failure_dispatch is Dispatch.SENT
+        assert outcome.carrier_failure is Failure.DEADLINE
         assert outcome.deadline_exceeded and sink.calls == 0
         assert outcome.cleanup_debt is None and not outcome.requires_owner_retention
         assert not tuple(scratch.iterdir())
@@ -599,6 +773,9 @@ def test_interrupted_dispatch_exports_pending_effect_facts_and_preserves_borrow(
         fact = raised.value.__cause__
         assert isinstance(fact, FileDownloadControlFact)
         assert fact.outcome.pending_remote_effects
+        assert fact.outcome.failure_phase is None
+        assert fact.outcome.failure_dispatch is None
+        assert fact.outcome.carrier_failure is None
         assert fact.outcome.requires_owner_retention
         with pytest.raises(StateError):
             operation_owner.borrow()
@@ -793,6 +970,9 @@ def test_whole_digest_mismatch_is_not_complete_and_still_cleans(
         outcome = download(borrow, source, sink, 64, plan)
 
         assert outcome.failure is FileDownloadFailure.INTEGRITY
+        assert outcome.failure_phase is None
+        assert outcome.failure_dispatch is None
+        assert outcome.carrier_failure is None
         assert not outcome.stream_verified and bytes(sink.data) == b"payload"
         assert outcome.cleanup_debt is None and not tuple(scratch.iterdir())
         borrow.close()

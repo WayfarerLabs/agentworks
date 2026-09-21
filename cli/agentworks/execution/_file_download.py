@@ -34,7 +34,7 @@ from agentworks.execution._runtime_prerequisite import (
     RuntimeSelection,
 )
 from agentworks.execution._scratch import ReadyScratchReference, ScratchFailureKind, _cleanup_debt
-from agentworks.execution.carrier import Deadline, Dispatch, ExitStatus
+from agentworks.execution.carrier import Deadline, Dispatch, ExitStatus, Failure
 from agentworks.operations import OperationBorrow
 
 if TYPE_CHECKING:
@@ -83,6 +83,15 @@ class FileDownloadFailure(StrEnum):
     INTEGRITY = "integrity"
 
 
+class FileDownloadFailurePhase(StrEnum):
+    """Snapshot exchange that established the primary download failure."""
+
+    SNAPSHOT_BEGIN = "snapshot_begin"
+    SNAPSHOT_CHUNK = "snapshot_chunk"
+    SNAPSHOT_RECONCILE = "snapshot_reconcile"
+    SNAPSHOT_CLEANUP = "snapshot_cleanup"
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class FileDownloadBinding:
     """Original core-bound inputs needed to interpret retained facts."""
@@ -114,6 +123,9 @@ class FileDownloadOutcome:
     runtime_prerequisite: RuntimePrerequisiteObservation | None = None
     coordination_uncertain: bool = False
     requires_owner_retention: bool = False
+    failure_phase: FileDownloadFailurePhase | None = None
+    failure_dispatch: Dispatch | None = None
+    carrier_failure: Failure | None = None
 
 
 class FileDownloadControlFact(Exception):
@@ -141,10 +153,23 @@ class _WorkingState:
     failure: FileDownloadFailure | None = None
     snapshot_failure: FileSnapshotFailureControl | None = None
     runtime_prerequisite: RuntimePrerequisiteObservation | None = None
+    failure_phase: FileDownloadFailurePhase | None = None
+    failure_dispatch: Dispatch | None = None
+    carrier_failure: Failure | None = None
 
-    def fail(self, failure: FileDownloadFailure) -> None:
+    def fail(
+        self,
+        failure: FileDownloadFailure,
+        *,
+        phase: FileDownloadFailurePhase | None = None,
+        dispatch: Dispatch | None = None,
+        carrier_failure: Failure | None = None,
+    ) -> None:
         if self.failure is None:
             self.failure = failure
+            self.failure_phase = phase
+            self.failure_dispatch = dispatch
+            self.carrier_failure = carrier_failure
 
     def finish(self) -> FileDownloadOutcome:
         pending = self.pending_remote_effects or self.operation.pending_remote_effects
@@ -165,22 +190,25 @@ class _WorkingState:
         else:
             status = FileDownloadStatus.FAILED
         return FileDownloadOutcome(
-            status,
-            self.binding,
-            self.token,
-            self.accepted_bytes,
-            self.stream_verified,
-            self.source_revision,
-            self.ready,
-            self.cleanup_debt,
-            self.ownership_uncertain,
-            pending,
-            self.deadline_exceeded,
-            self.failure,
-            self.snapshot_failure,
-            self.runtime_prerequisite,
-            coordination_uncertain,
-            retain,
+            status=status,
+            binding=self.binding,
+            token=self.token,
+            accepted_bytes=self.accepted_bytes,
+            stream_verified=self.stream_verified,
+            source_revision=self.source_revision,
+            ready=self.ready,
+            cleanup_debt=self.cleanup_debt,
+            snapshot_ownership_uncertain=self.ownership_uncertain,
+            pending_remote_effects=pending,
+            deadline_exceeded=self.deadline_exceeded,
+            failure=self.failure,
+            snapshot_failure=self.snapshot_failure,
+            runtime_prerequisite=self.runtime_prerequisite,
+            coordination_uncertain=coordination_uncertain,
+            requires_owner_retention=retain,
+            failure_phase=self.failure_phase,
+            failure_dispatch=self.failure_dispatch,
+            carrier_failure=self.carrier_failure,
         )
 
 
@@ -327,17 +355,30 @@ class _DownloadWorkflow:
         if result.dispatch is not Dispatch.NOT_SENT:
             self._record_runtime(result.runtime_prerequisite)
         if result.dispatch is not Dispatch.NOT_SENT and observation is not None:
-            self._record_observation(observation)
+            self._record_observation(
+                observation,
+                phase=FileDownloadFailurePhase.SNAPSHOT_BEGIN,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
+            )
         normal = self._settle(result.dispatch, result.carrier_completion)
         if not normal:
             self._state.fail(
                 FileDownloadFailure.OBSERVATION
                 if result.dispatch is Dispatch.NOT_SENT
-                else FileDownloadFailure.TERMINATION
+                else FileDownloadFailure.TERMINATION,
+                phase=FileDownloadFailurePhase.SNAPSHOT_BEGIN,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
             )
             return False
         if self._runtime_refused(result.runtime_prerequisite):
-            self._state.fail(FileDownloadFailure.RUNTIME_PREREQUISITE)
+            self._state.fail(
+                FileDownloadFailure.RUNTIME_PREREQUISITE,
+                phase=FileDownloadFailurePhase.SNAPSHOT_BEGIN,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
+            )
             return False
         if observation is not None and observation.state is FileSnapshotObservationState.READY:
             return True
@@ -345,9 +386,19 @@ class _DownloadWorkflow:
             self._state.absent = True
             return True
         if observation is not None and observation.state is FileSnapshotObservationState.REFUSED:
-            self._state.fail(FileDownloadFailure.SNAPSHOT)
+            self._state.fail(
+                FileDownloadFailure.SNAPSHOT,
+                phase=FileDownloadFailurePhase.SNAPSHOT_BEGIN,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
+            )
         else:
-            self._state.fail(FileDownloadFailure.OBSERVATION)
+            self._state.fail(
+                FileDownloadFailure.OBSERVATION,
+                phase=FileDownloadFailurePhase.SNAPSHOT_BEGIN,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
+            )
             if result.dispatch is not Dispatch.NOT_SENT:
                 self._reconcile_creation()
         return False
@@ -374,23 +425,39 @@ class _DownloadWorkflow:
             if result.dispatch is not Dispatch.NOT_SENT:
                 self._record_runtime(result.runtime_prerequisite)
             if result.dispatch is not Dispatch.NOT_SENT and observation is not None:
-                self._record_observation(observation)
+                self._record_observation(
+                    observation,
+                    phase=FileDownloadFailurePhase.SNAPSHOT_CHUNK,
+                    dispatch=result.dispatch,
+                    carrier_failure=result.carrier_failure,
+                )
             normal = self._settle(result.dispatch, result.carrier_completion)
             if not normal:
                 self._state.fail(
                     FileDownloadFailure.OBSERVATION
                     if result.dispatch is Dispatch.NOT_SENT
-                    else FileDownloadFailure.TERMINATION
+                    else FileDownloadFailure.TERMINATION,
+                    phase=FileDownloadFailurePhase.SNAPSHOT_CHUNK,
+                    dispatch=result.dispatch,
+                    carrier_failure=result.carrier_failure,
                 )
                 return False
             if self._runtime_refused(result.runtime_prerequisite):
-                self._state.fail(FileDownloadFailure.RUNTIME_PREREQUISITE)
+                self._state.fail(
+                    FileDownloadFailure.RUNTIME_PREREQUISITE,
+                    phase=FileDownloadFailurePhase.SNAPSHOT_CHUNK,
+                    dispatch=result.dispatch,
+                    carrier_failure=result.carrier_failure,
+                )
                 return False
             if observation is None or observation.state is not FileSnapshotObservationState.CHUNK:
                 self._state.fail(
                     FileDownloadFailure.SNAPSHOT
                     if observation is not None and observation.state is FileSnapshotObservationState.REFUSED
-                    else FileDownloadFailure.OBSERVATION
+                    else FileDownloadFailure.OBSERVATION,
+                    phase=FileDownloadFailurePhase.SNAPSHOT_CHUNK,
+                    dispatch=result.dispatch,
+                    carrier_failure=result.carrier_failure,
                 )
                 return False
             chunk = observation.chunk
@@ -444,10 +511,20 @@ class _DownloadWorkflow:
         if result.dispatch is not Dispatch.NOT_SENT:
             self._record_runtime(result.runtime_prerequisite)
         if result.dispatch is not Dispatch.NOT_SENT and observation is not None:
-            self._record_observation(observation)
+            self._record_observation(
+                observation,
+                phase=FileDownloadFailurePhase.SNAPSHOT_RECONCILE,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
+            )
         normal = self._settle(result.dispatch, result.carrier_completion)
         if normal and self._runtime_refused(result.runtime_prerequisite):
-            self._state.fail(FileDownloadFailure.RUNTIME_PREREQUISITE)
+            self._state.fail(
+                FileDownloadFailure.RUNTIME_PREREQUISITE,
+                phase=FileDownloadFailurePhase.SNAPSHOT_RECONCILE,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
+            )
         self._state.ownership_uncertain = self._state.cleanup_debt is None
 
     def _cleanup_after_failure(self) -> None:
@@ -478,14 +555,31 @@ class _DownloadWorkflow:
         if result.dispatch is not Dispatch.NOT_SENT:
             self._record_runtime(result.runtime_prerequisite)
         if result.dispatch is not Dispatch.NOT_SENT and observation is not None:
-            self._record_observation(observation)
+            self._record_observation(
+                observation,
+                phase=FileDownloadFailurePhase.SNAPSHOT_CLEANUP,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
+            )
         normal = self._settle(result.dispatch, result.carrier_completion)
         if normal and observation is not None and observation.state is FileSnapshotObservationState.CLEANED:
             self._state.cleanup_debt = None
         else:
-            self._state.fail(FileDownloadFailure.CLEANUP)
+            self._state.fail(
+                FileDownloadFailure.CLEANUP,
+                phase=FileDownloadFailurePhase.SNAPSHOT_CLEANUP,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
+            )
 
-    def _record_observation(self, observation: FileSnapshotObservation) -> None:
+    def _record_observation(
+        self,
+        observation: FileSnapshotObservation,
+        *,
+        phase: FileDownloadFailurePhase,
+        dispatch: Dispatch,
+        carrier_failure: Failure | None,
+    ) -> None:
         snapshot = observation.snapshot
         if snapshot is not None:
             self._state.ready = snapshot.ready
@@ -501,7 +595,12 @@ class _DownloadWorkflow:
                 self._state.cleanup_debt = failure.cleanup_debt
             if self._snapshot_deadline(failure):
                 self._state.deadline_exceeded = True
-                self._state.fail(FileDownloadFailure.DEADLINE)
+                self._state.fail(
+                    FileDownloadFailure.DEADLINE,
+                    phase=phase,
+                    dispatch=dispatch,
+                    carrier_failure=carrier_failure,
+                )
         if observation.state is FileSnapshotObservationState.OWNERSHIP_UNCERTAIN:
             self._state.cleanup_debt = None
             self._state.ownership_uncertain = True
