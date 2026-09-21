@@ -229,6 +229,36 @@ def upload_file(
     borrow: OperationBorrow,
 ) -> FileUploadOutcome:
     """Consume one exact source under the caller's active serial borrow."""
+    return _prepare_upload(
+        carrier,
+        trusted_root_path=trusted_root_path,
+        relative_path=relative_path,
+        source=source,
+        size=size,
+        condition=condition,
+        create_metadata=create_metadata,
+        plan=plan,
+        deadline=deadline,
+        runtime_selection=runtime_selection,
+        borrow=borrow,
+    ).run()
+
+
+def _prepare_upload(
+    carrier: Carrier,
+    *,
+    trusted_root_path: str,
+    relative_path: str,
+    source: ByteSource,
+    size: int,
+    condition: Create | Replace | Match,
+    create_metadata: CreateMetadata,
+    plan: IdentityPlan,
+    deadline: Deadline,
+    runtime_selection: RuntimeSelection,
+    borrow: OperationBorrow,
+) -> _PreparedUpload:
+    """Prepare one validated concrete upload without dispatching it."""
     binding, canonical_condition, canonical_metadata = _validate_inputs(
         trusted_root_path,
         relative_path,
@@ -242,7 +272,7 @@ def upload_file(
         borrow,
     )
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
-    return _upload_file_borrowed(
+    return _prepare_upload_borrowed(
         operation,
         source=source,
         deadline=deadline,
@@ -258,21 +288,57 @@ def _upload_file_borrowed(
     inputs: tuple[FileUploadBinding, Create | Replace | Match, CreateMetadata],
 ) -> FileUploadOutcome:
     """Run one validated upload without acquiring or closing its active borrow."""
+    return _prepare_upload_borrowed(
+        operation,
+        source=source,
+        deadline=deadline,
+        inputs=inputs,
+    ).run()
+
+
+def _prepare_upload_borrowed(
+    operation: BorrowedFixedHelperCarrier,
+    *,
+    source: ByteSource,
+    deadline: Deadline,
+    inputs: tuple[FileUploadBinding, Create | Replace | Match, CreateMetadata],
+) -> _PreparedUpload:
+    """Prepare one validated nested upload without dispatching it."""
     binding, canonical_condition, canonical_metadata = inputs
     state = _WorkingState(binding, secrets.token_bytes(16), operation)
     workflow = _UploadWorkflow(operation, source, canonical_condition, canonical_metadata, deadline, state)
-    try:
-        return workflow.run()
-    except BaseException as control:
-        workflow.note_control_stop()
-        if not operation.coordination_uncertain:
+    return _PreparedUpload(binding, source, state, workflow)
+
+
+@dataclass(slots=True, repr=False)
+class _PreparedUpload:
+    """Validated upload state attachable to core custody before dispatch."""
+
+    binding: FileUploadBinding
+    source: ByteSource
+    state: _WorkingState
+    workflow: _UploadWorkflow
+    control_outcome: FileUploadOutcome | None = field(default=None, init=False)
+
+    def run(self) -> FileUploadOutcome:
+        try:
+            return self.workflow.run()
+        except BaseException as control:
             try:
-                workflow.cleanup_after_local_stop()
+                self.workflow.note_control_stop()
+                if not self.state.operation.coordination_uncertain:
+                    try:
+                        self.workflow.cleanup_after_local_stop()
+                    except BaseException:
+                        self.workflow.note_control_stop()
+                        self.state.fail(FileUploadFailure.CLEANUP)
+                self.workflow.note_control_stop()
+                outcome = self.state.finish()
+                fact = FileUploadControlFact(outcome)
+                self.control_outcome = outcome
             except BaseException:
-                workflow.note_control_stop()
-                state.fail(FileUploadFailure.CLEANUP)
-        workflow.note_control_stop()
-        raise control from FileUploadControlFact(state.finish())
+                raise control from None
+            raise control from fact
 
 
 class _UploadWorkflow:

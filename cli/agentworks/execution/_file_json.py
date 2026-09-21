@@ -31,7 +31,8 @@ from agentworks.execution._file_upload import (
     FileUploadFailure,
     FileUploadOutcome,
     FileUploadStatus,
-    _upload_file_borrowed,
+    _prepare_upload_borrowed,
+    _PreparedUpload,
     _validate_inputs,
 )
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
@@ -166,6 +167,7 @@ class _State:
     upload_outcome: FileUploadOutcome | None = None
     runtime_prerequisite: RuntimePrerequisiteObservation | None = None
     deadline_exceeded: bool = False
+    active_upload: _PreparedUpload | None = field(default=None, repr=False)
 
     def fail(self, failure: FileJsonFailure) -> None:
         if self.failure is None:
@@ -183,6 +185,20 @@ class _State:
         )
         if replace:
             self.runtime_prerequisite = observation
+
+    def attach_upload(self, upload: _PreparedUpload) -> None:
+        if self.active_upload is not None:
+            raise AssertionError("JSON update already has an attached child upload")
+        self.active_upload = upload
+
+    def capture_upload(self, upload: _PreparedUpload, outcome: FileUploadOutcome) -> None:
+        if self.active_upload is not upload:
+            raise AssertionError("JSON update lost its attached child upload")
+        self.upload_outcome = outcome
+        if outcome.runtime_prerequisite is not None:
+            self.record_runtime(outcome.runtime_prerequisite)
+        self.deadline_exceeded = self.deadline_exceeded or outcome.deadline_exceeded
+        self.active_upload = None
 
     def finish(self) -> FileJsonOutcome:
         upload = self.upload_outcome
@@ -230,6 +246,40 @@ def update_json_file(
     borrow: OperationBorrow,
 ) -> FileJsonOutcome:
     """Apply one bounded JSON strategy while holding one serial owner borrow."""
+    return _prepare_json_update(
+        carrier,
+        trusted_root_path=trusted_root_path,
+        relative_path=relative_path,
+        source=source,
+        strategy=strategy,
+        create=create,
+        create_metadata=create_metadata,
+        max_bytes=max_bytes,
+        max_depth=max_depth,
+        plan=plan,
+        deadline=deadline,
+        runtime_selection=runtime_selection,
+        borrow=borrow,
+    ).run()
+
+
+def _prepare_json_update(
+    carrier: Carrier,
+    *,
+    trusted_root_path: str,
+    relative_path: str,
+    source: bytes,
+    strategy: JsonFileStrategy,
+    create: bool,
+    create_metadata: CreateMetadata,
+    max_bytes: int,
+    max_depth: int,
+    plan: IdentityPlan,
+    deadline: Deadline,
+    runtime_selection: RuntimeSelection,
+    borrow: OperationBorrow,
+) -> _PreparedJsonUpdate:
+    """Prepare one validated JSON update without dispatching it."""
     inputs = _validate_json_inputs(
         trusted_root_path,
         relative_path,
@@ -247,17 +297,39 @@ def update_json_file(
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
     state = _State(inputs.binding, operation)
     workflow = _JsonWorkflow(inputs, deadline, state)
-    try:
-        return workflow.run()
-    except BaseException as control:
-        cause = control.__cause__
-        if isinstance(cause, FileUploadControlFact):
-            state.upload_outcome = cause.outcome
-            if cause.outcome.runtime_prerequisite is not None:
-                state.record_runtime(cause.outcome.runtime_prerequisite)
-            state.deadline_exceeded = state.deadline_exceeded or cause.outcome.deadline_exceeded
-        state.deadline_exceeded = state.deadline_exceeded or deadline.expired
-        raise control from FileJsonControlFact(state.finish())
+    return _PreparedJsonUpdate(inputs.binding, state, workflow)
+
+
+@dataclass(slots=True, repr=False)
+class _PreparedJsonUpdate:
+    """Validated JSON state attachable to core custody before dispatch."""
+
+    binding: FileJsonBinding
+    state: _State
+    workflow: _JsonWorkflow
+    control_outcome: FileJsonOutcome | None = field(default=None, init=False)
+
+    def run(self) -> FileJsonOutcome:
+        try:
+            return self.workflow.run()
+        except BaseException as control:
+            cause = control.__cause__
+            child = self.state.active_upload
+            if child is not None:
+                if not isinstance(cause, FileUploadControlFact) or child.control_outcome is not cause.outcome:
+                    raise control from None
+                try:
+                    self.state.capture_upload(child, cause.outcome)
+                except BaseException:
+                    raise control from cause
+            try:
+                self.state.deadline_exceeded = self.state.deadline_exceeded or self.workflow.deadline.expired
+                outcome = self.state.finish()
+                fact = FileJsonControlFact(outcome)
+                self.control_outcome = outcome
+            except BaseException:
+                raise control from None
+            raise control from fact
 
 
 class _JsonWorkflow:
@@ -265,6 +337,10 @@ class _JsonWorkflow:
         self._inputs = inputs
         self._deadline = deadline
         self._state = state
+
+    @property
+    def deadline(self) -> Deadline:
+        return self._deadline
 
     def run(self) -> FileJsonOutcome:
         if self._deadline.expired:
@@ -463,16 +539,15 @@ class _JsonWorkflow:
             self._state.binding.runtime_selection,
         )
         self._state.publication_attempts += 1
-        outcome = _upload_file_borrowed(
+        upload = _prepare_upload_borrowed(
             self._state.operation,
             source=source,
             deadline=self._deadline,
             inputs=(binding, condition, self._inputs.create_metadata),
         )
-        self._state.upload_outcome = outcome
-        if outcome.runtime_prerequisite is not None:
-            self._state.record_runtime(outcome.runtime_prerequisite)
-        self._state.deadline_exceeded = self._state.deadline_exceeded or outcome.deadline_exceeded
+        self._state.attach_upload(upload)
+        outcome = upload.run()
+        self._state.capture_upload(upload, outcome)
         return outcome
 
     def _complete_upload(self, outcome: FileUploadOutcome) -> FileJsonOutcome:
