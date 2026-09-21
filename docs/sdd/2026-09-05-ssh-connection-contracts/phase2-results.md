@@ -155,7 +155,17 @@ asynchronous interruption at cleanup-loop entry that can leave a child and pipes
 [launch-interruption evidence](../2026-09-12-transport-improv/prior-art-research.md#local-process-startup-and-interruption)
 and [lifecycle design](../2026-09-12-transport-improv/execution-lifecycle-lld.md). Shared cleanup
 correction, native proof and SSH forwarding's separate startup path remain production acceptance
-work. The rebase's final validation and private reviews are in progress.
+work.
+
+Integration revision `de18829d` passes **11,939 non-integration tests with 14 skips**. Both SSH
+live-byte cases pass, including installed OpenSSH. The pre-authentication pipe fixture now uses empty
+finite input: it still creates an owned stdin pipe, without racing unused payload delivery against
+the fixture's deliberate disconnect. Two new helper-sizing tests supply SSH's explicit trust
+argument. No SSH runtime code changed in this rebase. Ruff/format, mypy (1,004 source files), file
+lint, locked-SDD, rulesync, typer isolation and website gates passed, including 160 Python tests,
+103 Node tests and both deterministic double-build comparisons. Independent project, complexity and
+correctness reviews are clean at `de18829d`. Hosted CI records the subsequently published head
+separately; these results do not close the remaining production acceptance gates.
 
 Also outstanding are additive RunContext/platform composition, a genuine creation-flow provenance
 and publication binding, complete SSH-backed workflow evidence, and supported Linux/macOS/Windows
