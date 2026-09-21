@@ -460,11 +460,11 @@ a borrow or unresolved attempt remains; it does not infer remote quiescence from
 `_file_upload.py` composes staging, finite source consumption, publication and ordered cleanup under
 one borrowed owner. It consumes bounded chunks without rewinding or retaining the whole source and
 checks exact EOF before publication. Follow-on calls require independently observed normal-zero
-completion of the supported nonspawning helper chain, or evidence that the previous attempt was not
-sent. Missing completion stops further calls, including cleanup. Publication evidence, remaining
-cleanup obligations and possible future effects are distinct. The caller retains the original
-binding and token for unresolved work. These private mechanics do not acquire production ownership
-before activation or provide crash recovery.
+completion of the supported helper chain that starts no background work, or evidence that the
+previous attempt was not sent. Missing completion stops further calls, including cleanup.
+Publication evidence, remaining cleanup obligations and possible future effects are distinct. The
+caller retains the original binding and token for unresolved work. These private mechanics do not
+acquire production ownership before activation or provide crash recovery.
 
 ## Private object observation and removal
 
