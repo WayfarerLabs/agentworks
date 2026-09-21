@@ -1430,6 +1430,22 @@ Hosted run `35614666650` at `2f34621e` subsequently passes every required check,
 Python 3.13 and Linux Python 3.12/3.13/3.14. This validates the selected workstation tests; it does
 not establish native backend acceptance or complete the remaining public composition gates.
 
+All three private lanes accept upload/JSON custody at `9d8ff26a` without outstanding findings.
+Review removed a generic completion helper, duplicate source reference and redundant interior checks
+while retaining the JSON child's required exceptional-fact provenance check. Negative mutations
+prove that removing that child check or restoring a stale source-exception cause breaks the
+corresponding regressions. The direct source cases verify their evidence outside the production
+exception handler.
+
+The final code pin passes 12,395 local tests with 13 skips. Full Ruff/format, mypy (1046 sources),
+file lint, locked-SDD/rulesync, typer isolation and whitespace checks pass. One earlier local
+website run failed its mouse-tap launch witness in
+`test_phase4k_native_input_focus_departure_and_accessibility_contracts`. Three isolated reruns and a
+complete rerun subsequently pass, with no website edits: 160 Python tests, 103 Node tests and both
+deterministic double-build comparisons. The initial failure's cause is unproved; these results are
+not a claimed fix. No live infrastructure was exercised. Hosted checks for the write-custody
+increment remain pending; no public review/test/merge signal is raised.
+
 ### Buffered execution result checkpoint
 
 - [x] Implement safe immutable application result values, honest wait/exit/signal precision and one
