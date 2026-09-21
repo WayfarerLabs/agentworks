@@ -129,7 +129,36 @@ These cases supply SSH boundary evidence for the private read/staging helpers. T
 production FileAccess, malformed-response and interruption coverage, publication, database
 coordination, elevation, native workstation/provider or full file-only workflow acceptance.
 
+## Real snapshot helper delivery
+
+SSH integration `c14edf65` adds the actual fixed snapshot helper over installed OpenSSH on transport
+`5b570442`. The host fixture passes all three read, stage and snapshot cases. The snapshot case
+downloads binary data in two chunks, including a nonzero offset, verifies per-chunk and complete
+digests, recovers cleanup-only ownership and removes the exact random-token scratch object. All five
+snapshot operations use one carrier call each, sensitive finite input and delivered outputs with no
+retained bytes. Source contents, identity, mode, size and modification/change times remain
+unchanged.
+
+The fixture independently requires a root-owned mode-1777 `/tmp` before dispatch; an owner-remapped
+sandbox skips this happy-path test rather than overriding helper policy or treating a helper refusal
+as a skip. Failure cleanup requires observed successful remote completion of every preceding helper
+attempt. Unknown completion retains and reports the exact owned path; reconciliation alone does not
+prove remote quiescence. The lead's host repetition found no owned fixture processes or new snapshot
+paths afterward and removed the temporary fixture directory and credentials.
+
+This is Linux loopback proof for private snapshot exchanges. Public download composition,
+publication, interruption and malformed-response acceptance, production FileAccess, and supported
+workstation/provider workflows remain open.
+
 ## Remaining integration and acceptance
+
+Current integration uses transport `5b57044260405089e972cd371462cefe325f906c`, which adds private
+snapshot download exchanges and preserves verified cleanup debt on final deadline expiry. The rebase
+applied cleanly without SSH runtime or shared-interface changes. Earlier evidence below retains its
+measured integration pins. The combined suite at `8eff3c23` passes **12,077 non-integration tests
+with 14 skips**. Full Ruff/format, mypy (1,013 source files), file lint, locked-SDD, rulesync and
+typer-isolation gates pass. Website tests pass 160 Python and 103 Node cases, and both deterministic
+double-build comparisons are identical.
 
 Transport [#833](https://github.com/WayfarerLabs/agentworks/pull/833), observed at
 `84ac8cafee8c6ac97587bcc98e8785b9be62de8a`, supplies the shared process core and concrete
@@ -172,8 +201,8 @@ Bootstrap EOF sufficed for the keyboard transition without SSH parsing readiness
 presentation stalls, early keys, resize, clean-exit restoration and fixture cleanup passed; the
 remaining production/native gates still apply.
 
-Current integration rebases onto transport `806741ca3cde218bbe5ca5dfd7bbe3d319eb9e32`. That
-increment replaces the destination file-lock prerequisite with transport-owned database
+Integration revision `de18829d` rebases onto transport `806741ca3cde218bbe5ca5dfd7bbe3d319eb9e32`.
+That increment replaces the destination file-lock prerequisite with transport-owned database
 coordination; SSH's independent trust-maintenance lock is unchanged. The file-helper test retains
 the current transport fixture names and SSH's explicit trust argument. The byte-adoption and
 terminal results above retain their original pins; they do not certify the newer process core.
