@@ -939,11 +939,12 @@ the private operation status records completion.
 The current carrier's dispatch and observation categories include local startup and protocol
 failures as well as network failures. Neither proves connectivity loss. Reduce those generic facts
 to a general external failure without inventing a network cause; `ConnectivityError` requires
-independent evidence that these categories do not supply. Upload/download composition currently
-discards some exchange-level dispatch/failure detail. Preserve any facts required by public
-diagnostics before exposing that boundary; do not manufacture missing precision from a generic
-termination category. Concrete private reducers now provide the public value/error projection;
-production FileAccess integration remains implementation work.
+independent evidence that these categories do not supply. Download composition retains its first
+primary failure's exchange-level phase, dispatch and carrier failure; upload retention remains in
+progress. Preserve any facts required by public diagnostics before exposing that boundary; do not
+manufacture missing precision from a generic termination category. Concrete private reducers now
+provide the public value/error projection; production FileAccess integration remains implementation
+work.
 
 ## Test and evidence plan
 

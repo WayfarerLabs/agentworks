@@ -398,8 +398,9 @@ conflicts, with eight total attempts under the original deadline. Uncertain disp
 termination evidence or retained cleanup debt stops the workflow without replay.
 
 Private outcomes distinguish change, failure and uncertainty and preserve the upload's recovery
-facts without embedding JSON content. Public FileAccess, error normalization, production ownership
-and recovery remain unimplemented; these private calls are not a production RunContext surface.
+facts without embedding JSON content. Private result reducers supply typed error projection; public
+FileAccess integration, production ownership and recovery remain unimplemented. These private calls
+are not a production RunContext surface.
 
 ## Private file observations
 
