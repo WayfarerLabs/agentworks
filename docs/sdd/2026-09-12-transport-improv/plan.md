@@ -974,10 +974,11 @@ increment still needs fresh hosted confirmation after publication.
 
 The focused systemd 252 source audit records helper acceptance separately from payload entry,
 completion retention across unit collection and independent boundary-emptiness observation after
-stop. These constrain the next supervisor experiment; no managed lifecycle is implemented by them.
-Creation receipts are under implementation. Transfer/publication exchanges, full FileAccess, native
-acceptance, lifecycle and additive RunContext remain required; both macOS decisions remain pending.
-No public feedback/fix round is consumed by this increment.
+stop. The later private foreground candidate below implements those source-backed mechanics without
+closing their native proof gates. Creation receipts are under implementation. Transfer/publication
+exchanges, full FileAccess, native acceptance, complete lifecycle and additive RunContext remain
+required. The macOS questions still pending at that checkpoint were resolved by the later
+platform-owned-lifecycle ruling above. No public feedback/fix round is consumed by this increment.
 
 The receipt increment is reviewed at `5a9d3b8f`. Core supplies a fresh token and execution identity
 before staging or snapshot creation. The immutable receipt binds the closed operation and original
@@ -1187,6 +1188,12 @@ connection and trust only. Before broader lifecycle implementation, complete the
       replacement FRD. Ownership is assigned to transport and #770 is closed; carry the accepted
       text into its designated requirements home. The closed source head is `2c406948`, matching the
       preserved snapshot; closing the PR does not complete requirements reconciliation.
+- [x] Implement a bounded private Linux foreground MANAGED candidate for native proof. The fixed
+      `systemd-run --pipe --wait` service runs under the explicit target identity, creates one
+      delegated child cgroup before workload execution, inherits the carrier byte streams directly,
+      and separately reports helper completion, payload evidence, service completion and observed
+      child-boundary emptiness. Preparation is atomically one-shot and carries no replay, public
+      job, RunContext or production-factory surface.
 - [ ] Complete and prove Linux supervisor launch through SSH and native QGA: protected identity,
       secret/source delivery, privilege changes, foreground wait, independent launch, output
       retention and terminal evidence. No workload code runs before boundary entry.
@@ -1210,6 +1217,14 @@ connection and trust only. Before broader lifecycle implementation, complete the
       stop and rollback for the supported drivers. A foreground anchor is an option to justify for a
       concrete workflow, not a required replacement for Lima's runtime. Do not treat numeric PID
       records as authority to kill unrelated host work.
+
+The checked private candidate is local mechanism evidence only. Its source harness executes the real
+bundled supervisor against a test-local cgroup-filesystem shim and deliberately avoids detached
+payloads. It does not prove Debian systemd 252+ delegation, root control to non-root service
+identity, descriptor inheritance through `systemd-run`, real `cgroup.kill`, detached-descendant
+cleanup, boundary removal timing, `waitpid` failure, carrier interruption or any SSH/QGA behavior.
+Those observations remain required by the unchecked native and lifecycle gates above; a failed
+native case blocks the MANAGED profile rather than selecting DIRECT or weakening the result.
 
 - [ ] SSH effort builds `execution/carriers/ssh/` and its connection/trust migration. Transport
       builds common execution, scoped context delivery, files/jobs and other adapters, and applies
