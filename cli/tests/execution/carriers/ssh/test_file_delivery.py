@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import secrets
 import sys
 from pathlib import Path
 
@@ -11,6 +12,14 @@ import pytest
 
 from agentworks.execution._file_read import FileReadObservationState, read_file
 from agentworks.execution._file_read_protocol import FileReadFailure
+from agentworks.execution._file_snapshot_exchange import (
+    FileSnapshotObservationState,
+    snapshot_begin,
+    snapshot_chunk,
+    snapshot_cleanup,
+    snapshot_reconcile,
+)
+from agentworks.execution._file_snapshot_protocol import MAX_SNAPSHOT_CHUNK_BYTES
 from agentworks.execution._file_stage_exchange import (
     FileStageObservationState,
     stage_begin,
@@ -20,7 +29,7 @@ from agentworks.execution._file_stage_exchange import (
 )
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
-from agentworks.execution._scratch_receipt import scratch_name
+from agentworks.execution._scratch_receipt import ScratchCleanupDebt, scratch_name
 from agentworks.execution.carrier import (
     CarrierIO,
     CarrierReport,
@@ -241,3 +250,140 @@ def test_file_stage_round_trip_and_exact_cleanup_over_real_ssh(
         _assert_sensitive_attempt(carrier, attempt, str(root), "destination", b"stage-payload-canary")
     assert "stage-payload-canary" not in repr(chunks)
     assert "stage-payload-canary" not in repr(readback)
+
+
+def test_file_snapshot_download_and_exact_cleanup_over_real_ssh(
+    tmp_path: Path,
+    local_sshd: SSHConnection,
+) -> None:
+    source_root = tmp_path / "snapshot-source"
+    source_root.mkdir()
+    payload = bytes(range(256)) * 49 + b"snapshot-payload-canary\x00\xff"
+    source = source_root / "payload"
+    source.write_bytes(payload)
+    source_before = source.stat()
+    token = secrets.token_bytes(16)
+    scratch = Path("/tmp") / scratch_name(token)
+    assert not scratch.exists()
+    carrier = _ObservedSSHCarrier(local_sshd)
+    plan = _direct_plan()
+    cleanup_debt: ScratchCleanupDebt | None = None
+    cleanup_result = None
+
+    try:
+        begun = snapshot_begin(
+            carrier,
+            trusted_root_path=str(source_root),
+            relative_path="payload",
+            max_bytes=len(payload),
+            token=token,
+            plan=plan,
+            deadline=Deadline.after(15),
+            runtime_path=_RUNTIME,
+        )
+        assert begun.dispatch is Dispatch.SENT and begun.carrier_completion == ExitStatus(code=0)
+        assert begun.carrier_failure is None
+        assert begun.observation.state is FileSnapshotObservationState.READY
+        snapshot = begun.observation.snapshot
+        assert snapshot is not None
+        assert snapshot.ready._reference._ownership._token == token
+        assert snapshot.ready._reference._ownership._length == len(payload)
+        assert snapshot.source.stat.size == len(payload)
+        assert snapshot.source.digest == hashlib.sha256(payload).digest()
+        assert snapshot.ready._digest == snapshot.source.digest
+
+        downloaded = bytearray()
+        chunks = []
+        for offset in range(0, len(payload), MAX_SNAPSHOT_CHUNK_BYTES):
+            length = min(MAX_SNAPSHOT_CHUNK_BYTES, len(payload) - offset)
+            result = snapshot_chunk(
+                carrier,
+                token=token,
+                ready=snapshot.ready,
+                offset=offset,
+                length=length,
+                plan=plan,
+                deadline=Deadline.after(15),
+                runtime_path=_RUNTIME,
+            )
+            assert result.dispatch is Dispatch.SENT and result.carrier_completion == ExitStatus(code=0)
+            assert result.carrier_failure is None
+            assert result.observation.state is FileSnapshotObservationState.CHUNK
+            chunk = result.observation.chunk
+            assert chunk is not None
+            assert chunk.offset == offset and chunk.length == length
+            assert chunk.data == payload[offset : offset + length]
+            assert chunk.chunk_digest == hashlib.sha256(chunk.data).digest()
+            downloaded.extend(chunk.data)
+            chunks.append(result)
+        assert [result.observation.chunk.offset for result in chunks if result.observation.chunk is not None] == [
+            0,
+            MAX_SNAPSHOT_CHUNK_BYTES,
+        ]
+        assert bytes(downloaded) == payload
+        assert hashlib.sha256(downloaded).digest() == snapshot.ready._digest
+
+        recovered = snapshot_reconcile(
+            carrier,
+            token=token,
+            plan=plan,
+            deadline=Deadline.after(15),
+            runtime_path=_RUNTIME,
+        )
+        assert recovered.dispatch is Dispatch.SENT and recovered.carrier_completion == ExitStatus(code=0)
+        assert recovered.carrier_failure is None
+        assert recovered.observation.state is FileSnapshotObservationState.RECOVERED
+        assert recovered.observation.snapshot is None and recovered.observation.chunk is None
+        cleanup_debt = recovered.observation.cleanup_debt
+        assert cleanup_debt is not None
+    finally:
+        if scratch.exists():
+            if cleanup_debt is None:
+                recovery = snapshot_reconcile(
+                    carrier,
+                    token=token,
+                    plan=plan,
+                    deadline=Deadline.after(15),
+                    runtime_path=_RUNTIME,
+                )
+                assert recovery.observation.state is FileSnapshotObservationState.RECOVERED
+                cleanup_debt = recovery.observation.cleanup_debt
+            assert cleanup_debt is not None
+            cleanup_result = snapshot_cleanup(
+                carrier,
+                token=token,
+                cleanup_debt=cleanup_debt,
+                plan=plan,
+                deadline=Deadline.after(15),
+                runtime_path=_RUNTIME,
+            )
+            assert cleanup_result.observation.state is FileSnapshotObservationState.CLEANED
+
+    assert cleanup_result is not None
+    assert cleanup_result.dispatch is Dispatch.SENT
+    assert cleanup_result.carrier_completion == ExitStatus(code=0)
+    assert cleanup_result.carrier_failure is None
+    assert not scratch.exists()
+    source_after = source.stat()
+    assert source.read_bytes() == payload
+    assert (
+        source_after.st_dev,
+        source_after.st_ino,
+        source_after.st_mode,
+        source_after.st_size,
+        source_after.st_mtime_ns,
+        source_after.st_ctime_ns,
+    ) == (
+        source_before.st_dev,
+        source_before.st_ino,
+        source_before.st_mode,
+        source_before.st_size,
+        source_before.st_mtime_ns,
+        source_before.st_ctime_ns,
+    )
+    assert tuple(source_root.iterdir()) == (source,)
+    assert len(carrier.attempts) == 5
+    for attempt in range(5):
+        _assert_sensitive_attempt(carrier, attempt, str(source_root), "payload", b"snapshot-payload-canary")
+    assert "snapshot-payload-canary" not in repr(chunks)
+    assert "snapshot-payload-canary" not in repr(begun)
