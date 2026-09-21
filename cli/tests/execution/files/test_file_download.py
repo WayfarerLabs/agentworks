@@ -477,16 +477,30 @@ def test_chunk_failure_facts_survive_later_cleanup_failure(
     tmp_path: Path,
     roots: tuple[Path, Path],
     plan: IdentityPlan,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source, scratch = roots
     source.joinpath("source").write_bytes(b"payload")
+    install_fixture_bundle(
+        monkeypatch,
+        scratch,
+        """
+def failed_cleanup(_scratch_fd,debt):
+ raise guest.ScratchTransferError(
+  guest.ScratchFailureKind.IO,
+  guest.ScratchPhase.CLEANUP,
+  cleanup_debt=debt,
+ )
+guest.cleanup_scratch=failed_cleanup
+""",
+    )
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
     borrow = operation_owner.borrow()
     carrier = _CarrierFactInjector(
         LocalCarrier(),
         {2: Failure.OUTPUT, 3: Failure.INPUT},
-        lost_calls=frozenset({2, 3}),
+        lost_calls=frozenset({2}),
     )
     try:
         outcome = download(borrow, source, BytesSink(), 64, plan, carrier=carrier)
@@ -496,7 +510,8 @@ def test_chunk_failure_facts_survive_later_cleanup_failure(
         assert outcome.failure_phase is FileDownloadFailurePhase.SNAPSHOT_CHUNK
         assert outcome.failure_dispatch is Dispatch.SENT
         assert outcome.carrier_failure is Failure.OUTPUT
-        assert outcome.cleanup_debt is not None and not tuple(scratch.iterdir())
+        assert outcome.snapshot_failure is None
+        assert outcome.cleanup_debt is not None and tuple(scratch.iterdir())
     finally:
         database.close()
 

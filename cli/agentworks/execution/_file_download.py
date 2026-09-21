@@ -589,7 +589,7 @@ class _DownloadWorkflow:
             self._state.cleanup_debt = observation.cleanup_debt
         failure = observation.failure
         if failure is not None:
-            if self._state.snapshot_failure is None:
+            if self._state.failure is None and self._state.snapshot_failure is None:
                 self._state.snapshot_failure = failure
             if failure.cleanup_debt is not None:
                 self._state.cleanup_debt = failure.cleanup_debt
