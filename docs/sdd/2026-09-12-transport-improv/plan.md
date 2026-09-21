@@ -1400,6 +1400,21 @@ Hosted run `35610495863` at `8e586040` passes every required check, including Wi
 and Linux Python 3.12/3.13/3.14. It verifies the scoped initialization change on that native Windows
 run, not the identity of the earlier handle holder or freedom from every possible cleanup race.
 
+All three private lanes accept concrete download custody and memory-read integration at `b867a572`
+without outstanding findings. Review corrected loss of the original control exception when outcome
+or fact allocation fails. The regression now interrupts a real download through its sink, records
+the prior typed cause at allocation, and verifies that evidence outside the production exception
+handler. Restoring the stale cause or recording the wrong cause makes both regression cases fail.
+The focused custody/download/memory selection passes 50 tests. The earlier caller-owned-borrow
+checkbox records its completed prerequisite; the later memory-custody checkbox records that
+adapter's subsequent transition to `FileOperation`.
+
+That code pin passes the full local suite with 12,378 tests and 13 skips. Full Ruff/format, mypy
+(1045 sources), file lint, locked-SDD/rulesync, typer isolation and whitespace gates pass. Website
+gates pass 160 Python tests, 103 Node tests and both deterministic double-build comparisons. No live
+infrastructure was exercised. Hosted validation of this increment remains pending; the draft has no
+review/test/merge signal and all three public feedback/fix rounds remain available.
+
 ### Buffered execution result checkpoint
 
 - [x] Implement safe immutable application result values, honest wait/exit/signal precision and one
