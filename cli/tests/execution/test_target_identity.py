@@ -317,7 +317,11 @@ def test_unproved_cross_identity_paths_are_refused_without_root_lookup(
     owner.close()
 
 
-@pytest.mark.parametrize("bad_name", ["", "bad\0name", "\ud800", "x" * 32_768])
+@pytest.mark.parametrize(
+    "bad_name",
+    ["", "bad\0name", "\ud800", "x" * 32_768],
+    ids=["empty", "embedded-nul", "lone-surrogate", "overlong"],
+)
 def test_all_input_names_are_validated_before_dispatch(
     owned: tuple[Database, OperationOwner],
     bad_name: str,
