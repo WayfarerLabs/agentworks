@@ -1316,6 +1316,11 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       unused names. Retain first-primary upload exchange and publication failure details while
       preserving independent later cleanup facts. Numeric metadata stays at the fixed publication
       boundary; reducer integration and production FileAccess remain required.
+- [x] Consume retained primary transfer and ownership-lookup facts in the private reducers. Preserve
+      specific carrier failures independently from mutation uncertainty and unknown runtime
+      evidence, expose a distinct removal phase and make confirmed changes visible in failure
+      guidance. Remove duplicate private completion checks while preserving independent deadline
+      refusal. This projection remains separate from public FileAccess wiring and durable recovery.
 - [x] Change private upload, download, JSON, memory-read and single-file compositions to accept a
       caller-owned `OperationBorrow` without acquiring or closing it. Nested compositions reuse the
       same borrow. Focused lifetime tests cover normal, invalid and exceptional results and prove
