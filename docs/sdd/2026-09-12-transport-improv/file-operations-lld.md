@@ -672,6 +672,14 @@ workflow records returned effects, references and cleanup debt before acknowledg
 effects; only the current borrow can settle its outstanding attempt. The coordinator does not
 interpret carrier reports or file protocols.
 
+Validate caller publication options with the canonical protocol schema before staging or consuming
+input. Local preparation can still reject a complete encoded request, for example when identity,
+path and chunk fields jointly exceed a manifest bound. The upload's concrete carrier forwarder arms
+the attempt immediately before actual carrier execution, after that local preparation. A local
+encoding failure before execution must not invent possible dispatch or strand a reserved claim.
+After actual execution begins, an exception retains the unresolved attempt; no exception type alone
+proves that remote effects stopped.
+
 Closing the owner and admitting a borrow share the same guard. Close first prevents new dispatch; an
 active borrow prevents release and requires explicit later finalization. A returning borrower may
 record the outstanding attempt's facts but cannot start another exchange after close. The last
