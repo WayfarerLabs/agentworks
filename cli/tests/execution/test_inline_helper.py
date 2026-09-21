@@ -20,7 +20,6 @@ from agentworks.execution._inline import (
     prepare_inline_candidate,
 )
 from agentworks.execution._inline_control import FailureCode, FailurePhase, StreamRetention, WaitFact, WaitKind
-from agentworks.execution._inline_observer import InlineObservation
 from agentworks.execution._runtime_prerequisite import (
     RuntimePrerequisiteState,
     RuntimeSelection,
@@ -110,24 +109,21 @@ def _run(
     return prepared, result, selected_carrier
 
 
-def _observation(result: InlineCandidateResult) -> InlineObservation:
-    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
-    assert result.observation is not None
-    return result.observation
-
-
 @pytest.mark.parametrize("status", range(256))
 def test_literal_command_preserves_every_normal_exit(status: int, plan: IdentityPlan) -> None:
     _, result, _ = _run(
         Command(["/usr/bin/python3", "-I", "-S", "-B", "-c", f"raise SystemExit({status})"]),
         plan,
     )
-    observation = _observation(result)
+    observation = result.observation
 
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert observation is not None
+    wait = observation.wait
     assert observation.trusted_terminal
-    assert observation.wait is not None
-    assert observation.wait.kind is WaitKind.EXIT
-    assert observation.wait.value == status
+    assert wait is not None
+    assert wait.kind is WaitKind.EXIT
+    assert wait.value == status
     assert observation.failure is None
     assert result.carrier_completion == ExitStatus(code=0)
 
@@ -137,11 +133,14 @@ def test_signaled_command_keeps_exact_signal_separate(plan: IdentityPlan) -> Non
         Command(["/usr/bin/python3", "-c", "import os,signal; os.kill(os.getpid(), signal.SIGTERM)"]),
         plan,
     )
-    observation = _observation(result)
+    observation = result.observation
 
-    assert observation.wait is not None
-    assert observation.wait.kind is WaitKind.SIGNAL
-    assert observation.wait.value == signal.SIGTERM
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert observation is not None
+    wait = observation.wait
+    assert wait is not None
+    assert wait.kind is WaitKind.SIGNAL
+    assert wait.value == signal.SIGTERM
     assert observation.trusted_terminal
 
 
@@ -150,8 +149,10 @@ def test_literal_arguments_are_not_reparsed(plan: IdentityPlan) -> None:
     code = f"import sys;assert sys.argv[1:]=={arguments!r}"
 
     _, result, _ = _run(Command(["/usr/bin/python3", "-I", "-S", "-B", "-c", code, *arguments]), plan)
-    observation = _observation(result)
+    observation = result.observation
 
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert observation is not None
     assert observation.wait == WaitFact(WaitKind.EXIT, 0)
     assert observation.trusted_terminal
 
@@ -179,11 +180,16 @@ def test_memfd_script_separates_source_binary_input_and_streams(
         helper_runtime=helper_runtime,
         stdin=stdin,
     )
-    observation = _observation(result)
+    observation = result.observation
 
-    assert observation.wait is not None and observation.wait.value == 255
-    assert observation.stdout is not None and observation.stdout.data == stdout
-    assert observation.stderr is not None and observation.stderr.data == stderr
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert observation is not None
+    wait = observation.wait
+    stdout_observation = observation.stdout
+    stderr_observation = observation.stderr
+    assert wait is not None and wait.value == 255
+    assert stdout_observation is not None and stdout_observation.data == stdout
+    assert stderr_observation is not None and stderr_observation.data == stderr
     assert observation.trusted_terminal
     assert source not in prepared.invocation.argv
 
@@ -199,13 +205,19 @@ def test_payload_environment_and_absolute_cwd_replace_helper_environment(
         cwd=str(tmp_path),
     )
     _, cwd_result, _ = _run(Command(["/bin/pwd"]), plan, cwd=str(tmp_path))
-    env_observation = _observation(env_result)
-    cwd_observation = _observation(cwd_result)
+    env_observation = env_result.observation
+    cwd_observation = cwd_result.observation
 
-    assert env_observation.stdout is not None
-    assert env_observation.stdout.data == b"ONLY_PAYLOAD=present\0"
-    assert cwd_observation.stdout is not None
-    assert cwd_observation.stdout.data == f"{tmp_path}\n".encode()
+    assert env_result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert cwd_result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert env_observation is not None
+    assert cwd_observation is not None
+    env_stdout = env_observation.stdout
+    cwd_stdout = cwd_observation.stdout
+    assert env_stdout is not None
+    assert env_stdout.data == b"ONLY_PAYLOAD=present\0"
+    assert cwd_stdout is not None
+    assert cwd_stdout.data == f"{tmp_path}\n".encode()
 
 
 def test_identity_mismatch_refuses_before_launch(plan: IdentityPlan) -> None:
@@ -216,14 +228,17 @@ def test_identity_mismatch_refuses_before_launch(plan: IdentityPlan) -> None:
     )
     _, result, _ = _run(Command(["/bin/true"]), mismatched)
 
-    observation = _observation(result)
+    observation = result.observation
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert observation is not None
     assert observation.trusted_terminal
     assert not observation.launching
     assert observation.wait is None
     assert observation.stdout is None and observation.stderr is None
-    assert observation.failure is not None
-    assert observation.failure.phase is FailurePhase.IDENTITY
-    assert observation.failure.code is FailureCode.MISMATCH
+    failure = observation.failure
+    assert failure is not None
+    assert failure.phase is FailurePhase.IDENTITY
+    assert failure.code is FailureCode.MISMATCH
 
 
 def test_unsupported_user_default_shell_refuses_without_fallback(plan: IdentityPlan) -> None:
@@ -234,11 +249,14 @@ def test_unsupported_user_default_shell_refuses_without_fallback(plan: IdentityP
         pytest.skip("The local account has a supported default shell")
 
     _, result, _ = _run(Script("exit 0\n", Shell.USER_DEFAULT), plan)
-    observation = _observation(result)
+    observation = result.observation
 
-    assert observation.failure is not None
-    assert observation.failure.phase is FailurePhase.IDENTITY
-    assert observation.failure.code is FailureCode.SHELL
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert observation is not None
+    failure = observation.failure
+    assert failure is not None
+    assert failure.phase is FailurePhase.IDENTITY
+    assert failure.code is FailureCode.SHELL
     assert not observation.launching
 
 
@@ -249,8 +267,10 @@ def test_capture_overflow_retains_limit_and_reports_truncation(plan: IdentityPla
         plan,
         capture_limit=4_096,
     )
-    observation = _observation(result)
+    observation = result.observation
 
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert observation is not None
     assert observation.failure is None
     for stream, expected in ((observation.stdout, b"o"), (observation.stderr, b"e")):
         assert stream is not None
@@ -281,19 +301,25 @@ def test_sensitive_output_and_raw_reports_retain_no_canary(plan: IdentityPlan) -
         env={"SECRET": canary},
         sensitive=True,
     )
-    observation = _observation(result)
+    observation = result.observation
 
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert observation is not None
     assert canary not in repr(prepared)
     assert canary not in repr(result)
     assert canary not in prepared.invocation.argv
-    assert observation.wait is not None and observation.wait.value == 37
-    assert observation.stdout is not None and observation.stdout.data == b""
-    assert observation.stderr is not None and observation.stderr.data == b""
-    assert observation.stdout.retention is StreamRetention.SUPPRESSED
-    assert carrier.last_report is not None
-    assert carrier.last_report.stdout.retention is carrier.last_report.stderr.retention is Retention.DELIVERED
-    assert carrier.last_report.stdout.data == carrier.last_report.stderr.data == b""
-    assert canary not in repr(carrier.last_report)
+    wait = observation.wait
+    stdout_observation = observation.stdout
+    stderr_observation = observation.stderr
+    report = carrier.last_report
+    assert wait is not None and wait.value == 37
+    assert stdout_observation is not None and stdout_observation.data == b""
+    assert stderr_observation is not None and stderr_observation.data == b""
+    assert stdout_observation.retention is StreamRetention.SUPPRESSED
+    assert report is not None
+    assert report.stdout.retention is report.stderr.retention is Retention.DELIVERED
+    assert report.stdout.data == report.stderr.data == b""
+    assert canary not in repr(report)
     with pytest.raises(ValidationError) as caught:
         execute_inline_candidate(carrier, prepared, deadline=Deadline.after(1))
     assert carrier.calls == 1
@@ -306,8 +332,10 @@ def test_discard_reports_safe_stream_facts_without_data(plan: IdentityPlan) -> N
         plan,
         capture_limit=None,
     )
-    observation = _observation(result)
+    observation = result.observation
 
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert observation is not None
     for stream in (observation.stdout, observation.stderr):
         assert stream is not None
         assert stream.data == b"" and stream.retained == 0
@@ -322,7 +350,9 @@ def test_script_helper_creates_no_directory_entry(plan: IdentityPlan, tmp_path: 
         plan,
         cwd=str(tmp_path),
     )
-    observation = _observation(result)
+    observation = result.observation
 
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert observation is not None
     assert observation.trusted_terminal
     assert set(tmp_path.iterdir()) == before

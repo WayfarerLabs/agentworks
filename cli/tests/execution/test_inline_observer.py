@@ -12,7 +12,6 @@ from agentworks.execution._evidence_wire import Frame, FrameKind, WireError, enc
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._inline import (
-    InlineCandidateResult,
     PreparedInlineCandidate,
     execute_inline_candidate,
     prepare_inline_candidate,
@@ -36,7 +35,7 @@ from agentworks.execution._inline_control import (
     parse_stream_end,
     parse_wait,
 )
-from agentworks.execution._inline_observer import InlineObservation, ObservationError
+from agentworks.execution._inline_observer import ObservationError
 from agentworks.execution._runtime_prerequisite import (
     RuntimePrefixSink,
     RuntimePrerequisiteState,
@@ -121,11 +120,6 @@ def _prepare(plan: IdentityPlan, *, sensitive: bool = False) -> PreparedInlineCa
     )
 
 
-def _observation(result: InlineCandidateResult) -> InlineObservation:
-    assert result.observation is not None
-    return result.observation
-
-
 def _record(nonce: str, sequence: int, kind: FrameKind, body: bytes) -> bytes:
     return encode_frame(nonce, Frame(sequence, kind, body))
 
@@ -187,11 +181,12 @@ def test_noise_reflection_requires_a_line_boundary_and_is_not_retained(plan: Ide
     carrier = TranscriptCarrier(same_line_decoy + _complete_transcript(prepared.nonce), stderr=canary)
 
     result = execute_inline_candidate(carrier, prepared, deadline=Deadline.after(1))
-    observation = _observation(result)
+    observation = result.observation
 
     assert carrier.calls == 1
     assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
     assert prepared._runtime.observation.state is RuntimePrerequisiteState.UNKNOWN
+    assert observation is not None
     assert observation.trusted_terminal
     assert observation.wait == WaitFact(WaitKind.EXIT, 23)
     assert canary.decode() not in repr(result)
@@ -240,8 +235,9 @@ def test_missing_terminal_preserves_independently_validated_wait(plan: IdentityP
     carrier = TranscriptCarrier(_complete_transcript(prepared.nonce, terminal=False))
 
     result = execute_inline_candidate(carrier, prepared, deadline=Deadline.after(1))
-    observation = _observation(result)
+    observation = result.observation
 
+    assert observation is not None
     assert observation.wait == WaitFact(WaitKind.EXIT, 23)
     assert not observation.trusted_terminal
     assert observation.error is ObservationError.MISSING_TERMINAL
@@ -254,8 +250,9 @@ def test_truncated_matching_record_preserves_wait_but_not_terminal(plan: Identit
     carrier = TranscriptCarrier(transcript + partial)
 
     result = execute_inline_candidate(carrier, prepared, deadline=Deadline.after(1))
-    observation = _observation(result)
+    observation = result.observation
 
+    assert observation is not None
     assert observation.wait == WaitFact(WaitKind.EXIT, 23)
     assert not observation.trusted_terminal
     assert observation.error is not None
@@ -271,8 +268,9 @@ def test_post_terminal_frame_revokes_terminal_evidence(plan: IdentityPlan) -> No
         prepared,
         deadline=Deadline.after(1),
     )
-    observation = _observation(result)
+    observation = result.observation
 
+    assert observation is not None
     assert observation.wait == WaitFact(WaitKind.EXIT, 23)
     assert not observation.trusted_terminal
     assert observation.error is ObservationError.POST_TERMINAL
@@ -289,8 +287,9 @@ def test_sensitive_data_frame_is_rejected_without_retaining_reflection(plan: Ide
         prepared,
         deadline=Deadline.after(1),
     )
-    observation = _observation(result)
+    observation = result.observation
 
+    assert observation is not None
     assert not observation.trusted_terminal
     assert observation.error is ObservationError.ORDER
     assert observation.stdout is None
@@ -306,9 +305,10 @@ def test_malformed_matching_wire_never_produces_terminal_evidence(plan: Identity
         prepared,
         deadline=Deadline.after(1),
     )
-    observation = _observation(result)
+    observation = result.observation
 
     assert result.carrier_completion == ExitStatus(code=255)
+    assert observation is not None
     assert not observation.trusted_terminal
     assert observation.error is WireError.MALFORMED
 
@@ -322,8 +322,9 @@ def test_started_record_is_rejected_by_candidate_grammar(plan: IdentityPlan) -> 
         prepared,
         deadline=Deadline.after(1),
     )
-    observation = _observation(result)
+    observation = result.observation
 
+    assert observation is not None
     assert not observation.trusted_terminal
     assert observation.error is ObservationError.ORDER
 
@@ -346,8 +347,9 @@ def test_launch_failure_after_empty_data_frame_is_rejected(kind: FrameKind, plan
         prepared,
         deadline=Deadline.after(1),
     )
-    observation = _observation(result)
+    observation = result.observation
 
+    assert observation is not None
     assert not observation.trusted_terminal
     assert observation.error is ObservationError.ORDER
 
@@ -364,10 +366,11 @@ def test_raw_carrier_status_never_substitutes_for_helper_terminal(
         prepared,
         deadline=Deadline.after(1),
     )
-    observation = _observation(result)
+    observation = result.observation
 
     assert result.carrier_completion == ExitStatus(code=raw_status)
     assert result.carrier_local_status == raw_status
+    assert observation is not None
     assert not observation.trusted_terminal
     assert observation.wait is None
     assert observation.error is ObservationError.MISSING_TERMINAL
@@ -381,8 +384,9 @@ def test_incomplete_carrier_stdout_revokes_otherwise_valid_terminal(plan: Identi
         prepared,
         deadline=Deadline.after(1),
     )
-    observation = _observation(result)
+    observation = result.observation
 
+    assert observation is not None
     assert observation.wait == WaitFact(WaitKind.EXIT, 23)
     assert not observation.trusted_terminal
     assert observation.error is ObservationError.CARRIER

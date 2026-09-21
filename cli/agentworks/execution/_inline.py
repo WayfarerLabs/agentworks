@@ -251,26 +251,23 @@ def execute_inline_candidate(
     prepared.claim()
     try:
         report = carrier.execute(prepared.invocation, io=prepared.io, deadline=deadline)
-        runtime_prerequisite = prepared._runtime.observation
-        if runtime_prerequisite.state is RuntimePrerequisiteState.READY:
-            prepared._reader.finish()
-            delivered = (
-                report.stdout.retention is Retention.DELIVERED and report.stderr.retention is Retention.DELIVERED
-            )
-            observation = prepared._observer.finish(
-                prepared._reader.error,
-                carrier_stdout_complete=delivered and report.stdout.complete,
-            )
-        else:
-            observation = None
-        return InlineCandidateResult(
-            dispatch=report.dispatch,
-            carrier_completion=report.completion,
-            carrier_local_status=report.local_status,
-            carrier_failure=report.failure,
-            runtime_prerequisite=runtime_prerequisite,
-            observation=observation,
-        )
     finally:
         prepared._reader.finish()
+        runtime_prerequisite = prepared._runtime.observation
         prepared._runtime.clear()
+    if runtime_prerequisite.state is RuntimePrerequisiteState.READY:
+        delivered = report.stdout.retention is Retention.DELIVERED and report.stderr.retention is Retention.DELIVERED
+        observation = prepared._observer.finish(
+            prepared._reader.error,
+            carrier_stdout_complete=delivered and report.stdout.complete,
+        )
+    else:
+        observation = None
+    return InlineCandidateResult(
+        dispatch=report.dispatch,
+        carrier_completion=report.completion,
+        carrier_local_status=report.local_status,
+        carrier_failure=report.failure,
+        runtime_prerequisite=runtime_prerequisite,
+        observation=observation,
+    )
