@@ -1374,6 +1374,16 @@ suppressed cleanup errors. A synthetic slow-initializer regression proves that s
 not native Windows handle cleanup. Windows confirmation remains required; this is not a general
 proof of descendant termination for interrupted Git operations.
 
+All three private lanes accept the caller-owned borrow, recovery inventory and scoped CI correction
+at `05fa75e9` without material or optional findings. Project and complexity lanes each pass 225
+focused tests with 4 skips; the generic correctness lane passes 151 affected tests. A process-only
+mutation restoring initialization's in-flight storage check makes its sequencing regression fail.
+The combined execution/artifact selection passes 3,102 tests with 10 skips. The full local suite
+passes 12,366 tests with 13 skips. Full Ruff/format, mypy (1043 sources), file lint,
+locked-SDD/rulesync, typer isolation and whitespace gates pass. Website gates pass 160 Python tests,
+103 Node tests and both deterministic double-build comparisons. No live infrastructure was
+exercised. This remains draft implementation, not a public review or native acceptance handoff.
+
 ### Buffered execution result checkpoint
 
 - [x] Implement safe immutable application result values, honest wait/exit/signal precision and one
