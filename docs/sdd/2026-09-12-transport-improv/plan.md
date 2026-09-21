@@ -1297,16 +1297,17 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
 
 All three private lanes accept code pin `8ceb899a` with no material findings. Review corrected
 acceptance of output/status dataclass extensions that added diagnostic fields to default result
-representations, and falsey nonempty bytes that bypassed unretained-output validation. Three exact
-child-type checks close those boundaries without a new abstraction. All 68 focused result/observer
-tests pass. Removing context suppression exposes the synthetic caller-exception canary; reverting
-terminal preservation breaks its regression test. The optional removal of the explicit completed
-state check in `ok` was declined to keep the public success predicate locally readable.
+representations, and nonempty byte subclasses that bypassed non-capture output validation. Three
+exact child-type checks close those boundaries without a new abstraction. All 68 focused
+result/observer tests pass. Removing context suppression exposes the synthetic caller-exception
+canary; reverting terminal preservation breaks its regression test. The optional removal of the
+explicit completed state check in `ok` was declined to keep the public success predicate locally
+readable.
 
 The final full local suite passes 12,291 tests with 13 skips. Ruff/format, full mypy (1037 sources),
 file lint, locked-SDD/rulesync, typer isolation and whitespace checks pass. Website gates pass 160
 Python tests, 103 Node tests and both deterministic double-build comparisons. No live infrastructure
-was exercised. The new values remain unwired: producer/reducer acceptance, safe target/phase
+was exercised. Production integration remains open: producer/reducer acceptance, safe target/phase
 metadata, native evidence and the complete public target/RunContext surface are not delivered by
 this checkpoint.
 
