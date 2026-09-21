@@ -1278,11 +1278,11 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
 
 ### File values and owned composition checkpoint
 
-- [ ] Implement the frozen public file values and opaque revision conversion described in the file
+- [x] Implement the frozen public file values and opaque revision conversion described in the file
       LLD. Reuse the existing versioned revision schema, validate consistent metadata and
       content-bound read results, and preserve payload privacy and portable module imports. These
       values do not establish remote evidence or activate permissions.
-- [ ] Compose bounded read, stat, inventory, conditional removal and metadata operations under one
+- [x] Compose bounded read, stat, inventory, conditional removal and metadata operations under one
       borrowed operation owner and deadline. Metadata name resolution and mutation share that
       borrow; record observations before settlement and retain ownership on unresolved effects or
       coordination failure. Preserve partial mutation separately from deadline and termination.
@@ -1298,6 +1298,25 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       framing and provider-envelope overhead. Keep one traversal and a finite response limit; prove
       local maximum-response acceptance and above-bound refusal, then obtain native PVE/QGA evidence
       before declaring inventory delivery accepted.
+- [x] Raise the private HTTP response bound to 8 MiB and exercise an exact 4 MiB canonical inventory
+      through real framing, the synthetic provider response reader, Proxmox sink delivery and the
+      typed collector. Preserve refusal at the response bound plus one byte. Native PVE/QGA evidence
+      remains required above; this local test is not native acceptance.
+
+All three private review lanes accept code pin `54be0ba9` with no outstanding findings. Review
+corrected a public directory-entry constructor that accepted paths outside the declared UTF-8
+domain; the added invalid-path case now refuses safely while ordinary Unicode paths remain valid.
+The optional redundant serialization guard and declaration-only assertions were removed. The
+combined focused selection passes 188 tests. Restoring the old HTTP bound makes the maximum
+inventory regression fail with observation loss, without decoded entries. The measured fixture has
+4,096 entries, 4,194,304 canonical bytes and 5,651,792 provider-response bytes. These are synthetic
+delivery measurements, not a native backend claim.
+
+The final code pin passes the full local suite with 12,355 tests and 13 skips. Full Ruff
+lint/format, mypy (1041 sources), file lint, locked-SDD/rulesync, typer isolation and whitespace
+gates pass. Website gates pass 160 Python tests, 103 Node tests and both deterministic double-build
+comparisons. No live infrastructure was exercised. This is a draft implementation increment, not a
+public review/test handoff; all three authorized public feedback/fix rounds remain available.
 
 ### Buffered execution result checkpoint
 
