@@ -200,8 +200,6 @@ def test_diagnostics_drain_before_and_after_readiness(synthetic: SyntheticForwar
     )
     with synthetic.open() as resource:
         assert resource.wait() == 23
-        assert resource._terminal is not None
-        assert resource._terminal.exit_status == resource._terminal.local_status == 23
     synthetic.assert_closed()
 
 
@@ -211,9 +209,6 @@ def test_natural_exit_with_held_stdin_retains_natural_status(synthetic: Syntheti
     resource = synthetic.open()
     assert synthetic.children[-1].stdin is not None and not synthetic.children[-1].stdin.closed
     assert resource.wait() == 23
-    assert resource._terminal is not None
-    assert resource._terminal.exit_status == resource._terminal.local_status == 23
-    assert resource._terminal.cleaned
     synthetic.assert_closed()
 
 
@@ -258,8 +253,6 @@ def test_lost_wait_status_never_becomes_forwarding_exit_zero(monkeypatch: pytest
     assert caught.value.failure == Failure.OBSERVATION
     assert caught.value.local_status is None
     assert not resource._thread.is_alive()
-    assert resource._terminal is not None
-    assert resource._terminal.observation_failed and not resource._terminal.cleaned
     assert all(pipe is None or pipe.closed for pipe in (process.stdin, process.stdout, process.stderr))
 
 
@@ -343,9 +336,7 @@ def test_read_error_closes_owned_client(synthetic: SyntheticForwarding, monkeypa
     with pytest.raises(ForwardingError) as caught:
         resource.wait()
     assert caught.value.failure == Failure.OUTPUT
-    assert resource._terminal is not None
-    assert resource._terminal.exit_status is None
-    assert resource._terminal.local_status is not None
+    assert caught.value.local_status is not None
     assert not resource._thread.is_alive()
     synthetic.assert_closed()
 
@@ -418,7 +409,6 @@ def test_delayed_worker_exit_reports_uncertainty_without_losing_process_cleanup(
             resource.close()
         assert caught.value.failure == Failure.OBSERVATION
         assert time.monotonic() - started < 2
-        assert resource._terminal is not None and resource._terminal.cleaned
         synthetic.assert_closed()
     finally:
         release.set()
@@ -744,6 +734,5 @@ def test_repeated_close_interruptions_preserve_first_and_finish_cleanup(
 
     assert caught.value is first
     resource.close()
-    assert resource._terminal is not None and resource._terminal.cleaned
     assert not resource._thread.is_alive()
     synthetic.assert_closed()

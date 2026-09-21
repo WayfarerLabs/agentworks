@@ -100,9 +100,7 @@ class OwnedForwarding:
         self._failure: Failure | None = None
         self._borrow_lock = Lock()
         self._close_lock = Lock()
-        self._terminal: LocalProcessTerminal | None = None
         self._worker_start_attempted = False
-        self._worker_stopped = False
         self._thread = Thread(target=self._drain, name="ssh-forwarding")
 
     def __enter__(self) -> Self:
@@ -142,32 +140,26 @@ class OwnedForwarding:
                 interruption = _retain_control_exception(interruption, error)
         try:
             worker_stopped, interruption = self._stop_worker(interruption)
-            terminal = self._terminal
-            if terminal is None:
-                while True:
-                    try:
-                        terminal = self._owner.close()
+            while True:
+                try:
+                    terminal = self._owner.close()
+                    break
+                except BaseException as error:
+                    interruption = _retain_control_exception(interruption, error)
+                    observed = self._owner.snapshot().terminal
+                    if observed is not None:
+                        terminal = observed
                         break
-                    except BaseException as error:
-                        interruption = _retain_control_exception(interruption, error)
-                        terminal = self._owner.snapshot().terminal
-                        if terminal is not None:
-                            break
-                self._terminal = terminal
         finally:
             self._close_lock.release()
 
-        cleanup_complete = worker_stopped and terminal is not None and terminal.cleaned
+        cleanup_complete = worker_stopped and terminal.cleaned
         if interruption is not None:
             if not cleanup_complete:
                 interruption.add_note("Local SSH forwarding cleanup did not complete within its bound.")
             raise interruption
         if not cleanup_complete:
-            raise ForwardingError(
-                Failure.OBSERVATION,
-                None if terminal is None else terminal.local_status,
-            )
-        assert terminal is not None
+            raise ForwardingError(Failure.OBSERVATION, terminal.local_status)
         if terminal.observation_failed:
             raise ForwardingError(Failure.OBSERVATION, terminal.local_status)
         return terminal
@@ -182,9 +174,6 @@ class OwnedForwarding:
                 interruption = _retain_control_exception(interruption, error)
 
         if not self._worker_start_attempted:
-            self._worker_stopped = True
-            return True, interruption
-        if self._worker_stopped:
             return True, interruption
 
         wait_until = time.monotonic() + _JOIN_SECONDS
@@ -204,7 +193,6 @@ class OwnedForwarding:
                 self._thread.join(timeout=min(_POLL_SECONDS, remaining))
             except BaseException as error:
                 interruption = _retain_control_exception(interruption, error)
-        self._worker_stopped = True
         return True, interruption
 
     def wait(self) -> int:
@@ -252,15 +240,14 @@ class OwnedForwarding:
         received = bytearray()
         outputs = [pipes.stdout, pipes.stderr]
         exit_seen_at: float | None = None
-        for pipe in (pipes.stdin, *outputs):
-            if pipe is not None:
-                try:
-                    configured = self._configure_pipe(pipe)
-                except OSError:
-                    self._failure = Failure.OBSERVATION
-                    return
-                if not configured:
-                    return
+        for pipe in outputs:
+            try:
+                configured = self._configure_pipe(pipe)
+            except OSError:
+                self._failure = Failure.OBSERVATION
+                return
+            if not configured:
+                return
         while not self._stop.is_set():
             snapshot = self._owner.snapshot()
             if snapshot.observation_failed:
