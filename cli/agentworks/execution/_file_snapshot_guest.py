@@ -114,7 +114,7 @@ def _operate_begin(
     except ConfinedOpenError:
         raise _SafeFailure(FileSnapshotFailureControl(FileSnapshotFailureCode.ROOT_REFUSED)) from None
     if source_fd is None:
-        raise _SafeFailure(FileSnapshotFailureControl(FileSnapshotFailureCode.ROOT_REFUSED))
+        return None
     try:
         return spool_snapshot(
             source_fd,

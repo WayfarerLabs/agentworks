@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ValidationError
 from agentworks.execution._file_snapshot_bundle import FIXED_SOURCE
 from agentworks.execution._file_snapshot_protocol import (
-    MAX_SNAPSHOT_CHUNK_BYTES,
     FileSnapshotBeginRequest,
     FileSnapshotChunkRequest,
     FileSnapshotChunkResult,
@@ -57,7 +56,6 @@ if TYPE_CHECKING:
     from agentworks.execution.carrier import Carrier, Deadline, ExitStatus
 
 _DEFAULT_RUNTIME = "/usr/bin/python3"
-_MAX_DATA_RECORDS = (MAX_SNAPSHOT_CHUNK_BYTES + MAX_RECORD_BODY_BYTES - 1) // MAX_RECORD_BODY_BYTES
 
 
 class FileSnapshotObservationState(StrEnum):
@@ -150,15 +148,8 @@ class _FileSnapshotCollector:
     def __init__(self, request: FileSnapshotRequest) -> None:
         self._request = request
         self._data = bytearray()
-        self._data_records = 0
         self._short_data_record = False
-        self._snapshot: SpoolSnapshot | None = None
-        self._chunk: FileSnapshotChunkResult | None = None
-        self._absent = False
-        self._cleanup_debt: ScratchCleanupDebt | None = None
-        self._ownership_uncertain = False
-        self._cleaned = False
-        self._failure: FileSnapshotFailureControl | None = None
+        self._outcome: FileSnapshotObservation | None = None
         self._terminal = False
         self._error: FileSnapshotObservationError | None = None
 
@@ -178,15 +169,11 @@ class _FileSnapshotCollector:
             if not isinstance(self._request, FileSnapshotChunkRequest) or self._has_outcome():
                 self._fail(FileSnapshotObservationError.ORDER)
             elif (
-                not record.body
-                or self._short_data_record
-                or self._data_records >= _MAX_DATA_RECORDS
-                or len(self._data) + len(record.body) > self._request.length
+                not record.body or self._short_data_record or len(self._data) + len(record.body) > self._request.length
             ):
                 self._fail(FileSnapshotObservationError.CONTENT)
             else:
                 self._data.extend(record.body)
-                self._data_records += 1
                 self._short_data_record = len(record.body) < MAX_RECORD_BODY_BYTES
             return
         if record.kind is FileRecordKind.RESULT:
@@ -200,16 +187,17 @@ class _FileSnapshotCollector:
                     self._request.max_bytes,
                 )
                 if result is None:
-                    self._absent = True
+                    self._outcome = FileSnapshotObservation(FileSnapshotObservationState.ABSENT)
                 else:
-                    self._snapshot = result
+                    self._outcome = FileSnapshotObservation(FileSnapshotObservationState.READY, snapshot=result)
             elif isinstance(self._request, FileSnapshotChunkRequest):
-                self._chunk = parse_file_snapshot_chunk_result(
+                chunk = parse_file_snapshot_chunk_result(
                     record.body,
                     self._request.offset,
                     self._request.length,
                     bytes(self._data),
                 )
+                self._outcome = FileSnapshotObservation(FileSnapshotObservationState.CHUNK, chunk=chunk)
             elif isinstance(self._request, FileSnapshotReconcileRequest):
                 cleanup = parse_file_snapshot_reconcile_result(
                     record.body,
@@ -217,12 +205,14 @@ class _FileSnapshotCollector:
                     self._request.identity,
                 )
                 if cleanup is None:
-                    self._ownership_uncertain = True
+                    self._outcome = FileSnapshotObservation(FileSnapshotObservationState.OWNERSHIP_UNCERTAIN)
                 else:
-                    self._cleanup_debt = cleanup
+                    self._outcome = FileSnapshotObservation(
+                        FileSnapshotObservationState.RECOVERED, cleanup_debt=cleanup
+                    )
             else:
                 parse_file_snapshot_cleanup_result(record.body)
-                self._cleaned = True
+                self._outcome = FileSnapshotObservation(FileSnapshotObservationState.CLEANED)
             return
         if record.kind is FileRecordKind.FAILED:
             if self._data or self._has_outcome():
@@ -230,7 +220,7 @@ class _FileSnapshotCollector:
                 return
             failure = parse_file_snapshot_failure(record.body, self._request.token, self._request.identity)
             if self._valid_failure(failure):
-                self._failure = failure
+                self._outcome = FileSnapshotObservation(FileSnapshotObservationState.REFUSED, failure=failure)
             else:
                 self._fail(FileSnapshotObservationError.CONTROL)
             return
@@ -244,15 +234,7 @@ class _FileSnapshotCollector:
         self._fail(FileSnapshotObservationError.ORDER)
 
     def _has_outcome(self) -> bool:
-        return (
-            self._snapshot is not None
-            or self._chunk is not None
-            or self._absent
-            or self._cleanup_debt is not None
-            or self._ownership_uncertain
-            or self._cleaned
-            or self._failure is not None
-        )
+        return self._outcome is not None
 
     def _valid_failure(self, failure: FileSnapshotFailureControl) -> bool:
         if failure.code is FileSnapshotFailureCode.ROOT_REFUSED:
@@ -281,15 +263,8 @@ class _FileSnapshotCollector:
 
     def _clear(self) -> None:
         self._data.clear()
-        self._data_records = 0
         self._short_data_record = False
-        self._snapshot = None
-        self._chunk = None
-        self._absent = False
-        self._cleanup_debt = None
-        self._ownership_uncertain = False
-        self._cleaned = False
-        self._failure = None
+        self._outcome = None
         self._terminal = False
 
     def abort(self) -> None:
@@ -320,31 +295,10 @@ class _FileSnapshotCollector:
             if dispatch is not Dispatch.NOT_SENT:
                 state = FileSnapshotObservationState.UNCERTAIN
             return FileSnapshotObservation(state, error=error)
-        if self._failure is not None:
-            failure = self._failure
-            self._clear()
-            return FileSnapshotObservation(FileSnapshotObservationState.REFUSED, failure=failure)
-        if self._snapshot is not None:
-            snapshot = self._snapshot
-            self._clear()
-            return FileSnapshotObservation(FileSnapshotObservationState.READY, snapshot=snapshot)
-        if self._chunk is not None:
-            chunk = self._chunk
-            self._clear()
-            return FileSnapshotObservation(FileSnapshotObservationState.CHUNK, chunk=chunk)
-        if self._absent:
-            self._clear()
-            return FileSnapshotObservation(FileSnapshotObservationState.ABSENT)
-        if self._cleanup_debt is not None:
-            cleanup = self._cleanup_debt
-            self._clear()
-            return FileSnapshotObservation(FileSnapshotObservationState.RECOVERED, cleanup_debt=cleanup)
-        if self._ownership_uncertain:
-            self._clear()
-            return FileSnapshotObservation(FileSnapshotObservationState.OWNERSHIP_UNCERTAIN)
-        assert self._cleaned
+        outcome = self._outcome
+        assert outcome is not None
         self._clear()
-        return FileSnapshotObservation(FileSnapshotObservationState.CLEANED)
+        return outcome
 
 
 def _validate_text(value: object) -> str:

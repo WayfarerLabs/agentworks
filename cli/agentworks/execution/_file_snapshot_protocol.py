@@ -450,8 +450,6 @@ def parse_file_snapshot_begin_result(
         return None
     if result != "ready" or set(value) != {"ready", "result", "source"}:
         raise FileSnapshotControlError
-    if type(max_bytes) is not int or not 1 <= max_bytes <= _MAX_LENGTH:
-        raise FileSnapshotControlError
     failed = False
     ready: ReadyScratchReference | None = None
     source = None
@@ -467,7 +465,6 @@ def parse_file_snapshot_begin_result(
     if (
         source_digest is None
         or not stat.S_ISREG(source.stat.mode)
-        or source.stat.link_count != 1
         or source.stat.size > max_bytes
         or length != source.stat.size
         or not hmac.compare_digest(ready._digest, source_digest)
@@ -492,13 +489,6 @@ def parse_file_snapshot_chunk_result(
     requested_length: int,
     data: bytes,
 ) -> FileSnapshotChunkResult:
-    if (
-        type(requested_offset) is not int
-        or not 0 <= requested_offset <= _MAX_LENGTH
-        or type(requested_length) is not int
-        or not 0 <= requested_length <= MAX_SNAPSHOT_CHUNK_BYTES
-    ):
-        raise FileSnapshotControlError
     value = _load_json(body, request=False)
     failed = False
     canonical = b""
@@ -519,7 +509,7 @@ def parse_file_snapshot_chunk_result(
         or any(character not in _LOWER_HEX for character in digest_value)
     ):
         raise FileSnapshotControlError
-    if type(data) is not bytes or len(data) != requested_length:
+    if len(data) != requested_length:
         raise FileSnapshotControlError
     digest = bytes.fromhex(digest_value)
     if not hmac.compare_digest(hashlib.sha256(data).digest(), digest):

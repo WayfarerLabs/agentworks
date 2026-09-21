@@ -5,13 +5,14 @@ from __future__ import annotations
 import hashlib
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
 
 from agentworks.errors import ValidationError
 from agentworks.execution._file_snapshot_exchange import (
+    FileSnapshotObservationError,
     FileSnapshotObservationState,
     snapshot_begin,
     snapshot_chunk,
@@ -22,18 +23,27 @@ from agentworks.execution._file_snapshot_protocol import (
     MAX_SNAPSHOT_CHUNK_BYTES,
     FileSnapshotChunkRequest,
     FileSnapshotChunkResult,
+    FileSnapshotCleanupRequest,
     FileSnapshotFailureCode,
+    FileSnapshotFailureControl,
     FileSnapshotRequest,
     decode_file_snapshot_request,
     empty_file_snapshot_body,
     encode_file_snapshot_chunk_result,
+    encode_file_snapshot_failure,
     snapshot_context,
 )
 from agentworks.execution._file_spool import SpoolSnapshotFailureKind
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, FileWireError, encode_file_record
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
-from agentworks.execution._scratch import ReadyScratchReference, ScratchFailureKind, ScratchReference, _cleanup_debt
+from agentworks.execution._scratch import (
+    ReadyScratchReference,
+    ScratchFailureKind,
+    ScratchPhase,
+    ScratchReference,
+    _cleanup_debt,
+)
 from agentworks.execution._scratch_receipt import ScratchOwnership, _Identity, scratch_name
 from agentworks.execution.carrier import (
     CapturedOutput,
@@ -67,6 +77,18 @@ guest._operate=advancing_operate
 """
 _IMMEDIATE_DEADLINE_PATCH = """
 guest._expires_at=lambda remaining: guest.time.monotonic()
+"""
+_ADVANCE_AFTER_SOURCE_ROOT_LOOKUP = """
+clock=[guest.time.monotonic()]
+def controlled_monotonic():
+ return clock[0]
+guest.time.monotonic=controlled_monotonic
+real_open_root=guest.open_linux_root
+def advancing_open_root(path):
+ result=real_open_root(path)
+ clock[0]+=60.0
+ return result
+guest.open_linux_root=advancing_open_root
 """
 
 
@@ -286,6 +308,36 @@ def test_absence_and_maximum_refusal_create_no_scratch(
     assert empty_cleanup.observation.state is FileSnapshotObservationState.CLEANED
 
 
+def test_missing_approved_root_is_initial_absence_without_scratch(
+    tmp_path: Path,
+    scratch_root: Path,
+    plan: IdentityPlan,
+) -> None:
+    _, result = _begin(tmp_path / "missing-approved-root", "payload", 8, plan)
+
+    assert result.observation.state is FileSnapshotObservationState.ABSENT
+    assert result.observation.snapshot is None
+    assert tuple(scratch_root.iterdir()) == ()
+
+
+def test_expiry_after_missing_root_lookup_never_becomes_false_absence(
+    tmp_path: Path,
+    scratch_root: Path,
+    plan: IdentityPlan,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_fixture_bundle(monkeypatch, scratch_root, _ADVANCE_AFTER_SOURCE_ROOT_LOOKUP)
+
+    _, result = _begin(tmp_path / "missing-approved-root", "payload", 8, plan)
+
+    assert result.observation.state is FileSnapshotObservationState.REFUSED
+    failure = result.observation.failure
+    assert failure is not None and failure.code is FileSnapshotFailureCode.SPOOL
+    assert failure.spool_kind is SpoolSnapshotFailureKind.DEADLINE
+    assert failure.cleanup_debt is None
+    assert tuple(scratch_root.iterdir()) == ()
+
+
 def test_host_refuses_out_of_range_chunk_before_dispatch(plan: IdentityPlan) -> None:
     ready = _ready(plan, length=4, digest=hashlib.sha256(b"data").digest())
     carrier = LocalCarrier()
@@ -475,6 +527,80 @@ def _overfragmented_chunk_records(request: FileSnapshotRequest, data: bytes) -> 
         request.nonce,
         FileRecord(len(data) + 1, FileRecordKind.FINISHED, empty_file_snapshot_body()),
     )
+
+
+def _failure_records(request: FileSnapshotRequest, failure: FileSnapshotFailureControl) -> bytes:
+    return encode_file_record(
+        request.nonce,
+        FileRecord(0, FileRecordKind.FAILED, encode_file_snapshot_failure(failure)),
+    ) + encode_file_record(
+        request.nonce,
+        FileRecord(1, FileRecordKind.FINISHED, empty_file_snapshot_body()),
+    )
+
+
+@pytest.mark.parametrize(
+    ("operation", "corruption"),
+    [
+        ("chunk", "debt"),
+        ("chunk", "phase"),
+        ("cleanup", "debt"),
+        ("cleanup", "phase"),
+    ],
+)
+def test_scratch_failure_cannot_substitute_cleanup_authority_or_phase(
+    plan: IdentityPlan,
+    operation: str,
+    corruption: str,
+) -> None:
+    data = b"private"
+    ready = _ready(plan, length=len(data), digest=hashlib.sha256(data).digest())
+    expected_debt = _cleanup_debt(ready)
+
+    def forged_failure(request: FileSnapshotRequest, _raw: bytes) -> bytes:
+        assert isinstance(request, FileSnapshotChunkRequest | FileSnapshotCleanupRequest)
+        debt = expected_debt
+        if corruption == "debt":
+            assert debt._object is not None
+            debt = replace(debt, _object=_Identity(debt._object.device, debt._object.inode + 1))
+        expected_phase = ScratchPhase.READ if isinstance(request, FileSnapshotChunkRequest) else ScratchPhase.CLEANUP
+        phase = expected_phase
+        if corruption == "phase":
+            phase = ScratchPhase.CLEANUP if expected_phase is ScratchPhase.READ else ScratchPhase.READ
+        return _failure_records(
+            request,
+            FileSnapshotFailureControl(
+                FileSnapshotFailureCode.SCRATCH,
+                scratch_kind=ScratchFailureKind.IO,
+                scratch_phase=phase,
+                cleanup_debt=debt,
+            ),
+        )
+
+    carrier = TranscriptCarrier(forged_failure)
+    if operation == "chunk":
+        result = snapshot_chunk(
+            carrier,
+            token=_TOKEN,
+            ready=ready,
+            offset=0,
+            length=len(data),
+            plan=plan,
+            deadline=Deadline.after(15),
+        )
+    else:
+        result = snapshot_cleanup(
+            carrier,
+            token=_TOKEN,
+            cleanup_debt=expected_debt,
+            plan=plan,
+            deadline=Deadline.after(15),
+        )
+
+    assert result.observation.state is FileSnapshotObservationState.UNCERTAIN
+    assert result.observation.error is FileSnapshotObservationError.CONTROL
+    assert result.observation.failure is None
+    assert result.observation.cleanup_debt is None
 
 
 def test_tampered_or_truncated_chunk_transcript_releases_no_bytes(plan: IdentityPlan) -> None:
