@@ -66,7 +66,7 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
-from tests.execution.files._runtime_support import require_observation, runtime_ready_record, runtime_selection
+from tests.execution.files._runtime_support import runtime_ready_record, runtime_selection
 
 
 def _json(value: object) -> bytes:
@@ -460,8 +460,10 @@ def test_complete_result_is_authoritative_and_carrier_evidence_stays_separate(pl
     assert carrier.calls == 1
     assert result.carrier_completion == ExitStatus(code=29)
     assert result.carrier_local_status == 29
-    assert require_observation(result.observation).state is FileMetadataObservationState.CHANGED
-    assert require_observation(result.observation).revision == _revision()
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileMetadataObservationState.CHANGED
+    assert result_observation.revision == _revision()
 
 
 @pytest.mark.parametrize(
@@ -517,8 +519,10 @@ def test_complete_helper_failure_preserves_exact_effect(
         runtime_selection=runtime_selection(),
     )
 
-    assert require_observation(result.observation).state is expected
-    assert require_observation(result.observation).failure == failure
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is expected
+    assert result_observation.failure == failure
 
 
 @pytest.mark.parametrize(
@@ -537,8 +541,10 @@ def test_missing_acknowledgement_is_not_replayed_or_claimed_unchanged(
     carrier = TranscriptCarrier(lambda _request: b"", dispatch=dispatch)
     result = _set(carrier, plan)
     assert carrier.calls == 1
-    assert require_observation(result.observation).state is expected
-    assert require_observation(result.observation).error is FileMetadataObservationError.MISSING_TERMINAL
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is expected
+    assert result_observation.error is FileMetadataObservationError.MISSING_TERMINAL
 
 
 @pytest.mark.parametrize(
@@ -595,8 +601,10 @@ def test_malformed_or_incomplete_responses_are_uncertain(
     error: object,
 ) -> None:
     result = _set(TranscriptCarrier(build, stderr=stderr), plan)
-    assert require_observation(result.observation).state is FileMetadataObservationState.UNCERTAIN
-    assert require_observation(result.observation).error is error
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileMetadataObservationState.UNCERTAIN
+    assert result_observation.error is error
     assert "diagnostic-canary" not in repr(result)
 
 
@@ -613,9 +621,11 @@ def test_oversized_and_reflected_output_is_bounded_uncertainty(
     build: Callable[[FileMetadataRequest], bytes],
 ) -> None:
     result = _set(TranscriptCarrier(build), plan)
-    assert require_observation(result.observation).state is FileMetadataObservationState.UNCERTAIN
-    assert require_observation(result.observation).revision is None
-    assert require_observation(result.observation).failure is None
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileMetadataObservationState.UNCERTAIN
+    assert result_observation.revision is None
+    assert result_observation.failure is None
     assert "/trusted" not in repr(result)
 
 
@@ -632,8 +642,10 @@ def test_set_rejects_cross_operation_creation_failure(plan: IdentityPlan) -> Non
         ),
         plan,
     )
-    assert require_observation(result.observation).state is FileMetadataObservationState.UNCERTAIN
-    assert require_observation(result.observation).error is FileMetadataObservationError.CONTROL
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileMetadataObservationState.UNCERTAIN
+    assert result_observation.error is FileMetadataObservationError.CONTROL
 
 
 def test_host_path_validation_discards_unicode_error_chain(plan: IdentityPlan) -> None:

@@ -85,7 +85,7 @@ from agentworks.execution.carrier import (
 )
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 from agentworks.execution.carriers.ssh.connection import SSHConnection, build_ssh_argv
-from tests.execution.files._runtime_support import require_observation, runtime_ready_record, runtime_selection
+from tests.execution.files._runtime_support import runtime_ready_record, runtime_selection
 
 _TOKEN = bytes(range(16))
 _DIGEST = hashlib.sha256(b"content").digest()
@@ -279,9 +279,11 @@ def test_complete_results_preserve_effect_and_deadline_facts(plan: IdentityPlan)
         )
 
     published = _call_publish(TranscriptCarrier(publish_records), plan, reference)
-    assert require_observation(published.observation).state is FilePublicationObservationState.PUBLISHED
-    assert require_observation(published.observation).revision == _revision()
-    assert require_observation(published.observation).deadline_exceeded is True
+    published_observation = published.observation
+    assert published_observation is not None
+    assert published_observation.state is FilePublicationObservationState.PUBLISHED
+    assert published_observation.revision == _revision()
+    assert published_observation.deadline_exceeded is True
 
     debt = _receipt_debt(reference)
 
@@ -302,9 +304,11 @@ def test_complete_results_preserve_effect_and_deadline_facts(plan: IdentityPlan)
         deadline=Deadline.after(1),
         runtime_selection=runtime_selection(),
     )
-    assert require_observation(recovered.observation).state is FilePublicationObservationState.RECOVERED
-    assert require_observation(recovered.observation).cleanup_debt == debt
-    assert require_observation(recovered.observation).deadline_exceeded is True
+    recovered_observation = recovered.observation
+    assert recovered_observation is not None
+    assert recovered_observation.state is FilePublicationObservationState.RECOVERED
+    assert recovered_observation.cleanup_debt == debt
+    assert recovered_observation.deadline_exceeded is True
 
     def cleanup_records(request: FilePublicationRequest) -> bytes:
         return _records(
@@ -324,8 +328,10 @@ def test_complete_results_preserve_effect_and_deadline_facts(plan: IdentityPlan)
         deadline=Deadline.after(1),
         runtime_selection=runtime_selection(),
     )
-    assert require_observation(cleaned.observation).state is FilePublicationObservationState.CLEANED
-    assert require_observation(cleaned.observation).deadline_exceeded is True
+    cleaned_observation = cleaned.observation
+    assert cleaned_observation is not None
+    assert cleaned_observation.state is FilePublicationObservationState.CLEANED
+    assert cleaned_observation.deadline_exceeded is True
 
 
 @pytest.mark.parametrize(
@@ -358,9 +364,11 @@ def test_reconcile_rejects_impossible_recovered_cleanup_shape(
         runtime_selection=runtime_selection(),
     )
 
-    assert require_observation(result.observation).state is FilePublicationObservationState.UNCERTAIN
-    assert require_observation(result.observation).error is FilePublicationObservationError.CONTROL
-    assert require_observation(result.observation).cleanup_debt is None
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FilePublicationObservationState.UNCERTAIN
+    assert result_observation.error is FilePublicationObservationError.CONTROL
+    assert result_observation.cleanup_debt is None
 
 
 def test_cleanup_failure_accepts_only_monotonic_exact_debt_progress(plan: IdentityPlan) -> None:
@@ -389,8 +397,10 @@ def test_cleanup_failure_accepts_only_monotonic_exact_debt_progress(plan: Identi
         runtime_selection=runtime_selection(),
     )
 
-    assert require_observation(result.observation).state is FilePublicationObservationState.REFUSED
-    assert require_observation(result.observation).cleanup_debt == progressed
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FilePublicationObservationState.REFUSED
+    assert result_observation.cleanup_debt == progressed
 
 
 @pytest.mark.parametrize("case", ["substituted-stage", "regressed-stage-removal"])
@@ -433,12 +443,11 @@ def test_cleanup_failure_rejects_substituted_or_regressed_debt(plan: IdentityPla
         deadline=Deadline.after(1),
         runtime_selection=runtime_selection(),
     )
-    assert require_observation(rejected.observation).state is FilePublicationObservationState.UNCERTAIN
-    assert require_observation(rejected.observation).error is FilePublicationObservationError.CONTROL
-    assert (
-        require_observation(rejected.observation).cleanup_debt is None
-        and require_observation(rejected.observation).failure is None
-    )
+    rejected_observation = rejected.observation
+    assert rejected_observation is not None
+    assert rejected_observation.state is FilePublicationObservationState.UNCERTAIN
+    assert rejected_observation.error is FilePublicationObservationError.CONTROL
+    assert rejected_observation.cleanup_debt is None and rejected_observation.failure is None
 
 
 def test_substituted_revision_and_cleanup_parent_are_uncertain_control(plan: IdentityPlan) -> None:
@@ -449,8 +458,10 @@ def test_substituted_revision_and_cleanup_parent_are_uncertain_control(plan: Ide
         return _records(request, FileRecordKind.RESULT, encode_file_publish_result(bad))
 
     publication = _call_publish(TranscriptCarrier(wrong_revision), plan, reference)
-    assert require_observation(publication.observation).state is FilePublicationObservationState.UNCERTAIN
-    assert require_observation(publication.observation).error is FilePublicationObservationError.CONTROL
+    publication_observation = publication.observation
+    assert publication_observation is not None
+    assert publication_observation.state is FilePublicationObservationState.UNCERTAIN
+    assert publication_observation.error is FilePublicationObservationError.CONTROL
 
     debt = _receipt_debt(reference)
 
@@ -474,8 +485,10 @@ def test_substituted_revision_and_cleanup_parent_are_uncertain_control(plan: Ide
         deadline=Deadline.after(1),
         runtime_selection=runtime_selection(),
     )
-    assert require_observation(reconciled.observation).state is FilePublicationObservationState.UNCERTAIN
-    assert require_observation(reconciled.observation).error is FilePublicationObservationError.CONTROL
+    reconciled_observation = reconciled.observation
+    assert reconciled_observation is not None
+    assert reconciled_observation.state is FilePublicationObservationState.UNCERTAIN
+    assert reconciled_observation.error is FilePublicationObservationError.CONTROL
 
 
 @pytest.mark.parametrize("case", ["partial", "stderr", "wrong-nonce", "extra-after-terminal", "order"])
@@ -498,11 +511,10 @@ def test_partial_noisy_nonce_and_order_faults_never_expose_typed_facts(plan: Ide
     carrier = TranscriptCarrier(transcript, stderr=b"noise" if case == "stderr" else b"")
     result = _call_publish(carrier, plan, reference)
 
-    assert require_observation(result.observation).state is FilePublicationObservationState.UNCERTAIN
-    assert (
-        require_observation(result.observation).revision is None
-        and require_observation(result.observation).cleanup_debt is None
-    )
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FilePublicationObservationState.UNCERTAIN
+    assert result_observation.revision is None and result_observation.cleanup_debt is None
 
 
 def test_oversized_manifest_refuses_before_carrier_and_safe_values_do_not_leak(plan: IdentityPlan) -> None:

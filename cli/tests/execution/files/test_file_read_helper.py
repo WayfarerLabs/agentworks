@@ -22,7 +22,7 @@ from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
 from agentworks.execution.carrier import Deadline, ExitStatus
 from tests.execution.files._file_read_support import LocalCarrier
-from tests.execution.files._runtime_support import require_observation, require_value, runtime_selection
+from tests.execution.files._runtime_support import runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the file-read helper candidate requires Linux")
 
@@ -86,8 +86,10 @@ def test_binary_read_uses_one_sensitive_ascii_attempt_without_staging(
         runtime=str(runtime),
     )
     assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
-    assert require_observation(result.observation).state is FileReadObservationState.PRESENT
-    snapshot = require_observation(result.observation).snapshot
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileReadObservationState.PRESENT
+    snapshot = result_observation.snapshot
     assert snapshot is not None
     assert snapshot.data == content
     assert snapshot.digest == hashlib.sha256(content).digest()
@@ -97,9 +99,10 @@ def test_binary_read_uses_one_sensitive_ascii_attempt_without_staging(
     assert carrier.io is not None and carrier.io.sensitive
     assert carrier.io.input.sensitive  # type: ignore[union-attr]
     assert carrier.io.input.data.isascii()  # type: ignore[union-attr]
-    assert carrier.invocation is not None
-    assert all(argument.isascii() for argument in carrier.invocation.argv)
-    assert str(tmp_path) not in carrier.invocation.argv
+    carrier_invocation = carrier.invocation
+    assert carrier_invocation is not None
+    assert all(argument.isascii() for argument in carrier_invocation.argv)
+    assert str(tmp_path) not in carrier_invocation.argv
     assert tuple(tmp_path.iterdir()) == before
     assert repr(content) not in repr(result)
     assert snapshot.digest.hex() not in repr(result)
@@ -116,9 +119,12 @@ def test_empty_and_small_regular_files_are_complete(
 
     _, result = _read(tmp_path, name, plan, max_bytes=max(1, len(content)))
 
-    assert require_observation(result.observation).state is FileReadObservationState.PRESENT
-    assert require_observation(result.observation).snapshot is not None
-    assert require_value(require_observation(result.observation).snapshot).data == content
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileReadObservationState.PRESENT
+    result_snapshot = result_observation.snapshot
+    assert result_snapshot is not None
+    assert result_snapshot.data == content
 
 
 def test_execute_only_root_ancestors_do_not_require_directory_read_permission(
@@ -138,20 +144,27 @@ def test_execute_only_root_ancestors_do_not_require_directory_read_permission(
         root.chmod(0o700)
         nested.chmod(0o700)
 
-    assert require_observation(result.observation).state is FileReadObservationState.PRESENT
-    assert require_observation(result.observation).snapshot is not None
-    assert require_value(require_observation(result.observation).snapshot).data == content
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileReadObservationState.PRESENT
+    result_snapshot = result_observation.snapshot
+    assert result_snapshot is not None
+    assert result_snapshot.data == content
 
 
 def test_absence_is_distinct_from_every_failure(tmp_path: Path, plan: IdentityPlan) -> None:
     _, result = _read(tmp_path, "missing", plan)
     _, missing_root = _read(tmp_path / "missing-root", "file", plan)
 
-    assert require_observation(result.observation).state is FileReadObservationState.ABSENT
-    assert require_observation(result.observation).snapshot is None
-    assert require_observation(result.observation).failure is None
-    assert require_observation(missing_root.observation).state is FileReadObservationState.ABSENT
-    assert require_observation(missing_root.observation).snapshot is None
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileReadObservationState.ABSENT
+    assert result_observation.snapshot is None
+    assert result_observation.failure is None
+    missing_root_observation = missing_root.observation
+    assert missing_root_observation is not None
+    assert missing_root_observation.state is FileReadObservationState.ABSENT
+    assert missing_root_observation.snapshot is None
 
 
 def test_special_object_and_oversize_refusals_disclose_no_bytes(
@@ -165,12 +178,16 @@ def test_special_object_and_oversize_refusals_disclose_no_bytes(
     _, directory = _read(tmp_path, "directory", plan)
     _, oversized = _read(tmp_path, "large", plan, max_bytes=1)
 
-    assert require_observation(directory.observation).state is FileReadObservationState.REFUSED
-    assert require_observation(directory.observation).failure is FileReadFailure.UNSUPPORTED_OBJECT
-    assert require_observation(directory.observation).snapshot is None
-    assert require_observation(oversized.observation).state is FileReadObservationState.REFUSED
-    assert require_observation(oversized.observation).failure is FileReadFailure.LIMIT
-    assert require_observation(oversized.observation).snapshot is None
+    directory_observation = directory.observation
+    assert directory_observation is not None
+    assert directory_observation.state is FileReadObservationState.REFUSED
+    assert directory_observation.failure is FileReadFailure.UNSUPPORTED_OBJECT
+    assert directory_observation.snapshot is None
+    oversized_observation = oversized.observation
+    assert oversized_observation is not None
+    assert oversized_observation.state is FileReadObservationState.REFUSED
+    assert oversized_observation.failure is FileReadFailure.LIMIT
+    assert oversized_observation.snapshot is None
     assert secret.decode() not in repr(oversized)
     assert hashlib.sha256(secret).hexdigest() not in repr(oversized)
 
@@ -185,9 +202,11 @@ def test_identity_mismatch_precedes_target_root_access(tmp_path: Path, plan: Ide
 
     _, result = _read(missing_root, "file", mismatched)
 
-    assert require_observation(result.observation).state is FileReadObservationState.REFUSED
-    assert require_observation(result.observation).failure is FileReadFailure.IDENTITY_MISMATCH
-    assert require_observation(result.observation).snapshot is None
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileReadObservationState.REFUSED
+    assert result_observation.failure is FileReadFailure.IDENTITY_MISMATCH
+    assert result_observation.snapshot is None
     assert str(missing_root) not in repr(result)
 
 
@@ -203,9 +222,11 @@ def test_symlinked_trusted_root_is_refused_without_path_disclosure(
 
     carrier, result = _read(link, "file", plan)
 
-    assert require_observation(result.observation).state is FileReadObservationState.REFUSED
-    assert require_observation(result.observation).failure is FileReadFailure.ROOT_REFUSED
-    assert require_observation(result.observation).snapshot is None
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileReadObservationState.REFUSED
+    assert result_observation.failure is FileReadFailure.ROOT_REFUSED
+    assert result_observation.snapshot is None
     assert carrier.invocation is not None and str(link) not in carrier.invocation.argv
     assert str(link) not in repr(result)
 
@@ -213,7 +234,9 @@ def test_symlinked_trusted_root_is_refused_without_path_disclosure(
 def test_root_path_is_a_valid_request_and_absence_remains_complete(plan: IdentityPlan) -> None:
     _, result = _read(Path("/"), "agentworks-definitely-absent-file-read-fixture", plan)
 
-    assert require_observation(result.observation).state is FileReadObservationState.ABSENT
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileReadObservationState.ABSENT
 
 
 def test_one_shot_read_uses_exactly_one_carrier_attempt(tmp_path: Path, plan: IdentityPlan) -> None:
@@ -230,7 +253,9 @@ def test_one_shot_read_uses_exactly_one_carrier_attempt(tmp_path: Path, plan: Id
         runtime_selection=runtime_selection(sys.executable),
     )
 
-    assert require_observation(result.observation).state is FileReadObservationState.PRESENT
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileReadObservationState.PRESENT
     assert carrier.calls == 1
 
 
@@ -300,7 +325,8 @@ def test_caller_bound_has_no_file_layer_ceiling(plan: IdentityPlan) -> None:
         runtime_selection=runtime_selection(sys.executable),
     )
 
-    assert carrier.io is not None
+    carrier_io = carrier.io
+    assert carrier_io is not None
     data = carrier.io.input.data  # type: ignore[union-attr]
     assert data.startswith(FIXED_BUNDLE.prefix)
     assert len(data) - len(FIXED_BUNDLE.prefix) < 1024

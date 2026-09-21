@@ -50,7 +50,7 @@ from agentworks.execution._scratch_receipt import scratch_name
 from agentworks.execution.carrier import CarrierIO, Deadline, SinkOutput
 from tests.execution.files._file_publication_support import LocalCarrier, install_fixture_bundle
 from tests.execution.files._publication_test_support import open_parent, ready_scratch, record_stage
-from tests.execution.files._runtime_support import require_observation, require_value, runtime_selection
+from tests.execution.files._runtime_support import runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the private publication helper requires Linux")
 
@@ -259,9 +259,11 @@ def test_production_bundle_publishes_each_condition_with_content_revision_and_me
     )
 
     assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
-    assert require_observation(result.observation).state is FilePublicationObservationState.PUBLISHED
-    assert require_observation(result.observation).deadline_exceeded is False
-    revision = require_observation(result.observation).revision
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FilePublicationObservationState.PUBLISHED
+    assert result_observation.deadline_exceeded is False
+    revision = result_observation.revision
     assert revision is not None
     assert revision.stat.size == len(content)
     assert revision.digest == hashlib.sha256(content).digest()
@@ -270,7 +272,8 @@ def test_production_bundle_publishes_each_condition_with_content_revision_and_me
     assert carrier.calls == 1 and carrier.io is not None and carrier.io.sensitive
     assert content not in carrier.io.input.data  # type: ignore[union-attr]
     assert content not in PRODUCTION_BUNDLE.prefix
-    assert carrier.invocation is not None
+    carrier_invocation = carrier.invocation
+    assert carrier_invocation is not None
     assert str(root) not in carrier.invocation.argv and content.decode("latin1") not in carrier.invocation.argv
     assert content.hex() not in repr(result)
 
@@ -306,8 +309,10 @@ def test_conditional_conflicts_preserve_closed_failure_and_destination(
 
     _, result = _publish(root, "target", ready._reference, content, condition, plan)
 
-    assert require_observation(result.observation).state is FilePublicationObservationState.REFUSED
-    failure = require_observation(result.observation).failure
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FilePublicationObservationState.REFUSED
+    failure = result_observation.failure
     assert failure is not None and failure.code is FilePublicationFailureCode.PUBLICATION
     assert failure.publication_kind is expected_kind
     assert failure.publication_phase is expected_phase
@@ -334,12 +339,12 @@ def test_match_digest_conflict_and_whole_digest_mismatch_refuse_without_publicat
         os.close(parent_fd)
 
     _, conflict = _publish(root, "target", ready_match._reference, b"new", Match(stale), plan)
-    assert require_observation(conflict.observation).state is FilePublicationObservationState.REFUSED
-    assert require_observation(conflict.observation).failure is not None
-    assert (
-        require_value(require_observation(conflict.observation).failure).publication_kind
-        is PublicationFailureKind.CONFLICT
-    )
+    conflict_observation = conflict.observation
+    assert conflict_observation is not None
+    assert conflict_observation.state is FilePublicationObservationState.REFUSED
+    conflict_failure = conflict_observation.failure
+    assert conflict_failure is not None
+    assert conflict_failure.publication_kind is PublicationFailureKind.CONFLICT
     assert target.read_bytes() == b"old"
     _cleanup_scratch(root, ready_match)
 
@@ -363,10 +368,13 @@ def test_match_digest_conflict_and_whole_digest_mismatch_refuse_without_publicat
         deadline=Deadline.after(15),
         runtime_selection=runtime_selection(sys.executable),
     )
-    assert require_observation(mismatch.observation).state is FilePublicationObservationState.REFUSED
-    assert require_observation(mismatch.observation).failure is not None
-    assert require_value(require_observation(mismatch.observation).failure).code is FilePublicationFailureCode.SCRATCH
-    assert require_value(require_observation(mismatch.observation).failure).scratch_phase is not None
+    mismatch_observation = mismatch.observation
+    assert mismatch_observation is not None
+    assert mismatch_observation.state is FilePublicationObservationState.REFUSED
+    mismatch_failure = mismatch_observation.failure
+    assert mismatch_failure is not None
+    assert mismatch_failure.code is FilePublicationFailureCode.SCRATCH
+    assert mismatch_failure.scratch_phase is not None
     assert target.read_bytes() == b"old"
     _cleanup_scratch(root, ready_digest)
 
@@ -399,12 +407,12 @@ def test_identity_refuses_before_missing_root_or_path_access(tmp_path: Path, pla
         runtime_selection=runtime_selection(sys.executable),
     )
 
-    assert require_observation(result.observation).state is FilePublicationObservationState.REFUSED
-    assert require_observation(result.observation).failure is not None
-    assert (
-        require_value(require_observation(result.observation).failure).code
-        is FilePublicationFailureCode.IDENTITY_MISMATCH
-    )
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FilePublicationObservationState.REFUSED
+    result_failure = result_observation.failure
+    assert result_failure is not None
+    assert result_failure.code is FilePublicationFailureCode.IDENTITY_MISMATCH
     _cleanup_scratch(parent, ready)
 
 
@@ -418,21 +426,21 @@ def test_missing_parent_and_removed_scratch_payload_are_closed_refusals(tmp_path
         os.close(parent_fd)
 
     _, missing_parent = _publish(root, "missing/target", ready._reference, b"content", Create(), plan)
-    assert require_observation(missing_parent.observation).state is FilePublicationObservationState.REFUSED
-    assert require_observation(missing_parent.observation).failure is not None
-    assert (
-        require_value(require_observation(missing_parent.observation).failure).code
-        is FilePublicationFailureCode.PARENT_REFUSED
-    )
+    missing_parent_observation = missing_parent.observation
+    assert missing_parent_observation is not None
+    assert missing_parent_observation.state is FilePublicationObservationState.REFUSED
+    missing_parent_failure = missing_parent_observation.failure
+    assert missing_parent_failure is not None
+    assert missing_parent_failure.code is FilePublicationFailureCode.PARENT_REFUSED
 
     (root / scratch_name(_TOKEN) / "data").unlink()
     _, missing_source = _publish(root, "target", ready._reference, b"content", Create(), plan)
-    assert require_observation(missing_source.observation).state is FilePublicationObservationState.REFUSED
-    assert require_observation(missing_source.observation).failure is not None
-    assert (
-        require_value(require_observation(missing_source.observation).failure).code
-        is FilePublicationFailureCode.SCRATCH
-    )
+    missing_source_observation = missing_source.observation
+    assert missing_source_observation is not None
+    assert missing_source_observation.state is FilePublicationObservationState.REFUSED
+    missing_source_failure = missing_source_observation.failure
+    assert missing_source_failure is not None
+    assert missing_source_failure.code is FilePublicationFailureCode.SCRATCH
     (root / scratch_name(_TOKEN) / "receipt").unlink()
     (root / scratch_name(_TOKEN)).rmdir()
 
@@ -463,9 +471,11 @@ def test_reconcile_recovers_historical_debt_after_payload_removal_then_cleanup_i
         runtime_selection=runtime_selection(sys.executable),
     )
 
-    assert require_observation(recovered.observation).state is FilePublicationObservationState.RECOVERED
-    assert require_observation(recovered.observation).deadline_exceeded is False
-    debt = require_observation(recovered.observation).cleanup_debt
+    recovered_observation = recovered.observation
+    assert recovered_observation is not None
+    assert recovered_observation.state is FilePublicationObservationState.RECOVERED
+    assert recovered_observation.deadline_exceeded is False
+    debt = recovered_observation.cleanup_debt
     assert debt is not None
     cleaned = publication_cleanup(
         LocalCarrier(),
@@ -478,8 +488,10 @@ def test_reconcile_recovers_historical_debt_after_payload_removal_then_cleanup_i
         deadline=Deadline.after(15),
         runtime_selection=runtime_selection(sys.executable),
     )
-    assert require_observation(cleaned.observation).state is FilePublicationObservationState.CLEANED
-    assert require_observation(cleaned.observation).deadline_exceeded is False
+    cleaned_observation = cleaned.observation
+    assert cleaned_observation is not None
+    assert cleaned_observation.state is FilePublicationObservationState.CLEANED
+    assert cleaned_observation.deadline_exceeded is False
     assert not (root / publication_stage_name(_TOKEN)).exists()
     assert not (root / scratch_name(_TOKEN) / "publication-receipt").exists()
     assert ownership._stage_name == publication_stage_name(_TOKEN)
@@ -510,11 +522,10 @@ def test_reconcile_never_infers_publication_or_quiescence_from_missing_record(
         runtime_selection=runtime_selection(sys.executable),
     )
 
-    assert require_observation(result.observation).state is FilePublicationObservationState.OWNERSHIP_UNCERTAIN
-    assert (
-        require_observation(result.observation).revision is None
-        and require_observation(result.observation).cleanup_debt is None
-    )
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FilePublicationObservationState.OWNERSHIP_UNCERTAIN
+    assert result_observation.revision is None and result_observation.cleanup_debt is None
     _cleanup_scratch(root, ready)
 
 
@@ -556,11 +567,10 @@ def test_reconcile_partial_missing_and_foreign_ownership_stays_uncertain(
         runtime_selection=runtime_selection(sys.executable),
     )
 
-    assert require_observation(result.observation).state is FilePublicationObservationState.OWNERSHIP_UNCERTAIN
-    assert (
-        require_observation(result.observation).cleanup_debt is None
-        and require_observation(result.observation).revision is None
-    )
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FilePublicationObservationState.OWNERSHIP_UNCERTAIN
+    assert result_observation.cleanup_debt is None and result_observation.revision is None
 
     if case == "partial-record":
         record.chmod(0o600)
@@ -607,7 +617,9 @@ def test_cleanup_accepts_record_only_and_identified_generic_debt(tmp_path: Path,
         deadline=Deadline.after(15),
         runtime_selection=runtime_selection(sys.executable),
     )
-    assert require_observation(record_cleaned.observation).state is FilePublicationObservationState.CLEANED
+    record_cleaned_observation = record_cleaned.observation
+    assert record_cleaned_observation is not None
+    assert record_cleaned_observation.state is FilePublicationObservationState.CLEANED
 
     generic_name = publication_stage_name(_TOKEN)
     generic_path = root / generic_name
@@ -629,7 +641,9 @@ def test_cleanup_accepts_record_only_and_identified_generic_debt(tmp_path: Path,
         deadline=Deadline.after(15),
         runtime_selection=runtime_selection(sys.executable),
     )
-    assert require_observation(generic_cleaned.observation).state is FilePublicationObservationState.CLEANED
+    generic_cleaned_observation = generic_cleaned.observation
+    assert generic_cleaned_observation is not None
+    assert generic_cleaned_observation.state is FilePublicationObservationState.CLEANED
     assert not generic_path.exists()
     _cleanup_scratch(root, ready)
 
@@ -669,13 +683,13 @@ def test_cleanup_refuses_replaced_generic_stage_without_deleting_foreign_object(
         runtime_selection=runtime_selection(sys.executable),
     )
 
-    assert require_observation(result.observation).state is FilePublicationObservationState.REFUSED
-    assert require_observation(result.observation).failure is not None
-    assert (
-        require_value(require_observation(result.observation).failure).publication_kind
-        is PublicationFailureKind.CONFLICT
-    )
-    assert require_observation(result.observation).cleanup_debt == debt
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FilePublicationObservationState.REFUSED
+    result_failure = result_observation.failure
+    assert result_failure is not None
+    assert result_failure.publication_kind is PublicationFailureKind.CONFLICT
+    assert result_observation.cleanup_debt == debt
     assert stage.read_bytes() == b"foreign"
     stage.unlink()
     held.unlink()
@@ -699,13 +713,15 @@ def test_publication_failure_returns_exact_debt_that_authorizes_only_bounded_cle
 
     _, failed = _publish(root, "target", ready._reference, content, Create(), plan)
 
-    assert require_observation(failed.observation).state is FilePublicationObservationState.REFUSED
-    failure = require_observation(failed.observation).failure
+    failed_observation = failed.observation
+    assert failed_observation is not None
+    assert failed_observation.state is FilePublicationObservationState.REFUSED
+    failure = failed_observation.failure
     assert failure is not None and failure.code is FilePublicationFailureCode.PUBLICATION
     assert failure.publication_kind is PublicationFailureKind.IO
     assert failure.publication_phase is PublicationPhase.CONTENT
     assert failure.cleanup_state is PublicationCleanupState.EXACT
-    debt = require_observation(failed.observation).cleanup_debt
+    debt = failed_observation.cleanup_debt
     assert debt is not None
     assert (root / publication_stage_name(_TOKEN)).exists()
 
@@ -721,7 +737,9 @@ def test_publication_failure_returns_exact_debt_that_authorizes_only_bounded_cle
         deadline=Deadline.after(15),
         runtime_selection=runtime_selection(sys.executable),
     )
-    assert require_observation(cleaned.observation).state is FilePublicationObservationState.CLEANED
+    cleaned_observation = cleaned.observation
+    assert cleaned_observation is not None
+    assert cleaned_observation.state is FilePublicationObservationState.CLEANED
     _cleanup_scratch(root, ready)
 
 
@@ -745,12 +763,11 @@ def test_uncertain_primitive_failure_never_becomes_publication_or_cleanup_author
 
     _, result = _publish(root, "target", ready._reference, content, Create(), plan)
 
-    assert require_observation(result.observation).state is FilePublicationObservationState.UNCERTAIN
-    assert (
-        require_observation(result.observation).revision is None
-        and require_observation(result.observation).cleanup_debt is None
-    )
-    failure = require_observation(result.observation).failure
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FilePublicationObservationState.UNCERTAIN
+    assert result_observation.revision is None and result_observation.cleanup_debt is None
+    failure = result_observation.failure
     assert failure is not None and failure.publication_kind is PublicationFailureKind.UNCERTAIN
     assert failure.publication_phase is PublicationPhase.PUBLICATION
     assert failure.cleanup_state is PublicationCleanupState.OWNERSHIP_UNCERTAIN
@@ -792,12 +809,14 @@ def test_progressed_cleanup_binding_loss_preserves_receipt_failure_and_effect(
         runtime_selection=runtime_selection(sys.executable),
     )
 
-    assert require_observation(result.observation).state is FilePublicationObservationState.REFUSED
-    failure = require_observation(result.observation).failure
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FilePublicationObservationState.REFUSED
+    failure = result_observation.failure
     assert failure is not None and failure.code is FilePublicationFailureCode.RECEIPT
     assert failure.receipt_kind is PublicationReceiptFailureKind.IO
     assert failure.cleanup_state is PublicationCleanupState.OWNERSHIP_UNCERTAIN
-    assert require_observation(result.observation).cleanup_debt is None
+    assert result_observation.cleanup_debt is None
     assert not (root / publication_stage_name(_TOKEN)).exists()
     parent_fd = open_parent(root)
     try:
@@ -824,12 +843,11 @@ def test_post_rename_record_failure_preserves_written_destination_as_uncertain(
 
     _, result = _publish(root, "target", ready._reference, content, Create(), plan)
 
-    assert require_observation(result.observation).state is FilePublicationObservationState.UNCERTAIN
-    assert (
-        require_observation(result.observation).revision is None
-        and require_observation(result.observation).cleanup_debt is None
-    )
-    failure = require_observation(result.observation).failure
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FilePublicationObservationState.UNCERTAIN
+    assert result_observation.revision is None and result_observation.cleanup_debt is None
+    failure = result_observation.failure
     assert failure is not None
     assert failure.publication_kind is PublicationFailureKind.UNCERTAIN
     assert failure.publication_phase is PublicationPhase.PUBLICATION
@@ -880,7 +898,9 @@ def test_lost_publish_reply_is_uncertain_and_never_replayed(tmp_path: Path, plan
         deadline=Deadline.after(15),
         runtime_selection=runtime_selection(sys.executable),
     )
-    assert require_observation(reconciled.observation).state is FilePublicationObservationState.OWNERSHIP_UNCERTAIN
+    reconciled_observation = reconciled.observation
+    assert reconciled_observation is not None
+    assert reconciled_observation.state is FilePublicationObservationState.OWNERSHIP_UNCERTAIN
     _cleanup_scratch(root, ready)
 
 
@@ -908,8 +928,10 @@ def test_late_deadline_retains_published_effect_and_operational_failure(
         plan,
         deadline=Deadline.after(1),
     )
-    assert require_observation(published.observation).state is FilePublicationObservationState.PUBLISHED
-    assert require_observation(published.observation).deadline_exceeded is True
+    published_observation = published.observation
+    assert published_observation is not None
+    assert published_observation.state is FilePublicationObservationState.PUBLISHED
+    assert published_observation.deadline_exceeded is True
     assert (root / "target").read_bytes() == content
     _cleanup_scratch(root, ready)
 
@@ -933,12 +955,12 @@ def test_late_deadline_retains_published_effect_and_operational_failure(
         deadline=Deadline.after(1),
         runtime_selection=runtime_selection(sys.executable),
     )
-    assert require_observation(refused.observation).state is FilePublicationObservationState.REFUSED
-    assert require_observation(refused.observation).failure is not None
-    assert (
-        require_value(require_observation(refused.observation).failure).publication_kind
-        is PublicationFailureKind.CONFLICT
-    )
+    refused_observation = refused.observation
+    assert refused_observation is not None
+    assert refused_observation.state is FilePublicationObservationState.REFUSED
+    refused_failure = refused_observation.failure
+    assert refused_failure is not None
+    assert refused_failure.publication_kind is PublicationFailureKind.CONFLICT
     _cleanup_scratch(root, conflicting)
 
 
@@ -968,9 +990,11 @@ def test_late_deadline_retains_recovered_debt_and_completed_cleanup(
         deadline=Deadline.after(1),
         runtime_selection=runtime_selection(sys.executable),
     )
-    assert require_observation(recovered.observation).state is FilePublicationObservationState.RECOVERED
-    assert require_observation(recovered.observation).deadline_exceeded is True
-    debt = require_observation(recovered.observation).cleanup_debt
+    recovered_observation = recovered.observation
+    assert recovered_observation is not None
+    assert recovered_observation.state is FilePublicationObservationState.RECOVERED
+    assert recovered_observation.deadline_exceeded is True
+    debt = recovered_observation.cleanup_debt
     assert debt is not None
 
     cleaned = publication_cleanup(
@@ -984,8 +1008,10 @@ def test_late_deadline_retains_recovered_debt_and_completed_cleanup(
         deadline=Deadline.after(1),
         runtime_selection=runtime_selection(sys.executable),
     )
-    assert require_observation(cleaned.observation).state is FilePublicationObservationState.CLEANED
-    assert require_observation(cleaned.observation).deadline_exceeded is True
+    cleaned_observation = cleaned.observation
+    assert cleaned_observation is not None
+    assert cleaned_observation.state is FilePublicationObservationState.CLEANED
+    assert cleaned_observation.deadline_exceeded is True
     _cleanup_scratch(root, ready)
 
 
@@ -1004,9 +1030,12 @@ def test_early_expiry_refuses_before_mutation(
 
     _, result = _publish(root, "target", ready._reference, content, Create(), plan)
 
-    assert require_observation(result.observation).state is FilePublicationObservationState.REFUSED
-    assert require_observation(result.observation).failure is not None
-    assert require_value(require_observation(result.observation).failure).code is FilePublicationFailureCode.DEADLINE
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FilePublicationObservationState.REFUSED
+    result_failure = result_observation.failure
+    assert result_failure is not None
+    assert result_failure.code is FilePublicationFailureCode.DEADLINE
     assert not (root / "target").exists() and not (root / publication_stage_name(_TOKEN)).exists()
     _cleanup_scratch(root, ready)
 
@@ -1045,13 +1074,13 @@ def test_cleanup_expiry_before_deletion_preserves_input_debt(
         runtime_selection=runtime_selection(sys.executable),
     )
 
-    assert require_observation(result.observation).state is FilePublicationObservationState.REFUSED
-    assert require_observation(result.observation).failure is not None
-    assert (
-        require_value(require_observation(result.observation).failure).publication_kind
-        is PublicationFailureKind.DEADLINE
-    )
-    assert require_observation(result.observation).cleanup_debt == debt
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FilePublicationObservationState.REFUSED
+    result_failure = result_observation.failure
+    assert result_failure is not None
+    assert result_failure.publication_kind is PublicationFailureKind.DEADLINE
+    assert result_observation.cleanup_debt == debt
     assert stage.exists()
     stage.unlink()
     _cleanup_scratch(root, ready)

@@ -15,7 +15,7 @@ from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution.carrier import Deadline
 from tests.execution.files._file_read_support import LocalCarrier, fixture_source, install_fixture_bundle
-from tests.execution.files._runtime_support import require_observation, require_value, runtime_selection
+from tests.execution.files._runtime_support import runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the file-read helper candidate requires Linux")
 
@@ -61,8 +61,10 @@ def test_identity_mismatch_precedes_target_access(tmp_path: Path, plan: Identity
 
     result = _read(tmp_path / "missing-root", "missing", mismatched)
 
-    assert require_observation(result.observation).state is FileReadObservationState.REFUSED
-    assert require_observation(result.observation).failure is FileReadFailure.IDENTITY_MISMATCH
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileReadObservationState.REFUSED
+    assert result_observation.failure is FileReadFailure.IDENTITY_MISMATCH
 
 
 def test_snapshot_deadline_maps_to_closed_read_refusal(
@@ -79,8 +81,10 @@ guest.read_snapshot=deadline_snapshot
 
     result = _read(tmp_path, "missing", plan)
 
-    assert require_observation(result.observation).state is FileReadObservationState.REFUSED
-    assert require_observation(result.observation).failure is FileReadFailure.DEADLINE
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileReadObservationState.REFUSED
+    assert result_observation.failure is FileReadFailure.DEADLINE
 
 
 @pytest.mark.parametrize("present", [False, True], ids=["absence", "post-snapshot"])
@@ -110,9 +114,11 @@ guest._snapshot=delayed_snapshot
         carrier=LocalCarrier(dispatch_deadline=Deadline.after(5)),
     )
 
-    assert require_observation(result.observation).state is FileReadObservationState.REFUSED
-    assert require_observation(result.observation).failure is FileReadFailure.DEADLINE
-    assert require_observation(result.observation).snapshot is None
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileReadObservationState.REFUSED
+    assert result_observation.failure is FileReadFailure.DEADLINE
+    assert result_observation.snapshot is None
 
 
 def test_read_succeeds_without_protected_lock_namespace(tmp_path: Path, plan: IdentityPlan) -> None:
@@ -120,9 +126,12 @@ def test_read_succeeds_without_protected_lock_namespace(tmp_path: Path, plan: Id
 
     result = _read(tmp_path, "target", plan)
 
-    assert require_observation(result.observation).state is FileReadObservationState.PRESENT
-    assert require_observation(result.observation).snapshot is not None
-    assert require_value(require_observation(result.observation).snapshot).data == b"content"
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileReadObservationState.PRESENT
+    result_snapshot = result_observation.snapshot
+    assert result_snapshot is not None
+    assert result_snapshot.data == b"content"
 
 
 def test_root_descriptor_closes_when_snapshot_control_raises(

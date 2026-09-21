@@ -38,7 +38,7 @@ from agentworks.execution.carrier import (
 )
 from agentworks.execution.carriers._subprocess import run_process
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
-from tests.execution.files._runtime_support import require_observation, require_value, runtime_selection
+from tests.execution.files._runtime_support import runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the file-object helper requires Linux")
 
@@ -140,13 +140,14 @@ def test_isolated_bundle_stats_mode_zero_file_through_execute_only_ancestry(
 
     assert carrier.calls == 1
     assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
-    assert require_observation(result.observation).state is FileObjectObservationState.PRESENT
-    assert require_observation(result.observation).object_kind is FileKind.REGULAR
-    assert (
-        require_observation(result.observation).revision is not None
-        and require_value(require_observation(result.observation).revision).digest is None
-    )
-    assert require_value(require_observation(result.observation).revision).stat.inode == target.stat().st_ino
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileObjectObservationState.PRESENT
+    assert result_observation.object_kind is FileKind.REGULAR
+    result_revision = result_observation.revision
+    assert result_revision is not None
+    assert result_observation.revision is not None and result_revision.digest is None
+    assert result_revision.stat.inode == target.stat().st_ino
     assert carrier.io is not None and carrier.io.sensitive
     assert str(root) not in " ".join(carrier.invocation.argv)  # type: ignore[union-attr]
     assert "private-canary" not in repr(result)
@@ -162,8 +163,11 @@ def test_remove_through_write_and_search_parent_without_read_permission(
     target.write_bytes(b"content")
     source = FIXED_BUNDLE
     _, observed = _stat(root, "target", plan, source, runtime=Path(sys.executable))
-    assert require_observation(observed.observation).revision is not None
-    expected = require_value(require_observation(observed.observation).revision)
+    observed_observation = observed.observation
+    assert observed_observation is not None
+    observed_revision = observed_observation.revision
+    assert observed_revision is not None
+    expected = observed_revision
     if include_digest:
         expected = FileRevision(expected.stat, hashlib.sha256(b"content").digest())
     root.chmod(0o300)
@@ -184,7 +188,9 @@ def test_remove_through_write_and_search_parent_without_read_permission(
         root.chmod(0o700)
 
     assert carrier.calls == 1
-    assert require_observation(removed.observation).state is FileObjectObservationState.CHANGED
+    removed_observation = removed.observation
+    assert removed_observation is not None
+    assert removed_observation.state is FileObjectObservationState.CHANGED
     assert not target.exists()
 
 
@@ -196,7 +202,9 @@ def test_missing_root_parent_and_leaf_are_complete_absence(tmp_path: Path, plan:
     cases = ((tmp_path / "missing-root", "leaf"), (root, "missing/leaf"), (root, "leaf"))
     for candidate_root, relative in cases:
         _, result = _stat(candidate_root, relative, plan, source, runtime=Path(sys.executable))
-        assert require_observation(result.observation).state is FileObjectObservationState.ABSENT
+        result_observation = result.observation
+        assert result_observation is not None
+        assert result_observation.state is FileObjectObservationState.ABSENT
 
 
 def test_nested_parent_control_interruption_closes_owned_root(
@@ -258,12 +266,13 @@ def test_stat_reports_directory_and_socket_metadata_without_content(tmp_path: Pa
         source = FIXED_BUNDLE
         for name, kind in (("directory", FileKind.DIRECTORY), ("socket", FileKind.SOCKET)):
             _, result = _stat(root, name, plan, source, runtime=Path(sys.executable))
-            assert require_observation(result.observation).state is FileObjectObservationState.PRESENT
-            assert require_observation(result.observation).object_kind is kind
-            assert (
-                require_observation(result.observation).revision is not None
-                and require_value(require_observation(result.observation).revision).digest is None
-            )
+            result_observation = result.observation
+            assert result_observation is not None
+            assert result_observation.state is FileObjectObservationState.PRESENT
+            assert result_observation.object_kind is kind
+            result_revision = result_observation.revision
+            assert result_revision is not None
+            assert result_observation.revision is not None and result_revision.digest is None
     finally:
         listener.close()
 
@@ -314,8 +323,9 @@ def test_complete_proxmox_post_fits_provider_bound_and_returns_typed_outcome(
 
     assert len(FIXED_BUNDLE.prefix) < body_sizes[0] < 65_536
     assert result.dispatch is Dispatch.SENT
-    assert require_observation(result.observation).state is FileObjectObservationState.REFUSED
-    assert require_observation(result.observation).failure is not None
-    assert (
-        require_value(require_observation(result.observation).failure).code is FileObjectFailureCode.IDENTITY_MISMATCH
-    )
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileObjectObservationState.REFUSED
+    result_failure = result_observation.failure
+    assert result_failure is not None
+    assert result_failure.code is FileObjectFailureCode.IDENTITY_MISMATCH

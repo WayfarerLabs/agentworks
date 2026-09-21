@@ -37,7 +37,7 @@ from agentworks.execution._scratch_receipt import _Identity, scratch_name
 from agentworks.execution.carrier import CarrierIO, Deadline, Dispatch, SinkOutput
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 from tests.execution.files._file_stage_support import LocalCarrier, fixture_source, install_fixture_bundle
-from tests.execution.files._runtime_support import require_observation, runtime_selection
+from tests.execution.files._runtime_support import runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the private stage helper candidate requires Linux")
 
@@ -211,8 +211,10 @@ def test_nested_stage_uses_one_sensitive_attempt_and_exact_private_modes(
     begin_carrier, begun = _begin(root, "nested/destination", len(payload), plan, runtime=str(runtime))
 
     assert begun.runtime_prerequisite.state is RuntimePrerequisiteState.READY
-    assert require_observation(begun.observation).state is FileStageObservationState.CREATED
-    reference = require_observation(begun.observation).reference
+    begun_observation = begun.observation
+    assert begun_observation is not None
+    assert begun_observation.state is FileStageObservationState.CREATED
+    reference = begun_observation.reference
     assert reference is not None
     scratch = parent / scratch_name(_TOKEN)
     data_path = scratch / "data"
@@ -223,7 +225,8 @@ def test_nested_stage_uses_one_sensitive_attempt_and_exact_private_modes(
     assert not (root / "destination").exists() and not (parent / "destination").exists()
     assert begin_carrier.io is not None and begin_carrier.io.sensitive
     assert begin_carrier.io.input.sensitive  # type: ignore[union-attr]
-    assert begin_carrier.invocation is not None
+    begin_carrier_invocation = begin_carrier.invocation
+    assert begin_carrier_invocation is not None
     assert str(root) not in begin_carrier.invocation.argv and "destination" not in begin_carrier.invocation.argv
 
     first = payload[:7]
@@ -231,8 +234,12 @@ def test_nested_stage_uses_one_sensitive_attempt_and_exact_private_modes(
     _, written = _chunk(root, "nested/destination", reference, 0, first, plan)
     _, completed = _chunk(root, "nested/destination", reference, len(first), second, plan)
 
-    assert require_observation(written.observation).state is FileStageObservationState.ACCEPTED
-    assert require_observation(completed.observation).state is FileStageObservationState.ACCEPTED
+    written_observation = written.observation
+    assert written_observation is not None
+    assert written_observation.state is FileStageObservationState.ACCEPTED
+    completed_observation = completed.observation
+    assert completed_observation is not None
+    assert completed_observation.state is FileStageObservationState.ACCEPTED
     assert data_path.read_bytes() == payload
     assert payload.decode() not in repr(completed)
 
@@ -258,15 +265,19 @@ def test_lost_begin_reply_recovers_cleanup_only_and_cleans_exact_artifact(
 
     reconcile_carrier, recovered = _reconcile(root, "destination", plan, runtime=str(runtime))
 
-    assert require_observation(recovered.observation).state is FileStageObservationState.RECOVERED
-    assert require_observation(recovered.observation).reference is None
-    debt = require_observation(recovered.observation).cleanup_debt
+    recovered_observation = recovered.observation
+    assert recovered_observation is not None
+    assert recovered_observation.state is FileStageObservationState.RECOVERED
+    assert recovered_observation.reference is None
+    debt = recovered_observation.cleanup_debt
     assert debt is not None
     assert reconcile_carrier.io is not None and reconcile_carrier.io.sensitive
 
     _, cleaned = _cleanup(root, "destination", debt, plan, runtime=str(runtime))
 
-    assert require_observation(cleaned.observation).state is FileStageObservationState.CLEANED
+    cleaned_observation = cleaned.observation
+    assert cleaned_observation is not None
+    assert cleaned_observation.state is FileStageObservationState.CLEANED
     assert not scratch.exists()
 
 
@@ -286,7 +297,9 @@ def test_reconcile_never_turns_missing_partial_or_invalid_receipt_into_absence(
         data.chmod(0o600)
     elif artifact == "changed-receipt":
         _, begun = _begin(root, "destination", 1, plan)
-        assert require_observation(begun.observation).state is FileStageObservationState.CREATED
+        begun_observation = begun.observation
+        assert begun_observation is not None
+        assert begun_observation.state is FileStageObservationState.CREATED
         receipt = scratch / "receipt"
         receipt.chmod(0o600)
         receipt.write_bytes(b"changed")
@@ -294,25 +307,33 @@ def test_reconcile_never_turns_missing_partial_or_invalid_receipt_into_absence(
 
     _, result = _reconcile(root, "destination", plan)
 
-    assert require_observation(result.observation).state is FileStageObservationState.OWNERSHIP_UNCERTAIN
-    assert require_observation(result.observation).cleanup_debt is None
-    assert require_observation(result.observation).reference is None
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileStageObservationState.OWNERSHIP_UNCERTAIN
+    assert result_observation.cleanup_debt is None
+    assert result_observation.reference is None
 
 
 def test_cleanup_wrong_inode_refuses_and_retains_exact_debt(tmp_path: Path, plan: IdentityPlan) -> None:
     root = tmp_path / "approved"
     root.mkdir()
     _, begun = _begin(root, "destination", 1, plan)
-    assert require_observation(begun.observation).state is FileStageObservationState.CREATED
+    begun_observation = begun.observation
+    assert begun_observation is not None
+    assert begun_observation.state is FileStageObservationState.CREATED
     _, recovered = _reconcile(root, "destination", plan)
-    debt = require_observation(recovered.observation).cleanup_debt
+    recovered_observation = recovered.observation
+    assert recovered_observation is not None
+    debt = recovered_observation.cleanup_debt
     assert debt is not None and debt._receipt is not None
     wrong = replace(debt, _receipt=_Identity(debt._receipt.device, debt._receipt.inode + 1))
 
     _, result = _cleanup(root, "destination", wrong, plan)
 
-    assert require_observation(result.observation).state is FileStageObservationState.REFUSED
-    failure = require_observation(result.observation).failure
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileStageObservationState.REFUSED
+    failure = result_observation.failure
     assert failure is not None and failure.kind is ScratchFailureKind.CONFLICT
     assert failure.phase is ScratchPhase.CLEANUP
     assert failure.cleanup_debt == wrong
@@ -321,7 +342,9 @@ def test_cleanup_wrong_inode_refuses_and_retains_exact_debt(tmp_path: Path, plan
 
     _, retried = _cleanup(root, "destination", debt, plan)
 
-    assert require_observation(retried.observation).state is FileStageObservationState.CLEANED
+    retried_observation = retried.observation
+    assert retried_observation is not None
+    assert retried_observation.state is FileStageObservationState.CLEANED
     assert not (root / scratch_name(_TOKEN)).exists()
 
 
@@ -329,19 +352,28 @@ def test_delayed_chunk_after_cleanup_refuses_without_recreating_scratch(tmp_path
     root = tmp_path / "approved"
     root.mkdir()
     _, begun = _begin(root, "destination", 1, plan)
-    reference = require_observation(begun.observation).reference
+    begun_observation = begun.observation
+    assert begun_observation is not None
+    reference = begun_observation.reference
     assert reference is not None
     _, recovered = _reconcile(root, "destination", plan)
-    debt = require_observation(recovered.observation).cleanup_debt
+    recovered_observation = recovered.observation
+    assert recovered_observation is not None
+    debt = recovered_observation.cleanup_debt
     assert debt is not None
     _, cleaned = _cleanup(root, "destination", debt, plan)
-    assert require_observation(cleaned.observation).state is FileStageObservationState.CLEANED
+    cleaned_observation = cleaned.observation
+    assert cleaned_observation is not None
+    assert cleaned_observation.state is FileStageObservationState.CLEANED
 
     _, delayed = _chunk(root, "destination", reference, 0, b"x", plan)
 
-    assert require_observation(delayed.observation).state is FileStageObservationState.REFUSED
-    assert require_observation(delayed.observation).failure is not None
-    assert require_observation(delayed.observation).failure.code is FileStageFailureCode.SCRATCH
+    delayed_observation = delayed.observation
+    assert delayed_observation is not None
+    assert delayed_observation.state is FileStageObservationState.REFUSED
+    delayed_failure = delayed_observation.failure
+    assert delayed_failure is not None
+    assert delayed_observation.failure.code is FileStageFailureCode.SCRATCH
     assert not (root / scratch_name(_TOKEN)).exists()
 
 
@@ -350,14 +382,20 @@ def test_exact_duplicate_chunk_is_accepted_without_appending(tmp_path: Path, pla
     root.mkdir()
     payload = b"duplicate"
     _, begun = _begin(root, "destination", len(payload), plan)
-    reference = require_observation(begun.observation).reference
+    begun_observation = begun.observation
+    assert begun_observation is not None
+    reference = begun_observation.reference
     assert reference is not None
 
     _, first = _chunk(root, "destination", reference, 0, payload, plan)
     _, duplicate = _chunk(root, "destination", reference, 0, payload, plan)
 
-    assert require_observation(first.observation).state is FileStageObservationState.ACCEPTED
-    assert require_observation(duplicate.observation).state is FileStageObservationState.ACCEPTED
+    first_observation = first.observation
+    assert first_observation is not None
+    assert first_observation.state is FileStageObservationState.ACCEPTED
+    duplicate_observation = duplicate.observation
+    assert duplicate_observation is not None
+    assert duplicate_observation.state is FileStageObservationState.ACCEPTED
     assert (root / scratch_name(_TOKEN) / "data").read_bytes() == payload
 
 
@@ -365,7 +403,9 @@ def test_wrong_hash_is_refused_with_exact_cleanup_debt(tmp_path: Path, plan: Ide
     root = tmp_path / "approved"
     root.mkdir()
     _, begun = _begin(root, "destination", 1, plan)
-    reference = require_observation(begun.observation).reference
+    begun_observation = begun.observation
+    assert begun_observation is not None
+    reference = begun_observation.reference
     assert reference is not None
     carrier = LocalCarrier()
 
@@ -383,18 +423,23 @@ def test_wrong_hash_is_refused_with_exact_cleanup_debt(tmp_path: Path, plan: Ide
         runtime_selection=runtime_selection(sys.executable),
     )
 
-    assert require_observation(result.observation).state is FileStageObservationState.REFUSED
-    failure = require_observation(result.observation).failure
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileStageObservationState.REFUSED
+    failure = result_observation.failure
     assert failure is not None and failure.code is FileStageFailureCode.SCRATCH
     assert failure.kind is ScratchFailureKind.INTEGRITY
-    assert failure.cleanup_debt is not None
+    failure_cleanup_debt = failure.cleanup_debt
+    assert failure_cleanup_debt is not None
 
 
 def test_changed_receipt_is_refused_and_never_recreated(tmp_path: Path, plan: IdentityPlan) -> None:
     root = tmp_path / "approved"
     root.mkdir()
     _, begun = _begin(root, "destination", 1, plan)
-    reference = require_observation(begun.observation).reference
+    begun_observation = begun.observation
+    assert begun_observation is not None
+    reference = begun_observation.reference
     assert reference is not None
     receipt = root / scratch_name(_TOKEN) / "receipt"
     receipt.chmod(0o600)
@@ -403,11 +448,14 @@ def test_changed_receipt_is_refused_and_never_recreated(tmp_path: Path, plan: Id
 
     _, result = _chunk(root, "destination", reference, 0, b"x", plan)
 
-    assert require_observation(result.observation).state is FileStageObservationState.REFUSED
-    failure = require_observation(result.observation).failure
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileStageObservationState.REFUSED
+    failure = result_observation.failure
     assert failure is not None and failure.code is FileStageFailureCode.SCRATCH
     assert failure.kind is ScratchFailureKind.CONFLICT
-    assert failure.cleanup_debt is not None
+    failure_cleanup_debt = failure.cleanup_debt
+    assert failure_cleanup_debt is not None
     assert receipt.read_bytes() == b"changed"
 
 
@@ -433,9 +481,12 @@ def test_private_creation_absence_is_a_refusal(
 
     _, result = _begin(root, "nested/destination", 1, plan)
 
-    assert require_observation(result.observation).state is FileStageObservationState.REFUSED
-    assert require_observation(result.observation).failure is not None
-    assert require_observation(result.observation).failure.code is failure
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileStageObservationState.REFUSED
+    result_failure = result_observation.failure
+    assert result_failure is not None
+    assert result_observation.failure.code is failure
 
 
 def test_identity_mismatch_precedes_root_access(tmp_path: Path, plan: IdentityPlan) -> None:
@@ -448,9 +499,12 @@ def test_identity_mismatch_precedes_root_access(tmp_path: Path, plan: IdentityPl
 
     _, result = _begin(missing_root, "destination", 1, mismatched)
 
-    assert require_observation(result.observation).state is FileStageObservationState.REFUSED
-    assert require_observation(result.observation).failure is not None
-    assert require_observation(result.observation).failure.code is FileStageFailureCode.IDENTITY_MISMATCH
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileStageObservationState.REFUSED
+    result_failure = result_observation.failure
+    assert result_failure is not None
+    assert result_observation.failure.code is FileStageFailureCode.IDENTITY_MISMATCH
     assert str(missing_root) not in repr(result)
 
 
@@ -464,9 +518,12 @@ def test_reconcile_identity_mismatch_precedes_absent_root_access(tmp_path: Path,
 
     _, result = _reconcile(missing_root, "destination", mismatched)
 
-    assert require_observation(result.observation).state is FileStageObservationState.REFUSED
-    assert require_observation(result.observation).failure is not None
-    assert require_observation(result.observation).failure.code is FileStageFailureCode.IDENTITY_MISMATCH
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileStageObservationState.REFUSED
+    result_failure = result_observation.failure
+    assert result_failure is not None
+    assert result_observation.failure.code is FileStageFailureCode.IDENTITY_MISMATCH
     assert str(missing_root) not in repr(result)
 
 
@@ -488,10 +545,13 @@ def test_guest_deadline_after_missing_root_lookup_is_not_root_refusal(
         deadline=Deadline.after(5),
     )
 
-    assert require_observation(result.observation).state is FileStageObservationState.REFUSED
-    assert require_observation(result.observation).failure is not None
-    assert require_observation(result.observation).failure.code is FileStageFailureCode.DEADLINE
-    assert require_observation(result.observation).failure.cleanup_debt is None
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileStageObservationState.REFUSED
+    result_failure = result_observation.failure
+    assert result_failure is not None
+    assert result_observation.failure.code is FileStageFailureCode.DEADLINE
+    assert result_observation.failure.cleanup_debt is None
 
 
 def test_reconcile_deadline_after_missing_root_lookup_is_not_absence(
@@ -510,13 +570,16 @@ def test_reconcile_deadline_after_missing_root_lookup_is_not_absence(
         deadline=Deadline.after(5),
     )
 
-    assert require_observation(result.observation).state is FileStageObservationState.REFUSED
-    assert require_observation(result.observation).failure is not None
-    assert require_observation(result.observation).failure.code is FileStageFailureCode.SCRATCH
-    assert require_observation(result.observation).failure.kind is ScratchFailureKind.DEADLINE
-    assert require_observation(result.observation).failure.phase is ScratchPhase.RECONCILE
-    assert require_observation(result.observation).failure.cleanup_debt is None
-    assert require_observation(result.observation).cleanup_debt is None
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileStageObservationState.REFUSED
+    result_failure = result_observation.failure
+    assert result_failure is not None
+    assert result_observation.failure.code is FileStageFailureCode.SCRATCH
+    assert result_observation.failure.kind is ScratchFailureKind.DEADLINE
+    assert result_observation.failure.phase is ScratchPhase.RECONCILE
+    assert result_observation.failure.cleanup_debt is None
+    assert result_observation.cleanup_debt is None
 
 
 def test_guest_deadline_after_closed_success_retains_created_cleanup_debt(
@@ -539,13 +602,16 @@ def test_guest_deadline_after_closed_success_retains_created_cleanup_debt(
         deadline=Deadline.after(5),
     )
 
-    assert require_observation(result.observation).state is FileStageObservationState.REFUSED
-    failure = require_observation(result.observation).failure
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileStageObservationState.REFUSED
+    failure = result_observation.failure
     assert failure is not None and failure.code is FileStageFailureCode.SCRATCH
     assert failure.kind is ScratchFailureKind.DEADLINE
     assert failure.phase is ScratchPhase.BEGIN
-    assert failure.cleanup_debt is not None
-    assert require_observation(result.observation).reference is None
+    failure_cleanup_debt = failure.cleanup_debt
+    assert failure_cleanup_debt is not None
+    assert result_observation.reference is None
     assert (root / scratch_name(_TOKEN)).is_dir()
 
 
@@ -557,7 +623,9 @@ def test_guest_deadline_after_closed_reconcile_retains_recovered_cleanup_debt(
     root = tmp_path / "approved"
     root.mkdir()
     _, begun = _begin(root, "destination", 1, plan)
-    assert require_observation(begun.observation).state is FileStageObservationState.CREATED
+    begun_observation = begun.observation
+    assert begun_observation is not None
+    assert begun_observation.state is FileStageObservationState.CREATED
     source = fixture_source(_ADVANCE_AFTER_OPERATE)
     monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_BUNDLE", source)
 
@@ -569,11 +637,14 @@ def test_guest_deadline_after_closed_reconcile_retains_recovered_cleanup_debt(
         deadline=Deadline.after(5),
     )
 
-    assert require_observation(result.observation).state is FileStageObservationState.REFUSED
-    failure = require_observation(result.observation).failure
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileStageObservationState.REFUSED
+    failure = result_observation.failure
     assert failure is not None and failure.kind is ScratchFailureKind.DEADLINE
     assert failure.phase is ScratchPhase.RECONCILE
-    assert failure.cleanup_debt is not None
+    failure_cleanup_debt = failure.cleanup_debt
+    assert failure_cleanup_debt is not None
 
 
 def test_cleanup_deadline_after_parent_open_refuses_before_mutation(
@@ -584,9 +655,13 @@ def test_cleanup_deadline_after_parent_open_refuses_before_mutation(
     root = tmp_path / "approved"
     root.mkdir()
     _, begun = _begin(root, "destination", 1, plan)
-    assert require_observation(begun.observation).state is FileStageObservationState.CREATED
+    begun_observation = begun.observation
+    assert begun_observation is not None
+    assert begun_observation.state is FileStageObservationState.CREATED
     _, recovered = _reconcile(root, "destination", plan)
-    debt = require_observation(recovered.observation).cleanup_debt
+    recovered_observation = recovered.observation
+    assert recovered_observation is not None
+    debt = recovered_observation.cleanup_debt
     assert debt is not None
     scratch = root / scratch_name(_TOKEN)
     source = fixture_source(_ADVANCE_AFTER_OPEN_ROOT)
@@ -601,8 +676,10 @@ def test_cleanup_deadline_after_parent_open_refuses_before_mutation(
         deadline=Deadline.after(5),
     )
 
-    assert require_observation(result.observation).state is FileStageObservationState.REFUSED
-    failure = require_observation(result.observation).failure
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileStageObservationState.REFUSED
+    failure = result_observation.failure
     assert failure is not None and failure.kind is ScratchFailureKind.DEADLINE
     assert failure.phase is ScratchPhase.CLEANUP
     assert failure.cleanup_debt == debt
@@ -618,9 +695,13 @@ def test_guest_deadline_after_closed_cleanup_retains_original_exact_debt(
     root = tmp_path / "approved"
     root.mkdir()
     _, begun = _begin(root, "destination", 1, plan)
-    assert require_observation(begun.observation).state is FileStageObservationState.CREATED
+    begun_observation = begun.observation
+    assert begun_observation is not None
+    assert begun_observation.state is FileStageObservationState.CREATED
     _, recovered = _reconcile(root, "destination", plan)
-    debt = require_observation(recovered.observation).cleanup_debt
+    recovered_observation = recovered.observation
+    assert recovered_observation is not None
+    debt = recovered_observation.cleanup_debt
     assert debt is not None
     source = fixture_source(_ADVANCE_AFTER_OPERATE)
     monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_BUNDLE", source)
@@ -634,8 +715,10 @@ def test_guest_deadline_after_closed_cleanup_retains_original_exact_debt(
         deadline=Deadline.after(5),
     )
 
-    assert require_observation(result.observation).state is FileStageObservationState.REFUSED
-    failure = require_observation(result.observation).failure
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileStageObservationState.REFUSED
+    failure = result_observation.failure
     assert failure is not None and failure.kind is ScratchFailureKind.DEADLINE
     assert failure.phase is ScratchPhase.CLEANUP
     assert failure.cleanup_debt == debt
@@ -693,7 +776,9 @@ guest.os.write=short_write
 
     _, result = _begin(root, "destination", 1, plan)
 
-    assert require_observation(result.observation).state is FileStageObservationState.CREATED
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileStageObservationState.CREATED
 
 
 def test_complete_proxmox_bodies_fit_for_transfer_and_recovery(
@@ -742,7 +827,9 @@ def test_complete_proxmox_bodies_fit_for_transfer_and_recovery(
             deadline=Deadline.after(15),
             runtime_selection=runtime_selection(sys.executable),
         )
-        reference = require_observation(begun.observation).reference
+        begun_observation = begun.observation
+        assert begun_observation is not None
+        reference = begun_observation.reference
         assert reference is not None
         payload = b"x" * MAX_STAGE_CHUNK_BYTES
         written = stage_chunk(
@@ -767,7 +854,9 @@ def test_complete_proxmox_bodies_fit_for_transfer_and_recovery(
             deadline=Deadline.after(15),
             runtime_selection=runtime_selection(sys.executable),
         )
-        debt = require_observation(recovered.observation).cleanup_debt
+        recovered_observation = recovered.observation
+        assert recovered_observation is not None
+        debt = recovered_observation.cleanup_debt
         assert debt is not None
         cleaned = stage_cleanup(
             carrier,
@@ -780,21 +869,17 @@ def test_complete_proxmox_bodies_fit_for_transfer_and_recovery(
             runtime_selection=runtime_selection(sys.executable),
         )
 
-    assert (
-        begun.dispatch is Dispatch.SENT
-        and require_observation(begun.observation).state is FileStageObservationState.CREATED
-    )
-    assert (
-        written.dispatch is Dispatch.SENT
-        and require_observation(written.observation).state is FileStageObservationState.ACCEPTED
-    )
-    assert (
-        recovered.dispatch is Dispatch.SENT
-        and require_observation(recovered.observation).state is FileStageObservationState.RECOVERED
-    )
-    assert (
-        cleaned.dispatch is Dispatch.SENT
-        and require_observation(cleaned.observation).state is FileStageObservationState.CLEANED
-    )
+    begun_observation = begun.observation
+    assert begun_observation is not None
+    assert begun.dispatch is Dispatch.SENT and begun_observation.state is FileStageObservationState.CREATED
+    written_observation = written.observation
+    assert written_observation is not None
+    assert written.dispatch is Dispatch.SENT and written_observation.state is FileStageObservationState.ACCEPTED
+    recovered_observation = recovered.observation
+    assert recovered_observation is not None
+    assert recovered.dispatch is Dispatch.SENT and recovered_observation.state is FileStageObservationState.RECOVERED
+    cleaned_observation = cleaned.observation
+    assert cleaned_observation is not None
+    assert cleaned.dispatch is Dispatch.SENT and cleaned_observation.state is FileStageObservationState.CLEANED
     assert len(body_sizes) == 4
     assert len(FIXED_BUNDLE.prefix) < min(body_sizes) <= max(body_sizes) < 65_536

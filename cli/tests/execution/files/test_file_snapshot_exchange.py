@@ -62,8 +62,6 @@ from agentworks.execution.carrier import (
 )
 from tests.execution.files._file_snapshot_support import LocalCarrier, install_fixture_bundle
 from tests.execution.files._runtime_support import (
-    require_observation,
-    require_value,
     runtime_ready_record,
     runtime_selection,
 )
@@ -185,17 +183,21 @@ def test_real_helper_exchanges_binary_snapshot_recovery_and_exact_cleanup(
         source_root.chmod(0o755)
 
     assert begun.runtime_prerequisite.state is RuntimePrerequisiteState.READY
-    assert require_observation(begun.observation).state is FileSnapshotObservationState.READY
-    snapshot = require_observation(begun.observation).snapshot
+    begun_observation = begun.observation
+    assert begun_observation is not None
+    assert begun_observation.state is FileSnapshotObservationState.READY
+    snapshot = begun_observation.snapshot
     assert snapshot is not None
     assert snapshot.source.stat.size == len(content)
     assert snapshot.source.digest == hashlib.sha256(content).digest()
     assert snapshot.ready._digest == snapshot.source.digest
     assert begin_carrier.calls == 1
-    assert begin_carrier.io is not None
+    begin_carrier_io = begin_carrier.io
+    assert begin_carrier_io is not None
     assert isinstance(begin_carrier.io.input, FiniteInput) and begin_carrier.io.input.sensitive
     assert begin_carrier.io.sensitive and isinstance(begin_carrier.io.output, SinkOutput)
-    assert begin_carrier.invocation is not None
+    begin_carrier_invocation = begin_carrier.invocation
+    assert begin_carrier_invocation is not None
     assert str(source_root) not in begin_carrier.invocation.argv
     assert "payload" not in begin_carrier.invocation.argv
 
@@ -212,8 +214,10 @@ def test_real_helper_exchanges_binary_snapshot_recovery_and_exact_cleanup(
             deadline=Deadline.after(15),
             runtime_selection=runtime_selection(str(runtime)),
         )
-        assert require_observation(result.observation).state is FileSnapshotObservationState.CHUNK
-        chunk = require_observation(result.observation).chunk
+        result_observation = result.observation
+        assert result_observation is not None
+        assert result_observation.state is FileSnapshotObservationState.CHUNK
+        chunk = result_observation.chunk
         assert chunk is not None and chunk.offset == offset and chunk.length == length
         downloaded.extend(chunk.data)
         assert repr(chunk.data) not in repr(result)
@@ -227,13 +231,12 @@ def test_real_helper_exchanges_binary_snapshot_recovery_and_exact_cleanup(
         deadline=Deadline.after(15),
         runtime_selection=runtime_selection(str(runtime)),
     )
-    assert require_observation(recovered.observation).state is FileSnapshotObservationState.RECOVERED
-    debt = require_observation(recovered.observation).cleanup_debt
+    recovered_observation = recovered.observation
+    assert recovered_observation is not None
+    assert recovered_observation.state is FileSnapshotObservationState.RECOVERED
+    debt = recovered_observation.cleanup_debt
     assert debt == _cleanup_debt(snapshot.ready)
-    assert (
-        require_observation(recovered.observation).snapshot is None
-        and require_observation(recovered.observation).chunk is None
-    )
+    assert recovered_observation.snapshot is None and recovered_observation.chunk is None
 
     cleaned = snapshot_cleanup(
         LocalCarrier(),
@@ -243,7 +246,9 @@ def test_real_helper_exchanges_binary_snapshot_recovery_and_exact_cleanup(
         deadline=Deadline.after(15),
         runtime_selection=runtime_selection(str(runtime)),
     )
-    assert require_observation(cleaned.observation).state is FileSnapshotObservationState.CLEANED
+    cleaned_observation = cleaned.observation
+    assert cleaned_observation is not None
+    assert cleaned_observation.state is FileSnapshotObservationState.CLEANED
     assert not (scratch_root / scratch_name(_TOKEN)).exists()
 
     after_cleanup = snapshot_reconcile(
@@ -253,8 +258,10 @@ def test_real_helper_exchanges_binary_snapshot_recovery_and_exact_cleanup(
         deadline=Deadline.after(15),
         runtime_selection=runtime_selection(str(runtime)),
     )
-    assert require_observation(after_cleanup.observation).state is FileSnapshotObservationState.OWNERSHIP_UNCERTAIN
-    assert require_observation(after_cleanup.observation).cleanup_debt is None
+    after_cleanup_observation = after_cleanup.observation
+    assert after_cleanup_observation is not None
+    assert after_cleanup_observation.state is FileSnapshotObservationState.OWNERSHIP_UNCERTAIN
+    assert after_cleanup_observation.cleanup_debt is None
 
     delayed = snapshot_chunk(
         LocalCarrier(),
@@ -266,8 +273,10 @@ def test_real_helper_exchanges_binary_snapshot_recovery_and_exact_cleanup(
         deadline=Deadline.after(15),
         runtime_selection=runtime_selection(str(runtime)),
     )
-    assert require_observation(delayed.observation).state is FileSnapshotObservationState.REFUSED
-    failure = require_observation(delayed.observation).failure
+    delayed_observation = delayed.observation
+    assert delayed_observation is not None
+    assert delayed_observation.state is FileSnapshotObservationState.REFUSED
+    failure = delayed_observation.failure
     assert failure is not None and failure.code is FileSnapshotFailureCode.SCRATCH
     assert failure.scratch_kind is ScratchFailureKind.CONFLICT
     assert failure.cleanup_debt == debt
@@ -294,13 +303,17 @@ def test_absence_and_maximum_refusal_create_no_scratch(
     source_root.mkdir()
 
     _, absent = _begin(source_root, "missing", 10, plan)
-    assert require_observation(absent.observation).state is FileSnapshotObservationState.ABSENT
+    absent_observation = absent.observation
+    assert absent_observation is not None
+    assert absent_observation.state is FileSnapshotObservationState.ABSENT
     assert tuple(scratch_root.iterdir()) == ()
 
     (source_root / "too-large").write_bytes(b"12345")
     _, refused = _begin(source_root, "too-large", 4, plan, token=b"z" * 16)
-    assert require_observation(refused.observation).state is FileSnapshotObservationState.REFUSED
-    failure = require_observation(refused.observation).failure
+    refused_observation = refused.observation
+    assert refused_observation is not None
+    assert refused_observation.state is FileSnapshotObservationState.REFUSED
+    failure = refused_observation.failure
     assert failure is not None and failure.code is FileSnapshotFailureCode.SPOOL
     assert failure.spool_kind is SpoolSnapshotFailureKind.LIMIT
     assert tuple(scratch_root.iterdir()) == ()
@@ -308,7 +321,9 @@ def test_absence_and_maximum_refusal_create_no_scratch(
     empty_token = b"q" * 16
     (source_root / "empty").write_bytes(b"")
     _, empty = _begin(source_root, "empty", 1, plan, token=empty_token)
-    snapshot = require_observation(empty.observation).snapshot
+    empty_observation = empty.observation
+    assert empty_observation is not None
+    snapshot = empty_observation.snapshot
     assert snapshot is not None and snapshot.source.stat.size == 0
     empty_chunk = snapshot_chunk(
         LocalCarrier(),
@@ -320,11 +335,12 @@ def test_absence_and_maximum_refusal_create_no_scratch(
         deadline=Deadline.after(15),
         runtime_selection=runtime_selection(sys.executable),
     )
-    assert require_observation(empty_chunk.observation).state is FileSnapshotObservationState.CHUNK
-    assert (
-        require_observation(empty_chunk.observation).chunk is not None
-        and require_value(require_observation(empty_chunk.observation).chunk).data == b""
-    )
+    empty_chunk_observation = empty_chunk.observation
+    assert empty_chunk_observation is not None
+    assert empty_chunk_observation.state is FileSnapshotObservationState.CHUNK
+    empty_chunk_chunk = empty_chunk_observation.chunk
+    assert empty_chunk_chunk is not None
+    assert empty_chunk_observation.chunk is not None and empty_chunk_chunk.data == b""
     empty_debt = _cleanup_debt(snapshot.ready)
     empty_cleanup = snapshot_cleanup(
         LocalCarrier(),
@@ -334,7 +350,9 @@ def test_absence_and_maximum_refusal_create_no_scratch(
         deadline=Deadline.after(15),
         runtime_selection=runtime_selection(sys.executable),
     )
-    assert require_observation(empty_cleanup.observation).state is FileSnapshotObservationState.CLEANED
+    empty_cleanup_observation = empty_cleanup.observation
+    assert empty_cleanup_observation is not None
+    assert empty_cleanup_observation.state is FileSnapshotObservationState.CLEANED
 
 
 def test_missing_approved_root_is_initial_absence_without_scratch(
@@ -344,8 +362,10 @@ def test_missing_approved_root_is_initial_absence_without_scratch(
 ) -> None:
     _, result = _begin(tmp_path / "missing-approved-root", "payload", 8, plan)
 
-    assert require_observation(result.observation).state is FileSnapshotObservationState.ABSENT
-    assert require_observation(result.observation).snapshot is None
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileSnapshotObservationState.ABSENT
+    assert result_observation.snapshot is None
     assert tuple(scratch_root.iterdir()) == ()
 
 
@@ -359,8 +379,10 @@ def test_expiry_after_missing_root_lookup_never_becomes_false_absence(
 
     _, result = _begin(tmp_path / "missing-approved-root", "payload", 8, plan)
 
-    assert require_observation(result.observation).state is FileSnapshotObservationState.REFUSED
-    failure = require_observation(result.observation).failure
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileSnapshotObservationState.REFUSED
+    failure = result_observation.failure
     assert failure is not None and failure.code is FileSnapshotFailureCode.SPOOL
     assert failure.spool_kind is SpoolSnapshotFailureKind.DEADLINE
     assert failure.cleanup_debt is None
@@ -380,7 +402,7 @@ def test_host_refuses_out_of_range_chunk_before_dispatch(plan: IdentityPlan) -> 
             length=1,
             plan=plan,
             deadline=Deadline.after(15),
-            runtime_selection=runtime_selection(sys.executable),
+            runtime_selection=runtime_selection(),
         )
 
     assert carrier.calls == 0
@@ -395,7 +417,9 @@ def test_changed_scratch_is_refused_with_exact_cleanup_debt(
     source_root.mkdir()
     (source_root / "payload").write_bytes(b"original")
     _, begun = _begin(source_root, "payload", 8, plan)
-    snapshot = require_observation(begun.observation).snapshot
+    begun_observation = begun.observation
+    assert begun_observation is not None
+    snapshot = begun_observation.snapshot
     assert snapshot is not None
     data_path = scratch_root / scratch_name(_TOKEN) / "data"
     data_path.write_bytes(b"tampered")
@@ -411,8 +435,10 @@ def test_changed_scratch_is_refused_with_exact_cleanup_debt(
         runtime_selection=runtime_selection(sys.executable),
     )
 
-    assert require_observation(result.observation).state is FileSnapshotObservationState.REFUSED
-    failure = require_observation(result.observation).failure
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileSnapshotObservationState.REFUSED
+    failure = result_observation.failure
     assert failure is not None and failure.scratch_kind is ScratchFailureKind.CONFLICT
     assert failure.cleanup_debt == _cleanup_debt(snapshot.ready)
 
@@ -427,11 +453,12 @@ def test_identity_refusal_precedes_source_or_scratch_access(
 
     _, result = _begin(tmp_path / "does-not-exist", "secret", 1, wrong_plan)
 
-    assert require_observation(result.observation).state is FileSnapshotObservationState.REFUSED
-    assert require_observation(result.observation).failure is not None
-    assert (
-        require_value(require_observation(result.observation).failure).code is FileSnapshotFailureCode.IDENTITY_MISMATCH
-    )
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileSnapshotObservationState.REFUSED
+    result_failure = result_observation.failure
+    assert result_failure is not None
+    assert result_failure.code is FileSnapshotFailureCode.IDENTITY_MISMATCH
     assert tuple(scratch_root.iterdir()) == ()
 
 
@@ -448,11 +475,14 @@ def test_final_deadline_retains_created_snapshot_debt_after_descriptor_closure(
 
     _, result = _begin(source_root, "payload", 8, plan)
 
-    assert require_observation(result.observation).state is FileSnapshotObservationState.REFUSED
-    failure = require_observation(result.observation).failure
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileSnapshotObservationState.REFUSED
+    failure = result_observation.failure
     assert failure is not None and failure.code is FileSnapshotFailureCode.SPOOL
     assert failure.spool_kind is SpoolSnapshotFailureKind.DEADLINE
-    assert failure.cleanup_debt is not None
+    failure_cleanup_debt = failure.cleanup_debt
+    assert failure_cleanup_debt is not None
     assert (scratch_root / scratch_name(_TOKEN)).is_dir()
 
 
@@ -467,8 +497,10 @@ def test_initial_deadline_refuses_before_any_filesystem_access(
 
     _, result = _begin(tmp_path / "missing-source", "payload", 8, plan)
 
-    assert require_observation(result.observation).state is FileSnapshotObservationState.REFUSED
-    failure = require_observation(result.observation).failure
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileSnapshotObservationState.REFUSED
+    failure = result_observation.failure
     assert failure is not None and failure.code is FileSnapshotFailureCode.SPOOL
     assert failure.spool_kind is SpoolSnapshotFailureKind.DEADLINE
     assert failure.cleanup_debt is None
@@ -594,8 +626,9 @@ def test_scratch_failure_cannot_substitute_cleanup_authority_or_phase(
         assert isinstance(request, FileSnapshotChunkRequest | FileSnapshotCleanupRequest)
         debt = expected_debt
         if corruption == "debt":
-            assert debt._object is not None
-            debt = replace(debt, _object=_Identity(debt._object.device, debt._object.inode + 1))
+            debt_object = debt._object
+            assert debt_object is not None
+            debt = replace(debt, _object=_Identity(debt_object.device, debt_object.inode + 1))
         expected_phase = ScratchPhase.READ if isinstance(request, FileSnapshotChunkRequest) else ScratchPhase.CLEANUP
         phase = expected_phase
         if corruption == "phase":
@@ -620,7 +653,7 @@ def test_scratch_failure_cannot_substitute_cleanup_authority_or_phase(
             length=len(data),
             plan=plan,
             deadline=Deadline.after(15),
-            runtime_selection=runtime_selection(sys.executable),
+            runtime_selection=runtime_selection(),
         )
     else:
         result = snapshot_cleanup(
@@ -629,13 +662,15 @@ def test_scratch_failure_cannot_substitute_cleanup_authority_or_phase(
             cleanup_debt=expected_debt,
             plan=plan,
             deadline=Deadline.after(15),
-            runtime_selection=runtime_selection(sys.executable),
+            runtime_selection=runtime_selection(),
         )
 
-    assert require_observation(result.observation).state is FileSnapshotObservationState.UNCERTAIN
-    assert require_observation(result.observation).error is FileSnapshotObservationError.CONTROL
-    assert require_observation(result.observation).failure is None
-    assert require_observation(result.observation).cleanup_debt is None
+    result_observation = result.observation
+    assert result_observation is not None
+    assert result_observation.state is FileSnapshotObservationState.UNCERTAIN
+    assert result_observation.error is FileSnapshotObservationError.CONTROL
+    assert result_observation.failure is None
+    assert result_observation.cleanup_debt is None
 
 
 def test_tampered_or_truncated_chunk_transcript_releases_no_bytes(plan: IdentityPlan) -> None:
@@ -656,10 +691,12 @@ def test_tampered_or_truncated_chunk_transcript_releases_no_bytes(plan: Identity
             length=len(data),
             plan=plan,
             deadline=Deadline.after(15),
-            runtime_selection=runtime_selection(sys.executable),
+            runtime_selection=runtime_selection(),
         )
-        assert require_observation(result.observation).state is FileSnapshotObservationState.UNCERTAIN
-        assert require_observation(result.observation).chunk is None
+        result_observation = result.observation
+        assert result_observation is not None
+        assert result_observation.state is FileSnapshotObservationState.UNCERTAIN
+        assert result_observation.chunk is None
         assert repr(data) not in repr(result)
 
 
@@ -679,7 +716,7 @@ def test_wrong_response_nonce_and_reflected_request_are_rejected_without_retenti
         length=len(data),
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_selection=runtime_selection(sys.executable),
+        runtime_selection=runtime_selection(),
     )
     canary = "reflected-source-secret"
     reflected = snapshot_begin(
@@ -690,13 +727,17 @@ def test_wrong_response_nonce_and_reflected_request_are_rejected_without_retenti
         token=_TOKEN,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_selection=runtime_selection(sys.executable),
+        runtime_selection=runtime_selection(),
     )
 
-    assert require_observation(nonce_result.observation).state is FileSnapshotObservationState.UNCERTAIN
-    assert require_observation(nonce_result.observation).error is FileWireError.NONCE
-    assert require_observation(reflected.observation).state is FileSnapshotObservationState.UNCERTAIN
-    assert require_observation(reflected.observation).error in {
+    nonce_result_observation = nonce_result.observation
+    assert nonce_result_observation is not None
+    assert nonce_result_observation.state is FileSnapshotObservationState.UNCERTAIN
+    assert nonce_result_observation.error is FileWireError.NONCE
+    reflected_observation = reflected.observation
+    assert reflected_observation is not None
+    assert reflected_observation.state is FileSnapshotObservationState.UNCERTAIN
+    assert reflected_observation.error in {
         FileWireError.TRUNCATED,
         FileWireError.MALFORMED,
         FileWireError.OVERSIZED,
