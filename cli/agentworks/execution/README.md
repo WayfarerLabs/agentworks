@@ -163,6 +163,27 @@ command on the assumption it stopped. Production use is not enabled; it requires
 owned-workload lifecycle/cancellation implementation. Test only bounded workloads under explicit
 cleanup authority, and verify their guest-side cleanup independently.
 
+`systemd.py` is a private Linux foreground MANAGED experiment, not an execution or jobs API. A root
+control carrier starts a fixed transient service, while an explicit target identity selects the
+service UID, GID and space-separated supplementary groups. The service main creates a delegated
+child cgroup, moves its trusted pre-exec child into it, then starts the fixed manifest helper. It
+performs bounded cleanup observation of that dedicated workload cgroup before exiting itself. The
+marker can report `POPULATED` or `INVALID`; only `EMPTY` is cleanup proof. Helper/payload frames,
+service launch evidence and child-boundary evidence remain separate facts. A missing unit,
+unobserved control identity, malformed marker, or failed launch is never cleanup proof. This
+source-backed candidate still needs supported-target systemd/cgroup, delegation, privilege and
+interruption evidence before any profile or production integration can rely on it. `complete` means
+execution and lifecycle evidence, not full output retention: intentional bounded capture may be
+truncated while its stream fact reports that outcome separately. The accepted manifest bound is a
+helper limit, not a claim that every carrier can transport a request at that size; carrier refusal
+before dispatch remains the truthful outcome.
+
+The Linux source tests execute the bundled supervisor through a test-local cgroup filesystem shim;
+that shim is not a native systemd proof. A supported Debian target must still establish the
+transient unit's identity/delegation behavior, `systemd-run` stderr behavior, cgroup events and kill
+semantics, and cleanup of a real detached descendant. `waitpid` failure paths remain native-proof
+gaps rather than claimed unit-test evidence.
+
 ## Input accounting
 
 The 262,144-byte preparation bound applies to the complete encoded envelope, not raw application
