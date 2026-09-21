@@ -21,6 +21,10 @@ restoring one does not establish that target state matches the snapshot.
 
 This persistence primitive is not yet connected to production operation admission or RunContext. The
 caller composition and recovery paths must be implemented before it can protect file workflows.
+Admission conflicts only on an exact resource kind/name pair. It does not check ancestors or
+descendants, provide system/workspace/agent/session/console claims, or expose lock-listing and
+force-unlock CLI commands. Adding a new resource kind alone would not establish hierarchical
+exclusion.
 
 ## Instance state
 

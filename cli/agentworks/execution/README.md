@@ -513,8 +513,9 @@ Windows SSH command-line sizing for explicit fixtures. Those measurements do not
 platform acceptance or fit for every connection/identity prefix.
 
 These entries are not complete upload or FileAccess operations. Whole-download and publication
-composition and publication recovery remain unfinished. The caller must retain the token, original binding and
-known references; an unavailable creation reply does not establish absence or quiescence.
+composition and publication recovery remain unfinished. The caller must retain the token, original
+binding and known references; an unavailable creation reply does not establish absence or
+quiescence.
 
 `_scratch_root.py` opens the fixed Linux `/tmp` directory without following symlinks and requires
 UID 0 and mode 01777. It creates and repairs nothing, ignores environment-selected temporary paths,
@@ -531,13 +532,13 @@ scratch once; later requests read that copy, not a changing source file. Source-
 not require write access to the source directory.
 
 Requests use sensitive stdin with a 32 KiB manifest bound. Chunk replies carry at most 12 KiB of
-binary data in `AGWF1` records, followed by range, length and digest evidence. The host releases typed
-results only after complete nonce-bound framing and delivered streams. A missing source is distinct
-from an empty file; invalid, reflected or incomplete output does not establish either.
+binary data in `AGWF1` records, followed by range, length and digest evidence. The host releases
+typed results only after complete nonce-bound framing and delivered streams. A missing source is
+distinct from an empty file; invalid, reflected or incomplete output does not establish either.
 
 Reconciliation recovers cleanup ownership only, never ready content or proof that an earlier request
 has stopped. Known cleanup debt survives deadline failure. Cleanup accepts the original token and
 identity-bound objects; delayed chunks refuse after receipt removal. The caller must serialize the
-complete logical operation and retain its token and known references. These private exchanges do
-not yet compose a complete download or enable public FileAccess. Local helper tests and serialized
+complete logical operation and retain its token and known references. These private exchanges do not
+yet compose a complete download or enable public FileAccess. Local helper tests and serialized
 request-size measurements do not establish native carrier acceptance.

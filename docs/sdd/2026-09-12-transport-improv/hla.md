@@ -58,6 +58,51 @@ all required semantics. Execution and file access are separate views; command an
 execution remain independently granted, as do profiles, identity/elevation, lifetime and I/O.
 Transport feature descriptions never stand in for permissions.
 
+### Operation coordination and hierarchical extension
+
+Core orchestration owns database-backed operation admission before activation or other conflicting
+effects. RunContext and nested cleanup carry the same ownership; constructing another context does
+not acquire an unrelated claim. Admission, resolution and release use short transactions, not a SQL
+write transaction held across remote work. Claims are coordination, not permissions or remote
+process containment. The [file LLD](file-operations-lld.md#cooperating-writers-and-honest-limits)
+defines uncertainty and recovery.
+
+The initial implementation uses coarse VM and shared platform-host resource keys. Its repository
+currently conflicts only on an exact kind/name pair. This is not hierarchical locking and does not
+complete [#377](https://github.com/WayfarerLabs/agentworks/issues/377). Coarse VM ownership
+deliberately serializes otherwise independent work within that VM until finer admission is
+implemented.
+
+Preserve one core admission boundary for extending this model to system, workspace, agent, session
+and console resources. The extension must atomically check equal, ancestor and descendant conflicts
+and insert ownership in the same transaction. A VM-wide claim blocks conflicting descendant claims;
+an existing descendant claim also blocks a conflicting VM-wide claim. System-wide exclusion covers
+all participating resources in that state database. Independent siblings may proceed when their
+actual resource sets do not overlap. Fail immediately with the blocking resource, operation and
+available claim metadata, rather than waiting for another operation to finish.
+
+Resource relationships come from core-owned entity identities, not path prefixes, transport routes,
+execution users or the descriptive RunContext scope. Do not invent a single nesting chain: agents
+are VM-scoped, workspaces are VM-scoped, and session work can involve both. An operation touching
+several resources needs their explicit conflict relationships. Platform-host mutations retain a
+separate shared resource identity; a guest operation does not automatically reserve its host simply
+because the VM lives there. Central admission owns these rules, not per-command lists of subobjects
+to inspect.
+
+Adding enum values to the current exact-key repository is insufficient. Enable finer claims only
+with the corresponding schema, atomic conflict checks and compatibility transition for existing
+coarse claims and callers. Until then, callers retain coarse VM exclusion rather than introducing
+apparently independent keys that bypass it. Do not build unused hierarchy tables or a generic lock
+engine in this increment.
+
+Operation ownership ends at the operation's proved completion, not automatically at the end of all
+work it started. The #377 follow-up must separately define lifetime claims for attached consoles and
+running sessions, including the VM-upgrade-versus-attached-console case. Lock listing and explicit
+force-unlock are also follow-up work: removing a row cannot stop remote work or prove quiescence, so
+an override must not be presented as safe recovery. The
+[plan](plan.md#hierarchical-coordination-follow-up-377) lists these exclusions and the final
+lockfile obligation.
+
 ### SSH-backed VM platform access
 
 SSH can reach a platform host to run management tools, not only a guest to run a workload. Reuse the

@@ -66,6 +66,14 @@ associated pending acceptance gates are superseded by this ruling.
       and shared platform-host resources without splitting ownership by transport route or identity.
       Retire superseded local harness coordination during consumer migration, not through a second
       competing new-stack lock.
+- [ ] Cover pre-context activation and nested teardown when wiring ownership. At `806741ca`,
+      `gated_vm_boundary` enters `activation_gate` before assembling its ordinary operation context,
+      and `LiveVMNode` constructs a separate gate context. Context factories, harness setup's
+      explicit held-guard chain and parameterless realization teardown must retain the same
+      core-owned operation when migrated. Adding a field to RunContext alone is insufficient.
+- [ ] Select shared platform-host resource keys before enabling their admission. Canonical VM names
+      are available before create dispatch; site names and authored SSH routes are not canonical
+      host identities. Do not silently treat different aliases or users as independent hosts.
 - [ ] Prove crash, disconnect and deadline handling retain unresolved ownership. Recovery must
       establish that prior remote work cannot still mutate before admitting conflicting work, and
       must not replay uncertain mutation or silently expire a claim. Report incomplete recovery
@@ -88,6 +96,45 @@ uses synthetic identity rather than Unix-only calls during collection. Final rev
 affected deadline/staging tests. No native VM or host acceptance is claimed. The independent local
 launch-owner cleanup-entry interrupt gap remains open and is documented in the preparation LLD; this
 increment does not introduce global signal handling or declare launch conformance.
+
+### Hierarchical coordination follow-up (#377)
+
+The operator directs compatibility with
+[#377](https://github.com/WayfarerLabs/agentworks/issues/377), not completion of all its
+functionality in this effort. The [HLA](hla.md#operation-coordination-and-hierarchical-extension)
+keeps admission centralized and requires conflicts in both directions between a resource and its
+ancestors/descendants. The current `Database.operations` implementation checks exact
+VM/platform-host keys only; it is neither a hierarchy nor a complete production lock service. The
+completed primitive checkbox above records that exact-key implementation, not broader #377
+acceptance.
+
+Not implemented in the current tree, and deferred to the #377 follow-up unless explicitly brought
+into this effort:
+
+- System, workspace, agent, session and console claim types and atomic ancestor/descendant
+  admission.
+- Independent sibling concurrency inside a VM, multi-resource acquisition and the schema/caller
+  transition that prevents fine-grained claims from bypassing existing coarse ownership.
+- Long-lived console/session claims and the VM-upgrade-versus-attached-console acceptance case,
+  including ordinary detach/release and stale lifetime-claim recovery.
+- Operator CLI commands to list locks and explicitly force-unlock, with blocker-specific diagnostics
+  and a clear distinction between an unsafe override and evidence-backed recovery.
+- The repository-wide concurrency sweep requested by #377. Passing this transport effort's tests
+  must not imply that unrelated legacy commands permit all non-conflicting concurrent work.
+
+The transport-owned production wiring and recovery gates immediately above remain required; this
+follow-up does not defer them. Existing claim timestamps and bounded operation labels are already
+implemented, while the broader inspection and conflict UI are not. No automatic expiry or
+force-release is added under the guise of hierarchy compatibility.
+
+- [ ] Review the implemented admission boundary against the #377 extension: centralized resource
+      identity/conflict decisions, ownership preserved through activation/nested contexts, and no
+      new fine-grained key that bypasses coarse exclusion. Record exact delivered scope and
+      evidence.
+- [ ] At final SDD closeout, explicitly list in `locked.md` the delivered coordination levels and
+      production paths, remaining limitations, and each still-unimplemented item above with #377 as
+      follow-up. Keep the issue open unless separately completed and verified. Do not create the
+      lockfile early or represent deferred hierarchy work as completed transport implementation.
 
 ## Buffered PoC checkpoint record
 

@@ -298,14 +298,23 @@ operation before calling the primitive. This is a concrete prerequisite, not a t
 
 Publication retains a sibling stage in the actual destination directory for its access-metadata
 semantics. Its candidate ownership record is separately bounded and immutable, rather than a rewrite
-of the sole creation receipt. Recovery binds that stage to the original authorized parent and
-recorded name/inode; it never follows the inode into the public destination. Remove owned data and
-outstanding stages before their receipts. A missing stage is not evidence of successful publication.
-Interruption before ownership is recorded, or between receipt removal and final directory removal,
-can still leave uncertain cleanup. These limits do not become a journal, prefix scavenger, resumed
-upload promise or reboot-durability requirement. Publication-stage recovery remains unimplemented;
-the complete remote exchange requires fault tests for lost replies, delayed dispatch, partial
-creation and interrupted cleanup.
+of the sole creation receipt. The selected private implementation places that record inside the
+already-owned upload scratch directory and derives the publication sibling's exact basename from
+core's token. Before creating the sibling, admit and retain the existing stage receipt and its
+identity/context. The record binds the original destination parent and acquired sibling identity; it
+introduces no caller-supplied path or scan. Generic scratch cleanup must refuse this extra record
+without first discarding the data or original receipt, so explicit publication cleanup precedes
+ordinary scratch cleanup. Existing local byte-publication mechanics remain shared rather than
+duplicated into a second rename implementation.
+
+Recovery binds that stage to the original authorized parent and recorded name/inode; it never
+follows the inode into the public destination. Remove owned data and outstanding stages before their
+receipts. A missing stage is not evidence of successful publication. Interruption before ownership
+is recorded, or between receipt removal and final directory removal, can still leave uncertain
+cleanup. These limits do not become a journal, prefix scavenger, resumed upload promise or
+reboot-durability requirement. Publication-stage recovery remains unimplemented; the complete remote
+exchange requires fault tests for lost replies, delayed dispatch, partial creation and interrupted
+cleanup.
 
 The delivery audit at `0ecb9a2e` found that one monolithic bundle plus a 24 KiB chunk nearly
 exhausts or exceeds the historical 64 KiB Proxmox whole-POST limit before its missing dispatcher is
@@ -326,18 +335,18 @@ field/line/decoded/total bounds must fit the complete carrier request. No reques
 or shell source; fixed preparation bootstrap source cannot be reused for file operations.
 
 The private Linux `stage_begin`, `stage_chunk`, `stage_reconcile` and `stage_cleanup` exchanges
-implement that delivery shape. Their blanket destination lock is being removed in favor of the
-operation coordination below. Every request retains the nonempty original destination path; the
-guest derives its parent after checking execution identity. A complete creation result must match
-the requested length before the host exposes its reference. Cleanup debt is data bound to the
-original token/context, not a returned name or path. Chunk scratch-failure debt must match the
-already-known active reference exactly; the response cannot introduce different cleanup ownership.
-Missing private parents refuse. Incomplete observation after possible dispatch remains uncertain; no
-replay or public absence is inferred. Guest expiry is checked after owned descriptor cleanup; a
-completed mutation retains exact cleanup debt when that final check expires instead of becoming a
-no-effects refusal. Reconciliation exposes only complete historical cleanup ownership, never a ready
-content reference; missing or invalid receipts remain ownership uncertainty. Explicit cleanup checks
-expiry before its first deletion and accepts only the original identity-bound debt. Returned cleanup
+implement that delivery shape. They require caller-owned operation coordination below rather than a
+destination lock. Every request retains the nonempty original destination path; the guest derives
+its parent after checking execution identity. A complete creation result must match the requested
+length before the host exposes its reference. Cleanup debt is data bound to the original
+token/context, not a returned name or path. Chunk scratch-failure debt must match the already-known
+active reference exactly; the response cannot introduce different cleanup ownership. Missing private
+parents refuse. Incomplete observation after possible dispatch remains uncertain; no replay or
+public absence is inferred. Guest expiry is checked after owned descriptor cleanup; a completed
+mutation retains exact cleanup debt when that final check expires instead of becoming a no-effects
+refusal. Reconciliation exposes only complete historical cleanup ownership, never a ready content
+reference; missing or invalid receipts remain ownership uncertainty. Explicit cleanup checks expiry
+before its first deletion and accepts only the original identity-bound debt. Returned cleanup
 failure debt must match it. These exchanges do not prove earlier-request quiescence or implement
 complete upload/publication; delayed chunk requests refuse after exact cleanup removes the receipt.
 
@@ -552,7 +561,10 @@ provisioning.
 Start with coarse VM-level exclusion, independent of execution identity. Host-level mutations use
 the platform's shared resource scope when they can conflict across VMs; do not infer separate
 ownership merely from different SSH routes or user/admin execution. Distinct isolated work may run
-concurrently. Resource ownership, not a hierarchy of per-path locks, determines conflicts.
+concurrently. Resource ownership, not a hierarchy of per-path locks, determines conflicts. The
+[hierarchical extension](hla.md#operation-coordination-and-hierarchical-extension) preserves
+ancestor/descendant admission for #377. The current exact-key primitive does not implement it; finer
+resource keys must not be enabled before their conflicts with coarse claims are enforced.
 
 Database transactions reserve and update ownership atomically and finish before network work. Do not
 hold a SQLite write transaction open for an entire remote operation. Ownership is durable while

@@ -204,6 +204,17 @@ The [file coordination design](file-operations-lld.md#cooperating-writers-and-ho
 this ruling. Host-side cooperation is not containment of a malicious platform. The existing
 exclusion of malicious target-user processes and the guest MANAGED lifecycle requirements remain.
 
+#### Hierarchical coordination follow-up ruling, 2026-09-20
+
+> Ok. Please take a look at #377. Done properly, we should be able to expand this to the other
+> levels, complete with the hierarchy (workspace locks are aware of the VM locks, etc.).
+>
+> You don't have to implement all of this but please leave room in the design and clearly indicate
+> what you didn't do in the SDD plan and lockfile.
+
+The [coordination extension design](hla.md#operation-coordination-and-hierarchical-extension) and
+[explicit follow-up scope](plan.md#hierarchical-coordination-follow-up-377) record the response.
+
 ### Implementation scope
 
 In scope for the eventual implementation:
