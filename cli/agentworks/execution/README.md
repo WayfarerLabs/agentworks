@@ -215,13 +215,14 @@ loader runs; a Python version alone does not establish that the optional `bz2` m
 
 ## Private file-helper delivery
 
-Read, object, metadata, inventory, staging and snapshot exchanges use `FixedFileHelperBundle`. The
-command line contains a short bootstrap, not the packaged modules. One sensitive finite stdin
-contains their fixed base64/bz2 prefix followed by the canonical operation manifest. The bootstrap
-uses unbuffered reads for its core-fixed prefix length and verifies the core-fixed SHA-256 before
-decoding or executing any module. The family helper reads the remaining bytes as request data.
-Requests cannot choose executable source, module names, entry points, prefix lengths or digests. No
-helper installation, executable staging, second invocation or codec fallback is used.
+Read, object, metadata, inventory, staging, snapshot and publication exchanges use
+`FixedFileHelperBundle`. The command line contains a short bootstrap, not the packaged modules. One
+sensitive finite stdin contains their fixed base64/bz2 prefix followed by the canonical operation
+manifest. The bootstrap uses unbuffered reads for its core-fixed prefix length and verifies the
+core-fixed SHA-256 before decoding or executing any module. The family helper reads the remaining
+bytes as request data. Requests cannot choose executable source, module names, entry points, prefix
+lengths or digests. No helper installation, executable staging, second invocation or codec fallback
+is used.
 
 A short or changed prefix exits without file-protocol output. That missing observation does not
 prove helper quiescence or authorize replay. Existing identity and path checks remain in each helper
@@ -391,8 +392,22 @@ the payload data to remain present. Missing siblings and missing, partial or inv
 uncertain. Exact cleanup removes the sibling before its record; a handled failure removing the
 record retains record-only cleanup debt. After independently observed publication, the publication
 primitive removes the record without following the inode into the public destination. Losing that
-reply still does not establish publication or remote quiescence. These local mechanics do not yet
-have a carrier exchange or complete remote upload/publication composition.
+reply still does not establish publication or remote quiescence.
+
+`_file_publication_exchange.py` delivers `publish`, `publication_reconcile` and
+`publication_cleanup` through one fixed Linux helper attempt each. Publication verifies the original
+stage's content before applying Create, Replace or Match. The host accepts a content-bound revision
+only from a complete nonce-bound transcript matching the original length and digest. Reconciliation
+returns historical cleanup ownership only, including after the payload disappears; it cannot recover
+publication authority. Cleanup accepts only debt bound to the original parent, token and stage
+reference, and preserves exact remaining debt on failure. Missing identity remains uncertainty, not
+permission to remove an object.
+
+Carrier facts remain separate from file evidence. Lost, partial, noisy or substituted replies cannot
+establish publication or cleanup, and no exchange retries automatically. A final descriptor-close
+deadline flag can accompany confirmed publication, recovered ownership or completed cleanup without
+erasing that effect. Requests and replies remain sensitive and bounded. Full uploads, FileAccess,
+operation ownership and native carrier acceptance remain separate work.
 
 ## Private file coordination
 
@@ -509,14 +524,14 @@ limit is an internal candidate, not evidence that a complete encoded carrier req
 Cleanup removes the exact data object before its receipt, then the empty directory, never unknown
 neighboring objects or a recursive prefix match. Errors retain closed facts and unresolved
 identity-bound cleanup debt. Ownership does not prove that an earlier request can no longer arrive;
-remote dispatch ordering and publication-recovery exchanges remain separate implementation gates.
-Begin, chunk writes, verification and range reads check caller expiry at acquisition, transfer and
-final-evidence checkpoints. Publication preserves scratch deadline failures. Expiry stops further
-acquisition, but permits identity capture and mode normalization needed for bounded exact cleanup;
-failed cleanup remains explicit debt. Creation preserves known acquisition facts through handled
-control-flow interruption; an unresolved debt is attached as a closed error cause while the original
-control exception propagates. Python ownership bookkeeping is not signal-atomic and repeated
-interruption is not a bounded cleanup guarantee.
+remote dispatch ordering remains a separate implementation gate. Begin, chunk writes, verification
+and range reads check caller expiry at acquisition, transfer and final-evidence checkpoints.
+Publication preserves scratch deadline failures. Expiry stops further acquisition, but permits
+identity capture and mode normalization needed for bounded exact cleanup; failed cleanup remains
+explicit debt. Creation preserves known acquisition facts through handled control-flow interruption;
+an unresolved debt is attached as a closed error cause while the original control exception
+propagates. Python ownership bookkeeping is not signal-atomic and repeated interruption is not a
+bounded cleanup guarantee.
 
 This primitive does not implement remote request validation, a wire protocol, helper deployment,
 execution staging or FileAccess. Filesystem calls have no hard interruption bound, and no crash
@@ -558,9 +573,8 @@ Windows SSH command-line sizing for explicit fixtures. Those measurements do not
 platform acceptance or fit for every connection/identity prefix.
 
 These entries are not complete upload or FileAccess operations. Whole-download and publication
-composition and publication-recovery delivery remain unfinished. The caller must retain the token,
-original binding and known references; an unavailable creation reply does not establish absence or
-quiescence.
+composition remain unfinished. The caller must retain the token, original binding and known
+references; an unavailable creation reply does not establish absence or quiescence.
 
 `_scratch_root.py` opens the fixed Linux `/tmp` directory without following symlinks and requires
 UID 0 and mode 01777. It creates and repairs nothing, ignores environment-selected temporary paths,
