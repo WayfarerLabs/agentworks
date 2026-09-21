@@ -355,6 +355,13 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       prerequisite or final deadline checks. Local Python 3.11 helper evidence and independent
       review at `9cdce7e6` establish this internal slice, not complete downloads, production
       operation coordination, FileAccess or native carrier acceptance.
+- [x] Implement private publication-stage receipts and cleanup-only recovery beneath the original
+      destination parent. Admit existing upload ownership before sibling creation, recover after
+      payload removal, preserve known failures and exact debt through handled interruptions, and
+      share record-only cleanup after observed publication. All three private lanes are clean at
+      `86189dc2`; the combined local suite passes 11,902 tests with 13 skips. This does not complete
+      remote publication delivery, upload composition, helper quiescence, FileAccess or native
+      acceptance; complete carrier sizing remains an explicit gate above.
 - [ ] Jointly accept and prove the privately implemented carrier sink extension with the SSH owner
       before enabling its production use or exposing it through RunContext.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
