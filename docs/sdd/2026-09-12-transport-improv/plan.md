@@ -1310,6 +1310,12 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       helper failure details coherent with that primary failure while later cleanup updates
       independent cleanup/effect facts. Local sink failures and controls without a carrier report do
       not invent exchange evidence. Public reducer consumption remains a separate step.
+- [x] Accept named `NewMetadata` in private upload, JSON and core custody composition. Resolve
+      actual creation ownership before staging under the existing borrow and deadline, recording
+      resolution before settlement. Replace/Match and existing-target JSON paths do not look up
+      unused names. Retain first-primary upload exchange and publication failure details while
+      preserving independent later cleanup facts. Numeric metadata stays at the fixed publication
+      boundary; reducer integration and production FileAccess remain required.
 - [x] Change private upload, download, JSON, memory-read and single-file compositions to accept a
       caller-owned `OperationBorrow` without acquiring or closing it. Nested compositions reuse the
       same borrow. Focused lifetime tests cover normal, invalid and exceptional results and prove

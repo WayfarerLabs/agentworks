@@ -568,10 +568,10 @@ transcripts. Read-only lookup or staging uncertainty does not imply destination 
 generic dispatch/observation failures do not establish network failure. These reducers do not
 dispatch work or manage ownership; public FileAccess integration remains incomplete.
 
-Download outcomes retain the first primary failure's exchange phase, dispatch and carrier failure.
-Later cleanup does not replace that diagnostic cause; its independent cleanup and ownership facts
-still update. Local sink failures and escaping control without a carrier report leave those exchange
-facts absent.
+Upload and download outcomes retain the first primary failure's exchange phase, dispatch and carrier
+failure. Later cleanup does not replace that diagnostic cause; its independent cleanup and ownership
+facts still update. Local sink failures and escaping control without a carrier report leave those
+exchange facts absent.
 
 This custody path adds no claim or admission lock and never closes the outer owner. Retaining an
 unfinished record does not establish remote quiescence or authorize claim release. It covers these
@@ -587,6 +587,12 @@ previous attempt was not sent. Missing completion stops further calls, including
 Publication evidence, remaining cleanup obligations and possible future effects are distinct. The
 caller retains the original binding and token for unresolved work. These private mechanics do not
 acquire production ownership before activation or provide crash recovery.
+
+Upload and JSON creation take named `NewMetadata`. An actual create resolves owner/group under the
+same borrow and deadline before staging, retaining the lookup result before settlement. Replace and
+revision-matched writes do not resolve unused creation names; existing-target JSON no-ops also skip
+that lookup. Numeric ownership is private publication input, not the composition API. Local
+publication/staging validation precedes ownership lookup and source consumption.
 
 `_fixed_helper_operation.py` owns the concrete dispatch gate shared by account preparation, upload,
 download and JSON composition. Only the outer workflow closes its borrow; a nested upload cannot
