@@ -202,7 +202,7 @@ def _encode_bytes(value: bytes) -> str:
     return base64.b64encode(value).decode("ascii")
 
 
-def _decode_bytes(value: object, maximum: int, *, exact: int | None = None) -> bytes:
+def _decode_bytes(value: object, maximum: int) -> bytes:
     if type(value) is not str:
         raise _invalid_request()
     failed = False
@@ -211,12 +211,7 @@ def _decode_bytes(value: object, maximum: int, *, exact: int | None = None) -> b
         decoded = base64.b64decode(value.encode("ascii"), validate=True)
     except (UnicodeEncodeError, binascii.Error):
         failed = True
-    if (
-        failed
-        or len(decoded) > maximum
-        or (exact is not None and len(decoded) != exact)
-        or _encode_bytes(decoded) != value
-    ):
+    if failed or len(decoded) > maximum or _encode_bytes(decoded) != value:
         raise _invalid_request()
     return decoded
 

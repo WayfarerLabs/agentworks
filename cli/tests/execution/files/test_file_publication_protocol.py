@@ -352,6 +352,50 @@ def test_cleanup_failure_accepts_only_monotonic_exact_debt_progress(plan: Identi
     assert result.observation.cleanup_debt == progressed
 
 
+@pytest.mark.parametrize("case", ["substituted-stage", "regressed-stage-removal"])
+def test_cleanup_failure_rejects_substituted_or_regressed_debt(plan: IdentityPlan, case: str) -> None:
+    reference = _reference(plan)
+    original = _receipt_debt(reference)
+    progressed = _receipt_debt(reference, stage_removed=True)
+    assert isinstance(original._debt, PublicationStageCleanupDebt)
+    substituted_ownership = replace(
+        original._debt._ownership,
+        _stage=PublicationIdentity(11, 999),
+    )
+    substituted = bind_publication_cleanup_debt(
+        reference,
+        PublicationIdentity(11, 12),
+        PublicationStageCleanupDebt(substituted_ownership, True),
+    )
+    if case == "substituted-stage":
+        input_debt, returned_debt = original, substituted
+    else:
+        input_debt, returned_debt = progressed, original
+
+    def invalid_failure_records(request: FilePublicationRequest) -> bytes:
+        failure = FilePublicationFailureControl(
+            FilePublicationFailureCode.RECEIPT,
+            receipt_kind=PublicationReceiptFailureKind.IO,
+            cleanup_state=PublicationCleanupState.EXACT,
+            cleanup_debt=returned_debt,
+        )
+        return _records(request, FileRecordKind.FAILED, encode_file_publication_failure(failure))
+
+    rejected = publication_cleanup(
+        TranscriptCarrier(invalid_failure_records),
+        trusted_root_path="/trusted",
+        relative_path="target",
+        token=_TOKEN,
+        reference=reference,
+        cleanup_debt=input_debt,
+        plan=plan,
+        deadline=Deadline.after(1),
+    )
+    assert rejected.observation.state is FilePublicationObservationState.UNCERTAIN
+    assert rejected.observation.error is FilePublicationObservationError.CONTROL
+    assert rejected.observation.cleanup_debt is None and rejected.observation.failure is None
+
+
 def test_substituted_revision_and_cleanup_parent_are_uncertain_control(plan: IdentityPlan) -> None:
     reference = _reference(plan)
 
@@ -433,6 +477,56 @@ def test_oversized_manifest_refuses_before_carrier_and_safe_values_do_not_leak(p
 
     assert carrier.calls == 0
     assert canary not in repr(reference) and canary not in repr(raised.value)
+
+
+@pytest.mark.parametrize("operation", ["publish", "reconcile", "cleanup"])
+def test_public_entrypoints_do_not_retain_unencodable_paths_in_exception_chains(
+    plan: IdentityPlan,
+    operation: str,
+) -> None:
+    reference = _reference(plan)
+    debt = _receipt_debt(reference)
+    carrier = TranscriptCarrier(lambda request: b"")
+    path = "surrogate-\ud800-secret"
+
+    with pytest.raises(ValidationError) as raised:
+        if operation == "publish":
+            publish(
+                carrier,
+                trusted_root_path=path,
+                relative_path="target",
+                token=_TOKEN,
+                reference=reference,
+                digest=_DIGEST,
+                condition=Create(),
+                create_metadata=CreateMetadata(1001, 1002, 0o600),
+                plan=plan,
+                deadline=Deadline.after(1),
+            )
+        elif operation == "reconcile":
+            publication_reconcile(
+                carrier,
+                trusted_root_path=path,
+                relative_path="target",
+                token=_TOKEN,
+                reference=reference,
+                plan=plan,
+                deadline=Deadline.after(1),
+            )
+        else:
+            publication_cleanup(
+                carrier,
+                trusted_root_path=path,
+                relative_path="target",
+                token=_TOKEN,
+                reference=reference,
+                cleanup_debt=debt,
+                plan=plan,
+                deadline=Deadline.after(1),
+            )
+
+    assert carrier.calls == 0
+    assert raised.value.__context__ is None and raised.value.__cause__ is None
 
 
 @pytest.mark.parametrize(

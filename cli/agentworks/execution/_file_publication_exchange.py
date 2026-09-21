@@ -8,7 +8,14 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
-from agentworks.execution._file_publication import Create, CreateMetadata, Match, PublicationPhase, Replace
+from agentworks.execution._file_publication import (
+    Create,
+    CreateMetadata,
+    Match,
+    PublicationFailureKind,
+    PublicationPhase,
+    Replace,
+)
 from agentworks.execution._file_publication_bundle import FIXED_BUNDLE
 from agentworks.execution._file_publication_protocol import (
     FilePublicationCleanupRequest,
@@ -207,8 +214,14 @@ class _FilePublicationCollector:
             if not self._valid_failure(failure):
                 self._fail(FilePublicationObservationError.CONTROL)
             else:
+                state = (
+                    FilePublicationObservationState.UNCERTAIN
+                    if failure.code is FilePublicationFailureCode.PUBLICATION
+                    and failure.publication_kind is PublicationFailureKind.UNCERTAIN
+                    else FilePublicationObservationState.REFUSED
+                )
                 self._outcome = FilePublicationObservation(
-                    FilePublicationObservationState.REFUSED,
+                    state,
                     cleanup_debt=failure.cleanup_debt,
                     failure=failure,
                 )
@@ -293,10 +306,13 @@ class _FilePublicationCollector:
 def _validate_text(value: object) -> str:
     if type(value) is not str or "\0" in value:
         raise ValidationError("File-publication paths must be non-NUL UTF-8 strings")
+    failed = False
     try:
         value.encode("utf-8")
     except UnicodeEncodeError:
-        raise ValidationError("File-publication paths must be non-NUL UTF-8 strings") from None
+        failed = True
+    if failed:
+        raise ValidationError("File-publication paths must be non-NUL UTF-8 strings")
     return value
 
 

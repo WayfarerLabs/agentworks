@@ -97,6 +97,14 @@ def uncertain_publish(*args,**kwargs):
  )
 guest.publish_file=uncertain_publish
 """
+_FAIL_AFTER_RECORD_REMOVAL = """
+publication=sys.modules['_agw_file_publication._file_publication']
+real_remove_record=publication.remove_publication_record
+def remove_record_then_fail(*args,**kwargs):
+ real_remove_record(*args,**kwargs)
+ raise publication.PublicationReceiptError(publication.PublicationReceiptFailureKind.IO)
+publication.remove_publication_record=remove_record_then_fail
+"""
 
 
 @pytest.fixture
@@ -487,10 +495,6 @@ def test_reconcile_partial_missing_and_foreign_ownership_stays_uncertain(
         record.write_bytes(record_content)
         record.chmod(0o400)
     elif case == "missing-stage":
-        stage_path = root / publication_stage_name(_TOKEN)
-        stage_path.write_bytes(b"")
-        assert stage_path.stat().st_ino != ownership._stage.inode
-        stage_path.unlink()
         record.unlink()
         _cleanup_scratch(root, ready)
         return
@@ -663,12 +667,39 @@ def test_uncertain_primitive_failure_never_becomes_publication_or_cleanup_author
 
     _, result = _publish(root, "target", ready._reference, content, Create(), plan)
 
-    assert result.observation.state is FilePublicationObservationState.REFUSED
+    assert result.observation.state is FilePublicationObservationState.UNCERTAIN
     assert result.observation.revision is None and result.observation.cleanup_debt is None
     failure = result.observation.failure
     assert failure is not None and failure.publication_kind is PublicationFailureKind.UNCERTAIN
     assert failure.cleanup_state is PublicationCleanupState.OWNERSHIP_UNCERTAIN
     assert not (root / "target").exists()
+    _cleanup_scratch(root, ready)
+
+
+def test_post_rename_record_failure_preserves_written_destination_as_uncertain(
+    tmp_path: Path,
+    plan: IdentityPlan,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_fixture_bundle(monkeypatch, _FAIL_AFTER_RECORD_REMOVAL)
+    root = tmp_path / "approved"
+    root.mkdir()
+    content = b"published-before-record-failure"
+    parent_fd = open_parent(root)
+    try:
+        ready = ready_scratch(parent_fd, _TOKEN, content)
+    finally:
+        os.close(parent_fd)
+
+    _, result = _publish(root, "target", ready._reference, content, Create(), plan)
+
+    assert result.observation.state is FilePublicationObservationState.UNCERTAIN
+    assert result.observation.revision is None and result.observation.cleanup_debt is None
+    failure = result.observation.failure
+    assert failure is not None
+    assert failure.publication_kind is PublicationFailureKind.UNCERTAIN
+    assert failure.publication_phase is PublicationPhase.PUBLICATION
+    assert (root / "target").read_bytes() == content
     _cleanup_scratch(root, ready)
 
 
