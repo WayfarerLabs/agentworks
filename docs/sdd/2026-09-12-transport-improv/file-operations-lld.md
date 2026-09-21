@@ -234,9 +234,10 @@ ranges of the changing public source. The private `_file_spool.py` candidate now
 held-source observation and scratch transfer to implement that local copy. It verifies length, EOF,
 digest and final source identity/metadata, checks expiry after source closure even for absence, and
 retains exact cleanup debt on failure. Core supplies its token and identity before dispatch, and the
-local receipt binds the copy to the snapshot operation. Remote snapshot/chunk delivery and
-lost-reply reconciliation through a carrier remain unimplemented; local copying and receipt recovery
-alone do not prove them.
+local receipt binds the copy to the snapshot operation. The private snapshot exchanges deliver
+creation, chunks, lost-reply ownership reconciliation and exact cleanup through a carrier. Local
+helper evidence covers these exchanges; complete download composition, production coordination and
+native carrier acceptance remain open.
 
 Snapshot storage is independent of source authority. Download must work when the selected identity
 can read the approved source but cannot write its parent. The Linux candidate uses the existing
@@ -273,9 +274,10 @@ directory name from it and attempts exclusive creation once. Before acknowledgin
 creation, it writes and validates a bounded receipt binding the token, operation, execution
 identity, original authorized parent identity, declared length and acquired directory/data
 identities. A collision refuses; losing a reply never resubmits creation. These private receipt
-mechanics are implemented in `_scratch_receipt.py`. The private stage exchange now delivers
-reconciliation and exact cleanup; snapshot reconciliation and publication-stage ownership remain
-unimplemented.
+mechanics are implemented in `_scratch_receipt.py`. Private stage and snapshot exchanges deliver
+reconciliation and exact cleanup. Publication-stage ownership recovery remains unimplemented;
+neither these private exchanges nor local evidence complete production FileAccess or native
+acceptance.
 
 Read-only reconciliation accepts the original core-bound context and token, not paths supplied by a
 receipt. It opens only that exact name and validates the receipt schema, ownership, permissions,
