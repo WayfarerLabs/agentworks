@@ -356,6 +356,8 @@ def test_file_snapshot_download_and_exact_cleanup_over_real_ssh(
                     deadline=Deadline.after(15),
                     runtime_path=_RUNTIME,
                 )
+                if not _all_attempts_succeeded(carrier):
+                    pytest.fail(f"snapshot recovery completion is unknown; retained owned scratch at {scratch}")
                 assert recovery.observation.state is FileSnapshotObservationState.RECOVERED
                 cleanup_debt = recovery.observation.cleanup_debt
             assert cleanup_debt is not None
