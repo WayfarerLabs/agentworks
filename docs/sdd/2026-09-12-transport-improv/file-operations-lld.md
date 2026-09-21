@@ -765,6 +765,28 @@ interruption; do not compensate by claiming the resource again. Cleanup debt rem
 possible future effects and must be returned or retained with its original binding, even after
 normal helper exit.
 
+The production file boundary must own that handoff, not leave it to the caller of a private helper.
+Core file composition acquires the serial borrow and keeps its working state attached to the outer
+operation. Borrowed helpers perform exchanges without acquiring or closing that borrow. Before
+public result conversion or relinquishment, core captures the typed outcome and original binding,
+including on exceptional exits. All user/admin file views share this operation state. No second file
+lock or protocol-aware recovery callback belongs in the generic database coordinator.
+
+Two decisions remain separate: whether old work can still cause effects, and who owns unfinished
+cleanup. Unresolved execution or coordination prevents conflicting admission and claim release.
+Proved-inert cleanup debt still needs an explicit owner, but does not by itself require indefinite
+VM exclusion. The current private `requires_owner_retention` summary combines these reasons and must
+not become the generic claim-release predicate. The outer workflow retains its claim for its own
+remaining work regardless of whether one file call has finished. Initial cleanup remains under the
+same operation; a later garbage collector under fresh admission is not introduced here.
+
+An in-memory handoff is insufficient for process-loss recovery. Before core drops its last working
+state or releases a claim with unfinished responsibility, the concrete recovery path must preserve
+the exact cleanup binding and facts durably. Tokens needed to reconcile an interrupted dispatch must
+be retained before dispatch, not reconstructed only from a returned outcome. Never persist file
+contents or source streams as a substitute. The recovery integration must prove this handoff before
+public FileAccess is production-ready; retaining a claim row alone does not satisfy it.
+
 Sequential fixed-helper calls also need a separate lifetime decision. For the exact supported
 foreground launch chain, the candidate termination rule is submitted dispatch plus an independently
 observed remote exit code of zero. The helper creates no background work, and its supported launcher

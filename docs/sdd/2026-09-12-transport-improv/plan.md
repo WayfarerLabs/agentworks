@@ -1290,6 +1290,16 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       exact-operation path confinement and safe target/phase diagnostics. Complete production
       ownership, local download publication, directory transfer and native acceptance remain
       required; these private building blocks do not close those gates.
+- [ ] Move serial-borrow lifetime to the core file boundary so returned and exceptional private
+      outcomes are retained before public reduction or relinquishment. Prove shared user/admin views
+      cannot lose cleanup responsibility, and distinguish unresolved remote effects from
+      proved-inert cleanup debt rather than using `requires_owner_retention` as a blanket claim
+      release rule. Keep the coordinator free of file protocols and a second file lock.
+- [ ] Complete the durable recovery handoff for file work, including pre-dispatch reconciliation
+      identity and exact cleanup binding without storing payload contents. Test process loss before
+      response, after response and during handoff. A surviving claim without recovery facts is not
+      completion evidence; do not close the production ownership gate with in-memory retention
+      alone.
 - [ ] Use the owned snapshot/chunk download for general in-memory reads, preserving caller byte
       bounds independently of QGA's single-response capacity. Keep the no-staging readiness read
       separately bound before dispatch; prove its complete encoded response fits the selected route.
