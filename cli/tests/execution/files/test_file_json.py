@@ -13,6 +13,7 @@ import pytest
 
 from agentworks.db import Database, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
+from agentworks.execution._account import FileOwnershipObservationState
 from agentworks.execution._file_json import (
     FileJsonChange,
     FileJsonControlFact,
@@ -22,7 +23,6 @@ from agentworks.execution._file_json import (
     update_json_file,
 )
 from agentworks.execution._file_object_exchange import stat_file
-from agentworks.execution._file_publication import CreateMetadata
 from agentworks.execution._file_read_protocol import FileReadFailure
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._helper_identity import IdentityExpectation
@@ -36,12 +36,13 @@ from agentworks.execution.carrier import (
     Deadline,
     PreparedInvocation,
 )
+from agentworks.execution.files import NewMetadata
 from agentworks.operations import OperationBorrow, OperationOwner
 from tests.execution.files._file_publication_support import LocalCarrier
 from tests.execution.files._file_publication_support import install_fixture_bundle as install_publication_bundle
 from tests.execution.files._file_read_support import install_fixture_bundle as install_read_bundle
 from tests.execution.files._file_stage_support import install_fixture_bundle as install_stage_bundle
-from tests.execution.files._file_upload_support import LostCallStdoutCarrier
+from tests.execution.files._file_upload_support import LostCallStdoutCarrier, new_metadata
 from tests.execution.files._runtime_support import runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the private file helpers require Linux")
@@ -170,6 +171,7 @@ def _update(
     max_bytes: int = 64 * 1024,
     max_depth: int = 64,
     runtime: str = sys.executable,
+    metadata: NewMetadata | None = None,
 ):
     return update_json_file(
         carrier or LocalCarrier(),
@@ -178,7 +180,7 @@ def _update(
         source=source,
         strategy=strategy,
         create=create,
-        create_metadata=CreateMetadata(os.geteuid(), os.getegid(), 0o640),
+        create_metadata=metadata or new_metadata(),
         max_bytes=max_bytes,
         max_depth=max_depth,
         plan=plan,
@@ -225,11 +227,20 @@ def test_replace_uses_stat_without_parsing_existing_bytes(tmp_path: Path, plan: 
     borrow = owner.borrow()
     carrier = LocalCarrier()
     try:
-        outcome = _update(borrow, root, plan, b'{"value":null}', "replace", carrier=carrier)
+        outcome = _update(
+            borrow,
+            root,
+            plan,
+            b'{"value":null}',
+            "replace",
+            carrier=carrier,
+            metadata=NewMetadata("unused-json-owner", "unused-json-group", 0o600),
+        )
 
         assert outcome.status is FileJsonStatus.COMPLETE
         assert outcome.change is FileJsonChange.CHANGED and outcome.revision is not None
         assert outcome.publication_attempts == 1 and carrier.calls == 5
+        assert outcome.upload_outcome is not None and outcome.upload_outcome.ownership_result is None
         assert json.loads(target.read_bytes()) == {"value": None}
         borrow.close()
         owner.close()
@@ -258,7 +269,7 @@ def test_publication_metadata_is_canonical_before_target_observation(
                 source=b'{"source":true}',
                 strategy="replace",
                 create=True,
-                create_metadata=CreateMetadata(1 << 40, os.getegid(), 0o640),
+                create_metadata=new_metadata(0o1000),
                 max_bytes=64 * 1024,
                 max_depth=64,
                 plan=plan,
@@ -291,7 +302,15 @@ def test_skip_existing_leaves_any_regular_file_unchanged(
     borrow = owner.borrow()
     carrier = LocalCarrier()
     try:
-        outcome = _update(borrow, root, plan, b'{"new":true}', "skip-existing", carrier=carrier)
+        outcome = _update(
+            borrow,
+            root,
+            plan,
+            b'{"new":true}',
+            "skip-existing",
+            carrier=carrier,
+            metadata=NewMetadata("unused-json-owner", "unused-json-group", 0o600),
+        )
 
         assert outcome.status is FileJsonStatus.COMPLETE
         assert outcome.change is FileJsonChange.UNCHANGED and outcome.revision is not None
@@ -337,11 +356,23 @@ def test_each_strategy_creates_an_absent_destination(
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
     borrow = owner.borrow()
+    carrier = LocalCarrier()
     try:
-        outcome = _update(borrow, root, plan, b'{"created":[null,{"nested":true}]}', strategy)
+        outcome = _update(
+            borrow,
+            root,
+            plan,
+            b'{"created":[null,{"nested":true}]}',
+            strategy,
+            carrier=carrier,
+        )
 
         assert outcome.status is FileJsonStatus.COMPLETE
         assert outcome.change is FileJsonChange.CHANGED and outcome.revision is not None
+        assert outcome.upload_outcome is not None
+        assert outcome.upload_outcome.ownership_result is not None
+        assert outcome.upload_outcome.ownership_result.observation is not None
+        assert outcome.upload_outcome.ownership_result.observation.state is FileOwnershipObservationState.RESOLVED
         assert json.loads((root / "target").read_bytes()) == {"created": [None, {"nested": True}]}
         borrow.close()
         owner.close()
@@ -399,10 +430,18 @@ def test_merge_uses_bounded_snapshot_and_atomic_leaf_semantics(
     owner = _owner(database)
     borrow = owner.borrow()
     try:
-        outcome = _update(borrow, root, plan, source, strategy)
+        outcome = _update(
+            borrow,
+            root,
+            plan,
+            source,
+            strategy,
+            metadata=NewMetadata("unused-json-owner", "unused-json-group", 0o600),
+        )
 
         assert outcome.status is FileJsonStatus.COMPLETE
         assert outcome.change is FileJsonChange.CHANGED and outcome.revision is not None
+        assert outcome.upload_outcome is not None and outcome.upload_outcome.ownership_result is None
         assert json.loads(target.read_bytes()) == expected
         borrow.close()
         owner.close()

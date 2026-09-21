@@ -51,11 +51,12 @@ if TYPE_CHECKING:
     from agentworks.execution._file_metadata_exchange import FileMetadataCandidateResult
     from agentworks.execution._file_object_exchange import FileObjectCandidateResult
     from agentworks.execution._file_objects import FileKind
-    from agentworks.execution._file_publication import Create, CreateMetadata, Match, Replace
+    from agentworks.execution._file_publication import Create, Match, Replace
     from agentworks.execution._file_stat import FileRevision
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution._runtime_prerequisite import RuntimeSelection
     from agentworks.execution.carrier import ByteSink, ByteSource, Carrier, Deadline
+    from agentworks.execution.files import NewMetadata
     from agentworks.operations import OperationBorrow, OperationOwner
 
 
@@ -250,7 +251,7 @@ class FileOperation:
         source: ByteSource,
         size: int,
         condition: Create | Replace | Match,
-        create_metadata: CreateMetadata,
+        create_metadata: NewMetadata,
         plan: IdentityPlan,
         deadline: Deadline,
         runtime_selection: RuntimeSelection,
@@ -305,7 +306,7 @@ class FileOperation:
         source: bytes,
         strategy: JsonFileStrategy,
         create: bool,
-        create_metadata: CreateMetadata,
+        create_metadata: NewMetadata,
         max_bytes: int,
         max_depth: int,
         plan: IdentityPlan,

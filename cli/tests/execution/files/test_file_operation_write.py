@@ -8,6 +8,7 @@ import os
 import sys
 import weakref
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -29,7 +30,7 @@ from agentworks.execution._file_operation import (
     UnfinishedFileJsonUpdate,
     UnfinishedFileUpload,
 )
-from agentworks.execution._file_publication import Create, CreateMetadata
+from agentworks.execution._file_publication import Create
 from agentworks.execution._file_upload import (
     FileUploadControlFact,
     FileUploadFailure,
@@ -46,7 +47,7 @@ from tests.execution.files._file_publication_support import LocalCarrier
 from tests.execution.files._file_publication_support import install_fixture_bundle as install_publication_bundle
 from tests.execution.files._file_read_support import install_fixture_bundle as install_read_bundle
 from tests.execution.files._file_stage_support import install_fixture_bundle as install_stage_bundle
-from tests.execution.files._file_upload_support import BytesSource, LostCallStdoutCarrier
+from tests.execution.files._file_upload_support import BytesSource, LostCallStdoutCarrier, new_metadata
 from tests.execution.files._runtime_support import runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the private file helpers require Linux")
@@ -72,6 +73,18 @@ class NthInterruptCarrier:
         if self.calls == self._call:
             raise self._control
         return self._inner.execute(invocation, io=io, deadline=deadline)
+
+
+class MissingCompletionCarrier:
+    def __init__(self) -> None:
+        self._inner = LocalCarrier()
+
+    @property
+    def features(self) -> ChannelFeatures:
+        return ChannelFeatures()
+
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        return replace(self._inner.execute(invocation, io=io, deadline=deadline), completion=None)
 
 
 class ReentrantCarrier:
@@ -123,10 +136,6 @@ def _owner(database: Database) -> OperationOwner:
     )
 
 
-def _metadata() -> CreateMetadata:
-    return CreateMetadata(os.geteuid(), os.getegid(), 0o640)
-
-
 def _upload(
     operation: FileOperation,
     root: Path,
@@ -143,7 +152,7 @@ def _upload(
         source=source,
         size=len(source.data),
         condition=Create(),
-        create_metadata=_metadata(),
+        create_metadata=new_metadata(),
         plan=plan,
         deadline=Deadline.after(30),
         runtime_selection=runtime_selection(sys.executable),
@@ -166,7 +175,7 @@ def _update(
         source=source,
         strategy=strategy,
         create=True,
-        create_metadata=_metadata(),
+        create_metadata=new_metadata(),
         max_bytes=64 * 1024,
         max_depth=64,
         plan=plan,
@@ -256,7 +265,7 @@ def test_cross_family_reentry_is_rejected_by_one_owner(
             source=b'{"nested":true}',
             strategy="replace",
             create=True,
-            create_metadata=_metadata(),
+            create_metadata=new_metadata(),
             max_bytes=64,
             max_depth=8,
             plan=plan,
@@ -295,7 +304,7 @@ def test_local_write_refusals_close_predispatch_borrows(
                 source=BytesSource(b"payload"),
                 size=-1,
                 condition=Create(),
-                create_metadata=_metadata(),
+                create_metadata=new_metadata(),
                 plan=plan,
                 deadline=Deadline.after(30),
                 runtime_selection=runtime_selection(sys.executable),
@@ -308,7 +317,7 @@ def test_local_write_refusals_close_predispatch_borrows(
                 source=b'{"duplicate":1,"duplicate":2}',
                 strategy="replace",
                 create=True,
-                create_metadata=_metadata(),
+                create_metadata=new_metadata(),
                 max_bytes=64,
                 max_depth=8,
                 plan=plan,
@@ -362,7 +371,7 @@ def test_multiple_upload_cleanup_obligations_remain_exact_and_bounded(
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
     operation = FileOperation(owner)
-    carriers = (LostCallStdoutCarrier(4), LostCallStdoutCarrier(4))
+    carriers = (LostCallStdoutCarrier(5), LostCallStdoutCarrier(5))
     try:
         outcomes = tuple(
             _upload(
@@ -416,6 +425,42 @@ def test_json_uncertain_publication_retains_child_upload_without_payload(
         assert operation.active_json_updates == ()
         borrow = owner.borrow()
         borrow.close()
+    finally:
+        database.close()
+
+
+def test_ownership_result_is_attached_before_failed_settlement_and_outcome_allocation(
+    tmp_path: Path,
+    root: Path,
+    plan: IdentityPlan,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    operation = FileOperation(owner)
+
+    def fail_outcome_allocation(state: _UploadWorkingState) -> None:
+        assert state.ownership_result is not None
+        raise MemoryError("outcome-allocation-canary")
+
+    monkeypatch.setattr(_UploadWorkingState, "finish", fail_outcome_allocation)
+    try:
+        with pytest.raises(MemoryError):
+            _upload(
+                operation,
+                root,
+                plan,
+                BytesSource(b"payload"),
+                carrier=MissingCompletionCarrier(),
+            )
+
+        active = operation.active_uploads[0]
+        result = active.prepared.state.ownership_result
+        assert result is not None and result.observation is not None
+        assert active.prepared.state.operation.has_outstanding_attempt
+        assert operation.unfinished_uploads == ()
+        with pytest.raises(StateError):
+            owner.borrow()
     finally:
         database.close()
 

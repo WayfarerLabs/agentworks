@@ -13,7 +13,7 @@ import pytest
 import agentworks.execution._file_publication_exchange as publication_exchange
 from agentworks.db import Database, OperationClaimState
 from agentworks.errors import StateError, ValidationError
-from agentworks.execution._file_publication import Create, CreateMetadata, Match
+from agentworks.execution._file_publication import Create, Match
 from agentworks.execution._file_publication_protocol import FilePublicationFailureCode, FilePublicationRequestError
 from agentworks.execution._file_stat import FileRevision, FileStat
 from agentworks.execution._file_upload import FileUploadControlFact, FileUploadFailure, FileUploadStatus, upload_file
@@ -22,10 +22,11 @@ from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._scratch_receipt import scratch_name
 from agentworks.execution.carrier import Deadline
+from agentworks.execution.files import NewMetadata
 from tests.execution.files._file_publication_support import LocalCarrier
 from tests.execution.files._file_publication_support import install_fixture_bundle as install_publication_bundle
 from tests.execution.files._file_stage_support import install_fixture_bundle as install_stage_bundle
-from tests.execution.files._file_upload_support import BytesSource, upload
+from tests.execution.files._file_upload_support import BytesSource, new_metadata, upload
 from tests.execution.files._file_upload_support import owner as operation_owner
 from tests.execution.files._runtime_support import runtime_selection
 
@@ -196,7 +197,7 @@ def test_validation_failure_does_not_retain_sensitive_exception_context(
                 source=source,
                 size=1,
                 condition=Create(),
-                create_metadata=CreateMetadata(os.geteuid(), os.getegid(), 0o640),
+                create_metadata=new_metadata(),
                 plan=plan,
                 deadline=Deadline.after(30),
                 runtime_selection=runtime_selection(sys.executable),
@@ -218,23 +219,23 @@ def test_validation_failure_does_not_retain_sensitive_exception_context(
 @pytest.mark.parametrize(
     ("condition", "create_metadata"),
     [
-        (Create(), CreateMetadata(1 << 40, 1002, 0o600)),
+        (Create(), new_metadata(0o1000)),
         (
             Match(FileRevision(FileStat(1, 0, stat.S_IFREG | 0o600, 1, 1001, 1002, 1, 1, 1))),
-            CreateMetadata(1001, 1002, 0o600),
+            new_metadata(0o600),
         ),
         (
             Match(FileRevision(FileStat(1, 2, stat.S_IFDIR | 0o700, 1, 1001, 1002, 0, 1, 1))),
-            CreateMetadata(1001, 1002, 0o600),
+            new_metadata(0o600),
         ),
     ],
-    ids=["wire-invalid-metadata", "malformed-match", "nonregular-match"],
+    ids=["unsupported-regular-mode", "malformed-match", "nonregular-match"],
 )
 def test_publication_schema_refusal_preserves_caller_borrow_and_precedes_carrier_and_source(
     tmp_path: Path,
     plan: IdentityPlan,
     condition: Create | Match,
-    create_metadata: CreateMetadata,
+    create_metadata: NewMetadata,
 ) -> None:
     root = tmp_path / "approved"
     root.mkdir()
@@ -286,10 +287,7 @@ def test_oversized_stage_preparation_never_arms_owner_or_executes_carrier(tmp_pa
         with pytest.raises(ValidationError) as raised:
             upload(borrow, root, source, 1, oversized_plan, carrier=carrier)
 
-        fact = raised.value.__cause__
-        assert isinstance(fact, FileUploadControlFact)
-        assert not fact.outcome.pending_remote_effects
-        assert not fact.outcome.requires_owner_retention
+        assert raised.value.__cause__ is None
         assert carrier.calls == 0 and source.calls == 0
         claim = database.operations.inspect(owner.ownership.scope)
         assert claim is not None and claim.state is OperationClaimState.RESERVED
@@ -385,7 +383,7 @@ def test_local_publication_preparation_failure_cleans_completed_stage(
         assert fact.outcome.scratch_cleanup_debt is None
         assert not fact.outcome.pending_remote_effects
         assert not fact.outcome.requires_owner_retention
-        assert carrier.calls == 3 and source.offset == 7
+        assert carrier.calls == 4 and source.offset == 7
         assert not root.joinpath(scratch_name(fact.outcome.token)).exists()
         borrow.close()
         owner.close()

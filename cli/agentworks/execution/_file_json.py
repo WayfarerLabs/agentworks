@@ -15,7 +15,6 @@ from agentworks.execution._file_object_exchange import (
 from agentworks.execution._file_objects import FileKind, FileObjectFailureKind
 from agentworks.execution._file_publication import (
     Create,
-    CreateMetadata,
     Match,
     PublicationFailureKind,
     PublicationPhase,
@@ -54,6 +53,7 @@ if TYPE_CHECKING:
     from agentworks.execution._file_object_protocol import FileObjectFailureControl
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution.carrier import Carrier
+    from agentworks.execution.files import NewMetadata
 
 type JsonFileStrategy = Literal["replace", "merge-overwrite", "merge-preserve", "skip-existing"]
 
@@ -151,7 +151,7 @@ class _BytesSource:
 class _Inputs:
     binding: FileJsonBinding
     source: ValidatedJsonObject
-    create_metadata: CreateMetadata
+    create_metadata: NewMetadata
 
 
 @dataclass(slots=True, repr=False)
@@ -230,7 +230,7 @@ def update_json_file(
     source: bytes,
     strategy: JsonFileStrategy,
     create: bool,
-    create_metadata: CreateMetadata,
+    create_metadata: NewMetadata,
     max_bytes: int,
     max_depth: int,
     plan: IdentityPlan,
@@ -264,7 +264,7 @@ def _prepare_json_update(
     source: bytes,
     strategy: JsonFileStrategy,
     create: bool,
-    create_metadata: CreateMetadata,
+    create_metadata: NewMetadata,
     max_bytes: int,
     max_depth: int,
     plan: IdentityPlan,
@@ -600,8 +600,6 @@ def _validate_json_inputs(
     if type(max_bytes) is not int or type(max_depth) is not int:
         raise ValidationError("JSON update limits must be positive integers")
     validated = validate_json_object(source, max_bytes=max_bytes, max_depth=max_depth)
-    if not isinstance(create_metadata, CreateMetadata):
-        raise ValidationError("JSON update requires numeric create metadata")
     if type(borrow) is not OperationBorrow:
         raise ValidationError("JSON update requires an active core operation borrow")
     probe = _BytesSource(b"")

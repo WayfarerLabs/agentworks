@@ -7,9 +7,10 @@ import sys
 from typing import TYPE_CHECKING
 
 from agentworks.db import OperationResourceKind, OperationScope
-from agentworks.execution._file_publication import Create, CreateMetadata
+from agentworks.execution._file_publication import Create
 from agentworks.execution._file_upload import FileUploadOutcome, upload_file
 from agentworks.execution.carrier import CarrierIO, CarrierReport, ChannelFeatures, Deadline, SinkOutput
+from agentworks.execution.files import NewMetadata
 from agentworks.operations import OperationBorrow, OperationOwner
 from tests.execution.files._file_publication_support import LocalCarrier
 from tests.execution.files._runtime_support import runtime_selection
@@ -86,6 +87,13 @@ def owner(database: Database) -> OperationOwner:
     )
 
 
+def new_metadata(mode: int = 0o640) -> NewMetadata:
+    import grp
+    import pwd
+
+    return NewMetadata(pwd.getpwuid(os.geteuid()).pw_name, grp.getgrgid(os.getegid()).gr_name, mode)
+
+
 def upload(
     borrow: OperationBorrow,
     root: Path,
@@ -95,6 +103,7 @@ def upload(
     *,
     carrier: Carrier | None = None,
     condition: Create | Replace | Match | None = None,
+    metadata: NewMetadata | None = None,
     deadline: Deadline | None = None,
     selected_runtime: RuntimeSelection | None = None,
 ) -> FileUploadOutcome:
@@ -105,7 +114,7 @@ def upload(
         source=source,
         size=size,
         condition=condition or Create(),
-        create_metadata=CreateMetadata(os.geteuid(), os.getegid(), 0o640),
+        create_metadata=metadata or new_metadata(),
         plan=plan,
         deadline=deadline or Deadline.after(30),
         runtime_selection=selected_runtime or runtime_selection(sys.executable),
