@@ -300,6 +300,31 @@ def _decode_metadata(value: object) -> CreateMetadata:
         raise _invalid_request() from None
 
 
+def validate_file_publication_inputs(
+    condition: Create | Replace | Match,
+    create_metadata: CreateMetadata,
+) -> tuple[Create | Replace | Match, CreateMetadata]:
+    """Return canonical publication inputs accepted by the guest schema."""
+    failed = False
+    canonical_condition: Create | Replace | Match = Create()
+    canonical_metadata = CreateMetadata(0, 0, 0)
+    try:
+        canonical_condition = _decode_condition(_condition_value(condition))
+        canonical_metadata = _decode_metadata(_metadata_value(create_metadata))
+    except (
+        AttributeError,
+        FilePublicationRequestError,
+        FilePublicationWireError,
+        FileRevisionWireError,
+        TypeError,
+        ValueError,
+    ):
+        failed = True
+    if failed:
+        raise _invalid_request()
+    return canonical_condition, canonical_metadata
+
+
 def encode_file_publication_request(request: FilePublicationRequest) -> bytes:
     """Encode trusted host values and enforce the complete guest schema."""
     try:
