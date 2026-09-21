@@ -26,6 +26,7 @@ from agentworks.execution._file_publication import (
     publish_file,
 )
 from agentworks.execution._publication_receipt import (
+    PublicationStageCleanupDebt,
     PublicationStageHistoricalOwnership,
     cleanup_publication_stage,
     reconcile_publication_stage,
@@ -253,6 +254,175 @@ def test_lost_record_ack_reconciles_cleanup_without_replaying_publication(
     cleanup_publication_stage(parent_fd, parent_fd, recovered)
     cleanup_scratch(parent_fd, ready)
     assert not stages[0].exists()
+    os.close(parent_fd)
+
+
+def test_record_write_interruption_is_chained_to_closed_staging_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    ready = _ready_scratch(parent_fd, b"verified")
+    interrupt = KeyboardInterrupt()
+
+    def interrupt_write(descriptor: int, content: bytes, expires_at: float | None) -> None:
+        raise interrupt
+
+    monkeypatch.setattr(publication_receipt_module, "_write_all", interrupt_write)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        publish_file(
+            parent_fd,
+            "target",
+            ScratchFileSource(parent_fd, ready),
+            condition=Create(),
+            create_metadata=_metadata(),
+        )
+    assert raised.value is interrupt
+    cause = raised.value.__cause__
+    assert isinstance(cause, FilePublicationError)
+    assert cause.kind is PublicationFailureKind.IO
+    assert cause.phase is PublicationPhase.STAGING
+    assert cause.cleanup_debt is None
+    assert not list(tmp_path.glob(f"{publication_module._STAGE_PREFIX}*"))
+    assert not (_scratch_directory(tmp_path) / publication_receipt_module._RECORD_NAME).exists()
+
+    cleanup_scratch(parent_fd, ready)
+    os.close(parent_fd)
+
+
+def test_content_failure_and_cleanup_interruption_preserve_prior_and_exact_debt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    ready = _ready_scratch(parent_fd, b"verified")
+    interrupt = KeyboardInterrupt()
+    original_unlink = os.unlink
+
+    def fail_content(descriptor: int, content: memoryview) -> int:
+        raise FilePublicationError(PublicationFailureKind.IO, PublicationPhase.CONTENT)
+
+    def interrupt_stage_unlink(path: str, *args: object, **kwargs: object) -> None:
+        if path.startswith(publication_module._STAGE_PREFIX):
+            raise interrupt
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(publication_module, "_write", fail_content)
+    monkeypatch.setattr(os, "unlink", interrupt_stage_unlink)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        publish_file(
+            parent_fd,
+            "target",
+            ScratchFileSource(parent_fd, ready),
+            condition=Create(),
+            create_metadata=_metadata(),
+        )
+    assert raised.value is interrupt
+    cause = raised.value.__cause__
+    assert isinstance(cause, FilePublicationError)
+    assert cause.kind is PublicationFailureKind.IO
+    assert cause.phase is PublicationPhase.CONTENT
+    debt = cause.cleanup_debt
+    assert isinstance(debt, PublicationStageCleanupDebt)
+    stage = tmp_path / debt.name
+    observed = stage.stat()
+    assert (debt.device, debt.inode) == (observed.st_dev, observed.st_ino)
+
+    monkeypatch.setattr(os, "unlink", original_unlink)
+    cleanup_publication_stage(parent_fd, parent_fd, debt)
+    cleanup_scratch(parent_fd, ready)
+    os.close(parent_fd)
+
+
+def test_content_failure_and_cleanup_close_interruption_preserve_prior(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    ready = _ready_scratch(parent_fd, b"verified")
+    interrupt = KeyboardInterrupt()
+    opened_directory = publication_receipt_module._OpenedScratchDirectory
+    original_close = opened_directory.close
+    closes = 0
+
+    def fail_content(
+        descriptor: int,
+        content: bytes | ScratchFileSource,
+        expires_at: float | None,
+    ) -> tuple[int, bytes]:
+        raise FilePublicationError(PublicationFailureKind.CONFLICT, PublicationPhase.CONTENT)
+
+    def interrupt_cleanup_close(
+        opened: publication_receipt_module._OpenedScratchDirectory,
+    ) -> BaseException | None:
+        nonlocal closes
+        closes += 1
+        result = original_close(opened)
+        return interrupt if closes == 1 else result
+
+    monkeypatch.setattr(publication_module, "_write_content", fail_content)
+    monkeypatch.setattr(opened_directory, "close", interrupt_cleanup_close)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        publish_file(
+            parent_fd,
+            "target",
+            ScratchFileSource(parent_fd, ready),
+            condition=Create(),
+            create_metadata=_metadata(),
+        )
+    assert raised.value is interrupt
+    cause = raised.value.__cause__
+    assert isinstance(cause, FilePublicationError)
+    assert cause.kind is PublicationFailureKind.CONFLICT
+    assert cause.phase is PublicationPhase.CONTENT
+    assert cause.cleanup_debt is None
+
+    cleanup_scratch(parent_fd, ready)
+    os.close(parent_fd)
+
+
+def test_record_unlink_interruption_after_rename_preserves_uncertainty_and_exact_debt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent_fd = _open_parent(tmp_path)
+    ready = _ready_scratch(parent_fd, b"verified")
+    interrupt = KeyboardInterrupt()
+    original_unlink = os.unlink
+    record_unlinks = 0
+
+    def interrupt_then_fail_record_unlink(path: str, *args: object, **kwargs: object) -> None:
+        nonlocal record_unlinks
+        if path != publication_receipt_module._RECORD_NAME:
+            original_unlink(path, *args, **kwargs)
+            return
+        record_unlinks += 1
+        if record_unlinks == 1:
+            raise interrupt
+        raise OSError("fixture cleanup failure")
+
+    monkeypatch.setattr(os, "unlink", interrupt_then_fail_record_unlink)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        publish_file(
+            parent_fd,
+            "target",
+            ScratchFileSource(parent_fd, ready),
+            condition=Create(),
+            create_metadata=_metadata(),
+        )
+    assert raised.value is interrupt
+    cause = raised.value.__cause__
+    assert isinstance(cause, FilePublicationError)
+    assert cause.kind is PublicationFailureKind.UNCERTAIN
+    assert cause.phase is PublicationPhase.PUBLICATION
+    debt = cause.cleanup_debt
+    assert isinstance(debt, PublicationStageCleanupDebt)
+    assert debt._stage_removed
+    assert (tmp_path / "target").read_bytes() == b"verified"
+
+    monkeypatch.setattr(os, "unlink", original_unlink)
+    cleanup_publication_stage(parent_fd, parent_fd, debt)
+    cleanup_scratch(parent_fd, ready)
     os.close(parent_fd)
 
 

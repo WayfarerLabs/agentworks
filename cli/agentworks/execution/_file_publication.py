@@ -232,6 +232,13 @@ def publish_file(
                 except PublicationReceiptError as error:
                     stage.publication = error.cleanup_debt
                     raise _publication_receipt_error(error, PublicationPhase.STAGING) from None
+                except BaseException as interruption:
+                    receipt_error = _publication_receipt_control_fact(interruption)
+                    if receipt_error is None or receipt_error.cleanup_debt is None:
+                        raise
+                    stage.publication = receipt_error.cleanup_debt
+                    mapped = _publication_receipt_error(receipt_error, PublicationPhase.STAGING)
+                    raise interruption from FilePublicationError(mapped.kind, mapped.phase)
             content_size, content_digest = _write_content(stage_fd, content, expires_at)
             if isinstance(condition, Create):
                 _prepare_create(stage_fd, parent_fd, create_metadata)
@@ -269,6 +276,15 @@ def publish_file(
                 except PublicationReceiptError as error:
                     stage.publication = error.cleanup_debt
                     raise _publication_receipt_error(error, PublicationPhase.CLEANUP) from None
+                except BaseException as interruption:
+                    receipt_error = _publication_receipt_control_fact(interruption)
+                    if receipt_error is None or receipt_error.cleanup_debt is None:
+                        raise
+                    stage.publication = receipt_error.cleanup_debt
+                    raise interruption from FilePublicationError(
+                        PublicationFailureKind.UNCERTAIN,
+                        PublicationPhase.PUBLICATION,
+                    )
                 stage.publication = None
                 stage.record_acquisition.identity = None
         except FilePublicationError as error:
@@ -814,6 +830,14 @@ def _cleanup_owned_stage(
         except PublicationReceiptError as error:
             assert error.cleanup_debt is not None
             return error.cleanup_debt
+        except BaseException as interruption:
+            receipt_error = _publication_receipt_control_fact(interruption)
+            cleanup_debt = None if receipt_error is not None else stage.publication
+            if receipt_error is not None:
+                cleanup_debt = receipt_error.cleanup_debt
+            if isinstance(cleanup_debt, PublicationStageOwnership):
+                cleanup_debt = PublicationStageCleanupDebt(cleanup_debt, False)
+            _raise_control(interruption, prior=prior, cleanup_debt=cleanup_debt)
         stage.publication = None
         return None
     if stage.name is None:
@@ -873,6 +897,11 @@ def _cleanup_or_raise_control(
 def _control_fact(control: BaseException) -> FilePublicationError | None:
     cause = control.__cause__
     return cause if isinstance(cause, FilePublicationError) else None
+
+
+def _publication_receipt_control_fact(control: BaseException) -> PublicationReceiptError | None:
+    cause = control.__cause__
+    return cause if isinstance(cause, PublicationReceiptError) else None
 
 
 def _raise_control(

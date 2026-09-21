@@ -13,7 +13,6 @@ from types import SimpleNamespace
 import pytest
 
 import agentworks.execution._publication_receipt as publication_receipt
-import agentworks.execution._scratch as scratch_module
 import agentworks.execution._scratch_receipt as scratch_receipt_module
 from agentworks.execution._publication_receipt import (
     PublicationReceiptError,
@@ -333,6 +332,147 @@ def test_cleanup_allows_intended_stage_metadata_changes(tmp_path: Path) -> None:
     os.close(scratch_parent_fd)
 
 
+def test_record_allows_gid_distinct_from_scratch_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scratch = tmp_path / "scratch"
+    destination = tmp_path / "destination"
+    scratch.mkdir()
+    destination.mkdir()
+    scratch_parent_fd = _open_parent(scratch)
+    publication_parent_fd = _open_parent(destination)
+    token = bytes.fromhex("10" * 16)
+    ready = _ready_scratch(scratch_parent_fd, token)
+    admission = admit_publication_stage(scratch_parent_fd, ready, publication_parent_fd)
+    stage_fd = os.open(
+        admission.stage_name,
+        os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+        0o600,
+        dir_fd=publication_parent_fd,
+    )
+    original_open = os.open
+    original_fstat = publication_receipt._fstat
+    record_fd: int | None = None
+
+    def capture_record(path: str, flags: int, mode: int = 0o777, *, dir_fd: int | None = None) -> int:
+        nonlocal record_fd
+        descriptor = original_open(path, flags, mode, dir_fd=dir_fd)
+        if path == publication_receipt._RECORD_NAME:
+            record_fd = descriptor
+        return descriptor
+
+    def alternate_record_gid(descriptor: int) -> os.stat_result:
+        observed = original_fstat(descriptor)
+        if descriptor != record_fd:
+            return observed
+        values = list(observed)
+        values[5] = observed.st_gid + 1
+        return os.stat_result(values)
+
+    monkeypatch.setattr(os, "open", capture_record)
+    monkeypatch.setattr(publication_receipt, "_fstat", alternate_record_gid)
+    ownership = record_publication_stage(
+        admission,
+        publication_parent_fd,
+        stage_fd,
+        PublicationRecordAcquisition(),
+    )
+
+    monkeypatch.setattr(publication_receipt, "_fstat", original_fstat)
+    os.close(stage_fd)
+    assert admission.close() is None
+    cleanup_publication_stage(scratch_parent_fd, publication_parent_fd, ownership)
+    cleanup_scratch(scratch_parent_fd, ready)
+    os.close(publication_parent_fd)
+    os.close(scratch_parent_fd)
+
+
+def test_record_write_interruption_retains_exact_cleanup_debt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scratch = tmp_path / "scratch"
+    destination = tmp_path / "destination"
+    scratch.mkdir()
+    destination.mkdir()
+    scratch_parent_fd = _open_parent(scratch)
+    publication_parent_fd = _open_parent(destination)
+    token = bytes.fromhex("11" * 16)
+    ready = _ready_scratch(scratch_parent_fd, token)
+    admission = admit_publication_stage(scratch_parent_fd, ready, publication_parent_fd)
+    stage_fd = os.open(
+        admission.stage_name,
+        os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+        0o600,
+        dir_fd=publication_parent_fd,
+    )
+    interrupt = KeyboardInterrupt()
+
+    def interrupt_write(descriptor: int, content: bytes, expires_at: float | None) -> None:
+        raise interrupt
+
+    monkeypatch.setattr(publication_receipt, "_write_all", interrupt_write)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        record_publication_stage(
+            admission,
+            publication_parent_fd,
+            stage_fd,
+            PublicationRecordAcquisition(),
+        )
+    assert raised.value is interrupt
+    cause = raised.value.__cause__
+    assert isinstance(cause, PublicationReceiptError)
+    assert cause.kind is PublicationReceiptFailureKind.IO
+    debt = cause.cleanup_debt
+    assert debt is not None and not debt._stage_removed
+    observed = os.stat(admission.stage_name, dir_fd=publication_parent_fd, follow_symlinks=False)
+    assert (debt.device, debt.inode) == (observed.st_dev, observed.st_ino)
+
+    os.close(stage_fd)
+    assert admission.close() is None
+    cleanup_publication_stage(scratch_parent_fd, publication_parent_fd, debt)
+    cleanup_scratch(scratch_parent_fd, ready)
+    os.close(publication_parent_fd)
+    os.close(scratch_parent_fd)
+
+
+@pytest.mark.parametrize("corruption", ["duplicate", "negative", "oversize", "boolean"])
+def test_reconciliation_rejects_noncanonical_or_invalid_identities(tmp_path: Path, corruption: str) -> None:
+    scratch = tmp_path / "scratch"
+    destination = tmp_path / "destination"
+    scratch.mkdir()
+    destination.mkdir()
+    scratch_parent_fd = _open_parent(scratch)
+    publication_parent_fd = _open_parent(destination)
+    token = bytes.fromhex("12" * 16)
+    ready = _ready_scratch(scratch_parent_fd, token)
+    ownership, stage_fd = _record_stage(scratch_parent_fd, ready, publication_parent_fd)
+    os.close(stage_fd)
+    record = scratch / scratch_name(token) / publication_receipt._RECORD_NAME
+    document = json.loads(record.read_bytes())
+    if corruption == "duplicate":
+        content = publication_receipt._encode_record(ownership).replace(b'"version":1', b'"version":1,"version":1')
+    else:
+        document["stage"]["inode"] = {
+            "negative": -1,
+            "oversize": publication_receipt._MAX_IDENTITY_NUMBER + 1,
+            "boolean": True,
+        }[corruption]
+        content = json.dumps(document, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("ascii")
+    record.chmod(0o600)
+    record.write_bytes(content)
+    record.chmod(publication_receipt._RECORD_MODE)
+
+    recovered = reconcile_publication_stage(scratch_parent_fd, ready._reference, publication_parent_fd)
+    assert isinstance(recovered, PublicationStageOwnershipUncertainty)
+
+    cleanup_publication_stage(scratch_parent_fd, publication_parent_fd, ownership)
+    cleanup_scratch(scratch_parent_fd, ready)
+    os.close(publication_parent_fd)
+    os.close(scratch_parent_fd)
+
+
 def test_expiry_after_record_mutation_carries_exact_cleanup_debt(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -420,6 +560,28 @@ def test_reconciliation_uses_original_reference_without_ready_content_proof(tmp_
     os.close(scratch_parent_fd)
 
 
+def test_reconciliation_and_cleanup_survive_removed_scratch_data(tmp_path: Path) -> None:
+    scratch = tmp_path / "scratch"
+    destination = tmp_path / "destination"
+    scratch.mkdir()
+    destination.mkdir()
+    scratch_parent_fd = _open_parent(scratch)
+    publication_parent_fd = _open_parent(destination)
+    token = bytes.fromhex("13" * 16)
+    ready = _ready_scratch(scratch_parent_fd, token)
+    ownership, stage_fd = _record_stage(scratch_parent_fd, ready, publication_parent_fd)
+    os.close(stage_fd)
+    (scratch / scratch_name(token) / "data").unlink()
+
+    recovered = reconcile_publication_stage(scratch_parent_fd, ready._reference, publication_parent_fd)
+    assert isinstance(recovered, PublicationStageHistoricalOwnership)
+    assert recovered._ownership == ownership
+    cleanup_publication_stage(scratch_parent_fd, publication_parent_fd, recovered)
+    cleanup_scratch(scratch_parent_fd, ready)
+    os.close(publication_parent_fd)
+    os.close(scratch_parent_fd)
+
+
 def test_expiry_during_final_stage_validation_retains_cleanup_ownership(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -480,16 +642,17 @@ def test_expiry_during_reconciliation_descriptor_close_retains_cleanup_ownership
     os.close(stage_fd)
     clock = [0.0]
     fake_time = SimpleNamespace(monotonic=lambda: clock[0])
-    original_close = scratch_module._OpenedScratch.close
+    opened_directory = publication_receipt._OpenedScratchDirectory
+    original_close = opened_directory.close
 
-    def close_then_expire(opened: scratch_module._OpenedScratch) -> BaseException | None:
+    def close_then_expire(opened: publication_receipt._OpenedScratchDirectory) -> BaseException | None:
         close_control = original_close(opened)
         clock[0] = 10.0
         return close_control
 
     monkeypatch.setattr(publication_receipt, "time", fake_time)
     monkeypatch.setattr(scratch_receipt_module, "time", fake_time)
-    monkeypatch.setattr(scratch_module._OpenedScratch, "close", close_then_expire)
+    monkeypatch.setattr(opened_directory, "close", close_then_expire)
     with pytest.raises(PublicationReceiptError) as raised:
         reconcile_publication_stage(
             scratch_parent_fd,
@@ -526,16 +689,17 @@ def test_expiry_after_uncertain_reconciliation_carries_no_cleanup_debt(
     stage.rename(saved)
     clock = [0.0]
     fake_time = SimpleNamespace(monotonic=lambda: clock[0])
-    original_close = scratch_module._OpenedScratch.close
+    opened_directory = publication_receipt._OpenedScratchDirectory
+    original_close = opened_directory.close
 
-    def close_then_expire(opened: scratch_module._OpenedScratch) -> BaseException | None:
+    def close_then_expire(opened: publication_receipt._OpenedScratchDirectory) -> BaseException | None:
         close_control = original_close(opened)
         clock[0] = 10.0
         return close_control
 
     monkeypatch.setattr(publication_receipt, "time", fake_time)
     monkeypatch.setattr(scratch_receipt_module, "time", fake_time)
-    monkeypatch.setattr(scratch_module._OpenedScratch, "close", close_then_expire)
+    monkeypatch.setattr(opened_directory, "close", close_then_expire)
     with pytest.raises(PublicationReceiptError) as raised:
         reconcile_publication_stage(
             scratch_parent_fd,

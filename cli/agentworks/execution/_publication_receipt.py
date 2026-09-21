@@ -20,6 +20,7 @@ from ._scratch_receipt import (
     ScratchReceiptError,
     ScratchReceiptFailureKind,
     matches_receipt_context,
+    matches_scratch_directory,
     scratch_name,
     validate_receipt,
 )
@@ -124,6 +125,20 @@ class PublicationRecordAcquisition:
     identity: _Identity | None = None
 
 
+@dataclass(repr=False)
+class _OpenedScratchDirectory:
+    directory_fd: int
+
+    def close(self) -> BaseException | None:
+        try:
+            os.close(self.directory_fd)
+        except OSError:
+            pass
+        except BaseException as control:
+            return control
+        return None
+
+
 class PublicationReceiptError(Exception):
     """Closed bookkeeping failure with optional exact cleanup debt."""
 
@@ -205,14 +220,6 @@ def record_publication_stage(
     if not _matches_stage(named_stage, admission._publication_parent.device, stage):
         raise PublicationReceiptError(PublicationReceiptFailureKind.CONFLICT)
 
-    provisional = PublicationStageOwnership(
-        admission._scratch_ownership,
-        admission._publication_parent,
-        admission._stage_name,
-        stage,
-        _Identity(0, 0),
-        (_RECORD_BUILD_MODE, _RECORD_MODE),
-    )
     descriptor: int | None = None
     result: PublicationStageOwnership | None = None
     try:
@@ -230,10 +237,10 @@ def record_publication_stage(
         acquisition.identity = _identity(observed)
         assert acquisition.identity is not None
         ownership = PublicationStageOwnership(
-            provisional._scratch_ownership,
-            provisional._publication_parent,
-            provisional._stage_name,
-            provisional._stage,
+            admission._scratch_ownership,
+            admission._publication_parent,
+            admission._stage_name,
+            stage,
             acquisition.identity,
         )
         content = _encode_record(ownership)
@@ -252,22 +259,30 @@ def record_publication_stage(
     except PublicationReceiptError as error:
         if acquisition.identity is None:
             raise
-        debt_ownership = PublicationStageOwnership(
-            provisional._scratch_ownership,
-            provisional._publication_parent,
-            provisional._stage_name,
-            provisional._stage,
-            acquisition.identity,
-            (_RECORD_BUILD_MODE, _RECORD_MODE),
-        )
         raise PublicationReceiptError(
             error.kind,
-            cleanup_debt=PublicationStageCleanupDebt(debt_ownership, False),
+            cleanup_debt=_acquired_record_cleanup_debt(admission, stage, acquisition.identity),
         ) from None
+    except BaseException as control:
+        if acquisition.identity is None:
+            raise
+        raise control from PublicationReceiptError(
+            PublicationReceiptFailureKind.IO,
+            cleanup_debt=_acquired_record_cleanup_debt(admission, stage, acquisition.identity),
+        )
     finally:
         if descriptor is not None:
-            with suppress(OSError):
+            try:
                 os.close(descriptor)
+            except OSError:
+                pass
+            except BaseException as control:
+                if acquisition.identity is None:
+                    raise
+                raise control from PublicationReceiptError(
+                    PublicationReceiptFailureKind.IO,
+                    cleanup_debt=_acquired_record_cleanup_debt(admission, stage, acquisition.identity),
+                )
     assert result is not None
     try:
         _check_deadline(expires_at)
@@ -277,6 +292,22 @@ def record_publication_stage(
             cleanup_debt=PublicationStageCleanupDebt(result, False),
         ) from None
     return result
+
+
+def _acquired_record_cleanup_debt(
+    admission: PublicationStageAdmission,
+    stage: _Identity,
+    record: _Identity,
+) -> PublicationStageCleanupDebt:
+    ownership = PublicationStageOwnership(
+        admission._scratch_ownership,
+        admission._publication_parent,
+        admission._stage_name,
+        stage,
+        record,
+        (_RECORD_BUILD_MODE, _RECORD_MODE),
+    )
+    return PublicationStageCleanupDebt(ownership, False)
 
 
 def reconcile_publication_stage(
@@ -290,7 +321,7 @@ def reconcile_publication_stage(
     ownership = reference._ownership
     if ownership._context.operation is not ScratchOperation.STAGE or not matches_receipt_context(ownership._context):
         return PublicationStageOwnershipUncertainty()
-    opened: _scratch._OpenedScratch | None = None
+    opened: _OpenedScratchDirectory | None = None
     result: PublicationStageReconciliation = PublicationStageOwnershipUncertainty()
     try:
         _check_deadline(expires_at)
@@ -375,7 +406,8 @@ def cleanup_publication_stage(
     """Remove the exact sibling before its exact immutable ownership record."""
     debt = _cleanup_debt(owned)
     ownership = debt._ownership
-    opened: _scratch._OpenedScratch | None = None
+    opened: _OpenedScratchDirectory | None = None
+    cleanup_complete = False
     try:
         opened = _open_owned_scratch(scratch_parent_fd, ownership._scratch_ownership)
         parent = _fstat(publication_parent_fd)
@@ -384,6 +416,7 @@ def cleanup_publication_stage(
         record = _stat_at(opened.directory_fd, _RECORD_NAME)
         if record is None:
             if debt._stage_removed:
+                cleanup_complete = True
                 return
             raise PublicationReceiptError(PublicationReceiptFailureKind.CONFLICT, cleanup_debt=debt)
         _require_record_stat(record, ownership, ownership._record_modes)
@@ -403,19 +436,23 @@ def cleanup_publication_stage(
             os.unlink(_RECORD_NAME, dir_fd=opened.directory_fd)
         except OSError:
             raise PublicationReceiptError(PublicationReceiptFailureKind.IO, cleanup_debt=debt) from None
+        cleanup_complete = True
     except PublicationReceiptError as error:
         if error.cleanup_debt is not None:
             raise
         raise PublicationReceiptError(error.kind, cleanup_debt=debt) from None
-    except ScratchTransferError as error:
-        raise PublicationReceiptError(_map_scratch_failure(error.kind), cleanup_debt=debt) from None
+    except BaseException as control:
+        raise control from PublicationReceiptError(
+            PublicationReceiptFailureKind.IO,
+            cleanup_debt=debt,
+        )
     finally:
         if opened is not None:
             close_control = opened.close()
             if close_control is not None:
                 raise close_control from PublicationReceiptError(
                     PublicationReceiptFailureKind.IO,
-                    cleanup_debt=debt,
+                    cleanup_debt=None if cleanup_complete else debt,
                 )
 
 
@@ -426,30 +463,36 @@ def remove_publication_record(
     """Remove a record after the caller has independently proved publication."""
     debt = _cleanup_debt(ownership)
     record_only = PublicationStageCleanupDebt(debt._ownership, True)
-    opened: _scratch._OpenedScratch | None = None
+    opened: _OpenedScratchDirectory | None = None
+    cleanup_complete = False
     try:
         opened = _open_owned_scratch(scratch_parent_fd, record_only._ownership._scratch_ownership)
         record = _stat_at(opened.directory_fd, _RECORD_NAME)
         if record is None:
+            cleanup_complete = True
             return
         _require_record_stat(record, record_only._ownership, record_only._ownership._record_modes)
         try:
             os.unlink(_RECORD_NAME, dir_fd=opened.directory_fd)
         except OSError:
             raise PublicationReceiptError(PublicationReceiptFailureKind.IO, cleanup_debt=record_only) from None
+        cleanup_complete = True
     except PublicationReceiptError as error:
         if error.cleanup_debt is not None:
             raise
         raise PublicationReceiptError(error.kind, cleanup_debt=record_only) from None
-    except ScratchTransferError as error:
-        raise PublicationReceiptError(_map_scratch_failure(error.kind), cleanup_debt=record_only) from None
+    except BaseException as control:
+        raise control from PublicationReceiptError(
+            PublicationReceiptFailureKind.IO,
+            cleanup_debt=record_only,
+        )
     finally:
         if opened is not None:
             close_control = opened.close()
             if close_control is not None:
                 raise close_control from PublicationReceiptError(
                     PublicationReceiptFailureKind.IO,
-                    cleanup_debt=record_only,
+                    cleanup_debt=None if cleanup_complete else record_only,
                 )
 
 
@@ -458,18 +501,10 @@ def _open_scratch(
     ready: ReadyScratchReference,
     expires_at: float | None,
 ) -> _scratch._OpenedScratch:
-    return _open_scratch_reference(parent_fd, ready._reference, expires_at)
-
-
-def _open_scratch_reference(
-    parent_fd: int,
-    reference: ScratchReference,
-    expires_at: float | None,
-) -> _scratch._OpenedScratch:
     try:
         return _scratch._open_scratch(
             parent_fd,
-            reference,
+            ready._reference,
             writable=False,
             phase=ScratchPhase.READ,
             expires_at=expires_at,
@@ -478,14 +513,64 @@ def _open_scratch_reference(
         raise PublicationReceiptError(_map_scratch_failure(error.kind)) from None
 
 
-def _open_owned_scratch(parent_fd: int, ownership: ScratchOwnership) -> _scratch._OpenedScratch:
-    return _scratch._open_scratch(
-        parent_fd,
-        _scratch.ScratchReference(ownership),
-        writable=False,
-        phase=ScratchPhase.READ,
-        expires_at=None,
-    )
+def _open_scratch_reference(
+    parent_fd: int,
+    reference: ScratchReference,
+    expires_at: float | None,
+) -> _OpenedScratchDirectory:
+    ownership = reference._ownership
+    _check_deadline(expires_at)
+    parent = _fstat(parent_fd)
+    if (parent.st_dev, parent.st_ino) != (ownership._parent.device, ownership._parent.inode):
+        raise PublicationReceiptError(PublicationReceiptFailureKind.CONFLICT)
+    name = scratch_name(ownership._token)
+    named = _stat_at(parent_fd, name)
+    if named is None or not matches_scratch_directory(
+        named,
+        ownership._directory,
+        ownership._context.identity.euid,
+        ownership._gid,
+    ):
+        raise PublicationReceiptError(PublicationReceiptFailureKind.CONFLICT)
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    try:
+        directory_fd = os.open(name, flags, dir_fd=parent_fd)
+    except OSError as error:
+        kind = (
+            PublicationReceiptFailureKind.CONFLICT
+            if error.errno in {errno.ENOENT, errno.ENOTDIR, errno.ELOOP}
+            else PublicationReceiptFailureKind.IO
+        )
+        raise PublicationReceiptError(kind) from None
+    opened = _OpenedScratchDirectory(directory_fd)
+    try:
+        observed = _fstat(directory_fd)
+        if not matches_scratch_directory(
+            observed,
+            ownership._directory,
+            ownership._context.identity.euid,
+            ownership._gid,
+        ):
+            raise PublicationReceiptError(PublicationReceiptFailureKind.CONFLICT)
+        _validate_scratch_receipt(directory_fd, ownership, expires_at)
+        named = _stat_at(parent_fd, name)
+        if named is None or (named.st_dev, named.st_ino) != (ownership._directory.device, ownership._directory.inode):
+            raise PublicationReceiptError(PublicationReceiptFailureKind.CONFLICT)
+        _check_deadline(expires_at)
+        return opened
+    except BaseException as error:
+        close_control = opened.close()
+        if close_control is not None:
+            raise close_control from error
+        raise
+
+
+def _open_owned_scratch(
+    parent_fd: int,
+    ownership: ScratchOwnership,
+) -> _OpenedScratchDirectory:
+    reference = _scratch.ScratchReference(ownership)
+    return _open_scratch_reference(parent_fd, reference, None)
 
 
 def _validate_scratch_receipt(
@@ -537,15 +622,7 @@ def _decode_record(
     if not content or len(content) > _MAX_RECORD_BYTES or not content.isascii():
         raise ValueError("Invalid publication record")
 
-    def object_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
-        result: dict[str, object] = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError("Duplicate publication record field")
-            result[key] = value
-        return result
-
-    value = json.loads(content, object_pairs_hook=object_pairs)
+    value = json.loads(content)
     if type(value) is not dict or set(value) != {"parent", "stage", "token", "version"}:
         raise ValueError("Invalid publication record")
     if value["version"] != 1 or value["token"] != scratch_ownership._token.hex():
@@ -560,9 +637,7 @@ def _decode_record(
     if stage_value["name"] != expected_name:
         raise ValueError("Invalid publication record")
     stage = _decode_identity({"device": stage_value["device"], "inode": stage_value["inode"]})
-    ownership = PublicationStageOwnership(scratch_ownership, parent, expected_name, stage, record)
-    _require_record_numbers(ownership)
-    return ownership
+    return PublicationStageOwnership(scratch_ownership, parent, expected_name, stage, record)
 
 
 def _identity_document(identity: _Identity) -> dict[str, int]:
@@ -574,22 +649,14 @@ def _decode_identity(value: object) -> _Identity:
         raise ValueError("Invalid publication record")
     device = value["device"]
     inode = value["inode"]
-    if type(device) is not int or type(inode) is not int:
+    if (
+        type(device) is not int
+        or type(inode) is not int
+        or not 0 <= device <= _MAX_IDENTITY_NUMBER
+        or not 0 <= inode <= _MAX_IDENTITY_NUMBER
+    ):
         raise ValueError("Invalid publication record")
     return _Identity(device, inode)
-
-
-def _require_record_numbers(ownership: PublicationStageOwnership) -> None:
-    values = (
-        ownership._publication_parent.device,
-        ownership._publication_parent.inode,
-        ownership._stage.device,
-        ownership._stage.inode,
-        ownership._record.device,
-        ownership._record.inode,
-    )
-    if any(value < 0 or value > _MAX_IDENTITY_NUMBER for value in values):
-        raise ValueError("Invalid publication record")
 
 
 def _require_unchanged_record(
@@ -617,7 +684,6 @@ def _require_record_stat(
         not stat.S_ISREG(observed.st_mode)
         or observed.st_nlink != 1
         or observed.st_uid != scratch._context.identity.euid
-        or observed.st_gid != scratch._gid
         or stat.S_IMODE(observed.st_mode) not in modes
         or _identity(observed) != ownership._record
     ):
