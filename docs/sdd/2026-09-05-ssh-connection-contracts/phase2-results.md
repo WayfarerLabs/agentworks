@@ -158,9 +158,9 @@ correction, native proof and SSH forwarding's separate startup path remain produ
 work.
 
 Integration revision `de18829d` passes **11,939 non-integration tests with 14 skips**. Both SSH
-live-byte cases pass, including installed OpenSSH. The pre-authentication pipe fixture now uses empty
-finite input: it still creates an owned stdin pipe, without racing unused payload delivery against
-the fixture's deliberate disconnect. Two new helper-sizing tests supply SSH's explicit trust
+live-byte cases pass, including installed OpenSSH. The pre-authentication pipe fixture now uses
+empty finite input: it still creates an owned stdin pipe, without racing unused payload delivery
+against the fixture's deliberate disconnect. Two new helper-sizing tests supply SSH's explicit trust
 argument. No SSH runtime code changed in this rebase. Ruff/format, mypy (1,004 source files), file
 lint, locked-SDD, rulesync, typer isolation and website gates passed, including 160 Python tests,
 103 Node tests and both deterministic double-build comparisons. Independent project, complexity and
