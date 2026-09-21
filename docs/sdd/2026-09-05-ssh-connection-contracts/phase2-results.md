@@ -157,16 +157,70 @@ This is Linux loopback proof for private snapshot exchanges. Public download com
 publication, interruption and malformed-response acceptance, production FileAccess, and supported
 workstation/provider workflows remain open.
 
+## Held-owner dependency and runtime admission
+
+SSH integration `e852aef2` incorporates transport `bb7ebb58588b3c2a6ea8eb09d0e297e06d8a3ddd`, the
+reviewed milestone with successful hosted Linux and Windows validation in
+[run 35617821328](https://github.com/WayfarerLabs/agentworks/actions/runs/35617821328). This brings
+the private `LocalProcessOwner`, runtime selection and fixed stdin helper framing into the SSH
+combination. The newer transport draft remains separately under validation; its current Windows
+collection correction does not change the owner being adopted.
+
+The SSH file fixtures now select Linux `/usr/bin/python3` explicitly and require positive runtime
+admission before accessing a helper observation. Two transport command-size fixtures retain their
+current bootstrap/prefix shape with SSH's explicit trust selection and native absolute paths. The
+size/protocol selection passes 83 cases, and the lead's host repetition passes all three installed
+OpenSSH read, stage and snapshot cases. Fixture processes are absent afterward; the exact temporary
+directory and credentials are removed. These results cover private helper delivery and preserve the
+existing unknown-completion cleanup restriction, not production FileAccess or native-platform
+acceptance.
+
+The combined baseline at `e852aef2` passes **12,605 non-integration tests with 14 skips**. Full
+Ruff/format and mypy (1,059 source files), rulesync and typer-isolation checks pass. Website checks
+pass 160 Python and 103 Node tests, with identical double builds at both site bases. Forwarding
+adoption has separate implementation and validation below; these baseline counts do not claim to
+cover it.
+
+The operator authorized a scoped SSH contribution to the shared held-process extraction on
+2026-09-21. Transport had already published that extraction, so forwarding adopts its existing
+owner. Any necessary shared correction stays separable; terminal and RunContext work stay with
+transport. No new public carrier contract or second process owner is introduced.
+
+## Forwarding uses the shared held-process owner
+
+SSH runtime `140f6758` adopts transport's existing `LocalProcessOwner`; no shared process code
+changes are required. The owner is retained before startup, and the pipe drain worker remains inert
+until shared startup returns successfully. Closing fences every pipe operation, serializes owner
+settlement and observes worker termination. A delayed worker can make termination uncertain, but
+cannot skip shared cleanup or resume pipe use. Natural client exit remains distinct from a status
+produced by local cleanup.
+
+The forwarding selection passes 48 non-integration cases, the broader SSH selection passes 265 with
+five skips, and all 20 shared-owner tests pass. These include worker-start interruption before and
+after native startup, interruption after process admission with no pipe reads, interruption before
+pipe publication, repeated close interruptions preserving the first control exception, concurrent
+wait/close, natural exit with held stdin, safe startup failure reporting and delayed worker
+termination. Ruff/format and focused strict typing pass.
+
+The lead repeated all eight installed-OpenSSH forwarding cases at `140f6758`; all passed. They
+exercise real binary forwarding, first/later listener refusal, IPv4/IPv6 partial setup,
+authentication/trust/command refusal and listener release. The fixture verifies rebinding; the lead
+independently found no owned fixture SSH processes and removed its exact directory and credentials.
+
+These are focused Linux loopback results, not complete asynchronous interruption or native-platform
+acceptance. The shared cleanup-entry gap and unbounded process-construction time retain their
+existing qualifications. Terminal and RunContext integration remain with transport.
+
 ## Remaining integration and acceptance
 
-Current integration `fefc2b9e` uses transport `f3339f3d3cccace129be58711dc7eeb30ec66dc2`, which adds
+Earlier integration `fefc2b9e` uses transport `f3339f3d3cccace129be58711dc7eeb30ec66dc2`, which adds
 private publication-stage ownership recovery. The rebase is clean and changes no SSH runtime, SSH
 fixtures, carrier interface or shared process core. Publication delivery is not yet implemented by
 that milestone. Transport records complete Windows command sizing as a gate for its upcoming fixed
 helper; the current snapshot helper's separate sizing and live evidence remain scoped to their
-recorded revisions. The
-[forwarding ownership proposal](forwarding-lld.md#launch-ownership-integration) remains pending
-transport integration, alongside terminal and RunContext composition.
+recorded revisions. At that revision the
+[forwarding ownership proposal](forwarding-lld.md#launch-ownership-integration) awaited transport
+extraction; the dependency above now supplies it. Terminal and RunContext composition remain open.
 
 The combined suite at `fefc2b9e` passes **12,112 non-integration tests with 14 skips**. Full
 Ruff/format, mypy (1,017 source files), file lint, locked-SDD, rulesync and typer-isolation checks
@@ -236,8 +290,8 @@ interruption by retaining the client outside the caller's byte pump. Transport s
 asynchronous interruption at cleanup-loop entry that can leave a child and pipes live. See its
 [launch-interruption evidence](../2026-09-12-transport-improv/prior-art-research.md#local-process-startup-and-interruption)
 and [lifecycle design](../2026-09-12-transport-improv/execution-lifecycle-lld.md). Shared cleanup
-correction, native proof and SSH forwarding's separate startup path remain production acceptance
-work.
+correction and native proof remain production acceptance work. Forwarding now uses that shared
+owner, with the focused adoption evidence recorded above.
 
 Integration revision `de18829d` passes **11,939 non-integration tests with 14 skips**. Both SSH
 live-byte cases pass, including installed OpenSSH. The pre-authentication pipe fixture now uses

@@ -12,7 +12,7 @@ address, local port, literal destination host and destination port. Non-loopback
 that explicit address, never an inherited config option. Ports are 1-65535; there is no automatic
 port allocation, SOCKS proxy, remote forwarding or arbitrary option passthrough in this surface.
 
-The returned `OwnedForwarding` is a context manager with `wait()` and idempotent bounded `close()`.
+The returned `OwnedForwarding` is a context manager with `wait()` and idempotent `close()`.
 Composition owns it separately from execution and closes it within its operation lifetime. Passive
 connection/target access does not create forwards. The startup deadline covers local validation,
 installed-client version checking, authentication and setup acknowledgment; it does not silently
@@ -67,26 +67,29 @@ child and then raised `KeyboardInterrupt` before returning its handle. The inter
 while that child remained live; the probe then killed/reaped the exact child and closed its pipes.
 This establishes the ownership gap, not native signal or installed-SSH acceptance.
 
-Transport's current `run_owned_process` cannot directly supply a held forward: it returns only after
-terminal cleanup. Copying its private admission and settlement logic into SSH would create a second
-process-lifetime implementation. Moving construction into the existing drain worker with only a stop
-event is insufficient: ambiguous thread startup needs serialized default-deny admission, so a late
-worker cannot dispatch after cancellation won.
+Transport now supplies `LocalProcessOwner` in `_process.py`, shared with `run_owned_process`. SSH
+retains the owner before any launch can occur. A forwarding drain worker starts inert;
+`LocalProcessOwner.start()` performs default-deny process admission, and SSH allows pipe borrowing
+only after `start()` returns successfully. This ordering matters because an interrupted shared
+admission can settle its process internally before returning to SSH. No SSH worker may borrow pipes
+during that internal settlement.
 
-The proposed integration is a small transport-owned held-process interface over its existing launch
-owner, shared with the run-to-completion path. Transport owns its final shape. SSH needs an owner
-retained before startup, cancellation serialized with admission, borrowed pipes only after owner
-publication, separate natural-exit and cleanup observations, and an explicit release after the drain
-worker stops using pipes. That release requests exact local cleanup; it must not masquerade as an
-input failure. Cancellation before admission prevents dispatch; after admission the owner retains
-construction and cleanup responsibility through terminal observation. Process construction itself
-has no proven hard time bound.
+The drain worker observes immutable snapshots and handles pipe readiness, marker validation and
+diagnostic drainage. SSH stops every pipe user before releasing the owner. The owner retains exact
+client construction, status observation and cleanup responsibilities. Natural exit is distinct from
+the local status produced by cleanup. Serialized, idempotent forwarding close coordinates with wait;
+interruption must settle ownership before propagating the original control exception.
 
-Forwarding continues to own listener requests, readiness-marker validation and resource lifetime.
-The shared owner replaces forwarding's direct process/status/cleanup ownership; it does not parse
-SSH readiness or own remote cancellation. This is an integration proposal, not a new shared contract
-or an implemented API. The startup, repeated-interruption, natural-exit, cleanup-uncertainty and
-native-platform proof gates remain open.
+The local kill/reap allowance remains bounded once the process is available. Process construction
+itself has no proven hard time bound, so total startup/settlement time cannot inherit that cleanup
+bound. The startup deadline does not become a held-resource lifetime limit. Local cleanup is never
+remote cancellation.
+
+The operator authorized a scoped SSH contribution to this extraction on 2026-09-21. The extraction
+was already published in transport, so SSH adopts it rather than introducing a second owner. Any
+integration-required shared correction remains a separable contribution. Transport retains terminal
+and RunContext ownership. The startup, repeated-interruption, natural-exit, cleanup-uncertainty and
+native-platform proof gates remain open until their measured results are recorded.
 
 ## Evidence
 
