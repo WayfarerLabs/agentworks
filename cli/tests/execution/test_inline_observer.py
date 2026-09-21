@@ -11,7 +11,12 @@ import pytest
 from agentworks.execution._evidence_wire import Frame, FrameKind, WireError, encode_frame
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
-from agentworks.execution._inline import execute_inline_candidate, prepare_inline_candidate
+from agentworks.execution._inline import (
+    InlineCandidateResult,
+    PreparedInlineCandidate,
+    execute_inline_candidate,
+    prepare_inline_candidate,
+)
 from agentworks.execution._inline_control import (
     ControlError,
     FailureCode,
@@ -31,7 +36,13 @@ from agentworks.execution._inline_control import (
     parse_stream_end,
     parse_wait,
 )
-from agentworks.execution._inline_observer import ObservationError
+from agentworks.execution._inline_observer import InlineObservation, ObservationError
+from agentworks.execution._runtime_prerequisite import (
+    RuntimePrefixSink,
+    RuntimePrerequisiteState,
+    RuntimeSelection,
+    RuntimeTargetOS,
+)
 from agentworks.execution.carrier import (
     ByteSink,
     CapturedOutput,
@@ -61,6 +72,9 @@ class TranscriptCarrier:
     stderr: bytes = b""
     completion: int = 0
     stdout_complete: bool = True
+    runtime_state: RuntimePrerequisiteState = RuntimePrerequisiteState.READY
+    runtime_record: bytes | None = None
+    error: BaseException | None = None
     calls: int = 0
 
     @property
@@ -71,9 +85,16 @@ class TranscriptCarrier:
         del invocation, deadline
         self.calls += 1
         assert isinstance(io.output, SinkOutput)
-        _write(io.output.stdout, self.stdout)
+        assert isinstance(io.output.stdout, RuntimePrefixSink)
+        runtime_record = self.runtime_record
+        if runtime_record is None:
+            token = "-" if self.runtime_state is RuntimePrerequisiteState.MISSING else "0"
+            runtime_record = f"AGW_RUNTIME_1:{io.output.stdout.nonce}:{self.runtime_state.value}:{token}\n".encode()
+        _write(io.output.stdout, runtime_record + self.stdout)
         if self.stderr:
             _write(io.output.stderr, self.stderr)
+        if self.error is not None:
+            raise self.error
         return CarrierReport(
             Dispatch.SENT,
             ExitStatus(code=self.completion),
@@ -86,6 +107,23 @@ class TranscriptCarrier:
 @pytest.fixture
 def plan() -> IdentityPlan:
     return IdentityPlan(IdentityExpectation(1001, 1002, (1002, 1003)), IdentityMode.DIRECT)
+
+
+_RUNTIME_SELECTION = RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3")
+
+
+def _prepare(plan: IdentityPlan, *, sensitive: bool = False) -> PreparedInlineCandidate:
+    return prepare_inline_candidate(
+        Command(["/bin/true"]),
+        plan=plan,
+        runtime_selection=_RUNTIME_SELECTION,
+        sensitive=sensitive,
+    )
+
+
+def _observation(result: InlineCandidateResult) -> InlineObservation:
+    assert result.observation is not None
+    return result.observation
 
 
 def _record(nonce: str, sequence: int, kind: FrameKind, body: bytes) -> bytes:
@@ -144,44 +182,87 @@ def test_control_schemas_reject_duplicate_keys(parser: Callable[[bytes], object]
 
 def test_noise_reflection_requires_a_line_boundary_and_is_not_retained(plan: IdentityPlan) -> None:
     canary = b"raw-hook-reflection-canary-09dba6"
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
+    prepared = _prepare(plan)
     same_line_decoy = canary + _record(prepared.nonce, 0, FrameKind.FINISHED, empty_body())
     carrier = TranscriptCarrier(same_line_decoy + _complete_transcript(prepared.nonce), stderr=canary)
 
     result = execute_inline_candidate(carrier, prepared, deadline=Deadline.after(1))
+    observation = _observation(result)
 
     assert carrier.calls == 1
-    assert result.observation.trusted_terminal
-    assert result.observation.wait == WaitFact(WaitKind.EXIT, 23)
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert prepared._runtime.observation.state is RuntimePrerequisiteState.UNKNOWN
+    assert observation.trusted_terminal
+    assert observation.wait == WaitFact(WaitKind.EXIT, 23)
     assert canary.decode() not in repr(result)
 
 
-def test_missing_terminal_preserves_independently_validated_wait(plan: IdentityPlan) -> None:
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
-    carrier = TranscriptCarrier(_complete_transcript(prepared.nonce, terminal=False))
+@pytest.mark.parametrize(
+    ("state", "runtime_record"),
+    [
+        (RuntimePrerequisiteState.MISSING, None),
+        (RuntimePrerequisiteState.UNSUPPORTED_VERSION, None),
+        (RuntimePrerequisiteState.UNKNOWN, b"not-a-runtime-record\n"),
+    ],
+)
+def test_runtime_refusal_or_unknown_never_fabricates_helper_observation(
+    state: RuntimePrerequisiteState,
+    runtime_record: bytes | None,
+    plan: IdentityPlan,
+) -> None:
+    prepared = _prepare(plan)
+    helper_transcript = _complete_transcript(prepared.nonce) if state is RuntimePrerequisiteState.UNKNOWN else b""
+    carrier = TranscriptCarrier(helper_transcript, runtime_state=state, runtime_record=runtime_record)
 
     result = execute_inline_candidate(carrier, prepared, deadline=Deadline.after(1))
 
-    assert result.observation.wait == WaitFact(WaitKind.EXIT, 23)
-    assert not result.observation.trusted_terminal
-    assert result.observation.error is ObservationError.MISSING_TERMINAL
+    assert carrier.calls == 1
+    assert result.runtime_prerequisite.state is state
+    assert result.observation is None
+    assert prepared._runtime.observation.state is RuntimePrerequisiteState.UNKNOWN
+
+
+def test_carrier_exception_is_preserved_and_runtime_parser_is_cleared(plan: IdentityPlan) -> None:
+    prepared = _prepare(plan)
+    failure = RuntimeError("carrier exception")
+    carrier = TranscriptCarrier(b"", error=failure)
+
+    with pytest.raises(RuntimeError) as caught:
+        execute_inline_candidate(carrier, prepared, deadline=Deadline.after(1))
+
+    assert caught.value is failure
+    assert carrier.calls == 1
+    assert prepared._runtime.observation.state is RuntimePrerequisiteState.UNKNOWN
+
+
+def test_missing_terminal_preserves_independently_validated_wait(plan: IdentityPlan) -> None:
+    prepared = _prepare(plan)
+    carrier = TranscriptCarrier(_complete_transcript(prepared.nonce, terminal=False))
+
+    result = execute_inline_candidate(carrier, prepared, deadline=Deadline.after(1))
+    observation = _observation(result)
+
+    assert observation.wait == WaitFact(WaitKind.EXIT, 23)
+    assert not observation.trusted_terminal
+    assert observation.error is ObservationError.MISSING_TERMINAL
 
 
 def test_truncated_matching_record_preserves_wait_but_not_terminal(plan: IdentityPlan) -> None:
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
+    prepared = _prepare(plan)
     transcript = _complete_transcript(prepared.nonce, terminal=False)
     partial = _record(prepared.nonce, 5, FrameKind.FINISHED, empty_body())[:-1]
     carrier = TranscriptCarrier(transcript + partial)
 
     result = execute_inline_candidate(carrier, prepared, deadline=Deadline.after(1))
+    observation = _observation(result)
 
-    assert result.observation.wait == WaitFact(WaitKind.EXIT, 23)
-    assert not result.observation.trusted_terminal
-    assert result.observation.error is not None
+    assert observation.wait == WaitFact(WaitKind.EXIT, 23)
+    assert not observation.trusted_terminal
+    assert observation.error is not None
 
 
 def test_post_terminal_frame_revokes_terminal_evidence(plan: IdentityPlan) -> None:
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
+    prepared = _prepare(plan)
     transcript = _complete_transcript(prepared.nonce)
     transcript += _record(prepared.nonce, 5, FrameKind.FINISHED, empty_body())
 
@@ -190,15 +271,16 @@ def test_post_terminal_frame_revokes_terminal_evidence(plan: IdentityPlan) -> No
         prepared,
         deadline=Deadline.after(1),
     )
+    observation = _observation(result)
 
-    assert result.observation.wait == WaitFact(WaitKind.EXIT, 23)
-    assert not result.observation.trusted_terminal
-    assert result.observation.error is ObservationError.POST_TERMINAL
+    assert observation.wait == WaitFact(WaitKind.EXIT, 23)
+    assert not observation.trusted_terminal
+    assert observation.error is ObservationError.POST_TERMINAL
 
 
 def test_sensitive_data_frame_is_rejected_without_retaining_reflection(plan: IdentityPlan) -> None:
     canary = b"sensitive-frame-reflection-635a4d"
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan, sensitive=True)
+    prepared = _prepare(plan, sensitive=True)
     transcript = _record(prepared.nonce, 0, FrameKind.LAUNCHING, empty_body())
     transcript += _record(prepared.nonce, 1, FrameKind.STDOUT, canary)
 
@@ -207,15 +289,16 @@ def test_sensitive_data_frame_is_rejected_without_retaining_reflection(plan: Ide
         prepared,
         deadline=Deadline.after(1),
     )
+    observation = _observation(result)
 
-    assert not result.observation.trusted_terminal
-    assert result.observation.error is ObservationError.ORDER
-    assert result.observation.stdout is None
+    assert not observation.trusted_terminal
+    assert observation.error is ObservationError.ORDER
+    assert observation.stdout is None
     assert canary.decode() not in repr(result)
 
 
 def test_malformed_matching_wire_never_produces_terminal_evidence(plan: IdentityPlan) -> None:
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
+    prepared = _prepare(plan)
     malformed = b"AGWE1 " + prepared.nonce.encode() + b" 0 LAUNCHING 2 not-canonical-base64\n"
 
     result = execute_inline_candidate(
@@ -223,14 +306,15 @@ def test_malformed_matching_wire_never_produces_terminal_evidence(plan: Identity
         prepared,
         deadline=Deadline.after(1),
     )
+    observation = _observation(result)
 
     assert result.carrier_completion == ExitStatus(code=255)
-    assert not result.observation.trusted_terminal
-    assert result.observation.error is WireError.MALFORMED
+    assert not observation.trusted_terminal
+    assert observation.error is WireError.MALFORMED
 
 
 def test_started_record_is_rejected_by_candidate_grammar(plan: IdentityPlan) -> None:
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
+    prepared = _prepare(plan)
     transcript = _record(prepared.nonce, 0, FrameKind.STARTED, empty_body())
 
     result = execute_inline_candidate(
@@ -238,14 +322,15 @@ def test_started_record_is_rejected_by_candidate_grammar(plan: IdentityPlan) -> 
         prepared,
         deadline=Deadline.after(1),
     )
+    observation = _observation(result)
 
-    assert not result.observation.trusted_terminal
-    assert result.observation.error is ObservationError.ORDER
+    assert not observation.trusted_terminal
+    assert observation.error is ObservationError.ORDER
 
 
 @pytest.mark.parametrize("kind", [FrameKind.STDOUT, FrameKind.STDERR])
 def test_launch_failure_after_empty_data_frame_is_rejected(kind: FrameKind, plan: IdentityPlan) -> None:
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
+    prepared = _prepare(plan)
     transcript = _record(prepared.nonce, 0, FrameKind.LAUNCHING, empty_body())
     transcript += _record(prepared.nonce, 1, kind, b"")
     transcript += _record(
@@ -261,9 +346,10 @@ def test_launch_failure_after_empty_data_frame_is_rejected(kind: FrameKind, plan
         prepared,
         deadline=Deadline.after(1),
     )
+    observation = _observation(result)
 
-    assert not result.observation.trusted_terminal
-    assert result.observation.error is ObservationError.ORDER
+    assert not observation.trusted_terminal
+    assert observation.error is ObservationError.ORDER
 
 
 @pytest.mark.parametrize("raw_status", [0, 255])
@@ -271,30 +357,32 @@ def test_raw_carrier_status_never_substitutes_for_helper_terminal(
     raw_status: int,
     plan: IdentityPlan,
 ) -> None:
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
+    prepared = _prepare(plan)
 
     result = execute_inline_candidate(
         TranscriptCarrier(b"account-shell-noise\n", completion=raw_status),
         prepared,
         deadline=Deadline.after(1),
     )
+    observation = _observation(result)
 
     assert result.carrier_completion == ExitStatus(code=raw_status)
     assert result.carrier_local_status == raw_status
-    assert not result.observation.trusted_terminal
-    assert result.observation.wait is None
-    assert result.observation.error is ObservationError.MISSING_TERMINAL
+    assert not observation.trusted_terminal
+    assert observation.wait is None
+    assert observation.error is ObservationError.MISSING_TERMINAL
 
 
 def test_incomplete_carrier_stdout_revokes_otherwise_valid_terminal(plan: IdentityPlan) -> None:
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
+    prepared = _prepare(plan)
 
     result = execute_inline_candidate(
         TranscriptCarrier(_complete_transcript(prepared.nonce), stdout_complete=False),
         prepared,
         deadline=Deadline.after(1),
     )
+    observation = _observation(result)
 
-    assert result.observation.wait == WaitFact(WaitKind.EXIT, 23)
-    assert not result.observation.trusted_terminal
-    assert result.observation.error is ObservationError.CARRIER
+    assert observation.wait == WaitFact(WaitKind.EXIT, 23)
+    assert not observation.trusted_terminal
+    assert observation.error is ObservationError.CARRIER

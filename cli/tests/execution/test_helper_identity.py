@@ -16,8 +16,11 @@ from agentworks.execution._helper_identity import IdentityExpectation, decode_id
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan, build_helper_argv
 from agentworks.execution._inline import execute_inline_candidate, prepare_inline_candidate
 from agentworks.execution._inline_control import FailureCode, FailurePhase, parse_failure
-from agentworks.execution._inline_observer import ObservationError
-from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
+from agentworks.execution._runtime_prerequisite import (
+    RuntimePrerequisiteState,
+    RuntimeSelection,
+    RuntimeTargetOS,
+)
 from agentworks.execution.carrier import (
     CapturedOutput,
     CarrierIO,
@@ -26,11 +29,14 @@ from agentworks.execution.carrier import (
     Deadline,
     Dispatch,
     ExitStatus,
+    FiniteInput,
     PreparedInvocation,
     Retention,
 )
 from agentworks.execution.models import Command, Script, Shell
 from tests.execution.files._runtime_support import runtime_selection
+
+_FIXED_LINUX_RUNTIME = RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3")
 
 
 def _identity(uid: int = 1001, gid: int = 1002, groups: tuple[int, ...] = (1002, 1003)) -> IdentityExpectation:
@@ -121,6 +127,7 @@ def test_wrapper_argv_is_literal_and_payload_free(
     inline = prepare_inline_candidate(
         Script(canary, Shell.SH),
         plan=plan,
+        runtime_selection=_FIXED_LINUX_RUNTIME,
         stdin=canary.encode(),
         env={"CANARY": canary},
         cwd=f"/{canary}",
@@ -175,7 +182,11 @@ def test_invalid_identity_plan_is_rejected_before_payload_encoding(
 
     with pytest.raises(ValidationError):
         if kind == "inline":
-            prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
+            prepare_inline_candidate(
+                Command(["/bin/true"]),
+                plan=plan,
+                runtime_selection=_FIXED_LINUX_RUNTIME,
+            )
         else:
             read_file(
                 _PreHelperFailureCarrier(),
@@ -217,8 +228,13 @@ def test_guest_identity_requires_real_effective_saved_and_exact_groups(
 def test_inline_guest_refuses_unsupported_runtime_before_identity_or_workload_access(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=_plan(IdentityMode.DIRECT))
-    manifest = prepared.io.input.data  # type: ignore[union-attr]
+    prepared = prepare_inline_candidate(
+        Command(["/bin/true"]),
+        plan=_plan(IdentityMode.DIRECT),
+        runtime_selection=_FIXED_LINUX_RUNTIME,
+    )
+    assert isinstance(prepared.io.input, FiniteInput)
+    manifest = prepared.io.input.data
     reads = [manifest, b""]
     output = bytearray()
 
@@ -272,7 +288,11 @@ class _PreHelperFailureCarrier:
 def test_pre_helper_wrapper_failure_never_claims_application_or_file_success(mode: IdentityMode) -> None:
     plan = _plan(mode, uid=0 if mode is IdentityMode.SUDO_ROOT else 1001)
     carrier = _PreHelperFailureCarrier()
-    inline = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
+    inline = prepare_inline_candidate(
+        Command(["/bin/true"]),
+        plan=plan,
+        runtime_selection=_FIXED_LINUX_RUNTIME,
+    )
     inline_result = execute_inline_candidate(carrier, inline, deadline=Deadline.after(1))
     file_result = read_file(
         carrier,
@@ -285,9 +305,7 @@ def test_pre_helper_wrapper_failure_never_claims_application_or_file_success(mod
     )
 
     assert carrier.calls == 2
-    assert not inline_result.observation.launching
-    assert not inline_result.observation.trusted_terminal
-    assert inline_result.observation.wait is None
-    assert inline_result.observation.error is ObservationError.MISSING_TERMINAL
+    assert inline_result.runtime_prerequisite.state is RuntimePrerequisiteState.UNKNOWN
+    assert inline_result.observation is None
     assert file_result.runtime_prerequisite.state is RuntimePrerequisiteState.UNKNOWN
     assert file_result.observation is None

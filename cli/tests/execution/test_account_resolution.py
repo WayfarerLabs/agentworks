@@ -597,21 +597,24 @@ def test_resolved_current_account_composes_with_truthful_direct_inline_identity_
     prepared = prepare_inline_candidate(
         Command(["/bin/true"]),
         plan=IdentityPlan(identity, IdentityMode.DIRECT),
-        runtime_path=sys.executable,
+        runtime_selection=_runtime_selection(),
     )
     executed = execute_inline_candidate(carrier, prepared, deadline=Deadline.after(15))
 
-    assert executed.observation.trusted_terminal
+    assert executed.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert executed.observation is not None
+    observation = executed.observation
+    assert observation.trusted_terminal
     if identity == actual:
-        assert executed.observation.wait is not None
-        assert executed.observation.wait.value == 0
-        assert executed.observation.failure is None
+        assert observation.wait is not None
+        assert observation.wait.value == 0
+        assert observation.failure is None
     else:
-        assert not executed.observation.launching
-        assert executed.observation.wait is None
-        assert executed.observation.failure is not None
-        assert executed.observation.failure.phase is FailurePhase.IDENTITY
-        assert executed.observation.failure.code is FailureCode.MISMATCH
+        assert not observation.launching
+        assert observation.wait is None
+        assert observation.failure is not None
+        assert observation.failure.phase is FailurePhase.IDENTITY
+        assert observation.failure.code is FailureCode.MISMATCH
 
 
 def test_unavailable_interpreter_never_yields_identity() -> None:

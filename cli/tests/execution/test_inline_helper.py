@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from agentworks.errors import ValidationError
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._inline import (
@@ -19,6 +20,12 @@ from agentworks.execution._inline import (
     prepare_inline_candidate,
 )
 from agentworks.execution._inline_control import FailureCode, FailurePhase, StreamRetention, WaitFact, WaitKind
+from agentworks.execution._inline_observer import InlineObservation
+from agentworks.execution._runtime_prerequisite import (
+    RuntimePrerequisiteState,
+    RuntimeSelection,
+    RuntimeTargetOS,
+)
 from agentworks.execution.carrier import (
     CarrierIO,
     CarrierReport,
@@ -87,15 +94,26 @@ def _run(
     request: Command | Script,
     plan: IdentityPlan,
     *,
-    helper_runtime: str = "/usr/bin/python3",
+    helper_runtime: str = sys.executable,
     carrier: LocalCarrier | None = None,
     **options: object,
 ) -> tuple[PreparedInlineCandidate, InlineCandidateResult, LocalCarrier]:
     selected_carrier = carrier or LocalCarrier()
-    prepared = prepare_inline_candidate(request, plan=plan, runtime_path=helper_runtime, **options)
+    prepared = prepare_inline_candidate(
+        request,
+        plan=plan,
+        runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, helper_runtime),
+        **options,
+    )
     result = execute_inline_candidate(selected_carrier, prepared, deadline=Deadline.after(15))
     assert selected_carrier.calls == 1
     return prepared, result, selected_carrier
+
+
+def _observation(result: InlineCandidateResult) -> InlineObservation:
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert result.observation is not None
+    return result.observation
 
 
 @pytest.mark.parametrize("status", range(256))
@@ -104,12 +122,13 @@ def test_literal_command_preserves_every_normal_exit(status: int, plan: Identity
         Command(["/usr/bin/python3", "-I", "-S", "-B", "-c", f"raise SystemExit({status})"]),
         plan,
     )
+    observation = _observation(result)
 
-    assert result.observation.trusted_terminal
-    assert result.observation.wait is not None
-    assert result.observation.wait.kind is WaitKind.EXIT
-    assert result.observation.wait.value == status
-    assert result.observation.failure is None
+    assert observation.trusted_terminal
+    assert observation.wait is not None
+    assert observation.wait.kind is WaitKind.EXIT
+    assert observation.wait.value == status
+    assert observation.failure is None
     assert result.carrier_completion == ExitStatus(code=0)
 
 
@@ -118,11 +137,12 @@ def test_signaled_command_keeps_exact_signal_separate(plan: IdentityPlan) -> Non
         Command(["/usr/bin/python3", "-c", "import os,signal; os.kill(os.getpid(), signal.SIGTERM)"]),
         plan,
     )
+    observation = _observation(result)
 
-    assert result.observation.wait is not None
-    assert result.observation.wait.kind is WaitKind.SIGNAL
-    assert result.observation.wait.value == signal.SIGTERM
-    assert result.observation.trusted_terminal
+    assert observation.wait is not None
+    assert observation.wait.kind is WaitKind.SIGNAL
+    assert observation.wait.value == signal.SIGTERM
+    assert observation.trusted_terminal
 
 
 def test_literal_arguments_are_not_reparsed(plan: IdentityPlan) -> None:
@@ -130,9 +150,10 @@ def test_literal_arguments_are_not_reparsed(plan: IdentityPlan) -> None:
     code = f"import sys;assert sys.argv[1:]=={arguments!r}"
 
     _, result, _ = _run(Command(["/usr/bin/python3", "-I", "-S", "-B", "-c", code, *arguments]), plan)
+    observation = _observation(result)
 
-    assert result.observation.wait == WaitFact(WaitKind.EXIT, 0)
-    assert result.observation.trusted_terminal
+    assert observation.wait == WaitFact(WaitKind.EXIT, 0)
+    assert observation.trusted_terminal
 
 
 @pytest.mark.parametrize("shell", [Shell.SH, Shell.BASH])
@@ -158,11 +179,12 @@ def test_memfd_script_separates_source_binary_input_and_streams(
         helper_runtime=helper_runtime,
         stdin=stdin,
     )
+    observation = _observation(result)
 
-    assert result.observation.wait is not None and result.observation.wait.value == 255
-    assert result.observation.stdout is not None and result.observation.stdout.data == stdout
-    assert result.observation.stderr is not None and result.observation.stderr.data == stderr
-    assert result.observation.trusted_terminal
+    assert observation.wait is not None and observation.wait.value == 255
+    assert observation.stdout is not None and observation.stdout.data == stdout
+    assert observation.stderr is not None and observation.stderr.data == stderr
+    assert observation.trusted_terminal
     assert source not in prepared.invocation.argv
 
 
@@ -177,11 +199,13 @@ def test_payload_environment_and_absolute_cwd_replace_helper_environment(
         cwd=str(tmp_path),
     )
     _, cwd_result, _ = _run(Command(["/bin/pwd"]), plan, cwd=str(tmp_path))
+    env_observation = _observation(env_result)
+    cwd_observation = _observation(cwd_result)
 
-    assert env_result.observation.stdout is not None
-    assert env_result.observation.stdout.data == b"ONLY_PAYLOAD=present\0"
-    assert cwd_result.observation.stdout is not None
-    assert cwd_result.observation.stdout.data == f"{tmp_path}\n".encode()
+    assert env_observation.stdout is not None
+    assert env_observation.stdout.data == b"ONLY_PAYLOAD=present\0"
+    assert cwd_observation.stdout is not None
+    assert cwd_observation.stdout.data == f"{tmp_path}\n".encode()
 
 
 def test_identity_mismatch_refuses_before_launch(plan: IdentityPlan) -> None:
@@ -192,7 +216,7 @@ def test_identity_mismatch_refuses_before_launch(plan: IdentityPlan) -> None:
     )
     _, result, _ = _run(Command(["/bin/true"]), mismatched)
 
-    observation = result.observation
+    observation = _observation(result)
     assert observation.trusted_terminal
     assert not observation.launching
     assert observation.wait is None
@@ -210,11 +234,12 @@ def test_unsupported_user_default_shell_refuses_without_fallback(plan: IdentityP
         pytest.skip("The local account has a supported default shell")
 
     _, result, _ = _run(Script("exit 0\n", Shell.USER_DEFAULT), plan)
+    observation = _observation(result)
 
-    assert result.observation.failure is not None
-    assert result.observation.failure.phase is FailurePhase.IDENTITY
-    assert result.observation.failure.code is FailureCode.SHELL
-    assert not result.observation.launching
+    assert observation.failure is not None
+    assert observation.failure.phase is FailurePhase.IDENTITY
+    assert observation.failure.code is FailureCode.SHELL
+    assert not observation.launching
 
 
 def test_capture_overflow_retains_limit_and_reports_truncation(plan: IdentityPlan) -> None:
@@ -224,15 +249,16 @@ def test_capture_overflow_retains_limit_and_reports_truncation(plan: IdentityPla
         plan,
         capture_limit=4_096,
     )
+    observation = _observation(result)
 
-    assert result.observation.failure is None
-    for stream, expected in ((result.observation.stdout, b"o"), (result.observation.stderr, b"e")):
+    assert observation.failure is None
+    for stream, expected in ((observation.stdout, b"o"), (observation.stderr, b"e")):
         assert stream is not None
         assert stream.data == expected * 4_096
         assert stream.retained == 4_096
         assert stream.truncated and not stream.complete
         assert stream.retention is StreamRetention.CAPTURED
-    assert result.observation.trusted_terminal
+    assert observation.trusted_terminal
 
 
 def test_sensitive_output_and_raw_reports_retain_no_canary(plan: IdentityPlan) -> None:
@@ -255,20 +281,22 @@ def test_sensitive_output_and_raw_reports_retain_no_canary(plan: IdentityPlan) -
         env={"SECRET": canary},
         sensitive=True,
     )
+    observation = _observation(result)
 
     assert canary not in repr(prepared)
     assert canary not in repr(result)
     assert canary not in prepared.invocation.argv
-    assert result.observation.wait is not None and result.observation.wait.value == 37
-    assert result.observation.stdout is not None and result.observation.stdout.data == b""
-    assert result.observation.stderr is not None and result.observation.stderr.data == b""
-    assert result.observation.stdout.retention is StreamRetention.SUPPRESSED
+    assert observation.wait is not None and observation.wait.value == 37
+    assert observation.stdout is not None and observation.stdout.data == b""
+    assert observation.stderr is not None and observation.stderr.data == b""
+    assert observation.stdout.retention is StreamRetention.SUPPRESSED
     assert carrier.last_report is not None
     assert carrier.last_report.stdout.retention is carrier.last_report.stderr.retention is Retention.DELIVERED
     assert carrier.last_report.stdout.data == carrier.last_report.stderr.data == b""
     assert canary not in repr(carrier.last_report)
-    with pytest.raises(Exception) as caught:
+    with pytest.raises(ValidationError) as caught:
         execute_inline_candidate(carrier, prepared, deadline=Deadline.after(1))
+    assert carrier.calls == 1
     assert canary not in str(caught.value) and canary not in repr(caught.value)
 
 
@@ -278,8 +306,9 @@ def test_discard_reports_safe_stream_facts_without_data(plan: IdentityPlan) -> N
         plan,
         capture_limit=None,
     )
+    observation = _observation(result)
 
-    for stream in (result.observation.stdout, result.observation.stderr):
+    for stream in (observation.stdout, observation.stderr):
         assert stream is not None
         assert stream.data == b"" and stream.retained == 0
         assert stream.complete and not stream.truncated
@@ -293,6 +322,7 @@ def test_script_helper_creates_no_directory_entry(plan: IdentityPlan, tmp_path: 
         plan,
         cwd=str(tmp_path),
     )
+    observation = _observation(result)
 
-    assert result.observation.trusted_terminal
+    assert observation.trusted_terminal
     assert set(tmp_path.iterdir()) == before

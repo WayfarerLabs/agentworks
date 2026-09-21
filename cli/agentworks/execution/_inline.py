@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ValidationError
 from agentworks.execution._evidence_wire import FrameReader
 from agentworks.execution._helper_identity import IdentityExpectation
-from agentworks.execution._helper_launcher import IdentityPlan, build_helper_argv
 from agentworks.execution._inline_bundle import FIXED_SOURCE
 from agentworks.execution._inline_observer import InlineObservation, InlineObserver
 from agentworks.execution._inline_request import (
@@ -21,6 +20,13 @@ from agentworks.execution._inline_request import (
     OutputMode,
     ScriptShell,
     encode_manifest,
+)
+from agentworks.execution._runtime_prerequisite import (
+    RuntimePrefixSink,
+    RuntimePrerequisiteObservation,
+    RuntimePrerequisiteState,
+    RuntimeSelection,
+    build_runtime_identity_helper_argv,
 )
 from agentworks.execution.carrier import (
     CarrierIO,
@@ -36,9 +42,8 @@ from agentworks.execution.models import Command, Script, Shell
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution.carrier import Carrier, Deadline, ExitStatus
-
-_DEFAULT_RUNTIME = "/usr/bin/python3"
 
 
 class _DiscardSink:
@@ -56,6 +61,7 @@ class PreparedInlineCandidate:
     invocation: PreparedInvocation
     io: CarrierIO
     nonce: str
+    _runtime: RuntimePrefixSink = field(repr=False)
     _reader: FrameReader = field(repr=False)
     _observer: InlineObserver = field(repr=False)
     _claimed: bool = field(default=False, init=False, repr=False)
@@ -68,13 +74,14 @@ class PreparedInlineCandidate:
 
 @dataclass(frozen=True, slots=True)
 class InlineCandidateResult:
-    """Separate carrier and helper observations, never application success."""
+    """Separate carrier, runtime and helper observations, never application success."""
 
     dispatch: Dispatch
     carrier_completion: ExitStatus | None
     carrier_local_status: int | None
     carrier_failure: Failure | None
-    observation: InlineObservation
+    runtime_prerequisite: RuntimePrerequisiteObservation
+    observation: InlineObservation | None
 
 
 def _utf8(value: str) -> bytes:
@@ -174,11 +181,16 @@ def prepare_inline_candidate(
     cwd: str | None = None,
     capture_limit: int | None = 4_096,
     sensitive: bool = False,
-    runtime_path: str = _DEFAULT_RUNTIME,
+    runtime_selection: RuntimeSelection,
 ) -> PreparedInlineCandidate:
     """Validate all payload data and build one file-free Linux helper attempt."""
     nonce = secrets.token_hex(16)
-    fixed_argv = build_helper_argv(plan, runtime_path=runtime_path, fixed_source=FIXED_SOURCE, nonce=nonce)
+    fixed_argv, candidates, system_shim = build_runtime_identity_helper_argv(
+        plan,
+        selection=runtime_selection,
+        fixed_source=FIXED_SOURCE,
+        nonce=nonce,
+    )
     if cwd is not None:
         _utf8(cwd)
         if not posixpath.isabs(cwd):
@@ -214,14 +226,16 @@ def prepare_inline_candidate(
 
     observer = InlineObserver(output_mode, retained_limit)
     reader = FrameReader(nonce, observer.accept)
+    runtime = RuntimePrefixSink(nonce, candidates, reader, system_shim)
     return PreparedInlineCandidate(
         invocation=PreparedInvocation(fixed_argv),
         io=CarrierIO(
             input=FiniteInput(manifest_data, sensitive=sensitive),
-            output=SinkOutput(reader, _DiscardSink(), require_live=False),
+            output=SinkOutput(runtime, _DiscardSink(), require_live=False),
             sensitive=sensitive,
         ),
         nonce=nonce,
+        _runtime=runtime,
         _reader=reader,
         _observer=observer,
     )
@@ -237,17 +251,26 @@ def execute_inline_candidate(
     prepared.claim()
     try:
         report = carrier.execute(prepared.invocation, io=prepared.io, deadline=deadline)
+        runtime_prerequisite = prepared._runtime.observation
+        if runtime_prerequisite.state is RuntimePrerequisiteState.READY:
+            prepared._reader.finish()
+            delivered = (
+                report.stdout.retention is Retention.DELIVERED and report.stderr.retention is Retention.DELIVERED
+            )
+            observation = prepared._observer.finish(
+                prepared._reader.error,
+                carrier_stdout_complete=delivered and report.stdout.complete,
+            )
+        else:
+            observation = None
+        return InlineCandidateResult(
+            dispatch=report.dispatch,
+            carrier_completion=report.completion,
+            carrier_local_status=report.local_status,
+            carrier_failure=report.failure,
+            runtime_prerequisite=runtime_prerequisite,
+            observation=observation,
+        )
     finally:
         prepared._reader.finish()
-    delivered = report.stdout.retention is Retention.DELIVERED and report.stderr.retention is Retention.DELIVERED
-    observation = prepared._observer.finish(
-        prepared._reader.error,
-        carrier_stdout_complete=delivered and report.stdout.complete,
-    )
-    return InlineCandidateResult(
-        dispatch=report.dispatch,
-        carrier_completion=report.completion,
-        carrier_local_status=report.local_status,
-        carrier_failure=report.failure,
-        observation=observation,
-    )
+        prepared._runtime.clear()

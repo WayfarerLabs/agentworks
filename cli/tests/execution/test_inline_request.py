@@ -23,11 +23,13 @@ from agentworks.execution._inline_request import (
     ManifestErrorCode,
     decode_manifest,
 )
+from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution.carrier import FiniteInput
 from agentworks.execution.carriers.ssh.connection import SSHConnection, build_ssh_argv
 from agentworks.execution.models import Command, Script, Shell
 
 NONCE = "0123456789abcdef0123456789abcdef"
+RUNTIME_SELECTION = RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3")
 
 
 def _exception_graph(error: BaseException) -> list[BaseException]:
@@ -60,6 +62,7 @@ def test_canonical_manifest_is_closed_ascii_and_keeps_payload_out_of_helper_argv
     prepared = prepare_inline_candidate(
         Command(["/bin/tool", canary]),
         plan=plan,
+        runtime_selection=RUNTIME_SELECTION,
         stdin=canary.encode(),
         env={"VALUE": canary},
         cwd=f"/{canary}",
@@ -95,7 +98,11 @@ def test_canonical_manifest_is_closed_ascii_and_keeps_payload_out_of_helper_argv
 
 
 def test_complete_inline_helper_fits_qga_and_windows_command_bounds(plan: IdentityPlan) -> None:
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
+    prepared = prepare_inline_candidate(
+        Command(["/bin/true"]),
+        plan=plan,
+        runtime_selection=RUNTIME_SELECTION,
+    )
     assert isinstance(prepared.io.input, FiniteInput)
     input_data = prepared.io.input.data
     qga_body = json.dumps({"command": prepared.invocation.argv, "input-data": input_data.decode("ascii")}).encode(
@@ -176,19 +183,37 @@ def test_boundary_errors_drop_payload_bearing_exception_context(plan: IdentityPl
         (lambda: decode_manifest(f'{{"{canary}":'.encode()), ManifestError),
         (lambda: parse_wait(f'{{"kind":"{canary}","value":0}}'.encode()), ControlError),
         (
-            lambda: prepare_inline_candidate(Command(["/bin/echo", f"{canary}\ud800"]), plan=plan),
+            lambda: prepare_inline_candidate(
+                Command(["/bin/echo", f"{canary}\ud800"]),
+                plan=plan,
+                runtime_selection=RUNTIME_SELECTION,
+            ),
             ValidationError,
         ),
         (
-            lambda: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, env={f"{canary}-": "x"}),
+            lambda: prepare_inline_candidate(
+                Command(["/bin/true"]),
+                plan=plan,
+                runtime_selection=RUNTIME_SELECTION,
+                env={f"{canary}-": "x"},
+            ),
             ValidationError,
         ),
         (
-            lambda: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, env=BrokenMapping()),
+            lambda: prepare_inline_candidate(
+                Command(["/bin/true"]),
+                plan=plan,
+                runtime_selection=RUNTIME_SELECTION,
+                env=BrokenMapping(),
+            ),
             ValidationError,
         ),
         (
-            lambda: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, runtime_path=f"/tmp/{canary}=python"),
+            lambda: prepare_inline_candidate(
+                Command(["/bin/true"]),
+                plan=plan,
+                runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, f"/tmp/{canary}\ud800"),
+            ),
             ValidationError,
         ),
     ):
@@ -205,21 +230,46 @@ def test_boundary_errors_drop_payload_bearing_exception_context(plan: IdentityPl
 @pytest.mark.parametrize(
     "build",
     [
-        lambda plan: prepare_inline_candidate(Command(["/bin/echo", "bad\0arg"]), plan=plan),
-        lambda plan: prepare_inline_candidate(Command(["/bin/echo", "\ud800"]), plan=plan),
-        lambda plan: prepare_inline_candidate(Script("bad\0source", Shell.SH), plan=plan),
-        lambda plan: prepare_inline_candidate(Script("\ud800", Shell.SH), plan=plan),
-        lambda plan: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, env={"BAD-NAME": "x"}),
-        lambda plan: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, env={"ENV": "x"}),
-        lambda plan: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, env={"_agw_x": "x"}),
-        lambda plan: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, env={"VALUE": "bad\0"}),
-        lambda plan: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, cwd="relative"),
-        lambda plan: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, cwd="/bad\0cwd"),
-        lambda plan: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, capture_limit=4_097),
-        lambda plan: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, capture_limit=True),
-        lambda plan: prepare_inline_candidate(Command(["/bin/true"]), plan=plan, runtime_path="python3"),
         lambda plan: prepare_inline_candidate(
-            Command(["/bin/true"]), plan=plan, runtime_path="/tmp/runtime=payload-canary"
+            Command(["/bin/echo", "bad\0arg"]), plan=plan, runtime_selection=RUNTIME_SELECTION
+        ),
+        lambda plan: prepare_inline_candidate(
+            Command(["/bin/echo", "\ud800"]), plan=plan, runtime_selection=RUNTIME_SELECTION
+        ),
+        lambda plan: prepare_inline_candidate(
+            Script("bad\0source", Shell.SH), plan=plan, runtime_selection=RUNTIME_SELECTION
+        ),
+        lambda plan: prepare_inline_candidate(
+            Script("\ud800", Shell.SH), plan=plan, runtime_selection=RUNTIME_SELECTION
+        ),
+        lambda plan: prepare_inline_candidate(
+            Command(["/bin/true"]), plan=plan, runtime_selection=RUNTIME_SELECTION, env={"BAD-NAME": "x"}
+        ),
+        lambda plan: prepare_inline_candidate(
+            Command(["/bin/true"]), plan=plan, runtime_selection=RUNTIME_SELECTION, env={"ENV": "x"}
+        ),
+        lambda plan: prepare_inline_candidate(
+            Command(["/bin/true"]), plan=plan, runtime_selection=RUNTIME_SELECTION, env={"_agw_x": "x"}
+        ),
+        lambda plan: prepare_inline_candidate(
+            Command(["/bin/true"]), plan=plan, runtime_selection=RUNTIME_SELECTION, env={"VALUE": "bad\0"}
+        ),
+        lambda plan: prepare_inline_candidate(
+            Command(["/bin/true"]), plan=plan, runtime_selection=RUNTIME_SELECTION, cwd="relative"
+        ),
+        lambda plan: prepare_inline_candidate(
+            Command(["/bin/true"]), plan=plan, runtime_selection=RUNTIME_SELECTION, cwd="/bad\0cwd"
+        ),
+        lambda plan: prepare_inline_candidate(
+            Command(["/bin/true"]), plan=plan, runtime_selection=RUNTIME_SELECTION, capture_limit=4_097
+        ),
+        lambda plan: prepare_inline_candidate(
+            Command(["/bin/true"]), plan=plan, runtime_selection=RUNTIME_SELECTION, capture_limit=True
+        ),
+        lambda plan: prepare_inline_candidate(
+            Command(["/bin/true"]),
+            plan=plan,
+            runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, "python3"),
         ),
         lambda plan: prepare_inline_candidate(
             Command(["/bin/true"]),
@@ -227,6 +277,7 @@ def test_boundary_errors_drop_payload_bearing_exception_context(plan: IdentityPl
                 IdentityExpectation(plan.expected.euid, plan.expected.egid, (plan.expected.egid, plan.expected.egid)),
                 IdentityMode.DIRECT,
             ),
+            runtime_selection=RUNTIME_SELECTION,
         ),
     ],
 )
@@ -248,12 +299,17 @@ def test_host_rejects_invalid_text_options_and_identity_before_dispatch(
 )
 def test_host_refuses_unsupported_startup_modes(invocation: Script, plan: IdentityPlan) -> None:
     with pytest.raises(ValidationError):
-        prepare_inline_candidate(invocation, plan=plan)
+        prepare_inline_candidate(invocation, plan=plan, runtime_selection=RUNTIME_SELECTION)
 
 
 def test_host_refuses_oversized_manifest_without_dispatch(plan: IdentityPlan) -> None:
     with pytest.raises(ValidationError) as caught:
-        prepare_inline_candidate(Command(["/bin/true"]), plan=plan, stdin=b"x" * MAX_MANIFEST_BYTES)
+        prepare_inline_candidate(
+            Command(["/bin/true"]),
+            plan=plan,
+            runtime_selection=RUNTIME_SELECTION,
+            stdin=b"x" * MAX_MANIFEST_BYTES,
+        )
 
     assert "x" * 64 not in str(caught.value)
 
@@ -266,9 +322,8 @@ def test_host_refuses_oversized_manifest_without_dispatch(plan: IdentityPlan) ->
         (b"x" * (MAX_MANIFEST_BYTES + 1), FailureCode.OVERSIZED),
     ],
 )
-def test_actual_guest_revalidates_untrusted_manifest(manifest: bytes, code: FailureCode, plan: IdentityPlan) -> None:
-    prepared = prepare_inline_candidate(Command(["/bin/true"]), plan=plan)
-    invocation = (*prepared.invocation.argv[:-1], NONCE)
+def test_actual_guest_revalidates_untrusted_manifest(manifest: bytes, code: FailureCode) -> None:
+    invocation = (sys.executable, "-I", "-S", "-B", "-c", FIXED_SOURCE, NONCE)
 
     completed = subprocess.run(invocation, input=manifest, capture_output=True, timeout=10, check=True)
     frames: list[Frame] = []
