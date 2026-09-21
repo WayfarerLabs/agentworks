@@ -179,10 +179,26 @@ acceptance and native integration remain open; these private plans are not grant
 activate permissions.
 
 `_account.resolve_account` discovers a core-bound account's UID, primary GID and normalized groups
-through one read-only carrier attempt under the delivery identity. It accepts an already-selected
-compatible Python path, changes no credentials and creates no files. The account name stays in
-sensitive stdin. The fixed helper queries the Linux or Darwin account database; it does not export
-passwords, account descriptions, home directories or shells. Native Darwin acceptance remains open.
+through one read-only carrier attempt under the delivery identity. `RuntimeSelection` explicitly
+binds the destination OS and an optional sole interpreter path. Linux otherwise selects
+`/usr/bin/python3`; Darwin checks `/opt/homebrew/bin/python3` then `/usr/local/bin/python3`. The
+first existing entry wins, including a broken link; an unusable selection never triggers fallback.
+Darwin rejects aliases of the system Python shim without executing it. Selection installs nothing
+and does not invoke developer-tools discovery. Native Darwin acceptance remains open.
+
+In that same invocation, an isolated Python trampoline checks version 3.11 or newer and the common
+bundle-loader imports before entering the account helper. One bounded nonce-bound prerequisite
+record precedes the account response; selection and admission leave sensitive stdin unchanged. The
+helper changes no credentials and creates no files. It queries the Linux or Darwin account database
+without exporting passwords, account descriptions, home directories or shells.
+
+The result separates the runtime prerequisite observation, carrier facts and optional account
+observation. A ready prerequisite record admits the loader, not account success. Missing, shim,
+unusable, unsupported-version and missing-module records give closed diagnostics; absent or invalid
+records remain unknown. A complete received prerequisite refusal survives a concurrent carrier input
+failure, but establishes neither process quiescence nor permission to retry. The account observation
+is absent unless runtime admission occurred. Other private helper families have not yet adopted this
+prerequisite boundary.
 
 Both request and reply are bounded to 32 KiB. A complete, nonce-bound response and complete
 delivered streams are required to return identity metadata. Missing accounts and closed helper

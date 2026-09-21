@@ -670,6 +670,11 @@ Begin integration with the two private account lookups, then adopt the same boun
 inline and terminal paths. Their distinct operation protocols and evidence rules remain unchanged.
 Native macOS acceptance and existing-guest bootstrap remain separate gates.
 
+The private account implementation now uses this boundary for both lookup kinds. Its local tests
+exercise Linux selection, real Python 3.11 lookup and fixture-based Darwin selection, not native
+macOS acceptance. File, inline and terminal integration remain unimplemented; the original runtime
+experiment above remains separate evidence rather than production dispatch.
+
 ## Public result and check behavior
 
 `ExecutionResult` carries `DispatchEvidence`, application state, optional application status,
