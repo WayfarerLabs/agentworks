@@ -20,6 +20,24 @@ from agentworks.execution._file_json import (
     _prepare_json_update,
     _PreparedJsonUpdate,
 )
+from agentworks.execution._file_metadata_protocol import FileMetadataOperation
+from agentworks.execution._file_operations import (
+    FileInventoryBinding,
+    FileMetadataBinding,
+    FileRemoveBinding,
+    FileStatBinding,
+    OwnedFileBinding,
+    OwnedFileControlFact,
+    OwnedFileOutcome,
+    _prepare_inventory,
+    _prepare_metadata,
+    _prepare_remove,
+    _prepare_stat,
+    _PreparedInventory,
+    _PreparedMetadata,
+    _PreparedRemove,
+    _PreparedStat,
+)
 from agentworks.execution._file_upload import (
     FileUploadBinding,
     FileUploadControlFact,
@@ -29,7 +47,12 @@ from agentworks.execution._file_upload import (
 )
 
 if TYPE_CHECKING:
+    from agentworks.execution._file_inventory_exchange import FileInventoryCandidateResult
+    from agentworks.execution._file_metadata_exchange import FileMetadataCandidateResult
+    from agentworks.execution._file_object_exchange import FileObjectCandidateResult
+    from agentworks.execution._file_objects import FileKind
     from agentworks.execution._file_publication import Create, CreateMetadata, Match, Replace
+    from agentworks.execution._file_stat import FileRevision
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution._runtime_prerequisite import RuntimeSelection
     from agentworks.execution.carrier import ByteSink, ByteSource, Carrier, Deadline
@@ -80,6 +103,31 @@ class UnfinishedFileJsonUpdate:
 
 type _ActiveFileJsonUpdate = _ActiveFileCall[FileJsonBinding, _PreparedJsonUpdate, FileJsonOutcome]
 
+type _ActiveFileStat = _ActiveFileCall[FileStatBinding, _PreparedStat, OwnedFileOutcome[FileObjectCandidateResult]]
+type _ActiveFileInventory = _ActiveFileCall[
+    FileInventoryBinding, _PreparedInventory, OwnedFileOutcome[FileInventoryCandidateResult]
+]
+type _ActiveFileRemove = _ActiveFileCall[
+    FileRemoveBinding, _PreparedRemove, OwnedFileOutcome[FileObjectCandidateResult]
+]
+type _ActiveFileMetadata = _ActiveFileCall[
+    FileMetadataBinding, _PreparedMetadata, OwnedFileOutcome[FileMetadataCandidateResult]
+]
+type _OwnedFileOutcome = (
+    OwnedFileOutcome[FileObjectCandidateResult]
+    | OwnedFileOutcome[FileInventoryCandidateResult]
+    | OwnedFileOutcome[FileMetadataCandidateResult]
+)
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class UnfinishedOwnedFile:
+    """Captured custody for one single-file call with unfinished responsibility."""
+
+    carrier: Carrier = field(repr=False)
+    binding: OwnedFileBinding
+    outcome: _OwnedFileOutcome = field(repr=False)
+
 
 class FileOperation:
     """One core file state shared by all views of an existing owner."""
@@ -92,6 +140,11 @@ class FileOperation:
         self._unfinished_uploads: list[UnfinishedFileUpload] = []
         self._active_json_updates: dict[int, _ActiveFileJsonUpdate] = {}
         self._unfinished_json_updates: list[UnfinishedFileJsonUpdate] = []
+        self._active_stats: dict[int, _ActiveFileStat] = {}
+        self._active_inventories: dict[int, _ActiveFileInventory] = {}
+        self._active_removals: dict[int, _ActiveFileRemove] = {}
+        self._active_metadata: dict[int, _ActiveFileMetadata] = {}
+        self._unfinished_owned_files: list[UnfinishedOwnedFile] = []
 
     @property
     def active_downloads(self) -> tuple[_ActiveFileDownload, ...]:
@@ -116,6 +169,26 @@ class FileOperation:
     @property
     def unfinished_json_updates(self) -> tuple[UnfinishedFileJsonUpdate, ...]:
         return tuple(self._unfinished_json_updates)
+
+    @property
+    def active_stats(self) -> tuple[_ActiveFileStat, ...]:
+        return tuple(self._active_stats.values())
+
+    @property
+    def active_inventories(self) -> tuple[_ActiveFileInventory, ...]:
+        return tuple(self._active_inventories.values())
+
+    @property
+    def active_removals(self) -> tuple[_ActiveFileRemove, ...]:
+        return tuple(self._active_removals.values())
+
+    @property
+    def active_metadata(self) -> tuple[_ActiveFileMetadata, ...]:
+        return tuple(self._active_metadata.values())
+
+    @property
+    def unfinished_owned_files(self) -> tuple[UnfinishedOwnedFile, ...]:
+        return tuple(self._unfinished_owned_files)
 
     def download(
         self,
@@ -280,6 +353,300 @@ class FileOperation:
             raise
 
         self._capture_json_update(active, outcome)
+        return outcome
+
+    def stat(
+        self,
+        carrier: Carrier,
+        *,
+        trusted_root_path: str,
+        relative_path: str,
+        plan: IdentityPlan,
+        deadline: Deadline,
+        runtime_selection: RuntimeSelection,
+    ) -> OwnedFileOutcome[FileObjectCandidateResult]:
+        """Run and capture one object observation under a whole-call borrow."""
+        borrow = self._owner.borrow()
+        try:
+            prepared = _prepare_stat(
+                carrier,
+                trusted_root_path=trusted_root_path,
+                relative_path=relative_path,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=runtime_selection,
+                borrow=borrow,
+            )
+            active: _ActiveFileStat = _ActiveFileCall(carrier, prepared.binding, borrow, prepared)
+        except BaseException:
+            borrow.close()
+            raise
+        try:
+            self._active_stats[id(active)] = active
+        except BaseException:
+            borrow.close()
+            raise
+        try:
+            outcome = prepared.run()
+        except BaseException as control:
+            fact = control.__cause__
+            if isinstance(fact, OwnedFileControlFact) and prepared.state.control_outcome is fact.outcome:
+                try:
+                    active.outcome = fact.outcome
+                    if fact.outcome.requires_owner_retention:
+                        self._unfinished_owned_files.append(
+                            UnfinishedOwnedFile(active.carrier, active.binding, fact.outcome)
+                        )
+                    active.borrow.close()
+                    self._active_stats.pop(id(active))
+                except BaseException:
+                    raise control from fact
+            raise
+        active.outcome = outcome
+        if outcome.requires_owner_retention:
+            self._unfinished_owned_files.append(UnfinishedOwnedFile(active.carrier, active.binding, outcome))
+        active.borrow.close()
+        self._active_stats.pop(id(active))
+        return outcome
+
+    def list_directory(
+        self,
+        carrier: Carrier,
+        *,
+        trusted_root_path: str,
+        relative_path: str,
+        max_entries: int,
+        max_depth: int,
+        max_encoded_bytes: int,
+        plan: IdentityPlan,
+        deadline: Deadline,
+        runtime_selection: RuntimeSelection,
+    ) -> OwnedFileOutcome[FileInventoryCandidateResult]:
+        """Run and capture one directory inventory under a whole-call borrow."""
+        borrow = self._owner.borrow()
+        try:
+            prepared = _prepare_inventory(
+                carrier,
+                trusted_root_path=trusted_root_path,
+                relative_path=relative_path,
+                max_entries=max_entries,
+                max_depth=max_depth,
+                max_encoded_bytes=max_encoded_bytes,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=runtime_selection,
+                borrow=borrow,
+            )
+            active: _ActiveFileInventory = _ActiveFileCall(carrier, prepared.binding, borrow, prepared)
+        except BaseException:
+            borrow.close()
+            raise
+        try:
+            self._active_inventories[id(active)] = active
+        except BaseException:
+            borrow.close()
+            raise
+        try:
+            outcome = prepared.run()
+        except BaseException as control:
+            fact = control.__cause__
+            if isinstance(fact, OwnedFileControlFact) and prepared.state.control_outcome is fact.outcome:
+                try:
+                    active.outcome = fact.outcome
+                    if fact.outcome.requires_owner_retention:
+                        self._unfinished_owned_files.append(
+                            UnfinishedOwnedFile(active.carrier, active.binding, fact.outcome)
+                        )
+                    active.borrow.close()
+                    self._active_inventories.pop(id(active))
+                except BaseException:
+                    raise control from fact
+            raise
+        active.outcome = outcome
+        if outcome.requires_owner_retention:
+            self._unfinished_owned_files.append(UnfinishedOwnedFile(active.carrier, active.binding, outcome))
+        active.borrow.close()
+        self._active_inventories.pop(id(active))
+        return outcome
+
+    def remove(
+        self,
+        carrier: Carrier,
+        *,
+        trusted_root_path: str,
+        relative_path: str,
+        expected_kind: FileKind,
+        expected_revision: FileRevision,
+        plan: IdentityPlan,
+        deadline: Deadline,
+        runtime_selection: RuntimeSelection,
+    ) -> OwnedFileOutcome[FileObjectCandidateResult]:
+        """Run and capture one conditional removal under a whole-call borrow."""
+        borrow = self._owner.borrow()
+        try:
+            prepared = _prepare_remove(
+                carrier,
+                trusted_root_path=trusted_root_path,
+                relative_path=relative_path,
+                expected_kind=expected_kind,
+                expected_revision=expected_revision,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=runtime_selection,
+                borrow=borrow,
+            )
+            active: _ActiveFileRemove = _ActiveFileCall(carrier, prepared.binding, borrow, prepared)
+        except BaseException:
+            borrow.close()
+            raise
+        try:
+            self._active_removals[id(active)] = active
+        except BaseException:
+            borrow.close()
+            raise
+        try:
+            outcome = prepared.run()
+        except BaseException as control:
+            fact = control.__cause__
+            if isinstance(fact, OwnedFileControlFact) and prepared.state.control_outcome is fact.outcome:
+                try:
+                    active.outcome = fact.outcome
+                    if fact.outcome.requires_owner_retention:
+                        self._unfinished_owned_files.append(
+                            UnfinishedOwnedFile(active.carrier, active.binding, fact.outcome)
+                        )
+                    active.borrow.close()
+                    self._active_removals.pop(id(active))
+                except BaseException:
+                    raise control from fact
+            raise
+        active.outcome = outcome
+        if outcome.requires_owner_retention:
+            self._unfinished_owned_files.append(UnfinishedOwnedFile(active.carrier, active.binding, outcome))
+        active.borrow.close()
+        self._active_removals.pop(id(active))
+        return outcome
+
+    def set_metadata(
+        self,
+        carrier: Carrier,
+        *,
+        trusted_root_path: str,
+        relative_path: str,
+        trusted_owner: str,
+        trusted_group: str,
+        mode: int,
+        plan: IdentityPlan,
+        deadline: Deadline,
+        runtime_selection: RuntimeSelection,
+    ) -> OwnedFileOutcome[FileMetadataCandidateResult]:
+        """Resolve and capture one metadata convergence under one borrow."""
+        borrow = self._owner.borrow()
+        try:
+            prepared = _prepare_metadata(
+                carrier,
+                operation=FileMetadataOperation.SET_METADATA,
+                trusted_root_path=trusted_root_path,
+                relative_path=relative_path,
+                trusted_owner=trusted_owner,
+                trusted_group=trusted_group,
+                mode=mode,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=runtime_selection,
+                borrow=borrow,
+            )
+            active: _ActiveFileMetadata = _ActiveFileCall(carrier, prepared.binding, borrow, prepared)
+        except BaseException:
+            borrow.close()
+            raise
+        try:
+            self._active_metadata[id(active)] = active
+        except BaseException:
+            borrow.close()
+            raise
+        try:
+            outcome = prepared.run()
+        except BaseException as control:
+            fact = control.__cause__
+            if isinstance(fact, OwnedFileControlFact) and prepared.state.control_outcome is fact.outcome:
+                try:
+                    active.outcome = fact.outcome
+                    if fact.outcome.requires_owner_retention:
+                        self._unfinished_owned_files.append(
+                            UnfinishedOwnedFile(active.carrier, active.binding, fact.outcome)
+                        )
+                    active.borrow.close()
+                    self._active_metadata.pop(id(active))
+                except BaseException:
+                    raise control from fact
+            raise
+        active.outcome = outcome
+        if outcome.requires_owner_retention:
+            self._unfinished_owned_files.append(UnfinishedOwnedFile(active.carrier, active.binding, outcome))
+        active.borrow.close()
+        self._active_metadata.pop(id(active))
+        return outcome
+
+    def ensure_directory(
+        self,
+        carrier: Carrier,
+        *,
+        trusted_root_path: str,
+        relative_path: str,
+        trusted_owner: str,
+        trusted_group: str,
+        mode: int,
+        plan: IdentityPlan,
+        deadline: Deadline,
+        runtime_selection: RuntimeSelection,
+    ) -> OwnedFileOutcome[FileMetadataCandidateResult]:
+        """Resolve and capture one directory convergence under one borrow."""
+        borrow = self._owner.borrow()
+        try:
+            prepared = _prepare_metadata(
+                carrier,
+                operation=FileMetadataOperation.ENSURE_DIRECTORY,
+                trusted_root_path=trusted_root_path,
+                relative_path=relative_path,
+                trusted_owner=trusted_owner,
+                trusted_group=trusted_group,
+                mode=mode,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=runtime_selection,
+                borrow=borrow,
+            )
+            active: _ActiveFileMetadata = _ActiveFileCall(carrier, prepared.binding, borrow, prepared)
+        except BaseException:
+            borrow.close()
+            raise
+        try:
+            self._active_metadata[id(active)] = active
+        except BaseException:
+            borrow.close()
+            raise
+        try:
+            outcome = prepared.run()
+        except BaseException as control:
+            fact = control.__cause__
+            if isinstance(fact, OwnedFileControlFact) and prepared.state.control_outcome is fact.outcome:
+                try:
+                    active.outcome = fact.outcome
+                    if fact.outcome.requires_owner_retention:
+                        self._unfinished_owned_files.append(
+                            UnfinishedOwnedFile(active.carrier, active.binding, fact.outcome)
+                        )
+                    active.borrow.close()
+                    self._active_metadata.pop(id(active))
+                except BaseException:
+                    raise control from fact
+            raise
+        active.outcome = outcome
+        if outcome.requires_owner_retention:
+            self._unfinished_owned_files.append(UnfinishedOwnedFile(active.carrier, active.binding, outcome))
+        active.borrow.close()
+        self._active_metadata.pop(id(active))
         return outcome
 
     def _capture(self, active: _ActiveFileDownload, outcome: FileDownloadOutcome) -> None:
