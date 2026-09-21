@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 import agentworks.execution._publication_receipt as publication_receipt
+import agentworks.execution._scratch as scratch_module
 import agentworks.execution._scratch_receipt as scratch_receipt_module
 from agentworks.execution._publication_receipt import (
     PublicationReceiptError,
@@ -100,7 +101,7 @@ def test_lost_ack_reconciles_exact_cleanup_ownership(tmp_path: Path) -> None:
     assert stat.S_IMODE(record.stat().st_mode) == publication_receipt._RECORD_MODE
     assert json.dumps(json.loads(encoded), ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode() == encoded
 
-    recovered = reconcile_publication_stage(scratch_parent_fd, ready, publication_parent_fd)
+    recovered = reconcile_publication_stage(scratch_parent_fd, ready._reference, publication_parent_fd)
     assert isinstance(recovered, PublicationStageHistoricalOwnership)
     assert recovered._ownership == ownership
     cleanup_publication_stage(scratch_parent_fd, publication_parent_fd, recovered)
@@ -146,17 +147,17 @@ def test_partial_record_and_absent_stage_are_uncertain(tmp_path: Path) -> None:
     record.write_bytes(record.read_bytes()[:5])
     record.chmod(publication_receipt._RECORD_MODE)
 
-    partial = reconcile_publication_stage(scratch_parent_fd, ready, publication_parent_fd)
+    partial = reconcile_publication_stage(scratch_parent_fd, ready._reference, publication_parent_fd)
     assert isinstance(partial, PublicationStageOwnershipUncertainty)
     assert (destination / publication_stage_name(token)).exists()
 
     record.unlink()
-    missing = reconcile_publication_stage(scratch_parent_fd, ready, publication_parent_fd)
+    missing = reconcile_publication_stage(scratch_parent_fd, ready._reference, publication_parent_fd)
     assert isinstance(missing, PublicationStageOwnershipUncertainty)
     record.write_bytes(publication_receipt._encode_record(ownership))
     record.chmod(publication_receipt._RECORD_MODE)
     (destination / publication_stage_name(token)).unlink()
-    absent = reconcile_publication_stage(scratch_parent_fd, ready, publication_parent_fd)
+    absent = reconcile_publication_stage(scratch_parent_fd, ready._reference, publication_parent_fd)
     assert isinstance(absent, PublicationStageOwnershipUncertainty)
     record.unlink()
     cleanup_scratch(scratch_parent_fd, ready)
@@ -184,7 +185,7 @@ def test_changed_stage_identity_refuses_cleanup_and_leaves_unrelated_files(tmp_p
     else:
         os.link(stage, saved)
 
-    reconciled = reconcile_publication_stage(scratch_parent_fd, ready, publication_parent_fd)
+    reconciled = reconcile_publication_stage(scratch_parent_fd, ready._reference, publication_parent_fd)
     assert isinstance(reconciled, PublicationStageOwnershipUncertainty)
     with pytest.raises(PublicationReceiptError) as raised:
         cleanup_publication_stage(scratch_parent_fd, publication_parent_fd, ownership)
@@ -220,7 +221,7 @@ def test_reconciliation_requires_original_destination_parent(tmp_path: Path) -> 
     ownership, stage_fd = _record_stage(scratch_parent_fd, ready, publication_parent_fd)
     os.close(stage_fd)
 
-    result = reconcile_publication_stage(scratch_parent_fd, ready, other_parent_fd)
+    result = reconcile_publication_stage(scratch_parent_fd, ready._reference, other_parent_fd)
     assert isinstance(result, PublicationStageOwnershipUncertainty)
     cleanup_publication_stage(scratch_parent_fd, publication_parent_fd, ownership)
     cleanup_scratch(scratch_parent_fd, ready)
@@ -390,6 +391,163 @@ def test_expiry_after_record_mutation_carries_exact_cleanup_debt(
     os.close(stage_fd)
     assert admission.close() is None
     cleanup_publication_stage(scratch_parent_fd, publication_parent_fd, debt)
+    cleanup_scratch(scratch_parent_fd, ready)
+    os.close(publication_parent_fd)
+    os.close(scratch_parent_fd)
+
+
+def test_reconciliation_uses_original_reference_without_ready_content_proof(tmp_path: Path) -> None:
+    scratch = tmp_path / "scratch"
+    destination = tmp_path / "destination"
+    scratch.mkdir()
+    destination.mkdir()
+    scratch_parent_fd = _open_parent(scratch)
+    publication_parent_fd = _open_parent(destination)
+    token = bytes.fromhex("0b" * 16)
+    ready = _ready_scratch(scratch_parent_fd, token)
+    reference = ready._reference
+    ownership, stage_fd = _record_stage(scratch_parent_fd, ready, publication_parent_fd)
+    os.close(stage_fd)
+    data = scratch / scratch_name(token) / "data"
+    data.write_bytes(b"changed")
+
+    recovered = reconcile_publication_stage(scratch_parent_fd, reference, publication_parent_fd)
+    assert isinstance(recovered, PublicationStageHistoricalOwnership)
+    cleanup_publication_stage(scratch_parent_fd, publication_parent_fd, recovered)
+    cleanup_scratch(scratch_parent_fd, reference)
+    assert recovered._ownership == ownership
+    os.close(publication_parent_fd)
+    os.close(scratch_parent_fd)
+
+
+def test_expiry_during_final_stage_validation_retains_cleanup_ownership(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scratch = tmp_path / "scratch"
+    destination = tmp_path / "destination"
+    scratch.mkdir()
+    destination.mkdir()
+    scratch_parent_fd = _open_parent(scratch)
+    publication_parent_fd = _open_parent(destination)
+    token = bytes.fromhex("0c" * 16)
+    ready = _ready_scratch(scratch_parent_fd, token)
+    _, stage_fd = _record_stage(scratch_parent_fd, ready, publication_parent_fd)
+    os.close(stage_fd)
+    clock = [0.0]
+    fake_time = SimpleNamespace(monotonic=lambda: clock[0])
+    original_matches_stage = publication_receipt._matches_stage
+
+    def match_then_expire(observed: os.stat_result, parent_device: int, identity: object) -> bool:
+        matches = original_matches_stage(observed, parent_device, identity)  # type: ignore[arg-type]
+        clock[0] = 10.0
+        return matches
+
+    monkeypatch.setattr(publication_receipt, "time", fake_time)
+    monkeypatch.setattr(scratch_receipt_module, "time", fake_time)
+    monkeypatch.setattr(publication_receipt, "_matches_stage", match_then_expire)
+    with pytest.raises(PublicationReceiptError) as raised:
+        reconcile_publication_stage(
+            scratch_parent_fd,
+            ready._reference,
+            publication_parent_fd,
+            expires_at=5.0,
+        )
+    debt = raised.value.cleanup_debt
+    assert raised.value.kind is PublicationReceiptFailureKind.DEADLINE
+    assert debt is not None and not debt._stage_removed
+
+    monkeypatch.setattr(publication_receipt, "_matches_stage", original_matches_stage)
+    cleanup_publication_stage(scratch_parent_fd, publication_parent_fd, debt)
+    cleanup_scratch(scratch_parent_fd, ready)
+    os.close(publication_parent_fd)
+    os.close(scratch_parent_fd)
+
+
+def test_expiry_during_reconciliation_descriptor_close_retains_cleanup_ownership(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scratch = tmp_path / "scratch"
+    destination = tmp_path / "destination"
+    scratch.mkdir()
+    destination.mkdir()
+    scratch_parent_fd = _open_parent(scratch)
+    publication_parent_fd = _open_parent(destination)
+    token = bytes.fromhex("0d" * 16)
+    ready = _ready_scratch(scratch_parent_fd, token)
+    _, stage_fd = _record_stage(scratch_parent_fd, ready, publication_parent_fd)
+    os.close(stage_fd)
+    clock = [0.0]
+    fake_time = SimpleNamespace(monotonic=lambda: clock[0])
+    original_close = scratch_module._OpenedScratch.close
+
+    def close_then_expire(opened: scratch_module._OpenedScratch) -> BaseException | None:
+        close_control = original_close(opened)
+        clock[0] = 10.0
+        return close_control
+
+    monkeypatch.setattr(publication_receipt, "time", fake_time)
+    monkeypatch.setattr(scratch_receipt_module, "time", fake_time)
+    monkeypatch.setattr(scratch_module._OpenedScratch, "close", close_then_expire)
+    with pytest.raises(PublicationReceiptError) as raised:
+        reconcile_publication_stage(
+            scratch_parent_fd,
+            ready._reference,
+            publication_parent_fd,
+            expires_at=5.0,
+        )
+    debt = raised.value.cleanup_debt
+    assert raised.value.kind is PublicationReceiptFailureKind.DEADLINE
+    assert debt is not None and not debt._stage_removed
+
+    cleanup_publication_stage(scratch_parent_fd, publication_parent_fd, debt)
+    cleanup_scratch(scratch_parent_fd, ready)
+    os.close(publication_parent_fd)
+    os.close(scratch_parent_fd)
+
+
+def test_expiry_after_uncertain_reconciliation_carries_no_cleanup_debt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scratch = tmp_path / "scratch"
+    destination = tmp_path / "destination"
+    scratch.mkdir()
+    destination.mkdir()
+    scratch_parent_fd = _open_parent(scratch)
+    publication_parent_fd = _open_parent(destination)
+    token = bytes.fromhex("0e" * 16)
+    ready = _ready_scratch(scratch_parent_fd, token)
+    ownership, stage_fd = _record_stage(scratch_parent_fd, ready, publication_parent_fd)
+    os.close(stage_fd)
+    stage = destination / publication_stage_name(token)
+    saved = destination / "saved-stage"
+    stage.rename(saved)
+    clock = [0.0]
+    fake_time = SimpleNamespace(monotonic=lambda: clock[0])
+    original_close = scratch_module._OpenedScratch.close
+
+    def close_then_expire(opened: scratch_module._OpenedScratch) -> BaseException | None:
+        close_control = original_close(opened)
+        clock[0] = 10.0
+        return close_control
+
+    monkeypatch.setattr(publication_receipt, "time", fake_time)
+    monkeypatch.setattr(scratch_receipt_module, "time", fake_time)
+    monkeypatch.setattr(scratch_module._OpenedScratch, "close", close_then_expire)
+    with pytest.raises(PublicationReceiptError) as raised:
+        reconcile_publication_stage(
+            scratch_parent_fd,
+            ready._reference,
+            publication_parent_fd,
+            expires_at=5.0,
+        )
+    assert raised.value.kind is PublicationReceiptFailureKind.DEADLINE
+    assert raised.value.cleanup_debt is None
+
+    saved.rename(stage)
+    cleanup_publication_stage(scratch_parent_fd, publication_parent_fd, ownership)
     cleanup_scratch(scratch_parent_fd, ready)
     os.close(publication_parent_fd)
     os.close(scratch_parent_fd)

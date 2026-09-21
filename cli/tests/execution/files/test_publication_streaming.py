@@ -248,7 +248,7 @@ def test_lost_record_ack_reconciles_cleanup_without_replaying_publication(
     stages = list(tmp_path.glob(f"{publication_module._STAGE_PREFIX}*"))
     assert len(stages) == 1
 
-    recovered = reconcile_publication_stage(parent_fd, ready, parent_fd)
+    recovered = reconcile_publication_stage(parent_fd, ready._reference, parent_fd)
     assert isinstance(recovered, PublicationStageHistoricalOwnership)
     cleanup_publication_stage(parent_fd, parent_fd, recovered)
     cleanup_scratch(parent_fd, ready)

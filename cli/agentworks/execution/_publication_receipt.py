@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from . import _scratch
-from ._scratch import ReadyScratchReference, ScratchFailureKind, ScratchPhase, ScratchTransferError
+from ._scratch import ReadyScratchReference, ScratchFailureKind, ScratchPhase, ScratchReference, ScratchTransferError
 from ._scratch_receipt import (
     ScratchOperation,
     ScratchOwnership,
@@ -281,57 +281,90 @@ def record_publication_stage(
 
 def reconcile_publication_stage(
     scratch_parent_fd: int,
-    ready: ReadyScratchReference,
+    reference: ScratchReference,
     publication_parent_fd: int,
     *,
     expires_at: float | None = None,
 ) -> PublicationStageReconciliation:
     """Recover exact cleanup ownership without establishing publication proof."""
-    ownership = ready._reference._ownership
+    ownership = reference._ownership
     if ownership._context.operation is not ScratchOperation.STAGE or not matches_receipt_context(ownership._context):
         return PublicationStageOwnershipUncertainty()
     opened: _scratch._OpenedScratch | None = None
-    record_fd: int | None = None
+    result: PublicationStageReconciliation = PublicationStageOwnershipUncertainty()
     try:
         _check_deadline(expires_at)
-        opened = _open_scratch(scratch_parent_fd, ready, expires_at)
-        parent = _fstat(publication_parent_fd)
-        if not stat.S_ISDIR(parent.st_mode):
-            return PublicationStageOwnershipUncertainty()
-        record_fd = _open_record(opened.directory_fd)
+        opened = _open_scratch_reference(scratch_parent_fd, reference, expires_at)
+        result = _reconcile_opened_publication_stage(
+            opened.directory_fd,
+            ownership,
+            publication_parent_fd,
+            expires_at,
+        )
+    except PublicationReceiptError as error:
+        if error.kind is PublicationReceiptFailureKind.DEADLINE:
+            raise
+        result = PublicationStageOwnershipUncertainty()
+    except (OSError, ValueError, ScratchTransferError):
+        result = PublicationStageOwnershipUncertainty()
+    finally:
+        if opened is not None:
+            close_control = opened.close()
+            if close_control is not None:
+                raise close_control from PublicationReceiptError(
+                    PublicationReceiptFailureKind.IO,
+                    cleanup_debt=_reconciliation_cleanup_debt(result),
+                )
+    try:
+        _check_deadline(expires_at)
+    except PublicationReceiptError as error:
+        raise PublicationReceiptError(
+            error.kind,
+            cleanup_debt=_reconciliation_cleanup_debt(result),
+        ) from None
+    return result
+
+
+def _reconcile_opened_publication_stage(
+    scratch_directory_fd: int,
+    scratch_ownership: ScratchOwnership,
+    publication_parent_fd: int,
+    expires_at: float | None,
+) -> PublicationStageReconciliation:
+    parent = _fstat(publication_parent_fd)
+    if not stat.S_ISDIR(parent.st_mode):
+        return PublicationStageOwnershipUncertainty()
+    record_fd: int | None = None
+    try:
+        record_fd = _open_record(scratch_directory_fd)
         record_stat = _fstat(record_fd)
         content = _pread_bounded(record_fd, expires_at)
         candidate = _decode_record(
             content,
-            ownership,
+            scratch_ownership,
             _identity(parent),
             _identity(record_stat),
         )
         expected = _encode_record(candidate)
         if not hmac.compare_digest(content, expected):
             return PublicationStageOwnershipUncertainty()
-        _require_unchanged_record(opened.directory_fd, record_fd, candidate, len(expected))
-        stage = _stat_at(publication_parent_fd, candidate._stage_name)
-        if stage is None or not _matches_stage(stage, candidate._publication_parent.device, candidate._stage):
-            return PublicationStageOwnershipUncertainty()
-        _check_deadline(expires_at)
-        return PublicationStageHistoricalOwnership(candidate)
-    except PublicationReceiptError as error:
-        if error.kind is PublicationReceiptFailureKind.DEADLINE:
-            raise
-        return PublicationStageOwnershipUncertainty()
-    except (OSError, ValueError, ScratchTransferError):
-        return PublicationStageOwnershipUncertainty()
+        _require_unchanged_record(scratch_directory_fd, record_fd, candidate, len(expected))
     finally:
-        try:
-            if record_fd is not None:
-                with suppress(OSError):
-                    os.close(record_fd)
-        finally:
-            if opened is not None:
-                close_control = opened.close()
-                if close_control is not None:
-                    raise close_control from PublicationReceiptError(PublicationReceiptFailureKind.IO)
+        if record_fd is not None:
+            with suppress(OSError):
+                os.close(record_fd)
+    stage = _stat_at(publication_parent_fd, candidate._stage_name)
+    if stage is None or not _matches_stage(stage, candidate._publication_parent.device, candidate._stage):
+        return PublicationStageOwnershipUncertainty()
+    return PublicationStageHistoricalOwnership(candidate)
+
+
+def _reconciliation_cleanup_debt(
+    result: PublicationStageReconciliation,
+) -> PublicationStageCleanupDebt | None:
+    if isinstance(result, PublicationStageHistoricalOwnership):
+        return PublicationStageCleanupDebt(result._ownership, False)
+    return None
 
 
 def cleanup_publication_stage(
@@ -425,10 +458,18 @@ def _open_scratch(
     ready: ReadyScratchReference,
     expires_at: float | None,
 ) -> _scratch._OpenedScratch:
+    return _open_scratch_reference(parent_fd, ready._reference, expires_at)
+
+
+def _open_scratch_reference(
+    parent_fd: int,
+    reference: ScratchReference,
+    expires_at: float | None,
+) -> _scratch._OpenedScratch:
     try:
         return _scratch._open_scratch(
             parent_fd,
-            ready._reference,
+            reference,
             writable=False,
             phase=ScratchPhase.READ,
             expires_at=expires_at,
