@@ -59,6 +59,35 @@ Do not use `LocalCommand` for acknowledgment: despite its useful ordering, it in
 shell. Windows command-processor startup can execute ambient policy before even a fixed marker,
 which defeats the intended local configuration isolation.
 
+## Launch ownership integration
+
+At SSH `6efaffce` on transport `5b570442`, forwarding still constructs its client on the caller
+before creating `OwnedForwarding`. A disposable synthetic constructor probe created an owned local
+child and then raised `KeyboardInterrupt` before returning its handle. The interruption propagated
+while that child remained live; the probe then killed/reaped the exact child and closed its pipes.
+This establishes the ownership gap, not native signal or installed-SSH acceptance.
+
+Transport's current `run_owned_process` cannot directly supply a held forward: it returns only after
+terminal cleanup. Copying its private admission and settlement logic into SSH would create a second
+process-lifetime implementation. Moving construction into the existing drain worker with only a stop
+event is insufficient: ambiguous thread startup needs serialized default-deny admission, so a late
+worker cannot dispatch after cancellation won.
+
+The proposed integration is a small transport-owned held-process interface over its existing launch
+owner, shared with the run-to-completion path. Transport owns its final shape. SSH needs an owner
+retained before startup, cancellation serialized with admission, borrowed pipes only after owner
+publication, separate natural-exit and cleanup observations, and an explicit release after the drain
+worker stops using pipes. That release requests exact local cleanup; it must not masquerade as an
+input failure. Cancellation before admission prevents dispatch; after admission the owner retains
+construction and cleanup responsibility through terminal observation. Process construction itself
+has no proven hard time bound.
+
+Forwarding continues to own listener requests, readiness-marker validation and resource lifetime.
+The shared owner replaces forwarding's direct process/status/cleanup ownership; it does not parse
+SSH readiness or own remote cancellation. This is an integration proposal, not a new shared contract
+or an implemented API. The startup, repeated-interruption, natural-exit, cleanup-uncertainty and
+native-platform proof gates remain open.
+
 ## Evidence
 
 Focused tests cover split acknowledgment reads, missing/wrong/noisy acknowledgment, auth/trust and
