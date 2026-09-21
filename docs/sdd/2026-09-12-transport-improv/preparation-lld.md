@@ -357,6 +357,22 @@ production gate. Native Windows/macOS behavior, interpreter shutdown, repeated s
 and the final bundled-helper size remain acceptance gates. The existing OS process-creation caveat
 still applies; no new hard real-time bound is promised.
 
+The application-boundary inventory at `43c04a06` found no existing deferred-interrupt facility to
+reuse. `cli/_entry.py` translates escaped `KeyboardInterrupt` into exit 130; RunContext carries no
+cancellation policy, and orchestration uses ordinary context unwinding. Neither prevents an
+interrupt from skipping cleanup entry. Provider rollback paths deliberately allow a second Ctrl-C to
+abandon cleanup, and `vms/manager/tailscale.py` installs its own handlers for port forwarding.
+Changing the entire CLI's signal policy would therefore change existing behavior beyond the new
+execution stack. The fixed inline guest helper runs in a separate interpreter and would not inherit
+a workstation CLI policy.
+
+A scoped interrupt policy for new execution and its fixed helper is proposed for operator
+discussion, not selected or implemented. Its design must cover handler ownership/restoration,
+ordinary interruption and repeated interrupts, and the held-process consumer without changing legacy
+provisioning rollback implicitly. It must distinguish requesting cleanup from proving it and retain
+explicit incomplete-cleanup facts. Forced interpreter termination cannot acquire a cleanup guarantee
+from a Python signal handler. The production gate above remains open.
+
 ### Shared ownership for held local processes
 
 SSH forwarding needs the same child owner without the run-to-completion byte pump. Transport owns

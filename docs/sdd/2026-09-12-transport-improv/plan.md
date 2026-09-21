@@ -91,6 +91,11 @@ associated pending acceptance gates are superseded by this ruling.
       administrator-installed file lock. Keep Linux guest MANAGED guarantees unchanged.
 - [ ] Complete the private reviews and gates for this replacement, update permanent collateral, and
       publish the corrected design and implementation as part of the still-draft effort.
+- [ ] Resolve the local cleanup-entry interrupt policy before production execution adoption. The
+      preparation LLD records the application-boundary inventory and proposed scoped policy;
+      operator discussion remains open. Prove both workstation and separate fixed-helper behavior,
+      including handler restoration and repeated interruption, without implicitly changing legacy
+      provisioning rollback or treating forced process termination as successful cleanup.
 
 The first implementation increment is privately reviewed at `063cd0bc` by the project, complexity
 and generic correctness lanes. It removes the lock/setup stack and supplies `Database.operations`,
@@ -676,8 +681,8 @@ evidence and cleanup-only status. All hosted checks at `37a36aae`, including Win
 Linux Python 3.12/3.13/3.14, pass in
 [run 35496253664](https://github.com/WayfarerLabs/agentworks/actions/runs/35496253664). The
 [Darwin ownership investigation](prior-art-research.md#darwin-ownership-feasibility) separately
-identifies a public-mechanism gap for generic MANAGED host jobs. Its suggested narrower supervision
-contract awaits operator disposition; the current requirements remain unchanged.
+identifies a public-mechanism gap for generic MANAGED host jobs. The operation-coordination ruling
+above subsequently selected platform-owned host lifecycle without weakening guest MANAGED.
 
 SSH's implementation at `174187d2` includes transport `a885ef5a` and adopts the reviewed finite
 subprocess pump. Its owner has separately supplied the buffered compatibility guard integrated here.
