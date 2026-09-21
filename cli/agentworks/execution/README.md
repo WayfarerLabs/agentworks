@@ -173,10 +173,12 @@ service launch evidence and child-boundary evidence remain separate facts. A mis
 unobserved control identity, malformed marker, or failed launch is never cleanup proof. This
 source-backed candidate still needs supported-target systemd/cgroup, delegation, privilege and
 interruption evidence before any profile or production integration can rely on it. `complete` means
-execution and lifecycle evidence, not full output retention: intentional bounded capture may be
-truncated while its stream fact reports that outcome separately. The accepted manifest bound is a
-helper limit, not a claim that every carrier can transport a request at that size; carrier refusal
-before dispatch remains the truthful outcome.
+execution, terminal and lifecycle evidence, not overall requested-I/O success or input consumption:
+intentional bounded capture may be truncated and post-wait helper failures remain available for a
+later success reduction. The fixed `--collect` option unloads a failed foreground transient unit; it
+does not replace durable job records or reconnect evidence. The accepted manifest bound is a helper
+limit, not a claim that every carrier can transport a request at that size; carrier refusal before
+dispatch remains the truthful outcome.
 
 The Linux source tests execute the bundled supervisor through a test-local cgroup filesystem shim;
 that shim is not a native systemd proof. A supported Debian target must still establish the

@@ -233,7 +233,6 @@ class ManagedForegroundResult:
             and self.helper.trusted_terminal
             and self.helper.wait is not None
             and self.helper.wait.kind in (WaitKind.EXIT, WaitKind.SIGNAL)
-            and self.helper.failure is None
             and self.helper.error is None
             and self.boundary.helper_completion == ExitStatus(code=0)
             and self.boundary.state is BoundaryState.EMPTY
@@ -387,6 +386,7 @@ def prepare_managed_candidate(
             "--quiet",
             "--pipe",
             "--wait",
+            "--collect",
             "--service-type=exec",
             f"--unit={run.unit}",
             *_unit_properties(identity),

@@ -18,8 +18,8 @@ from agentworks.errors import ValidationError
 from agentworks.execution import systemd
 from agentworks.execution._evidence_wire import FrameReader
 from agentworks.execution._helper_identity import IdentityExpectation
-from agentworks.execution._inline_control import WaitFact, WaitKind
-from agentworks.execution._inline_observer import InlineObservation, InlineObserver
+from agentworks.execution._inline_control import FailureCode, FailureFact, FailurePhase, WaitFact, WaitKind
+from agentworks.execution._inline_observer import InlineObservation, InlineObserver, ObservationError
 from agentworks.execution._inline_request import OutputMode
 from agentworks.execution.carrier import (
     ByteSink,
@@ -209,7 +209,7 @@ def test_fixed_unit_shape_has_no_stdio_properties_or_caller_controls(identity: I
     argv = prepared.invocation.argv
     assert argv[0] == "/usr/bin/systemd-run"
     assert "--quiet" in argv
-    assert "--pipe" in argv and "--wait" in argv
+    assert "--pipe" in argv and "--wait" in argv and "--collect" in argv
     assert "--service-type=exec" in argv
     assert "--property=Delegate=yes" in argv
     assert "--property=KillMode=control-group" in argv
@@ -294,6 +294,58 @@ def test_unknown_payload_wait_is_not_complete() -> None:
         None,
         helper,
         systemd.BoundaryObservation(run, BoundaryState.EMPTY, ExitStatus(code=0), Dispatch.SENT, ExitStatus(code=0)),
+    )
+    assert not result.complete
+
+
+@pytest.mark.parametrize(
+    ("phase", "code"),
+    (
+        (FailurePhase.OBSERVE, FailureCode.INPUT),
+        (FailurePhase.OBSERVE, FailureCode.OUTPUT),
+        (FailurePhase.OBSERVE, FailureCode.OBSERVATION),
+        (FailurePhase.CLEANUP, FailureCode.RESOURCE),
+    ),
+)
+def test_valid_post_wait_helper_failure_remains_terminal_lifecycle_evidence(
+    phase: FailurePhase, code: FailureCode
+) -> None:
+    run = ManagedRun.fresh()
+    failure = FailureFact(phase, code)
+    helper = InlineObservation(False, None, None, WaitFact(WaitKind.EXIT, 0), failure, True, None)
+    result = systemd.ManagedForegroundResult(
+        run,
+        PrerequisiteState.READY,
+        Dispatch.SENT,
+        ExitStatus(code=0),
+        None,
+        helper,
+        systemd.BoundaryObservation(run, BoundaryState.EMPTY, ExitStatus(code=0), Dispatch.SENT, ExitStatus(code=0)),
+    )
+    assert result.helper is not None and result.helper.failure == failure
+    assert result.complete
+
+
+@pytest.mark.parametrize("boundary_state", (BoundaryState.POPULATED, BoundaryState.INVALID))
+def test_helper_error_or_nonempty_boundary_is_not_complete(boundary_state: BoundaryState) -> None:
+    run = ManagedRun.fresh()
+    helper = InlineObservation(
+        False,
+        None,
+        None,
+        WaitFact(WaitKind.EXIT, 0),
+        None,
+        True,
+        ObservationError.CARRIER if boundary_state is BoundaryState.INVALID else None,
+    )
+    result = systemd.ManagedForegroundResult(
+        run,
+        PrerequisiteState.READY,
+        Dispatch.SENT,
+        ExitStatus(code=0),
+        None,
+        helper,
+        systemd.BoundaryObservation(run, boundary_state, ExitStatus(code=0), Dispatch.SENT, ExitStatus(code=0)),
     )
     assert not result.complete
 
