@@ -109,14 +109,16 @@ def test_source_contract_failures_cleanup_exact_scratch(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = operation_owner(database)
+    borrow = owner.borrow()
     try:
-        outcome = upload(owner, root, source, size, plan)
+        outcome = upload(borrow, root, source, size, plan)
 
         assert outcome.status is FileUploadStatus.FAILED
         assert outcome.failure is FileUploadFailure.SOURCE_CONTRACT
         assert outcome.bytes_consumed == expected_consumed
         assert outcome.scratch_cleanup_debt is None and not outcome.requires_owner_retention
         assert not root.joinpath("target").exists()
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -130,13 +132,15 @@ def test_source_exception_is_sanitized_and_borrowed_source_is_not_closed(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = operation_owner(database)
+    borrow = owner.borrow()
     source = FailingSource()
     try:
-        outcome = upload(owner, root, source, 1, plan)
+        outcome = upload(borrow, root, source, 1, plan)
 
         assert outcome.failure is FileUploadFailure.SOURCE
         assert "source-secret-canary" not in repr(outcome)
         assert outcome.scratch_cleanup_debt is None and not source.closed
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -150,15 +154,17 @@ def test_source_cancellation_propagates_with_bounded_cleanup_facts(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = operation_owner(database)
+    borrow = owner.borrow()
     source = CancelingSource()
     try:
         with pytest.raises(KeyboardInterrupt) as raised:
-            upload(owner, root, source, 1, plan)
+            upload(borrow, root, source, 1, plan)
 
         fact = raised.value.__cause__
         assert isinstance(fact, FileUploadControlFact)
         assert fact.outcome.scratch_cleanup_debt is None
         assert not fact.outcome.requires_owner_retention and not source.closed
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -180,6 +186,7 @@ def test_validation_failure_does_not_retain_sensitive_exception_context(
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = operation_owner(database)
+    borrow = owner.borrow()
     try:
         with pytest.raises(ValidationError) as raised:
             upload_file(
@@ -193,13 +200,16 @@ def test_validation_failure_does_not_retain_sensitive_exception_context(
                 plan=plan,
                 deadline=Deadline.after(30),
                 runtime_selection=runtime_selection(sys.executable),
-                owner=owner,
+                borrow=borrow,
             )
 
         assert raised.value.__cause__ is None
         assert raised.value.__context__ is None
         claim = database.operations.inspect(owner.ownership.scope)
         assert claim is not None and claim.state is OperationClaimState.RESERVED
+        with pytest.raises(StateError):
+            owner.borrow()
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -220,7 +230,7 @@ def test_validation_failure_does_not_retain_sensitive_exception_context(
     ],
     ids=["wire-invalid-metadata", "malformed-match", "nonregular-match"],
 )
-def test_publication_schema_refusal_precedes_borrow_carrier_and_source(
+def test_publication_schema_refusal_preserves_caller_borrow_and_precedes_carrier_and_source(
     tmp_path: Path,
     plan: IdentityPlan,
     condition: Create | Match,
@@ -230,6 +240,7 @@ def test_publication_schema_refusal_precedes_borrow_carrier_and_source(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = operation_owner(database)
+    borrow = owner.borrow()
     carrier = LocalCarrier()
     source = BytesSource(b"secret")
     try:
@@ -245,13 +256,16 @@ def test_publication_schema_refusal_precedes_borrow_carrier_and_source(
                 plan=plan,
                 deadline=Deadline.after(30),
                 runtime_selection=runtime_selection(sys.executable),
-                owner=owner,
+                borrow=borrow,
             )
 
         assert raised.value.__cause__ is None and raised.value.__context__ is None
         assert carrier.calls == 0 and source.calls == 0
         claim = database.operations.inspect(owner.ownership.scope)
         assert claim is not None and claim.state is OperationClaimState.RESERVED
+        with pytest.raises(StateError):
+            owner.close()
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -262,6 +276,7 @@ def test_oversized_stage_preparation_never_arms_owner_or_executes_carrier(tmp_pa
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = operation_owner(database)
+    borrow = owner.borrow()
     carrier = LocalCarrier()
     source = BytesSource(b"x")
     gid = os.getegid()
@@ -269,7 +284,7 @@ def test_oversized_stage_preparation_never_arms_owner_or_executes_carrier(tmp_pa
     oversized_plan = IdentityPlan(IdentityExpectation(os.geteuid(), gid, groups), IdentityMode.DIRECT)
     try:
         with pytest.raises(ValidationError) as raised:
-            upload(owner, root, source, 1, oversized_plan, carrier=carrier)
+            upload(borrow, root, source, 1, oversized_plan, carrier=carrier)
 
         fact = raised.value.__cause__
         assert isinstance(fact, FileUploadControlFact)
@@ -278,6 +293,7 @@ def test_oversized_stage_preparation_never_arms_owner_or_executes_carrier(tmp_pa
         assert carrier.calls == 0 and source.calls == 0
         claim = database.operations.inspect(owner.ownership.scope)
         assert claim is not None and claim.state is OperationClaimState.RESERVED
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -291,6 +307,7 @@ def test_interrupt_at_owned_carrier_handoff_exports_coordination_uncertainty(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = operation_owner(database)
+    borrow = owner.borrow()
     carrier = LocalCarrier()
     target_instruction = next(
         instruction
@@ -318,7 +335,7 @@ def test_interrupt_at_owned_carrier_handoff_exports_coordination_uncertainty(
     try:
         sys.settrace(interrupt_at_handoff)
         with pytest.raises(KeyboardInterrupt) as raised:
-            upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+            upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
     finally:
         sys.settrace(previous_trace)
 
@@ -334,6 +351,9 @@ def test_interrupt_at_owned_carrier_handoff_exports_coordination_uncertainty(
         assert claim is not None and claim.state is OperationClaimState.POSSIBLE_DISPATCH
         with pytest.raises(StateError):
             owner.close()
+        borrow.close()
+        with pytest.raises(StateError):
+            owner.close()
     finally:
         database.close()
 
@@ -347,6 +367,7 @@ def test_local_publication_preparation_failure_cleans_completed_stage(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = operation_owner(database)
+    borrow = owner.borrow()
     carrier = LocalCarrier()
     source = BytesSource(b"content")
 
@@ -357,7 +378,7 @@ def test_local_publication_preparation_failure_cleans_completed_stage(
     monkeypatch.setattr(publication_exchange, "encode_file_publication_request", fail_encode)
     try:
         with pytest.raises(ValidationError) as raised:
-            upload(owner, root, source, 7, plan, carrier=carrier)
+            upload(borrow, root, source, 7, plan, carrier=carrier)
 
         fact = raised.value.__cause__
         assert isinstance(fact, FileUploadControlFact)
@@ -366,12 +387,13 @@ def test_local_publication_preparation_failure_cleans_completed_stage(
         assert not fact.outcome.requires_owner_retention
         assert carrier.calls == 3 and source.offset == 7
         assert not root.joinpath(scratch_name(fact.outcome.token)).exists()
+        borrow.close()
         owner.close()
     finally:
         database.close()
 
 
-def test_invalid_input_refuses_before_borrow_or_carrier_effects(
+def test_invalid_input_preserves_borrow_and_refuses_carrier_effects(
     tmp_path: Path,
     plan: IdentityPlan,
 ) -> None:
@@ -379,15 +401,17 @@ def test_invalid_input_refuses_before_borrow_or_carrier_effects(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = operation_owner(database)
+    borrow = owner.borrow()
     carrier = LocalCarrier()
     try:
         with pytest.raises(ValidationError):
-            upload(owner, root, BytesSource(b"x"), -1, plan, carrier=carrier)
+            upload(borrow, root, BytesSource(b"x"), -1, plan, carrier=carrier)
 
         assert carrier.calls == 0
         claim = database.operations.inspect(owner.ownership.scope)
         assert claim is not None and claim.state is OperationClaimState.RESERVED
-        borrow = owner.borrow()
+        with pytest.raises(StateError):
+            owner.borrow()
         borrow.close()
         owner.close()
     finally:

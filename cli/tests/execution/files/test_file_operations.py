@@ -60,7 +60,7 @@ from agentworks.execution.carrier import (
     ExitStatus,
     PreparedInvocation,
 )
-from agentworks.operations import OperationAttempt, OperationOwner
+from agentworks.operations import OperationAttempt, OperationBorrow, OperationOwner
 from tests.execution.files._file_read_support import LocalCarrier
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the fixed file helpers require Linux")
@@ -112,7 +112,7 @@ class SyntheticCarrier:
 
 
 @pytest.fixture
-def owned(tmp_path: Path) -> Iterator[tuple[Database, OperationOwner]]:
+def owned(tmp_path: Path) -> Iterator[tuple[Database, OperationOwner, OperationBorrow]]:
     database = Database(tmp_path / "state.db")
     owner = OperationOwner.acquire(
         database.operations,
@@ -120,7 +120,7 @@ def owned(tmp_path: Path) -> Iterator[tuple[Database, OperationOwner]]:
         "file-operation",
     )
     try:
-        yield database, owner
+        yield database, owner, owner.borrow()
     finally:
         database.close()
 
@@ -200,13 +200,13 @@ def _read_result(
     ids=["read", "stat", "list", "remove"],
 )
 def test_single_exchange_entrypoints_preserve_typed_result_and_settle(
-    owned: tuple[Database, OperationOwner],
+    owned: tuple[Database, OperationOwner, OperationBorrow],
     monkeypatch: pytest.MonkeyPatch,
     entrypoint,
     exchange_name: str,
     result,
 ) -> None:
-    _, owner = owned
+    _, owner, borrow = owned
     carrier = SyntheticCarrier()
     seen_operations: list[BorrowedFixedHelperCarrier] = []
 
@@ -229,7 +229,7 @@ def test_single_exchange_entrypoints_preserve_typed_result_and_settle(
         "plan": _PLAN,
         "deadline": Deadline.after(15),
         "runtime_selection": _RUNTIME,
-        "owner": owner,
+        "borrow": borrow,
     }
     if entrypoint is operations.read_file:
         arguments["max_bytes"] = 1024
@@ -245,6 +245,9 @@ def test_single_exchange_entrypoints_preserve_typed_result_and_settle(
     assert not outcome.deadline_exceeded
     assert not outcome.requires_owner_retention
     assert carrier.calls == 1 and len(seen_operations) == 1
+    with pytest.raises(StateError):
+        owner.close()
+    borrow.close()
     owner.close()
 
 
@@ -259,13 +262,13 @@ def test_single_exchange_entrypoints_preserve_typed_result_and_settle(
     ],
 )
 def test_settlement_uses_only_supported_termination_evidence(
-    owned: tuple[Database, OperationOwner],
+    owned: tuple[Database, OperationOwner, OperationBorrow],
     monkeypatch: pytest.MonkeyPatch,
     dispatch: Dispatch,
     completion: ExitStatus | None,
     retained: bool,
 ) -> None:
-    _, owner = owned
+    _, owner, borrow = owned
     carrier = SyntheticCarrier(dispatch, completion)
 
     def exchange(operation: BorrowedFixedHelperCarrier, **kwargs: object) -> FileReadCandidateResult:
@@ -283,20 +286,21 @@ def test_settlement_uses_only_supported_termination_evidence(
         plan=_PLAN,
         deadline=Deadline.after(15),
         runtime_selection=_RUNTIME,
-        owner=owner,
+        borrow=borrow,
     )
 
     assert outcome.result is not None and outcome.result.dispatch is dispatch
     assert outcome.pending_remote_effects is retained
     assert outcome.requires_owner_retention is retained
     if not retained:
+        borrow.close()
         owner.close()
 
 
 def test_local_preparation_failure_never_arms_or_dispatches(
-    owned: tuple[Database, OperationOwner],
+    owned: tuple[Database, OperationOwner, OperationBorrow],
 ) -> None:
-    database, owner = owned
+    database, owner, borrow = owned
     carrier = SyntheticCarrier()
 
     with pytest.raises(ValidationError) as raised:
@@ -308,7 +312,7 @@ def test_local_preparation_failure_never_arms_or_dispatches(
             plan=_PLAN,
             deadline=Deadline.after(15),
             runtime_selection=_RUNTIME,
-            owner=owner,
+            borrow=borrow,
         )
 
     fact = raised.value.__cause__
@@ -318,13 +322,16 @@ def test_local_preparation_failure_never_arms_or_dispatches(
     assert carrier.calls == 0
     claim = database.operations.inspect(owner.ownership.scope)
     assert claim is not None and claim.state is OperationClaimState.RESERVED
+    with pytest.raises(StateError):
+        owner.borrow()
+    borrow.close()
     owner.close()
 
 
-def test_expired_deadline_returns_before_borrow_or_dispatch(
-    owned: tuple[Database, OperationOwner],
+def test_expired_deadline_returns_without_dispatch_and_preserves_borrow(
+    owned: tuple[Database, OperationOwner, OperationBorrow],
 ) -> None:
-    database, owner = owned
+    database, owner, borrow = owned
     carrier = SyntheticCarrier()
 
     outcome = operations.stat_file(
@@ -334,23 +341,26 @@ def test_expired_deadline_returns_before_borrow_or_dispatch(
         plan=_PLAN,
         deadline=Deadline.after(0),
         runtime_selection=_RUNTIME,
-        owner=owner,
+        borrow=borrow,
     )
 
     assert outcome.result is None and outcome.deadline_exceeded
     assert not outcome.requires_owner_retention and carrier.calls == 0
     claim = database.operations.inspect(owner.ownership.scope)
     assert claim is not None and claim.state is OperationClaimState.RESERVED
+    with pytest.raises(StateError):
+        owner.close()
+    borrow.close()
     owner.close()
 
 
 @pytest.mark.parametrize("completion", [ExitStatus(code=0), ExitStatus(code=9)], ids=["normal", "abnormal"])
 def test_deadline_after_return_is_independent_of_operation_facts(
-    owned: tuple[Database, OperationOwner],
+    owned: tuple[Database, OperationOwner, OperationBorrow],
     monkeypatch: pytest.MonkeyPatch,
     completion: ExitStatus,
 ) -> None:
-    _, owner = owned
+    _, owner, borrow = owned
     carrier = SyntheticCarrier(completion=completion, expire_on_return=True)
 
     def exchange(operation: BorrowedFixedHelperCarrier, **kwargs: object) -> FileReadCandidateResult:
@@ -367,22 +377,23 @@ def test_deadline_after_return_is_independent_of_operation_facts(
         plan=_PLAN,
         deadline=Deadline.after(15),
         runtime_selection=_RUNTIME,
-        owner=owner,
+        borrow=borrow,
     )
 
     assert outcome.result is not None and outcome.deadline_exceeded
     assert outcome.requires_owner_retention is (completion.code != 0)
     if not outcome.requires_owner_retention:
+        borrow.close()
         owner.close()
 
 
 @pytest.mark.parametrize("entrypoint_name", ["set_metadata", "ensure_directory"])
 def test_metadata_lookup_and_mutation_share_one_borrow_and_preserve_both_results(
-    owned: tuple[Database, OperationOwner],
+    owned: tuple[Database, OperationOwner, OperationBorrow],
     monkeypatch: pytest.MonkeyPatch,
     entrypoint_name: str,
 ) -> None:
-    _, owner = owned
+    _, owner, borrow = owned
     carrier = SyntheticCarrier()
     operations_seen: list[BorrowedFixedHelperCarrier] = []
 
@@ -448,7 +459,7 @@ def test_metadata_lookup_and_mutation_share_one_borrow_and_preserve_both_results
         plan=_PLAN,
         deadline=Deadline.after(15),
         runtime_selection=_RUNTIME,
-        owner=owner,
+        borrow=borrow,
     )
 
     assert outcome.ownership_result is not None
@@ -456,6 +467,7 @@ def test_metadata_lookup_and_mutation_share_one_borrow_and_preserve_both_results
     assert outcome.result == operation_result
     assert len(operations_seen) == 2 and operations_seen[0] is operations_seen[1]
     assert carrier.calls == 2 and not outcome.requires_owner_retention
+    borrow.close()
     owner.close()
 
 
@@ -500,14 +512,14 @@ def test_metadata_lookup_and_mutation_share_one_borrow_and_preserve_both_results
     ids=["refused", "runtime", "incomplete", "abnormal", "expired"],
 )
 def test_metadata_lookup_must_be_ready_resolved_normal_and_within_deadline(
-    owned: tuple[Database, OperationOwner],
+    owned: tuple[Database, OperationOwner, OperationBorrow],
     monkeypatch: pytest.MonkeyPatch,
     runtime: RuntimePrerequisiteObservation,
     observation: FileOwnershipObservation | None,
     completion: ExitStatus,
     deadline_expired: bool,
 ) -> None:
-    _, owner = owned
+    _, owner, borrow = owned
     carrier = SyntheticCarrier(completion=completion, expire_on_return=deadline_expired)
     mutation_calls = 0
 
@@ -548,7 +560,7 @@ def test_metadata_lookup_must_be_ready_resolved_normal_and_within_deadline(
         plan=_PLAN,
         deadline=Deadline.after(15),
         runtime_selection=_RUNTIME,
-        owner=owner,
+        borrow=borrow,
     )
 
     assert outcome.ownership_result is not None and outcome.result is None
@@ -557,6 +569,7 @@ def test_metadata_lookup_must_be_ready_resolved_normal_and_within_deadline(
     retained = completion != ExitStatus(code=0)
     assert outcome.requires_owner_retention is retained
     if not retained:
+        borrow.close()
         owner.close()
 
 
@@ -566,12 +579,12 @@ def test_metadata_lookup_must_be_ready_resolved_normal_and_within_deadline(
     ids=["owner", "mode"],
 )
 def test_metadata_canonical_validation_precedes_lookup(
-    owned: tuple[Database, OperationOwner],
+    owned: tuple[Database, OperationOwner, OperationBorrow],
     monkeypatch: pytest.MonkeyPatch,
     trusted_owner: str,
     mode: int,
 ) -> None:
-    database, owner = owned
+    database, owner, borrow = owned
     carrier = SyntheticCarrier()
     lookup_calls = 0
 
@@ -594,20 +607,21 @@ def test_metadata_canonical_validation_precedes_lookup(
             plan=_PLAN,
             deadline=Deadline.after(15),
             runtime_selection=_RUNTIME,
-            owner=owner,
+            borrow=borrow,
         )
 
     assert lookup_calls == 0 and carrier.calls == 0
     claim = database.operations.inspect(owner.ownership.scope)
     assert claim is not None and claim.state is OperationClaimState.RESERVED
+    borrow.close()
     owner.close()
 
 
 def test_settlement_failure_retains_previously_returned_fact(
-    owned: tuple[Database, OperationOwner],
+    owned: tuple[Database, OperationOwner, OperationBorrow],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _, owner = owned
+    _, owner, borrow = owned
     carrier = SyntheticCarrier()
     observation = FileReadObservation(FileReadObservationState.ABSENT)
 
@@ -632,7 +646,7 @@ def test_settlement_failure_retains_previously_returned_fact(
             plan=_PLAN,
             deadline=Deadline.after(15),
             runtime_selection=_RUNTIME,
-            owner=owner,
+            borrow=borrow,
         )
 
     fact = raised.value.__cause__
@@ -643,10 +657,10 @@ def test_settlement_failure_retains_previously_returned_fact(
 
 
 def test_metadata_lookup_fact_is_recorded_before_settlement(
-    owned: tuple[Database, OperationOwner],
+    owned: tuple[Database, OperationOwner, OperationBorrow],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _, owner = owned
+    _, owner, borrow = owned
     carrier = SyntheticCarrier()
     ownership_result: FileOwnershipResolutionResult | None = None
 
@@ -691,7 +705,7 @@ def test_metadata_lookup_fact_is_recorded_before_settlement(
             plan=_PLAN,
             deadline=Deadline.after(15),
             runtime_selection=_RUNTIME,
-            owner=owner,
+            borrow=borrow,
         )
 
     fact = raised.value.__cause__
@@ -704,11 +718,11 @@ def test_metadata_lookup_fact_is_recorded_before_settlement(
 
 @pytest.mark.parametrize("control", [RuntimeError("ordinary-canary"), ControlStop("base-canary")])
 def test_escaping_carrier_control_retains_safe_private_facts(
-    owned: tuple[Database, OperationOwner],
+    owned: tuple[Database, OperationOwner, OperationBorrow],
     monkeypatch: pytest.MonkeyPatch,
     control: BaseException,
 ) -> None:
-    _, owner = owned
+    _, owner, borrow = owned
     carrier = SyntheticCarrier(control=control)
 
     def exchange(operation: BorrowedFixedHelperCarrier, **kwargs: object) -> FileReadCandidateResult:
@@ -727,7 +741,7 @@ def test_escaping_carrier_control_retains_safe_private_facts(
             plan=_PLAN,
             deadline=Deadline.after(15),
             runtime_selection=_RUNTIME,
-            owner=owner,
+            borrow=borrow,
         )
 
     assert raised.value is control
@@ -737,12 +751,17 @@ def test_escaping_carrier_control_retains_safe_private_facts(
     assert fact.outcome.pending_remote_effects
     assert fact.outcome.requires_owner_retention
     assert "canary" not in repr(fact) and "canary" not in repr(fact.outcome)
+    with pytest.raises(StateError):
+        owner.close()
+    borrow.close()
+    with pytest.raises(StateError):
+        owner.close()
 
 
 def test_owner_close_during_dispatch_retains_the_interrupted_attempt(
-    owned: tuple[Database, OperationOwner],
+    owned: tuple[Database, OperationOwner, OperationBorrow],
 ) -> None:
-    _, owner = owned
+    _, owner, borrow = owned
 
     class ClosingCarrier(SyntheticCarrier):
         def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
@@ -762,7 +781,7 @@ def test_owner_close_during_dispatch_retains_the_interrupted_attempt(
             plan=_PLAN,
             deadline=Deadline.after(15),
             runtime_selection=_RUNTIME,
-            owner=owner,
+            borrow=borrow,
         )
 
     fact = raised.value.__cause__
@@ -795,6 +814,7 @@ def test_real_linux_read_preserves_present_and_absent_observations(
                 OperationScope(OperationResourceKind.VM, f"real-read-{index}"),
                 "file-read",
             )
+            borrow = owner.borrow()
             outcome = operations.read_file(
                 carrier,
                 trusted_root_path=str(tmp_path),
@@ -803,11 +823,12 @@ def test_real_linux_read_preserves_present_and_absent_observations(
                 plan=plan,
                 deadline=Deadline.after(15),
                 runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable),
-                owner=owner,
+                borrow=borrow,
             )
             assert outcome.result is not None and outcome.result.observation is not None
             assert outcome.result.observation.state is state
             assert not outcome.requires_owner_retention
+            borrow.close()
             owner.close()
     finally:
         database.close()

@@ -69,9 +69,10 @@ def test_real_helper_downloads_verified_content_and_cleans_snapshot(
     source.joinpath("source").write_bytes(content)
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     sink = BytesSink(writes=(1, None, 7)) if content else BytesSink()
     try:
-        outcome = download(operation_owner, source, sink, max(1, len(content)), plan)
+        outcome = download(borrow, source, sink, max(1, len(content)), plan)
 
         assert outcome.status is FileDownloadStatus.COMPLETE
         assert outcome.stream_verified and outcome.accepted_bytes == len(content)
@@ -80,6 +81,7 @@ def test_real_helper_downloads_verified_content_and_cleans_snapshot(
         assert bytes(sink.data) == content and not sink.closed
         assert outcome.cleanup_debt is None and not outcome.requires_owner_retention
         assert not tuple(scratch.iterdir())
+        borrow.close()
         operation_owner.close()
     finally:
         database.close()
@@ -93,13 +95,15 @@ def test_proven_absence_writes_nothing(
     source, _ = roots
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     sink = BytesSink()
     try:
-        outcome = download(operation_owner, source, sink, 1, plan)
+        outcome = download(borrow, source, sink, 1, plan)
 
         assert outcome.status is FileDownloadStatus.ABSENT
         assert outcome.accepted_bytes == 0 and sink.calls == 0
         assert outcome.source_revision is None and not outcome.requires_owner_retention
+        borrow.close()
         operation_owner.close()
     finally:
         database.close()
@@ -150,14 +154,16 @@ def test_bad_sink_is_sanitized_and_snapshot_is_cleaned(
     source.joinpath("source").write_bytes(b"secret-payload")
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     try:
-        outcome = download(operation_owner, source, sink, 64, plan)
+        outcome = download(borrow, source, sink, 64, plan)
 
         assert outcome.status is FileDownloadStatus.FAILED
         assert outcome.failure is failure and outcome.accepted_bytes == 0
         assert "sink-secret-canary" not in repr(outcome)
         assert outcome.cleanup_debt is None and not outcome.requires_owner_retention
         assert not tuple(scratch.iterdir())
+        borrow.close()
         operation_owner.close()
     finally:
         database.close()
@@ -172,15 +178,17 @@ def test_sink_control_flow_propagates_with_bounded_clean_state(
     source.joinpath("source").write_bytes(b"payload")
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     try:
         with pytest.raises(KeyboardInterrupt) as raised:
-            download(operation_owner, source, _CancelingSink(), 64, plan)
+            download(borrow, source, _CancelingSink(), 64, plan)
 
         fact = raised.value.__cause__
         assert isinstance(fact, FileDownloadControlFact)
         assert fact.outcome.cleanup_debt is None
         assert fact.outcome.accepted_bytes == 0 and not fact.outcome.requires_owner_retention
         assert not tuple(scratch.iterdir())
+        borrow.close()
         operation_owner.close()
     finally:
         database.close()
@@ -197,11 +205,12 @@ def test_real_carrier_timeout_records_deadline_with_unresolved_begin(
     install_fixture_bundle(monkeypatch, scratch, "import time; time.sleep(1)")
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     carrier = AdmittedTimeoutCarrier(monkeypatch, startup_delay=0.15)
     sink = BytesSink()
     try:
         outcome = download(
-            operation_owner,
+            borrow,
             source,
             sink,
             64,
@@ -229,9 +238,10 @@ def test_deadline_during_sink_stall_retains_exact_cleanup_debt(
     source.joinpath("source").write_bytes(b"payload")
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     sink = _StalledSink()
     try:
-        outcome = download(operation_owner, source, sink, 64, plan, deadline=Deadline.after(0.5))
+        outcome = download(borrow, source, sink, 64, plan, deadline=Deadline.after(0.5))
 
         assert outcome.failure is FileDownloadFailure.DEADLINE
         assert outcome.deadline_exceeded and outcome.cleanup_debt is not None
@@ -250,10 +260,11 @@ def test_runtime_refusal_stops_without_reconciliation(
     source.joinpath("source").write_bytes(b"payload")
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     carrier = LocalCarrier()
     try:
         outcome = download(
-            operation_owner,
+            borrow,
             source,
             BytesSink(),
             64,
@@ -267,6 +278,7 @@ def test_runtime_refusal_stops_without_reconciliation(
         assert outcome.runtime_prerequisite is not None
         assert outcome.runtime_prerequisite.state is RuntimePrerequisiteState.MISSING
         assert not outcome.requires_owner_retention
+        borrow.close()
         operation_owner.close()
     finally:
         database.close()
@@ -281,14 +293,16 @@ def test_source_exceeding_bound_is_refused_without_sink_bytes(
     source.joinpath("source").write_bytes(b"too-large")
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     sink = BytesSink()
     try:
-        outcome = download(operation_owner, source, sink, 3, plan)
+        outcome = download(borrow, source, sink, 3, plan)
 
         assert outcome.failure is FileDownloadFailure.SNAPSHOT
         assert outcome.snapshot_failure is not None
         assert sink.calls == 0 and outcome.accepted_bytes == 0
         assert outcome.cleanup_debt is None and not tuple(scratch.iterdir())
+        borrow.close()
         operation_owner.close()
     finally:
         database.close()
@@ -303,16 +317,18 @@ def test_lost_creation_observation_reconciles_and_cleans_without_replay(
     source.joinpath("source").write_bytes(b"payload")
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     carrier = LostCallStdoutCarrier(1)
     sink = BytesSink()
     try:
-        outcome = download(operation_owner, source, sink, 64, plan, carrier=carrier)
+        outcome = download(borrow, source, sink, 64, plan, carrier=carrier)
 
         assert carrier.calls == 3
         assert outcome.status is FileDownloadStatus.FAILED
         assert outcome.failure is FileDownloadFailure.OBSERVATION
         assert sink.calls == 0 and outcome.cleanup_debt is None
         assert not outcome.requires_owner_retention and not tuple(scratch.iterdir())
+        borrow.close()
         operation_owner.close()
     finally:
         database.close()
@@ -327,15 +343,17 @@ def test_lost_chunk_observation_hands_no_bytes_then_cleans_known_snapshot(
     source.joinpath("source").write_bytes(b"payload")
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     carrier = LostCallStdoutCarrier(2)
     sink = BytesSink()
     try:
-        outcome = download(operation_owner, source, sink, 64, plan, carrier=carrier)
+        outcome = download(borrow, source, sink, 64, plan, carrier=carrier)
 
         assert carrier.calls == 3 and sink.calls == 0
         assert outcome.failure is FileDownloadFailure.OBSERVATION
         assert outcome.cleanup_debt is None and not outcome.requires_owner_retention
         assert not tuple(scratch.iterdir())
+        borrow.close()
         operation_owner.close()
     finally:
         database.close()
@@ -350,10 +368,11 @@ def test_lost_cleanup_observation_retains_exact_debt(
     source.joinpath("source").write_bytes(b"payload")
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     carrier = LostCallStdoutCarrier(3)
     sink = BytesSink()
     try:
-        outcome = download(operation_owner, source, sink, 64, plan, carrier=carrier)
+        outcome = download(borrow, source, sink, 64, plan, carrier=carrier)
 
         assert bytes(sink.data) == b"payload" and outcome.stream_verified
         assert outcome.status is FileDownloadStatus.FAILED
@@ -379,9 +398,10 @@ def test_reconciliation_ownership_uncertainty_clears_stale_actionable_debt(
     )
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     carrier = LostCallStdoutCarrier(1)
     try:
-        outcome = download(operation_owner, source, BytesSink(), 64, plan, carrier=carrier)
+        outcome = download(borrow, source, BytesSink(), 64, plan, carrier=carrier)
 
         assert carrier.calls == 2
         assert outcome.status is FileDownloadStatus.UNCERTAIN
@@ -415,8 +435,9 @@ guest.cleanup_scratch=failed_cleanup
     )
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     try:
-        outcome = download(operation_owner, source, BytesSink(), 64, plan)
+        outcome = download(borrow, source, BytesSink(), 64, plan)
 
         assert outcome.stream_verified
         assert outcome.failure is FileDownloadFailure.CLEANUP
@@ -476,14 +497,18 @@ def test_abnormal_chunk_wrapper_exit_hands_no_bytes_and_stops_followons(
     source.joinpath("source").write_bytes(b"payload")
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     carrier = _NonzeroSecondCarrier(completion)
     sink = BytesSink()
     try:
-        outcome = download(operation_owner, source, sink, 64, plan, carrier=carrier)
+        outcome = download(borrow, source, sink, 64, plan, carrier=carrier)
 
         assert carrier.calls == 2 and sink.calls == 0
         assert outcome.failure is FileDownloadFailure.TERMINATION
         assert outcome.pending_remote_effects and outcome.requires_owner_retention
+        with pytest.raises(StateError):
+            operation_owner.close()
+        borrow.close()
         with pytest.raises(StateError):
             operation_owner.close()
     finally:
@@ -505,14 +530,16 @@ def test_helper_declared_deadline_stops_before_sink_delivery(
     )
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     sink = BytesSink()
     try:
-        outcome = download(operation_owner, source, sink, 64, plan)
+        outcome = download(borrow, source, sink, 64, plan)
 
         assert outcome.failure is FileDownloadFailure.DEADLINE
         assert outcome.deadline_exceeded and sink.calls == 0
         assert outcome.cleanup_debt is None and not outcome.requires_owner_retention
         assert not tuple(scratch.iterdir())
+        borrow.close()
         operation_owner.close()
     finally:
         database.close()
@@ -527,9 +554,10 @@ def test_nonzero_cleanup_exit_preserves_debt_despite_cleaned_transcript(
     source.joinpath("source").write_bytes(b"payload")
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     carrier = _NonzeroCleanupCarrier()
     try:
-        outcome = download(operation_owner, source, BytesSink(), 64, plan, carrier=carrier)
+        outcome = download(borrow, source, BytesSink(), 64, plan, carrier=carrier)
 
         assert carrier.calls == 3 and outcome.stream_verified
         assert outcome.failure is FileDownloadFailure.CLEANUP
@@ -554,7 +582,7 @@ class _InterruptingCarrier:
         raise KeyboardInterrupt("carrier-secret-canary")
 
 
-def test_interrupted_dispatch_exports_pending_effect_facts_and_releases_borrow(
+def test_interrupted_dispatch_exports_pending_effect_facts_and_preserves_borrow(
     tmp_path: Path,
     roots: tuple[Path, Path],
     plan: IdentityPlan,
@@ -563,9 +591,10 @@ def test_interrupted_dispatch_exports_pending_effect_facts_and_releases_borrow(
     source.joinpath("source").write_bytes(b"payload")
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     try:
         with pytest.raises(KeyboardInterrupt) as raised:
-            download(operation_owner, source, BytesSink(), 64, plan, carrier=_InterruptingCarrier())
+            download(borrow, source, BytesSink(), 64, plan, carrier=_InterruptingCarrier())
 
         fact = raised.value.__cause__
         assert isinstance(fact, FileDownloadControlFact)
@@ -573,6 +602,9 @@ def test_interrupted_dispatch_exports_pending_effect_facts_and_releases_borrow(
         assert fact.outcome.requires_owner_retention
         with pytest.raises(StateError):
             operation_owner.borrow()
+        borrow.close()
+        with pytest.raises(StateError):
+            operation_owner.close()
     finally:
         database.close()
 
@@ -586,10 +618,11 @@ def test_interrupted_dispatch_records_expired_deadline_fact(
     source.joinpath("source").write_bytes(b"payload")
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     try:
         with pytest.raises(KeyboardInterrupt) as raised:
             download(
-                operation_owner,
+                borrow,
                 source,
                 BytesSink(),
                 64,
@@ -630,11 +663,13 @@ def test_one_borrow_spans_snapshot_delivery_and_cleanup(
     source.joinpath("source").write_bytes(b"payload")
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     sink = _BorrowCheckingSink(operation_owner)
     try:
-        outcome = download(operation_owner, source, sink, 64, plan)
+        outcome = download(borrow, source, sink, 64, plan)
 
         assert outcome.status is FileDownloadStatus.COMPLETE and sink.refused
+        borrow.close()
         operation_owner.close()
     finally:
         database.close()
@@ -655,7 +690,7 @@ class _FailingSinkGetter:
     ],
     ids=["invalid-utf8", "sink-getter", "zero-bound"],
 )
-def test_validation_precedes_borrow_and_carrier_without_exception_context(
+def test_validation_preserves_caller_borrow_and_precedes_carrier_without_exception_context(
     tmp_path: Path,
     plan: IdentityPlan,
     trusted_root: str,
@@ -664,6 +699,7 @@ def test_validation_precedes_borrow_and_carrier_without_exception_context(
 ) -> None:
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     carrier = LocalCarrier()
     try:
         with pytest.raises(ValidationError) as raised:
@@ -676,23 +712,25 @@ def test_validation_precedes_borrow_and_carrier_without_exception_context(
                 plan=plan,
                 deadline=Deadline.after(30),
                 runtime_selection=runtime_selection(sys.executable),
-                owner=operation_owner,
+                borrow=borrow,
             )
 
         assert raised.value.__cause__ is None and raised.value.__context__ is None
         assert carrier.calls == 0
-        borrowed = operation_owner.borrow()
-        borrowed.close()
+        with pytest.raises(StateError):
+            operation_owner.borrow()
+        borrow.close()
         operation_owner.close()
     finally:
         database.close()
 
 
-def test_combined_begin_request_rejection_never_arms_dispatch_and_closes_borrow(
+def test_combined_begin_request_rejection_never_arms_dispatch_and_preserves_borrow(
     tmp_path: Path,
 ) -> None:
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     carrier = LocalCarrier()
     expected = IdentityExpectation(1, 1, tuple(range(9_000)))
     oversized_plan = IdentityPlan(expected, IdentityMode.DIRECT)
@@ -708,7 +746,7 @@ def test_combined_begin_request_rejection_never_arms_dispatch_and_closes_borrow(
                 plan=oversized_plan,
                 deadline=Deadline.after(30),
                 runtime_selection=runtime_selection(sys.executable),
-                owner=operation_owner,
+                borrow=borrow,
             )
 
         fact = raised.value.__cause__
@@ -719,8 +757,9 @@ def test_combined_begin_request_rejection_never_arms_dispatch_and_closes_borrow(
         assert not fact.outcome.requires_owner_retention
         claim = database.operations.inspect(operation_owner.ownership.scope)
         assert claim is not None and claim.state is OperationClaimState.RESERVED
-        borrowed = operation_owner.borrow()
-        borrowed.close()
+        with pytest.raises(StateError):
+            operation_owner.close()
+        borrow.close()
         operation_owner.close()
     finally:
         database.close()
@@ -748,13 +787,15 @@ def test_whole_digest_mismatch_is_not_complete_and_still_cleans(
     monkeypatch.setattr(_file_download, "snapshot_begin", mismatched_begin)
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     sink = BytesSink()
     try:
-        outcome = download(operation_owner, source, sink, 64, plan)
+        outcome = download(borrow, source, sink, 64, plan)
 
         assert outcome.failure is FileDownloadFailure.INTEGRITY
         assert not outcome.stream_verified and bytes(sink.data) == b"payload"
         assert outcome.cleanup_debt is None and not tuple(scratch.iterdir())
+        borrow.close()
         operation_owner.close()
     finally:
         database.close()

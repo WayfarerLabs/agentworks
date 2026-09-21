@@ -54,7 +54,7 @@ from agentworks.execution.carrier import (
     Dispatch,
     ExitStatus,
 )
-from agentworks.operations import OperationOwner
+from agentworks.operations import OperationBorrow
 
 if TYPE_CHECKING:
     from agentworks.execution._file_publication_wire import BoundPublicationCleanupDebt
@@ -226,9 +226,9 @@ def upload_file(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
-    owner: OperationOwner,
+    borrow: OperationBorrow,
 ) -> FileUploadOutcome:
-    """Consume one exact source and publish it without replay or host spooling."""
+    """Consume one exact source under the caller's active serial borrow."""
     binding, canonical_condition, canonical_metadata = _validate_inputs(
         trusted_root_path,
         relative_path,
@@ -239,19 +239,15 @@ def upload_file(
         plan,
         deadline,
         runtime_selection,
-        owner,
+        borrow,
     )
-    borrow = owner.borrow()
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
-    try:
-        return _upload_file_borrowed(
-            operation,
-            source=source,
-            deadline=deadline,
-            inputs=(binding, canonical_condition, canonical_metadata),
-        )
-    finally:
-        borrow.close()
+    return _upload_file_borrowed(
+        operation,
+        source=source,
+        deadline=deadline,
+        inputs=(binding, canonical_condition, canonical_metadata),
+    )
 
 
 def _upload_file_borrowed(
@@ -737,7 +733,7 @@ def _validate_inputs(
     plan: object,
     deadline: object,
     runtime_selection: object,
-    owner: object,
+    borrow: object,
 ) -> tuple[FileUploadBinding, Create | Replace | Match, CreateMetadata]:
     if type(trusted_root_path) is not str or not normalized_root(trusted_root_path):
         raise ValidationError("Upload requires a normalized absolute trusted root")
@@ -776,8 +772,8 @@ def _validate_inputs(
         raise ValidationError("Upload requires one shared deadline")
     if type(runtime_selection) is not RuntimeSelection:
         raise ValidationError("Upload requires a bound runtime selection")
-    if type(owner) is not OperationOwner:
-        raise ValidationError("Upload requires core operation ownership")
+    if type(borrow) is not OperationBorrow:
+        raise ValidationError("Upload requires an active core operation borrow")
     getter_failed = False
     reader = None
     try:

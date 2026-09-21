@@ -35,7 +35,7 @@ from agentworks.execution._runtime_prerequisite import (
 )
 from agentworks.execution._scratch import ReadyScratchReference, ScratchFailureKind, _cleanup_debt
 from agentworks.execution.carrier import Deadline, Dispatch, ExitStatus
-from agentworks.operations import OperationOwner
+from agentworks.operations import OperationBorrow
 
 if TYPE_CHECKING:
     from agentworks.execution._file_stat import FileRevision
@@ -194,7 +194,7 @@ def download_file(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
-    owner: OperationOwner,
+    borrow: OperationBorrow,
 ) -> FileDownloadOutcome:
     """Download one bounded immutable snapshot without closing the sink."""
     binding = _validate_inputs(
@@ -205,28 +205,24 @@ def download_file(
         plan,
         deadline,
         runtime_selection,
-        owner,
+        borrow,
     )
     token = secrets.token_bytes(16)
-    borrow = owner.borrow()
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
     state = _WorkingState(binding, token, operation)
     workflow = _DownloadWorkflow(operation, sink, deadline, state)
     try:
-        try:
-            return workflow.run()
-        except BaseException as control:
-            workflow.note_control_stop()
-            if not operation.coordination_uncertain:
-                try:
-                    workflow.cleanup_after_local_stop()
-                except BaseException:
-                    workflow.note_control_stop()
-                    state.fail(FileDownloadFailure.CLEANUP)
-            workflow.note_control_stop()
-            raise control from FileDownloadControlFact(state.finish())
-    finally:
-        borrow.close()
+        return workflow.run()
+    except BaseException as control:
+        workflow.note_control_stop()
+        if not operation.coordination_uncertain:
+            try:
+                workflow.cleanup_after_local_stop()
+            except BaseException:
+                workflow.note_control_stop()
+                state.fail(FileDownloadFailure.CLEANUP)
+        workflow.note_control_stop()
+        raise control from FileDownloadControlFact(state.finish())
 
 
 class _DownloadWorkflow:
@@ -508,7 +504,7 @@ def _validate_inputs(
     plan: object,
     deadline: object,
     runtime_selection: object,
-    owner: object,
+    borrow: object,
 ) -> FileDownloadBinding:
     if type(trusted_root_path) is not str or not normalized_root(trusted_root_path):
         raise ValidationError("Download requires a normalized absolute trusted root")
@@ -535,8 +531,8 @@ def _validate_inputs(
         raise ValidationError("Download requires one shared deadline")
     if type(runtime_selection) is not RuntimeSelection:
         raise ValidationError("Download requires a bound runtime selection")
-    if type(owner) is not OperationOwner:
-        raise ValidationError("Download requires core operation ownership")
+    if type(borrow) is not OperationBorrow:
+        raise ValidationError("Download requires an active core operation borrow")
     getter_failed = False
     writer = None
     try:

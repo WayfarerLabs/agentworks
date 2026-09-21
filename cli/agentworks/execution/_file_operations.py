@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution._runtime_prerequisite import RuntimeSelection
     from agentworks.execution.carrier import Carrier, Deadline, Dispatch, ExitStatus
-    from agentworks.operations import OperationOwner
+    from agentworks.operations import OperationBorrow
 
 _VALIDATION_NONCE = "0" * 32
 
@@ -140,13 +140,13 @@ def read_file(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
-    owner: OperationOwner,
+    borrow: OperationBorrow,
 ) -> OwnedFileOutcome[FileReadCandidateResult]:
-    """Run one bounded read while borrowing core operation ownership."""
+    """Run one bounded read under the caller's active operation borrow."""
     return _run_owned(
         carrier,
         deadline,
-        owner,
+        borrow,
         lambda operation: exchange_read_file(
             operation,
             trusted_root_path=trusted_root_path,
@@ -167,13 +167,13 @@ def stat_file(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
-    owner: OperationOwner,
+    borrow: OperationBorrow,
 ) -> OwnedFileOutcome[FileObjectCandidateResult]:
-    """Run one object observation while borrowing core operation ownership."""
+    """Run one object observation under the caller's active operation borrow."""
     return _run_owned(
         carrier,
         deadline,
-        owner,
+        borrow,
         lambda operation: exchange_stat_file(
             operation,
             trusted_root_path=trusted_root_path,
@@ -196,13 +196,13 @@ def list_directory(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
-    owner: OperationOwner,
+    borrow: OperationBorrow,
 ) -> OwnedFileOutcome[FileInventoryCandidateResult]:
-    """Run one bounded inventory while borrowing core operation ownership."""
+    """Run one bounded inventory under the caller's active operation borrow."""
     return _run_owned(
         carrier,
         deadline,
-        owner,
+        borrow,
         lambda operation: exchange_list_directory(
             operation,
             trusted_root_path=trusted_root_path,
@@ -227,13 +227,13 @@ def remove_file(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
-    owner: OperationOwner,
+    borrow: OperationBorrow,
 ) -> OwnedFileOutcome[FileObjectCandidateResult]:
-    """Run one conditional removal while borrowing core operation ownership."""
+    """Run one conditional removal under the caller's active operation borrow."""
     return _run_owned(
         carrier,
         deadline,
-        owner,
+        borrow,
         lambda operation: exchange_remove_file(
             operation,
             trusted_root_path=trusted_root_path,
@@ -258,7 +258,7 @@ def set_metadata(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
-    owner: OperationOwner,
+    borrow: OperationBorrow,
 ) -> OwnedFileOutcome[FileMetadataCandidateResult]:
     """Resolve names and converge one object's metadata under one borrow."""
     _validate_metadata_inputs(
@@ -281,7 +281,7 @@ def set_metadata(
         plan=plan,
         deadline=deadline,
         runtime_selection=runtime_selection,
-        owner=owner,
+        borrow=borrow,
         exchange=set_file_metadata,
     )
 
@@ -297,7 +297,7 @@ def ensure_directory(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
-    owner: OperationOwner,
+    borrow: OperationBorrow,
 ) -> OwnedFileOutcome[FileMetadataCandidateResult]:
     """Resolve names and create or converge one directory under one borrow."""
     _validate_metadata_inputs(
@@ -320,7 +320,7 @@ def ensure_directory(
         plan=plan,
         deadline=deadline,
         runtime_selection=runtime_selection,
-        owner=owner,
+        borrow=borrow,
         exchange=ensure_file_directory,
     )
 
@@ -328,25 +328,21 @@ def ensure_directory(
 def _run_owned[T: _CandidateResult](
     carrier: Carrier,
     deadline: Deadline,
-    owner: OperationOwner,
+    borrow: OperationBorrow,
     exchange: Callable[[BorrowedFixedHelperCarrier], T],
 ) -> OwnedFileOutcome[T]:
     if deadline.expired:
         return OwnedFileOutcome(deadline_exceeded=True)
-    borrow = owner.borrow()
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
     state = _State[T](operation, deadline)
     try:
-        try:
-            state.result = exchange(operation)
-            operation.settle(state.result.dispatch, state.result.carrier_completion)
-            state.note_deadline()
-            return state.finish()
-        except BaseException as control:
-            state.note_deadline()
-            raise control from OwnedFileControlFact(state.finish())
-    finally:
-        borrow.close()
+        state.result = exchange(operation)
+        operation.settle(state.result.dispatch, state.result.carrier_completion)
+        state.note_deadline()
+        return state.finish()
+    except BaseException as control:
+        state.note_deadline()
+        raise control from OwnedFileControlFact(state.finish())
 
 
 def _run_metadata(
@@ -360,55 +356,51 @@ def _run_metadata(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
-    owner: OperationOwner,
+    borrow: OperationBorrow,
     exchange: _MetadataExchange,
 ) -> OwnedFileOutcome[FileMetadataCandidateResult]:
     if deadline.expired:
         return OwnedFileOutcome(deadline_exceeded=True)
-    borrow = owner.borrow()
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
     state = _State[FileMetadataCandidateResult](operation, deadline)
     try:
-        try:
-            ownership_result = resolve_file_ownership(
-                operation,
-                trusted_owner,
-                trusted_group,
-                deadline,
-                runtime_selection,
-            )
-            state.ownership_result = ownership_result
-            normal = operation.settle(ownership_result.dispatch, ownership_result.carrier_completion)
-            state.note_deadline()
-            observation = ownership_result.observation
-            if (
-                not normal
-                or state.deadline_exceeded
-                or ownership_result.runtime_prerequisite.state is not RuntimePrerequisiteState.READY
-                or observation is None
-                or observation.state is not AccountObservationState.RESOLVED
-                or observation.ownership is None
-            ):
-                return state.finish()
-            state.result = exchange(
-                operation,
-                trusted_root_path=trusted_root_path,
-                relative_path=relative_path,
-                uid=observation.ownership.uid,
-                gid=observation.ownership.gid,
-                mode=mode,
-                plan=plan,
-                deadline=deadline,
-                runtime_selection=runtime_selection,
-            )
-            operation.settle(state.result.dispatch, state.result.carrier_completion)
-            state.note_deadline()
+        ownership_result = resolve_file_ownership(
+            operation,
+            trusted_owner,
+            trusted_group,
+            deadline,
+            runtime_selection,
+        )
+        state.ownership_result = ownership_result
+        normal = operation.settle(ownership_result.dispatch, ownership_result.carrier_completion)
+        state.note_deadline()
+        observation = ownership_result.observation
+        if (
+            not normal
+            or state.deadline_exceeded
+            or ownership_result.runtime_prerequisite.state is not RuntimePrerequisiteState.READY
+            or observation is None
+            or observation.state is not AccountObservationState.RESOLVED
+            or observation.ownership is None
+        ):
             return state.finish()
-        except BaseException as control:
-            state.note_deadline()
-            raise control from OwnedFileControlFact(state.finish())
-    finally:
-        borrow.close()
+        state.result = exchange(
+            operation,
+            trusted_root_path=trusted_root_path,
+            relative_path=relative_path,
+            uid=observation.ownership.uid,
+            gid=observation.ownership.gid,
+            mode=mode,
+            plan=plan,
+            deadline=deadline,
+            runtime_selection=runtime_selection,
+        )
+        operation.settle(state.result.dispatch, state.result.carrier_completion)
+        state.note_deadline()
+        return state.finish()
+    except BaseException as control:
+        state.note_deadline()
+        raise control from OwnedFileControlFact(state.finish())
 
 
 def _validate_metadata_inputs(

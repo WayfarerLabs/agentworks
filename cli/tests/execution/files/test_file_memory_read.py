@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.db import Database, OperationClaimState
-from agentworks.errors import ValidationError
+from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _file_memory_read
 from agentworks.execution._file_download import (
     FileDownloadBinding,
@@ -32,7 +32,7 @@ from tests.execution.files._runtime_support import runtime_selection
 
 if TYPE_CHECKING:
     from agentworks.execution.carrier import ByteSink, Carrier
-    from agentworks.operations import OperationOwner
+    from agentworks.operations import OperationBorrow
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the private snapshot helper requires Linux")
 
@@ -64,9 +64,9 @@ class _FakeDownload:
         plan: IdentityPlan,
         deadline: Deadline,
         runtime_selection: RuntimeSelection,
-        owner: OperationOwner,
+        borrow: OperationBorrow,
     ) -> FileDownloadOutcome:
-        del carrier, trusted_root_path, relative_path, max_bytes, plan, deadline, runtime_selection, owner
+        del carrier, trusted_root_path, relative_path, max_bytes, plan, deadline, runtime_selection, borrow
         self.sink = sink
         for chunk in self.chunks:
             assert sink.try_write(memoryview(chunk)) == len(chunk)
@@ -92,7 +92,7 @@ def roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
 
 def _read(
     carrier: Carrier,
-    operation_owner: OperationOwner,
+    borrow: OperationBorrow,
     source: Path,
     relative_path: str,
     max_bytes: int,
@@ -106,7 +106,7 @@ def _read(
         plan=plan,
         deadline=Deadline.after(30),
         runtime_selection=runtime_selection(sys.executable),
-        owner=operation_owner,
+        borrow=borrow,
     )
 
 
@@ -125,8 +125,9 @@ def test_real_linux_read_returns_only_complete_verified_data(
     source.joinpath("target").write_bytes(content)
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     try:
-        outcome = _read(LocalCarrier(), operation_owner, source, "target", max(1, len(content)), plan)
+        outcome = _read(LocalCarrier(), borrow, source, "target", max(1, len(content)), plan)
 
         assert outcome.download.status is FileDownloadStatus.COMPLETE
         assert outcome.download.stream_verified
@@ -135,6 +136,7 @@ def test_real_linux_read_returns_only_complete_verified_data(
         assert not outcome.download.requires_owner_retention
         assert not tuple(scratch.iterdir())
         assert repr(content) not in repr(outcome)
+        borrow.close()
         operation_owner.close()
     finally:
         database.close()
@@ -148,14 +150,16 @@ def test_real_linux_absence_returns_no_data(
     source, scratch = roots
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     try:
-        outcome = _read(LocalCarrier(), operation_owner, source, "absent", 1, plan)
+        outcome = _read(LocalCarrier(), borrow, source, "absent", 1, plan)
 
         assert outcome.download.status is FileDownloadStatus.ABSENT
         assert outcome.download.accepted_bytes == 0
         assert outcome.data is None
         assert not outcome.download.requires_owner_retention
         assert not tuple(scratch.iterdir())
+        borrow.close()
         operation_owner.close()
     finally:
         database.close()
@@ -170,8 +174,9 @@ def test_real_linux_caller_bound_refusal_exposes_no_partial_data(
     source.joinpath("target").write_bytes(b"bounded-content")
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     try:
-        outcome = _read(LocalCarrier(), operation_owner, source, "target", 4, plan)
+        outcome = _read(LocalCarrier(), borrow, source, "target", 4, plan)
 
         assert outcome.download.status is FileDownloadStatus.FAILED
         assert outcome.download.failure is FileDownloadFailure.SNAPSHOT
@@ -179,6 +184,7 @@ def test_real_linux_caller_bound_refusal_exposes_no_partial_data(
         assert outcome.data is None
         assert not outcome.download.requires_owner_retention
         assert not tuple(scratch.iterdir())
+        borrow.close()
         operation_owner.close()
     finally:
         database.close()
@@ -224,6 +230,7 @@ def test_partial_bytes_are_discarded_without_changing_download_facts(
 ) -> None:
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     fake = _FakeDownload(download, (b"partial",))
     monkeypatch.setattr(_file_memory_read, "download_file", fake)
     try:
@@ -235,7 +242,7 @@ def test_partial_bytes_are_discarded_without_changing_download_facts(
             plan=_PLAN,
             deadline=Deadline.after(30),
             runtime_selection=_RUNTIME,
-            owner=operation_owner,
+            borrow=borrow,
         )
 
         assert outcome.download is download
@@ -243,6 +250,9 @@ def test_partial_bytes_are_discarded_without_changing_download_facts(
         assert fake.sink is not None
         assert isinstance(fake.sink, _file_memory_read._MemorySink)  # noqa: SLF001
         assert fake.sink.data == bytearray()
+        with pytest.raises(StateError):
+            operation_owner.close()
+        borrow.close()
         operation_owner.close()
     finally:
         database.close()
@@ -276,15 +286,16 @@ def test_original_control_and_download_fact_escape_unchanged(
         plan: IdentityPlan,
         deadline: Deadline,
         runtime_selection: RuntimeSelection,
-        owner: OperationOwner,
+        borrow: OperationBorrow,
     ) -> FileDownloadOutcome:
         nonlocal sink_seen
-        del carrier, trusted_root_path, relative_path, max_bytes, plan, deadline, runtime_selection, owner
+        del carrier, trusted_root_path, relative_path, max_bytes, plan, deadline, runtime_selection, borrow
         sink_seen = sink
         assert sink.try_write(memoryview(b"partial")) == 7
         raise control from fact
 
     monkeypatch.setattr(_file_memory_read, "download_file", fail_download)
+    borrow = operation_owner.borrow()
     try:
         with pytest.raises(ControlStop) as raised:
             read_file(
@@ -295,7 +306,7 @@ def test_original_control_and_download_fact_escape_unchanged(
                 plan=_PLAN,
                 deadline=Deadline.after(30),
                 runtime_selection=_RUNTIME,
-                owner=operation_owner,
+                borrow=borrow,
             )
 
         assert raised.value is control and raised.value.__cause__ is fact
@@ -303,13 +314,18 @@ def test_original_control_and_download_fact_escape_unchanged(
         assert isinstance(sink_seen, _file_memory_read._MemorySink)  # noqa: SLF001
         assert sink_seen.data == bytearray()
         assert "private-control-canary" not in repr(fact)
+        with pytest.raises(StateError):
+            operation_owner.borrow()
+        borrow.close()
+        operation_owner.close()
     finally:
         database.close()
 
 
-def test_invalid_caller_bound_is_rejected_by_download_before_borrow(tmp_path: Path) -> None:
+def test_invalid_caller_bound_preserves_borrow_and_never_dispatches(tmp_path: Path) -> None:
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     carrier = LocalCarrier()
     try:
         with pytest.raises(ValidationError):
@@ -321,12 +337,15 @@ def test_invalid_caller_bound_is_rejected_by_download_before_borrow(tmp_path: Pa
                 plan=_PLAN,
                 deadline=Deadline.after(30),
                 runtime_selection=_RUNTIME,
-                owner=operation_owner,
+                borrow=borrow,
             )
 
         assert carrier.calls == 0
         claim = database.operations.inspect(operation_owner.ownership.scope)
         assert claim is not None and claim.state is OperationClaimState.RESERVED
+        with pytest.raises(StateError):
+            operation_owner.close()
+        borrow.close()
         operation_owner.close()
     finally:
         database.close()
@@ -349,6 +368,7 @@ def test_bounded_fake_collects_more_than_one_qga_response_without_native_proof(
     monkeypatch.setattr(_file_memory_read, "download_file", fake)
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
+    borrow = operation_owner.borrow()
     try:
         outcome = read_file(
             LocalCarrier(),
@@ -358,11 +378,12 @@ def test_bounded_fake_collects_more_than_one_qga_response_without_native_proof(
             plan=_PLAN,
             deadline=Deadline.after(30),
             runtime_selection=_RUNTIME,
-            owner=operation_owner,
+            borrow=borrow,
         )
 
         assert outcome.download is download
         assert outcome.data == content
+        borrow.close()
         operation_owner.close()
     finally:
         database.close()

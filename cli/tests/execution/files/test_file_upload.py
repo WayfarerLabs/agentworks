@@ -383,9 +383,10 @@ def test_real_helper_create_streams_exact_bytes_once(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     source = BytesSource(content, pieces=(1, 37, 8191, 12_288))
     try:
-        outcome = _upload(owner, root, source, len(content), plan)
+        outcome = _upload(borrow, root, source, len(content), plan)
 
         assert outcome.status is FileUploadStatus.COMPLETE
         assert outcome.publication_confirmed and not outcome.requires_owner_retention
@@ -396,6 +397,7 @@ def test_real_helper_create_streams_exact_bytes_once(
         assert root.joinpath("target").read_bytes() == content
         assert source.offset == len(content) and not source.closed
         assert all(limit <= 12 * 1024 for limit in source.limits)
+        borrow.close()
         owner.close()
         assert database.operations.inspect(owner.ownership.scope) is None
     finally:
@@ -413,6 +415,7 @@ def test_owner_is_durably_marked_once_before_each_real_carrier_execute(
     repository = database.operations
     scope = OperationScope(OperationResourceKind.VM, "upload-vm")
     owner = OperationOwner.acquire(repository, scope, "file-upload")
+    borrow = owner.borrow()
     carrier = ClaimInspectingCarrier(database, owner.ownership.scope)
     marks = 0
     original = repository.mark_possible_dispatch
@@ -424,11 +427,12 @@ def test_owner_is_durably_marked_once_before_each_real_carrier_execute(
 
     monkeypatch.setattr(repository, "mark_possible_dispatch", mark_possible_dispatch)
     try:
-        outcome = _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+        outcome = _upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
 
         assert outcome.status is FileUploadStatus.COMPLETE
         assert carrier.calls == 4
         assert marks == 1
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -442,12 +446,13 @@ def test_real_helper_replace_and_match_use_the_same_owner_without_overlapping_bo
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     try:
-        created = _upload(owner, root, BytesSource(b"first"), 5, plan)
-        replaced = _upload(owner, root, BytesSource(b"second"), 6, plan, condition=Replace())
+        created = _upload(borrow, root, BytesSource(b"first"), 5, plan)
+        replaced = _upload(borrow, root, BytesSource(b"second"), 6, plan, condition=Replace())
         assert replaced.revision is not None
         matched = _upload(
-            owner,
+            borrow,
             root,
             BytesSource(b"third"),
             5,
@@ -457,6 +462,7 @@ def test_real_helper_replace_and_match_use_the_same_owner_without_overlapping_bo
 
         assert created.status is replaced.status is matched.status is FileUploadStatus.COMPLETE
         assert root.joinpath("target").read_bytes() == b"third"
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -470,15 +476,17 @@ def test_lost_creation_reply_reconciles_and_cleans_without_replaying_begin(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = LostCallStdoutCarrier(1)
     try:
-        outcome = _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+        outcome = _upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
 
         assert carrier.calls == 3
         assert outcome.status is FileUploadStatus.FAILED
         assert outcome.failure is FileUploadFailure.OBSERVATION
         assert outcome.scratch_cleanup_debt is None
         assert not outcome.requires_owner_retention and not root.joinpath("target").exists()
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -503,6 +511,7 @@ def test_known_runtime_refusal_stops_before_pointless_reconciliation(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = RuntimeRefusalOnCallCarrier(1, state)
     selected_runtime = RuntimeSelection(
         RuntimeTargetOS.DARWIN if state is RuntimePrerequisiteState.SHIM else RuntimeTargetOS.LINUX,
@@ -510,7 +519,7 @@ def test_known_runtime_refusal_stops_before_pointless_reconciliation(
     )
     try:
         outcome = _upload(
-            owner,
+            borrow,
             root,
             BytesSource(b"content"),
             7,
@@ -525,6 +534,7 @@ def test_known_runtime_refusal_stops_before_pointless_reconciliation(
         assert outcome.runtime_prerequisite.state is state
         assert not outcome.stage_ownership_uncertain
         assert not outcome.requires_owner_retention
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -538,9 +548,10 @@ def test_known_runtime_refusal_replaces_prior_unknown_without_erasing_ownership_
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = LostThenRuntimeRefusalCarrier()
     try:
-        outcome = _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+        outcome = _upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
 
         assert carrier.calls == 2
         assert outcome.runtime_prerequisite is not None
@@ -559,9 +570,10 @@ def test_runtime_refusal_after_source_read_preserves_debt_and_distinct_counters(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = RuntimeRefusalOnCallCarrier(2, RuntimePrerequisiteState.MISSING)
     try:
-        outcome = _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+        outcome = _upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
 
         assert carrier.calls == 2
         assert outcome.failure is FileUploadFailure.RUNTIME_PREREQUISITE
@@ -583,9 +595,10 @@ def test_lost_publish_reply_never_replays_mutation_and_preserves_unknown_cleanup
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = LostCallStdoutCarrier(3)
     try:
-        outcome = _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+        outcome = _upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
 
         assert carrier.calls == 4
         assert root.joinpath("target").read_bytes() == b"content"
@@ -608,9 +621,10 @@ def test_nonzero_wrapper_exit_records_effect_but_stops_all_follow_on_calls(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = NonzeroCallCarrier(3)
     try:
-        outcome = _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+        outcome = _upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
 
         assert carrier.calls == 3
         assert root.joinpath("target").read_bytes() == b"content"
@@ -620,6 +634,7 @@ def test_nonzero_wrapper_exit_records_effect_but_stops_all_follow_on_calls(
         with pytest.raises(StateError):
             owner.borrow()
         with pytest.raises(StateError):
+            borrow.close()
             owner.close()
     finally:
         database.close()
@@ -633,9 +648,10 @@ def test_missing_completion_with_valid_transcript_stops_follow_on_calls_and_reta
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = MissingCompletionCallCarrier(2)
     try:
-        outcome = _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+        outcome = _upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
 
         assert carrier.calls == 2
         assert not root.joinpath("target").exists()
@@ -658,10 +674,11 @@ def test_carrier_exception_after_execute_boundary_stops_follow_on_and_retains_ow
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = RaisingCallCarrier(2)
     try:
         with pytest.raises(RuntimeError) as raised:
-            _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+            _upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
 
         fact = raised.value.__cause__
         assert isinstance(fact, FileUploadControlFact)
@@ -670,6 +687,7 @@ def test_carrier_exception_after_execute_boundary_stops_follow_on_and_retains_ow
         assert fact.outcome.scratch_cleanup_debt is not None
         assert fact.outcome.requires_owner_retention
         with pytest.raises(StateError):
+            borrow.close()
             owner.close()
     finally:
         database.close()
@@ -683,10 +701,11 @@ def test_interrupted_dispatch_records_expired_deadline_fact(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = DeadlineInterruptingCarrier()
     try:
         with pytest.raises(KeyboardInterrupt) as raised:
-            _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+            _upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
 
         fact = raised.value.__cause__
         assert isinstance(fact, FileUploadControlFact)
@@ -706,9 +725,10 @@ def test_deadline_exhaustion_after_stage_uses_no_fresh_cleanup_budget(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     deadline = Deadline.after(30)
     try:
-        outcome = _upload(owner, root, ExpiringSource(deadline), 1, plan, deadline=deadline)
+        outcome = _upload(borrow, root, ExpiringSource(deadline), 1, plan, deadline=deadline)
 
         assert outcome.failure is FileUploadFailure.DEADLINE
         assert outcome.deadline_exceeded and outcome.scratch_cleanup_debt is not None
@@ -728,10 +748,11 @@ def test_real_carrier_timeout_records_deadline_with_unresolved_stage_begin(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = AdmittedTimeoutCarrier(monkeypatch, startup_delay=0.15)
     try:
         outcome = _upload(
-            owner,
+            borrow,
             root,
             BytesSource(b"content"),
             7,
@@ -772,19 +793,21 @@ def test_closed_stage_deadline_transcript_stops_without_fresh_cleanup(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = ClosedFailureOnCallCarrier(
         1,
         encode_file_stage_failure(failure),
         empty_file_stage_body(),
     )
     try:
-        outcome = _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+        outcome = _upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
 
         assert carrier.calls == 1
         assert outcome.failure is FileUploadFailure.DEADLINE
         assert outcome.deadline_exceeded
         assert outcome.stage_failure == failure
         assert not outcome.requires_owner_retention
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -798,6 +821,7 @@ def test_closed_publication_deadline_code_retains_scratch_without_cleanup(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     failure = FilePublicationFailureControl(FilePublicationFailureCode.DEADLINE)
     carrier = ClosedFailureOnCallCarrier(
         3,
@@ -805,7 +829,7 @@ def test_closed_publication_deadline_code_retains_scratch_without_cleanup(
         empty_file_publication_body(),
     )
     try:
-        outcome = _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+        outcome = _upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
 
         assert carrier.calls == 3
         assert outcome.failure is FileUploadFailure.DEADLINE
@@ -827,9 +851,10 @@ def test_real_helper_publication_deadline_retains_scratch_without_cleanup(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = LocalCarrier()
     try:
-        outcome = _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+        outcome = _upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
 
         assert carrier.calls == 3
         assert outcome.failure is FileUploadFailure.DEADLINE
@@ -853,15 +878,17 @@ def test_publish_failure_cleans_publication_debt_before_ordinary_scratch(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = RestorePublicationBundleCarrier(3, normal_bundle, monkeypatch)
     try:
-        outcome = _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+        outcome = _upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
 
         assert carrier.calls == 5
         assert outcome.failure is FileUploadFailure.PUBLICATION
         assert outcome.publication_cleanup_debt is None
         assert outcome.scratch_cleanup_debt is None
         assert not outcome.requires_owner_retention and not root.joinpath("target").exists()
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -877,9 +904,10 @@ def test_failed_publication_cleanup_preserves_both_bound_debts(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = LocalCarrier()
     try:
-        outcome = _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+        outcome = _upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
 
         assert carrier.calls == 4
         assert outcome.failure is FileUploadFailure.PUBLICATION
@@ -902,9 +930,10 @@ def test_progressed_publication_cleanup_binding_loss_clears_stale_debt(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = RestorePublicationBundleCarrier(3, progressed_bundle, monkeypatch)
     try:
-        outcome = _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+        outcome = _upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
 
         assert carrier.calls == 4
         assert outcome.publication_cleanup_debt is None
@@ -929,9 +958,10 @@ def test_publication_cleanup_receipt_deadline_preserves_exact_debt_and_stops(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = RestorePublicationBundleCarrier(3, deadline_bundle, monkeypatch)
     try:
-        outcome = _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+        outcome = _upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
 
         assert carrier.calls == 4
         assert outcome.failure is FileUploadFailure.PUBLICATION
@@ -955,9 +985,10 @@ def test_partial_stage_creation_failure_uses_failure_debt_for_cleanup(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = LocalCarrier()
     try:
-        outcome = _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+        outcome = _upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
 
         assert carrier.calls == 2
         assert outcome.failure is FileUploadFailure.STAGE
@@ -966,6 +997,7 @@ def test_partial_stage_creation_failure_uses_failure_debt_for_cleanup(
         assert outcome.scratch_cleanup_debt is None
         assert not root.joinpath(scratch_name(outcome.token)).exists()
         assert not outcome.requires_owner_retention
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -985,9 +1017,10 @@ def test_failed_cleanup_after_partial_stage_creation_preserves_failure_debt(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = LocalCarrier()
     try:
-        outcome = _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+        outcome = _upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
 
         assert carrier.calls == 2
         assert outcome.failure is FileUploadFailure.STAGE

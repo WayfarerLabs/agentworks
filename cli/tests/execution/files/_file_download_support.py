@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from agentworks.db import OperationResourceKind, OperationScope
 from agentworks.execution._file_download import FileDownloadOutcome, download_file
 from agentworks.execution.carrier import CarrierIO, CarrierReport, ChannelFeatures, Deadline, SinkOutput
-from agentworks.operations import OperationOwner
+from agentworks.operations import OperationBorrow, OperationOwner
 from tests.execution.files._file_snapshot_support import LocalCarrier
 from tests.execution.files._runtime_support import runtime_selection
 
@@ -80,7 +80,7 @@ def owner(database: Database) -> OperationOwner:
 
 
 def download(
-    operation_owner: OperationOwner,
+    borrow: OperationBorrow,
     root: Path,
     sink: ByteSink,
     max_bytes: int,
@@ -100,5 +100,5 @@ def download(
         plan=plan,
         deadline=deadline or Deadline.after(30),
         runtime_selection=selected_runtime or runtime_selection(sys.executable),
-        owner=operation_owner,
+        borrow=borrow,
     )

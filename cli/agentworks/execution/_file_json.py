@@ -47,7 +47,7 @@ from agentworks.execution._runtime_prerequisite import (
     RuntimeSelection,
 )
 from agentworks.execution.carrier import Deadline, Dispatch
-from agentworks.operations import OperationOwner
+from agentworks.operations import OperationBorrow
 
 if TYPE_CHECKING:
     from agentworks.execution._file_object_protocol import FileObjectFailureControl
@@ -227,7 +227,7 @@ def update_json_file(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
-    owner: OperationOwner,
+    borrow: OperationBorrow,
 ) -> FileJsonOutcome:
     """Apply one bounded JSON strategy while holding one serial owner borrow."""
     inputs = _validate_json_inputs(
@@ -242,26 +242,22 @@ def update_json_file(
         plan,
         deadline,
         runtime_selection,
-        owner,
+        borrow,
     )
-    borrow = owner.borrow()
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
     state = _State(inputs.binding, operation)
     workflow = _JsonWorkflow(inputs, deadline, state)
     try:
-        try:
-            return workflow.run()
-        except BaseException as control:
-            cause = control.__cause__
-            if isinstance(cause, FileUploadControlFact):
-                state.upload_outcome = cause.outcome
-                if cause.outcome.runtime_prerequisite is not None:
-                    state.record_runtime(cause.outcome.runtime_prerequisite)
-                state.deadline_exceeded = state.deadline_exceeded or cause.outcome.deadline_exceeded
-            state.deadline_exceeded = state.deadline_exceeded or deadline.expired
-            raise control from FileJsonControlFact(state.finish())
-    finally:
-        borrow.close()
+        return workflow.run()
+    except BaseException as control:
+        cause = control.__cause__
+        if isinstance(cause, FileUploadControlFact):
+            state.upload_outcome = cause.outcome
+            if cause.outcome.runtime_prerequisite is not None:
+                state.record_runtime(cause.outcome.runtime_prerequisite)
+            state.deadline_exceeded = state.deadline_exceeded or cause.outcome.deadline_exceeded
+        state.deadline_exceeded = state.deadline_exceeded or deadline.expired
+        raise control from FileJsonControlFact(state.finish())
 
 
 class _JsonWorkflow:
@@ -528,7 +524,7 @@ def _validate_json_inputs(
     plan: object,
     deadline: object,
     runtime_selection: object,
-    owner: object,
+    borrow: object,
 ) -> _Inputs:
     if type(source) is not bytes:
         raise ValidationError("JSON update requires source bytes")
@@ -540,8 +536,8 @@ def _validate_json_inputs(
     validated = validate_json_object(source, max_bytes=max_bytes, max_depth=max_depth)
     if not isinstance(create_metadata, CreateMetadata):
         raise ValidationError("JSON update requires numeric create metadata")
-    if type(owner) is not OperationOwner:
-        raise ValidationError("JSON update requires core operation ownership")
+    if type(borrow) is not OperationBorrow:
+        raise ValidationError("JSON update requires an active core operation borrow")
     probe = _BytesSource(b"")
     binding, _, canonical_metadata = _validate_inputs(
         trusted_root_path,
@@ -553,7 +549,7 @@ def _validate_json_inputs(
         plan,
         deadline,
         runtime_selection,
-        owner,
+        borrow,
     )
     json_binding = FileJsonBinding(
         binding.trusted_root_path,

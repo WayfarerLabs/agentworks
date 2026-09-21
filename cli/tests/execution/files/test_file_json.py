@@ -36,12 +36,12 @@ from agentworks.execution.carrier import (
     Deadline,
     PreparedInvocation,
 )
-from agentworks.operations import OperationOwner
+from agentworks.operations import OperationBorrow, OperationOwner
 from tests.execution.files._file_publication_support import LocalCarrier
 from tests.execution.files._file_publication_support import install_fixture_bundle as install_publication_bundle
 from tests.execution.files._file_read_support import install_fixture_bundle as install_read_bundle
 from tests.execution.files._file_stage_support import install_fixture_bundle as install_stage_bundle
-from tests.execution.files._file_upload_support import BytesSource, LostCallStdoutCarrier, upload
+from tests.execution.files._file_upload_support import LostCallStdoutCarrier
 from tests.execution.files._runtime_support import runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the private file helpers require Linux")
@@ -159,7 +159,7 @@ def _owner(database: Database) -> OperationOwner:
 
 
 def _update(
-    owner: OperationOwner,
+    borrow: OperationBorrow,
     root: Path,
     plan: IdentityPlan,
     source: bytes,
@@ -184,7 +184,7 @@ def _update(
         plan=plan,
         deadline=Deadline.after(30),
         runtime_selection=runtime_selection(runtime),
-        owner=owner,
+        borrow=borrow,
     )
 
 
@@ -199,15 +199,17 @@ def test_invalid_source_refuses_before_target_io(
     (root / "target").write_bytes(b"private-existing-content")
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = LocalCarrier()
     try:
         with pytest.raises(ValidationError) as raised:
-            _update(owner, root, plan, b'{"duplicate":1,"duplicate":2}', strategy, carrier=carrier)
+            _update(borrow, root, plan, b'{"duplicate":1,"duplicate":2}', strategy, carrier=carrier)
 
         assert raised.value.__context__ is None and raised.value.__cause__ is None
         assert "duplicate" not in repr(raised.value)
         assert carrier.calls == 0
         assert (root / "target").read_bytes() == b"private-existing-content"
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -220,14 +222,16 @@ def test_replace_uses_stat_without_parsing_existing_bytes(tmp_path: Path, plan: 
     target.write_bytes(b"malformed \xff")
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = LocalCarrier()
     try:
-        outcome = _update(owner, root, plan, b'{"value":null}', "replace", carrier=carrier)
+        outcome = _update(borrow, root, plan, b'{"value":null}', "replace", carrier=carrier)
 
         assert outcome.status is FileJsonStatus.COMPLETE
         assert outcome.change is FileJsonChange.CHANGED and outcome.revision is not None
         assert outcome.publication_attempts == 1 and carrier.calls == 5
         assert json.loads(target.read_bytes()) == {"value": None}
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -243,6 +247,7 @@ def test_publication_metadata_is_canonical_before_target_observation(
     target.write_text('{"existing":true}')
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = LocalCarrier()
     try:
         with pytest.raises(ValidationError):
@@ -259,10 +264,13 @@ def test_publication_metadata_is_canonical_before_target_observation(
                 plan=plan,
                 deadline=Deadline.after(30),
                 runtime_selection=runtime_selection(sys.executable),
-                owner=owner,
+                borrow=borrow,
             )
 
         assert carrier.calls == 0 and json.loads(target.read_bytes()) == {"existing": True}
+        with pytest.raises(StateError):
+            owner.borrow()
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -280,14 +288,16 @@ def test_skip_existing_leaves_any_regular_file_unchanged(
     target.write_bytes(existing)
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = LocalCarrier()
     try:
-        outcome = _update(owner, root, plan, b'{"new":true}', "skip-existing", carrier=carrier)
+        outcome = _update(borrow, root, plan, b'{"new":true}', "skip-existing", carrier=carrier)
 
         assert outcome.status is FileJsonStatus.COMPLETE
         assert outcome.change is FileJsonChange.UNCHANGED and outcome.revision is not None
         assert outcome.publication_attempts == 0 and carrier.calls == 1
         assert target.read_bytes() == existing
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -303,12 +313,14 @@ def test_absent_destination_respects_create(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     try:
-        outcome = _update(owner, root, plan, b'{"created":true}', strategy, create=False)
+        outcome = _update(borrow, root, plan, b'{"created":true}', strategy, create=False)
 
         assert outcome.status is FileJsonStatus.FAILED
         assert outcome.failure is FileJsonFailure.ABSENT
         assert outcome.publication_attempts == 0 and not (root / "target").exists()
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -324,12 +336,14 @@ def test_each_strategy_creates_an_absent_destination(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     try:
-        outcome = _update(owner, root, plan, b'{"created":[null,{"nested":true}]}', strategy)
+        outcome = _update(borrow, root, plan, b'{"created":[null,{"nested":true}]}', strategy)
 
         assert outcome.status is FileJsonStatus.COMPLETE
         assert outcome.change is FileJsonChange.CHANGED and outcome.revision is not None
         assert json.loads((root / "target").read_bytes()) == {"created": [None, {"nested": True}]}
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -383,12 +397,14 @@ def test_merge_uses_bounded_snapshot_and_atomic_leaf_semantics(
     ).encode()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     try:
-        outcome = _update(owner, root, plan, source, strategy)
+        outcome = _update(borrow, root, plan, source, strategy)
 
         assert outcome.status is FileJsonStatus.COMPLETE
         assert outcome.change is FileJsonChange.CHANGED and outcome.revision is not None
         assert json.loads(target.read_bytes()) == expected
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -406,14 +422,16 @@ def test_merge_rejects_invalid_existing_without_publication(
     target.write_bytes(existing)
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = LocalCarrier()
     try:
-        outcome = _update(owner, root, plan, b"{}", "merge-overwrite", carrier=carrier)
+        outcome = _update(borrow, root, plan, b"{}", "merge-overwrite", carrier=carrier)
 
         assert outcome.status is FileJsonStatus.FAILED
         assert outcome.failure is FileJsonFailure.EXISTING_VALIDATION
         assert outcome.publication_attempts == 0 and carrier.calls == 1
         assert target.read_bytes() == existing
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -430,10 +448,11 @@ def test_valid_existing_json_beyond_depth_bound_does_not_publish(
     target.write_bytes(existing)
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = LocalCarrier()
     try:
         outcome = _update(
-            owner,
+            borrow,
             root,
             plan,
             b"{}",
@@ -446,6 +465,7 @@ def test_valid_existing_json_beyond_depth_bound_does_not_publish(
         assert outcome.failure is FileJsonFailure.EXISTING_VALIDATION
         assert outcome.publication_attempts == 0 and carrier.calls == 1
         assert target.read_bytes() == existing
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -465,10 +485,11 @@ def test_valid_existing_json_beyond_integer_parser_capacity_does_not_publish(
     target.write_bytes(existing)
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = LocalCarrier()
     try:
         outcome = _update(
-            owner,
+            borrow,
             root,
             plan,
             b"{}",
@@ -481,6 +502,7 @@ def test_valid_existing_json_beyond_integer_parser_capacity_does_not_publish(
         assert outcome.failure is FileJsonFailure.EXISTING_VALIDATION
         assert outcome.publication_attempts == 0 and carrier.calls == 1
         assert target.read_bytes() == existing
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -496,10 +518,11 @@ def test_merge_enforces_snapshot_byte_bound_without_partial_publication(
     target.write_text('{"existing":"value beyond bound"}')
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = LocalCarrier()
     try:
         outcome = _update(
-            owner,
+            borrow,
             root,
             plan,
             b"{}",
@@ -513,6 +536,7 @@ def test_merge_enforces_snapshot_byte_bound_without_partial_publication(
         assert outcome.read_failure is FileReadFailure.LIMIT
         assert outcome.publication_attempts == 0 and carrier.calls == 1
         assert target.read_text() == '{"existing":"value beyond bound"}'
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -528,9 +552,10 @@ def test_merge_reports_result_capacity_separately_from_invalid_existing(
     target.write_text('{"existing":"1234567890"}')
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     try:
         outcome = _update(
-            owner,
+            borrow,
             root,
             plan,
             b'{"source":"1234567890"}',
@@ -542,6 +567,7 @@ def test_merge_reports_result_capacity_separately_from_invalid_existing(
         assert outcome.failure is FileJsonFailure.TRANSFORM
         assert outcome.publication_attempts == 0
         assert json.loads(target.read_bytes()) == {"existing": "1234567890"}
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -552,10 +578,11 @@ def test_known_runtime_refusal_stops_before_upload(tmp_path: Path, plan: Identit
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = LocalCarrier()
     try:
         outcome = _update(
-            owner,
+            borrow,
             root,
             plan,
             b'{"value":1}',
@@ -570,6 +597,7 @@ def test_known_runtime_refusal_stops_before_upload(tmp_path: Path, plan: Identit
         assert outcome.runtime_prerequisite.state is RuntimePrerequisiteState.MISSING
         assert outcome.publication_attempts == 0 and carrier.calls == 1
         assert not outcome.requires_owner_retention
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -593,9 +621,10 @@ def test_merge_retries_a_later_exact_match_conflict_with_one_deadline_and_borrow
     carrier = AfterCallCarrier(race_once)
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     try:
         outcome = _update(
-            owner,
+            borrow,
             root,
             plan,
             b'{"source":{"nested":null}}',
@@ -607,6 +636,7 @@ def test_merge_retries_a_later_exact_match_conflict_with_one_deadline_and_borrow
         assert outcome.publication_attempts == 2
         assert json.loads(target.read_bytes()) == {"concurrent": True, "source": {"nested": None}}
         assert len({id(deadline) for deadline in seen_deadlines}) == 1
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -624,14 +654,16 @@ def test_merge_stops_after_eight_total_condition_conflicts(
     target.write_text('{"existing":true}')
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     try:
-        outcome = _update(owner, root, plan, b'{"source":true}', "merge-overwrite")
+        outcome = _update(borrow, root, plan, b'{"source":true}', "merge-overwrite")
 
         assert outcome.status is FileJsonStatus.FAILED
         assert outcome.failure is FileJsonFailure.CONFLICT
         assert outcome.publication_attempts == 8
         assert not outcome.requires_owner_retention
         assert json.loads(target.read_bytes()) == {"existing": True}
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -649,13 +681,15 @@ def test_merge_does_not_retry_a_noncondition_publication_conflict(
     target.write_text('{"existing":true}')
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     try:
-        outcome = _update(owner, root, plan, b'{"source":true}', "merge-overwrite")
+        outcome = _update(borrow, root, plan, b'{"source":true}', "merge-overwrite")
 
         assert outcome.status is FileJsonStatus.FAILED
         assert outcome.failure is FileJsonFailure.PUBLICATION
         assert outcome.publication_attempts == 1
         assert json.loads(target.read_bytes()) == {"existing": True}
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -669,6 +703,7 @@ def test_whole_json_call_holds_borrow_against_sibling_upload(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     sibling_refused = False
 
     def try_sibling(call: int, deadline: Deadline) -> None:
@@ -677,12 +712,12 @@ def test_whole_json_call_holds_borrow_against_sibling_upload(
         if call != 1:
             return
         with pytest.raises(StateError):
-            upload(owner, root, BytesSource(b"sibling"), 7, plan)
+            owner.borrow()
         sibling_refused = True
 
     try:
         outcome = _update(
-            owner,
+            borrow,
             root,
             plan,
             b'{"primary":true}',
@@ -691,6 +726,7 @@ def test_whole_json_call_holds_borrow_against_sibling_upload(
         )
 
         assert outcome.status is FileJsonStatus.COMPLETE and sibling_refused
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -720,11 +756,13 @@ def test_read_and_upload_share_one_durable_dispatch_transition(
         OperationScope(OperationResourceKind.VM, "json-vm"),
         "file-json",
     )
+    borrow = owner.borrow()
     try:
-        outcome = _update(owner, root, plan, b'{"source":true}', "merge-overwrite")
+        outcome = _update(borrow, root, plan, b'{"source":true}', "merge-overwrite")
 
         assert outcome.status is FileJsonStatus.COMPLETE
         assert outcome.publication_attempts == 1 and marks == 1
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -739,14 +777,16 @@ def test_lost_read_observation_stops_without_replay_or_owner_retention(
     (root / "target").write_text('{"existing":true}')
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = LostCallStdoutCarrier(1)
     try:
-        outcome = _update(owner, root, plan, b'{"source":true}', "merge-overwrite", carrier=carrier)
+        outcome = _update(borrow, root, plan, b'{"source":true}', "merge-overwrite", carrier=carrier)
 
         assert outcome.status is FileJsonStatus.FAILED
         assert outcome.failure is FileJsonFailure.OBSERVATION
         assert outcome.publication_attempts == 0 and carrier.calls == 1
         assert not outcome.requires_owner_retention
+        borrow.close()
         owner.close()
     finally:
         database.close()
@@ -761,9 +801,10 @@ def test_lost_publication_observation_preserves_cleanup_and_never_replays(
     (root / "target").write_text('{"existing":true}')
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = LostCallStdoutCarrier(4)
     try:
-        outcome = _update(owner, root, plan, b'{"source":true}', "merge-overwrite", carrier=carrier)
+        outcome = _update(borrow, root, plan, b'{"source":true}', "merge-overwrite", carrier=carrier)
 
         assert outcome.status is FileJsonStatus.UNCERTAIN
         assert outcome.publication_attempts == 1
@@ -784,10 +825,11 @@ def test_interrupted_dispatch_exports_bounded_retention_fact(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = InterruptingCarrier()
     try:
         with pytest.raises(KeyboardInterrupt) as raised:
-            _update(owner, root, plan, b'{"source":true}', "replace", carrier=carrier)
+            _update(borrow, root, plan, b'{"source":true}', "replace", carrier=carrier)
 
         fact = raised.value.__cause__
         assert isinstance(fact, FileJsonControlFact)
@@ -795,6 +837,9 @@ def test_interrupted_dispatch_exports_bounded_retention_fact(
         assert outcome.pending_remote_effects and outcome.requires_owner_retention
         assert outcome.publication_attempts == 0 and carrier.calls == 1
         assert "source" not in repr(outcome)
+        with pytest.raises(StateError):
+            owner.close()
+        borrow.close()
         with pytest.raises(StateError):
             owner.close()
     finally:
@@ -812,9 +857,10 @@ def test_expired_stat_or_read_result_preserves_termination_and_deadline_facts(
     root.joinpath("target").write_text('{"existing":true}')
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = ExpiredMissingCompletionCarrier()
     try:
-        outcome = _update(owner, root, plan, b'{"source":true}', strategy, carrier=carrier)
+        outcome = _update(borrow, root, plan, b'{"source":true}', strategy, carrier=carrier)
 
         assert carrier.calls == 1 and outcome.publication_attempts == 0
         assert outcome.status is FileJsonStatus.UNCERTAIN
@@ -833,10 +879,11 @@ def test_interrupted_json_exchange_records_expired_deadline_fact(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
+    borrow = owner.borrow()
     carrier = InterruptingCarrier(expire_deadline=True)
     try:
         with pytest.raises(KeyboardInterrupt) as raised:
-            _update(owner, root, plan, b'{"source":true}', "replace", carrier=carrier)
+            _update(borrow, root, plan, b'{"source":true}', "replace", carrier=carrier)
 
         fact = raised.value.__cause__
         assert isinstance(fact, FileJsonControlFact)
