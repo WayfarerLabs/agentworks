@@ -197,6 +197,32 @@ def download_file(
     borrow: OperationBorrow,
 ) -> FileDownloadOutcome:
     """Download one bounded immutable snapshot without closing the sink."""
+    return _prepare_download(
+        carrier,
+        trusted_root_path=trusted_root_path,
+        relative_path=relative_path,
+        sink=sink,
+        max_bytes=max_bytes,
+        plan=plan,
+        deadline=deadline,
+        runtime_selection=runtime_selection,
+        borrow=borrow,
+    ).run()
+
+
+def _prepare_download(
+    carrier: Carrier,
+    *,
+    trusted_root_path: str,
+    relative_path: str,
+    sink: ByteSink,
+    max_bytes: int,
+    plan: IdentityPlan,
+    deadline: Deadline,
+    runtime_selection: RuntimeSelection,
+    borrow: OperationBorrow,
+) -> _PreparedDownload:
+    """Prepare one validated concrete download without dispatching it."""
     binding = _validate_inputs(
         trusted_root_path,
         relative_path,
@@ -211,18 +237,34 @@ def download_file(
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
     state = _WorkingState(binding, token, operation)
     workflow = _DownloadWorkflow(operation, sink, deadline, state)
-    try:
-        return workflow.run()
-    except BaseException as control:
-        workflow.note_control_stop()
-        if not operation.coordination_uncertain:
-            try:
-                workflow.cleanup_after_local_stop()
-            except BaseException:
-                workflow.note_control_stop()
-                state.fail(FileDownloadFailure.CLEANUP)
-        workflow.note_control_stop()
-        raise control from FileDownloadControlFact(state.finish())
+    return _PreparedDownload(binding, state, workflow)
+
+
+@dataclass(slots=True, repr=False)
+class _PreparedDownload:
+    """Validated download state attachable to core ownership before dispatch."""
+
+    binding: FileDownloadBinding
+    state: _WorkingState
+    workflow: _DownloadWorkflow
+
+    def run(self) -> FileDownloadOutcome:
+        try:
+            return self.workflow.run()
+        except BaseException as control:
+            self.workflow.note_control_stop()
+            if not self.state.operation.coordination_uncertain:
+                try:
+                    self.workflow.cleanup_after_local_stop()
+                except BaseException:
+                    self.workflow.note_control_stop()
+                    self.state.fail(FileDownloadFailure.CLEANUP)
+            self.workflow.note_control_stop()
+            raise control from FileDownloadControlFact(self.state.finish())
+
+    def release_sink(self) -> None:
+        """Drop the caller sink after core has captured the complete outcome."""
+        self.workflow.release_sink()
 
 
 class _DownloadWorkflow:
@@ -234,7 +276,7 @@ class _DownloadWorkflow:
         state: _WorkingState,
     ) -> None:
         self._carrier = carrier
-        self._sink = sink
+        self._sink: ByteSink | None = sink
         self._deadline = deadline
         self._state = state
 
@@ -260,6 +302,9 @@ class _DownloadWorkflow:
     def cleanup_after_local_stop(self) -> None:
         if not self._state.pending_remote_effects and not self._state.operation.coordination_uncertain:
             self._cleanup_after_failure()
+
+    def release_sink(self) -> None:
+        self._sink = None
 
     def _begin(self) -> bool:
         result = snapshot_begin(
@@ -354,12 +399,14 @@ class _DownloadWorkflow:
         return True
 
     def _write_chunk(self, data: bytes, digest: _Digest) -> bool:
+        sink = self._sink
+        assert sink is not None
         offset = 0
         while offset < len(data):
             if self._expired():
                 return False
             try:
-                written = self._sink.try_write(memoryview(data)[offset:])
+                written = sink.try_write(memoryview(data)[offset:])
             except Exception:
                 self._state.fail(FileDownloadFailure.SINK)
                 return False
