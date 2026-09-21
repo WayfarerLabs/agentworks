@@ -609,7 +609,10 @@ def _raise_object_observation(
     failure = observation.failure
     if failure is not None:
         _raise_reason(
-            _object_phase(failure), _object_failure_reason(failure), entity_kind=entity_kind, entity_name=entity_name
+            _object_phase(failure, fallback=phase),
+            _object_failure_reason(failure),
+            entity_kind=entity_kind,
+            entity_name=entity_name,
         )
     state = observation.state
     reason = (
@@ -620,10 +623,15 @@ def _raise_object_observation(
     _raise_reason(phase, reason, entity_kind=entity_kind, entity_name=entity_name)
 
 
-def _object_phase(failure: FileObjectFailureControl | None) -> FileOperationPhase:
+def _object_phase(
+    failure: FileObjectFailureControl | None,
+    *,
+    fallback: FileOperationPhase = FileOperationPhase.REMOVAL,
+) -> FileOperationPhase:
     private = None if failure is None else failure.phase
+    if private is None:
+        return fallback
     return {
-        None: FileOperationPhase.REMOVAL,
         FileObjectPhase.OBSERVATION: FileOperationPhase.OBSERVATION,
         FileObjectPhase.CONDITION: FileOperationPhase.CONDITION,
         FileObjectPhase.REMOVAL: FileOperationPhase.REMOVAL,

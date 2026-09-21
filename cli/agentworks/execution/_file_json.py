@@ -469,6 +469,15 @@ class _JsonWorkflow:
         if _runtime_refused(result.runtime_prerequisite):
             self._state.fail(FileJsonFailure.RUNTIME_PREREQUISITE)
             return None
+        if self._state.failure is not None:
+            return observation
+        if result.carrier_failure is not None:
+            self._state.fail(
+                FileJsonFailure.OBSERVATION,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
+            )
+            return None
         if observation is None:
             self._state.fail(FileJsonFailure.OBSERVATION)
             return None
@@ -515,6 +524,15 @@ class _JsonWorkflow:
             return None
         if _runtime_refused(result.runtime_prerequisite):
             self._state.fail(FileJsonFailure.RUNTIME_PREREQUISITE)
+            return None
+        if self._state.failure is not None:
+            return observation
+        if result.carrier_failure is not None:
+            self._state.fail(
+                FileJsonFailure.OBSERVATION,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
+            )
             return None
         if observation is None:
             self._state.fail(FileJsonFailure.OBSERVATION)

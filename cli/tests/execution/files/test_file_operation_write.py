@@ -14,11 +14,12 @@ from pathlib import Path
 import pytest
 
 from agentworks.db import Database, OperationResourceKind, OperationScope
-from agentworks.errors import StateError, ValidationError
+from agentworks.errors import ExternalError, StateError, ValidationError
 from agentworks.execution import _file_upload
 from agentworks.execution._file_json import (
     FileJsonChange,
     FileJsonControlFact,
+    FileJsonFailure,
     FileJsonStatus,
     JsonFileStrategy,
 )
@@ -31,6 +32,7 @@ from agentworks.execution._file_operation import (
     UnfinishedFileUpload,
 )
 from agentworks.execution._file_publication import Create
+from agentworks.execution._file_result_transfer import reduce_file_json
 from agentworks.execution._file_upload import (
     FileUploadControlFact,
     FileUploadFailure,
@@ -41,7 +43,15 @@ from agentworks.execution._file_upload import (
 )
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
-from agentworks.execution.carrier import CarrierIO, CarrierReport, ChannelFeatures, Deadline, PreparedInvocation
+from agentworks.execution.carrier import (
+    CarrierIO,
+    CarrierReport,
+    ChannelFeatures,
+    Deadline,
+    Failure,
+    PreparedInvocation,
+)
+from agentworks.execution.files import FileFailureReason, FileOperationPhase
 from agentworks.operations import OperationOwner
 from tests.execution.files._file_publication_support import LocalCarrier
 from tests.execution.files._file_publication_support import install_fixture_bundle as install_publication_bundle
@@ -85,6 +95,26 @@ class MissingCompletionCarrier:
 
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
         return replace(self._inner.execute(invocation, io=io, deadline=deadline), completion=None)
+
+
+class OutputFailureCarrier:
+    def __init__(self, *, stdout_complete: bool) -> None:
+        self._inner = LocalCarrier()
+        self._stdout_complete = stdout_complete
+        self.calls = 0
+
+    @property
+    def features(self) -> ChannelFeatures:
+        return ChannelFeatures()
+
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.calls += 1
+        report = self._inner.execute(invocation, io=io, deadline=deadline)
+        return replace(
+            report,
+            stdout=replace(report.stdout, complete=self._stdout_complete),
+            failure=Failure.OUTPUT,
+        )
 
 
 class ReentrantCarrier:
@@ -243,6 +273,50 @@ def test_real_json_strategies_share_core_custody_and_preserve_noop(
         else:
             assert outcome.change is FileJsonChange.CHANGED
             assert content == {"base": 1, "incoming": 2, "shared": "old"}
+        owner.close()
+    finally:
+        database.close()
+
+
+@pytest.mark.parametrize(
+    ("strategy", "stdout_complete"),
+    [
+        ("skip-existing", True),
+        ("skip-existing", False),
+        ("merge-overwrite", True),
+        ("merge-overwrite", False),
+    ],
+    ids=["stat-complete", "stat-incomplete", "read-complete", "read-incomplete"],
+)
+def test_json_observation_carrier_failure_precedes_success_or_invalid_response(
+    tmp_path: Path,
+    root: Path,
+    plan: IdentityPlan,
+    strategy: JsonFileStrategy,
+    stdout_complete: bool,
+) -> None:
+    target = root / "target"
+    target.write_text('{"base":1}')
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    operation = FileOperation(owner)
+    carrier = OutputFailureCarrier(stdout_complete=stdout_complete)
+    try:
+        outcome = _update(operation, root, plan, b'{"incoming":2}', strategy, carrier=carrier)
+
+        assert outcome.status is FileJsonStatus.FAILED
+        assert outcome.failure is FileJsonFailure.OBSERVATION
+        assert outcome.carrier_failure is Failure.OUTPUT
+        assert outcome.publication_attempts == 0
+        assert not outcome.requires_owner_retention
+        assert operation.unfinished_json_updates == ()
+        assert carrier.calls == 1
+        assert target.read_text() == '{"base":1}'
+        with pytest.raises(ExternalError) as raised:
+            reduce_file_json(outcome, entity_kind="workspace file", entity_name="settings")
+        assert raised.value.details is not None
+        assert raised.value.details.phase is FileOperationPhase.OBSERVATION
+        assert raised.value.details.reason is FileFailureReason.CARRIER_OUTPUT
         owner.close()
     finally:
         database.close()

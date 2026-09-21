@@ -25,7 +25,7 @@ from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import RuntimeSelection
 from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, Failure, PreparedInvocation
-from agentworks.execution.files import Change, FileFailureReason
+from agentworks.execution.files import Change, FileFailureReason, FileOperationPhase
 from agentworks.operations import OperationOwner
 from tests.execution.files._file_read_support import LocalCarrier
 from tests.execution.files._runtime_support import runtime_selection
@@ -97,6 +97,57 @@ def _local_identity_names() -> tuple[str, str]:
 def _details(error: ExternalError | StateError) -> ErrorDetails:
     assert error.details is not None
     return error.details
+
+
+def test_real_root_refusal_uses_callers_observation_or_removal_phase(
+    real_operation: tuple[Path, OperationOwner, FileOperation, IdentityPlan, RuntimeSelection],
+) -> None:
+    root, owner, operation, plan, runtime = real_operation
+    target = root / "target"
+    target.write_bytes(_DATA)
+    linked_root = root.parent / "approved-link"
+    linked_root.symlink_to(root, target_is_directory=True)
+
+    stat_outcome = operation.stat(
+        LocalCarrier(),
+        trusted_root_path=str(linked_root),
+        relative_path="target",
+        plan=plan,
+        deadline=Deadline.after(30),
+        runtime_selection=runtime,
+    )
+    with pytest.raises(StateError) as raised_stat:
+        reduce_file_stat(stat_outcome, **_CONTEXT)
+    assert _details(raised_stat.value).reason is FileFailureReason.REFUSED
+    assert _details(raised_stat.value).phase is FileOperationPhase.OBSERVATION
+
+    present = operation.stat(
+        LocalCarrier(),
+        trusted_root_path=str(root),
+        relative_path="target",
+        plan=plan,
+        deadline=Deadline.after(30),
+        runtime_selection=runtime,
+    )
+    assert present.result is not None and present.result.observation is not None
+    revision = present.result.observation.revision
+    assert revision is not None
+    remove_outcome = operation.remove(
+        LocalCarrier(),
+        trusted_root_path=str(linked_root),
+        relative_path="target",
+        expected_kind=FileKind.REGULAR,
+        expected_revision=revision,
+        plan=plan,
+        deadline=Deadline.after(30),
+        runtime_selection=runtime,
+    )
+    with pytest.raises(StateError) as raised_remove:
+        reduce_file_remove(remove_outcome, **_CONTEXT)
+    assert _details(raised_remove.value).reason is FileFailureReason.REFUSED
+    assert _details(raised_remove.value).phase is FileOperationPhase.REMOVAL
+    assert target.read_bytes() == _DATA
+    owner.close()
 
 
 def test_real_removal_retains_confirmed_change_across_missing_termination(
