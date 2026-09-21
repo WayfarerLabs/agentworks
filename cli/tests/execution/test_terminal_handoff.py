@@ -23,6 +23,13 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from agentworks.errors import ValidationError
+from agentworks.execution._runtime_prerequisite import (
+    MAX_RUNTIME_RECORD_BYTES,
+    RuntimePrerequisiteObservation,
+    RuntimePrerequisiteState,
+    RuntimeSelection,
+    RuntimeTargetOS,
+)
 from agentworks.execution._terminal_guest import (
     FRAME_MAGIC,
     INTERACTIVE_READY,
@@ -52,8 +59,30 @@ class CollectSink:
         return length
 
 
+_RUNTIME_SELECTION = RuntimeSelection(RuntimeTargetOS.LINUX)
+
+
 def _marker(prepared: PreparedTerminalHandoff, kind: int) -> bytes:
-    return READINESS_MAGIC + prepared.nonce.encode("ascii") + b":" + bytes((kind,))
+    return READINESS_MAGIC + prepared.nonce.upper().encode("ascii") + b":" + bytes((kind,))
+
+
+def _runtime_record(
+    prepared: PreparedTerminalHandoff,
+    state: RuntimePrerequisiteState = RuntimePrerequisiteState.READY,
+    *,
+    token: str = "0",
+    uppercase: bool = False,
+    ending: bytes = b"\n",
+) -> bytes:
+    record = f"AGW_RUNTIME_1:{prepared.nonce}:{state.value}:{token}".encode("ascii")
+    if uppercase:
+        record = record.upper()
+    return record + ending
+
+
+def _admit_runtime(prepared: PreparedTerminalHandoff) -> None:
+    record = _runtime_record(prepared)
+    assert prepared.stdout.try_write(memoryview(record)) == len(record)
 
 
 def _drain_bootstrap(prepared: PreparedTerminalHandoff, limit: int = 11) -> bytes:
@@ -73,12 +102,143 @@ def _prepared(presentation: CollectSink | None = None) -> tuple[PreparedTerminal
         {b"VALUE": b"line1\nline2"},
         b"source\0bytes\r\n",
         selected,
+        runtime_selection=_RUNTIME_SELECTION,
     )
     return prepared, selected
 
 
+@pytest.mark.parametrize("uppercase", [False, True], ids=["canonical", "uppercase"])
+@pytest.mark.parametrize("ending", [b"\n", b"\r\n"], ids=["lf", "crlf"])
+def test_runtime_admission_accepts_only_terminal_line_transformations(
+    uppercase: bool,
+    ending: bytes,
+) -> None:
+    prepared, _ = _prepared()
+    record = _runtime_record(prepared, uppercase=uppercase, ending=ending)
+
+    for byte in b"setup noise\r\n" + record:
+        assert prepared.stdout.try_write(memoryview(bytes((byte,)))) == 1
+
+    assert prepared.runtime_prerequisite == RuntimePrerequisiteObservation(
+        RuntimePrerequisiteState.READY,
+        "/usr/bin/python3",
+    )
+    assert prepared.bootstrap.try_read(1) is None
+    assert prepared.failure is None
+
+
+def test_wrong_nonce_setup_noise_cannot_admit_or_hide_bound_record() -> None:
+    prepared, _ = _prepared()
+    wrong = b"AGW_RUNTIME_1:ffffffffffffffffffffffffffffffff:ready:0\r\n"
+
+    assert prepared.stdout.try_write(memoryview(wrong)) == len(wrong)
+    assert prepared.runtime_prerequisite.state is RuntimePrerequisiteState.UNKNOWN
+    assert prepared.bootstrap.try_read(1) is None
+    _admit_runtime(prepared)
+
+    admitted = prepared.runtime_prerequisite
+    assert admitted.state is RuntimePrerequisiteState.READY
+    assert prepared.failure is None
+
+
+@pytest.mark.parametrize(
+    ("suffix", "oversized"),
+    [
+        (b"Ready:0\n", False),
+        (b"ready:0\rnoise\n", False),
+        (b"x", True),
+    ],
+    ids=["mixed-case", "embedded-carriage-return", "oversized"],
+)
+def test_malformed_nonce_bound_runtime_candidate_fails_without_rescan(
+    suffix: bytes,
+    oversized: bool,
+) -> None:
+    prepared, _ = _prepared()
+    prefix = b"AGW_RUNTIME_1:" + prepared.nonce.encode("ascii") + b":"
+    candidate = prefix + suffix
+    if oversized:
+        candidate += b"x" * (MAX_RUNTIME_RECORD_BYTES + 1 - len(candidate))
+
+    with pytest.raises(TerminalHandoffError) as caught:
+        prepared.stdout.try_write(memoryview(candidate + _runtime_record(prepared)))
+
+    assert caught.value.failure is TerminalHandoffFailure.PROTOCOL
+    assert prepared.runtime_prerequisite.state is RuntimePrerequisiteState.UNKNOWN
+    with pytest.raises(TerminalHandoffError):
+        prepared.bootstrap.try_read(1)
+
+
+@pytest.mark.parametrize("partial", [b"setup only", b"AGW_RUNTIME_1:"])
+def test_missing_or_truncated_runtime_record_closes_unknown_and_clears_temporary_bytes(
+    partial: bytes,
+) -> None:
+    prepared, _ = _prepared()
+    if partial.endswith(b":"):
+        partial += prepared.nonce.encode("ascii") + b":ready:0"
+    prepared.stdout.try_write(memoryview(partial))
+
+    prepared.stdout.finish()
+
+    assert prepared.failure is TerminalHandoffFailure.TRUNCATED
+    assert prepared.runtime_prerequisite.state is RuntimePrerequisiteState.UNKNOWN
+    assert "setup only" not in repr(prepared)
+
+
+def test_complete_runtime_refusal_is_immutable_and_releases_no_payload() -> None:
+    prepared, presentation = _prepared()
+    refusal = _runtime_record(
+        prepared,
+        RuntimePrerequisiteState.MISSING,
+        token="-",
+        ending=b"\r\n",
+    )
+
+    with pytest.raises(TerminalHandoffError) as caught:
+        prepared.stdout.try_write(memoryview(b"noise" + refusal + b"suppressed"))
+
+    assert caught.value.failure is TerminalHandoffFailure.PREREQUISITE
+    assert prepared.runtime_prerequisite == RuntimePrerequisiteObservation(
+        RuntimePrerequisiteState.MISSING,
+        None,
+    )
+    assert bytes(presentation.data) == b""
+    with pytest.raises(TerminalHandoffError):
+        prepared.bootstrap.try_read(1)
+    prepared.stdout.finish()
+    assert prepared.runtime_prerequisite.state is RuntimePrerequisiteState.MISSING
+
+
+def test_runtime_ready_and_payload_gate_can_be_coalesced_without_premature_payload() -> None:
+    prepared, _ = _prepared()
+    coalesced = _runtime_record(prepared) + _marker(prepared, PAYLOAD_READY)
+
+    assert prepared.stdout.try_write(memoryview(coalesced)) == len(coalesced)
+
+    chunk = prepared.bootstrap.try_read(1)
+    assert chunk is not None and len(chunk) == 1
+    assert prepared.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+
+
+def test_finish_clears_partial_terminal_marker_without_erasing_runtime_evidence() -> None:
+    prepared, _ = _prepared()
+    _admit_runtime(prepared)
+    prepared.stdout.try_write(memoryview(_marker(prepared, PAYLOAD_READY)[:-1]))
+
+    prepared.stdout.finish()
+
+    assert prepared.failure is TerminalHandoffFailure.TRUNCATED
+    assert prepared.runtime_prerequisite == RuntimePrerequisiteObservation(
+        RuntimePrerequisiteState.READY,
+        "/usr/bin/python3",
+    )
+
+
 def test_two_gates_release_only_the_finite_payload_then_handoff_eof() -> None:
     prepared, presentation = _prepared(CollectSink(max_write=2))
+    assert prepared.bootstrap.try_read(4) is None
+    _admit_runtime(prepared)
+    assert prepared.bootstrap.try_read(4) is None
     first = b"setup-withheld" + _marker(prepared, PAYLOAD_READY)
     for byte in first:
         assert prepared.stdout.try_write(memoryview(bytes((byte,)))) == 1
@@ -112,6 +272,7 @@ def test_two_gates_release_only_the_finite_payload_then_handoff_eof() -> None:
 def test_stalled_presentation_acknowledges_only_filtered_prefix() -> None:
     presentation = CollectSink(stalled=True)
     prepared, _ = _prepared(presentation)
+    _admit_runtime(prepared)
     assert prepared.stdout.try_write(memoryview(_marker(prepared, PAYLOAD_READY))) is not None
     _drain_bootstrap(prepared)
     value = _marker(prepared, INTERACTIVE_READY) + b"suffix"
@@ -127,11 +288,12 @@ def test_stalled_presentation_acknowledges_only_filtered_prefix() -> None:
         lambda prepared: _marker(prepared, INTERACTIVE_READY),
         lambda prepared: _marker(prepared, PAYLOAD_READY) + _marker(prepared, PAYLOAD_READY),
         lambda prepared: _marker(prepared, PAYLOAD_READY) + _marker(prepared, INTERACTIVE_READY),
-        lambda prepared: READINESS_MAGIC + prepared.nonce.encode("ascii") + b":\xff",
+        lambda prepared: READINESS_MAGIC + prepared.nonce.upper().encode("ascii") + b":\xff",
     ],
 )
 def test_wrong_order_duplicate_early_and_malformed_readiness_fail_closed(drive) -> None:
     prepared, _ = _prepared()
+    _admit_runtime(prepared)
 
     with pytest.raises(TerminalHandoffError) as caught:
         prepared.stdout.try_write(memoryview(drive(prepared)))
@@ -144,6 +306,7 @@ def test_wrong_order_duplicate_early_and_malformed_readiness_fail_closed(drive) 
 
 def test_truncated_readiness_closes_without_retaining_prefix() -> None:
     prepared, _ = _prepared()
+    _admit_runtime(prepared)
     marker = _marker(prepared, PAYLOAD_READY)
     prepared.stdout.try_write(memoryview(b"noise" + marker[:-1]))
 
@@ -161,7 +324,14 @@ def test_presentation_failure_drops_payload_bearing_cause() -> None:
         def try_write(_data: memoryview) -> int:
             raise RuntimeError(canary)
 
-    prepared = prepare_terminal_handoff((b"/bin/true",), {}, b"source", BrokenSink())
+    prepared = prepare_terminal_handoff(
+        (b"/bin/true",),
+        {},
+        b"source",
+        BrokenSink(),
+        runtime_selection=_RUNTIME_SELECTION,
+    )
+    _admit_runtime(prepared)
     prepared.stdout.try_write(memoryview(_marker(prepared, PAYLOAD_READY)))
     _drain_bootstrap(prepared)
     prepared.stdout.try_write(memoryview(_marker(prepared, INTERACTIVE_READY)))
@@ -172,6 +342,7 @@ def test_presentation_failure_drops_payload_bearing_cause() -> None:
     assert caught.value.__cause__ is None and caught.value.__context__ is None
     assert canary not in repr(caught.value)
     assert prepared.failure is TerminalHandoffFailure.PRESENTATION
+    assert prepared.runtime_prerequisite.state is RuntimePrerequisiteState.READY
 
 
 def test_payload_material_stays_off_fixed_argv_and_preparation_is_single_use() -> None:
@@ -181,11 +352,13 @@ def test_payload_material_stays_off_fixed_argv_and_preparation_is_single_use() -
         {b"SECRET": canary},
         canary,
         CollectSink(),
+        runtime_selection=_RUNTIME_SELECTION,
     )
 
     assert all(canary.decode() not in argument for argument in prepared.invocation.argv)
     assert canary.decode() not in repr(prepared)
-    assert prepared.invocation.argv[-1] == prepared.nonce
+    assert prepared.nonce == prepared.nonce.lower()
+    assert prepared.nonce in prepared.invocation.argv
     prepared.claim()
     with pytest.raises(ValidationError):
         prepared.claim()
@@ -339,6 +512,7 @@ def test_actual_pty_keeps_source_environment_and_empty_arg_off_terminal_input(
         {b"SECRET": secret},
         source,
         presentation,
+        runtime_selection=_RUNTIME_SELECTION,
     )
     before = set(tmp_path.iterdir())
     running = TerminalProcess(prepared, cwd=tmp_path)
@@ -346,6 +520,11 @@ def test_actual_pty_keeps_source_environment_and_empty_arg_off_terminal_input(
     process_path = Path(f"/proc/{running.process.pid}")
 
     running.wait_for_payload_gate()
+    assert prepared.runtime_prerequisite == RuntimePrerequisiteObservation(
+        RuntimePrerequisiteState.READY,
+        "/usr/bin/python3",
+    )
+    assert _runtime_record(prepared, ending=b"\r\n") in running.raw_output
     payload_mode = termios.tcgetattr(running.slave)
     assert not payload_mode[3] & (termios.ECHO | termios.ICANON)
     assert source not in running.raw_output and secret not in running.raw_output
@@ -380,11 +559,13 @@ def test_actual_pty_native_shell_inherits_default_sigpipe(
         {},
         b"",
         presentation,
+        runtime_selection=_RUNTIME_SELECTION,
     )
     running = TerminalProcess(prepared)
     running_processes.append(running)
 
     running.wait_for_payload_gate()
+    assert prepared.runtime_prerequisite.state is RuntimePrerequisiteState.READY
     running.send_payload()
     running.wait_for_handoff()
     running.read_until_presented(presentation, b"SHELL-DONE!")
@@ -399,11 +580,22 @@ def test_actual_pty_restored_uppercase_output_mode_preserves_second_marker(
     uppercase_output = getattr(termios, "OLCUC", None)
     if uppercase_output is None:
         pytest.skip("this host does not expose the Linux OLCUC terminal flag")
-    prepared = prepare_terminal_handoff((b"/bin/true",), {}, b"", CollectSink())
+    prepared = prepare_terminal_handoff(
+        (b"/bin/true",),
+        {},
+        b"",
+        CollectSink(),
+        runtime_selection=_RUNTIME_SELECTION,
+    )
     running = TerminalProcess(prepared, output_flags=termios.OPOST | uppercase_output)
     running_processes.append(running)
 
     running.wait_for_payload_gate()
+    assert prepared.runtime_prerequisite == RuntimePrerequisiteObservation(
+        RuntimePrerequisiteState.READY,
+        "/usr/bin/python3",
+    )
+    assert _runtime_record(prepared, uppercase=True, ending=b"\r\n") in running.raw_output
     running.send_payload()
     running.wait_for_handoff()
 

@@ -19,7 +19,7 @@ _SHELL = "/bin/sh"
 _LINUX_CANDIDATES = ("/usr/bin/python3",)
 _DARWIN_CANDIDATES = ("/opt/homebrew/bin/python3", "/usr/local/bin/python3")
 _DARWIN_SYSTEM_SHIM = "/usr/bin/python3"
-_MAX_RECORD_BYTES = 128
+MAX_RUNTIME_RECORD_BYTES = 128
 
 _TRAMPOLINE = r"""import sys
 n=sys.argv[1]
@@ -211,20 +211,20 @@ class RuntimePrefixSink:
                 return len(data)
             return self.downstream.try_write(data)
 
-        remaining = _MAX_RECORD_BYTES - len(self._prefix)
+        remaining = MAX_RUNTIME_RECORD_BYTES - len(self._prefix)
         scan_length = min(len(data), remaining + 1)
         newline = bytes(data[:scan_length]).find(b"\n")
         consumed = len(data) if newline < 0 else newline + 1
         if newline < 0 and len(data) <= remaining:
             self._prefix.extend(data)
             return len(data)
-        if newline < 0 or len(self._prefix) + consumed > _MAX_RECORD_BYTES:
+        if newline < 0 or len(self._prefix) + consumed > MAX_RUNTIME_RECORD_BYTES:
             self._prefix.clear()
             self._invalid = True
             return len(data)
         self._prefix.extend(data[:consumed])
 
-        self._observation = _interpret_record(
+        self._observation = decode_runtime_prerequisite_record(
             bytes(self._prefix),
             nonce=self.nonce,
             candidates=self.candidates,
@@ -257,13 +257,14 @@ class RuntimePrefixSink:
         self._invalid = False
 
 
-def _interpret_record(
+def decode_runtime_prerequisite_record(
     record: bytes,
     *,
     nonce: str,
     candidates: tuple[str, ...],
     system_shim: str | None,
 ) -> RuntimePrerequisiteObservation:
+    """Decode one strict pipe-form runtime prerequisite record."""
     match = _RECORD.fullmatch(record)
     if match is None or match.group(1).decode("ascii") != nonce:
         return RuntimePrerequisiteObservation(RuntimePrerequisiteState.UNKNOWN, None)

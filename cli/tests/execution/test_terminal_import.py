@@ -9,6 +9,7 @@ import sys
 import pytest
 
 from agentworks.execution import _terminal_guest as guest
+from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution._terminal_handoff import prepare_terminal_handoff
 
 pytestmark = pytest.mark.windows
@@ -49,7 +50,13 @@ def test_host_preparation_is_platform_neutral_and_has_no_terminal_or_dispatch_ef
     monkeypatch.delattr(os, "memfd_create", raising=False)
     monkeypatch.setattr(guest, "run", unexpected_guest_run)
 
-    prepared = prepare_terminal_handoff((b"/bin/true", b""), {}, b"source", Sink())
+    prepared = prepare_terminal_handoff(
+        (b"/bin/true", b""),
+        {},
+        b"source",
+        Sink(),
+        runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX),
+    )
 
     assert prepared.bootstrap.try_read(1) is None
     assert not prepared.handed_off
