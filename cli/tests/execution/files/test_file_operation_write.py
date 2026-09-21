@@ -458,6 +458,56 @@ def test_upload_retention_failure_preserves_original_control_and_attached_source
 
 
 @pytest.mark.parametrize("failure_point", ["outcome", "fact"])
+def test_upload_allocation_failure_cannot_reuse_source_exception_cause(
+    tmp_path: Path,
+    root: Path,
+    plan: IdentityPlan,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_point: str,
+) -> None:
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    operation = FileOperation(owner)
+    try:
+        previous = _upload(operation, root, plan, BytesSource(b"prior"), relative_path="prior")
+        prior_fact = FileUploadControlFact(previous)
+        control = KeyboardInterrupt("source-control-canary")
+        control.__cause__ = prior_fact
+
+        class InterruptingSource(BytesSource):
+            def try_read(self, limit: int) -> bytes:
+                raise control
+
+        source = InterruptingSource(b"payload")
+        allocation_causes: list[BaseException | None] = []
+
+        def fail_allocation(*args: object) -> None:
+            allocation_causes.append(control.__cause__)
+            raise MemoryError("upload-allocation-canary")
+
+        if failure_point == "outcome":
+            monkeypatch.setattr(_UploadWorkingState, "finish", fail_allocation)
+        else:
+            monkeypatch.setattr(_file_upload, "FileUploadControlFact", fail_allocation)
+
+        with pytest.raises(KeyboardInterrupt) as raised:
+            _upload(operation, root, plan, source)
+
+        assert allocation_causes == [prior_fact]
+        assert raised.value is control and raised.value.__cause__ is None
+        active = operation.active_uploads[0]
+        assert active.outcome is None
+        assert active.prepared.state.token != previous.token
+        assert operation.unfinished_uploads == ()
+        with pytest.raises(StateError):
+            owner.borrow()
+        with pytest.raises(StateError):
+            owner.close()
+    finally:
+        database.close()
+
+
+@pytest.mark.parametrize("failure_point", ["outcome", "fact"])
 def test_json_child_allocation_failure_keeps_preattached_token_and_original_control(
     tmp_path: Path,
     root: Path,
