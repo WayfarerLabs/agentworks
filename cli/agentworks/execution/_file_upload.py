@@ -166,13 +166,6 @@ class FileUploadControlFact(Exception):
         super().__init__("private upload stopped with retained operation state")
 
 
-class FileOwnershipResolutionUncertain(Exception):
-    """Safe cause for an ownership lookup without a returned carrier result."""
-
-    def __init__(self) -> None:
-        super().__init__("private file ownership lookup observation is unavailable")
-
-
 @dataclass(slots=True, repr=False)
 class _WorkingState:
     binding: FileUploadBinding
@@ -418,16 +411,13 @@ class _UploadWorkflow:
         metadata = self._new_metadata
         assert metadata is not None
         mode = metadata.mode
-        try:
-            result = resolve_file_ownership(
-                self._carrier,
-                metadata.owner,
-                metadata.group,
-                self._deadline,
-                self._state.binding.runtime_selection,
-            )
-        except BaseException as control:
-            raise control from FileOwnershipResolutionUncertain()
+        result = resolve_file_ownership(
+            self._carrier,
+            metadata.owner,
+            metadata.group,
+            self._deadline,
+            self._state.binding.runtime_selection,
+        )
         self._state.ownership_result = result
         self._new_metadata = None
         if result.dispatch is not Dispatch.NOT_SENT:

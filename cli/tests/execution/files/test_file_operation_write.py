@@ -553,7 +553,7 @@ def test_upload_allocation_failure_cannot_reuse_source_exception_cause(
 
 
 @pytest.mark.parametrize("failure_point", ["outcome", "fact"])
-def test_json_child_allocation_failure_keeps_preattached_token_and_original_control(
+def test_json_child_ownership_lookup_allocation_failure_preserves_original_control(
     tmp_path: Path,
     root: Path,
     plan: IdentityPlan,
@@ -582,8 +582,7 @@ def test_json_child_allocation_failure_keeps_preattached_token_and_original_cont
         with pytest.raises(KeyboardInterrupt) as raised:
             _update(operation, root, plan, b'{"private-child":true}', "replace", carrier=carrier)
 
-        assert len(allocation_causes) == 1
-        assert allocation_causes[0] is not prior_fact
+        assert allocation_causes == [prior_fact]
         assert raised.value is control and raised.value.__cause__ is None
         active = operation.active_json_updates[0]
         assert active.outcome is None
