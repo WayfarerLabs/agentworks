@@ -357,6 +357,31 @@ production gate. Native Windows/macOS behavior, interpreter shutdown, repeated s
 and the final bundled-helper size remain acceptance gates. The existing OS process-creation caveat
 still applies; no new hard real-time bound is promised.
 
+### Shared ownership for held local processes
+
+SSH forwarding needs the same child owner without the run-to-completion byte pump. Transport owns
+one private `LocalProcessOwner` seam, constructed before dispatch, with one immutable launch
+request, once-only admission, immutable observations and explicit close after pipe use ends.
+`run_owned_process` and the SSH forwarding resource consume that same implementation. This is a
+factoring of local process ownership, not a second job backend or descendant supervisor.
+
+The seam encapsulates inert bootstrap startup, request admission, ambiguous-start cancellation and
+settlement. A never-admitted request is distinct from a started process's terminal observation; an
+inert canceled bootstrap need not publish a process terminal record. Natural exit is observable
+while pipes remain borrowed and stdin remains open. Closing only stdin is input EOF, not a request
+to kill or a manufactured input failure. A status first obtained during cleanup remains local
+cleanup evidence, not natural-exit evidence.
+
+SSH retains its readiness protocol and I/O drainer. On close it first stops and joins every pipe
+user, then relinquishes those pipes to the common owner and waits for settlement. Relinquishment
+does not ask a running drainer to stop: it asserts that pipe use has already ended. Repeated close
+returns the same settled facts without another kill or reap. Immutable snapshots support observers;
+launch and relinquishment have one caller-side owner, not a new general concurrent-control API.
+
+This seam must not be advertised as fixing the independent cleanup-entry SIGINT gap above. Shared
+ownership removes forwarding's direct `Popen`-before-owner construction gap; global interrupt
+policy, native workstation proof and final production acceptance remain separate gates.
+
 ### Inline Python implementation slice
 
 The next private implementation composes the shared process core with one fixed Linux helper and the

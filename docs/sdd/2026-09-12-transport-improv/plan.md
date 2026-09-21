@@ -97,6 +97,13 @@ affected deadline/staging tests. No native VM or host acceptance is claimed. The
 launch-owner cleanup-entry interrupt gap remains open and is documented in the preparation LLD; this
 increment does not introduce global signal handling or declare launch conformance.
 
+- [ ] Factor one private local process owner for both the ordinary byte pump and SSH's held
+      forwarding resource. Prove once-only admission, cancellation before admission, natural exit
+      with held input, pipe relinquishment after all I/O users stop, idempotent settlement and
+      cleanup-only status separation. Transport owns the interface and implementation; SSH owns its
+      consumer adaptation and drainer ordering. This does not close the independently recorded
+      asynchronous cleanup-entry interruption or native-workstation acceptance gates.
+
 ### Hierarchical coordination follow-up (#377)
 
 The operator directs compatibility with
