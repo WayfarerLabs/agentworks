@@ -1328,6 +1328,13 @@ gates pass. Website gates pass 160 Python tests, 103 Node tests and both determi
 comparisons. No live infrastructure was exercised. This is a draft implementation increment, not a
 public review/test handoff; all three authorized public feedback/fix rounds remain available.
 
+Hosted run `35604348860` at `8aef59ae` passed every platform lane except Linux Python 3.13, where
+the new file-value import-isolation test failed. Its setup imported `importlib.abc` before
+installing the guard, transitively loading `pwd` and `grp` through Python 3.13's `pathlib`. The
+correction uses a minimal finder without that setup dependency and continues to make the blocked
+modules unavailable during the tested import. Production code is unchanged; the 35 file-value tests
+pass locally on Python 3.12. Hosted Python 3.13 confirmation remains pending.
+
 ### Buffered execution result checkpoint
 
 - [x] Implement safe immutable application result values, honest wait/exit/signal precision and one

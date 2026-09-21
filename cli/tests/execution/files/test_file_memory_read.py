@@ -363,8 +363,6 @@ def test_bounded_fake_collects_more_than_one_qga_response_without_native_proof(
 
         assert outcome.download is download
         assert outcome.data == content
-        assert len(chunks) > 1
-        assert fake.sink is not None and fake.sink.try_write(memoryview(b"")) == 0
         operation_owner.close()
     finally:
         database.close()

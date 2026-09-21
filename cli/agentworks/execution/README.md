@@ -338,6 +338,14 @@ mutation, macOS support or a hard elapsed-time bound for filesystem reads. Metad
 the separate object exchange below. Both assume a cooperative execution identity, not hostile
 same-user isolation.
 
+`_file_memory_read.py` supplies a separate private in-memory read over the owned snapshot/chunk
+download. The caller's byte limit bounds the snapshot, independently of a carrier's single-response
+capacity. Only a complete verified download with completed cleanup returns bytes; absence and
+failures retain the original download outcome without exposing partial data. Its temporary buffer is
+cleared on every exit, which is not secure memory erasure. This adapter introduces no retry,
+fallback or additional claim and is not the no-staging readiness path. Production FileAccess and
+core recovery handoff remain separate integration work.
+
 ## Private terminal handoff preparation
 
 `_terminal_handoff.py` provides platform-neutral host preparation for one no-staging, same-terminal
