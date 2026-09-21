@@ -44,6 +44,7 @@ from agentworks.execution._file_inventory_exchange import (
 from agentworks.execution._file_json import (
     FileJsonBinding,
     FileJsonChange,
+    FileJsonFailure,
     FileJsonOutcome,
     FileJsonStatus,
 )
@@ -85,6 +86,12 @@ from agentworks.execution._file_operations import (
     FileStatBinding,
     OwnedFileOutcome,
 )
+from agentworks.execution._file_publication import PublicationFailureKind, PublicationPhase
+from agentworks.execution._file_publication_protocol import (
+    FilePublicationFailureCode,
+    FilePublicationFailureControl,
+)
+from agentworks.execution._file_read_protocol import FileReadFailure
 from agentworks.execution._file_result import (
     reduce_file_inventory,
     reduce_file_metadata,
@@ -101,6 +108,7 @@ from agentworks.execution._file_snapshot_protocol import (
     FileSnapshotFailureControl,
 )
 from agentworks.execution._file_spool import SpoolSnapshotFailureKind
+from agentworks.execution._file_stage_protocol import FileStageFailureCode, FileStageFailureControl
 from agentworks.execution._file_stat import FileRevision, FileStat
 from agentworks.execution._file_upload import (
     FileUploadBinding,
@@ -235,6 +243,10 @@ def _upload_outcome(**changes: object) -> FileUploadOutcome:
         publication_confirmed=True,
     )
     return replace(outcome, **changes)
+
+
+def _json_binding() -> FileJsonBinding:
+    return FileJsonBinding("/sensitive/root", "private-name", "replace", True, 4096, 8, _PLAN, _RUNTIME)
 
 
 def test_complete_stat_inventory_and_removal_project_public_values() -> None:
@@ -710,6 +722,109 @@ def test_memory_read_and_json_preserve_data_revision_and_changed_state() -> None
     result = reduce_file_json(json_outcome, **_CONTEXT)
     assert result.change is Change.CHANGED
     assert result.revision is not None
+
+
+def test_json_uses_only_its_terminal_upload_for_public_failure_provenance() -> None:
+    ownership = FileOwnershipResolutionResult(
+        Dispatch.SENT,
+        _EXIT,
+        0,
+        None,
+        _READY,
+        FileOwnershipObservation(
+            AccountObservationState.REFUSED,
+            failure=FileOwnershipFailure.MISSING_OWNER,
+        ),
+    )
+    nested_ownership = _upload_outcome(
+        status=FileUploadStatus.FAILED,
+        publication_confirmed=False,
+        revision=None,
+        failure=FileUploadFailure.OWNERSHIP,
+        ownership_result=ownership,
+        failure_phase=FileUploadFailurePhase.OWNERSHIP,
+        failure_dispatch=Dispatch.SENT,
+    )
+    with pytest.raises(StateError) as raised_ownership:
+        reduce_file_json(
+            FileJsonOutcome(
+                FileJsonStatus.FAILED,
+                _json_binding(),
+                failure=FileJsonFailure.UPLOAD,
+                upload_outcome=nested_ownership,
+            ),
+            **_CONTEXT,
+        )
+    assert _error_details(raised_ownership.value).phase is FileOperationPhase.OWNERSHIP_LOOKUP
+    assert _error_details(raised_ownership.value).reason is FileFailureReason.MISSING_OWNER
+
+    nested_stage = _upload_outcome(
+        status=FileUploadStatus.FAILED,
+        publication_confirmed=False,
+        revision=None,
+        failure=FileUploadFailure.STAGE,
+        failure_phase=FileUploadFailurePhase.STAGE_BEGIN,
+        stage_failure=FileStageFailureControl(FileStageFailureCode.ROOT_REFUSED),
+    )
+    with pytest.raises(StateError) as raised_stage:
+        reduce_file_json(
+            FileJsonOutcome(
+                FileJsonStatus.FAILED,
+                _json_binding(),
+                failure=FileJsonFailure.UPLOAD,
+                upload_outcome=nested_stage,
+            ),
+            **_CONTEXT,
+        )
+    assert _error_details(raised_stage.value).phase is FileOperationPhase.TRANSFER
+    assert _error_details(raised_stage.value).reason is FileFailureReason.REFUSED
+
+    nested_carrier = _upload_outcome(
+        status=FileUploadStatus.FAILED,
+        publication_confirmed=False,
+        revision=None,
+        failure=FileUploadFailure.TERMINATION,
+        failure_phase=FileUploadFailurePhase.STAGE_CHUNK,
+        carrier_failure=Failure.DEADLINE,
+    )
+    with pytest.raises(ExternalError) as raised_carrier:
+        reduce_file_json(
+            FileJsonOutcome(
+                FileJsonStatus.FAILED,
+                _json_binding(),
+                failure=FileJsonFailure.UPLOAD,
+                upload_outcome=nested_carrier,
+            ),
+            **_CONTEXT,
+        )
+    assert _error_details(raised_carrier.value).phase is FileOperationPhase.TRANSFER
+    assert _error_details(raised_carrier.value).reason is FileFailureReason.DEADLINE
+
+    stale_conflict = _upload_outcome(
+        status=FileUploadStatus.FAILED,
+        publication_confirmed=False,
+        revision=None,
+        failure=FileUploadFailure.PUBLICATION,
+        failure_phase=FileUploadFailurePhase.PUBLICATION,
+        publication_failure=FilePublicationFailureControl(
+            FilePublicationFailureCode.PUBLICATION,
+            publication_kind=PublicationFailureKind.CONFLICT,
+            publication_phase=PublicationPhase.CONDITION,
+        ),
+    )
+    with pytest.raises(LimitExceededError) as raised_read:
+        reduce_file_json(
+            FileJsonOutcome(
+                FileJsonStatus.FAILED,
+                _json_binding(),
+                failure=FileJsonFailure.READ,
+                read_failure=FileReadFailure.LIMIT,
+                upload_outcome=stale_conflict,
+            ),
+            **_CONTEXT,
+        )
+    assert _error_details(raised_read.value).phase is FileOperationPhase.OBSERVATION
+    assert _error_details(raised_read.value).reason is FileFailureReason.LIMIT
 
 
 def test_complete_download_late_deadline_and_cleanup_debt_never_publish_success() -> None:

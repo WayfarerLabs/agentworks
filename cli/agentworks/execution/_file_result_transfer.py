@@ -351,44 +351,60 @@ def reduce_file_json(
         change = Change.CHANGED if outcome.change is FileJsonChange.CHANGED else Change.UNCHANGED
         revision = None if outcome.revision is None else _revision_from_file_revision(outcome.revision)
         return MutationResult(change, revision)
-    upload = outcome.upload_outcome
-    if upload is not None and (upload.publication_uncertain or upload.publication_ownership_uncertain):
-        phase = _upload_phase(upload)
-        _raise_uncertain(
-            phase,
+    if outcome.failure is FileJsonFailure.UPLOAD and outcome.upload_outcome is not None:
+        upload = outcome.upload_outcome
+        if upload.publication_uncertain or upload.publication_ownership_uncertain:
+            phase = _upload_phase(upload)
+            _raise_uncertain(
+                phase,
+                _upload_reason(upload),
+                entity_kind=entity_kind,
+                entity_name=entity_name,
+                dispatch=upload.failure_dispatch if phase is FileOperationPhase.PUBLICATION else None,
+            )
+        if outcome.pending_remote_effects or outcome.coordination_uncertain:
+            _raise_reason(
+                _upload_phase(upload),
+                _upload_reason(upload),
+                entity_kind=entity_kind,
+                entity_name=entity_name,
+                effect=Change.CHANGED if upload.publication_confirmed else None,
+            )
+        _raise_reason(
+            _upload_phase(upload),
             _upload_reason(upload),
             entity_kind=entity_kind,
             entity_name=entity_name,
-            dispatch=upload.failure_dispatch if phase is FileOperationPhase.PUBLICATION else None,
+            effect=Change.CHANGED if upload.publication_confirmed else None,
         )
     if outcome.pending_remote_effects or outcome.coordination_uncertain:
-        phase = _upload_phase(upload) if upload is not None else _json_phase(outcome)
-        reason = _upload_reason(upload) if upload is not None else _json_reason(outcome)
         _raise_reason(
-            phase,
-            reason,
+            _json_phase(outcome),
+            _json_reason(outcome),
             entity_kind=entity_kind,
             entity_name=entity_name,
-            effect=Change.CHANGED if upload is not None and upload.publication_confirmed else None,
+            effect=Change.CHANGED if outcome.change is FileJsonChange.CHANGED else None,
         )
-    effect = Change.CHANGED if upload is not None and upload.publication_confirmed else None
-    phase = _upload_phase(upload) if upload is not None else _json_phase(outcome)
     _raise_reason(
-        phase,
+        _json_phase(outcome),
         _json_reason(outcome),
         entity_kind=entity_kind,
         entity_name=entity_name,
-        effect=effect,
+        effect=Change.CHANGED if outcome.change is FileJsonChange.CHANGED else None,
     )
 
 
 def _json_reason(outcome: FileJsonOutcome) -> FileFailureReason:
+    if outcome.failure is FileJsonFailure.UPLOAD:
+        return FileFailureReason.INVALID_RESPONSE
     if outcome.failure is FileJsonFailure.READ and outcome.read_failure is not None:
         return _read_failure_reason(outcome.read_failure)
     if outcome.failure is FileJsonFailure.OBJECT and outcome.object_failure is not None:
         return _object_failure_reason(outcome.object_failure)
-    if outcome.failure in {FileJsonFailure.PUBLICATION, FileJsonFailure.CLEANUP} and outcome.upload_outcome is not None:
-        return _upload_reason(outcome.upload_outcome)
+    if outcome.carrier_failure is not None:
+        return _carrier_reason(outcome.carrier_failure)
+    if outcome.failure is FileJsonFailure.OBSERVATION and outcome.failure_dispatch is Dispatch.NOT_SENT:
+        return FileFailureReason.CARRIER_DISPATCH
     if outcome.failure is FileJsonFailure.DEADLINE:
         return FileFailureReason.DEADLINE
     if outcome.failure is None and outcome.deadline_exceeded:
@@ -401,9 +417,8 @@ def _json_reason(outcome: FileJsonOutcome) -> FileFailureReason:
         FileJsonFailure.READ: FileFailureReason.REFUSED,
         FileJsonFailure.EXISTING_VALIDATION: FileFailureReason.EXISTING_CONTENT,
         FileJsonFailure.TRANSFORM: FileFailureReason.TRANSFORM,
-        FileJsonFailure.PUBLICATION: FileFailureReason.REFUSED,
+        FileJsonFailure.UPLOAD: FileFailureReason.INVALID_RESPONSE,
         FileJsonFailure.CONFLICT: FileFailureReason.CONFLICT,
-        FileJsonFailure.CLEANUP: FileFailureReason.CLEANUP,
         FileJsonFailure.OBSERVATION: FileFailureReason.INVALID_RESPONSE,
         FileJsonFailure.RUNTIME_PREREQUISITE: _optional_runtime_reason(outcome.runtime_prerequisite),
         FileJsonFailure.TERMINATION: FileFailureReason.TERMINATION,
@@ -413,8 +428,4 @@ def _json_reason(outcome: FileJsonOutcome) -> FileFailureReason:
 def _json_phase(outcome: FileJsonOutcome) -> FileOperationPhase:
     if outcome.failure in {FileJsonFailure.EXISTING_VALIDATION, FileJsonFailure.TRANSFORM}:
         return FileOperationPhase.TRANSFORM
-    if outcome.failure is FileJsonFailure.CLEANUP:
-        return FileOperationPhase.CLEANUP
-    if outcome.failure is FileJsonFailure.PUBLICATION:
-        return FileOperationPhase.PUBLICATION
     return FileOperationPhase.OBSERVATION

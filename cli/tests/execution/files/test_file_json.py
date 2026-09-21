@@ -12,8 +12,9 @@ from pathlib import Path
 import pytest
 
 from agentworks.db import Database, OperationResourceKind, OperationScope
-from agentworks.errors import StateError, ValidationError
+from agentworks.errors import ExternalError, StateError, ValidationError
 from agentworks.execution._account import FileOwnershipObservationState
+from agentworks.execution._account_protocol import FileOwnershipFailure
 from agentworks.execution._file_json import (
     FileJsonChange,
     FileJsonControlFact,
@@ -24,6 +25,8 @@ from agentworks.execution._file_json import (
 )
 from agentworks.execution._file_object_exchange import stat_file
 from agentworks.execution._file_read_protocol import FileReadFailure
+from agentworks.execution._file_result_transfer import reduce_file_json
+from agentworks.execution._file_upload import FileUploadFailure
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
@@ -34,9 +37,10 @@ from agentworks.execution.carrier import (
     CarrierReport,
     ChannelFeatures,
     Deadline,
+    Failure,
     PreparedInvocation,
 )
-from agentworks.execution.files import NewMetadata
+from agentworks.execution.files import FileFailureReason, FileOperationPhase, NewMetadata
 from agentworks.operations import OperationBorrow, OperationOwner
 from tests.execution.files._file_publication_support import LocalCarrier
 from tests.execution.files._file_publication_support import install_fixture_bundle as install_publication_bundle
@@ -134,7 +138,34 @@ class ExpiredMissingCompletionCarrier:
         self.calls += 1
         report = self._carrier.execute(invocation, io=io, deadline=deadline)
         object.__setattr__(deadline, "expires_at", 0.0)
-        return replace(report, completion=None)
+        return replace(report, completion=None, failure=Failure.DEADLINE)
+
+
+class ConflictThenDeadlineCarrier:
+    def __init__(self, target: Path) -> None:
+        self._carrier = LocalCarrier()
+        self._target = target
+        self.calls = 0
+
+    @property
+    def features(self) -> ChannelFeatures:
+        return ChannelFeatures()
+
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+    ) -> CarrierReport:
+        self.calls += 1
+        report = self._carrier.execute(invocation, io=io, deadline=deadline)
+        if self.calls == 1:
+            self._target.write_text('{"concurrent":true}')
+        elif self.calls == 6:
+            object.__setattr__(deadline, "expires_at", 0.0)
+            return replace(report, completion=None, failure=Failure.DEADLINE)
+        return report
 
 
 @pytest.fixture
@@ -374,6 +405,44 @@ def test_each_strategy_creates_an_absent_destination(
         assert outcome.upload_outcome.ownership_result.observation is not None
         assert outcome.upload_outcome.ownership_result.observation.state is FileOwnershipObservationState.RESOLVED
         assert json.loads((root / "target").read_bytes()) == {"created": [None, {"nested": True}]}
+        borrow.close()
+        owner.close()
+    finally:
+        database.close()
+
+
+def test_absent_creation_retains_nested_ownership_failure(
+    tmp_path: Path,
+    plan: IdentityPlan,
+) -> None:
+    root = tmp_path / "approved"
+    root.mkdir()
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    borrow = owner.borrow()
+    try:
+        outcome = _update(
+            borrow,
+            root,
+            plan,
+            b'{"created":true}',
+            "replace",
+            metadata=NewMetadata("missing-json-owner", "missing-json-group", 0o600),
+        )
+
+        assert outcome.status is FileJsonStatus.FAILED
+        assert outcome.failure is FileJsonFailure.UPLOAD
+        upload = outcome.upload_outcome
+        assert upload is not None and upload.failure is FileUploadFailure.OWNERSHIP
+        assert upload.ownership_result is not None
+        observation = upload.ownership_result.observation
+        assert observation is not None and observation.failure is FileOwnershipFailure.MISSING_OWNER
+        with pytest.raises(StateError) as raised:
+            reduce_file_json(outcome, entity_kind="workspace file", entity_name="settings")
+        assert raised.value.details is not None
+        assert raised.value.details.phase is FileOperationPhase.OWNERSHIP_LOOKUP
+        assert raised.value.details.reason is FileFailureReason.MISSING_OWNER
+        assert not (root / "target").exists()
         borrow.close()
         owner.close()
     finally:
@@ -681,6 +750,39 @@ def test_merge_retries_a_later_exact_match_conflict_with_one_deadline_and_borrow
         database.close()
 
 
+def test_merge_retry_read_keeps_its_deadline_over_the_prior_conflict(
+    tmp_path: Path,
+    plan: IdentityPlan,
+) -> None:
+    root = tmp_path / "approved"
+    root.mkdir()
+    target = root / "target"
+    target.write_text('{"initial":true}')
+    carrier = ConflictThenDeadlineCarrier(target)
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    borrow = owner.borrow()
+    try:
+        outcome = _update(borrow, root, plan, b'{"source":true}', "merge-overwrite", carrier=carrier)
+
+        assert carrier.calls == 6 and outcome.publication_attempts == 1
+        assert outcome.status is FileJsonStatus.UNCERTAIN
+        assert outcome.failure is FileJsonFailure.TERMINATION
+        assert outcome.carrier_failure is Failure.DEADLINE
+        assert outcome.deadline_exceeded and outcome.pending_remote_effects
+        assert outcome.requires_owner_retention
+        upload = outcome.upload_outcome
+        assert upload is not None and upload.failure is FileUploadFailure.PUBLICATION
+        with pytest.raises(ExternalError) as raised:
+            reduce_file_json(outcome, entity_kind="workspace file", entity_name="settings")
+        assert raised.value.details is not None
+        assert raised.value.details.phase is FileOperationPhase.OBSERVATION
+        assert raised.value.details.reason is FileFailureReason.DEADLINE
+        assert target.read_text() == '{"concurrent":true}'
+    finally:
+        database.close()
+
+
 def test_merge_stops_after_eight_total_condition_conflicts(
     tmp_path: Path,
     plan: IdentityPlan,
@@ -725,7 +827,7 @@ def test_merge_does_not_retry_a_noncondition_publication_conflict(
         outcome = _update(borrow, root, plan, b'{"source":true}', "merge-overwrite")
 
         assert outcome.status is FileJsonStatus.FAILED
-        assert outcome.failure is FileJsonFailure.PUBLICATION
+        assert outcome.failure is FileJsonFailure.UPLOAD
         assert outcome.publication_attempts == 1
         assert json.loads(target.read_bytes()) == {"existing": True}
         borrow.close()
@@ -904,8 +1006,14 @@ def test_expired_stat_or_read_result_preserves_termination_and_deadline_facts(
         assert carrier.calls == 1 and outcome.publication_attempts == 0
         assert outcome.status is FileJsonStatus.UNCERTAIN
         assert outcome.failure is FileJsonFailure.TERMINATION
+        assert outcome.carrier_failure is Failure.DEADLINE
         assert outcome.deadline_exceeded and outcome.pending_remote_effects
         assert outcome.requires_owner_retention
+        with pytest.raises(ExternalError) as raised:
+            reduce_file_json(outcome, entity_kind="workspace file", entity_name="settings")
+        assert raised.value.details is not None
+        assert raised.value.details.phase is FileOperationPhase.OBSERVATION
+        assert raised.value.details.reason is FileFailureReason.DEADLINE
     finally:
         database.close()
 

@@ -46,7 +46,7 @@ from agentworks.execution._runtime_prerequisite import (
     RuntimePrerequisiteState,
     RuntimeSelection,
 )
-from agentworks.execution.carrier import Deadline, Dispatch
+from agentworks.execution.carrier import Deadline, Dispatch, Failure
 from agentworks.operations import OperationBorrow
 
 if TYPE_CHECKING:
@@ -87,9 +87,8 @@ class FileJsonFailure(StrEnum):
     READ = "read"
     EXISTING_VALIDATION = "existing_validation"
     TRANSFORM = "transform"
-    PUBLICATION = "publication"
+    UPLOAD = "upload"
     CONFLICT = "conflict"
-    CLEANUP = "cleanup"
     OBSERVATION = "observation"
     RUNTIME_PREREQUISITE = "runtime_prerequisite"
     TERMINATION = "termination"
@@ -123,6 +122,8 @@ class FileJsonOutcome:
     pending_remote_effects: bool = False
     coordination_uncertain: bool = False
     requires_owner_retention: bool = False
+    failure_dispatch: Dispatch | None = None
+    carrier_failure: Failure | None = None
 
 
 class FileJsonControlFact(Exception):
@@ -168,10 +169,20 @@ class _State:
     runtime_prerequisite: RuntimePrerequisiteObservation | None = None
     deadline_exceeded: bool = False
     active_upload: _PreparedUpload | None = field(default=None, repr=False)
+    failure_dispatch: Dispatch | None = None
+    carrier_failure: Failure | None = None
 
-    def fail(self, failure: FileJsonFailure) -> None:
+    def fail(
+        self,
+        failure: FileJsonFailure,
+        *,
+        dispatch: Dispatch | None = None,
+        carrier_failure: Failure | None = None,
+    ) -> None:
         if self.failure is None:
             self.failure = failure
+            self.failure_dispatch = dispatch
+            self.carrier_failure = carrier_failure
 
     def record_runtime(self, observation: RuntimePrerequisiteObservation) -> None:
         current = self.runtime_prerequisite
@@ -219,6 +230,8 @@ class _State:
             pending,
             coordination,
             retain,
+            self.failure_dispatch,
+            self.carrier_failure,
         )
 
 
@@ -312,6 +325,7 @@ class _PreparedJsonUpdate:
                     raise control from None
                 try:
                     self.state.capture_upload(cause.outcome)
+                    self.state.fail(FileJsonFailure.UPLOAD)
                 except BaseException:
                     raise control from cause
             try:
@@ -414,7 +428,7 @@ class _JsonWorkflow:
             if outcome.status is FileUploadStatus.COMPLETE:
                 return self._complete_upload(outcome)
             if not self._retryable_conflict(outcome):
-                self._record_upload_failure(outcome)
+                self._state.fail(FileJsonFailure.UPLOAD)
                 return self._state.finish()
             if attempt == _MAX_PUBLICATION_ATTEMPTS - 1:
                 self._state.fail(FileJsonFailure.CONFLICT)
@@ -441,11 +455,15 @@ class _JsonWorkflow:
             if observation.failure.kind is FileObjectFailureKind.DEADLINE:
                 self._state.deadline_exceeded = True
                 self._state.fail(FileJsonFailure.DEADLINE)
+            elif observation.state is FileObjectObservationState.REFUSED:
+                self._state.fail(FileJsonFailure.OBJECT)
         normal = self._state.operation.settle(result.dispatch, result.carrier_completion)
         self._state.deadline_exceeded = self._state.deadline_exceeded or self._deadline.expired
         if not normal:
             self._state.fail(
-                FileJsonFailure.OBSERVATION if result.dispatch is Dispatch.NOT_SENT else FileJsonFailure.TERMINATION
+                FileJsonFailure.OBSERVATION if result.dispatch is Dispatch.NOT_SENT else FileJsonFailure.TERMINATION,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
             )
             return None
         if _runtime_refused(result.runtime_prerequisite):
@@ -484,11 +502,15 @@ class _JsonWorkflow:
             if observation.failure is FileReadFailure.DEADLINE:
                 self._state.deadline_exceeded = True
                 self._state.fail(FileJsonFailure.DEADLINE)
+            elif observation.state is FileReadObservationState.REFUSED:
+                self._state.fail(FileJsonFailure.READ)
         normal = self._state.operation.settle(result.dispatch, result.carrier_completion)
         self._state.deadline_exceeded = self._state.deadline_exceeded or self._deadline.expired
         if not normal:
             self._state.fail(
-                FileJsonFailure.OBSERVATION if result.dispatch is Dispatch.NOT_SENT else FileJsonFailure.TERMINATION
+                FileJsonFailure.OBSERVATION if result.dispatch is Dispatch.NOT_SENT else FileJsonFailure.TERMINATION,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
             )
             return None
         if _runtime_refused(result.runtime_prerequisite):
@@ -510,7 +532,7 @@ class _JsonWorkflow:
         outcome = self._upload(content, condition)
         if outcome.status is FileUploadStatus.COMPLETE:
             return self._complete_upload(outcome)
-        self._record_upload_failure(outcome)
+        self._state.fail(FileJsonFailure.UPLOAD)
         return self._state.finish()
 
     def _serialize_source(self) -> bytes | None:
@@ -548,19 +570,6 @@ class _JsonWorkflow:
             self._state.change = FileJsonChange.CHANGED
             self._state.revision = outcome.revision
         return self._state.finish()
-
-    def _record_upload_failure(self, outcome: FileUploadOutcome) -> None:
-        mapping = {
-            FileUploadFailure.DEADLINE: FileJsonFailure.DEADLINE,
-            FileUploadFailure.PUBLICATION: FileJsonFailure.PUBLICATION,
-            FileUploadFailure.CLEANUP: FileJsonFailure.CLEANUP,
-            FileUploadFailure.RUNTIME_PREREQUISITE: FileJsonFailure.RUNTIME_PREREQUISITE,
-            FileUploadFailure.TERMINATION: FileJsonFailure.TERMINATION,
-        }
-        failure = outcome.failure
-        self._state.fail(
-            FileJsonFailure.OBSERVATION if failure is None else mapping.get(failure, FileJsonFailure.OBSERVATION)
-        )
 
     @staticmethod
     def _retryable_conflict(outcome: FileUploadOutcome) -> bool:
