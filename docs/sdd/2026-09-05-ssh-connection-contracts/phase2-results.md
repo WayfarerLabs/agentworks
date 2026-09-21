@@ -214,6 +214,12 @@ setup, authentication/trust/command refusal and listener release. The fixture ve
 the lead independently found no owned fixture SSH processes and removed each exact directory and its
 credentials.
 
+All three private review lanes are clean at `8c3c4e5b`. The full combined non-integration suite
+passes **12,613 tests with 14 skips**. Full Ruff/format, mypy (1,059 source files), file lint,
+locked-SDD and whitespace checks pass. The earlier baseline records the unchanged website, rulesync
+and typer-isolation gate results. Hosted CI records the published branch separately and can also
+include later transport base commits.
+
 These are focused Linux loopback results, not complete asynchronous interruption or native-platform
 acceptance. The shared cleanup-entry gap and unbounded process-construction time retain their
 existing qualifications. Terminal and RunContext integration remain with transport.

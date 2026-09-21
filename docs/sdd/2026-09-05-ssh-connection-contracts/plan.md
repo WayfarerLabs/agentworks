@@ -212,11 +212,14 @@ confirmed by the operator.
       trust in command-size fixtures, and repeat read, stage and snapshot delivery through installed
       Linux OpenSSH. All three cases pass at `e852aef2`; production file and native acceptance
       remain open.
-- [ ] Adopt the transport-owned `LocalProcessOwner` for forwarding, retaining ownership before
+- [x] Adopt the transport-owned `LocalProcessOwner` for forwarding, retaining ownership before
       dispatch and stopping pipe borrowers before release. The operator authorized the scoped SSH
       contribution on 2026-09-21; transport already published the extraction, so reuse it and keep
       any integration-required shared correction separable. Terminal and RunContext remain with
-      transport.
+      transport. Implementation `8c3c4e5b` passes the focused and full local suites, installed Linux
+      forwarding cases and all three private reviews; the
+      [evidence record](phase2-results.md#forwarding-uses-the-shared-held-process-owner) retains the
+      remaining shared interruption and native acceptance limits.
 - [ ] Finish the SSH LLD for R1-R5: complete connection validation, installed-client/path policy,
       config schema and conversion, trust preservation/enrollment/refusal, process/terminal and
       forwarding lifetimes, diagnostics and acceptance fixtures. Name the authority and refresh
