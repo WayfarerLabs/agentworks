@@ -86,7 +86,7 @@ def _assert_sensitive_attempt(carrier: _ObservedSSHCarrier, attempt: int, *secre
         assert text not in diagnostic
 
 
-def _all_attempts_completed(carrier: _ObservedSSHCarrier) -> bool:
+def _all_attempts_succeeded(carrier: _ObservedSSHCarrier) -> bool:
     return len(carrier.reports) == len(carrier.attempts) and all(
         report.dispatch is Dispatch.SENT and report.completion == ExitStatus(code=0) and report.failure is None
         for report in carrier.reports
@@ -306,7 +306,6 @@ def test_file_snapshot_download_and_exact_cleanup_over_real_ssh(
         assert snapshot.ready._digest == snapshot.source.digest
 
         downloaded = bytearray()
-        chunks = []
         for offset in range(0, len(payload), MAX_SNAPSHOT_CHUNK_BYTES):
             length = min(MAX_SNAPSHOT_CHUNK_BYTES, len(payload) - offset)
             result = snapshot_chunk(
@@ -327,12 +326,8 @@ def test_file_snapshot_download_and_exact_cleanup_over_real_ssh(
             assert chunk.offset == offset and chunk.length == length
             assert chunk.data == payload[offset : offset + length]
             assert chunk.chunk_digest == hashlib.sha256(chunk.data).digest()
+            assert "snapshot-payload-canary" not in repr(result)
             downloaded.extend(chunk.data)
-            chunks.append(result)
-        assert [result.observation.chunk.offset for result in chunks if result.observation.chunk is not None] == [
-            0,
-            MAX_SNAPSHOT_CHUNK_BYTES,
-        ]
         assert bytes(downloaded) == payload
         assert hashlib.sha256(downloaded).digest() == snapshot.ready._digest
 
@@ -351,7 +346,7 @@ def test_file_snapshot_download_and_exact_cleanup_over_real_ssh(
         assert cleanup_debt is not None
     finally:
         if scratch.exists():
-            if not _all_attempts_completed(carrier):
+            if not _all_attempts_succeeded(carrier):
                 pytest.fail(f"snapshot helper completion is unknown; retained owned scratch at {scratch}")
             if cleanup_debt is None:
                 recovery = snapshot_reconcile(
@@ -400,5 +395,4 @@ def test_file_snapshot_download_and_exact_cleanup_over_real_ssh(
     assert len(carrier.attempts) == 5
     for attempt in range(5):
         _assert_sensitive_attempt(carrier, attempt, str(source_root), "payload", b"snapshot-payload-canary")
-    assert "snapshot-payload-canary" not in repr(chunks)
     assert "snapshot-payload-canary" not in repr(begun)
