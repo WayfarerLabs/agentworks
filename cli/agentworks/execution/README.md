@@ -389,7 +389,7 @@ binds this operation to snapshot creation, not upload staging. Expiry is checked
 descriptors close, including initial absence. Failure attempts exact scratch cleanup and preserves
 unresolved cleanup debt. Local receipt reconciliation can recover cleanup ownership after a lost
 return, not the ready snapshot or its content revision. The private snapshot exchanges below deliver
-these operations; complete download composition is not implemented.
+these operations; `_file_download.py` composes them under one borrowed operation owner.
 
 Descriptor bookkeeping is not signal-atomic. An asynchronous interruption before an intermediate
 ancestor close can leave that descriptor open until helper exit; callers cannot assume leak-free
@@ -497,9 +497,22 @@ Publication evidence, remaining cleanup obligations and possible future effects 
 caller retains the original binding and token for unresolved work. These private mechanics do not
 acquire production ownership before activation or provide crash recovery.
 
-`_file_operation.py` owns the concrete dispatch gate shared by upload and JSON composition. Only the
-outer workflow closes its borrow; a nested upload cannot release the JSON operation's ownership
-between observation and conditional publication.
+`_file_operation.py` owns the concrete dispatch gate shared by upload, download and JSON
+composition. Only the outer workflow closes its borrow; a nested upload cannot release the JSON
+operation's ownership between observation and conditional publication.
+
+`_file_download.py` creates one private source snapshot, streams verified chunks to a borrowed byte
+sink, and cleans up the exact snapshot under the same owner. Only complete chunk observations with
+independent normal-zero completion reach the sink. Short writes and temporary stalls consume the
+original deadline; the sink is never closed by the coordinator. The final byte count and digest must
+match the source revision, including for empty files. Confirmed absence returns no bytes.
+
+The outcome separates accepted bytes, whole-stream verification, remote cleanup debt and possible
+future effects. A verified stream is not complete while required cleanup remains unresolved. Sink
+failures retain closed facts, not raw exception text; escaping control flow carries bounded recovery
+facts. This private entry requires a finite positive source bound. Public optional bounds, local
+staging/publication and local cleanup remain unimplemented; the coordinator cannot publish a local
+file or provide public FileAccess on its own.
 
 ## Private object observation and removal
 
@@ -652,7 +665,7 @@ Windows SSH command-line sizing for explicit fixtures. Those measurements do not
 platform acceptance or fit for every connection/identity prefix.
 
 These entries are individual exchanges, not FileAccess operations. Private upload composition uses
-them through `_file_upload.py`; whole-download composition remains unfinished. The caller must
+them through `_file_upload.py`; downloads use the separate snapshot exchanges below. The caller must
 retain the token, original binding and known references; an unavailable creation reply does not
 establish absence or quiescence.
 
@@ -679,6 +692,6 @@ either.
 Reconciliation recovers cleanup ownership only, never ready content or proof that an earlier request
 has stopped. Known cleanup debt survives deadline failure. Cleanup accepts the original token and
 identity-bound objects; delayed chunks refuse after receipt removal. The caller must serialize the
-complete logical operation and retain its token and known references. These private exchanges do not
-yet compose a complete download or enable public FileAccess. Local helper tests and serialized
-request-size measurements do not establish native carrier acceptance.
+complete logical operation and retain its token and known references. `_file_download.py` supplies
+that private composition; local publication and public FileAccess remain unimplemented. Local helper
+tests and serialized request-size measurements do not establish native carrier acceptance.
