@@ -263,6 +263,49 @@ def test_lost_wait_status_never_becomes_forwarding_exit_zero(monkeypatch: pytest
     assert all(pipe is None or pipe.closed for pipe in (process.stdin, process.stdout, process.stderr))
 
 
+def test_close_while_another_caller_waits_preserves_cleanup_evidence(
+    synthetic: SyntheticForwarding, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    resource = synthetic.open()
+    waiting = threading.Event()
+    outcomes: list[int | BaseException] = []
+    original_wait = resource._done.wait
+
+    def observe_wait(timeout: float | None = None) -> bool:
+        if threading.current_thread() is waiter:
+            waiting.set()
+        return original_wait(timeout)
+
+    def wait_for_client() -> None:
+        try:
+            outcomes.append(resource.wait())
+        except BaseException as error:
+            outcomes.append(error)
+
+    waiter = threading.Thread(target=wait_for_client, name="ssh-forwarding-wait-test")
+    monkeypatch.setattr(resource._done, "wait", observe_wait)
+    waiter.start()
+    try:
+        assert waiting.wait(timeout=2)
+        assert synthetic.children[-1].poll() is None
+        resource.close()
+        waiter.join(timeout=2)
+        assert not waiter.is_alive()
+    finally:
+        try:
+            resource.close()
+        finally:
+            waiter.join(timeout=2)
+
+    assert len(outcomes) == 1
+    outcome = outcomes[0]
+    assert isinstance(outcome, ForwardingError)
+    assert outcome.failure is Failure.OBSERVATION
+    assert outcome.local_status == synthetic.children[-1].returncode
+    assert not resource._thread.is_alive()
+    synthetic.assert_closed()
+
+
 def test_wait_interruption_closes_before_propagating(
     synthetic: SyntheticForwarding, monkeypatch: pytest.MonkeyPatch
 ) -> None:
