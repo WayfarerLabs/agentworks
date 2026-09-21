@@ -59,6 +59,37 @@ scope. Finalization also remains explicit: returning from a legacy helper or lea
 does not prove that remote effects stopped. This inventory locates the integration work, not
 implemented production ownership or accepted recovery.
 
+### Remaining-native-platform inventory, 2026-09-21
+
+The read-only inventory at `bf819094` covers Lima, AWS EC2, Azure VM and GCP GCE. The cloud native
+paths use provider APIs for identity, live endpoint and route management, then SSH to the guest;
+they are not API-based guest command channels. AWS describes its current instance IP, Azure walks
+the VM/NIC public-IP state, and GCP verifies the owned instance/network before reading its external
+IP. Stop/start can change these addresses. The platform must perform that resolution explicitly
+under the core operation's preparation deadline, not inside a passive RunContext accessor.
+
+Each cloud create path already holds the endpoint, admin account and operator key before building
+its legacy SSH transport. `ProvisionResult.native_transport` still carries that old object into
+Debian attestation and Phase A. New create-time result composition must carry an independent binding
+from those facts; adding an existing-VM resolver alone does not cover provisioning. Explicit
+known-hosts and connection-isolation inputs remain SSH-lane dependencies, not ambient trust that
+transport may infer from the operator's key path.
+
+Lima still needs an independent guest carrier. Local delivery uses `limactl shell`, but the current
+template and invocation do not explicitly select its actual guest delivery account. That account
+must be observed or explicitly established, not assumed equal to the separately created VM admin.
+Remote Lima additionally needs explicit placement-host endpoint/account/trust/OS facts and separate
+inner-guest completion evidence. Its host create/rollback currently uses legacy detached execution;
+replacing only the returned guest transport leaves those required workflows unmigrated.
+
+This inventory is source evidence, not native feasibility or acceptance. Its concrete seams are
+`plugins/aws/platform.py`, `plugins/azure/platform.py`, `plugins/gcp/platform.py`,
+`capabilities/vm_platform/lima.py`, `capabilities/vm_platform/base.py` (`ProvisionResult`),
+`vms/manager/lifecycle.py` (attestation/Phase A), and the current native factory in
+`transports/__init__.py`. Provider identities, route policy and opaque metadata decoding stay inside
+their platforms. The explicit resolver and complete create-time/factory integration remain required
+before native production cutover.
+
 ### New-target composition inventory, 2026-09-21
 
 Read-only inspection at `449b297e` found that `VMPlatform.native_transport` and

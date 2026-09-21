@@ -1241,6 +1241,12 @@ isolation, in coexistence releases. Operational safety and selected profile guar
       Proxmox uses the configured CA for both platform API and new QGA delivery, without accepting
       legacy verification bypass. Other platforms, provisioning-result integration and complete
       target identity composition remain part of the required gate above.
+- [ ] Expose native binding resolution as an explicit preparation operation with a deadline, before
+      passive target/RunContext construction. The remaining-platform inventory shows that cloud
+      public-IP resolution requires provider reads; do not force stale metadata or hide those reads
+      behind an accessor. Keep Proxmox/WSL2 resolution passive, keep route lifetime in core, and use
+      already-observed create-time endpoint facts for the new provisioning result. Retire the
+      initial private hook name without a compatibility alias before consumer adoption.
 - [ ] Prove fresh-process platform composition without retirement dependencies, not only calls to
       already-imported native hooks. The first-binding audit at `6149cf06` found that VM-platform
       package initialization imports Lima's legacy dependencies, while plugin initialization imports

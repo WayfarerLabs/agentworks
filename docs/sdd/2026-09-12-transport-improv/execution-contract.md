@@ -406,12 +406,26 @@ virtualization framework.
 
 ### Core native binding
 
-Add `VMPlatform.native_execution_binding(vm, ctx, *, config=None)` alongside the legacy hook. It
-returns a `NativeExecutionBinding` containing the independent carrier, its actual delivery account
-name and explicit runtime selection. This is a core/platform composition boundary, not an accessor
-supplied to file or execution consumers. Construction resolves only already-delivered secrets and
-platform-owned VM metadata; it does not activate routes, probe accounts or launch work. The
-enclosing core operation owns those effects and its lifetime.
+Add `VMPlatform.resolve_native_execution_binding(vm, ctx, *, deadline, config=None)` alongside the
+legacy hook. This is an explicit core/platform preparation operation, not an accessor supplied to
+file or execution consumers. It returns a `NativeExecutionBinding` containing the independent
+carrier, its actual delivery account name and explicit runtime selection. Constructing that value
+and the resulting RunContext views remains passive.
+
+Core acquires operation ownership before activation, enters the platform-owned route lifetime, then
+invokes resolution with one preparation deadline before constructing the target views. Cloud
+platforms may need bounded provider reads to resolve a current endpoint: AWS, Azure and GCP obtain
+live public IPs that cannot safely be inferred from stored VM metadata. Those reads and delivered
+secret consumption belong to this explicit step. They must not be deferred to a property access or
+hidden in the carrier constructor. Core owns route activation and cleanup separately; the resolver
+does not implicitly open a route, launch a guest workload or retry an uncertain invocation.
+
+Proxmox and WSL2 already have their required endpoint/distribution facts, so their resolvers remain
+passive and perform no provider lookup. Create-time composition should use the platform's already
+observed endpoint facts instead of inventing a VM-row round trip or constructing a legacy transport
+to recover them. Provider metadata remains opaque to core in every case. The
+[remaining-platform inventory](migration-strategy.md#remaining-native-platform-inventory-2026-09-21)
+records the actual input and trust gaps.
 
 Delivery account and requested execution account are distinct facts. QGA delivers as root; WSL2's
 binding explicitly selects the VM's admin account. Target composition must observe the requested
@@ -428,7 +442,7 @@ Proxmox configuration adds an explicit workstation CA-bundle path alongside syst
 same CA choice to platform API access and the new QGA connection; never reinterpret
 `verify_ssl=False` as acceptable new-stack trust. That legacy setting retains its old meaning only
 for unmigrated calls, and the new binding rejects it with migration guidance. Loading the selected
-trust material belongs to delivery/readiness, not passive binding construction.
+trust material belongs to delivery/readiness, not passive carrier or binding-value construction.
 
 ## Filesystem and package layout
 
