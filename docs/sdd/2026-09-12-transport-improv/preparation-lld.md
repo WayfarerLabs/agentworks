@@ -617,9 +617,12 @@ prevent bytecode writes. A small trampoline checks the version before entering t
 helper in the same process. Python 3.4 introduced `-I`; an older interpreter that rejects the
 startup flags cannot emit the prerequisite response and follows the observation-failure path. This
 is not a preliminary readiness probe or staging operation. A valid nonce-bound prerequisite response
-reports a closed failure category; missing responses and transport failures remain
-observation/connection failures, never evidence of an absent interpreter. Diagnostics use the bound
-host, selected path, failure category and remedy, not raw interpreter or account-shell output.
+reports a closed failure category. A carrier failure alone establishes no prerequisite category;
+missing, truncated or invalid prerequisite responses remain unknown, never evidence of an absent
+interpreter. Preserve a complete valid prerequisite record already received even if stdin delivery
+or later observation also fails. It reports what this invocation observed, not helper quiescence or
+permission to retry. Diagnostics use the bound host, established selected path, failure category and
+remedy, not raw interpreter or account-shell output.
 
 This remains an implementation candidate. Acceptance needs Intel and Apple Silicon macOS evidence
 for independent installations, explicit paths, shim aliases, broken selections, old interpreters, no
@@ -633,6 +636,39 @@ POSIX object/alias checks without touching a Mac or executing a system shim. Loc
 establishes the positive trampoline path; the unsupported-version response is synthetic, not an
 observation of Python 3.9 or 3.10. No production selector, configuration field or helper wiring is
 enabled by these tests. The shared pump's process-construction interruption gap also remains open.
+
+### Shared runtime admission
+
+Promote the candidate into shared preparation, with target composition explicitly selecting Linux or
+Darwin rather than inferring the destination from the workstation. Linux uses `/usr/bin/python3`
+unless an explicit absolute path is bound; Darwin retains the candidate rules above. Only Darwin
+treats the system Python path as a shim. Neither choice adds a public configuration field or an
+implicit preliminary probe.
+
+The old-compatible trampoline checks the Python version and the fixed common bundle-loader imports
+(`base64`, `bz2`, `hashlib`, `json`, `os`, `sys`, `types`) before entering helper source. This is
+loader admission, not proof of every operation-specific prerequisite. Account-database support,
+filesystem features and launch mechanisms retain their existing operation-level checks. Selection
+and admission leave stdin untouched; helper entry preserves the original nonce argument.
+
+One bounded nonce-bound prerequisite record precedes the family transcript. A shared prefix sink
+consumes that record and, only on readiness, forwards subsequent bytes unchanged to the existing
+family sink, including its partial-write and backpressure behavior. A refusal never enters that
+collector; trailing bytes after refusal invalidate the prerequisite transcript. Closed observations
+are ready, missing, shim, unusable, unsupported version, missing required modules and unknown, with
+the selected path derived from a core-bound candidate index rather than guest diagnostic text.
+
+Each exchange keeps this prerequisite observation beside unchanged carrier facts. Its operation
+observation is absent when admission did not occur; readiness itself is not application start or
+operation success. Complete refusal evidence can coexist with incomplete input delivery. The current
+pump may stop collection on an input failure before receiving any refusal, so this design does not
+promise a specific diagnosis for every failed invocation. It adds no refusal-time stdin drain, retry
+or ownership release. Explicit EOF readiness is separate acceptance evidence, not a cache or
+permission for a later invocation to skip admission.
+
+Begin integration with the two private account lookups, then adopt the same boundary in the file,
+inline and terminal paths. Their distinct operation protocols and evidence rules remain unchanged.
+Native macOS acceptance and existing-guest bootstrap remain separate gates.
 
 ## Public result and check behavior
 

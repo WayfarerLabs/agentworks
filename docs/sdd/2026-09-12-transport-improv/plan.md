@@ -275,6 +275,12 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
 - [ ] Accept the preparation/result and file-operation LLDs after private review and disposition of
       their helper/runtime, launch-evidence, cross-identity operation coordination, and platform
       prerequisites.
+- [ ] Integrate shared same-invocation runtime admission into account and file-owner lookup, then
+      file, inline and terminal preparation. Preserve complete prerequisite observations separately
+      from carrier failures; never infer a missing interpreter from absent evidence. Prove bounded
+      prefix forwarding, common loader imports, unchanged sensitive stdin, and clean selection
+      refusals without staging, installation or an implicit preliminary probe. Native macOS proof
+      and existing-guest bootstrap remain required, not satisfied by local selection fixtures.
 - [x] Implement private revision-aware publication with explicit Create/Replace/Match conditions,
       bounded streaming from verified scratch, stat-only observations without old-content reads, and
       a content-bound post-publication revision. At `75aaaa5e`, all three private lanes are clean
