@@ -517,10 +517,16 @@ def test_exceptional_fact_failure_preserves_control_without_reusing_prior_cause(
             runtime_selection=runtime_selection(sys.executable),
         )
         control = KeyboardInterrupt("control-canary")
-        control.__cause__ = FileDownloadControlFact(previous)
-        carrier = InterruptingCarrier(control)
+        prior_fact = FileDownloadControlFact(previous)
+        control.__cause__ = prior_fact
+        carrier = LocalCarrier()
+
+        class InterruptingSink:
+            def try_write(self, data: memoryview) -> int:
+                raise control
 
         def fail_allocation(*args: object) -> None:
+            assert control.__cause__ is prior_fact
             raise MemoryError("allocation-canary")
 
         if failure_point == "outcome":
@@ -533,7 +539,7 @@ def test_exceptional_fact_failure_preserves_control_without_reusing_prior_cause(
                 carrier,
                 trusted_root_path=str(source),
                 relative_path="source",
-                sink=BytesSink(),
+                sink=InterruptingSink(),
                 max_bytes=64,
                 plan=plan,
                 deadline=Deadline.after(30),
