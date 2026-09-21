@@ -30,6 +30,7 @@ from agentworks.execution._file_stage_exchange import (
 )
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState, RuntimeSelection, RuntimeTargetOS
 from agentworks.execution._scratch_receipt import ScratchCleanupDebt, scratch_name
 from agentworks.execution.carrier import (
     CarrierIO,
@@ -48,7 +49,7 @@ pytestmark = [
     pytest.mark.skipif(sys.platform != "linux", reason="the file helpers require Linux"),
 ]
 
-_RUNTIME = "/usr/bin/python3"
+_RUNTIME = RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3")
 
 
 class _ObservedSSHCarrier(SSHCarrier):
@@ -113,7 +114,7 @@ def test_file_read_delivers_binary_and_typed_noncontent_outcomes_over_real_ssh(
         max_bytes=len(payload),
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=_RUNTIME,
+        runtime_selection=_RUNTIME,
     )
     absent = read_file(
         carrier,
@@ -122,7 +123,7 @@ def test_file_read_delivers_binary_and_typed_noncontent_outcomes_over_real_ssh(
         max_bytes=1,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=_RUNTIME,
+        runtime_selection=_RUNTIME,
     )
     refused = read_file(
         carrier,
@@ -131,12 +132,14 @@ def test_file_read_delivers_binary_and_typed_noncontent_outcomes_over_real_ssh(
         max_bytes=1,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=_RUNTIME,
+        runtime_selection=_RUNTIME,
     )
 
     assert len(carrier.attempts) == 3
     assert present.dispatch is Dispatch.SENT and present.carrier_completion == ExitStatus(code=0)
     assert present.carrier_failure is None
+    assert present.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert present.observation is not None
     assert present.observation.state is FileReadObservationState.PRESENT
     snapshot = present.observation.snapshot
     assert snapshot is not None
@@ -145,9 +148,13 @@ def test_file_read_delivers_binary_and_typed_noncontent_outcomes_over_real_ssh(
     assert snapshot.metadata.size == len(payload)
     assert absent.dispatch is Dispatch.SENT and absent.carrier_completion == ExitStatus(code=0)
     assert absent.carrier_failure is None
+    assert absent.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert absent.observation is not None
     assert absent.observation.state is FileReadObservationState.ABSENT
     assert refused.dispatch is Dispatch.SENT and refused.carrier_completion == ExitStatus(code=0)
     assert refused.carrier_failure is None
+    assert refused.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert refused.observation is not None
     assert refused.observation.state is FileReadObservationState.REFUSED
     assert refused.observation.failure is FileReadFailure.LIMIT
     assert refused.observation.snapshot is None
@@ -179,10 +186,12 @@ def test_file_stage_round_trip_and_exact_cleanup_over_real_ssh(
         expected_length=len(payload),
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=_RUNTIME,
+        runtime_selection=_RUNTIME,
     )
     assert begun.dispatch is Dispatch.SENT and begun.carrier_completion == ExitStatus(code=0)
     assert begun.carrier_failure is None
+    assert begun.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert begun.observation is not None
     assert begun.observation.state is FileStageObservationState.CREATED
     reference = begun.observation.reference
     assert reference is not None
@@ -200,10 +209,12 @@ def test_file_stage_round_trip_and_exact_cleanup_over_real_ssh(
             chunk_digest=hashlib.sha256(data).digest(),
             plan=plan,
             deadline=Deadline.after(15),
-            runtime_path=_RUNTIME,
+            runtime_selection=_RUNTIME,
         )
         assert result.dispatch is Dispatch.SENT and result.carrier_completion == ExitStatus(code=0)
         assert result.carrier_failure is None
+        assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+        assert result.observation is not None
         assert result.observation.state is FileStageObservationState.ACCEPTED
         chunks.append(result)
 
@@ -215,10 +226,12 @@ def test_file_stage_round_trip_and_exact_cleanup_over_real_ssh(
         max_bytes=len(payload),
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=_RUNTIME,
+        runtime_selection=_RUNTIME,
     )
     assert readback.dispatch is Dispatch.SENT and readback.carrier_completion == ExitStatus(code=0)
     assert readback.carrier_failure is None
+    assert readback.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert readback.observation is not None
     assert readback.observation.state is FileReadObservationState.PRESENT
     assert readback.observation.snapshot is not None
     assert readback.observation.snapshot.data == payload
@@ -231,10 +244,12 @@ def test_file_stage_round_trip_and_exact_cleanup_over_real_ssh(
         token=token,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=_RUNTIME,
+        runtime_selection=_RUNTIME,
     )
     assert recovered.dispatch is Dispatch.SENT and recovered.carrier_completion == ExitStatus(code=0)
     assert recovered.carrier_failure is None
+    assert recovered.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert recovered.observation is not None
     assert recovered.observation.state is FileStageObservationState.RECOVERED
     debt = recovered.observation.cleanup_debt
     assert debt is not None
@@ -246,11 +261,13 @@ def test_file_stage_round_trip_and_exact_cleanup_over_real_ssh(
         cleanup_debt=debt,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=_RUNTIME,
+        runtime_selection=_RUNTIME,
     )
 
     assert cleaned.dispatch is Dispatch.SENT and cleaned.carrier_completion == ExitStatus(code=0)
     assert cleaned.carrier_failure is None
+    assert cleaned.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert cleaned.observation is not None
     assert cleaned.observation.state is FileStageObservationState.CLEANED
     assert len(carrier.attempts) == 6
     assert not scratch.exists()
@@ -294,10 +311,12 @@ def test_file_snapshot_download_and_exact_cleanup_over_real_ssh(
             token=token,
             plan=plan,
             deadline=Deadline.after(15),
-            runtime_path=_RUNTIME,
+            runtime_selection=_RUNTIME,
         )
         assert begun.dispatch is Dispatch.SENT and begun.carrier_completion == ExitStatus(code=0)
         assert begun.carrier_failure is None
+        assert begun.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+        assert begun.observation is not None
         assert begun.observation.state is FileSnapshotObservationState.READY
         snapshot = begun.observation.snapshot
         assert snapshot is not None
@@ -316,10 +335,12 @@ def test_file_snapshot_download_and_exact_cleanup_over_real_ssh(
                 length=length,
                 plan=plan,
                 deadline=Deadline.after(15),
-                runtime_path=_RUNTIME,
+                runtime_selection=_RUNTIME,
             )
             assert result.dispatch is Dispatch.SENT and result.carrier_completion == ExitStatus(code=0)
             assert result.carrier_failure is None
+            assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+            assert result.observation is not None
             assert result.observation.state is FileSnapshotObservationState.CHUNK
             chunk = result.observation.chunk
             assert chunk is not None
@@ -336,10 +357,12 @@ def test_file_snapshot_download_and_exact_cleanup_over_real_ssh(
             token=token,
             plan=plan,
             deadline=Deadline.after(15),
-            runtime_path=_RUNTIME,
+            runtime_selection=_RUNTIME,
         )
         assert recovered.dispatch is Dispatch.SENT and recovered.carrier_completion == ExitStatus(code=0)
         assert recovered.carrier_failure is None
+        assert recovered.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+        assert recovered.observation is not None
         assert recovered.observation.state is FileSnapshotObservationState.RECOVERED
         assert recovered.observation.snapshot is None and recovered.observation.chunk is None
         cleanup_debt = recovered.observation.cleanup_debt
@@ -354,10 +377,12 @@ def test_file_snapshot_download_and_exact_cleanup_over_real_ssh(
                     token=token,
                     plan=plan,
                     deadline=Deadline.after(15),
-                    runtime_path=_RUNTIME,
+                    runtime_selection=_RUNTIME,
                 )
                 if not _all_attempts_succeeded(carrier):
                     pytest.fail(f"snapshot recovery completion is unknown; retained owned scratch at {scratch}")
+                assert recovery.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+                assert recovery.observation is not None
                 assert recovery.observation.state is FileSnapshotObservationState.RECOVERED
                 cleanup_debt = recovery.observation.cleanup_debt
             assert cleanup_debt is not None
@@ -367,8 +392,10 @@ def test_file_snapshot_download_and_exact_cleanup_over_real_ssh(
                 cleanup_debt=cleanup_debt,
                 plan=plan,
                 deadline=Deadline.after(15),
-                runtime_path=_RUNTIME,
+                runtime_selection=_RUNTIME,
             )
+            assert cleanup_result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+            assert cleanup_result.observation is not None
             assert cleanup_result.observation.state is FileSnapshotObservationState.CLEANED
 
     assert cleanup_result is not None
