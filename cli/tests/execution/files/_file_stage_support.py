@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import textwrap
 from typing import TYPE_CHECKING
 
 from agentworks.execution import _file_stage_exchange
-from agentworks.execution._file_stage_bundle import FIXED_LOADER
+from agentworks.execution._file_stage_bundle import _MODULE_NAMES, _PACKAGE
+from agentworks.execution._helper_bundle import FixedFileHelperBundle
 from agentworks.execution.carrier import (
     CarrierIO,
     CarrierReport,
@@ -17,27 +17,20 @@ from agentworks.execution.carrier import (
     PreparedInvocation,
 )
 from agentworks.execution.carriers._subprocess import run_process
+from tests.execution.files._fixed_bundle_support import fixture_file_bundle
 
 if TYPE_CHECKING:
     import pytest
 
-_PACKAGE = "_agw_file_stage"
+
+def fixture_source(guest_patch: str = "") -> FixedFileHelperBundle:
+    return fixture_file_bundle(_PACKAGE, _MODULE_NAMES, "_file_stage_guest", guest_patch)
 
 
-def fixture_source(guest_patch: str = "") -> str:
-    entry = f"""
-import sys
-guest=sys.modules[{(_PACKAGE + "._file_stage_guest")!r}]
-{textwrap.dedent(guest_patch)}
-raise SystemExit(guest.main(sys.argv[1]))
-"""
-    return FIXED_LOADER + textwrap.dedent(entry)
-
-
-def install_fixture_bundle(monkeypatch: pytest.MonkeyPatch) -> str:
-    source = fixture_source()
-    monkeypatch.setattr(_file_stage_exchange, "FIXED_SOURCE", source)
-    return source
+def install_fixture_bundle(monkeypatch: pytest.MonkeyPatch) -> FixedFileHelperBundle:
+    bundle = fixture_source()
+    monkeypatch.setattr(_file_stage_exchange, "FIXED_BUNDLE", bundle)
+    return bundle
 
 
 class LocalCarrier:

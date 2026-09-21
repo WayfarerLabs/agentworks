@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
-from agentworks.execution._file_metadata_bundle import FIXED_LOADER
+from agentworks.execution._file_metadata_bundle import _MODULE_NAMES, _PACKAGE, FIXED_BUNDLE
 from agentworks.execution._file_metadata_exchange import (
     FileMetadataCandidateResult,
     FileMetadataObservationState,
@@ -21,6 +21,7 @@ from agentworks.execution._file_metadata_exchange import (
     set_file_metadata,
 )
 from agentworks.execution._file_metadata_protocol import FileMetadataFailureCode
+from agentworks.execution._helper_bundle import FixedFileHelperBundle
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution.carrier import (
@@ -34,6 +35,7 @@ from agentworks.execution.carrier import (
 )
 from agentworks.execution.carriers._subprocess import run_process
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
+from tests.execution.files._fixed_bundle_support import fixture_file_bundle
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the metadata helper requires Linux")
 
@@ -80,20 +82,16 @@ def plan() -> IdentityPlan:
     )
 
 
-def _fixture_source(injection: str = "") -> str:
-    package = "_agw_file_metadata"
-    return FIXED_LOADER + (
-        "import os\n"
-        f"g=sys.modules[{(package + '._file_metadata_guest')!r}]\n"
-        f"m=sys.modules[{(package + '._file_metadata')!r}]\n" + injection + "raise SystemExit(g.main(sys.argv[1]))\n"
-    )
+def _fixture_source(injection: str = "") -> FixedFileHelperBundle:
+    patch_source = f"import os\ng=guest\nm=sys.modules[{(_PACKAGE + '._file_metadata')!r}]\n" + injection
+    return fixture_file_bundle(_PACKAGE, _MODULE_NAMES, "_file_metadata_guest", patch_source)
 
 
 def _set(
     root: Path,
     relative: str,
     plan: IdentityPlan,
-    source: str,
+    source: FixedFileHelperBundle,
     *,
     mode: int,
     runtime: Path = Path(sys.executable),
@@ -101,7 +99,7 @@ def _set(
     carrier: LocalCarrier | None = None,
 ) -> tuple[LocalCarrier, FileMetadataCandidateResult]:
     carrier = LocalCarrier() if carrier is None else carrier
-    with patch("agentworks.execution._file_metadata_exchange.FIXED_SOURCE", source):
+    with patch("agentworks.execution._file_metadata_exchange.FIXED_BUNDLE", source):
         result = set_file_metadata(
             carrier,
             trusted_root_path=str(root),
@@ -120,14 +118,14 @@ def _ensure(
     root: Path,
     relative: str,
     plan: IdentityPlan,
-    source: str,
+    source: FixedFileHelperBundle,
     *,
     mode: int,
     runtime: Path = Path(sys.executable),
     deadline: float = 15,
 ) -> tuple[LocalCarrier, FileMetadataCandidateResult]:
     carrier = LocalCarrier()
-    with patch("agentworks.execution._file_metadata_exchange.FIXED_SOURCE", source):
+    with patch("agentworks.execution._file_metadata_exchange.FIXED_BUNDLE", source):
         result = ensure_file_directory(
             carrier,
             trusted_root_path=str(root),
@@ -233,7 +231,7 @@ def test_identity_mismatch_precedes_target_access(tmp_path: Path, plan: Identity
         IdentityExpectation((plan.expected.euid + 1) % (2**32), plan.expected.egid, plan.expected.groups),
         IdentityMode.DIRECT,
     )
-    with patch("agentworks.execution._file_metadata_exchange.FIXED_SOURCE", _fixture_source()):
+    with patch("agentworks.execution._file_metadata_exchange.FIXED_BUNDLE", _fixture_source()):
         result = set_file_metadata(
             carrier,
             trusted_root_path=str(tmp_path / "absent-target"),
@@ -394,7 +392,7 @@ def test_complete_proxmox_post_fits_provider_bound_and_returns_typed_refusal(
         runtime_path=sys.executable,
     )
 
-    assert len(FIXED_LOADER) < body_sizes[0] < 65_536
+    assert len(FIXED_BUNDLE.prefix) < body_sizes[0] < 65_536
     assert result.dispatch is Dispatch.SENT
     assert result.observation.state is FileMetadataObservationState.REFUSED
     assert result.observation.failure is not None

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agentworks.execution._helper_bundle import build_helper_modules
+from agentworks.execution._helper_bundle import build_file_helper_bundle
 
 _PACKAGE = "_agw_file_read"
 _MODULE_NAMES = (
@@ -16,6 +16,4 @@ _MODULE_NAMES = (
 )
 
 
-FIXED_SOURCE = build_helper_modules(_PACKAGE, _MODULE_NAMES) + (
-    f"raise SystemExit(sys.modules[{(_PACKAGE + '._file_read_guest')!r}].main(sys.argv[1]))\n"
-)
+FIXED_BUNDLE = build_file_helper_bundle(_PACKAGE, _MODULE_NAMES, "_file_read_guest")

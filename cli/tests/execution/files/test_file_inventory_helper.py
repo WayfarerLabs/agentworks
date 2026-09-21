@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
-from agentworks.execution._file_inventory_bundle import FIXED_LOADER, FIXED_SOURCE
+from agentworks.execution._file_inventory_bundle import FIXED_BUNDLE
 from agentworks.execution._file_inventory_exchange import (
     FileInventoryCandidateResult,
     FileInventoryObservationState,
@@ -36,6 +36,7 @@ from agentworks.execution._file_wire import (
     FileRecordReader,
     encode_file_record,
 )
+from agentworks.execution._helper_bundle import FixedFileHelperBundle
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution.carrier import (
@@ -97,7 +98,7 @@ def _list(
     root: Path,
     relative: str,
     plan: IdentityPlan,
-    source: str,
+    source: FixedFileHelperBundle,
     *,
     runtime: Path,
     max_entries: int = 64,
@@ -105,7 +106,7 @@ def _list(
     max_encoded_bytes: int = 65_536,
 ) -> tuple[LocalCarrier, FileInventoryCandidateResult]:
     carrier = LocalCarrier()
-    with patch("agentworks.execution._file_inventory_exchange.FIXED_SOURCE", source):
+    with patch("agentworks.execution._file_inventory_exchange.FIXED_BUNDLE", source):
         result = list_directory(
             carrier,
             trusted_root_path=str(root),
@@ -135,7 +136,7 @@ def test_isolated_bundle_lists_sorted_utf8_metadata_without_content_reads(
     private.chmod(0)
     (nested / "child").write_bytes(b"child")
     try:
-        carrier, result = _list(approved, "target", plan, FIXED_SOURCE, runtime=runtime)
+        carrier, result = _list(approved, "target", plan, FIXED_BUNDLE, runtime=runtime)
     finally:
         private.chmod(0o600)
 
@@ -157,7 +158,7 @@ def test_isolated_bundle_lists_sorted_utf8_metadata_without_content_reads(
 
 
 def test_empty_directory_and_missing_target_are_distinct_complete_outcomes(tmp_path: Path, plan: IdentityPlan) -> None:
-    source = FIXED_SOURCE
+    source = FIXED_BUNDLE
     approved = tmp_path / "approved"
     (approved / "empty").mkdir(parents=True)
 
@@ -173,7 +174,7 @@ def test_empty_directory_and_missing_target_are_distinct_complete_outcomes(tmp_p
 
 @pytest.mark.parametrize("object_kind", ["symlink", "hardlink", "fifo"])
 def test_helper_refuses_links_and_special_entries(tmp_path: Path, plan: IdentityPlan, object_kind: str) -> None:
-    source = FIXED_SOURCE
+    source = FIXED_BUNDLE
     approved = tmp_path / "approved"
     target = approved / "target"
     target.mkdir(parents=True)
@@ -193,7 +194,7 @@ def test_helper_refuses_links_and_special_entries(tmp_path: Path, plan: Identity
 
 
 def test_helper_observes_socket_metadata(tmp_path: Path, plan: IdentityPlan) -> None:
-    source = FIXED_SOURCE
+    source = FIXED_BUNDLE
     approved = tmp_path / "approved"
     target = approved / "target"
     target.mkdir(parents=True)
@@ -213,7 +214,7 @@ def test_helper_observes_socket_metadata(tmp_path: Path, plan: IdentityPlan) -> 
 def test_helper_refuses_target_mount_crossing(tmp_path: Path, plan: IdentityPlan) -> None:
     if not Path("/proc").is_dir():
         pytest.skip("procfs fixture is unavailable")
-    source = FIXED_SOURCE
+    source = FIXED_BUNDLE
 
     _, result = _list(Path("/"), "proc", plan, source, runtime=Path(sys.executable))
 
@@ -222,7 +223,7 @@ def test_helper_refuses_target_mount_crossing(tmp_path: Path, plan: IdentityPlan
 
 
 def test_helper_enforces_requested_depth_entry_and_encoded_bounds(tmp_path: Path, plan: IdentityPlan) -> None:
-    source = FIXED_SOURCE
+    source = FIXED_BUNDLE
     approved = tmp_path / "approved"
     target = approved / "target"
     nested = target / "nested"
@@ -330,7 +331,7 @@ def test_maximum_framed_candidate_fits_qemu_7_2_capture_as_local_sizing_evidence
 def test_complete_proxmox_envelope_fits_and_delivers_real_helper_response(
     tmp_path: Path, plan: IdentityPlan, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source = FIXED_SOURCE
+    source = FIXED_BUNDLE
     approved = tmp_path / "approved"
     target = approved / "target"
     target.mkdir(parents=True)
@@ -361,7 +362,7 @@ def test_complete_proxmox_envelope_fits_and_delivers_real_helper_response(
         return status
 
     monkeypatch.setattr(carrier._wire, "request", request)
-    with patch("agentworks.execution._file_inventory_exchange.FIXED_SOURCE", source):
+    with patch("agentworks.execution._file_inventory_exchange.FIXED_BUNDLE", source):
         result = list_directory(
             carrier,
             trusted_root_path=str(approved),
@@ -374,7 +375,7 @@ def test_complete_proxmox_envelope_fits_and_delivers_real_helper_response(
             runtime_path=sys.executable,
         )
 
-    assert len(FIXED_LOADER) < body_sizes[0] < 65_536
+    assert len(FIXED_BUNDLE.prefix) < body_sizes[0] < 65_536
     assert result.dispatch is Dispatch.SENT
     assert result.observation.state is FileInventoryObservationState.PRESENT
     assert result.observation.entries is not None

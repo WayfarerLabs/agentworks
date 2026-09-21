@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
 from agentworks.execution._file_metadata import MetadataEffect, MetadataPhase, MetadataStep
-from agentworks.execution._file_metadata_bundle import FIXED_SOURCE
+from agentworks.execution._file_metadata_bundle import FIXED_BUNDLE
 from agentworks.execution._file_metadata_protocol import (
     FileMetadataControlError,
     FileMetadataFailureCode,
@@ -244,7 +244,12 @@ def _exchange(
     runtime_path: str,
 ) -> FileMetadataCandidateResult:
     nonce = secrets.token_hex(16)
-    fixed_argv = build_helper_argv(plan, runtime_path=runtime_path, fixed_source=FIXED_SOURCE, nonce=nonce)
+    fixed_argv = build_helper_argv(
+        plan,
+        runtime_path=runtime_path,
+        fixed_source=FIXED_BUNDLE.bootstrap,
+        nonce=nonce,
+    )
     root = _validate_text(trusted_root_path)
     leaf = _validate_text(relative_path)
     request_data = b""
@@ -273,7 +278,7 @@ def _exchange(
     reader = FileRecordReader(nonce, collector.accept)
     stderr = _DiagnosticSink()
     io = CarrierIO(
-        input=FiniteInput(request_data, sensitive=True),
+        input=FiniteInput(FIXED_BUNDLE.prefix + request_data, sensitive=True),
         output=SinkOutput(reader, stderr, require_live=False),
         sensitive=True,
     )

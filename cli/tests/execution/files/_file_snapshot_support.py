@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import textwrap
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks.execution import _file_snapshot_exchange
-from agentworks.execution._file_snapshot_bundle import FIXED_LOADER
+from agentworks.execution._file_snapshot_bundle import _MODULE_NAMES, _PACKAGE
+from agentworks.execution._helper_bundle import FixedFileHelperBundle
 from agentworks.execution.carrier import (
     CarrierIO,
     CarrierReport,
@@ -18,34 +18,30 @@ from agentworks.execution.carrier import (
     PreparedInvocation,
 )
 from agentworks.execution.carriers._subprocess import run_process
+from tests.execution.files._fixed_bundle_support import fixture_file_bundle
 
 if TYPE_CHECKING:
     import pytest
 
-_PACKAGE = "_agw_file_snapshot"
 
-
-def fixture_source(scratch_root: Path, guest_patch: str = "") -> str:
-    entry = f"""
-import os, sys
+def fixture_source(scratch_root: Path, guest_patch: str = "") -> FixedFileHelperBundle:
+    setup = f"""
+import os
 root=sys.modules[{(_PACKAGE + "._scratch_root")!r}]
 root._LINUX_SCRATCH_ROOT={str(scratch_root)!r}
 root._EXPECTED_OWNER_UID=os.geteuid()
-guest=sys.modules[{(_PACKAGE + "._file_snapshot_guest")!r}]
-{textwrap.dedent(guest_patch)}
-raise SystemExit(guest.main(sys.argv[1]))
 """
-    return FIXED_LOADER + textwrap.dedent(entry)
+    return fixture_file_bundle(_PACKAGE, _MODULE_NAMES, "_file_snapshot_guest", guest_patch, setup)
 
 
 def install_fixture_bundle(
     monkeypatch: pytest.MonkeyPatch,
     scratch_root: Path,
     guest_patch: str = "",
-) -> str:
-    source = fixture_source(scratch_root, guest_patch)
-    monkeypatch.setattr(_file_snapshot_exchange, "FIXED_SOURCE", source)
-    return source
+) -> FixedFileHelperBundle:
+    bundle = fixture_source(scratch_root, guest_patch)
+    monkeypatch.setattr(_file_snapshot_exchange, "FIXED_BUNDLE", bundle)
+    return bundle
 
 
 class LocalCarrier:

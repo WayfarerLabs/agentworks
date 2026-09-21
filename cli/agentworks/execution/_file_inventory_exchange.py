@@ -9,7 +9,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
-from agentworks.execution._file_inventory_bundle import FIXED_SOURCE
+from agentworks.execution._file_inventory_bundle import FIXED_BUNDLE
 from agentworks.execution._file_inventory_protocol import (
     FileInventoryControlError,
     FileInventoryFailureCode,
@@ -242,7 +242,12 @@ def list_directory(
 ) -> FileInventoryCandidateResult:
     """Inventory one confined directory through one fresh helper attempt."""
     nonce = secrets.token_hex(16)
-    fixed_argv = build_helper_argv(plan, runtime_path=runtime_path, fixed_source=FIXED_SOURCE, nonce=nonce)
+    fixed_argv = build_helper_argv(
+        plan,
+        runtime_path=runtime_path,
+        fixed_source=FIXED_BUNDLE.bootstrap,
+        nonce=nonce,
+    )
     root = _validate_text(trusted_root_path)
     relative = _validate_text(relative_path)
     request_data = b""
@@ -274,7 +279,7 @@ def list_directory(
     reader = FileRecordReader(nonce, collector.accept)
     stderr = _DiagnosticSink()
     io = CarrierIO(
-        input=FiniteInput(request_data, sensitive=True),
+        input=FiniteInput(FIXED_BUNDLE.prefix + request_data, sensitive=True),
         output=SinkOutput(reader, stderr, require_live=False),
         sensitive=True,
     )

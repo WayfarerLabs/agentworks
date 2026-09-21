@@ -21,7 +21,7 @@ from agentworks.execution._file_read import (
     FileReadObservationState,
     read_file,
 )
-from agentworks.execution._file_read_bundle import FIXED_SOURCE
+from agentworks.execution._file_read_bundle import FIXED_BUNDLE
 from agentworks.execution._file_read_protocol import (
     FileReadFailure,
     FileReadResultControl,
@@ -489,9 +489,9 @@ def test_fixed_helper_bundle_is_an_independent_stdlib_package(tmp_path: Path, in
         pytest.skip(f"compatibility interpreter is unavailable: {interpreter}")
     nonce = "0123456789abcdef0123456789abcdef"
     completed = subprocess.run(
-        [str(interpreter), "-I", "-S", "-B", "-c", FIXED_SOURCE, nonce],
+        [str(interpreter), "-I", "-S", "-B", "-c", FIXED_BUNDLE.bootstrap, nonce],
         cwd=tmp_path,
-        input=b"",
+        input=FIXED_BUNDLE.prefix,
         capture_output=True,
         timeout=10,
     )

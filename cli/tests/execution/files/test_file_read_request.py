@@ -10,6 +10,7 @@ import pytest
 
 from agentworks.errors import ValidationError
 from agentworks.execution._file_read import read_file
+from agentworks.execution._file_read_bundle import FIXED_BUNDLE
 from agentworks.execution._file_read_protocol import (
     FileReadFailure,
     FileReadRequestError,
@@ -120,7 +121,9 @@ def test_host_computes_remaining_immediately_before_its_only_attempt(
     assert events == ["remaining", "encode"]
     assert carrier.calls == 1
     assert carrier.io is not None
-    assert decode_file_read_request(carrier.io.input.data).remaining_seconds == 4.25  # type: ignore[union-attr]
+    data = carrier.io.input.data  # type: ignore[union-attr]
+    assert data.startswith(FIXED_BUNDLE.prefix)
+    assert decode_file_read_request(data[len(FIXED_BUNDLE.prefix) :]).remaining_seconds == 4.25
 
 
 def test_validation_precedes_the_single_carrier_attempt(plan: IdentityPlan) -> None:

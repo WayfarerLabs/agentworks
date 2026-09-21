@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import textwrap
 from typing import TYPE_CHECKING
 
 from agentworks.execution import _file_read
-from agentworks.execution._helper_bundle import build_helper_modules
+from agentworks.execution._file_read_bundle import _MODULE_NAMES, _PACKAGE
+from agentworks.execution._helper_bundle import FixedFileHelperBundle
 from agentworks.execution.carrier import (
     CarrierIO,
     CarrierReport,
@@ -17,34 +17,18 @@ from agentworks.execution.carrier import (
     PreparedInvocation,
 )
 from agentworks.execution.carriers._subprocess import run_process
+from tests.execution.files._fixed_bundle_support import fixture_file_bundle
 
 if TYPE_CHECKING:
     import pytest
 
-_PACKAGE = "_agw_file_read"
-_MODULE_NAMES = (
-    "_helper_identity",
-    "_file_stat",
-    "_file_paths",
-    "_file_snapshot",
-    "_file_wire",
-    "_file_read_protocol",
-    "_file_read_guest",
-)
 
-
-def fixture_source(guest_patch: str = "") -> str:
-    entry = f"""
-import sys
-guest=sys.modules[{(_PACKAGE + "._file_read_guest")!r}]
-{textwrap.dedent(guest_patch)}
-raise SystemExit(guest.main(sys.argv[1]))
-"""
-    return build_helper_modules(_PACKAGE, _MODULE_NAMES) + textwrap.dedent(entry)
+def fixture_source(guest_patch: str = "") -> FixedFileHelperBundle:
+    return fixture_file_bundle(_PACKAGE, _MODULE_NAMES, "_file_read_guest", guest_patch)
 
 
 def install_fixture_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_file_read, "FIXED_SOURCE", fixture_source())
+    monkeypatch.setattr(_file_read, "FIXED_BUNDLE", fixture_source())
 
 
 class LocalCarrier:

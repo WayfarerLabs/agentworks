@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution._file_snapshot_bundle import FIXED_BUNDLE
 from agentworks.execution._file_snapshot_exchange import (
     FileSnapshotObservationError,
     FileSnapshotObservationState,
@@ -479,7 +480,8 @@ class TranscriptCarrier:
         self.calls += 1
         self.io = io
         assert isinstance(io.input, FiniteInput) and isinstance(io.output, SinkOutput)
-        request = decode_file_snapshot_request(io.input.data)
+        assert io.input.data.startswith(FIXED_BUNDLE.prefix)
+        request = decode_file_snapshot_request(io.input.data[len(FIXED_BUNDLE.prefix) :])
         transcript = self.build(request, io.input.data)  # type: ignore[operator]
         _write(io.output.stdout, transcript)
         output = CapturedOutput(complete=True, retention=Retention.DELIVERED)
@@ -658,5 +660,5 @@ def test_wrong_response_nonce_and_reflected_request_are_rejected_without_retenti
     assert nonce_result.observation.state is FileSnapshotObservationState.UNCERTAIN
     assert nonce_result.observation.error is FileWireError.NONCE
     assert reflected.observation.state is FileSnapshotObservationState.UNCERTAIN
-    assert reflected.observation.error in {FileWireError.TRUNCATED, FileWireError.MALFORMED}
+    assert reflected.observation.error in {FileWireError.TRUNCATED, FileWireError.MALFORMED, FileWireError.OVERSIZED}
     assert canary not in repr(reflected)

@@ -15,6 +15,7 @@ import pytest
 
 from agentworks.errors import ValidationError
 from agentworks.execution import _file_object_exchange
+from agentworks.execution._file_object_bundle import FIXED_BUNDLE
 from agentworks.execution._file_object_exchange import (
     FileObjectMutationUncertain,
     FileObjectObservationError,
@@ -339,7 +340,8 @@ class TranscriptCarrier:
         self.calls += 1
         assert isinstance(io.input, FiniteInput)
         assert io.input.sensitive and isinstance(io.output, SinkOutput)
-        request = decode_file_object_request(io.input.data)
+        assert io.input.data.startswith(FIXED_BUNDLE.prefix)
+        request = decode_file_object_request(io.input.data[len(FIXED_BUNDLE.prefix) :])
         transcript = self.build(request)  # type: ignore[operator]
         _write(io.output.stdout, transcript)
         _write(io.output.stderr, self.stderr)

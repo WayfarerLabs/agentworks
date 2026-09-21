@@ -9,7 +9,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
-from agentworks.execution._file_read_bundle import FIXED_SOURCE
+from agentworks.execution._file_read_bundle import FIXED_BUNDLE
 from agentworks.execution._file_read_protocol import (
     FileReadControlError,
     FileReadFailure,
@@ -242,7 +242,12 @@ def read_file(
 ) -> FileReadCandidateResult:
     """Validate and dispatch one bounded read without replay or target writes."""
     nonce = secrets.token_hex(16)
-    fixed_argv = build_helper_argv(plan, runtime_path=runtime_path, fixed_source=FIXED_SOURCE, nonce=nonce)
+    fixed_argv = build_helper_argv(
+        plan,
+        runtime_path=runtime_path,
+        fixed_source=FIXED_BUNDLE.bootstrap,
+        nonce=nonce,
+    )
     root = _validate_text(trusted_root_path)
     leaf = _validate_text(relative_path)
     if type(max_bytes) is not int or max_bytes <= 0:
@@ -263,7 +268,7 @@ def read_file(
     stderr = _DiagnosticSink()
     invocation = PreparedInvocation(fixed_argv)
     io = CarrierIO(
-        input=FiniteInput(request_data, sensitive=True),
+        input=FiniteInput(FIXED_BUNDLE.prefix + request_data, sensitive=True),
         output=SinkOutput(reader, stderr, require_live=False),
         sensitive=True,
     )

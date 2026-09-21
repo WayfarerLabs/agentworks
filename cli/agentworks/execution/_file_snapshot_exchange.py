@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
-from agentworks.execution._file_snapshot_bundle import FIXED_SOURCE
+from agentworks.execution._file_snapshot_bundle import FIXED_BUNDLE
 from agentworks.execution._file_snapshot_protocol import (
     FileSnapshotBeginRequest,
     FileSnapshotChunkRequest,
@@ -328,12 +328,17 @@ def _exchange(
     deadline: Deadline,
     runtime_path: str,
 ) -> FileSnapshotCandidateResult:
-    fixed_argv = build_helper_argv(plan, runtime_path=runtime_path, fixed_source=FIXED_SOURCE, nonce=request.nonce)
+    fixed_argv = build_helper_argv(
+        plan,
+        runtime_path=runtime_path,
+        fixed_source=FIXED_BUNDLE.bootstrap,
+        nonce=request.nonce,
+    )
     collector = _FileSnapshotCollector(request)
     reader = FileRecordReader(request.nonce, collector.accept)
     stderr = _DiagnosticSink()
     io = CarrierIO(
-        input=FiniteInput(_request_data(request), sensitive=True),
+        input=FiniteInput(FIXED_BUNDLE.prefix + _request_data(request), sensitive=True),
         output=SinkOutput(reader, stderr, require_live=False),
         sensitive=True,
     )

@@ -22,6 +22,7 @@ from agentworks.execution._file_metadata import (
     MetadataPhase,
     MetadataStep,
 )
+from agentworks.execution._file_metadata_bundle import FIXED_BUNDLE
 from agentworks.execution._file_metadata_exchange import (
     FileMetadataCandidateResult,
     FileMetadataMutationUncertain,
@@ -407,7 +408,8 @@ class TranscriptCarrier:
         self.calls += 1
         assert isinstance(io.input, FiniteInput)
         assert io.input.sensitive and isinstance(io.output, SinkOutput)
-        request = decode_file_metadata_request(io.input.data)
+        assert io.input.data.startswith(FIXED_BUNDLE.prefix)
+        request = decode_file_metadata_request(io.input.data[len(FIXED_BUNDLE.prefix) :])
         transcript = self.build(request)  # type: ignore[operator]
         _write(io.output.stdout, transcript)
         _write(io.output.stderr, self.stderr)

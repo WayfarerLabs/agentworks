@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
-from agentworks.execution._file_object_bundle import FIXED_LOADER, FIXED_SOURCE
+from agentworks.execution._file_object_bundle import FIXED_BUNDLE
 from agentworks.execution._file_object_exchange import (
     FileObjectCandidateResult,
     FileObjectObservationState,
@@ -23,6 +23,7 @@ from agentworks.execution._file_object_exchange import (
 from agentworks.execution._file_object_protocol import FileObjectFailureCode
 from agentworks.execution._file_objects import FileKind
 from agentworks.execution._file_stat import FileRevision
+from agentworks.execution._helper_bundle import FixedFileHelperBundle
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution.carrier import (
@@ -84,12 +85,12 @@ def _stat(
     root: Path,
     relative: str,
     plan: IdentityPlan,
-    source: str,
+    source: FixedFileHelperBundle,
     *,
     runtime: Path,
 ) -> tuple[LocalCarrier, FileObjectCandidateResult]:
     carrier = LocalCarrier()
-    with patch("agentworks.execution._file_object_exchange.FIXED_SOURCE", source):
+    with patch("agentworks.execution._file_object_exchange.FIXED_BUNDLE", source):
         result = stat_file(
             carrier,
             trusted_root_path=str(root),
@@ -116,7 +117,7 @@ def test_isolated_bundle_stats_mode_zero_file_through_execute_only_ancestry(
     root.chmod(0o111)
     parent.chmod(0o111)
     try:
-        carrier, result = _stat(root, "nested/leaf", plan, FIXED_SOURCE, runtime=runtime)
+        carrier, result = _stat(root, "nested/leaf", plan, FIXED_BUNDLE, runtime=runtime)
     finally:
         parent.chmod(0o700)
         root.chmod(0o700)
@@ -139,7 +140,7 @@ def test_remove_through_write_and_search_parent_without_read_permission(
     root.mkdir()
     target = root / "target"
     target.write_bytes(b"content")
-    source = FIXED_SOURCE
+    source = FIXED_BUNDLE
     _, observed = _stat(root, "target", plan, source, runtime=Path(sys.executable))
     assert observed.observation.revision is not None
     expected = observed.observation.revision
@@ -148,7 +149,7 @@ def test_remove_through_write_and_search_parent_without_read_permission(
     root.chmod(0o300)
     carrier = LocalCarrier()
     try:
-        with patch("agentworks.execution._file_object_exchange.FIXED_SOURCE", source):
+        with patch("agentworks.execution._file_object_exchange.FIXED_BUNDLE", source):
             removed = remove_file(
                 carrier,
                 trusted_root_path=str(root),
@@ -170,7 +171,7 @@ def test_remove_through_write_and_search_parent_without_read_permission(
 def test_missing_root_parent_and_leaf_are_complete_absence(tmp_path: Path, plan: IdentityPlan) -> None:
     root = tmp_path / "root"
     root.mkdir()
-    source = FIXED_SOURCE
+    source = FIXED_BUNDLE
 
     cases = ((tmp_path / "missing-root", "leaf"), (root, "missing/leaf"), (root, "leaf"))
     for candidate_root, relative in cases:
@@ -234,7 +235,7 @@ def test_stat_reports_directory_and_socket_metadata_without_content(tmp_path: Pa
     listener = socket.socket(socket.AF_UNIX)
     listener.bind(str(root / "socket"))
     try:
-        source = FIXED_SOURCE
+        source = FIXED_BUNDLE
         for name, kind in (("directory", FileKind.DIRECTORY), ("socket", FileKind.SOCKET)):
             _, result = _stat(root, name, plan, source, runtime=Path(sys.executable))
             assert result.observation.state is FileObjectObservationState.PRESENT
@@ -288,7 +289,7 @@ def test_complete_proxmox_post_fits_provider_bound_and_returns_typed_outcome(
         runtime_path=sys.executable,
     )
 
-    assert len(FIXED_LOADER) < body_sizes[0] < 65_536
+    assert len(FIXED_BUNDLE.prefix) < body_sizes[0] < 65_536
     assert result.dispatch is Dispatch.SENT
     assert result.observation.state is FileObjectObservationState.REFUSED
     assert result.observation.failure is not None

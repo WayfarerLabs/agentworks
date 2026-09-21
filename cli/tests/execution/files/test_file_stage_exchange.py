@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution._file_stage_bundle import FIXED_BUNDLE
 from agentworks.execution._file_stage_exchange import (
     FileStageChunkUncertain,
     FileStageCleanupUncertain,
@@ -135,7 +136,8 @@ class TranscriptCarrier:
         self.io = io
         assert isinstance(io.input, FiniteInput)
         assert io.input.sensitive and io.sensitive and isinstance(io.output, SinkOutput)
-        request = decode_file_stage_request(io.input.data)
+        assert io.input.data.startswith(FIXED_BUNDLE.prefix)
+        request = decode_file_stage_request(io.input.data[len(FIXED_BUNDLE.prefix) :])
         transcript = self.build(request)  # type: ignore[operator]
         _write(io.output.stdout, transcript)
         _write(io.output.stderr, self.stderr)

@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
-from agentworks.execution._file_stage_bundle import FIXED_SOURCE
+from agentworks.execution._file_stage_bundle import FIXED_BUNDLE
 from agentworks.execution._file_stage_protocol import (
     FileStageBeginRequest,
     FileStageChunkRequest,
@@ -341,13 +341,18 @@ def _exchange(
     deadline: Deadline,
     runtime_path: str,
 ) -> FileStageCandidateResult:
-    fixed_argv = build_helper_argv(plan, runtime_path=runtime_path, fixed_source=FIXED_SOURCE, nonce=request.nonce)
+    fixed_argv = build_helper_argv(
+        plan,
+        runtime_path=runtime_path,
+        fixed_source=FIXED_BUNDLE.bootstrap,
+        nonce=request.nonce,
+    )
     data = _request_data(request)
     collector = _FileStageCollector(request)
     reader = FileRecordReader(request.nonce, collector.accept)
     stderr = _DiagnosticSink()
     io = CarrierIO(
-        input=FiniteInput(data, sensitive=True),
+        input=FiniteInput(FIXED_BUNDLE.prefix + data, sensitive=True),
         output=SinkOutput(reader, stderr, require_live=False),
         sensitive=True,
     )

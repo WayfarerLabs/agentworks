@@ -15,7 +15,7 @@ from unittest.mock import patch
 import pytest
 
 from agentworks.execution import _file_stage_guest
-from agentworks.execution._file_stage_bundle import FIXED_LOADER, FIXED_SOURCE
+from agentworks.execution._file_stage_bundle import FIXED_BUNDLE
 from agentworks.execution._file_stage_exchange import (
     FileStageObservationError,
     FileStageObservationState,
@@ -29,6 +29,7 @@ from agentworks.execution._file_stage_protocol import (
     FileStageFailureCode,
     FileStageReconcileRequest,
 )
+from agentworks.execution._helper_bundle import FixedFileHelperBundle
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan, build_helper_argv
 from agentworks.execution._scratch import ScratchFailureKind, ScratchPhase
@@ -78,7 +79,7 @@ def plan() -> IdentityPlan:
 
 
 @pytest.fixture(autouse=True)
-def fixed_source(monkeypatch: pytest.MonkeyPatch) -> str:
+def fixed_source(monkeypatch: pytest.MonkeyPatch) -> FixedFileHelperBundle:
     return install_fixture_bundle(monkeypatch)
 
 
@@ -467,7 +468,7 @@ def test_guest_deadline_after_missing_root_lookup_is_not_root_refusal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source = fixture_source(_ADVANCE_AFTER_OPEN_ROOT)
-    monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
+    monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_BUNDLE", source)
     carrier = LocalCarrier(dispatch_deadline=Deadline.after(15))
 
     _, result = _begin(
@@ -491,7 +492,7 @@ def test_reconcile_deadline_after_missing_root_lookup_is_not_absence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source = fixture_source(_ADVANCE_AFTER_OPEN_ROOT)
-    monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
+    monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_BUNDLE", source)
 
     _, result = _reconcile(
         tmp_path / "missing-root",
@@ -516,7 +517,7 @@ def test_guest_deadline_after_closed_success_retains_created_cleanup_debt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source = fixture_source(_ADVANCE_AFTER_OPERATE)
-    monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
+    monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_BUNDLE", source)
     root = tmp_path / "approved"
     root.mkdir()
     carrier = LocalCarrier(dispatch_deadline=Deadline.after(15))
@@ -550,7 +551,7 @@ def test_guest_deadline_after_closed_reconcile_retains_recovered_cleanup_debt(
     _, begun = _begin(root, "destination", 1, plan)
     assert begun.observation.state is FileStageObservationState.CREATED
     source = fixture_source(_ADVANCE_AFTER_OPERATE)
-    monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
+    monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_BUNDLE", source)
 
     _, result = _reconcile(
         root,
@@ -581,7 +582,7 @@ def test_cleanup_deadline_after_parent_open_refuses_before_mutation(
     assert debt is not None
     scratch = root / scratch_name(_TOKEN)
     source = fixture_source(_ADVANCE_AFTER_OPEN_ROOT)
-    monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
+    monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_BUNDLE", source)
 
     _, result = _cleanup(
         root,
@@ -614,7 +615,7 @@ def test_guest_deadline_after_closed_cleanup_retains_original_exact_debt(
     debt = recovered.observation.cleanup_debt
     assert debt is not None
     source = fixture_source(_ADVANCE_AFTER_OPERATE)
-    monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
+    monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_BUNDLE", source)
 
     _, result = _cleanup(
         root,
@@ -678,7 +679,7 @@ def short_write(fd,data):
 guest.os.write=short_write
 """
     source = fixture_source(patch_source)
-    monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_SOURCE", source)
+    monkeypatch.setattr("agentworks.execution._file_stage_exchange.FIXED_BUNDLE", source)
     root = tmp_path / "approved"
     root.mkdir()
 
@@ -722,7 +723,7 @@ def test_complete_proxmox_bodies_fit_for_transfer_and_recovery(
         return status
 
     monkeypatch.setattr(carrier._wire, "request", request)
-    with patch("agentworks.execution._file_stage_exchange.FIXED_SOURCE", fixed_source):
+    with patch("agentworks.execution._file_stage_exchange.FIXED_BUNDLE", fixed_source):
         begun = stage_begin(
             carrier,
             trusted_root_path=str(root),
@@ -776,12 +777,17 @@ def test_complete_proxmox_bodies_fit_for_transfer_and_recovery(
     assert recovered.dispatch is Dispatch.SENT and recovered.observation.state is FileStageObservationState.RECOVERED
     assert cleaned.dispatch is Dispatch.SENT and cleaned.observation.state is FileStageObservationState.CLEANED
     assert len(body_sizes) == 4
-    assert len(FIXED_LOADER) < min(body_sizes) <= max(body_sizes) < 65_536
+    assert len(FIXED_BUNDLE.prefix) < min(body_sizes) <= max(body_sizes) < 65_536
 
 
 def test_fixed_helper_retains_windows_command_line_headroom(plan: IdentityPlan) -> None:
     invocation = PreparedInvocation(
-        build_helper_argv(plan, runtime_path="/usr/bin/python3", fixed_source=FIXED_SOURCE, nonce="0" * 32)
+        build_helper_argv(
+            plan,
+            runtime_path="/usr/bin/python3",
+            fixed_source=FIXED_BUNDLE.bootstrap,
+            nonce="0" * 32,
+        )
     )
     connection = SSHConnection(
         "host.example",
@@ -792,4 +798,5 @@ def test_fixed_helper_retains_windows_command_line_headroom(plan: IdentityPlan) 
     ssh_argv = build_ssh_argv(connection, invocation)
     windows_command = subprocess.list2cmdline(ssh_argv)
 
-    assert len(FIXED_LOADER) < len(FIXED_SOURCE) < len(ssh_argv[-1]) < len(windows_command) < 32_767
+    assert len(FIXED_BUNDLE.bootstrap) < len(ssh_argv[-1]) < len(windows_command) < 32_767
+    assert FIXED_BUNDLE.prefix.decode("ascii") not in ssh_argv[-1]

@@ -15,6 +15,7 @@ from agentworks.execution._file_read import (
     FileReadObservationState,
     read_file,
 )
+from agentworks.execution._file_read_bundle import FIXED_BUNDLE
 from agentworks.execution._file_read_protocol import FileReadFailure
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
@@ -288,7 +289,9 @@ def test_caller_bound_has_no_file_layer_ceiling(plan: IdentityPlan) -> None:
     )
 
     assert carrier.io is not None
-    assert len(carrier.io.input.data) < 1024  # type: ignore[union-attr]
+    data = carrier.io.input.data  # type: ignore[union-attr]
+    assert data.startswith(FIXED_BUNDLE.prefix)
+    assert len(data) - len(FIXED_BUNDLE.prefix) < 1024
 
 
 def test_request_manifest_has_an_independent_finite_bound(plan: IdentityPlan) -> None:

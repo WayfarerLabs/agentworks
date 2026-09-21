@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.execution._file_snapshot_bundle import FIXED_LOADER, FIXED_SOURCE
+from agentworks.execution._file_snapshot_bundle import FIXED_BUNDLE
 from agentworks.execution._file_snapshot_protocol import FileSnapshotBeginRequest, encode_file_snapshot_request
 from agentworks.execution._helper_bundle import build_helper_modules
 from agentworks.execution._helper_identity import IdentityExpectation
@@ -207,7 +207,7 @@ def test_snapshot_helper_retains_windows_and_qga_delivery_headroom() -> None:
         build_helper_argv(
             plan,
             runtime_path="/usr/bin/python3",
-            fixed_source=FIXED_SOURCE,
+            fixed_source=FIXED_BUNDLE.bootstrap,
             nonce="0" * 32,
         )
     )
@@ -220,8 +220,11 @@ def test_snapshot_helper_retains_windows_and_qga_delivery_headroom() -> None:
     )
     ssh_argv = build_ssh_argv(connection, invocation)
     windows_command = subprocess.list2cmdline(ssh_argv)
-    qga_body = json.dumps({"command": invocation.argv, "input-data": request.decode("ascii")}).encode("ascii")
+    qga_body = json.dumps(
+        {"command": invocation.argv, "input-data": (FIXED_BUNDLE.prefix + request).decode("ascii")}
+    ).encode("ascii")
 
-    assert request.decode("ascii") not in FIXED_SOURCE
-    assert len(FIXED_LOADER) < len(FIXED_SOURCE) < len(ssh_argv[-1]) < len(windows_command) < 32_767
-    assert len(FIXED_SOURCE) < len(qga_body) < 65_536
+    assert request.decode("ascii") not in FIXED_BUNDLE.bootstrap
+    assert FIXED_BUNDLE.prefix.decode("ascii") not in FIXED_BUNDLE.bootstrap
+    assert len(FIXED_BUNDLE.bootstrap) < len(ssh_argv[-1]) < len(windows_command) < 32_767
+    assert len(FIXED_BUNDLE.prefix) < len(qga_body) < 65_536

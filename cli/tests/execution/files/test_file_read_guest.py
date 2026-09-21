@@ -74,7 +74,7 @@ def deadline_snapshot(*args,**kwargs):
  raise guest.SnapshotReadError(guest.SnapshotFailureKind.DEADLINE)
 guest.read_snapshot=deadline_snapshot
 """
-    monkeypatch.setattr(_file_read, "FIXED_SOURCE", fixture_source(patch))
+    monkeypatch.setattr(_file_read, "FIXED_BUNDLE", fixture_source(patch))
 
     result = _read(tmp_path, "missing", plan)
 
@@ -99,7 +99,7 @@ def delayed_snapshot(*args,**kwargs):
  return result
 guest._snapshot=delayed_snapshot
 """
-    monkeypatch.setattr(_file_read, "FIXED_SOURCE", fixture_source(patch))
+    monkeypatch.setattr(_file_read, "FIXED_BUNDLE", fixture_source(patch))
 
     result = _read(
         tmp_path,
