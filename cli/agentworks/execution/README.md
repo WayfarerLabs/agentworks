@@ -229,6 +229,21 @@ supplementary groups. Missing owner and missing group have distinct closed refus
 sensitive stdin, and the response kind must match this operation. Lookup does not change the
 execution identity, select elevation or grant permission to apply the resulting metadata.
 
+`_target_identity.prepare_target_identity` privately composes those account observations under one
+already-acquired operation owner. It resolves delivery and workload identities, reusing an identical
+name only within that call, and resolves root only for a requested non-root sudo plan. Every actual
+carrier call is armed through the shared fixed-helper admission adapter and uses the original
+deadline. A plan requires a complete resolved observation, sent dispatch, normal helper exit and
+remaining budget for every lookup. Lookup facts never prove that a later transition will succeed.
+
+Ordinary preparation uses direct entry only for identical numeric identities and otherwise permits
+only root delivery demotion to a non-root workload. Explicit root preparation uses direct entry for
+root delivery or non-interactive sudo when the non-root delivery and workload identities match.
+Other cross-identity paths are closed refusals. Results retain each attempted account exchange and
+safe deadline, termination and ownership-retention facts without retaining account names in their
+diagnostic representation. The composer releases its serial borrow but does not close or recover the
+enclosing owner, activate a route, launch a workload or expose a public permission surface.
+
 ## Private inline preparation
 
 The private `_inline` candidate composes one carrier attempt with a fixed, standard-library-only
@@ -499,9 +514,9 @@ Publication evidence, remaining cleanup obligations and possible future effects 
 caller retains the original binding and token for unresolved work. These private mechanics do not
 acquire production ownership before activation or provide crash recovery.
 
-`_file_operation.py` owns the concrete dispatch gate shared by upload, download and JSON
-composition. Only the outer workflow closes its borrow; a nested upload cannot release the JSON
-operation's ownership between observation and conditional publication.
+`_fixed_helper_operation.py` owns the concrete dispatch gate shared by account preparation, upload,
+download and JSON composition. Only the outer workflow closes its borrow; a nested upload cannot
+release the JSON operation's ownership between observation and conditional publication.
 
 `_file_download.py` creates one private source snapshot, streams verified chunks to a borrowed byte
 sink, and cleans up the exact snapshot under the same owner. Only complete chunk observations with

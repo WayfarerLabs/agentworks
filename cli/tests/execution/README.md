@@ -14,6 +14,11 @@ discovers and imports every supplied execution module, so a combined checkout ex
 automatically and any failed import fails the check. A standalone checkout does not claim coverage
 of an absent carrier.
 
+`test_target_identity.py` exercises the private owned identity composer with the real local account
+helper and synthetic identity, refusal, deadline, termination and operation-coordination cases. Its
+sudo and demotion checks validate plan selection only; they do not invoke those transitions or
+establish destination acceptance.
+
 ## Combined-tree integration run
 
 The integration tester can merge pinned transport and SSH commits into a disposable local branch.

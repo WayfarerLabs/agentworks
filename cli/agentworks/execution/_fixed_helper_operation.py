@@ -1,4 +1,4 @@
-"""Concrete carrier admission for file calls borrowing one core operation."""
+"""Concrete carrier admission for fixed helpers borrowing one core operation."""
 
 from __future__ import annotations
 
@@ -17,11 +17,11 @@ if TYPE_CHECKING:
     from agentworks.operations import OperationAttempt, OperationBorrow
 
 
-class BorrowedFileCarrier:
+class BorrowedFixedHelperCarrier:
     """Arm and settle one borrowed owner around concrete carrier executions.
 
-    File workflows must record their protocol facts before calling ``settle``.
-    This class deliberately knows nothing about file observations or cleanup
+    Helper workflows must record their protocol facts before calling ``settle``.
+    This class deliberately knows nothing about protocol observations or cleanup
     debt; it owns only actual-dispatch admission and termination evidence.
     """
 
@@ -64,13 +64,13 @@ class BorrowedFileCarrier:
             if dispatch is not Dispatch.NOT_SENT:
                 self.coordination_uncertain = True
             return False
-        if dispatch is Dispatch.NOT_SENT:
-            attempt.settle()
+        if dispatch is Dispatch.NOT_SENT or (dispatch is Dispatch.SENT and completion == ExitStatus(code=0)):
+            try:
+                attempt.settle()
+            except BaseException:
+                self.coordination_uncertain = True
+                raise
             self.outstanding_attempt = None
-            return False
-        if dispatch is Dispatch.SENT and completion == ExitStatus(code=0):
-            attempt.settle()
-            self.outstanding_attempt = None
-            return True
+            return dispatch is Dispatch.SENT
         self.pending_remote_effects = True
         return False

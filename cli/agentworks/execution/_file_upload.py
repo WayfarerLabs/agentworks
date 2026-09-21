@@ -10,7 +10,6 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
-from agentworks.execution._file_operation import BorrowedFileCarrier
 from agentworks.execution._file_paths import normalized_relative_path, normalized_root
 from agentworks.execution._file_publication import Create, CreateMetadata, Match, PublicationFailureKind, Replace
 from agentworks.execution._file_publication_exchange import (
@@ -41,6 +40,7 @@ from agentworks.execution._file_stage_protocol import (
     FileStageFailureCode,
     FileStageFailureControl,
 )
+from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._helper_launcher import IdentityPlan, _validate_plan
 from agentworks.execution._publication_receipt import PublicationReceiptFailureKind
 from agentworks.execution._runtime_prerequisite import (
@@ -147,7 +147,7 @@ class FileUploadControlFact(Exception):
 class _WorkingState:
     binding: FileUploadBinding
     token: bytes
-    operation: BorrowedFileCarrier
+    operation: BorrowedFixedHelperCarrier
     bytes_consumed: int = 0
     staged_bytes: int = 0
     digest: bytes | None = None
@@ -242,7 +242,7 @@ def upload_file(
         owner,
     )
     borrow = owner.borrow()
-    operation = BorrowedFileCarrier(carrier, borrow)
+    operation = BorrowedFixedHelperCarrier(carrier, borrow)
     try:
         return _upload_file_borrowed(
             operation,
@@ -255,7 +255,7 @@ def upload_file(
 
 
 def _upload_file_borrowed(
-    operation: BorrowedFileCarrier,
+    operation: BorrowedFixedHelperCarrier,
     *,
     source: ByteSource,
     deadline: Deadline,
@@ -282,7 +282,7 @@ def _upload_file_borrowed(
 class _UploadWorkflow:
     def __init__(
         self,
-        carrier: BorrowedFileCarrier,
+        carrier: BorrowedFixedHelperCarrier,
         source: ByteSource,
         condition: Create | Replace | Match,
         create_metadata: CreateMetadata,

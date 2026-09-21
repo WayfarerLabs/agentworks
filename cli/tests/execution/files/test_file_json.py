@@ -22,9 +22,9 @@ from agentworks.execution._file_json import (
     update_json_file,
 )
 from agentworks.execution._file_object_exchange import stat_file
-from agentworks.execution._file_operation import BorrowedFileCarrier
 from agentworks.execution._file_publication import CreateMetadata
 from agentworks.execution._file_read_protocol import FileReadFailure
+from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
@@ -857,7 +857,7 @@ def test_shared_file_carrier_refuses_an_inactive_borrow_before_dispatch(
     owner = _owner(database)
     borrow = owner.borrow()
     carrier = LocalCarrier()
-    operation = BorrowedFileCarrier(carrier, borrow)
+    operation = BorrowedFixedHelperCarrier(carrier, borrow)
     borrow.close()
     try:
         with pytest.raises(StateError):

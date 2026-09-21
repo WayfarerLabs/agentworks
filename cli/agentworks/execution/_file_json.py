@@ -13,7 +13,6 @@ from agentworks.execution._file_object_exchange import (
     stat_file,
 )
 from agentworks.execution._file_objects import FileKind, FileObjectFailureKind
-from agentworks.execution._file_operation import BorrowedFileCarrier
 from agentworks.execution._file_publication import (
     Create,
     CreateMetadata,
@@ -35,6 +34,7 @@ from agentworks.execution._file_upload import (
     _upload_file_borrowed,
     _validate_inputs,
 )
+from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._json import (
     ValidatedJsonObject,
     merge_json_objects,
@@ -156,7 +156,7 @@ class _Inputs:
 @dataclass(slots=True, repr=False)
 class _State:
     binding: FileJsonBinding
-    operation: BorrowedFileCarrier
+    operation: BorrowedFixedHelperCarrier
     change: FileJsonChange | None = None
     revision: FileRevision | None = None
     publication_attempts: int = 0
@@ -245,7 +245,7 @@ def update_json_file(
         owner,
     )
     borrow = owner.borrow()
-    operation = BorrowedFileCarrier(carrier, borrow)
+    operation = BorrowedFixedHelperCarrier(carrier, borrow)
     state = _State(inputs.binding, operation)
     workflow = _JsonWorkflow(inputs, deadline, state)
     try:

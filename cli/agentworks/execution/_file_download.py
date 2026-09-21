@@ -10,7 +10,6 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
 from agentworks.errors import ValidationError
-from agentworks.execution._file_operation import BorrowedFileCarrier
 from agentworks.execution._file_paths import normalized_relative_path, normalized_root
 from agentworks.execution._file_snapshot_exchange import (
     FileSnapshotObservation,
@@ -27,6 +26,7 @@ from agentworks.execution._file_snapshot_protocol import (
     FileSnapshotFailureControl,
 )
 from agentworks.execution._file_spool import SpoolSnapshotFailureKind
+from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._helper_launcher import IdentityPlan, _validate_plan
 from agentworks.execution._runtime_prerequisite import (
     RuntimePrerequisiteObservation,
@@ -128,7 +128,7 @@ class FileDownloadControlFact(Exception):
 class _WorkingState:
     binding: FileDownloadBinding
     token: bytes
-    operation: BorrowedFileCarrier
+    operation: BorrowedFixedHelperCarrier
     accepted_bytes: int = 0
     stream_verified: bool = False
     absent: bool = False
@@ -209,7 +209,7 @@ def download_file(
     )
     token = secrets.token_bytes(16)
     borrow = owner.borrow()
-    operation = BorrowedFileCarrier(carrier, borrow)
+    operation = BorrowedFixedHelperCarrier(carrier, borrow)
     state = _WorkingState(binding, token, operation)
     workflow = _DownloadWorkflow(operation, sink, deadline, state)
     try:
@@ -232,7 +232,7 @@ def download_file(
 class _DownloadWorkflow:
     def __init__(
         self,
-        carrier: BorrowedFileCarrier,
+        carrier: BorrowedFixedHelperCarrier,
         sink: ByteSink,
         deadline: Deadline,
         state: _WorkingState,

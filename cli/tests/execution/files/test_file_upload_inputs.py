@@ -13,11 +13,11 @@ import pytest
 import agentworks.execution._file_publication_exchange as publication_exchange
 from agentworks.db import Database, OperationClaimState
 from agentworks.errors import StateError, ValidationError
-from agentworks.execution._file_operation import BorrowedFileCarrier
 from agentworks.execution._file_publication import Create, CreateMetadata, Match
 from agentworks.execution._file_publication_protocol import FilePublicationFailureCode, FilePublicationRequestError
 from agentworks.execution._file_stat import FileRevision, FileStat
 from agentworks.execution._file_upload import FileUploadControlFact, FileUploadFailure, FileUploadStatus, upload_file
+from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._scratch_receipt import scratch_name
@@ -294,7 +294,7 @@ def test_interrupt_at_owned_carrier_handoff_exports_coordination_uncertainty(
     carrier = LocalCarrier()
     target_instruction = next(
         instruction
-        for instruction in dis.get_instructions(BorrowedFileCarrier.execute)
+        for instruction in dis.get_instructions(BorrowedFixedHelperCarrier.execute)
         if instruction.opname == "STORE_ATTR" and instruction.argval == "outstanding_attempt"
     )
     assert target_instruction.positions is not None
@@ -305,7 +305,11 @@ def test_interrupt_at_owned_carrier_handoff_exports_coordination_uncertainty(
     def interrupt_at_handoff(frame, event, arg):
         nonlocal interrupted
         del arg
-        if frame.f_code is BorrowedFileCarrier.execute.__code__ and event == "line" and frame.f_lineno == target_line:
+        if (
+            frame.f_code is BorrowedFixedHelperCarrier.execute.__code__
+            and event == "line"
+            and frame.f_lineno == target_line
+        ):
             interrupted = True
             raise KeyboardInterrupt
         return interrupt_at_handoff
