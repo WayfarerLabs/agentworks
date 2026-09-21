@@ -436,8 +436,8 @@ helper facts; a truncated observation is not promoted into a confirmed effect.
 
 Before accepting this family's delivery, measure the actual protocol, dispatcher and dependency
 closure through complete SSH/Windows quoting and QGA serialization. A minimal dependency loader
-without the production dispatcher is not evidence of fit. Fixed ASCII armoring may change if it
-proves sufficient; there is no runtime codec option, executable staging or oversized-request retry.
+without the production dispatcher is not evidence of fit. The fixed stdin bundle delivery above has
+no runtime codec option, executable staging or oversized-request retry.
 
 ### Private output delivery
 
