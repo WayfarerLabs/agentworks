@@ -162,7 +162,6 @@ def test_actual_python_admits_and_passes_binary_sensitive_input_unchanged() -> N
     assert result.exit_status == 0
 
 
-@pytest.mark.windows
 def test_target_os_selects_fixed_candidates_without_host_inference() -> None:
     _, linux_candidates, linux_shim = build_runtime_helper_argv(
         selection=RuntimeSelection(RuntimeTargetOS.LINUX),
@@ -370,7 +369,6 @@ def test_raw_runtime_diagnostic_is_not_retained_in_observation(tmp_path: Path) -
     assert canary not in repr(observation)
 
 
-@pytest.mark.windows
 def test_prefix_sink_preserves_fragmented_bytes_and_downstream_backpressure() -> None:
     downstream = _Sink(limit=3, stalls=4)
     sink = RuntimePrefixSink(_NONCE, ("/runtime",), downstream)
@@ -384,7 +382,6 @@ def test_prefix_sink_preserves_fragmented_bytes_and_downstream_backpressure() ->
     assert downstream.calls > len(payload) // 3
 
 
-@pytest.mark.windows
 @pytest.mark.parametrize(
     "transcript",
     [
@@ -405,7 +402,6 @@ def test_missing_truncated_or_malformed_record_is_unknown(transcript: bytes) -> 
     assert not downstream.data
 
 
-@pytest.mark.windows
 def test_trailing_bytes_after_refusal_invalidate_transcript() -> None:
     downstream = _Sink()
     sink = RuntimePrefixSink(_NONCE, ("/runtime",), downstream)
@@ -419,7 +415,6 @@ def test_trailing_bytes_after_refusal_invalidate_transcript() -> None:
     assert not downstream.data
 
 
-@pytest.mark.windows
 def test_linux_shim_record_without_bound_shim_is_unknown() -> None:
     downstream = _Sink()
     sink = RuntimePrefixSink(_NONCE, ("/usr/bin/python3",), downstream)
