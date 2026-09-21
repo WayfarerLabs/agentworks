@@ -33,7 +33,7 @@ records raw bytes only when captured and distinguishes completeness from intenti
 discard or suppression. `ExecutionResult.ok` requires proved zero completion, successful requested
 output semantics, no recorded failure or expired deadline, and confirmed owned cleanup. `check()`
 returns that same result or raises `CheckedExecutionError` carrying it; neither path invents a
-scalar return code or retains provider exception text.
+scalar return code or copies provider exception text into result fields or the error message.
 
 The bootstrap waits for source and stdin producers as well as output encoders. Unexpected producer
 failure invalidates delivery even if the command exits zero. Intentional early input closure is
