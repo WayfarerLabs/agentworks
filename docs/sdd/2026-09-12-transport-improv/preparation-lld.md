@@ -653,7 +653,7 @@ and admission leave stdin untouched; helper entry preserves the original nonce a
 
 One bounded nonce-bound prerequisite record precedes the family transcript. A shared prefix sink
 consumes that record and, only on readiness, forwards subsequent bytes unchanged to the existing
-family sink, including its partial-write and backpressure behavior. A refusal never enters that
+family sink, including partial writes and temporary sink stalls. A refusal never enters that
 collector; trailing bytes after refusal invalidate the prerequisite transcript. Closed observations
 are ready, missing, shim, unusable, unsupported version, missing required modules and unknown, with
 the selected path derived from a core-bound candidate index rather than guest diagnostic text.
