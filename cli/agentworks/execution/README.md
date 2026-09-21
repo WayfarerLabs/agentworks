@@ -320,12 +320,14 @@ fallback. Replacement rechecks its observed condition before rename. The caller 
 confinement, operation serialization and scratch cleanup. This primitive is not FileAccess or a
 remote upload helper.
 
-An unpredictable exclusive sibling receives the content and required metadata before publication.
-New files retain the directory's inherited ACL behavior with the requested owner, group and mode.
-Replacement requires ordinary destination write authority and preserves UID, GID, permission bits
-and the Linux access ACL. Read authority is additionally needed for a content-bound match, not
-unconditional replacement. Observed links, multiply linked files, special objects, set-ID state and
-other visible extended attributes refuse. Unsupported metadata is not silently dropped.
+An exclusive sibling receives the content and required metadata before publication. Byte-backed
+publication chooses a fresh random name; scratch-backed publication derives its name from the
+core-generated scratch token and records its exact identity before copying content. New files retain
+the directory's inherited ACL behavior with the requested owner, group and mode. Replacement
+requires ordinary destination write authority and preserves UID, GID, permission bits and the Linux
+access ACL. Read authority is additionally needed for a content-bound match, not unconditional
+replacement. Observed links, multiply linked files, special objects, set-ID state and other visible
+extended attributes refuse. Unsupported metadata is not silently dropped.
 
 Scratch publication checks declared length and digest while copying bounded ranges, including
 validation of empty sources. The caller retains ownership of the scratch object. Hash/copy loops
@@ -348,6 +350,21 @@ acceptance remain open.
 Atomic visibility does not imply directory-entry crash durability, an external-writer
 compare-and-swap guarantee or a hard filesystem deadline. Native-platform acceptance and the
 complete file service remain separate work.
+
+`_publication_receipt.py` supplies private recovery for scratch-backed publication stages. Admission
+validates and holds the original STAGE scratch receipt and objects before creating a destination
+artifact. A separate bounded immutable record inside that scratch directory binds the original
+destination parent and exact sibling name/inode. Cleanup permits the publication algorithm's
+intentional owner, group, mode and ACL changes, but refuses links or a replacement inode. Ordinary
+scratch cleanup refuses the extra record instead of discarding the data or original receipt first.
+
+Read-only reconciliation yields historical cleanup ownership, not permission to publish or proof
+that publication happened. Missing siblings and missing, partial or invalid records remain
+uncertain. Exact cleanup removes the sibling before its record; a filesystem error removing the
+record retains record-only cleanup debt. After independently observed publication, the publication
+primitive removes the record without following the inode into the public destination. Losing that
+reply still does not establish publication or remote quiescence. These local mechanics do not yet
+have a carrier exchange or complete remote upload/publication composition.
 
 ## Private file coordination
 
@@ -464,8 +481,8 @@ limit is an internal candidate, not evidence that a complete encoded carrier req
 Cleanup removes the exact data object before its receipt, then the empty directory, never unknown
 neighboring objects or a recursive prefix match. Errors retain closed facts and unresolved
 identity-bound cleanup debt. Ownership does not prove that an earlier request can no longer arrive;
-remote dispatch ordering and publication-stage recovery remain separate implementation gates. Begin,
-chunk writes, verification and range reads check caller expiry at acquisition, transfer and
+remote dispatch ordering and publication-recovery exchanges remain separate implementation gates.
+Begin, chunk writes, verification and range reads check caller expiry at acquisition, transfer and
 final-evidence checkpoints. Publication preserves scratch deadline failures. Expiry stops further
 acquisition, but permits identity capture and mode normalization needed for bounded exact cleanup;
 failed cleanup remains explicit debt. Creation preserves known acquisition facts through handled

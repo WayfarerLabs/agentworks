@@ -275,9 +275,9 @@ creation, it writes and validates a bounded receipt binding the token, operation
 identity, original authorized parent identity, declared length and acquired directory/data
 identities. A collision refuses; losing a reply never resubmits creation. These private receipt
 mechanics are implemented in `_scratch_receipt.py`. Private stage and snapshot exchanges deliver
-reconciliation and exact cleanup. Publication-stage ownership recovery remains unimplemented;
-neither these private exchanges nor local evidence complete production FileAccess or native
-acceptance.
+reconciliation and exact cleanup. Publication-stage ownership recovery has a private local
+candidate; its carrier exchange remains unimplemented. Neither these private exchanges nor local
+evidence complete production FileAccess or native acceptance.
 
 Read-only reconciliation accepts the original core-bound context and token, not paths supplied by a
 receipt. It opens only that exact name and validates the receipt schema, ownership, permissions,
@@ -314,9 +314,10 @@ follows the inode into the public destination. Remove owned data and outstanding
 receipts. A missing stage is not evidence of successful publication. Interruption before ownership
 is recorded, or between receipt removal and final directory removal, can still leave uncertain
 cleanup. These limits do not become a journal, prefix scavenger, resumed upload promise or
-reboot-durability requirement. Publication-stage recovery remains unimplemented; the complete remote
-exchange requires fault tests for lost replies, delayed dispatch, partial creation and interrupted
-cleanup.
+reboot-durability requirement. `_publication_receipt.py` implements a private local candidate and
+`_file_publication.py` uses it for scratch-backed publication. The complete remote exchange remains
+unimplemented and requires fault tests for lost replies, delayed dispatch, partial creation and
+interrupted cleanup through a carrier.
 
 The delivery audit at `0ecb9a2e` found that one monolithic bundle plus a 24 KiB chunk nearly
 exhausts or exceeds the historical 64 KiB Proxmox whole-POST limit before its missing dispatcher is
