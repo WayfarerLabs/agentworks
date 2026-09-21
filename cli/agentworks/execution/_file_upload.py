@@ -235,10 +235,10 @@ class _OwnedCarrier:
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
         try:
             attempt = self._state.borrow.begin_attempt()
+            self._state.outstanding_attempt = attempt
         except BaseException:
             self._state.coordination_uncertain = self._state.borrow.has_outstanding_attempt
             raise
-        self._state.outstanding_attempt = attempt
         return self._carrier.execute(invocation, io=io, deadline=deadline)
 
 

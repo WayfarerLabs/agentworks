@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dis
 import os
 import stat
 import sys
@@ -10,8 +11,9 @@ from pathlib import Path
 import pytest
 
 import agentworks.execution._file_publication_exchange as publication_exchange
+import agentworks.execution._file_upload as file_upload
 from agentworks.db import Database, OperationClaimState
-from agentworks.errors import ValidationError
+from agentworks.errors import StateError, ValidationError
 from agentworks.execution._file_publication import Create, CreateMetadata, Match
 from agentworks.execution._file_publication_protocol import FilePublicationFailureCode, FilePublicationRequestError
 from agentworks.execution._file_stat import FileRevision, FileStat
@@ -277,6 +279,61 @@ def test_oversized_stage_preparation_never_arms_owner_or_executes_carrier(tmp_pa
         claim = database.operations.inspect(owner.ownership.scope)
         assert claim is not None and claim.state is OperationClaimState.RESERVED
         owner.close()
+    finally:
+        database.close()
+
+
+def test_interrupt_at_owned_carrier_handoff_exports_coordination_uncertainty(
+    tmp_path: Path,
+    plan: IdentityPlan,
+) -> None:
+    root = tmp_path / "approved"
+    root.mkdir()
+    database = Database(tmp_path / "state.db")
+    owner = operation_owner(database)
+    carrier = LocalCarrier()
+    target_instruction = next(
+        instruction
+        for instruction in dis.get_instructions(file_upload._OwnedCarrier.execute)  # noqa: SLF001
+        if instruction.opname == "STORE_ATTR" and instruction.argval == "outstanding_attempt"
+    )
+    assert target_instruction.positions is not None
+    target_line = target_instruction.positions.lineno
+    assert target_line is not None
+    interrupted = False
+
+    def interrupt_at_handoff(frame, event, arg):
+        nonlocal interrupted
+        del arg
+        if (  # noqa: SLF001
+            frame.f_code is file_upload._OwnedCarrier.execute.__code__
+            and event == "line"
+            and frame.f_lineno == target_line
+        ):
+            interrupted = True
+            raise KeyboardInterrupt
+        return interrupt_at_handoff
+
+    previous_trace = sys.gettrace()
+    try:
+        sys.settrace(interrupt_at_handoff)
+        with pytest.raises(KeyboardInterrupt) as raised:
+            upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+    finally:
+        sys.settrace(previous_trace)
+
+    try:
+        fact = raised.value.__cause__
+        assert interrupted
+        assert isinstance(fact, FileUploadControlFact)
+        assert carrier.calls == 0
+        assert not fact.outcome.pending_remote_effects
+        assert fact.outcome.coordination_uncertain
+        assert fact.outcome.requires_owner_retention
+        claim = database.operations.inspect(owner.ownership.scope)
+        assert claim is not None and claim.state is OperationClaimState.POSSIBLE_DISPATCH
+        with pytest.raises(StateError):
+            owner.close()
     finally:
         database.close()
 
