@@ -224,6 +224,30 @@ These are focused Linux loopback results, not complete asynchronous interruption
 acceptance. The shared cleanup-entry gap and unbounded process-construction time retain their
 existing qualifications. Terminal and RunContext integration remain with transport.
 
+## Transport rebase and external managed-process evidence
+
+SSH `ce0d8ca0` rebases cleanly onto transport `126c12a4`. The SSH runtime and test files are
+unchanged from published SSH `f6af80cc`. Transport supplies the Windows collection correction and a
+private managed-process candidate; shared terminal endpoints and the additive RunContext accessors
+are still absent. The combined non-integration suite passes **12,700 tests with 14 skips** on the
+lead's Linux workstation.
+
+The integration tester's
+[complete native report](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-5767397749)
+covers a separately composed tree `7101ecfc`, using transport `126c12a4` and SSH `f6af80cc`. It
+reports identity, descendant cleanup, binary delivery, exit propagation, boundary integrity and
+honest interrupted observation through SSH on Debian 12 and 13, plus QGA on Debian 12. These are
+Linux-workstation observations for the private managed-process candidate, not complete SSH standup
+acceptance. Windows/macOS workstations, terminal mode and native asymmetric stream failure are not
+covered; Proxmox 9 was unavailable due to capacity.
+
+Two material findings remain transport-owned: the candidate's completion predicate depends on an
+orthogonal input failure, and failed transient units are retained after startup failure. Transport's
+[round disposition](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-5768591053)
+accepts both, confines its proposed fixes to the managed-process candidate and leaves shared process
+and SSH behavior unchanged. Neither finding authorizes an SSH contract change or closes an
+acceptance item here. The subsequent fixed head needs its own complete test report.
+
 ## Remaining integration and acceptance
 
 Earlier integration `fefc2b9e` uses transport `f3339f3d3cccace129be58711dc7eeb30ec66dc2`, which adds
