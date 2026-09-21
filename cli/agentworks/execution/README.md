@@ -27,6 +27,14 @@ Preparation accepts at most 256 KiB of encoded input; carriers can impose smalle
 delivery limits. Bash's saved process-substitution waits require the 5.1 floor; local
 fault-injection evidence currently covers Bash 5.2.15, not every version at or above that floor.
 
+`result.py` defines immutable public outcome facts without wiring them into production execution.
+Application progress and status precision remain separate from carrier dispatch evidence. Output
+records raw bytes only when captured and distinguishes completeness from intentional delivery,
+discard or suppression. `ExecutionResult.ok` requires proved zero completion, successful requested
+output semantics, no recorded failure or expired deadline, and confirmed owned cleanup. `check()`
+returns that same result or raises `CheckedExecutionError` carrying it; neither path invents a
+scalar return code or retains provider exception text.
+
 The bootstrap waits for source and stdin producers as well as output encoders. Unexpected producer
 failure invalidates delivery even if the command exits zero. Intentional early input closure is
 allowed; GNU env's `--default-signal=PIPE` ensures its SIGPIPE outcome is observable.
