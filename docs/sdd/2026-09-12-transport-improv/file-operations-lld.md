@@ -386,6 +386,50 @@ without changing their external envelopes. Validation belongs at incoming reques
 the typed interior must not gain a second validation framework. Final source size, complete native
 request/output bounds, Windows serialization and cross-identity/native execution remain proof gates.
 
+### Private publication exchanges
+
+The next private family contains `publish`, `publication_reconcile` and `publication_cleanup`. Every
+request binds the original approved root, nonempty destination relative path, core token, execution
+identity, plain stage reference and relative budget. The guest derives the parent from that original
+path after identity admission. Scratch and sibling publication use this same parent; neither a
+returned path nor a returned basename can select cleanup authority.
+
+`publish` adds the final whole-content SHA-256, explicit Create/Replace/Match condition and numeric
+create metadata. It verifies the scratch content before passing the ready reference to the existing
+publication primitive. The result carries the content-bound revision; the host checks its length and
+digest against the original request. A publication failure retains its closed kind, phase and
+available exact cleanup debt. An uncertain publication remains uncertain, even when cleanup
+succeeds.
+
+`publication_reconcile` uses the original plain reference, not a ready reference or surviving data
+payload. It returns historical cleanup ownership or ownership uncertainty. Receipt-backed debt binds
+the original scratch ownership, destination parent, exact sibling and record identities, record mode
+state and whether the sibling was already removed. The wire representation reuses the request's
+token/context/reference and derives the sibling name from that token. It must not permit replacement
+scratch ownership or a new destination to arrive through the response.
+
+`publication_cleanup` accepts known exact debt. Receipt-backed cleanup uses the existing primitive;
+an identified sibling-only debt also requires the original parent identity and token-derived name
+before exact-inode removal. Unidentified debt authorizes no deletion and may only lead to explicit
+reconciliation. Cleanup responses cannot substitute identities; only observed cleanup progress may
+reduce remaining work. Removing the publication record precedes ordinary scratch cleanup. A lost
+reply after rename or record removal can remain uncertain: neither an absent stage nor an absent
+record proves publication, completed cleanup or earlier-request quiescence.
+
+Complete result bodies also carry `deadline_exceeded`, checked after the guest closes its owned
+root/parent descriptors. If publication returned a revision before that final check expired, retain
+the confirmed publication and revision while reporting the timing failure. If cleanup completed,
+retain the cleaned fact without recreating debt. Reconciliation similarly retains exact recovered
+ownership. These are effect observations, not an in-budget success claim. Early expiry refuses
+before mutation, and a later deadline does not overwrite an already established operational failure.
+The host still requires a complete valid transcript and keeps carrier completion separate from
+helper facts; a truncated observation is not promoted into a confirmed effect.
+
+Before accepting this family's delivery, measure the actual protocol, dispatcher and dependency
+closure through complete SSH/Windows quoting and QGA serialization. A minimal dependency loader
+without the production dispatcher is not evidence of fit. Fixed ASCII armoring may change if it
+proves sufficient; there is no runtime codec option, executable staging or oversized-request retry.
+
 ### Private output delivery
 
 Ordinary buffered capture cannot safely carry this protocol: sensitive input suppresses the
@@ -401,13 +445,13 @@ outcome. Ordinary sensitive-output suppression remains unchanged. This file sche
 private raw-capture mode, decides which typed content may survive.
 
 Closed helper operations are `stage_begin`, `stage_chunk`, `stage_reconcile`, `stage_cleanup`,
-`publish`, `snapshot_begin`, `snapshot_chunk`, `snapshot_reconcile`, `snapshot_cleanup`, `stat`,
-`list`, `ensure_directory`, `set_metadata`, `remove`, and `cleanup`. Staging is created beside the
-destination with mode 0600 and an unpredictable helper-owned name. Chunks use exact offsets and
-hashes; final size and SHA-256 must match before publication. Snapshot chunks come from a private
-complete spool, not repeated reads of a changing source. The host checks the end-to-end size/digest
-too. No helper operation accepts executable names, arbitrary flags, environment, cwd, source text,
-callbacks, or a destination outside its single request.
+`publish`, `publication_reconcile`, `publication_cleanup`, `snapshot_begin`, `snapshot_chunk`,
+`snapshot_reconcile`, `snapshot_cleanup`, `stat`, `list`, `ensure_directory`, `set_metadata`, and
+`remove`. Staging is created beside the destination with mode 0600 and an unpredictable helper-owned
+name. Chunks use exact offsets and hashes; final size and SHA-256 must match before publication.
+Snapshot chunks come from a private complete spool, not repeated reads of a changing source. The
+host checks the end-to-end size/digest too. No helper operation accepts executable names, arbitrary
+flags, environment, cwd, source text, callbacks, or a destination outside its single request.
 
 ### No-staging readiness gate
 

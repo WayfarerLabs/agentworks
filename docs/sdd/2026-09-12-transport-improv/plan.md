@@ -362,6 +362,13 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       `86189dc2`; the combined local suite passes 11,902 tests with 13 skips. This does not complete
       remote publication delivery, upload composition, helper quiescence, FileAccess or native
       acceptance; complete carrier sizing remains an explicit gate above.
+- [ ] Deliver the private publication/reconciliation/cleanup family described in the file LLD. Bind
+      all cleanup evidence to the original destination, token and stage reference; refuse
+      substituted identities and paths. Preserve confirmed publication, recovered ownership or
+      completed cleanup when only the final descriptor-closure deadline expires. Prove the actual
+      production bundle's complete carrier sizing before accepting its delivery representation, then
+      fault-test lost replies and partial observations through the exchange. This slice does not
+      itself complete upload orchestration, FileAccess or production operation ownership.
 - [ ] Jointly accept and prove the privately implemented carrier sink extension with the SSH owner
       before enabling its production use or exposing it through RunContext.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
