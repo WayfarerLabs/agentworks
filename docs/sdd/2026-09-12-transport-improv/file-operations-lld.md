@@ -148,6 +148,14 @@ ancestor creation, such as `/run/agentworks` before a session socket directory, 
 explicit operation rather than implicit `mkdir -p` behavior. During coexistence this is internal
 path composition, not a claim that the successor permission model is active.
 
+The filesystem root `/` has no final component and is not representable by that private contract.
+Whether the initial public API explicitly excludes `/` itself or adds read-only root stat/inventory
+is an open operator question. Do not introduce an empty-path sentinel, claim root support from path
+normalization alone, or infer blanket-root authority. Explicit descendant targets remain
+representable. During coexistence, a closed operation method plus core-bound parent/leaf and
+identity is sufficient for exact-operation confinement; no action registry or permission catalog is
+needed to express this composition.
+
 Requested metadata owner and group names are resolved by a closed read-only operation in the fixed
 account helper. It resolves the pair to numeric UID/GID without retrieving supplementary groups,
 changing credentials or selecting elevation. Missing owner and missing group are distinct closed

@@ -1290,6 +1290,11 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       exact-operation path confinement and safe target/phase diagnostics. Complete production
       ownership, local download publication, directory transfer and native acceptance remain
       required; these private building blocks do not close those gates.
+- [ ] Resolve the public filesystem-root edge before claiming complete path coverage: the current
+      nonempty parent/leaf helper contract cannot address `/` itself. The operator has been asked
+      whether to exclude root targets initially or support read-only root stat/inventory. Keep
+      ordinary public reads on snapshot/chunk delivery, inline reads on the separately bound
+      no-staging path, and coexistence confinement separate from deferred permission activation.
 - [ ] Move serial-borrow lifetime to the core file boundary so returned and exceptional private
       outcomes are retained before public reduction or relinquishment. Prove shared user/admin views
       cannot lose cleanup responsibility, and distinguish unresolved remote effects from
@@ -1414,6 +1419,10 @@ That code pin passes the full local suite with 12,378 tests and 13 skips. Full R
 gates pass 160 Python tests, 103 Node tests and both deterministic double-build comparisons. No live
 infrastructure was exercised. Hosted validation of this increment remains pending; the draft has no
 review/test/merge signal and all three public feedback/fix rounds remain available.
+
+Hosted run `35614666650` at `2f34621e` subsequently passes every required check, including
+Windows Python 3.13 and Linux Python 3.12/3.13/3.14. This validates the selected workstation tests;
+it does not establish native backend acceptance or complete the remaining public composition gates.
 
 ### Buffered execution result checkpoint
 
