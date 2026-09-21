@@ -38,11 +38,6 @@ def validate_json_object(content: bytes, *, max_bytes: int, max_depth: int) -> V
     )
 
 
-def validate_json_source(source: bytes, *, max_bytes: int, max_depth: int) -> ValidatedJsonObject:
-    """Validate one source object before any destination observation."""
-    return validate_json_object(source, max_bytes=max_bytes, max_depth=max_depth)
-
-
 def serialize_json_source(source: ValidatedJsonObject) -> bytes:
     """Serialize a validated source for replace or absent creation."""
     return _serialize(source.document, max_bytes=source.max_bytes)
@@ -90,7 +85,7 @@ def transform_json(
     depth starts at one for the root object; nested arrays and objects each add
     one, while scalar leaves do not.
     """
-    validated = validate_json_source(source, max_bytes=max_bytes, max_depth=max_depth)
+    validated = validate_json_object(source, max_bytes=max_bytes, max_depth=max_depth)
 
     if existing is None:
         if not create:

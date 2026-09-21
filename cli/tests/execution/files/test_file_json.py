@@ -142,6 +142,7 @@ def _update(
     carrier: Carrier | None = None,
     create: bool = True,
     max_bytes: int = 64 * 1024,
+    max_depth: int = 64,
     runtime: str = sys.executable,
 ):
     return update_json_file(
@@ -153,7 +154,7 @@ def _update(
         create=create,
         create_metadata=CreateMetadata(os.geteuid(), os.getegid(), 0o640),
         max_bytes=max_bytes,
-        max_depth=64,
+        max_depth=max_depth,
         plan=plan,
         deadline=Deadline.after(30),
         runtime_selection=runtime_selection(runtime),
@@ -384,7 +385,74 @@ def test_merge_rejects_invalid_existing_without_publication(
         outcome = _update(owner, root, plan, b"{}", "merge-overwrite", carrier=carrier)
 
         assert outcome.status is FileJsonStatus.FAILED
-        assert outcome.failure is FileJsonFailure.INVALID_EXISTING
+        assert outcome.failure is FileJsonFailure.EXISTING_VALIDATION
+        assert outcome.publication_attempts == 0 and carrier.calls == 1
+        assert target.read_bytes() == existing
+        owner.close()
+    finally:
+        database.close()
+
+
+def test_valid_existing_json_beyond_depth_bound_does_not_publish(
+    tmp_path: Path,
+    plan: IdentityPlan,
+) -> None:
+    root = tmp_path / "approved"
+    root.mkdir()
+    target = root / "target"
+    existing = b'{"nested":[[[[0]]]]}'
+    target.write_bytes(existing)
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    carrier = LocalCarrier()
+    try:
+        outcome = _update(
+            owner,
+            root,
+            plan,
+            b"{}",
+            "merge-overwrite",
+            carrier=carrier,
+            max_depth=4,
+        )
+
+        assert outcome.status is FileJsonStatus.FAILED
+        assert outcome.failure is FileJsonFailure.EXISTING_VALIDATION
+        assert outcome.publication_attempts == 0 and carrier.calls == 1
+        assert target.read_bytes() == existing
+        owner.close()
+    finally:
+        database.close()
+
+
+def test_valid_existing_json_beyond_integer_parser_capacity_does_not_publish(
+    tmp_path: Path,
+    plan: IdentityPlan,
+) -> None:
+    integer_limit = sys.get_int_max_str_digits()
+    if integer_limit == 0:
+        pytest.skip("interpreter integer conversion limit is disabled")
+    root = tmp_path / "approved"
+    root.mkdir()
+    target = root / "target"
+    existing = b'{"integer":' + (b"9" * (integer_limit + 1)) + b"}"
+    target.write_bytes(existing)
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    carrier = LocalCarrier()
+    try:
+        outcome = _update(
+            owner,
+            root,
+            plan,
+            b"{}",
+            "merge-preserve",
+            carrier=carrier,
+            max_bytes=len(existing),
+        )
+
+        assert outcome.status is FileJsonStatus.FAILED
+        assert outcome.failure is FileJsonFailure.EXISTING_VALIDATION
         assert outcome.publication_attempts == 0 and carrier.calls == 1
         assert target.read_bytes() == existing
         owner.close()

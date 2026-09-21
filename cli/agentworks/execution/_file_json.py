@@ -27,6 +27,7 @@ from agentworks.execution._file_read import FileReadObservation, FileReadObserva
 from agentworks.execution._file_read_protocol import FileReadFailure
 from agentworks.execution._file_stat import FileRevision
 from agentworks.execution._file_upload import (
+    FileUploadBinding,
     FileUploadControlFact,
     FileUploadFailure,
     FileUploadOutcome,
@@ -39,7 +40,6 @@ from agentworks.execution._json import (
     merge_json_objects,
     serialize_json_source,
     validate_json_object,
-    validate_json_source,
 )
 from agentworks.execution._runtime_prerequisite import (
     RuntimePrerequisiteObservation,
@@ -84,7 +84,7 @@ class FileJsonFailure(StrEnum):
     ABSENT = "absent"
     OBJECT = "object"
     READ = "read"
-    INVALID_EXISTING = "invalid_existing"
+    EXISTING_VALIDATION = "existing_validation"
     TRANSFORM = "transform"
     PUBLICATION = "publication"
     CONFLICT = "conflict"
@@ -151,7 +151,6 @@ class _Inputs:
     binding: FileJsonBinding
     source: ValidatedJsonObject
     create_metadata: CreateMetadata
-    owner: OperationOwner
 
 
 @dataclass(slots=True, repr=False)
@@ -333,7 +332,7 @@ class _JsonWorkflow:
                         max_depth=self._state.binding.max_depth,
                     )
                 except ValidationError:
-                    self._state.fail(FileJsonFailure.INVALID_EXISTING)
+                    self._state.fail(FileJsonFailure.EXISTING_VALIDATION)
                     return self._state.finish()
                 try:
                     content = merge_json_objects(
@@ -457,24 +456,19 @@ class _JsonWorkflow:
 
     def _upload(self, content: bytes, condition: Create | Replace | Match) -> FileUploadOutcome:
         source = _BytesSource(content)
-        inputs = _validate_inputs(
+        binding = FileUploadBinding(
             self._state.binding.trusted_root_path,
             self._state.binding.relative_path,
-            source,
             len(content),
-            condition,
-            self._inputs.create_metadata,
             self._state.binding.identity_plan,
-            self._deadline,
             self._state.binding.runtime_selection,
-            self._inputs.owner,
         )
         self._state.publication_attempts += 1
         outcome = _upload_file_borrowed(
             self._state.operation,
             source=source,
             deadline=self._deadline,
-            inputs=inputs,
+            inputs=(binding, condition, self._inputs.create_metadata),
         )
         self._state.upload_outcome = outcome
         if outcome.runtime_prerequisite is not None:
@@ -540,7 +534,7 @@ def _validate_json_inputs(
         raise ValidationError("JSON update create must be a boolean")
     if type(max_bytes) is not int or type(max_depth) is not int:
         raise ValidationError("JSON update limits must be positive integers")
-    validated = validate_json_source(source, max_bytes=max_bytes, max_depth=max_depth)
+    validated = validate_json_object(source, max_bytes=max_bytes, max_depth=max_depth)
     if not isinstance(create_metadata, CreateMetadata):
         raise ValidationError("JSON update requires numeric create metadata")
     if type(owner) is not OperationOwner:
@@ -568,7 +562,7 @@ def _validate_json_inputs(
         binding.identity_plan,
         binding.runtime_selection,
     )
-    return _Inputs(json_binding, validated, canonical_metadata, owner)
+    return _Inputs(json_binding, validated, canonical_metadata)
 
 
 def _runtime_refused(observation: RuntimePrerequisiteObservation) -> bool:
