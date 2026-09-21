@@ -525,8 +525,10 @@ def test_exceptional_fact_failure_preserves_control_without_reusing_prior_cause(
             def try_write(self, data: memoryview) -> int:
                 raise control
 
+        allocation_causes: list[BaseException | None] = []
+
         def fail_allocation(*args: object) -> None:
-            assert control.__cause__ is prior_fact
+            allocation_causes.append(control.__cause__)
             raise MemoryError("allocation-canary")
 
         if failure_point == "outcome":
@@ -546,6 +548,7 @@ def test_exceptional_fact_failure_preserves_control_without_reusing_prior_cause(
                 runtime_selection=runtime_selection(sys.executable),
             )
 
+        assert allocation_causes == [prior_fact]
         assert raised.value is control and raised.value.__cause__ is None
         assert operation.unfinished_downloads == ()
         assert len(operation.active_downloads) == 1
