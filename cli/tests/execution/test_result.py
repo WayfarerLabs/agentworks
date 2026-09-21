@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import traceback
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, dataclass
 
 import pytest
 
@@ -86,6 +86,35 @@ def test_output_retention_preserves_requested_success_semantics(output: Executio
 def test_unretained_output_cannot_contain_bytes(retention: Retention) -> None:
     with pytest.raises(ValidationError):
         ExecutionOutput(b"private", retention=retention)
+
+
+def test_falsey_bytes_subclass_cannot_bypass_unretained_output_validation() -> None:
+    class FalseyBytes(bytes):
+        def __bool__(self) -> bool:
+            return False
+
+    with pytest.raises(ValidationError):
+        ExecutionOutput(FalseyBytes(b"private"), complete=True, retention=Retention.DELIVERED)
+
+
+def test_result_rejects_output_extensions_with_diagnostic_fields() -> None:
+    @dataclass(frozen=True)
+    class ExtendedOutput(ExecutionOutput):
+        provider_diagnostic: bytes = b"provider-output-canary"
+
+    with pytest.raises(ValidationError) as caught:
+        _result(stdout=ExtendedOutput(complete=True))
+    assert "provider-output-canary" not in repr(caught.value)
+
+
+def test_result_rejects_status_extensions_with_diagnostic_fields() -> None:
+    @dataclass(frozen=True)
+    class ExtendedExitCode(ExitCode):
+        provider_diagnostic: bytes = b"provider-status-canary"
+
+    with pytest.raises(ValidationError) as caught:
+        _result(status=ExtendedExitCode(0))
+    assert "provider-status-canary" not in repr(caught.value)
 
 
 @pytest.mark.parametrize(

@@ -82,7 +82,7 @@ class ExecutionOutput:
 
     def __post_init__(self) -> None:
         """Validate values accepted from clients outside static typing."""
-        if not isinstance(self.data, bytes):
+        if type(self.data) is not bytes:
             raise ValidationError("Execution output data must be bytes")
         if type(self.complete) is not bool:
             raise ValidationError("Execution output completeness must be boolean")
@@ -111,7 +111,7 @@ class ExecutionResult:
             raise ValidationError("Execution result requires supported dispatch evidence")
         if not isinstance(self.application_state, ApplicationState):
             raise ValidationError("Execution result requires a supported application state")
-        if self.status is not None and not isinstance(self.status, WaitCode | ExitCode | Signal):
+        if self.status is not None and type(self.status) not in {WaitCode, ExitCode, Signal}:
             raise ValidationError("Execution result requires a supported application status")
         if (self.application_state is ApplicationState.COMPLETED) != (self.status is not None):
             raise ValidationError("Application status is required exactly when execution completed")
@@ -120,7 +120,7 @@ class ExecutionResult:
             ApplicationState.COMPLETED,
         }:
             raise ValidationError("An unsent execution cannot have started or completed")
-        if not isinstance(self.stdout, ExecutionOutput) or not isinstance(self.stderr, ExecutionOutput):
+        if type(self.stdout) is not ExecutionOutput or type(self.stderr) is not ExecutionOutput:
             raise ValidationError("Execution result requires supported output values")
         if self.failure is not None and not isinstance(self.failure, ExecutionFailure):
             raise ValidationError("Execution result requires a supported failure category")
