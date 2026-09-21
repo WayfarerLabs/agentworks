@@ -163,8 +163,8 @@ registry because importing that registry currently loads legacy execution module
 
 ## Private helper identity plans
 
-Buffered inline execution and file reads take one `IdentityPlan`, binding the expected account to an
-explicit transition. `DIRECT` uses the delivery identity, `SUDO_ROOT` selects UID 0 through
+Buffered inline execution and file exchanges take one `IdentityPlan`, binding the expected account
+to an explicit transition. `DIRECT` uses the delivery identity, `SUDO_ROOT` selects UID 0 through
 non-interactive sudo, and `DEMOTE` uses fixed `setpriv` arguments for a non-root UID, primary GID
 and normalized groups. Demotion clears inheritable/ambient capabilities, not the bounding set or
 permission to gain privileges later. Protection profiles are separate. Invalid plan combinations
@@ -197,8 +197,8 @@ observation. A ready prerequisite record admits the loader, not account success.
 unusable, unsupported-version and missing-module records give closed diagnostics; absent or invalid
 records remain unknown. A complete received prerequisite refusal survives a concurrent carrier input
 failure, but establishes neither process quiescence nor permission to retry. The account observation
-is absent unless runtime admission occurred. Other private helper families have not yet adopted this
-prerequisite boundary.
+is absent unless runtime admission occurred. The seven file families use the same prerequisite
+boundary; inline and terminal execution have not yet adopted it.
 
 Both request and reply are bounded to 32 KiB. A complete, nonce-bound response and complete
 delivered streams are required to return identity metadata. Missing accounts and closed helper
@@ -240,12 +240,19 @@ bytes as request data. Requests cannot choose executable source, module names, e
 lengths or digests. No helper installation, executable staging, second invocation or codec fallback
 is used.
 
+Each file entrypoint requires a destination-bound `RuntimeSelection`. The shared identity wrapper
+encloses runtime selection and admission, so the selector runs under the intended helper identity.
+The version/import trampoline emits one binary prerequisite record before the bootstrap reads the
+bundle. Results retain that prerequisite observation independently of carrier facts; file-operation
+observations are absent unless admission is READY. Common loader readiness does not waive the
+family's Linux/filesystem/identity checks or establish support for a new destination platform.
+
 A short or changed prefix exits without file-protocol output. That missing observation does not
 prove helper quiescence or authorize replay. Existing identity and path checks remain in each helper
-before workload access. Interpreter/module readiness is still a separate prerequisite. Operation
-manifest bounds exclude the fixed prefix; carriers also enforce their complete request bound,
-including the prefix and command serialization. Local Python and serialized Windows/QGA checks do
-not establish native carrier acceptance or public FileAccess composition.
+before workload access. A received READY record is not file-operation success. Operation manifest
+bounds exclude the fixed prefix; carriers also enforce their complete request bound, including the
+prefix and command serialization. Local Python and serialized Windows/QGA checks do not establish
+native carrier acceptance or public FileAccess composition.
 
 ## Private inline file reads
 

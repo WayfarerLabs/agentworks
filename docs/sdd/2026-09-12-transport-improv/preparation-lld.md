@@ -143,7 +143,7 @@ incomplete observation. Noise, reflection, duplicate fields, extra content, over
 incomplete streams must not yield an identity. Discovery neither grants authority nor certifies the
 identity of a later process: the selected helper still checks its actual IDs/groups before workload
 access. There is no account cache, automatic replay, staging, privilege change or public account
-selector in this operation. The runtime prerequisite probe supplies the selected Python path.
+selector in this operation. Shared same-invocation admission selects and checks the Python runtime.
 
 The same fixed lookup family supplies a separate metadata-owner/group operation. It resolves only
 the requested UID and GID; it does not run the execution-account supplementary-group lookup or
@@ -672,8 +672,10 @@ Native macOS acceptance and existing-guest bootstrap remain separate gates.
 
 The private account implementation now uses this boundary for both lookup kinds. Its local tests
 exercise Linux selection, real Python 3.11 lookup and fixture-based Darwin selection, not native
-macOS acceptance. File, inline and terminal integration remain unimplemented; the original runtime
-experiment above remains separate evidence rather than production dispatch.
+macOS acceptance. The seven file exchange families also adopt it, applying the selected identity
+transition around the selector and keeping absent file observations separate from prerequisite
+refusal. Their implementation is under private review. Inline and terminal adoption remain open; the
+original runtime experiment above remains separate evidence rather than production dispatch.
 
 ## Public result and check behavior
 

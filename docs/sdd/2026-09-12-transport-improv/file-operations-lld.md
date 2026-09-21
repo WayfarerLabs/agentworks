@@ -658,6 +658,31 @@ transfer; inventory remains a bounded set of observations, not a globally cohere
 Fresh exclusive scratch names prevent transfer collisions and retain exact cleanup ownership. They
 do not serialize updates to the final shared filename.
 
+One core operation owner is acquired before activation and carried through nested contexts and
+teardown. FileAccess borrows it; it does not acquire or release a second database claim. The shared
+serial-use guard covers an entire public file call across user/admin views, including JSON
+read/merge/publication and cleanup, not just individual exchanges. Private file composition owns the
+upload token, original destination binding, content references and cleanup debt. These values are
+working state, not another claim lifetime or a generic transaction framework.
+
+Sequential fixed-helper calls also need a separate lifetime decision. For the exact supported
+foreground launch chain, the candidate termination rule is submitted dispatch plus an independently
+observed remote exit code of zero. The helper creates no background work, and its supported launcher
+must wait for it; native acceptance must prove that chain for each identity/carrier path. A signal
+or nonzero command-chain exit is not enough: terminating a supervising `sudo` process can leave its
+Python child running. Neither local process status, stream EOF nor an `AGWF1` terminator substitutes
+for this rule. Helper effect facts remain valid independently of termination evidence.
+
+Advancing transfer additionally requires a valid successful observation for the preceding request.
+Normal-chain completion with missing or refused operation evidence does not authorize replay or
+claim success; it permits token-bound reconciliation or exact known cleanup within the same held
+ownership and remaining deadline. Without normal-chain completion, stop follow-on exchanges and
+retain unresolved ownership, even if a complete helper transcript arrived. A carrier failure does
+not erase independently observed normal completion, and a late deadline does not grant a new
+dispatch budget. This narrow file-helper rule is not a termination guarantee for arbitrary commands
+or jobs. Crash recovery still requires a concrete handoff of the original operation context and
+independent no-further-effects evidence; an in-memory file workflow does not supply that handoff.
+
 The database coordinator and RunContext composition are implementation gates, not behavior supplied
 by the current database's migration/use locks. Until they are implemented and proved, the private
 file primitives require caller-owned serial execution and are not a production FileAccess surface. A
