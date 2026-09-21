@@ -1,6 +1,6 @@
 # SSH Phase 2 Implementation Progress
 
-- Updated: 2026-09-20
+- Updated: 2026-09-21
 - PR: [#832](https://github.com/WayfarerLabs/agentworks/pull/832), draft
 - Initial evaluated code: `e63a1ec4a8e9d99e89d09d6b162e908d3a4b96d6`
 - Main/contract base: `cea5e8523aac05edfc3a99a940d7cfb4d71fe32f` (#830)
@@ -159,13 +159,30 @@ workstation/provider workflows remain open.
 
 ## Remaining integration and acceptance
 
-Current integration uses transport `5b57044260405089e972cd371462cefe325f906c`, which adds private
-snapshot download exchanges and preserves verified cleanup debt on final deadline expiry. The rebase
-applied cleanly without SSH runtime or shared-interface changes. Earlier evidence below retains its
-measured integration pins. The combined suite at `8eff3c23` passes **12,077 non-integration tests
-with 14 skips**. Full Ruff/format, mypy (1,013 source files), file lint, locked-SDD, rulesync and
-typer-isolation gates pass. Website tests pass 160 Python and 103 Node cases, and both deterministic
-double-build comparisons are identical.
+Current integration `fefc2b9e` uses transport `f3339f3d3cccace129be58711dc7eeb30ec66dc2`, which adds
+private publication-stage ownership recovery. The rebase is clean and changes no SSH runtime, SSH
+fixtures, carrier interface or shared process core. Publication delivery is not yet implemented by
+that milestone. Transport records complete Windows command sizing as a gate for its upcoming fixed
+helper; the current snapshot helper's separate sizing and live evidence remain scoped to their
+recorded revisions. The
+[forwarding ownership proposal](forwarding-lld.md#launch-ownership-integration) remains pending
+transport integration, alongside terminal and RunContext composition.
+
+The combined suite at `fefc2b9e` passes **12,112 non-integration tests with 14 skips**. Full
+Ruff/format, mypy (1,017 source files), file lint, locked-SDD, rulesync and typer-isolation checks
+pass. Website tests pass 160 Python and 103 Node cases, and both deterministic build comparisons are
+identical. This is a clean dependency rebase with evidence bookkeeping only; earlier SSH private
+review dispositions and live results retain their pins. Transport reports three clean private lanes
+for its publication recovery runtime at `86189dc2`. These checks do not establish remote publication
+or native workflow acceptance.
+
+Earlier snapshot integration uses transport `5b57044260405089e972cd371462cefe325f906c`, which adds
+private snapshot download exchanges and preserves verified cleanup debt on final deadline expiry.
+The rebase applied cleanly without SSH runtime or shared-interface changes. Earlier evidence below
+retains its measured integration pins. The combined suite at `8eff3c23` passes **12,077
+non-integration tests with 14 skips**. Full Ruff/format, mypy (1,013 source files), file lint,
+locked-SDD, rulesync and typer-isolation gates pass. Website tests pass 160 Python and 103 Node
+cases, and both deterministic double-build comparisons are identical.
 
 Transport [#833](https://github.com/WayfarerLabs/agentworks/pull/833), observed at
 `84ac8cafee8c6ac97587bcc98e8785b9be62de8a`, supplies the shared process core and concrete
