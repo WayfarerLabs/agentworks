@@ -1243,15 +1243,31 @@ connection and trust only. Before broader lifecycle implementation, complete the
 
 Private project and complexity reviews of the design at `9822a26a` found no material or optional
 findings. Markdown formatting, structure, spelling, whitespace and locked-SDD checks pass. This is
-design evidence only; implementation and its separate code reviews remain pending below.
+design evidence only; the implementation has its separate code evidence below.
 
-- [ ] Implement the private owned target identity composer described in the preparation LLD. Observe
+- [x] Implement the private owned target identity composer described in the preparation LLD. Observe
       delivery/workload/root account facts as needed under one borrowed owner and deadline; produce
       only a supported direct, sudo-root or root-demotion plan. Keep account, termination, deadline
       and unresolved-ownership evidence distinct. Test refusals, interrupted observation, normal and
       abnormal completion, and actual helper composition without claiming native sudo or demotion
       acceptance. Public RunContext and production activation wiring remain separate required gates,
       not completed by this private increment.
+
+The private composer and shared fixed-helper admission adapter are reviewed at `0c433730` by all
+three lanes, with no material findings remaining. The correction preserves expiry after abnormal or
+no-send completion without replacing its primary failure, and makes account tests collectable on
+Windows. All 35 focused cases pass; removing the expiry correction makes its four new regressions
+fail. Native identity transition acceptance is not implied. The optional suggestion to narrow the
+Windows marker is acknowledged; the small composition module remains selected as a unit.
+
+The full local suite passes 12,243 tests with 13 skips. Ruff lint/format, full mypy (1035 sources),
+file lint, locked-SDD/rulesync, typer isolation and whitespace gates pass. Website validation passes
+160 Python tests, 103 Node tests and both deterministic build comparisons. An initial run used a
+long workspace fixture directory whose inherited default ACL/setgid and Unix-socket path limits
+caused 32 failures; concurrent fixture deletion also interrupted the website repository scan. The
+same pre-correction code passed all 12,239 tests with 13 skips under a short `/tmp` fixture root,
+and the final corrected run above uses that placement. No production checks were weakened to make
+those environment-dependent failures pass. No live infrastructure was exercised.
 
 ## 5. Add the complete new RunContext surface
 
