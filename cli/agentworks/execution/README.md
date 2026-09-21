@@ -213,6 +213,23 @@ This candidate is not wired to production RunContext and does not yet supply sta
 or managed lifetime. It does not yet check interpreter/module prerequisites before the bundled
 loader runs; a Python version alone does not establish that the optional `bz2` module is available.
 
+## Private file-helper delivery
+
+Read, object, metadata, inventory, staging and snapshot exchanges use `FixedFileHelperBundle`. The
+command line contains a short bootstrap, not the packaged modules. One sensitive finite stdin
+contains their fixed base64/bz2 prefix followed by the canonical operation manifest. The bootstrap
+uses unbuffered reads for its core-fixed prefix length and verifies the core-fixed SHA-256 before
+decoding or executing any module. The family helper reads the remaining bytes as request data.
+Requests cannot choose executable source, module names, entry points, prefix lengths or digests. No
+helper installation, executable staging, second invocation or codec fallback is used.
+
+A short or changed prefix exits without file-protocol output. That missing observation does not
+prove helper quiescence or authorize replay. Existing identity and path checks remain in each helper
+before workload access. Interpreter/module readiness is still a separate prerequisite. Operation
+manifest bounds exclude the fixed prefix; carriers also enforce their complete request bound,
+including the prefix and command serialization. Local Python and serialized Windows/QGA checks do
+not establish native carrier acceptance or public FileAccess composition.
+
 ## Private inline file reads
 
 `_file_read.py` composes a bounded, identity-bound Linux file read through one carrier attempt. The
@@ -416,8 +433,8 @@ retained. Stat returns metadata only; it does not read file contents or stage st
 
 The fixed operation bundle is checked against the complete Proxmox HTTP request bound. Local
 isolated-interpreter fixtures exercise the real confined operations under a test-owned root without
-an installed lock namespace. These tests do not establish privileged or cross-identity native
-acceptance, the complete Windows SSH command-line bound, or public FileAccess composition.
+an installed lock namespace. Serialized Windows command sizes are checked separately. These tests do
+not establish privileged or cross-identity native acceptance or public FileAccess composition.
 
 ## Private metadata convergence
 
