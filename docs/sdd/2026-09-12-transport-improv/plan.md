@@ -1321,6 +1321,12 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       evidence, expose a distinct removal phase and make confirmed changes visible in failure
       guidance. Remove duplicate private completion checks while preserving independent deadline
       refusal. This projection remains separate from public FileAccess wiring and durable recovery.
+- [x] Preserve JSON failure provenance across nested uploads and direct retry work. Delegate phase
+      and reason only when the terminal failure is the current child upload; retain direct carrier
+      dispatch/failure facts and never let a stale publication conflict mask a later read failure.
+      Production-path tests cover missing creation ownership, initial stat/read deadline loss and a
+      conflict followed by a retry-read deadline. This remains a private reduction correction, not
+      completion of the public FileAccess or recovery gates.
 - [x] Change private upload, download, JSON, memory-read and single-file compositions to accept a
       caller-owned `OperationBorrow` without acquiring or closing it. Nested compositions reuse the
       same borrow. Focused lifetime tests cover normal, invalid and exceptional results and prove
