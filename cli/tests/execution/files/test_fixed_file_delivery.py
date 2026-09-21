@@ -30,6 +30,7 @@ from agentworks.execution._runtime_prerequisite import build_runtime_identity_he
 from agentworks.execution.carrier import CarrierIO, Deadline, FiniteInput, PreparedInvocation, SinkOutput
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 from agentworks.execution.carriers.ssh.connection import SSHConnection, build_ssh_argv
+from agentworks.execution.carriers.ssh.trust import SSHTrustFiles
 from tests.execution.files._runtime_support import runtime_selection
 
 _NONCE = "0" * 32
@@ -213,13 +214,10 @@ def test_windows_ssh_command_contains_only_short_fixed_bootstrap(
     bundle: FixedFileHelperBundle,
     plan: IdentityPlan,
 ) -> None:
-    connection = SSHConnection(
-        "host.example",
-        "agent",
-        Path("/keys/identity"),
-        Path("/keys/known-hosts"),
-    )
-    argv = build_ssh_argv(connection, _invocation(bundle, plan))
+    native_root = Path(Path.cwd().anchor)
+    trust = SSHTrustFiles((native_root / "keys" / "known-hosts",))
+    connection = SSHConnection("host.example", "agent", native_root / "keys" / "identity", trust)
+    argv = build_ssh_argv(connection, _invocation(bundle, plan), trust=trust)
     windows_command = subprocess.list2cmdline(argv)
 
     assert len(windows_command) < 32_767, family
