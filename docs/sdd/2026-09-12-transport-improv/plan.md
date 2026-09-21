@@ -1226,6 +1226,25 @@ cleanup, boundary removal timing, `waitpid` failure, carrier interruption or any
 Those observations remain required by the unchecked native and lifecycle gates above; a failed
 native case blocks the MANAGED profile rather than selecting DIRECT or weakening the result.
 
+The first native round composed transport `126c12a4` with SSH `f6af80cc` without changing either
+branch. Bookworm systemd 252 and Trixie systemd 257 over SSH, plus a Bookworm guest through PVE 8
+QGA, proved target UID/GID/groups, workload placement before caller code, byte-exact binary streams,
+payload exit 23, no staging, truthful interrupted observation and cleanup of a real detached
+descendant. Independent checks found no remaining transient unit, workload cgroup or process. PVE 9
+was unavailable because every nested-virtualization-capable machine type tried in the authorized
+zone was capacity-exhausted; it remains a required coverage cell rather than inferred evidence.
+
+That round also found two candidate defects. Terminal/lifecycle `complete` depended on whether a
+normal exiting payload happened to accept all offered stdin before its wait became observable, and
+failed-to-start transient units accumulated in systemd's failed set. The corrections at `32751d5d`
+retain post-wait helper I/O failures separately from terminal/lifecycle completion and use fixed
+`--collect` for foreground unit cleanup. They do not weaken the later overall-success reduction or
+replace durable job records. A second native round must repeat immediate exit, delayed exit and
+partial-input-reader cases through SSH and QGA, prove failed-start collection on systemd 252 and a
+newer release, and retry PVE 9. Native asymmetric stream failure and `waitpid` fault injection also
+remain unmeasured; independent launch, terminal mode, reconnect-capable jobs and production
+composition remain under the broader unchecked gates above.
+
 - [ ] SSH effort builds `execution/carriers/ssh/` and its connection/trust migration. Transport
       builds common execution, scoped context delivery, files/jobs and other adapters, and applies
       SSH policy in platform-host/Lima/provisioning paths. Test reusable host composition separately
