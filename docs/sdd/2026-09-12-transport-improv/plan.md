@@ -109,6 +109,12 @@ increment does not introduce global signal handling or declare launch conformanc
       cleanup-only status separation. Transport owns the interface and implementation; SSH owns its
       consumer adaptation and drainer ordering. This does not close the independently recorded
       asynchronous cleanup-entry interruption or native-workstation acceptance gates.
+- [x] Expose the private `LocalProcessOwner` interface and use it in the ordinary byte pump. Local
+      tests cover canceled admission, held-pipe natural exit, settlement and failure facts. Private
+      review corrected inconsistent snapshot evidence after a pre-start dispatch denial; the real
+      audit-hook regression fails with the old publication order. All three lanes are clean at
+      `ee2d0a8f`, whose full local suite passes 11,912 tests with 13 skips. SSH forwarding adoption,
+      joint proof and the independent asynchronous-interruption/native gates remain open above.
 
 ### Hierarchical coordination follow-up (#377)
 
