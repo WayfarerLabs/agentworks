@@ -127,6 +127,18 @@ VM/platform-host keys only; it is neither a hierarchy nor a complete production 
 completed primitive checkbox above records that exact-key implementation, not broader #377
 acceptance.
 
+The platform-host inventory at `f646b04d` found no demonstrated need to serialize every VM operation
+on a Lima placement host. Lifecycle commands address one instance; provisioning templates use
+`mktemp -d`, and two-hop copies use a fresh transfer UUID. Current remote-create wrapper files under
+`/var/tmp` instead use a deterministic instance basename, and rollback reads the corresponding PID.
+Their migration must preserve exact attempt ownership, not carry that ambiguous fixed-name cleanup
+into the new implementation. VM ownership covers the demonstrated per-VM coordination; it does not
+establish a guarantee about Lima-internal shared resources. If a real shared-host mutation requires
+admission, canonical host-resource identity remains the gate above. Site, SSH alias and account
+strings do not prove equivalence. This inventory is source inspection of
+`capabilities/vm_platform/lima.py`, `transports/remote_lima.py` and their remote-execution helper,
+not native concurrency acceptance or authorization for a blanket host lock.
+
 Not implemented in the current tree, and deferred to the #377 follow-up unless explicitly brought
 into this effort:
 
