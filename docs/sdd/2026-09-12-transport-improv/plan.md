@@ -1278,14 +1278,14 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
 
 ### Buffered execution result checkpoint
 
-- [ ] Implement safe immutable application result values, honest wait/exit/signal precision and one
+- [x] Implement safe immutable application result values, honest wait/exit/signal precision and one
       checked-result error. Keep deadline expiry and owned cleanup independent of the primary
       failure; distinguish captured, delivered, discarded and suppressed output. Result values must
       not infer completion from raw carrier status.
 - [ ] Bind safe target identity and execution phase to errors during target/reducer composition, as
       required by FRD R5. The minimal result values alone do not satisfy that complete error
       contract; this remains required before public ExecutionAccess and RunContext delivery.
-- [ ] Preserve a valid helper terminal transcript when only later carrier observation is lost, while
+- [x] Preserve a valid helper terminal transcript when only later carrier observation is lost, while
       retaining the carrier error. Missing terminal, wire corruption and post-terminal records must
       still prevent trusted terminal evidence.
 - [ ] Settle supported-runtime eligibility for retrospective normal completion, then implement and
@@ -1294,6 +1294,21 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       initial runtime range; no range restriction or new completion rule is accepted merely by
       recording this audit. Eager start, signaled-entry ambiguity and native acceptance remain
       separate gates.
+
+All three private lanes accept code pin `8ceb899a` with no material findings. Review corrected
+acceptance of output/status dataclass extensions that added diagnostic fields to default result
+representations, and falsey nonempty bytes that bypassed unretained-output validation. Three exact
+child-type checks close those boundaries without a new abstraction. All 68 focused result/observer
+tests pass. Removing context suppression exposes the synthetic caller-exception canary; reverting
+terminal preservation breaks its regression test. The optional removal of the explicit completed
+state check in `ok` was declined to keep the public success predicate locally readable.
+
+The final full local suite passes 12,291 tests with 13 skips. Ruff/format, full mypy (1037 sources),
+file lint, locked-SDD/rulesync, typer isolation and whitespace checks pass. Website gates pass 160
+Python tests, 103 Node tests and both deterministic double-build comparisons. No live infrastructure
+was exercised. The new values remain unwired: producer/reducer acceptance, safe target/phase
+metadata, native evidence and the complete public target/RunContext surface are not delivered by
+this checkpoint.
 
 ## 5. Add the complete new RunContext surface
 
