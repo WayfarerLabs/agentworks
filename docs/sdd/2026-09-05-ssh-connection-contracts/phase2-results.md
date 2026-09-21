@@ -146,6 +146,13 @@ attempt. Unknown completion retains and reports the exact owned path; reconcilia
 prove remote quiescence. The lead's host repetition found no owned fixture processes or new snapshot
 paths afterward and removed the temporary fixture directory and credentials.
 
+Project, complexity and correctness reviews are clean at `32eefc50`. Review removed redundant chunk
+bookkeeping and added a successful-completion check after fallback reconciliation as well as before
+it. A focused in-memory fault experiment returned typed recovered ownership with unknown raw SSH
+completion: the test reported the retained exact path and made zero cleanup calls. This fault
+experiment is control-flow evidence, not a live SSH interruption result. The corrected happy path
+passed on the host; final Ruff/format, full mypy and whitespace checks pass.
+
 This is Linux loopback proof for private snapshot exchanges. Public download composition,
 publication, interruption and malformed-response acceptance, production FileAccess, and supported
 workstation/provider workflows remain open.
