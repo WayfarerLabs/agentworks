@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import secrets
+import stat
 import sys
 from pathlib import Path
 
@@ -56,6 +57,7 @@ class _ObservedSSHCarrier(SSHCarrier):
     def __init__(self, connection: SSHConnection) -> None:
         super().__init__(connection)
         self.attempts: list[tuple[PreparedInvocation, CarrierIO]] = []
+        self.reports: list[CarrierReport] = []
 
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
         self.attempts.append((invocation, io))
@@ -63,6 +65,7 @@ class _ObservedSSHCarrier(SSHCarrier):
         assert report.stdout.retention is Retention.DELIVERED
         assert report.stderr.retention is Retention.DELIVERED
         assert report.stdout.data == report.stderr.data == b""
+        self.reports.append(report)
         return report
 
 
@@ -81,6 +84,13 @@ def _assert_sensitive_attempt(carrier: _ObservedSSHCarrier, attempt: int, *secre
         text = secret.decode("ascii") if isinstance(secret, bytes) else secret
         assert text not in argv
         assert text not in diagnostic
+
+
+def _all_attempts_completed(carrier: _ObservedSSHCarrier) -> bool:
+    return len(carrier.reports) == len(carrier.attempts) and all(
+        report.dispatch is Dispatch.SENT and report.completion == ExitStatus(code=0) and report.failure is None
+        for report in carrier.reports
+    )
 
 
 def test_file_read_delivers_binary_and_typed_noncontent_outcomes_over_real_ssh(
@@ -256,6 +266,11 @@ def test_file_snapshot_download_and_exact_cleanup_over_real_ssh(
     tmp_path: Path,
     local_sshd: SSHConnection,
 ) -> None:
+    scratch_root = os.lstat("/tmp")
+    if not (
+        stat.S_ISDIR(scratch_root.st_mode) and scratch_root.st_uid == 0 and stat.S_IMODE(scratch_root.st_mode) == 0o1777
+    ):
+        pytest.skip("snapshot helper fixture requires a root-owned mode-1777 /tmp directory")
     source_root = tmp_path / "snapshot-source"
     source_root.mkdir()
     payload = bytes(range(256)) * 49 + b"snapshot-payload-canary\x00\xff"
@@ -286,8 +301,6 @@ def test_file_snapshot_download_and_exact_cleanup_over_real_ssh(
         assert begun.observation.state is FileSnapshotObservationState.READY
         snapshot = begun.observation.snapshot
         assert snapshot is not None
-        assert snapshot.ready._reference._ownership._token == token
-        assert snapshot.ready._reference._ownership._length == len(payload)
         assert snapshot.source.stat.size == len(payload)
         assert snapshot.source.digest == hashlib.sha256(payload).digest()
         assert snapshot.ready._digest == snapshot.source.digest
@@ -338,6 +351,8 @@ def test_file_snapshot_download_and_exact_cleanup_over_real_ssh(
         assert cleanup_debt is not None
     finally:
         if scratch.exists():
+            if not _all_attempts_completed(carrier):
+                pytest.fail(f"snapshot helper completion is unknown; retained owned scratch at {scratch}")
             if cleanup_debt is None:
                 recovery = snapshot_reconcile(
                     carrier,

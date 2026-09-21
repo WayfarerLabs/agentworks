@@ -28,7 +28,9 @@ carrier call with sensitive input, and payloads stay out of invocation and resul
 The same boundary downloads an immutable snapshot in exact chunks, including a nonzero offset, then
 recovers cleanup-only ownership and removes its exact fixed-root scratch object. These loopback
 Linux cases are adapter evidence for transport's private helpers. They do not expose `FileAccess`,
-establish production grants or supply native workstation/provider acceptance.
+establish production grants or supply native workstation/provider acceptance. The snapshot fixture
+requires `/tmp` to be a root-owned mode-1777 directory, matching the production helper prerequisite;
+namespaces that remap its owner skip that happy-path case before dispatch.
 
 For the operator's integration tester, combine the SSH and transport branches in a disposable local
 branch. Record both input commit IDs, the integrated commit, conflict resolutions and the installed
