@@ -359,8 +359,9 @@ intentional owner, group, mode and ACL changes, but refuses links or a replaceme
 scratch cleanup refuses the extra record instead of discarding the data or original receipt first.
 
 Read-only reconciliation yields historical cleanup ownership, not permission to publish or proof
-that publication happened. Missing siblings and missing, partial or invalid records remain
-uncertain. Exact cleanup removes the sibling before its record; a filesystem error removing the
+that publication happened. It validates the scratch directory and original receipt without requiring
+the payload data to remain present. Missing siblings and missing, partial or invalid records remain
+uncertain. Exact cleanup removes the sibling before its record; a handled failure removing the
 record retains record-only cleanup debt. After independently observed publication, the publication
 primitive removes the record without following the inode into the public destination. Losing that
 reply still does not establish publication or remote quiescence. These local mechanics do not yet
@@ -530,8 +531,8 @@ Windows SSH command-line sizing for explicit fixtures. Those measurements do not
 platform acceptance or fit for every connection/identity prefix.
 
 These entries are not complete upload or FileAccess operations. Whole-download and publication
-composition and publication recovery remain unfinished. The caller must retain the token, original
-binding and known references; an unavailable creation reply does not establish absence or
+composition and publication-recovery delivery remain unfinished. The caller must retain the token,
+original binding and known references; an unavailable creation reply does not establish absence or
 quiescence.
 
 `_scratch_root.py` opens the fixed Linux `/tmp` directory without following symlinks and requires
