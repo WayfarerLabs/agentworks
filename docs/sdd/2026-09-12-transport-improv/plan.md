@@ -1327,6 +1327,11 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       Production-path tests cover missing creation ownership, initial stat/read deadline loss and a
       conflict followed by a retry-read deadline. This remains a private reduction correction, not
       completion of the public FileAccess or recovery gates.
+- [x] Preserve file-result chronology and known effects independently from later host state. A
+      helper-confirmed change or no-change raises an ordinary typed failure with that exact effect
+      when later termination or coordination is incomplete; helper refusal precedes a deadline
+      sampled after its response. Record deadline expiry at actual upload/download cleanup entry as
+      cleanup rather than transfer. Real producer-path tests retain custody and no-replay behavior.
 - [x] Change private upload, download, JSON, memory-read and single-file compositions to accept a
       caller-owned `OperationBorrow` without acquiring or closing it. Nested compositions reuse the
       same borrow. Focused lifetime tests cover normal, invalid and exceptional results and prove
