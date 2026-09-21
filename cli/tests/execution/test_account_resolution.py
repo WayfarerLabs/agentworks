@@ -39,6 +39,12 @@ from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._inline import execute_inline_candidate, prepare_inline_candidate
 from agentworks.execution._inline_control import FailureCode, FailurePhase
+from agentworks.execution._runtime_prerequisite import (
+    RuntimePrerequisiteObservation,
+    RuntimePrerequisiteState,
+    RuntimeSelection,
+    RuntimeTargetOS,
+)
 from agentworks.execution.carrier import (
     CapturedOutput,
     CarrierIO,
@@ -55,6 +61,21 @@ from agentworks.execution.carrier import (
 )
 from agentworks.execution.carriers._subprocess import run_process
 from agentworks.execution.models import Command
+
+_HOST_TARGET = RuntimeTargetOS.DARWIN if sys.platform == "darwin" else RuntimeTargetOS.LINUX
+
+
+def _runtime_selection(path: str = sys.executable) -> RuntimeSelection:
+    return RuntimeSelection(_HOST_TARGET, path)
+
+
+def _nonce(invocation: PreparedInvocation) -> str:
+    marker = invocation.argv.index("agentworks-runtime-prerequisite")
+    return invocation.argv[marker + 1]
+
+
+def _ready_record(invocation: PreparedInvocation) -> bytes:
+    return f"AGW_RUNTIME_1:{_nonce(invocation)}:ready:0\n".encode("ascii")
 
 
 def _exception_details(error: BaseException) -> str:
@@ -80,6 +101,7 @@ def _exception_details(error: BaseException) -> str:
 class TranscriptCarrier:
     transcript: bytes
     stderr: bytes = b""
+    prefix_ready: bool = True
     stdout_complete: bool = True
     stderr_complete: bool = True
     completion: ExitStatus | None = ExitStatus(code=0)
@@ -98,7 +120,8 @@ class TranscriptCarrier:
         self.io = io
         self.invocation = invocation
         assert isinstance(io.output, SinkOutput)
-        io.output.stdout.try_write(memoryview(self.transcript))
+        transcript = _ready_record(invocation) + self.transcript if self.prefix_ready else self.transcript
+        io.output.stdout.try_write(memoryview(transcript))
         io.output.stderr.try_write(memoryview(self.stderr))
         stdout = CapturedOutput(complete=self.stdout_complete, retention=Retention.DELIVERED)
         stderr = CapturedOutput(complete=self.stderr_complete, retention=Retention.DELIVERED)
@@ -114,14 +137,14 @@ class TranscriptCarrier:
 
 class ReplyCarrier(TranscriptCarrier):
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-        nonce = invocation.argv[-1]
+        nonce = _nonce(invocation)
         self.transcript = encode_account_identity(nonce, IdentityExpectation(1001, 1002, (1002, 1003)))
         return super().execute(invocation, io=io, deadline=deadline)
 
 
 class RefusalCarrier(TranscriptCarrier):
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-        self.transcript = encode_account_failure(invocation.argv[-1], AccountFailure.MISSING)
+        self.transcript = encode_account_failure(_nonce(invocation), AccountFailure.MISSING)
         return super().execute(invocation, io=io, deadline=deadline)
 
 
@@ -131,7 +154,7 @@ class ReflectedCarrier(TranscriptCarrier):
             {
                 "account": "workload",
                 "identity": {"egid": 1002, "euid": 1001, "groups": [1002]},
-                "nonce": invocation.argv[-1],
+                "nonce": _nonce(invocation),
                 "status": "identity",
                 "version": 1,
             },
@@ -143,14 +166,14 @@ class ReflectedCarrier(TranscriptCarrier):
 
 class OwnershipReplyCarrier(TranscriptCarrier):
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-        self.transcript = encode_file_ownership_success(invocation.argv[-1], FileOwnership(1001, 2003))
+        self.transcript = encode_file_ownership_success(_nonce(invocation), FileOwnership(1001, 2003))
         return super().execute(invocation, io=io, deadline=deadline)
 
 
 class OwnershipRefusalCarrier(TranscriptCarrier):
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
         self.transcript = encode_file_ownership_failure(
-            invocation.argv[-1],
+            _nonce(invocation),
             FileOwnershipFailure.MISSING_GROUP,
         )
         return super().execute(invocation, io=io, deadline=deadline)
@@ -206,7 +229,7 @@ class LocalCarrier:
 
 
 def _resolve(carrier: TranscriptCarrier | LocalCarrier, runtime_path: str = sys.executable) -> AccountResolutionResult:
-    return resolve_account(carrier, "workload", Deadline.after(15), runtime_path)
+    return resolve_account(carrier, "workload", Deadline.after(15), _runtime_selection(runtime_path))
 
 
 def _resolve_ownership(
@@ -218,7 +241,7 @@ def _resolve_ownership(
         "workload",
         "tmux-agent-access",
         Deadline.after(15),
-        runtime_path,
+        _runtime_selection(runtime_path),
     )
 
 
@@ -238,9 +261,11 @@ def test_resolved_identity_uses_one_sensitive_payload_free_attempt_and_preserves
     account = "account-payload-canary-c86d89e5"
     carrier = ReplyCarrier(b"", completion=ExitStatus(code=19), failure=Failure.OBSERVATION)
 
-    result = resolve_account(carrier, account, Deadline.after(15), sys.executable)
+    result = resolve_account(carrier, account, Deadline.after(15), _runtime_selection())
 
     assert carrier.calls == 1
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert result.observation is not None
     assert result.observation.state is AccountObservationState.RESOLVED
     assert result.observation.identity == IdentityExpectation(1001, 1002, (1002, 1003))
     assert result.carrier_completion == ExitStatus(code=19)
@@ -253,12 +278,13 @@ def test_resolved_identity_uses_one_sensitive_payload_free_attempt_and_preserves
     assert carrier.invocation is not None
     assert all(account not in argument for argument in carrier.invocation.argv)
     assert isinstance(carrier.io.output, SinkOutput)
-    assert carrier.io.output.stdout.data == bytearray()  # type: ignore[attr-defined]
+    assert carrier.io.output.stdout.downstream.data == bytearray()  # type: ignore[attr-defined]
 
 
 def test_typed_helper_refusal_is_distinct_from_invalid_observation() -> None:
     result = _resolve(RefusalCarrier(b""))
 
+    assert result.observation is not None
     assert result.observation.state is AccountObservationState.REFUSED
     assert result.observation.failure is AccountFailure.MISSING
     assert result.observation.error is None
@@ -301,6 +327,7 @@ def test_noise_truncation_oversize_and_partial_streams_never_resolve(
     result = _resolve(carrier)
 
     assert carrier.calls == 1
+    assert result.observation is not None
     assert result.observation.state is state
     assert result.observation.error is error
     assert result.observation.identity is None
@@ -311,6 +338,7 @@ def test_reflected_account_response_is_invalid() -> None:
 
     result = _resolve(carrier)
 
+    assert result.observation is not None
     assert result.observation.state is AccountObservationState.INVALID
     assert result.observation.identity is None
 
@@ -323,7 +351,7 @@ def test_carrier_exception_clears_private_response_and_diagnostic_state() -> Non
 
     assert carrier.calls == 1
     assert carrier.io is not None and isinstance(carrier.io.output, SinkOutput)
-    assert carrier.io.output.stdout.data == bytearray()  # type: ignore[attr-defined]
+    assert carrier.io.output.stdout.downstream.data == bytearray()  # type: ignore[attr-defined]
     assert not carrier.io.output.stderr.saw_data  # type: ignore[attr-defined]
 
 
@@ -336,9 +364,11 @@ def test_resolved_file_ownership_uses_one_sensitive_name_free_attempt_and_preser
         failure=Failure.OBSERVATION,
     )
 
-    result = resolve_file_ownership(carrier, owner, group, Deadline.after(15), sys.executable)
+    result = resolve_file_ownership(carrier, owner, group, Deadline.after(15), _runtime_selection())
 
     assert carrier.calls == 1
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert result.observation is not None
     assert result.observation.state is FileOwnershipObservationState.RESOLVED
     assert result.observation.ownership == FileOwnership(1001, 2003)
     assert result.carrier_completion == ExitStatus(code=23)
@@ -352,12 +382,13 @@ def test_resolved_file_ownership_uses_one_sensitive_name_free_attempt_and_preser
     assert carrier.invocation is not None
     assert all(owner not in argument and group not in argument for argument in carrier.invocation.argv)
     assert isinstance(carrier.io.output, SinkOutput)
-    assert carrier.io.output.stdout.data == bytearray()  # type: ignore[attr-defined]
+    assert carrier.io.output.stdout.downstream.data == bytearray()  # type: ignore[attr-defined]
 
 
 def test_file_ownership_refusal_distinguishes_missing_group() -> None:
     result = _resolve_ownership(OwnershipRefusalCarrier(b""))
 
+    assert result.observation is not None
     assert result.observation.state is FileOwnershipObservationState.REFUSED
     assert result.observation.failure is FileOwnershipFailure.MISSING_GROUP
     assert result.observation.error is None
@@ -417,6 +448,7 @@ def test_file_ownership_noise_incomplete_wrong_nonce_and_wrong_kind_never_resolv
     result = _resolve_ownership(carrier)
 
     assert carrier.calls == 1
+    assert result.observation is not None
     assert result.observation.state is state
     assert result.observation.error is error
     assert result.observation.ownership is None
@@ -430,7 +462,7 @@ def test_file_ownership_carrier_exception_clears_private_sinks() -> None:
 
     assert carrier.calls == 1
     assert carrier.io is not None and isinstance(carrier.io.output, SinkOutput)
-    assert carrier.io.output.stdout.data == bytearray()  # type: ignore[attr-defined]
+    assert carrier.io.output.stdout.downstream.data == bytearray()  # type: ignore[attr-defined]
     assert not carrier.io.output.stderr.saw_data  # type: ignore[attr-defined]
 
 
@@ -439,7 +471,7 @@ def test_invalid_or_oversized_trusted_account_refuses_before_dispatch(account: s
     carrier = ReplyCarrier(b"")
 
     with pytest.raises(ValidationError):
-        resolve_account(carrier, account, Deadline.after(1), sys.executable)
+        resolve_account(carrier, account, Deadline.after(1), _runtime_selection())
 
     assert carrier.calls == 0
 
@@ -461,7 +493,7 @@ def test_invalid_or_oversized_file_ownership_names_refuse_before_dispatch(owner:
     carrier = OwnershipReplyCarrier(b"")
 
     with pytest.raises(ValidationError):
-        resolve_file_ownership(carrier, owner, group, Deadline.after(1), sys.executable)
+        resolve_file_ownership(carrier, owner, group, Deadline.after(1), _runtime_selection())
 
     assert carrier.calls == 0
 
@@ -486,7 +518,7 @@ def test_file_ownership_host_conversion_discards_sensitive_encoder_chain(
     carrier = OwnershipReplyCarrier(b"")
 
     with pytest.raises(ValidationError) as raised:
-        resolve_file_ownership(carrier, "owner", "group", Deadline.after(1), sys.executable)
+        resolve_file_ownership(carrier, "owner", "group", Deadline.after(1), _runtime_selection())
 
     assert canary not in _exception_details(raised.value)
     assert carrier.calls == 0
@@ -497,15 +529,17 @@ def test_real_subprocess_resolves_current_and_missing_accounts() -> None:
     current = _current_account()
     carrier = LocalCarrier()
 
-    found = resolve_account(carrier, current, Deadline.after(15), sys.executable)
+    found = resolve_account(carrier, current, Deadline.after(15), _runtime_selection())
     missing = resolve_account(
         carrier,
         "agw-account-that-does-not-exist-5e289461",
         Deadline.after(15),
-        sys.executable,
+        _runtime_selection(),
     )
 
     assert carrier.calls == 2
+    assert found.observation is not None
+    assert missing.observation is not None
     assert found.observation.state is AccountObservationState.RESOLVED
     assert found.observation.identity is not None
     assert missing.observation.state is AccountObservationState.REFUSED
@@ -523,24 +557,27 @@ def test_real_subprocess_resolves_current_file_owner_and_group_and_missing_names
         current_owner,
         current_group,
         Deadline.after(15),
-        sys.executable,
+        _runtime_selection(),
     )
     missing_owner = resolve_file_ownership(
         carrier,
         "agw-owner-that-does-not-exist-51635510",
         current_group,
         Deadline.after(15),
-        sys.executable,
+        _runtime_selection(),
     )
     missing_group = resolve_file_ownership(
         carrier,
         current_owner,
         "agw-group-that-does-not-exist-18c3fd0b",
         Deadline.after(15),
-        sys.executable,
+        _runtime_selection(),
     )
 
     assert carrier.calls == 3
+    assert found.observation is not None
+    assert missing_owner.observation is not None
+    assert missing_group.observation is not None
     assert found.observation.state is FileOwnershipObservationState.RESOLVED
     assert found.observation.ownership == FileOwnership(os.geteuid(), os.getegid())
     assert missing_owner.observation.failure is FileOwnershipFailure.MISSING_OWNER
@@ -551,7 +588,8 @@ def test_real_subprocess_resolves_current_file_owner_and_group_and_missing_names
 def test_resolved_current_account_composes_with_truthful_direct_inline_identity_check() -> None:
     current = _current_account()
     carrier = LocalCarrier()
-    resolved = resolve_account(carrier, current, Deadline.after(15), sys.executable)
+    resolved = resolve_account(carrier, current, Deadline.after(15), _runtime_selection())
+    assert resolved.observation is not None
     identity = resolved.observation.identity
     assert identity is not None
     actual = IdentityExpectation(os.geteuid(), os.getegid(), tuple(sorted(set(os.getgroups()) | {os.getegid()})))
@@ -579,8 +617,79 @@ def test_resolved_current_account_composes_with_truthful_direct_inline_identity_
 def test_unavailable_interpreter_never_yields_identity() -> None:
     result = _resolve(LocalCarrier(), runtime_path="/definitely/missing/python3")
 
-    assert result.observation.state in (AccountObservationState.INVALID, AccountObservationState.INCOMPLETE)
-    assert result.observation.identity is None
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.MISSING
+    assert result.observation is None
+
+
+def test_unavailable_interpreter_never_yields_file_ownership() -> None:
+    result = _resolve_ownership(LocalCarrier(), runtime_path="/definitely/missing/python3")
+
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.MISSING
+    assert result.observation is None
+
+
+def test_complete_runtime_refusal_survives_input_failure_without_operation_observation() -> None:
+    class RuntimeRefusalCarrier(TranscriptCarrier):
+        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+            self.transcript = f"AGW_RUNTIME_1:{_nonce(invocation)}:missing:-\n".encode("ascii")
+            return super().execute(invocation, io=io, deadline=deadline)
+
+    carrier = RuntimeRefusalCarrier(
+        b"",
+        prefix_ready=False,
+        stdout_complete=False,
+        failure=Failure.INPUT,
+    )
+
+    result = _resolve(carrier)
+
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.MISSING
+    assert result.observation is None
+    assert result.carrier_failure is Failure.INPUT
+
+
+def test_input_failure_without_runtime_record_is_unknown_not_missing() -> None:
+    result = _resolve(
+        TranscriptCarrier(
+            b"",
+            prefix_ready=False,
+            stdout_complete=False,
+            failure=Failure.INPUT,
+        )
+    )
+
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.UNKNOWN
+    assert result.observation is None
+    assert result.carrier_failure is Failure.INPUT
+
+
+def test_hostile_python_environment_cannot_write_or_change_account_helper(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup = tmp_path / "startup.py"
+    startup.write_text(f"open({os.fspath(tmp_path / 'startup-ran')!r},'w').close()\n")
+    injected = tmp_path / "injected"
+    injected.mkdir()
+    (injected / "sitecustomize.py").write_text(f"open({os.fspath(tmp_path / 'sitecustomize-ran')!r},'w').close()\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PYTHONHOME", os.fspath(tmp_path / "bad-home"))
+    monkeypatch.setenv("PYTHONPATH", os.fspath(injected))
+    monkeypatch.setenv("PYTHONSTARTUP", os.fspath(startup))
+    monkeypatch.setenv("PYTHONPYCACHEPREFIX", os.fspath(tmp_path / "cache"))
+    before = {entry.relative_to(tmp_path) for entry in tmp_path.rglob("*")}
+
+    result = resolve_account(
+        LocalCarrier(),
+        _current_account(),
+        Deadline.after(15),
+        _runtime_selection(),
+    )
+
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    assert result.observation is not None
+    assert result.observation.state is AccountObservationState.RESOLVED
+    assert {entry.relative_to(tmp_path) for entry in tmp_path.rglob("*")} == before
 
 
 def test_bookworm_python_311_bundle_smoke_if_available() -> None:
@@ -597,11 +706,23 @@ def test_bookworm_python_311_bundle_smoke_if_available() -> None:
     if version.stdout.strip() != "(3, 11)":
         pytest.skip("/usr/bin/python3 is not the Bookworm Python 3.11 runtime")
     current = _current_account()
+    carrier = LocalCarrier()
 
-    result = resolve_account(LocalCarrier(), current, Deadline.after(15), str(interpreter))
+    result = resolve_account(
+        carrier,
+        current,
+        Deadline.after(15),
+        RuntimeSelection(RuntimeTargetOS.LINUX),
+    )
 
+    assert result.runtime_prerequisite == RuntimePrerequisiteObservation(
+        RuntimePrerequisiteState.READY,
+        str(interpreter),
+    )
+    assert result.observation is not None
     assert result.observation.state is AccountObservationState.RESOLVED
     assert result.observation.identity is not None
+    assert carrier.calls == 1
     assert FIXED_SOURCE.isascii()
 
 
@@ -619,16 +740,23 @@ def test_bookworm_python_311_bundle_resolves_file_ownership_if_available() -> No
     if version.stdout.strip() != "(3, 11)":
         pytest.skip("/usr/bin/python3 is not the Bookworm Python 3.11 runtime")
 
+    carrier = LocalCarrier()
     result = resolve_file_ownership(
-        LocalCarrier(),
+        carrier,
         _current_account(),
         _current_group(),
         Deadline.after(15),
-        str(interpreter),
+        RuntimeSelection(RuntimeTargetOS.LINUX),
     )
 
+    assert result.runtime_prerequisite == RuntimePrerequisiteObservation(
+        RuntimePrerequisiteState.READY,
+        str(interpreter),
+    )
+    assert result.observation is not None
     assert result.observation.state is FileOwnershipObservationState.RESOLVED
     assert result.observation.ownership == FileOwnership(os.geteuid(), os.getegid())
+    assert carrier.calls == 1
 
 
 @pytest.mark.windows

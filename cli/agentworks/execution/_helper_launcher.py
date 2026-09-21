@@ -64,6 +64,11 @@ def _validate_runtime_path(runtime_path: str) -> None:
         raise ValidationError("Helper runtime must be an absolute non-assignment UTF-8 path")
 
 
+def build_clean_environment_argv(executable: str, *arguments: str) -> tuple[str, ...]:
+    """Launch one fixed executable under the common cleared environment."""
+    return (*_ENV, executable, *arguments)
+
+
 def build_clean_helper_argv(
     *,
     runtime_path: str,
@@ -72,7 +77,7 @@ def build_clean_helper_argv(
 ) -> tuple[str, ...]:
     """Build one fixed helper launch under the carrier delivery identity."""
     _validate_runtime_path(runtime_path)
-    return (*_ENV, runtime_path, "-I", "-S", "-B", "-c", fixed_source, nonce)
+    return build_clean_environment_argv(runtime_path, "-I", "-S", "-B", "-c", fixed_source, nonce)
 
 
 def build_helper_argv(

@@ -25,7 +25,13 @@ from agentworks.execution._account_protocol import (
     encode_account_request,
     encode_file_ownership_request,
 )
-from agentworks.execution._helper_launcher import build_clean_helper_argv
+from agentworks.execution._runtime_prerequisite import (
+    RuntimePrefixSink,
+    RuntimePrerequisiteObservation,
+    RuntimePrerequisiteState,
+    RuntimeSelection,
+    build_runtime_helper_argv,
+)
 from agentworks.execution.carrier import (
     CarrierIO,
     Dispatch,
@@ -72,7 +78,8 @@ class AccountResolutionResult:
     carrier_completion: ExitStatus | None
     carrier_local_status: int | None
     carrier_failure: Failure | None
-    observation: AccountObservation
+    runtime_prerequisite: RuntimePrerequisiteObservation
+    observation: AccountObservation | None
 
 
 FileOwnershipObservationState = AccountObservationState
@@ -95,7 +102,8 @@ class FileOwnershipResolutionResult:
     carrier_completion: ExitStatus | None
     carrier_local_status: int | None
     carrier_failure: Failure | None
-    observation: FileOwnershipObservation
+    runtime_prerequisite: RuntimePrerequisiteObservation
+    observation: FileOwnershipObservation | None
 
 
 class _BoundedResponseSink:
@@ -204,7 +212,7 @@ def resolve_account(
     carrier: Carrier,
     trusted_account: str,
     deadline: Deadline,
-    runtime_path: str,
+    runtime_selection: RuntimeSelection,
 ) -> AccountResolutionResult:
     """Resolve one core-bound account without replay or identity transition."""
     nonce = secrets.token_hex(16)
@@ -218,27 +226,38 @@ def resolve_account(
         raise ValidationError("Account lookup request exceeds its manifest bound")
     if request_failure is not None:
         raise ValidationError("Account lookup requires a valid UTF-8 account")
-    invocation = PreparedInvocation(
-        build_clean_helper_argv(runtime_path=runtime_path, fixed_source=FIXED_SOURCE, nonce=nonce)
+    argv, candidates, system_shim = build_runtime_helper_argv(
+        selection=runtime_selection,
+        fixed_source=FIXED_SOURCE,
+        nonce=nonce,
     )
+    invocation = PreparedInvocation(argv)
     response = _BoundedResponseSink()
+    runtime = RuntimePrefixSink(nonce, candidates, response, system_shim)
     stderr = _DiagnosticSink()
     io = CarrierIO(
         input=FiniteInput(request, sensitive=True),
-        output=SinkOutput(response, stderr, require_live=False),
+        output=SinkOutput(runtime, stderr, require_live=False),
         sensitive=True,
     )
     try:
         report = carrier.execute(invocation, io=io, deadline=deadline)
-        observation = _observe(response, stderr, report, nonce)
+        runtime_prerequisite = runtime.observation
+        observation = (
+            _observe(response, stderr, report, nonce)
+            if runtime_prerequisite.state is RuntimePrerequisiteState.READY
+            else None
+        )
         return AccountResolutionResult(
             dispatch=report.dispatch,
             carrier_completion=report.completion,
             carrier_local_status=report.local_status,
             carrier_failure=report.failure,
+            runtime_prerequisite=runtime_prerequisite,
             observation=observation,
         )
     finally:
+        runtime.clear()
         response.clear()
         stderr.clear()
 
@@ -248,7 +267,7 @@ def resolve_file_ownership(
     trusted_owner: str,
     trusted_group: str,
     deadline: Deadline,
-    runtime_path: str,
+    runtime_selection: RuntimeSelection,
 ) -> FileOwnershipResolutionResult:
     """Resolve one core-bound owner/group pair without replay or identity transition."""
     nonce = secrets.token_hex(16)
@@ -262,26 +281,37 @@ def resolve_file_ownership(
         raise ValidationError("File ownership lookup request exceeds its manifest bound")
     if request_failure is not None:
         raise ValidationError("File ownership lookup requires valid UTF-8 names")
-    invocation = PreparedInvocation(
-        build_clean_helper_argv(runtime_path=runtime_path, fixed_source=FIXED_SOURCE, nonce=nonce)
+    argv, candidates, system_shim = build_runtime_helper_argv(
+        selection=runtime_selection,
+        fixed_source=FIXED_SOURCE,
+        nonce=nonce,
     )
+    invocation = PreparedInvocation(argv)
     response = _BoundedResponseSink()
+    runtime = RuntimePrefixSink(nonce, candidates, response, system_shim)
     stderr = _DiagnosticSink()
     io = CarrierIO(
         input=FiniteInput(request, sensitive=True),
-        output=SinkOutput(response, stderr, require_live=False),
+        output=SinkOutput(runtime, stderr, require_live=False),
         sensitive=True,
     )
     try:
         report = carrier.execute(invocation, io=io, deadline=deadline)
-        observation = _observe_file_ownership(response, stderr, report, nonce)
+        runtime_prerequisite = runtime.observation
+        observation = (
+            _observe_file_ownership(response, stderr, report, nonce)
+            if runtime_prerequisite.state is RuntimePrerequisiteState.READY
+            else None
+        )
         return FileOwnershipResolutionResult(
             dispatch=report.dispatch,
             carrier_completion=report.completion,
             carrier_local_status=report.local_status,
             carrier_failure=report.failure,
+            runtime_prerequisite=runtime_prerequisite,
             observation=observation,
         )
     finally:
+        runtime.clear()
         response.clear()
         stderr.clear()
