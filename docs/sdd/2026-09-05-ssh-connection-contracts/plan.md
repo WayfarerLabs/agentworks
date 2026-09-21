@@ -188,7 +188,7 @@ The [implementation progress record](phase2-results.md) pins the completed indep
 local validation separately from the remaining shared integration and platform acceptance.
 
 Shared subprocess adoption introduces an implementation dependency on transport #833. Current
-integration uses `126c12a4ef738ef9b9851bbd9b37dc37acd41286`; completed records retain the pins they
+integration uses `ae1ce293d9a27cd6f38838fd88ef23575f1472b7`; completed records retain the pins they
 validated. #832 stacks on its implementation branch; transport lands first. Buffered adapter
 validation does not close the shared launch-interruption gate, live I/O, terminal preparation or
 additive RunContext delivery. Terminal/PTY work is proceeding in parallel in the transport lane, as
