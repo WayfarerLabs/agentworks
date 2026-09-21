@@ -197,8 +197,8 @@ observation. A ready prerequisite record admits the loader, not account success.
 unusable, unsupported-version and missing-module records give closed diagnostics; absent or invalid
 records remain unknown. A complete received prerequisite refusal survives a concurrent carrier input
 failure, but establishes neither process quiescence nor permission to retry. The account observation
-is absent unless runtime admission occurred. The seven file families use the same prerequisite
-boundary; inline and terminal execution have not yet adopted it.
+is absent unless runtime admission occurred. The seven file families and buffered inline execution
+use the same prerequisite boundary; terminal execution has not yet adopted it.
 
 Both request and reply are bounded to 32 KiB. A complete, nonce-bound response and complete
 delivered streams are required to return identity metadata. Missing accounts and closed helper
@@ -223,11 +223,17 @@ Only core-selected packaged code uses that loader; it does not select modules fr
 install guest files. The destination Python must provide `bz2`. Caller arguments, script source,
 environment, working directory and finite stdin travel in the bounded stdin manifest, not helper
 argv. On Linux, scripts use an inherited memory file separately from application stdin. The caller
-must bind the expected destination identity. The host validates bounded helper evidence and keeps
-carrier status separate; it does not infer application success or an eager start acknowledgment.
-This candidate is not wired to production RunContext and does not yet supply staging, terminal I/O
-or managed lifetime. It does not yet check interpreter/module prerequisites before the bundled
-loader runs; a Python version alone does not establish that the optional `bz2` module is available.
+must bind the expected destination identity and an explicit `RuntimeSelection`. The identity
+transition encloses the shared selector, which checks Python 3.11 and common loader imports before
+the bundled helper runs. A bounded prerequisite record precedes helper framing without consuming
+application input or staging files.
+
+The result separates prerequisite evidence, carrier facts and an optional helper observation.
+Without READY admission, the helper observation is absent; READY alone proves neither application
+entry nor success. The host validates bounded helper evidence and does not infer an eager start
+acknowledgment. Preparation remains single-use and clears the prerequisite parser after the attempt,
+including carrier exceptions. This candidate is not wired to production RunContext and does not yet
+supply staging, terminal I/O or managed lifetime.
 
 ## Private file-helper delivery
 
