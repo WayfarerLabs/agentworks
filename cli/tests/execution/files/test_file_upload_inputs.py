@@ -219,14 +219,14 @@ def test_validation_failure_does_not_retain_sensitive_exception_context(
 @pytest.mark.parametrize(
     ("condition", "create_metadata"),
     [
-        (Create(), new_metadata(0o1000)),
+        (Create(), NewMetadata("owner", "group", 0o1000)),
         (
             Match(FileRevision(FileStat(1, 0, stat.S_IFREG | 0o600, 1, 1001, 1002, 1, 1, 1))),
-            new_metadata(0o600),
+            NewMetadata("owner", "group", 0o600),
         ),
         (
             Match(FileRevision(FileStat(1, 2, stat.S_IFDIR | 0o700, 1, 1001, 1002, 0, 1, 1))),
-            new_metadata(0o600),
+            NewMetadata("owner", "group", 0o600),
         ),
     ],
     ids=["unsupported-regular-mode", "malformed-match", "nonregular-match"],
