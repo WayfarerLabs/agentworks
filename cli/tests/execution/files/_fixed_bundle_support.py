@@ -13,7 +13,6 @@ def fixture_file_bundle(
     module_names: tuple[str, ...],
     guest_module: str,
     guest_patch: str = "",
-    setup: str = "",
 ) -> FixedFileHelperBundle:
     """Package a fixed test entrypoint after the production module closure."""
     package = files("agentworks.execution")
@@ -21,7 +20,6 @@ def fixture_file_bundle(
     entrypoint = "_fixture_entry"
     entrypoint_source = f"""
 import sys
-{textwrap.dedent(setup)}
 guest=sys.modules[{(package_name + "." + guest_module)!r}]
 {textwrap.dedent(guest_patch)}
 def main(nonce):

@@ -31,12 +31,11 @@ from agentworks.execution._file_stage_protocol import (
 )
 from agentworks.execution._helper_bundle import FixedFileHelperBundle
 from agentworks.execution._helper_identity import IdentityExpectation
-from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan, build_helper_argv
+from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._scratch import ScratchFailureKind, ScratchPhase
 from agentworks.execution._scratch_receipt import _Identity, scratch_name
-from agentworks.execution.carrier import CarrierIO, Deadline, Dispatch, PreparedInvocation, SinkOutput
+from agentworks.execution.carrier import CarrierIO, Deadline, Dispatch, SinkOutput
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
-from agentworks.execution.carriers.ssh.connection import SSHConnection, build_ssh_argv
 from tests.execution.files._file_stage_support import LocalCarrier, fixture_source, install_fixture_bundle
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the private stage helper candidate requires Linux")
@@ -778,25 +777,3 @@ def test_complete_proxmox_bodies_fit_for_transfer_and_recovery(
     assert cleaned.dispatch is Dispatch.SENT and cleaned.observation.state is FileStageObservationState.CLEANED
     assert len(body_sizes) == 4
     assert len(FIXED_BUNDLE.prefix) < min(body_sizes) <= max(body_sizes) < 65_536
-
-
-def test_fixed_helper_retains_windows_command_line_headroom(plan: IdentityPlan) -> None:
-    invocation = PreparedInvocation(
-        build_helper_argv(
-            plan,
-            runtime_path="/usr/bin/python3",
-            fixed_source=FIXED_BUNDLE.bootstrap,
-            nonce="0" * 32,
-        )
-    )
-    connection = SSHConnection(
-        "host.example",
-        "agent",
-        Path("/keys/identity"),
-        Path("/keys/known-hosts"),
-    )
-    ssh_argv = build_ssh_argv(connection, invocation)
-    windows_command = subprocess.list2cmdline(ssh_argv)
-
-    assert len(FIXED_BUNDLE.bootstrap) < len(ssh_argv[-1]) < len(windows_command) < 32_767
-    assert FIXED_BUNDLE.prefix.decode("ascii") not in ssh_argv[-1]

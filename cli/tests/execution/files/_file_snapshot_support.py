@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import textwrap
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -31,7 +32,7 @@ root=sys.modules[{(_PACKAGE + "._scratch_root")!r}]
 root._LINUX_SCRATCH_ROOT={str(scratch_root)!r}
 root._EXPECTED_OWNER_UID=os.geteuid()
 """
-    return fixture_file_bundle(_PACKAGE, _MODULE_NAMES, "_file_snapshot_guest", guest_patch, setup)
+    return fixture_file_bundle(_PACKAGE, _MODULE_NAMES, "_file_snapshot_guest", setup + textwrap.dedent(guest_patch))
 
 
 def install_fixture_bundle(
