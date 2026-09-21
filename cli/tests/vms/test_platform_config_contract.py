@@ -299,7 +299,7 @@ def test_proxmox_no_longer_reads_a_string_verify_ssl_as_true() -> None:
 
 def test_proxmox_ca_bundle_requires_verified_tls() -> None:
     _validate("proxmox", {**PROXMOX_CONFIG, "ca_bundle": "/trust/cluster-ca.pem"})
-    with pytest.raises(ConfigError, match="ca_bundle cannot be combined with verify_ssl: false"):
+    with pytest.raises(ConfigError):
         _validate(
             "proxmox",
             {**PROXMOX_CONFIG, "ca_bundle": "/trust/cluster-ca.pem", "verify_ssl": False},

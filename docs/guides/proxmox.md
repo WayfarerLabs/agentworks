@@ -269,6 +269,6 @@ Export the cluster CA certificate as a PEM bundle on the workstation and set `ca
 site's `platform` table. Agentworks verifies the API hostname against that CA. Omit `ca_bundle` when
 the cluster certificate already chains to normal workstation trust.
 
-Existing `verify_ssl: false` sites retain their legacy API behavior, but independent native
-execution refuses that setting. Enable verification and select the cluster CA bundle instead;
-Agentworks neither installs certificates nor downgrades TLS verification automatically.
+`ca_bundle` requires `verify_ssl: true`; configuration rejects combining a CA bundle with disabled
+verification. Agentworks neither installs certificates nor downgrades TLS verification
+automatically.

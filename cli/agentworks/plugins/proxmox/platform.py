@@ -229,7 +229,20 @@ class ProxmoxPlatform(VMPlatform):
 
     def _ca_bundle(self) -> Path | None:
         configured = self.config.ca_bundle
-        return Path(configured).expanduser() if configured is not None else None
+        if configured is None:
+            return None
+        try:
+            expanded = Path(configured).expanduser()
+        except RuntimeError:
+            expanded = None
+        if expanded is None:
+            raise ConfigError(
+                f"Proxmox CA bundle for vm-site '{self.site_name}' could not be resolved",
+                entity_kind="vm-site",
+                entity_name=self.site_name,
+                hint=f"Check the ca_bundle path: {configured}",
+            )
+        return expanded
 
     def _api(self, ctx: RunContext) -> ProxmoxAPI:
         """The op client, built on first need from the context's scoped

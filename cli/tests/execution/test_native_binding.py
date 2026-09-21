@@ -183,6 +183,39 @@ def test_proxmox_api_ca_load_failure_is_scoped_and_secret_free(monkeypatch: pyte
     assert raised.value.__context__ is None
 
 
+@pytest.mark.windows
+@pytest.mark.parametrize("path", ["binding", "api"])
+def test_proxmox_ca_expansion_failure_is_scoped_without_loading_or_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+) -> None:
+    configured = "~nonexistent-user/cluster-ca.pem"
+    platform = ProxmoxPlatform("pve-site", {**_PROXMOX_CONFIG, "ca_bundle": configured})
+    secrets = _Secrets({"native-binding-token": _SECRET})
+    load = MagicMock()
+    monkeypatch.setattr(Path, "expanduser", MagicMock(side_effect=RuntimeError(_SECRET)))
+    monkeypatch.setattr(ssl, "create_default_context", load)
+    monkeypatch.setattr("subprocess.Popen", lambda *_args, **_kwargs: pytest.fail("process launched"))
+
+    with pytest.raises(ConfigError) as raised:
+        if path == "binding":
+            platform.native_execution_binding(
+                _vm(metadata={"vmid": "101"}),
+                RunContext(secrets=secrets),
+            )
+        else:
+            platform._build_api(_SECRET)
+
+    assert raised.value.entity_kind == "vm-site"
+    assert raised.value.entity_name == "pve-site"
+    assert raised.value.hint is not None
+    assert configured in raised.value.hint
+    assert _SECRET not in repr(raised.value)
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    load.assert_not_called()
+
+
 def test_unimplemented_platform_hook_fails_without_making_old_subclass_abstract() -> None:
     platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
 

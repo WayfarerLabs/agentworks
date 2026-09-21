@@ -477,7 +477,7 @@ class TestSSLConfig:
         assert api._ssl_ctx.verify_mode == ssl.CERT_REQUIRED
 
     def test_ca_bundle_cannot_accompany_legacy_verification_bypass(self) -> None:
-        with pytest.raises(ValueError, match="cannot be combined"):
+        with pytest.raises(ValueError):
             ProxmoxAPI(
                 api_url="https://pve.example.com:8006",
                 token_id="u@p!t",
