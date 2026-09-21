@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import pwd
 import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -47,15 +46,15 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the account helper requires Linux")
+pytestmark = pytest.mark.windows
 
 _ROOT = IdentityExpectation(0, 0, (0,))
 _WORKER = IdentityExpectation(1001, 1002, (1002, 1003))
 _OTHER = IdentityExpectation(2001, 2002, (2002,))
 
 
-def _runtime() -> RuntimeSelection:
-    return RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable)
+def _runtime(path: str = "/usr/bin/python3") -> RuntimeSelection:
+    return RuntimeSelection(RuntimeTargetOS.LINUX, path)
 
 
 def _nonce(invocation: PreparedInvocation) -> str:
@@ -192,26 +191,30 @@ def _prepare(
     workload: str = "worker",
     elevated: bool = False,
     deadline: Deadline | None = None,
+    runtime_path: str = "/usr/bin/python3",
 ):
     return prepare_target_identity(
         carrier,
         delivery_account=delivery,
         workload_account=workload,
         elevated=elevated,
-        runtime_selection=_runtime(),
+        runtime_selection=_runtime(runtime_path),
         deadline=deadline or Deadline.after(15),
         owner=owner,
     )
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="the account helper requires Linux")
 def test_real_fixed_helper_composes_current_direct_identity_under_one_borrow(
     owned: tuple[Database, OperationOwner],
 ) -> None:
+    import pwd
+
     _, owner = owned
     account = pwd.getpwuid(os.geteuid()).pw_name
     carrier = LocalCarrier()
 
-    result = _prepare(owner, carrier, delivery=account, workload=account)
+    result = _prepare(owner, carrier, delivery=account, workload=account, runtime_path=sys.executable)
 
     assert result.status is TargetIdentityStatus.PREPARED
     assert result.plan is not None and result.plan.mode is IdentityMode.DIRECT
@@ -414,6 +417,40 @@ def test_abnormal_and_no_send_completion_facts_are_conservative(
 
     assert result.failure is failure and result.plan is None
     assert result.requires_owner_retention is retained
+    assert result.pending_remote_effects is retained
+    if not retained:
+        owner.close()
+
+
+@pytest.mark.parametrize(
+    ("dispatch", "completion", "failure", "retained"),
+    [
+        (Dispatch.SENT, ExitStatus(code=7), TargetIdentityFailure.TERMINATION, True),
+        (Dispatch.SENT, None, TargetIdentityFailure.TERMINATION, True),
+        (Dispatch.UNKNOWN, None, TargetIdentityFailure.TERMINATION, True),
+        (Dispatch.NOT_SENT, None, TargetIdentityFailure.DISPATCH, False),
+    ],
+    ids=["nonzero", "missing-completion", "unknown-dispatch", "not-sent"],
+)
+def test_expiry_crossed_during_abnormal_exchange_preserves_primary_failure(
+    owned: tuple[Database, OperationOwner],
+    dispatch: Dispatch,
+    completion: ExitStatus | None,
+    failure: TargetIdentityFailure,
+    retained: bool,
+) -> None:
+    _, owner = owned
+    carrier = SyntheticCarrier(
+        {"worker": _WORKER},
+        dispatch=dispatch,
+        completion=completion,
+        expire_on_return=True,
+    )
+
+    result = _prepare(owner, carrier, deadline=Deadline.after(15))
+
+    assert result.failure is failure and result.deadline_exceeded
+    assert result.plan is None and result.requires_owner_retention is retained
     assert result.pending_remote_effects is retained
     if not retained:
         owner.close()

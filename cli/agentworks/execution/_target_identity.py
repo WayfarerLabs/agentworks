@@ -151,8 +151,6 @@ class _Composer:
         else:
             self._state.fail(TargetIdentityFailure.IDENTITY_PATH)
 
-        if self._state.plan is None and self._state.failure is None:
-            self._state.fail(TargetIdentityFailure.IDENTITY_PATH)
         if self._expired():
             self._state.plan = None
         return self._state.finish()
@@ -195,6 +193,7 @@ class _Composer:
                 if result.dispatch is Dispatch.NOT_SENT
                 else TargetIdentityFailure.TERMINATION
             )
+            self._expired()
             return None
         if self._expired():
             return None
@@ -299,7 +298,7 @@ def _validate_inputs(
     deadline: Deadline,
     owner: OperationOwner,
 ) -> None:
-    for account in (delivery_account, workload_account, "root"):
+    for account in (delivery_account, workload_account):
         valid = True
         try:
             encode_account_request(AccountRequest(_VALIDATION_NONCE, account))
