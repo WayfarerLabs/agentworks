@@ -198,6 +198,20 @@ class RaisingCallCarrier:
         return self._carrier.execute(invocation, io=io, deadline=deadline)
 
 
+class DeadlineInterruptingCarrier:
+    calls = 0
+
+    @property
+    def features(self) -> ChannelFeatures:
+        return ChannelFeatures()
+
+    def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        del invocation, io
+        self.calls += 1
+        object.__setattr__(deadline, "expires_at", 0.0)
+        raise KeyboardInterrupt("carrier-secret-canary")
+
+
 class RuntimeRefusalOnCallCarrier:
     def __init__(self, refusal_call: int, state: RuntimePrerequisiteState) -> None:
         self._carrier = LocalCarrier()
@@ -660,6 +674,29 @@ def test_carrier_exception_after_execute_boundary_stops_follow_on_and_retains_ow
         database.close()
 
 
+def test_interrupted_dispatch_records_expired_deadline_fact(
+    tmp_path: Path,
+    plan: IdentityPlan,
+) -> None:
+    root = tmp_path / "approved"
+    root.mkdir()
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    carrier = DeadlineInterruptingCarrier()
+    try:
+        with pytest.raises(KeyboardInterrupt) as raised:
+            _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+
+        fact = raised.value.__cause__
+        assert isinstance(fact, FileUploadControlFact)
+        assert carrier.calls == 1
+        assert fact.outcome.deadline_exceeded
+        assert fact.outcome.pending_remote_effects
+        assert fact.outcome.requires_owner_retention
+    finally:
+        database.close()
+
+
 def test_deadline_exhaustion_after_stage_uses_no_fresh_cleanup_budget(
     tmp_path: Path,
     plan: IdentityPlan,
@@ -674,6 +711,39 @@ def test_deadline_exhaustion_after_stage_uses_no_fresh_cleanup_budget(
 
         assert outcome.failure is FileUploadFailure.DEADLINE
         assert outcome.deadline_exceeded and outcome.scratch_cleanup_debt is not None
+        assert outcome.requires_owner_retention
+        assert not root.joinpath("target").exists()
+    finally:
+        database.close()
+
+
+def test_real_carrier_timeout_records_deadline_with_unresolved_stage_begin(
+    tmp_path: Path,
+    plan: IdentityPlan,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(stage_exchange, "FIXED_BUNDLE", stage_fixture_source("import time; time.sleep(1)"))
+    root = tmp_path / "approved"
+    root.mkdir()
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    carrier = LocalCarrier()
+    try:
+        outcome = _upload(
+            owner,
+            root,
+            BytesSource(b"content"),
+            7,
+            plan,
+            carrier=carrier,
+            deadline=Deadline.after(0.1),
+        )
+
+        assert carrier.calls == 1
+        assert outcome.status is FileUploadStatus.UNCERTAIN
+        assert outcome.failure is FileUploadFailure.TERMINATION
+        assert outcome.deadline_exceeded and outcome.pending_remote_effects
+        assert outcome.bytes_consumed == 0
         assert outcome.requires_owner_retention
         assert not root.joinpath("target").exists()
     finally:

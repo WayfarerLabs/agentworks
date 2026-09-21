@@ -215,14 +215,6 @@ def download_file(
     try:
         try:
             return workflow.run()
-        except (KeyboardInterrupt, SystemExit, GeneratorExit) as control:
-            workflow.note_control_stop()
-            try:
-                workflow.cleanup_after_local_stop()
-            except BaseException:
-                workflow.note_control_stop()
-                state.fail(FileDownloadFailure.CLEANUP)
-            raise control from FileDownloadControlFact(state.finish())
         except BaseException as control:
             workflow.note_control_stop()
             if not operation.coordination_uncertain:
@@ -231,6 +223,7 @@ def download_file(
                 except BaseException:
                     workflow.note_control_stop()
                     state.fail(FileDownloadFailure.CLEANUP)
+            workflow.note_control_stop()
             raise control from FileDownloadControlFact(state.finish())
     finally:
         borrow.close()
@@ -264,6 +257,7 @@ class _DownloadWorkflow:
         return self._state.finish()
 
     def note_control_stop(self) -> None:
+        self._state.deadline_exceeded = self._state.deadline_exceeded or self._deadline.expired
         if self._state.operation.outstanding_attempt is not None:
             self._state.pending_remote_effects = True
 
@@ -403,13 +397,8 @@ class _DownloadWorkflow:
         if result.dispatch is not Dispatch.NOT_SENT and observation is not None:
             self._record_observation(observation)
         normal = self._settle(result.dispatch, result.carrier_completion)
-        if not normal:
-            self._state.ownership_uncertain = self._state.cleanup_debt is None
-            return
-        if self._runtime_refused(result.runtime_prerequisite):
+        if normal and self._runtime_refused(result.runtime_prerequisite):
             self._state.fail(FileDownloadFailure.RUNTIME_PREREQUISITE)
-            self._state.ownership_uncertain = self._state.cleanup_debt is None
-            return
         self._state.ownership_uncertain = self._state.cleanup_debt is None
 
     def _cleanup_after_failure(self) -> None:
@@ -472,6 +461,7 @@ class _DownloadWorkflow:
 
     def _settle(self, dispatch: Dispatch, completion: ExitStatus | None) -> bool:
         normal = self._state.operation.settle(dispatch, completion)
+        self._state.deadline_exceeded = self._state.deadline_exceeded or self._deadline.expired
         self._state.pending_remote_effects = (
             self._state.pending_remote_effects or self._state.operation.pending_remote_effects
         )

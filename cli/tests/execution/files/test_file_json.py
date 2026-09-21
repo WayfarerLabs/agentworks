@@ -6,7 +6,7 @@ import json
 import os
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
@@ -92,7 +92,9 @@ class AfterCallCarrier:
 
 
 class InterruptingCarrier:
-    calls = 0
+    def __init__(self, *, expire_deadline: bool = False) -> None:
+        self.calls = 0
+        self.expire_deadline = expire_deadline
 
     @property
     def features(self) -> ChannelFeatures:
@@ -105,9 +107,33 @@ class InterruptingCarrier:
         io: CarrierIO,
         deadline: Deadline,
     ) -> CarrierReport:
-        del invocation, io, deadline
+        del invocation, io
         self.calls += 1
+        if self.expire_deadline:
+            object.__setattr__(deadline, "expires_at", 0.0)
         raise KeyboardInterrupt
+
+
+class ExpiredMissingCompletionCarrier:
+    def __init__(self) -> None:
+        self._carrier = LocalCarrier()
+        self.calls = 0
+
+    @property
+    def features(self) -> ChannelFeatures:
+        return ChannelFeatures()
+
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+    ) -> CarrierReport:
+        self.calls += 1
+        report = self._carrier.execute(invocation, io=io, deadline=deadline)
+        object.__setattr__(deadline, "expires_at", 0.0)
+        return replace(report, completion=None)
 
 
 @pytest.fixture
@@ -771,6 +797,52 @@ def test_interrupted_dispatch_exports_bounded_retention_fact(
         assert "source" not in repr(outcome)
         with pytest.raises(StateError):
             owner.close()
+    finally:
+        database.close()
+
+
+@pytest.mark.parametrize("strategy", ["replace", "merge-overwrite"], ids=["stat", "read"])
+def test_expired_stat_or_read_result_preserves_termination_and_deadline_facts(
+    tmp_path: Path,
+    plan: IdentityPlan,
+    strategy: JsonFileStrategy,
+) -> None:
+    root = tmp_path / "approved"
+    root.mkdir()
+    root.joinpath("target").write_text('{"existing":true}')
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    carrier = ExpiredMissingCompletionCarrier()
+    try:
+        outcome = _update(owner, root, plan, b'{"source":true}', strategy, carrier=carrier)
+
+        assert carrier.calls == 1 and outcome.publication_attempts == 0
+        assert outcome.status is FileJsonStatus.UNCERTAIN
+        assert outcome.failure is FileJsonFailure.TERMINATION
+        assert outcome.deadline_exceeded and outcome.pending_remote_effects
+        assert outcome.requires_owner_retention
+    finally:
+        database.close()
+
+
+def test_interrupted_json_exchange_records_expired_deadline_fact(
+    tmp_path: Path,
+    plan: IdentityPlan,
+) -> None:
+    root = tmp_path / "approved"
+    root.mkdir()
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    carrier = InterruptingCarrier(expire_deadline=True)
+    try:
+        with pytest.raises(KeyboardInterrupt) as raised:
+            _update(owner, root, plan, b'{"source":true}', "replace", carrier=carrier)
+
+        fact = raised.value.__cause__
+        assert isinstance(fact, FileJsonControlFact)
+        assert fact.outcome.deadline_exceeded
+        assert fact.outcome.pending_remote_effects
+        assert fact.outcome.requires_owner_retention
     finally:
         database.close()
 

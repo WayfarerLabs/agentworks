@@ -185,6 +185,40 @@ def test_sink_control_flow_propagates_with_bounded_clean_state(
         database.close()
 
 
+def test_real_carrier_timeout_records_deadline_with_unresolved_begin(
+    tmp_path: Path,
+    roots: tuple[Path, Path],
+    plan: IdentityPlan,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, scratch = roots
+    source.joinpath("source").write_bytes(b"payload")
+    install_fixture_bundle(monkeypatch, scratch, "import time; time.sleep(1)")
+    database = Database(tmp_path / "state.db")
+    operation_owner = owner(database)
+    carrier = LocalCarrier()
+    sink = BytesSink()
+    try:
+        outcome = download(
+            operation_owner,
+            source,
+            sink,
+            64,
+            plan,
+            carrier=carrier,
+            deadline=Deadline.after(0.1),
+        )
+
+        assert carrier.calls == 1 and sink.calls == 0
+        assert outcome.status is FileDownloadStatus.UNCERTAIN
+        assert outcome.failure is FileDownloadFailure.TERMINATION
+        assert outcome.deadline_exceeded and outcome.pending_remote_effects
+        assert outcome.requires_owner_retention
+        assert not tuple(scratch.iterdir())
+    finally:
+        database.close()
+
+
 def test_deadline_during_sink_stall_retains_exact_cleanup_debt(
     tmp_path: Path,
     roots: tuple[Path, Path],
@@ -506,11 +540,16 @@ def test_nonzero_cleanup_exit_preserves_debt_despite_cleaned_transcript(
 
 
 class _InterruptingCarrier:
+    def __init__(self, *, expire_deadline: bool = False) -> None:
+        self.expire_deadline = expire_deadline
+
     @property
     def features(self):
         return LocalCarrier().features
 
     def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        if self.expire_deadline:
+            object.__setattr__(deadline, "expires_at", 0.0)
         raise KeyboardInterrupt("carrier-secret-canary")
 
 
@@ -533,6 +572,35 @@ def test_interrupted_dispatch_exports_pending_effect_facts_and_releases_borrow(
         assert fact.outcome.requires_owner_retention
         with pytest.raises(StateError):
             operation_owner.borrow()
+    finally:
+        database.close()
+
+
+def test_interrupted_dispatch_records_expired_deadline_fact(
+    tmp_path: Path,
+    roots: tuple[Path, Path],
+    plan: IdentityPlan,
+) -> None:
+    source, _ = roots
+    source.joinpath("source").write_bytes(b"payload")
+    database = Database(tmp_path / "state.db")
+    operation_owner = owner(database)
+    try:
+        with pytest.raises(KeyboardInterrupt) as raised:
+            download(
+                operation_owner,
+                source,
+                BytesSink(),
+                64,
+                plan,
+                carrier=_InterruptingCarrier(expire_deadline=True),
+            )
+
+        fact = raised.value.__cause__
+        assert isinstance(fact, FileDownloadControlFact)
+        assert fact.outcome.deadline_exceeded
+        assert fact.outcome.pending_remote_effects
+        assert fact.outcome.requires_owner_retention
     finally:
         database.close()
 

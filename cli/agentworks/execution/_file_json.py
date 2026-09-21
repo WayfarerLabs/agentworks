@@ -258,6 +258,7 @@ def update_json_file(
                 if cause.outcome.runtime_prerequisite is not None:
                     state.record_runtime(cause.outcome.runtime_prerequisite)
                 state.deadline_exceeded = state.deadline_exceeded or cause.outcome.deadline_exceeded
+            state.deadline_exceeded = state.deadline_exceeded or deadline.expired
             raise control from FileJsonControlFact(state.finish())
     finally:
         borrow.close()
@@ -378,6 +379,7 @@ class _JsonWorkflow:
                 self._state.deadline_exceeded = True
                 self._state.fail(FileJsonFailure.DEADLINE)
         normal = self._state.operation.settle(result.dispatch, result.carrier_completion)
+        self._state.deadline_exceeded = self._state.deadline_exceeded or self._deadline.expired
         if not normal:
             self._state.fail(
                 FileJsonFailure.OBSERVATION if result.dispatch is Dispatch.NOT_SENT else FileJsonFailure.TERMINATION
@@ -420,6 +422,7 @@ class _JsonWorkflow:
                 self._state.deadline_exceeded = True
                 self._state.fail(FileJsonFailure.DEADLINE)
         normal = self._state.operation.settle(result.dispatch, result.carrier_completion)
+        self._state.deadline_exceeded = self._state.deadline_exceeded or self._deadline.expired
         if not normal:
             self._state.fail(
                 FileJsonFailure.OBSERVATION if result.dispatch is Dispatch.NOT_SENT else FileJsonFailure.TERMINATION

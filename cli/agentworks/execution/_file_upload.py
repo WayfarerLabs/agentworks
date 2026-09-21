@@ -267,26 +267,15 @@ def _upload_file_borrowed(
     workflow = _UploadWorkflow(operation, source, canonical_condition, canonical_metadata, deadline, state)
     try:
         return workflow.run()
-    except (KeyboardInterrupt, SystemExit, GeneratorExit) as control:
-        if operation.outstanding_attempt is not None:
-            state.pending_remote_effects = True
-        try:
-            workflow.cleanup_after_local_stop()
-        except BaseException:
-            if operation.outstanding_attempt is not None:
-                state.pending_remote_effects = True
-            state.fail(FileUploadFailure.CLEANUP)
-        raise control from FileUploadControlFact(state.finish())
     except BaseException as control:
-        if operation.outstanding_attempt is not None:
-            state.pending_remote_effects = True
-        elif not operation.coordination_uncertain:
+        workflow.note_control_stop()
+        if not operation.coordination_uncertain:
             try:
                 workflow.cleanup_after_local_stop()
             except BaseException:
-                if operation.outstanding_attempt is not None:
-                    state.pending_remote_effects = True
+                workflow.note_control_stop()
                 state.fail(FileUploadFailure.CLEANUP)
+        workflow.note_control_stop()
         raise control from FileUploadControlFact(state.finish())
 
 
@@ -327,6 +316,11 @@ class _UploadWorkflow:
     def cleanup_after_local_stop(self) -> None:
         if not self._state.pending_remote_effects and not self._state.operation.coordination_uncertain:
             self._cleanup_after_failure()
+
+    def note_control_stop(self) -> None:
+        self._state.deadline_exceeded = self._state.deadline_exceeded or self._deadline.expired
+        if self._state.operation.outstanding_attempt is not None:
+            self._state.pending_remote_effects = True
 
     def _begin_stage(self) -> bool:
         result = stage_begin(
@@ -655,6 +649,7 @@ class _UploadWorkflow:
         completion: ExitStatus | None,
     ) -> bool:
         normal = self._state.operation.settle(dispatch, completion)
+        self._state.deadline_exceeded = self._state.deadline_exceeded or self._deadline.expired
         self._state.pending_remote_effects = (
             self._state.pending_remote_effects or self._state.operation.pending_remote_effects
         )
