@@ -11,12 +11,13 @@ import pytest
 from agentworks.errors import ValidationError
 from agentworks.execution import _helper_identity, _inline_guest
 from agentworks.execution._evidence_wire import Frame, FrameKind, FrameReader
-from agentworks.execution._file_read import FileReadObservationState, read_file
+from agentworks.execution._file_read import read_file
 from agentworks.execution._helper_identity import IdentityExpectation, decode_identity
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan, build_helper_argv
 from agentworks.execution._inline import execute_inline_candidate, prepare_inline_candidate
 from agentworks.execution._inline_control import FailureCode, FailurePhase, parse_failure
 from agentworks.execution._inline_observer import ObservationError
+from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
 from agentworks.execution.carrier import (
     CapturedOutput,
     CarrierIO,
@@ -29,6 +30,7 @@ from agentworks.execution.carrier import (
     Retention,
 )
 from agentworks.execution.models import Command, Script, Shell
+from tests.execution.files._runtime_support import runtime_selection
 
 
 def _identity(uid: int = 1001, gid: int = 1002, groups: tuple[int, ...] = (1002, 1003)) -> IdentityExpectation:
@@ -131,6 +133,7 @@ def test_wrapper_argv_is_literal_and_payload_free(
         max_bytes=1,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
     assert carrier.invocation is not None
 
@@ -181,6 +184,7 @@ def test_invalid_identity_plan_is_rejected_before_payload_encoding(
                 max_bytes=1,
                 plan=plan,
                 deadline=Deadline.after(1),
+                runtime_selection=runtime_selection(),
             )
 
 
@@ -277,6 +281,7 @@ def test_pre_helper_wrapper_failure_never_claims_application_or_file_success(mod
         max_bytes=1,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
     assert carrier.calls == 2
@@ -284,5 +289,5 @@ def test_pre_helper_wrapper_failure_never_claims_application_or_file_success(mod
     assert not inline_result.observation.trusted_terminal
     assert inline_result.observation.wait is None
     assert inline_result.observation.error is ObservationError.MISSING_TERMINAL
-    assert file_result.observation.state is FileReadObservationState.INCOMPLETE
-    assert file_result.observation.snapshot is None
+    assert file_result.runtime_prerequisite.state is RuntimePrerequisiteState.UNKNOWN
+    assert file_result.observation is None

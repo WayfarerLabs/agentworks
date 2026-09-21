@@ -25,10 +25,12 @@ from agentworks.execution._file_stage_protocol import parse_file_stage_failure
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, FileRecordReader
 from agentworks.execution._helper_bundle import FixedFileHelperBundle
 from agentworks.execution._helper_identity import IdentityExpectation
-from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan, build_helper_argv
+from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._runtime_prerequisite import build_runtime_identity_helper_argv
 from agentworks.execution.carrier import CarrierIO, Deadline, FiniteInput, PreparedInvocation, SinkOutput
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 from agentworks.execution.carriers.ssh.connection import SSHConnection, build_ssh_argv
+from tests.execution.files._runtime_support import runtime_selection
 
 _NONCE = "0" * 32
 _BUNDLES = (
@@ -48,12 +50,12 @@ class _Sink:
 
 def _invocation(bundle: FixedFileHelperBundle, plan: IdentityPlan) -> PreparedInvocation:
     return PreparedInvocation(
-        build_helper_argv(
+        build_runtime_identity_helper_argv(
             plan,
-            runtime_path="/usr/bin/python3",
+            selection=runtime_selection("/usr/bin/python3"),
             fixed_source=bundle.bootstrap,
             nonce=_NONCE,
-        )
+        )[0]
     )
 
 

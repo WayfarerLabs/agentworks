@@ -41,6 +41,7 @@ from agentworks.execution._file_wire import (
 )
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._runtime_prerequisite import RuntimePrefixSink
 from agentworks.execution.carrier import (
     ByteSink,
     CapturedOutput,
@@ -54,6 +55,7 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
+from tests.execution.files._runtime_support import runtime_nonce, runtime_ready_record, runtime_selection
 
 
 def _write(sink: ByteSink, data: bytes) -> int:
@@ -139,8 +141,8 @@ class TranscriptCarrier:
         self.invocation = invocation
         self.io = io
         assert isinstance(io.output, SinkOutput)
-        transcript = self.stdout(invocation.argv[-1]) if callable(self.stdout) else self.stdout
-        self.sink_calls += _write(io.output.stdout, transcript)
+        transcript = self.stdout(runtime_nonce(invocation)) if callable(self.stdout) else self.stdout
+        self.sink_calls += _write(io.output.stdout, runtime_ready_record(invocation) + transcript)
         if self.stderr:
             self.sink_calls += _write(io.output.stderr, self.stderr)
         return CarrierReport(
@@ -166,12 +168,13 @@ class InterruptingCarrier:
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
         del deadline
         assert isinstance(io.output, SinkOutput)
-        assert isinstance(io.output.stdout, FileRecordReader)
-        self.reader = io.output.stdout
+        assert isinstance(io.output.stdout, RuntimePrefixSink)
+        assert isinstance(io.output.stdout.downstream, FileRecordReader)
+        self.reader = io.output.stdout.downstream
         callback_owner = getattr(self.reader._on_record, "__self__", None)
         assert isinstance(callback_owner, _file_read._FileReadCollector)
         self.collector = callback_owner
-        _write(io.output.stdout, self.build_stdout(invocation.argv[-1]))
+        _write(io.output.stdout, runtime_ready_record(invocation) + self.build_stdout(runtime_nonce(invocation)))
         raise self.interruption
 
 
@@ -211,6 +214,7 @@ def _read(
         max_bytes=max_bytes,
         plan=plan,
         deadline=deadline or Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
 
@@ -387,7 +391,9 @@ def test_finalization_base_exception_clears_transcript_state_before_propagation(
 
     assert raised.value is interruption
     assert carrier.io is not None and isinstance(carrier.io.output, SinkOutput)
-    reader = carrier.io.output.stdout
+    runtime = carrier.io.output.stdout
+    assert isinstance(runtime, RuntimePrefixSink)
+    reader = runtime.downstream
     assert isinstance(reader, FileRecordReader)
     collector = getattr(reader._on_record, "__self__", None)
     assert isinstance(collector, _file_read._FileReadCollector)
@@ -510,6 +516,7 @@ def test_complete_qga_json_request_is_ascii_armored_and_within_full_body_limit(p
         max_bytes=1024,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
     assert carrier.io is not None and carrier.invocation is not None
     input_data = carrier.io.input.data  # type: ignore[union-attr]

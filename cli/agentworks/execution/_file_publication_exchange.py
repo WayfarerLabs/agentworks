@@ -36,8 +36,14 @@ from agentworks.execution._file_publication_protocol import (
     parse_file_publish_result,
 )
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, FileRecordReader, FileWireError
-from agentworks.execution._helper_launcher import IdentityPlan, build_helper_argv
 from agentworks.execution._publication_receipt import PublicationStageCleanupDebt
+from agentworks.execution._runtime_prerequisite import (
+    RuntimePrefixSink,
+    RuntimePrerequisiteObservation,
+    RuntimePrerequisiteState,
+    RuntimeSelection,
+    build_runtime_identity_helper_argv,
+)
 from agentworks.execution._scratch import ScratchPhase
 from agentworks.execution.carrier import (
     CarrierIO,
@@ -52,10 +58,9 @@ from agentworks.execution.carrier import (
 if TYPE_CHECKING:
     from agentworks.execution._file_publication_wire import BoundPublicationCleanupDebt
     from agentworks.execution._file_stat import FileRevision
+    from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution._scratch import ScratchReference
     from agentworks.execution.carrier import Carrier, Deadline, ExitStatus
-
-_DEFAULT_RUNTIME = "/usr/bin/python3"
 
 
 class FilePublicationObservationState(StrEnum):
@@ -96,7 +101,8 @@ class FilePublicationCandidateResult:
     carrier_completion: ExitStatus | None
     carrier_local_status: int | None
     carrier_failure: Failure | None
-    observation: FilePublicationObservation
+    runtime_prerequisite: RuntimePrerequisiteObservation
+    observation: FilePublicationObservation | None
 
 
 class FilePublishUncertain(Exception):
@@ -338,40 +344,50 @@ def _exchange(
     request: FilePublicationRequest,
     plan: IdentityPlan,
     deadline: Deadline,
-    runtime_path: str,
+    runtime_selection: RuntimeSelection,
 ) -> FilePublicationCandidateResult:
     data = _request_data(request)
-    fixed_argv = build_helper_argv(
+    fixed_argv, candidates, system_shim = build_runtime_identity_helper_argv(
         plan,
-        runtime_path=runtime_path,
+        selection=runtime_selection,
         fixed_source=FIXED_BUNDLE.bootstrap,
         nonce=request.nonce,
     )
     collector = _FilePublicationCollector(request)
     reader = FileRecordReader(request.nonce, collector.accept)
+    runtime = RuntimePrefixSink(request.nonce, candidates, reader, system_shim)
     stderr = _DiagnosticSink()
     io = CarrierIO(
         input=FiniteInput(FIXED_BUNDLE.prefix + data, sensitive=True),
-        output=SinkOutput(reader, stderr, require_live=False),
+        output=SinkOutput(runtime, stderr, require_live=False),
         sensitive=True,
     )
     dispatch = Dispatch.UNKNOWN
     try:
         report = carrier.execute(PreparedInvocation(fixed_argv), io=io, deadline=deadline)
         dispatch = report.dispatch
-        reader.finish()
-        delivered = report.stdout.retention is Retention.DELIVERED and report.stderr.retention is Retention.DELIVERED
-        observation = collector.finish(
-            reader.error,
-            streams_complete=delivered and report.stdout.complete and report.stderr.complete,
-            stderr_noise=stderr.saw_data,
-            dispatch=report.dispatch,
-        )
+        runtime_prerequisite = runtime.observation
+        if runtime_prerequisite.state is RuntimePrerequisiteState.READY:
+            reader.finish()
+            delivered = (
+                report.stdout.retention is Retention.DELIVERED and report.stderr.retention is Retention.DELIVERED
+            )
+            observation = collector.finish(
+                reader.error,
+                streams_complete=delivered and report.stdout.complete and report.stderr.complete,
+                stderr_noise=stderr.saw_data,
+                dispatch=report.dispatch,
+            )
+        else:
+            reader.abort()
+            collector.abort()
+            observation = None
         return FilePublicationCandidateResult(
             report.dispatch,
             report.completion,
             report.local_status,
             report.failure,
+            runtime_prerequisite,
             observation,
         )
     except BaseException as control:
@@ -380,6 +396,8 @@ def _exchange(
         if dispatch is not Dispatch.NOT_SENT:
             raise control from _control_uncertainty(request.operation)
         raise
+    finally:
+        runtime.clear()
 
 
 def publish(
@@ -394,7 +412,7 @@ def publish(
     create_metadata: CreateMetadata,
     plan: IdentityPlan,
     deadline: Deadline,
-    runtime_path: str = _DEFAULT_RUNTIME,
+    runtime_selection: RuntimeSelection,
 ) -> FilePublicationCandidateResult:
     """Publish one verified stage through one fresh non-replayed attempt."""
     request = FilePublishRequest(
@@ -409,7 +427,7 @@ def publish(
         plan.expected,
         deadline.remaining(),
     )
-    return _exchange(carrier, request, plan, deadline, runtime_path)
+    return _exchange(carrier, request, plan, deadline, runtime_selection)
 
 
 def publication_reconcile(
@@ -421,7 +439,7 @@ def publication_reconcile(
     reference: ScratchReference,
     plan: IdentityPlan,
     deadline: Deadline,
-    runtime_path: str = _DEFAULT_RUNTIME,
+    runtime_selection: RuntimeSelection,
 ) -> FilePublicationCandidateResult:
     """Recover historical cleanup ownership without inferring publication."""
     request = FilePublicationReconcileRequest(
@@ -433,7 +451,7 @@ def publication_reconcile(
         plan.expected,
         deadline.remaining(),
     )
-    return _exchange(carrier, request, plan, deadline, runtime_path)
+    return _exchange(carrier, request, plan, deadline, runtime_selection)
 
 
 def publication_cleanup(
@@ -446,7 +464,7 @@ def publication_cleanup(
     cleanup_debt: BoundPublicationCleanupDebt,
     plan: IdentityPlan,
     deadline: Deadline,
-    runtime_path: str = _DEFAULT_RUNTIME,
+    runtime_selection: RuntimeSelection,
 ) -> FilePublicationCandidateResult:
     """Attempt one exact publication cleanup without a quiescence claim."""
     request = FilePublicationCleanupRequest(
@@ -459,4 +477,4 @@ def publication_cleanup(
         plan.expected,
         deadline.remaining(),
     )
-    return _exchange(carrier, request, plan, deadline, runtime_path)
+    return _exchange(carrier, request, plan, deadline, runtime_selection)

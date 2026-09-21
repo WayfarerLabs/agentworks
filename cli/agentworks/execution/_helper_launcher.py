@@ -80,6 +80,33 @@ def build_clean_helper_argv(
     return build_clean_environment_argv(runtime_path, "-I", "-S", "-B", "-c", fixed_source, nonce)
 
 
+def build_identity_argv(plan: IdentityPlan, fixed_argv: tuple[str, ...]) -> tuple[str, ...]:
+    """Apply one validated identity transition to fixed inner argv."""
+    expected = _validate_plan(plan)
+    return _identity_argv(plan, expected, fixed_argv)
+
+
+def _identity_argv(
+    plan: IdentityPlan,
+    expected: IdentityExpectation,
+    fixed_argv: tuple[str, ...],
+) -> tuple[str, ...]:
+    if plan.mode is IdentityMode.DIRECT:
+        return fixed_argv
+    if plan.mode is IdentityMode.SUDO_ROOT:
+        return (_SUDO, "-n", "--user=#0", "--", *fixed_argv)
+    return (
+        _SETPRIV,
+        f"--reuid={expected.euid}",
+        f"--regid={expected.egid}",
+        f"--groups={','.join(str(group) for group in expected.groups)}",
+        "--inh-caps=-all",
+        "--ambient-caps=-all",
+        "--",
+        *fixed_argv,
+    )
+
+
 def build_helper_argv(
     plan: IdentityPlan,
     *,
@@ -90,17 +117,4 @@ def build_helper_argv(
     """Build one fixed helper launch with an explicit identity transition."""
     expected = _validate_plan(plan)
     helper = build_clean_helper_argv(runtime_path=runtime_path, fixed_source=fixed_source, nonce=nonce)
-    if plan.mode is IdentityMode.DIRECT:
-        return helper
-    if plan.mode is IdentityMode.SUDO_ROOT:
-        return (_SUDO, "-n", "--user=#0", "--", *helper)
-    return (
-        _SETPRIV,
-        f"--reuid={expected.euid}",
-        f"--regid={expected.egid}",
-        f"--groups={','.join(str(group) for group in expected.groups)}",
-        "--inh-caps=-all",
-        "--ambient-caps=-all",
-        "--",
-        *helper,
-    )
+    return _identity_argv(plan, expected, helper)

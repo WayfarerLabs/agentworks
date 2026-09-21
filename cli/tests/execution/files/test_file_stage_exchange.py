@@ -67,6 +67,7 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
+from tests.execution.files._runtime_support import runtime_ready_record, runtime_selection
 
 _TOKEN = bytes(range(16))
 
@@ -139,7 +140,7 @@ class TranscriptCarrier:
         assert io.input.data.startswith(FIXED_BUNDLE.prefix)
         request = decode_file_stage_request(io.input.data[len(FIXED_BUNDLE.prefix) :])
         transcript = self.build(request)  # type: ignore[operator]
-        _write(io.output.stdout, transcript)
+        _write(io.output.stdout, runtime_ready_record(invocation) + transcript)
         _write(io.output.stderr, self.stderr)
         output = CapturedOutput(complete=self.complete, retention=Retention.DELIVERED)
         return CarrierReport(
@@ -195,6 +196,7 @@ def test_complete_begin_exposes_reference_only_after_sensitive_terminal_exchange
         expected_length=20_000,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
     assert carrier.calls == 1
@@ -227,6 +229,7 @@ def test_complete_begin_with_different_declared_length_is_uncertain_control(plan
         expected_length=20_000,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FileStageObservationState.UNCERTAIN
@@ -258,6 +261,7 @@ def test_complete_chunk_is_accepted_once_without_payload_retention(plan: Identit
         chunk_digest=hashlib.sha256(payload).digest(),
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
     assert carrier.calls == 1
@@ -276,6 +280,7 @@ def test_complete_reconcile_exposes_only_cleanup_debt_after_terminal(plan: Ident
         token=_TOKEN,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FileStageObservationState.RECOVERED
@@ -295,6 +300,7 @@ def test_truncated_reconcile_never_exposes_parsed_cleanup_debt(plan: IdentityPla
         token=_TOKEN,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FileStageObservationState.UNCERTAIN
@@ -318,6 +324,7 @@ def test_complete_reconcile_can_report_ownership_uncertainty(plan: IdentityPlan)
         token=_TOKEN,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FileStageObservationState.OWNERSHIP_UNCERTAIN
@@ -345,6 +352,7 @@ def _reconcile_refusal(
         token=_TOKEN,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
 
@@ -394,6 +402,7 @@ def test_reconcile_reply_from_another_request_nonce_is_uncertain(plan: IdentityP
         token=_TOKEN,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FileStageObservationState.UNCERTAIN
@@ -411,6 +420,7 @@ def test_complete_cleanup_reports_only_attempt_observation(plan: IdentityPlan) -
         cleanup_debt=_debt(begin),
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FileStageObservationState.CLEANED
@@ -440,6 +450,7 @@ def test_lost_creation_acknowledgement_is_never_replayed_or_reported_absent(
         expected_length=1,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
     assert carrier.calls == 1
@@ -470,6 +481,7 @@ def test_complete_refusal_exposes_known_cleanup_debt(plan: IdentityPlan) -> None
         expected_length=1,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FileStageObservationState.REFUSED
@@ -500,6 +512,7 @@ def test_truncated_refusal_never_exposes_parsed_cleanup_debt(plan: IdentityPlan)
         expected_length=1,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FileStageObservationState.UNCERTAIN
@@ -549,6 +562,7 @@ def _chunk_refusal(
         chunk_digest=hashlib.sha256(data).digest(),
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
 
@@ -618,6 +632,7 @@ def _cleanup_refusal(
         cleanup_debt=debt,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
 
@@ -697,6 +712,7 @@ def test_noisy_wrong_nonce_duplicate_and_stderr_creation_responses_are_uncertain
         expected_length=1,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FileStageObservationState.UNCERTAIN
@@ -734,6 +750,7 @@ def test_control_interruption_propagates_with_operation_specific_uncertainty(
         "token": _TOKEN,
         "plan": plan,
         "deadline": Deadline.after(1),
+        "runtime_selection": runtime_selection(),
     }
     with pytest.raises(KeyboardInterrupt) as raised:
         if operation == "begin":
@@ -769,6 +786,7 @@ def test_invalid_destination_refuses_before_carrier_attempt(plan: IdentityPlan, 
             expected_length=1,
             plan=plan,
             deadline=Deadline.after(1),
+            runtime_selection=runtime_selection(),
         )
 
     assert carrier.calls == 0
@@ -786,6 +804,7 @@ def test_invalid_utf8_selector_is_not_retained_by_validation(plan: IdentityPlan)
             expected_length=1,
             plan=plan,
             deadline=Deadline.after(1),
+            runtime_selection=runtime_selection(),
         )
 
     assert carrier.calls == 0

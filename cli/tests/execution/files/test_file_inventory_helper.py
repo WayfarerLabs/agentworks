@@ -39,6 +39,7 @@ from agentworks.execution._file_wire import (
 from agentworks.execution._helper_bundle import FixedFileHelperBundle
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
 from agentworks.execution.carrier import (
     CarrierIO,
     CarrierReport,
@@ -50,6 +51,7 @@ from agentworks.execution.carrier import (
 )
 from agentworks.execution.carriers._subprocess import run_process
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
+from tests.execution.files._runtime_support import runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the inventory helper requires Linux")
 
@@ -116,9 +118,23 @@ def _list(
             max_encoded_bytes=max_encoded_bytes,
             plan=plan,
             deadline=Deadline.after(15),
-            runtime_path=str(runtime),
+            runtime_selection=runtime_selection(str(runtime)),
         )
     return carrier, result
+
+
+def test_missing_runtime_yields_no_inventory_observation(tmp_path: Path, plan: IdentityPlan) -> None:
+    carrier, result = _list(
+        tmp_path,
+        "missing",
+        plan,
+        FIXED_BUNDLE,
+        runtime=Path("/missing/agentworks-python"),
+    )
+
+    assert carrier.calls == 1
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.MISSING
+    assert result.observation is None
 
 
 @pytest.mark.parametrize("runtime", [Path(sys.executable), Path("/usr/bin/python3.11")], ids=["current", "python311"])
@@ -141,6 +157,7 @@ def test_isolated_bundle_lists_sorted_utf8_metadata_without_content_reads(
         private.chmod(0o600)
 
     assert carrier.calls == 1
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
     assert result.observation.state is FileInventoryObservationState.PRESENT
     assert result.observation.entries is not None
     assert [entry.relative_path for entry in result.observation.entries] == [
@@ -372,7 +389,7 @@ def test_complete_proxmox_envelope_fits_and_delivers_real_helper_response(
             max_encoded_bytes=4096,
             plan=plan,
             deadline=Deadline.after(15),
-            runtime_path=sys.executable,
+            runtime_selection=runtime_selection(),
         )
 
     assert len(FIXED_BUNDLE.prefix) < body_sizes[0] < 65_536

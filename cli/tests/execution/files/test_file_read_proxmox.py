@@ -13,8 +13,10 @@ import pytest
 from agentworks.execution._file_read import FileReadObservationState, read_file
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
 from agentworks.execution.carrier import Deadline, Dispatch, ExitStatus
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
+from tests.execution.files._runtime_support import runtime_selection
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -82,7 +84,7 @@ def test_file_read_through_buffered_proxmox_delivery(
             IdentityMode.DIRECT,
         ),
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
 
     assert requests == [("POST", "exec"), ("GET", "exec-status?pid=42")]
@@ -90,9 +92,16 @@ def test_file_read_through_buffered_proxmox_delivery(
     assert "file-content-canary" not in repr(result)
     assert "reflected-secret-canary" not in repr(result)
     if fault is None:
+        assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+        assert result.observation is not None
         assert result.observation.state is FileReadObservationState.PRESENT
         assert result.observation.snapshot is not None
         assert result.observation.snapshot.data == data
+    elif fault == "stdout_noise":
+        assert result.runtime_prerequisite.state is RuntimePrerequisiteState.UNKNOWN
+        assert result.observation is None
     else:
+        assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+        assert result.observation is not None
         assert result.observation.snapshot is None
         assert result.observation.state in {FileReadObservationState.INVALID, FileReadObservationState.INCOMPLETE}

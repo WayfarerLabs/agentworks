@@ -55,7 +55,7 @@ from agentworks.execution._file_publication_wire import (
 from agentworks.execution._file_stat import FileRevision, FileStat
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, encode_file_record
 from agentworks.execution._helper_identity import IdentityExpectation
-from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan, build_helper_argv
+from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._publication_receipt import (
     PublicationReceiptFailureKind,
     PublicationStageCleanupDebt,
@@ -65,6 +65,7 @@ from agentworks.execution._publication_receipt import (
 from agentworks.execution._publication_receipt import (
     _Identity as PublicationIdentity,
 )
+from agentworks.execution._runtime_prerequisite import build_runtime_identity_helper_argv
 from agentworks.execution._scratch import ScratchReference
 from agentworks.execution._scratch_receipt import ScratchOwnership
 from agentworks.execution._scratch_receipt import _Identity as ScratchIdentity
@@ -84,6 +85,7 @@ from agentworks.execution.carrier import (
 )
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 from agentworks.execution.carriers.ssh.connection import SSHConnection, build_ssh_argv
+from tests.execution.files._runtime_support import runtime_ready_record, runtime_selection
 
 _TOKEN = bytes(range(16))
 _DIGEST = hashlib.sha256(b"content").digest()
@@ -231,7 +233,7 @@ class TranscriptCarrier:
         assert io.input.data.startswith(FIXED_BUNDLE.prefix)
         request = decode_file_publication_request(io.input.data[len(FIXED_BUNDLE.prefix) :])
         transcript = self.build(request)  # type: ignore[operator]
-        _write(io.output.stdout, transcript)
+        _write(io.output.stdout, runtime_ready_record(invocation) + transcript)
         _write(io.output.stderr, self.stderr)
         output = CapturedOutput(complete=self.complete, retention=Retention.DELIVERED)
         return CarrierReport(
@@ -263,6 +265,7 @@ def _call_publish(carrier: object, plan: IdentityPlan, reference: ScratchReferen
         create_metadata=CreateMetadata(1001, 1002, 0o640),
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
 
@@ -297,6 +300,7 @@ def test_complete_results_preserve_effect_and_deadline_facts(plan: IdentityPlan)
         reference=reference,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
     assert recovered.observation.state is FilePublicationObservationState.RECOVERED
     assert recovered.observation.cleanup_debt == debt
@@ -318,6 +322,7 @@ def test_complete_results_preserve_effect_and_deadline_facts(plan: IdentityPlan)
         cleanup_debt=debt,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
     assert cleaned.observation.state is FilePublicationObservationState.CLEANED
     assert cleaned.observation.deadline_exceeded is True
@@ -350,6 +355,7 @@ def test_reconcile_rejects_impossible_recovered_cleanup_shape(
         reference=reference,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FilePublicationObservationState.UNCERTAIN
@@ -380,6 +386,7 @@ def test_cleanup_failure_accepts_only_monotonic_exact_debt_progress(plan: Identi
         cleanup_debt=original,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FilePublicationObservationState.REFUSED
@@ -424,6 +431,7 @@ def test_cleanup_failure_rejects_substituted_or_regressed_debt(plan: IdentityPla
         cleanup_debt=input_debt,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
     assert rejected.observation.state is FilePublicationObservationState.UNCERTAIN
     assert rejected.observation.error is FilePublicationObservationError.CONTROL
@@ -461,6 +469,7 @@ def test_substituted_revision_and_cleanup_parent_are_uncertain_control(plan: Ide
         reference=reference,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
     assert reconciled.observation.state is FilePublicationObservationState.UNCERTAIN
     assert reconciled.observation.error is FilePublicationObservationError.CONTROL
@@ -507,6 +516,7 @@ def test_oversized_manifest_refuses_before_carrier_and_safe_values_do_not_leak(p
             create_metadata=CreateMetadata(1001, 1002, 0o600),
             plan=plan,
             deadline=Deadline.after(1),
+            runtime_selection=runtime_selection(),
         )
 
     assert carrier.calls == 0
@@ -536,6 +546,7 @@ def test_public_entrypoints_do_not_retain_unencodable_paths_in_exception_chains(
                 create_metadata=CreateMetadata(1001, 1002, 0o600),
                 plan=plan,
                 deadline=Deadline.after(1),
+                runtime_selection=runtime_selection(),
             )
         elif operation == "reconcile":
             publication_reconcile(
@@ -546,6 +557,7 @@ def test_public_entrypoints_do_not_retain_unencodable_paths_in_exception_chains(
                 reference=reference,
                 plan=plan,
                 deadline=Deadline.after(1),
+                runtime_selection=runtime_selection(),
             )
         else:
             publication_cleanup(
@@ -557,6 +569,7 @@ def test_public_entrypoints_do_not_retain_unencodable_paths_in_exception_chains(
                 cleanup_debt=debt,
                 plan=plan,
                 deadline=Deadline.after(1),
+                runtime_selection=runtime_selection(),
             )
 
     assert carrier.calls == 0
@@ -592,12 +605,12 @@ def test_complete_requests_fit_real_windows_ssh_and_qga_bounds(plan: IdentityPla
         request = FilePublicationCleanupRequest(*common, _receipt_debt(reference), plan.expected, 1.0)
     manifest = encode_file_publication_request(request)
     invocation = PreparedInvocation(
-        build_helper_argv(
+        build_runtime_identity_helper_argv(
             plan,
-            runtime_path="/usr/bin/python3",
+            selection=runtime_selection("/usr/bin/python3"),
             fixed_source=FIXED_BUNDLE.bootstrap,
             nonce=request.nonce,
-        )
+        )[0]
     )
     connection = SSHConnection("host.example", "agent", Path("/keys/identity"), Path("/keys/known-hosts"))
     windows_command = subprocess.list2cmdline(build_ssh_argv(connection, invocation))
@@ -614,12 +627,12 @@ def test_complete_requests_fit_real_windows_ssh_and_qga_bounds(plan: IdentityPla
 def test_aggregate_oversize_refuses_before_proxmox_wire(plan: IdentityPlan, monkeypatch: pytest.MonkeyPatch) -> None:
     request = _requests(plan)[0]
     invocation = PreparedInvocation(
-        build_helper_argv(
+        build_runtime_identity_helper_argv(
             plan,
-            runtime_path="/usr/bin/python3",
+            selection=runtime_selection("/usr/bin/python3"),
             fixed_source=FIXED_BUNDLE.bootstrap,
             nonce=request.nonce,
-        )
+        )[0]
     )
     carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.example:8006", "node-a", 101, "root@pam!token", "secret"))
 

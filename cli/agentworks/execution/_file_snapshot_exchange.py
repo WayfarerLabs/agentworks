@@ -37,7 +37,13 @@ from agentworks.execution._file_wire import (
     FileRecordReader,
     FileWireError,
 )
-from agentworks.execution._helper_launcher import IdentityPlan, build_helper_argv
+from agentworks.execution._runtime_prerequisite import (
+    RuntimePrefixSink,
+    RuntimePrerequisiteObservation,
+    RuntimePrerequisiteState,
+    RuntimeSelection,
+    build_runtime_identity_helper_argv,
+)
 from agentworks.execution._scratch import ScratchPhase, _cleanup_debt
 from agentworks.execution.carrier import (
     CarrierIO,
@@ -51,11 +57,10 @@ from agentworks.execution.carrier import (
 
 if TYPE_CHECKING:
     from agentworks.execution._file_spool import SpoolSnapshot
+    from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution._scratch import ReadyScratchReference
     from agentworks.execution._scratch_receipt import ScratchCleanupDebt
     from agentworks.execution.carrier import Carrier, Deadline, ExitStatus
-
-_DEFAULT_RUNTIME = "/usr/bin/python3"
 
 
 class FileSnapshotObservationState(StrEnum):
@@ -99,7 +104,8 @@ class FileSnapshotCandidateResult:
     carrier_completion: ExitStatus | None
     carrier_local_status: int | None
     carrier_failure: Failure | None
-    observation: FileSnapshotObservation
+    runtime_prerequisite: RuntimePrerequisiteObservation
+    observation: FileSnapshotObservation | None
 
 
 class FileSnapshotCreationUncertain(Exception):
@@ -326,39 +332,49 @@ def _exchange(
     request: FileSnapshotRequest,
     plan: IdentityPlan,
     deadline: Deadline,
-    runtime_path: str,
+    runtime_selection: RuntimeSelection,
 ) -> FileSnapshotCandidateResult:
-    fixed_argv = build_helper_argv(
+    fixed_argv, candidates, system_shim = build_runtime_identity_helper_argv(
         plan,
-        runtime_path=runtime_path,
+        selection=runtime_selection,
         fixed_source=FIXED_BUNDLE.bootstrap,
         nonce=request.nonce,
     )
     collector = _FileSnapshotCollector(request)
     reader = FileRecordReader(request.nonce, collector.accept)
+    runtime = RuntimePrefixSink(request.nonce, candidates, reader, system_shim)
     stderr = _DiagnosticSink()
     io = CarrierIO(
         input=FiniteInput(FIXED_BUNDLE.prefix + _request_data(request), sensitive=True),
-        output=SinkOutput(reader, stderr, require_live=False),
+        output=SinkOutput(runtime, stderr, require_live=False),
         sensitive=True,
     )
     dispatch = Dispatch.UNKNOWN
     try:
         report = carrier.execute(PreparedInvocation(fixed_argv), io=io, deadline=deadline)
         dispatch = report.dispatch
-        reader.finish()
-        delivered = report.stdout.retention is Retention.DELIVERED and report.stderr.retention is Retention.DELIVERED
-        observation = collector.finish(
-            reader.error,
-            streams_complete=delivered and report.stdout.complete and report.stderr.complete,
-            stderr_noise=stderr.saw_data,
-            dispatch=report.dispatch,
-        )
+        runtime_prerequisite = runtime.observation
+        if runtime_prerequisite.state is RuntimePrerequisiteState.READY:
+            reader.finish()
+            delivered = (
+                report.stdout.retention is Retention.DELIVERED and report.stderr.retention is Retention.DELIVERED
+            )
+            observation = collector.finish(
+                reader.error,
+                streams_complete=delivered and report.stdout.complete and report.stderr.complete,
+                stderr_noise=stderr.saw_data,
+                dispatch=report.dispatch,
+            )
+        else:
+            reader.abort()
+            collector.abort()
+            observation = None
         return FileSnapshotCandidateResult(
             report.dispatch,
             report.completion,
             report.local_status,
             report.failure,
+            runtime_prerequisite,
             observation,
         )
     except BaseException as control:
@@ -367,6 +383,8 @@ def _exchange(
         if dispatch is not Dispatch.NOT_SENT:
             raise control from _control_uncertainty(request.operation)
         raise
+    finally:
+        runtime.clear()
 
 
 def snapshot_begin(
@@ -378,7 +396,7 @@ def snapshot_begin(
     token: bytes,
     plan: IdentityPlan,
     deadline: Deadline,
-    runtime_path: str = _DEFAULT_RUNTIME,
+    runtime_selection: RuntimeSelection,
 ) -> FileSnapshotCandidateResult:
     """Create one immutable private snapshot through one fresh attempt."""
     request = FileSnapshotBeginRequest(
@@ -390,7 +408,7 @@ def snapshot_begin(
         plan.expected,
         deadline.remaining(),
     )
-    return _exchange(carrier, request, plan, deadline, runtime_path)
+    return _exchange(carrier, request, plan, deadline, runtime_selection)
 
 
 def snapshot_chunk(
@@ -402,7 +420,7 @@ def snapshot_chunk(
     length: int,
     plan: IdentityPlan,
     deadline: Deadline,
-    runtime_path: str = _DEFAULT_RUNTIME,
+    runtime_selection: RuntimeSelection,
 ) -> FileSnapshotCandidateResult:
     """Read one exact bounded range from an immutable private snapshot."""
     request = FileSnapshotChunkRequest(
@@ -414,7 +432,7 @@ def snapshot_chunk(
         plan.expected,
         deadline.remaining(),
     )
-    return _exchange(carrier, request, plan, deadline, runtime_path)
+    return _exchange(carrier, request, plan, deadline, runtime_selection)
 
 
 def snapshot_reconcile(
@@ -423,7 +441,7 @@ def snapshot_reconcile(
     token: bytes,
     plan: IdentityPlan,
     deadline: Deadline,
-    runtime_path: str = _DEFAULT_RUNTIME,
+    runtime_selection: RuntimeSelection,
 ) -> FileSnapshotCandidateResult:
     """Read historical cleanup ownership without replaying snapshot creation."""
     request = FileSnapshotReconcileRequest(
@@ -432,7 +450,7 @@ def snapshot_reconcile(
         plan.expected,
         deadline.remaining(),
     )
-    return _exchange(carrier, request, plan, deadline, runtime_path)
+    return _exchange(carrier, request, plan, deadline, runtime_selection)
 
 
 def snapshot_cleanup(
@@ -442,7 +460,7 @@ def snapshot_cleanup(
     cleanup_debt: ScratchCleanupDebt,
     plan: IdentityPlan,
     deadline: Deadline,
-    runtime_path: str = _DEFAULT_RUNTIME,
+    runtime_selection: RuntimeSelection,
 ) -> FileSnapshotCandidateResult:
     """Attempt exact identity-bound cleanup once without a quiescence claim."""
     request = FileSnapshotCleanupRequest(
@@ -452,4 +470,4 @@ def snapshot_cleanup(
         plan.expected,
         deadline.remaining(),
     )
-    return _exchange(carrier, request, plan, deadline, runtime_path)
+    return _exchange(carrier, request, plan, deadline, runtime_selection)

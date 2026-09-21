@@ -19,8 +19,10 @@ from agentworks.execution._file_read_bundle import FIXED_BUNDLE
 from agentworks.execution._file_read_protocol import FileReadFailure
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
 from agentworks.execution.carrier import Deadline, ExitStatus
 from tests.execution.files._file_read_support import LocalCarrier
+from tests.execution.files._runtime_support import runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the file-read helper candidate requires Linux")
 
@@ -39,7 +41,7 @@ def _read(
     plan: IdentityPlan,
     *,
     max_bytes: int = 1024,
-    runtime_path: str = sys.executable,
+    runtime: str = sys.executable,
 ) -> tuple[LocalCarrier, FileReadCandidateResult]:
     carrier = LocalCarrier()
     result = read_file(
@@ -49,10 +51,18 @@ def _read(
         max_bytes=max_bytes,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=runtime_path,
+        runtime_selection=runtime_selection(runtime),
     )
     assert carrier.calls == 1
     return carrier, result
+
+
+def test_missing_runtime_yields_no_file_observation(tmp_path: Path, plan: IdentityPlan) -> None:
+    carrier, result = _read(tmp_path, "missing", plan, runtime="/missing/agentworks-python")
+
+    assert carrier.calls == 1
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.MISSING
+    assert result.observation is None
 
 
 @pytest.mark.parametrize("runtime", [Path(sys.executable), Path("/usr/bin/python3.11")], ids=["current", "system-3.11"])
@@ -73,8 +83,9 @@ def test_binary_read_uses_one_sensitive_ascii_attempt_without_staging(
         target.name,
         plan,
         max_bytes=len(content),
-        runtime_path=str(runtime),
+        runtime=str(runtime),
     )
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
     assert result.observation.state is FileReadObservationState.PRESENT
     snapshot = result.observation.snapshot
     assert snapshot is not None
@@ -216,7 +227,7 @@ def test_one_shot_read_uses_exactly_one_carrier_attempt(tmp_path: Path, plan: Id
         max_bytes=1024,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FileReadObservationState.PRESENT
@@ -249,6 +260,7 @@ def test_invalid_requests_refuse_before_carrier_construction(
             max_bytes=bound,  # type: ignore[arg-type]
             plan=plan,
             deadline=Deadline.after(15),
+            runtime_selection=runtime_selection(),
         )
     assert carrier.calls == 0
 
@@ -267,7 +279,7 @@ def test_request_and_result_representations_hide_paths_and_payload(
         max_bytes=1,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
 
     assert secret_path not in repr(carrier)
@@ -285,7 +297,7 @@ def test_caller_bound_has_no_file_layer_ceiling(plan: IdentityPlan) -> None:
         max_bytes=10**100,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
 
     assert carrier.io is not None
@@ -304,6 +316,7 @@ def test_request_manifest_has_an_independent_finite_bound(plan: IdentityPlan) ->
             max_bytes=1,
             plan=plan,
             deadline=Deadline.after(15),
+            runtime_selection=runtime_selection(),
         )
 
     assert carrier.calls == 0
@@ -321,6 +334,7 @@ def test_invalid_utf8_path_is_not_retained_by_the_validation_exception(plan: Ide
             max_bytes=1,
             plan=plan,
             deadline=Deadline.after(15),
+            runtime_selection=runtime_selection(),
         )
 
     assert carrier.calls == 0

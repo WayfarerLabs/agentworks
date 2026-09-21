@@ -30,6 +30,7 @@ from agentworks.execution.carrier import (
     PreparedInvocation,
     Retention,
 )
+from tests.execution.files._runtime_support import runtime_selection
 
 
 @dataclass
@@ -116,6 +117,7 @@ def test_host_computes_remaining_immediately_before_its_only_attempt(
         max_bytes=1,
         plan=plan,
         deadline=Deadline(None),
+        runtime_selection=runtime_selection(),
     )
 
     assert events == ["remaining", "encode"]
@@ -137,6 +139,7 @@ def test_validation_precedes_the_single_carrier_attempt(plan: IdentityPlan) -> N
             max_bytes=1,
             plan=plan,
             deadline=Deadline.after(1),
+            runtime_selection=runtime_selection(),
         )
 
     assert carrier.calls == 0

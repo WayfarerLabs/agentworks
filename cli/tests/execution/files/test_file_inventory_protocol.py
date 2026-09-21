@@ -51,6 +51,7 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
+from tests.execution.files._runtime_support import runtime_nonce, runtime_ready_record, runtime_selection
 
 pytestmark = pytest.mark.windows
 
@@ -286,8 +287,9 @@ class _ScriptedCarrier:
         self.invocation = invocation
         self.io = io
         assert isinstance(io.output, SinkOutput)
-        nonce = invocation.argv[-1]
+        nonce = runtime_nonce(invocation)
         stream = b"".join(encode_file_record(nonce, record) for record in self.records)
+        stream = runtime_ready_record(invocation) + stream
         assert io.output.stdout.try_write(memoryview(stream)) == len(stream)
         assert io.output.stderr.try_write(memoryview(self.stderr)) == len(self.stderr)
         delivered = CapturedOutput(complete=True, provenance=Provenance.CARRIER_STDOUT, retention=Retention.DELIVERED)
@@ -305,7 +307,7 @@ class _TruncatingCompleteCarrier:
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
         del deadline
         assert isinstance(io.output, SinkOutput)
-        nonce = invocation.argv[-1]
+        nonce = runtime_nonce(invocation)
         encoded = encode_inventory((_entry("alpha"),))
         records = (
             FileRecord(0, FileRecordKind.DATA, encoded),
@@ -318,7 +320,9 @@ class _TruncatingCompleteCarrier:
             ),
             FileRecord(2, FileRecordKind.FINISHED, b"{}"),
         )
-        stream = b"".join(encode_file_record(nonce, record) for record in records)[:-1]
+        stream = (
+            runtime_ready_record(invocation) + b"".join(encode_file_record(nonce, record) for record in records)[:-1]
+        )
         assert io.output.stdout.try_write(memoryview(stream)) == len(stream)
         delivered = CapturedOutput(complete=True, provenance=Provenance.CARRIER_STDOUT, retention=Retention.DELIVERED)
         diagnostics = replace(delivered, provenance=Provenance.MIXED_STDERR)
@@ -352,13 +356,14 @@ def test_exchange_uses_sensitive_finite_input_and_releases_verified_entries(monk
         max_encoded_bytes=len(encoded),
         plan=plan,
         deadline=Deadline.after(10),
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FileInventoryObservationState.PRESENT
     assert result.observation.entries == (_entry("alpha"),)
     assert carrier.io is not None and carrier.io.sensitive
     assert carrier.invocation is not None and "/srv/workspace" not in " ".join(carrier.invocation.argv)
-    assert "target" not in " ".join(carrier.invocation.argv)
+    assert "target" not in carrier.invocation.argv
 
 
 def test_exchange_refuses_invalid_host_limits_before_dispatch() -> None:
@@ -373,6 +378,7 @@ def test_exchange_refuses_invalid_host_limits_before_dispatch() -> None:
             max_encoded_bytes=2,
             plan=IdentityPlan(_identity(), IdentityMode.DIRECT),
             deadline=Deadline.after(10),
+            runtime_selection=runtime_selection(),
         )
     assert carrier.calls == 0
 
@@ -390,6 +396,7 @@ def test_exchange_host_path_error_does_not_retain_invalid_text() -> None:
             max_encoded_bytes=2,
             plan=IdentityPlan(_identity(), IdentityMode.DIRECT),
             deadline=Deadline.after(10),
+            runtime_selection=runtime_selection(),
         )
 
     assert "host-path-canary" not in _exception_details(raised.value)
@@ -409,6 +416,7 @@ def test_exchange_rejects_truncated_transcript_despite_complete_carrier_flags(
         max_encoded_bytes=4096,
         plan=IdentityPlan(_identity(), IdentityMode.DIRECT),
         deadline=Deadline.after(10),
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FileInventoryObservationState.INCOMPLETE

@@ -24,6 +24,7 @@ from agentworks.execution._file_metadata_protocol import FileMetadataFailureCode
 from agentworks.execution._helper_bundle import FixedFileHelperBundle
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
 from agentworks.execution.carrier import (
     CarrierIO,
     CarrierReport,
@@ -36,6 +37,7 @@ from agentworks.execution.carrier import (
 from agentworks.execution.carriers._subprocess import run_process
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 from tests.execution.files._fixed_bundle_support import fixture_file_bundle
+from tests.execution.files._runtime_support import runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the metadata helper requires Linux")
 
@@ -109,7 +111,7 @@ def _set(
             mode=mode,
             plan=plan,
             deadline=Deadline.after(deadline),
-            runtime_path=str(runtime),
+            runtime_selection=runtime_selection(str(runtime)),
         )
     return carrier, result
 
@@ -135,9 +137,24 @@ def _ensure(
             mode=mode,
             plan=plan,
             deadline=Deadline.after(deadline),
-            runtime_path=str(runtime),
+            runtime_selection=runtime_selection(str(runtime)),
         )
     return carrier, result
+
+
+def test_missing_runtime_yields_no_metadata_observation(tmp_path: Path, plan: IdentityPlan) -> None:
+    carrier, result = _set(
+        tmp_path,
+        "missing",
+        plan,
+        _fixture_source(),
+        mode=0o600,
+        runtime=Path("/missing/agentworks-python"),
+    )
+
+    assert carrier.calls == 1
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.MISSING
+    assert result.observation is None
 
 
 @pytest.mark.parametrize(
@@ -166,6 +183,7 @@ def test_fixed_bundle_creates_converges_and_is_idempotent(
     assert carrier.calls == 1
     assert carrier.io is not None and carrier.io.sensitive
     assert carrier.invocation is not None and str(root) not in " ".join(carrier.invocation.argv)
+    assert changed_file.runtime_prerequisite.state is RuntimePrerequisiteState.READY
     assert changed_file.observation.state is FileMetadataObservationState.CHANGED
     assert changed_file.observation.revision is not None
     assert existing.read_bytes() == b"unrelated-content"
@@ -241,7 +259,7 @@ def test_identity_mismatch_precedes_target_access(tmp_path: Path, plan: Identity
             mode=0o600,
             plan=mismatched,
             deadline=Deadline.after(15),
-            runtime_path=sys.executable,
+            runtime_selection=runtime_selection(),
         )
 
     assert carrier.calls == 1
@@ -389,7 +407,7 @@ def test_complete_proxmox_post_fits_provider_bound_and_returns_typed_refusal(
         mode=0o600,
         plan=mismatched,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
 
     assert len(FIXED_BUNDLE.prefix) < body_sizes[0] < 65_536

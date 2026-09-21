@@ -62,9 +62,11 @@ from agentworks.execution.carrier import (
     ExitStatus,
     Failure,
     FiniteInput,
+    PreparedInvocation,
     Retention,
     SinkOutput,
 )
+from tests.execution.files._runtime_support import runtime_ready_record, runtime_selection
 
 
 def _json(value: object) -> bytes:
@@ -403,15 +405,15 @@ class TranscriptCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
-    def execute(self, invocation: object, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-        del invocation, deadline
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        del deadline
         self.calls += 1
         assert isinstance(io.input, FiniteInput)
         assert io.input.sensitive and isinstance(io.output, SinkOutput)
         assert io.input.data.startswith(FIXED_BUNDLE.prefix)
         request = decode_file_metadata_request(io.input.data[len(FIXED_BUNDLE.prefix) :])
         transcript = self.build(request)  # type: ignore[operator]
-        _write(io.output.stdout, transcript)
+        _write(io.output.stdout, runtime_ready_record(invocation) + transcript)
         _write(io.output.stderr, self.stderr)
         output = CapturedOutput(complete=self.complete, retention=Retention.DELIVERED)
         return CarrierReport(
@@ -441,6 +443,7 @@ def _set(carrier: object, plan: IdentityPlan) -> FileMetadataCandidateResult:
         mode=0o640,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
 
@@ -511,6 +514,7 @@ def test_complete_helper_failure_preserves_exact_effect(
         mode=0o2770,
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is expected
@@ -645,6 +649,7 @@ def test_host_path_validation_discards_unicode_error_chain(plan: IdentityPlan) -
             mode=0o640,
             plan=plan,
             deadline=Deadline.after(1),
+            runtime_selection=runtime_selection(),
         )
     assert canary not in _exception_details(raised.value)
     assert carrier.calls == 0

@@ -26,6 +26,7 @@ from agentworks.execution._file_stat import FileRevision
 from agentworks.execution._helper_bundle import FixedFileHelperBundle
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
 from agentworks.execution.carrier import (
     CarrierIO,
     CarrierReport,
@@ -37,6 +38,7 @@ from agentworks.execution.carrier import (
 )
 from agentworks.execution.carriers._subprocess import run_process
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
+from tests.execution.files._runtime_support import runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the file-object helper requires Linux")
 
@@ -97,9 +99,23 @@ def _stat(
             relative_path=relative,
             plan=plan,
             deadline=Deadline.after(15),
-            runtime_path=str(runtime),
+            runtime_selection=runtime_selection(str(runtime)),
         )
     return carrier, result
+
+
+def test_missing_runtime_yields_no_object_observation(tmp_path: Path, plan: IdentityPlan) -> None:
+    carrier, result = _stat(
+        tmp_path,
+        "missing",
+        plan,
+        FIXED_BUNDLE,
+        runtime=Path("/missing/agentworks-python"),
+    )
+
+    assert carrier.calls == 1
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.MISSING
+    assert result.observation is None
 
 
 @pytest.mark.parametrize("runtime", [Path(sys.executable), Path("/usr/bin/python3.11")], ids=["current", "system-3.11"])
@@ -123,6 +139,7 @@ def test_isolated_bundle_stats_mode_zero_file_through_execute_only_ancestry(
         root.chmod(0o700)
 
     assert carrier.calls == 1
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
     assert result.observation.state is FileObjectObservationState.PRESENT
     assert result.observation.object_kind is FileKind.REGULAR
     assert result.observation.revision is not None and result.observation.revision.digest is None
@@ -158,7 +175,7 @@ def test_remove_through_write_and_search_parent_without_read_permission(
                 expected_revision=expected,
                 plan=plan,
                 deadline=Deadline.after(15),
-                runtime_path=sys.executable,
+                runtime_selection=runtime_selection(),
             )
     finally:
         root.chmod(0o700)
@@ -286,7 +303,7 @@ def test_complete_proxmox_post_fits_provider_bound_and_returns_typed_outcome(
         relative_path="leaf",
         plan=mismatched_plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
 
     assert len(FIXED_BUNDLE.prefix) < body_sizes[0] < 65_536

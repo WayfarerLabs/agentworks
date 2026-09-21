@@ -38,6 +38,7 @@ from agentworks.execution._file_spool import SpoolSnapshotFailureKind
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, FileWireError, encode_file_record
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
 from agentworks.execution._scratch import (
     ReadyScratchReference,
     ScratchFailureKind,
@@ -60,6 +61,7 @@ from agentworks.execution.carrier import (
     SinkOutput,
 )
 from tests.execution.files._file_snapshot_support import LocalCarrier, install_fixture_bundle
+from tests.execution.files._runtime_support import runtime_ready_record, runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the private snapshot helper requires Linux")
 
@@ -116,7 +118,7 @@ def _begin(
     *,
     token: bytes = _TOKEN,
     carrier: LocalCarrier | None = None,
-    runtime_path: str = sys.executable,
+    runtime: str = sys.executable,
 ):
     selected = carrier or LocalCarrier()
     result = snapshot_begin(
@@ -127,9 +129,23 @@ def _begin(
         token=token,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=runtime_path,
+        runtime_selection=runtime_selection(runtime),
     )
     return selected, result
+
+
+def test_missing_runtime_yields_no_snapshot_observation(tmp_path: Path, plan: IdentityPlan) -> None:
+    carrier, result = _begin(
+        tmp_path,
+        "missing",
+        1,
+        plan,
+        runtime="/missing/agentworks-python",
+    )
+
+    assert carrier.calls == 1
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.MISSING
+    assert result.observation is None
 
 
 @pytest.mark.parametrize(
@@ -158,11 +174,12 @@ def test_real_helper_exchanges_binary_snapshot_recovery_and_exact_cleanup(
             "payload",
             len(content),
             plan,
-            runtime_path=str(runtime),
+            runtime=str(runtime),
         )
     finally:
         source_root.chmod(0o755)
 
+    assert begun.runtime_prerequisite.state is RuntimePrerequisiteState.READY
     assert begun.observation.state is FileSnapshotObservationState.READY
     snapshot = begun.observation.snapshot
     assert snapshot is not None
@@ -188,7 +205,7 @@ def test_real_helper_exchanges_binary_snapshot_recovery_and_exact_cleanup(
             length=length,
             plan=plan,
             deadline=Deadline.after(15),
-            runtime_path=str(runtime),
+            runtime_selection=runtime_selection(str(runtime)),
         )
         assert result.observation.state is FileSnapshotObservationState.CHUNK
         chunk = result.observation.chunk
@@ -203,7 +220,7 @@ def test_real_helper_exchanges_binary_snapshot_recovery_and_exact_cleanup(
         token=_TOKEN,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=str(runtime),
+        runtime_selection=runtime_selection(str(runtime)),
     )
     assert recovered.observation.state is FileSnapshotObservationState.RECOVERED
     debt = recovered.observation.cleanup_debt
@@ -216,7 +233,7 @@ def test_real_helper_exchanges_binary_snapshot_recovery_and_exact_cleanup(
         cleanup_debt=debt,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=str(runtime),
+        runtime_selection=runtime_selection(str(runtime)),
     )
     assert cleaned.observation.state is FileSnapshotObservationState.CLEANED
     assert not (scratch_root / scratch_name(_TOKEN)).exists()
@@ -226,7 +243,7 @@ def test_real_helper_exchanges_binary_snapshot_recovery_and_exact_cleanup(
         token=_TOKEN,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=str(runtime),
+        runtime_selection=runtime_selection(str(runtime)),
     )
     assert after_cleanup.observation.state is FileSnapshotObservationState.OWNERSHIP_UNCERTAIN
     assert after_cleanup.observation.cleanup_debt is None
@@ -239,7 +256,7 @@ def test_real_helper_exchanges_binary_snapshot_recovery_and_exact_cleanup(
         length=1,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=str(runtime),
+        runtime_selection=runtime_selection(str(runtime)),
     )
     assert delayed.observation.state is FileSnapshotObservationState.REFUSED
     failure = delayed.observation.failure
@@ -293,7 +310,7 @@ def test_absence_and_maximum_refusal_create_no_scratch(
         length=0,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
     assert empty_chunk.observation.state is FileSnapshotObservationState.CHUNK
     assert empty_chunk.observation.chunk is not None and empty_chunk.observation.chunk.data == b""
@@ -304,7 +321,7 @@ def test_absence_and_maximum_refusal_create_no_scratch(
         cleanup_debt=empty_debt,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
     assert empty_cleanup.observation.state is FileSnapshotObservationState.CLEANED
 
@@ -352,6 +369,7 @@ def test_host_refuses_out_of_range_chunk_before_dispatch(plan: IdentityPlan) -> 
             length=1,
             plan=plan,
             deadline=Deadline.after(15),
+            runtime_selection=runtime_selection(),
         )
 
     assert carrier.calls == 0
@@ -379,7 +397,7 @@ def test_changed_scratch_is_refused_with_exact_cleanup_debt(
         length=8,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FileSnapshotObservationState.REFUSED
@@ -476,14 +494,14 @@ class TranscriptCarrier:
         return ChannelFeatures()
 
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-        del invocation, deadline
+        del deadline
         self.calls += 1
         self.io = io
         assert isinstance(io.input, FiniteInput) and isinstance(io.output, SinkOutput)
         assert io.input.data.startswith(FIXED_BUNDLE.prefix)
         request = decode_file_snapshot_request(io.input.data[len(FIXED_BUNDLE.prefix) :])
         transcript = self.build(request, io.input.data)  # type: ignore[operator]
-        _write(io.output.stdout, transcript)
+        _write(io.output.stdout, runtime_ready_record(invocation) + transcript)
         output = CapturedOutput(complete=True, retention=Retention.DELIVERED)
         return CarrierReport(Dispatch.SENT, ExitStatus(code=0), 0, output, output, None)
 
@@ -589,6 +607,7 @@ def test_scratch_failure_cannot_substitute_cleanup_authority_or_phase(
             length=len(data),
             plan=plan,
             deadline=Deadline.after(15),
+            runtime_selection=runtime_selection(),
         )
     else:
         result = snapshot_cleanup(
@@ -597,6 +616,7 @@ def test_scratch_failure_cannot_substitute_cleanup_authority_or_phase(
             cleanup_debt=expected_debt,
             plan=plan,
             deadline=Deadline.after(15),
+            runtime_selection=runtime_selection(),
         )
 
     assert result.observation.state is FileSnapshotObservationState.UNCERTAIN
@@ -623,6 +643,7 @@ def test_tampered_or_truncated_chunk_transcript_releases_no_bytes(plan: Identity
             length=len(data),
             plan=plan,
             deadline=Deadline.after(15),
+            runtime_selection=runtime_selection(),
         )
         assert result.observation.state is FileSnapshotObservationState.UNCERTAIN
         assert result.observation.chunk is None
@@ -645,6 +666,7 @@ def test_wrong_response_nonce_and_reflected_request_are_rejected_without_retenti
         length=len(data),
         plan=plan,
         deadline=Deadline.after(15),
+        runtime_selection=runtime_selection(),
     )
     canary = "reflected-source-secret"
     reflected = snapshot_begin(
@@ -655,6 +677,7 @@ def test_wrong_response_nonce_and_reflected_request_are_rejected_without_retenti
         token=_TOKEN,
         plan=plan,
         deadline=Deadline.after(15),
+        runtime_selection=runtime_selection(),
     )
 
     assert nonce_result.observation.state is FileSnapshotObservationState.UNCERTAIN

@@ -15,6 +15,7 @@ from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution.carrier import Deadline
 from tests.execution.files._file_read_support import LocalCarrier, fixture_source, install_fixture_bundle
+from tests.execution.files._runtime_support import runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the file-read helper candidate requires Linux")
 
@@ -47,7 +48,7 @@ def _read(
         max_bytes=1024,
         plan=plan,
         deadline=deadline or Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
 
 

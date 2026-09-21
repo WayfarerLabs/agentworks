@@ -22,7 +22,13 @@ from agentworks.execution._file_inventory_protocol import (
     parse_file_inventory_result,
 )
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, FileRecordReader, FileWireError
-from agentworks.execution._helper_launcher import IdentityPlan, build_helper_argv
+from agentworks.execution._runtime_prerequisite import (
+    RuntimePrefixSink,
+    RuntimePrerequisiteObservation,
+    RuntimePrerequisiteState,
+    RuntimeSelection,
+    build_runtime_identity_helper_argv,
+)
 from agentworks.execution.carrier import (
     CarrierIO,
     Dispatch,
@@ -35,9 +41,8 @@ from agentworks.execution.carrier import (
 
 if TYPE_CHECKING:
     from agentworks.execution._file_inventory import FileInventoryEntry
+    from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution.carrier import Carrier, Deadline, ExitStatus
-
-_DEFAULT_RUNTIME = "/usr/bin/python3"
 
 
 class FileInventoryObservationState(StrEnum):
@@ -74,7 +79,8 @@ class FileInventoryCandidateResult:
     carrier_completion: ExitStatus | None
     carrier_local_status: int | None
     carrier_failure: Failure | None
-    observation: FileInventoryObservation
+    runtime_prerequisite: RuntimePrerequisiteObservation
+    observation: FileInventoryObservation | None
 
 
 class _DiagnosticSink:
@@ -238,13 +244,13 @@ def list_directory(
     max_encoded_bytes: int,
     plan: IdentityPlan,
     deadline: Deadline,
-    runtime_path: str = _DEFAULT_RUNTIME,
+    runtime_selection: RuntimeSelection,
 ) -> FileInventoryCandidateResult:
     """Inventory one confined directory through one fresh helper attempt."""
     nonce = secrets.token_hex(16)
-    fixed_argv = build_helper_argv(
+    fixed_argv, candidates, system_shim = build_runtime_identity_helper_argv(
         plan,
-        runtime_path=runtime_path,
+        selection=runtime_selection,
         fixed_source=FIXED_BUNDLE.bootstrap,
         nonce=nonce,
     )
@@ -277,29 +283,41 @@ def list_directory(
         max_encoded_bytes=max_encoded_bytes,
     )
     reader = FileRecordReader(nonce, collector.accept)
+    runtime = RuntimePrefixSink(nonce, candidates, reader, system_shim)
     stderr = _DiagnosticSink()
     io = CarrierIO(
         input=FiniteInput(FIXED_BUNDLE.prefix + request_data, sensitive=True),
-        output=SinkOutput(reader, stderr, require_live=False),
+        output=SinkOutput(runtime, stderr, require_live=False),
         sensitive=True,
     )
     try:
         report = carrier.execute(PreparedInvocation(fixed_argv), io=io, deadline=deadline)
-        reader.finish()
-        delivered = report.stdout.retention is Retention.DELIVERED and report.stderr.retention is Retention.DELIVERED
-        observation = collector.finish(
-            reader.error,
-            streams_complete=delivered and report.stdout.complete and report.stderr.complete,
-            stderr_noise=stderr.saw_data,
-        )
+        runtime_prerequisite = runtime.observation
+        if runtime_prerequisite.state is RuntimePrerequisiteState.READY:
+            reader.finish()
+            delivered = (
+                report.stdout.retention is Retention.DELIVERED and report.stderr.retention is Retention.DELIVERED
+            )
+            observation = collector.finish(
+                reader.error,
+                streams_complete=delivered and report.stdout.complete and report.stderr.complete,
+                stderr_noise=stderr.saw_data,
+            )
+        else:
+            reader.abort()
+            collector.abort()
+            observation = None
         return FileInventoryCandidateResult(
             report.dispatch,
             report.completion,
             report.local_status,
             report.failure,
+            runtime_prerequisite,
             observation,
         )
     except BaseException:
         reader.abort()
         collector.abort()
         raise
+    finally:
+        runtime.clear()

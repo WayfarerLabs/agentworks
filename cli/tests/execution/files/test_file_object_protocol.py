@@ -55,9 +55,11 @@ from agentworks.execution.carrier import (
     ExitStatus,
     Failure,
     FiniteInput,
+    PreparedInvocation,
     Retention,
     SinkOutput,
 )
+from tests.execution.files._runtime_support import runtime_ready_record, runtime_selection
 
 
 def _json(value: object) -> bytes:
@@ -335,15 +337,15 @@ class TranscriptCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
-    def execute(self, invocation: object, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-        del invocation, deadline
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        del deadline
         self.calls += 1
         assert isinstance(io.input, FiniteInput)
         assert io.input.sensitive and isinstance(io.output, SinkOutput)
         assert io.input.data.startswith(FIXED_BUNDLE.prefix)
         request = decode_file_object_request(io.input.data[len(FIXED_BUNDLE.prefix) :])
         transcript = self.build(request)  # type: ignore[operator]
-        _write(io.output.stdout, transcript)
+        _write(io.output.stdout, runtime_ready_record(invocation) + transcript)
         _write(io.output.stderr, self.stderr)
         output = CapturedOutput(complete=self.complete, retention=Retention.DELIVERED)
         return CarrierReport(
@@ -373,6 +375,7 @@ def test_host_path_validation_discards_sensitive_unicode_error_chain(plan: Ident
             relative_path="\ud800" + canary,
             plan=plan,
             deadline=Deadline.after(1),
+            runtime_selection=runtime_selection(),
         )
 
     assert canary not in _exception_details(raised.value)
@@ -406,6 +409,7 @@ def test_host_request_conversion_discards_sensitive_encoder_chain(
             relative_path="leaf",
             plan=plan,
             deadline=Deadline.after(1),
+            runtime_selection=runtime_selection(),
         )
 
     assert canary not in _exception_details(raised.value)
@@ -427,6 +431,7 @@ def test_complete_stat_result_does_not_depend_on_carrier_exit(plan: IdentityPlan
         relative_path="socket",
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
     assert carrier.calls == 1
@@ -457,6 +462,7 @@ def test_lost_remove_acknowledgement_is_never_retried_or_reported_unchanged(
         expected_revision=_revision(),
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
     assert carrier.calls == 1
@@ -483,6 +489,7 @@ def test_complete_primitive_uncertainty_retains_kind_and_phase(plan: IdentityPla
         expected_revision=_revision(),
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FileObjectObservationState.UNCERTAIN
@@ -506,6 +513,7 @@ def test_stat_rejects_mutation_only_uncertain_failure_phase(plan: IdentityPlan) 
         relative_path="leaf",
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FileObjectObservationState.INVALID
@@ -556,6 +564,7 @@ def test_noisy_wrong_nonce_truncated_and_stderr_remove_responses_are_uncertain(
         expected_revision=_revision(),
         plan=plan,
         deadline=Deadline.after(1),
+        runtime_selection=runtime_selection(),
     )
     assert result.observation.state is FileObjectObservationState.UNCERTAIN
     assert result.observation.error is error
@@ -581,5 +590,6 @@ def test_control_interruption_propagates_with_safe_remove_uncertainty(plan: Iden
             expected_revision=_revision(),
             plan=plan,
             deadline=Deadline.after(1),
+            runtime_selection=runtime_selection(),
         )
     assert isinstance(raised.value.__cause__, FileObjectMutationUncertain)

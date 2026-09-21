@@ -44,11 +44,13 @@ from agentworks.execution._publication_receipt import (
     cleanup_publication_stage,
     publication_stage_name,
 )
+from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
 from agentworks.execution._scratch import ScratchReference, cleanup_scratch
 from agentworks.execution._scratch_receipt import scratch_name
 from agentworks.execution.carrier import CarrierIO, Deadline, SinkOutput
 from tests.execution.files._file_publication_support import LocalCarrier, install_fixture_bundle
 from tests.execution.files._publication_test_support import open_parent, ready_scratch, record_stage
+from tests.execution.files._runtime_support import runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the private publication helper requires Linux")
 
@@ -169,7 +171,7 @@ def _publish(
         create_metadata=_metadata(mode),
         plan=plan,
         deadline=deadline or Deadline.after(15),
-        runtime_path=runtime,
+        runtime_selection=runtime_selection(runtime),
     )
     return carrier, result
 
@@ -180,6 +182,30 @@ def _cleanup_scratch(parent: Path, ready: object) -> None:
         cleanup_scratch(parent_fd, ready)  # type: ignore[arg-type]
     finally:
         os.close(parent_fd)
+
+
+def test_missing_runtime_yields_no_publication_observation(tmp_path: Path, plan: IdentityPlan) -> None:
+    content = b"publication"
+    parent_fd = open_parent(tmp_path)
+    try:
+        ready = ready_scratch(parent_fd, _TOKEN, content)
+    finally:
+        os.close(parent_fd)
+
+    carrier, result = _publish(
+        tmp_path,
+        "target",
+        ready._reference,
+        content,
+        Create(),
+        plan,
+        runtime="/missing/agentworks-python",
+    )
+
+    assert carrier.calls == 1
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.MISSING
+    assert result.observation is None
+    _cleanup_scratch(tmp_path, ready)
 
 
 @pytest.mark.parametrize("runtime", [Path(sys.executable), Path("/usr/bin/python3.11")], ids=["current", "system-3.11"])
@@ -232,6 +258,7 @@ def test_production_bundle_publishes_each_condition_with_content_revision_and_me
         mode=0o640,
     )
 
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
     assert result.observation.state is FilePublicationObservationState.PUBLISHED
     assert result.observation.deadline_exceeded is False
     revision = result.observation.revision
@@ -331,7 +358,7 @@ def test_match_digest_conflict_and_whole_digest_mismatch_refuse_without_publicat
         create_metadata=_metadata(),
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
     assert mismatch.observation.state is FilePublicationObservationState.REFUSED
     assert mismatch.observation.failure is not None
@@ -366,7 +393,7 @@ def test_identity_refuses_before_missing_root_or_path_access(tmp_path: Path, pla
         create_metadata=_metadata(),
         plan=wrong_plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FilePublicationObservationState.REFUSED
@@ -421,7 +448,7 @@ def test_reconcile_recovers_historical_debt_after_payload_removal_then_cleanup_i
         reference=ready._reference,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
 
     assert recovered.observation.state is FilePublicationObservationState.RECOVERED
@@ -437,7 +464,7 @@ def test_reconcile_recovers_historical_debt_after_payload_removal_then_cleanup_i
         cleanup_debt=debt,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
     assert cleaned.observation.state is FilePublicationObservationState.CLEANED
     assert cleaned.observation.deadline_exceeded is False
@@ -468,7 +495,7 @@ def test_reconcile_never_infers_publication_or_quiescence_from_missing_record(
         reference=ready._reference,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FilePublicationObservationState.OWNERSHIP_UNCERTAIN
@@ -511,7 +538,7 @@ def test_reconcile_partial_missing_and_foreign_ownership_stays_uncertain(
         reference=ready._reference,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FilePublicationObservationState.OWNERSHIP_UNCERTAIN
@@ -560,7 +587,7 @@ def test_cleanup_accepts_record_only_and_identified_generic_debt(tmp_path: Path,
         cleanup_debt=record_only,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
     assert record_cleaned.observation.state is FilePublicationObservationState.CLEANED
 
@@ -582,7 +609,7 @@ def test_cleanup_accepts_record_only_and_identified_generic_debt(tmp_path: Path,
         cleanup_debt=generic,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
     assert generic_cleaned.observation.state is FilePublicationObservationState.CLEANED
     assert not generic_path.exists()
@@ -621,7 +648,7 @@ def test_cleanup_refuses_replaced_generic_stage_without_deleting_foreign_object(
         cleanup_debt=debt,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FilePublicationObservationState.REFUSED
@@ -671,7 +698,7 @@ def test_publication_failure_returns_exact_debt_that_authorizes_only_bounded_cle
         cleanup_debt=debt,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
     assert cleaned.observation.state is FilePublicationObservationState.CLEANED
     _cleanup_scratch(root, ready)
@@ -738,7 +765,7 @@ def test_progressed_cleanup_binding_loss_preserves_receipt_failure_and_effect(
         cleanup_debt=debt,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FilePublicationObservationState.REFUSED
@@ -813,8 +840,8 @@ def test_lost_publish_reply_is_uncertain_and_never_replayed(tmp_path: Path, plan
     _, result = _publish(root, "target", ready._reference, content, Create(), plan, carrier=carrier)
 
     assert carrier.calls == 1
-    assert result.observation.state is FilePublicationObservationState.UNCERTAIN
-    assert result.observation.revision is None
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.UNKNOWN
+    assert result.observation is None
     assert (root / "target").read_bytes() == content
     reconciled = publication_reconcile(
         LocalCarrier(),
@@ -824,7 +851,7 @@ def test_lost_publish_reply_is_uncertain_and_never_replayed(tmp_path: Path, plan
         reference=ready._reference,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
     assert reconciled.observation.state is FilePublicationObservationState.OWNERSHIP_UNCERTAIN
     _cleanup_scratch(root, ready)
@@ -877,7 +904,7 @@ def test_late_deadline_retains_published_effect_and_operational_failure(
         create_metadata=_metadata(),
         plan=plan,
         deadline=Deadline.after(1),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
     assert refused.observation.state is FilePublicationObservationState.REFUSED
     assert refused.observation.failure is not None
@@ -909,7 +936,7 @@ def test_late_deadline_retains_recovered_debt_and_completed_cleanup(
         reference=ready._reference,
         plan=plan,
         deadline=Deadline.after(1),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
     assert recovered.observation.state is FilePublicationObservationState.RECOVERED
     assert recovered.observation.deadline_exceeded is True
@@ -925,7 +952,7 @@ def test_late_deadline_retains_recovered_debt_and_completed_cleanup(
         cleanup_debt=debt,
         plan=plan,
         deadline=Deadline.after(1),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
     assert cleaned.observation.state is FilePublicationObservationState.CLEANED
     assert cleaned.observation.deadline_exceeded is True
@@ -985,7 +1012,7 @@ def test_cleanup_expiry_before_deletion_preserves_input_debt(
         cleanup_debt=debt,
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FilePublicationObservationState.REFUSED

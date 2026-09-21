@@ -17,7 +17,6 @@ import pytest
 from agentworks.execution import _file_stage_guest
 from agentworks.execution._file_stage_bundle import FIXED_BUNDLE
 from agentworks.execution._file_stage_exchange import (
-    FileStageObservationError,
     FileStageObservationState,
     stage_begin,
     stage_chunk,
@@ -32,11 +31,13 @@ from agentworks.execution._file_stage_protocol import (
 from agentworks.execution._helper_bundle import FixedFileHelperBundle
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
 from agentworks.execution._scratch import ScratchFailureKind, ScratchPhase
 from agentworks.execution._scratch_receipt import _Identity, scratch_name
 from agentworks.execution.carrier import CarrierIO, Deadline, Dispatch, SinkOutput
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 from tests.execution.files._file_stage_support import LocalCarrier, fixture_source, install_fixture_bundle
+from tests.execution.files._runtime_support import runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the private stage helper candidate requires Linux")
 
@@ -101,7 +102,7 @@ def _begin(
         expected_length=length,
         plan=plan,
         deadline=deadline or Deadline.after(15),
-        runtime_path=runtime,
+        runtime_selection=runtime_selection(runtime),
     )
     return carrier, result
 
@@ -119,7 +120,7 @@ def _chunk(root: Path, path: str, reference, offset: int, data: bytes, plan: Ide
         chunk_digest=hashlib.sha256(data).digest(),
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
     return carrier, result
 
@@ -141,7 +142,7 @@ def _reconcile(
         token=_TOKEN,
         plan=plan,
         deadline=deadline or Deadline.after(15),
-        runtime_path=runtime,
+        runtime_selection=runtime_selection(runtime),
     )
     return carrier, result
 
@@ -165,9 +166,17 @@ def _cleanup(
         cleanup_debt=debt,
         plan=plan,
         deadline=deadline or Deadline.after(15),
-        runtime_path=runtime,
+        runtime_selection=runtime_selection(runtime),
     )
     return carrier, result
+
+
+def test_missing_runtime_yields_no_stage_observation(tmp_path: Path, plan: IdentityPlan) -> None:
+    carrier, result = _begin(tmp_path, "target", 1, plan, runtime="/missing/agentworks-python")
+
+    assert carrier.calls == 1
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.MISSING
+    assert result.observation is None
 
 
 class _DiscardSink:
@@ -201,6 +210,7 @@ def test_nested_stage_uses_one_sensitive_attempt_and_exact_private_modes(
 
     begin_carrier, begun = _begin(root, "nested/destination", len(payload), plan, runtime=str(runtime))
 
+    assert begun.runtime_prerequisite.state is RuntimePrerequisiteState.READY
     assert begun.observation.state is FileStageObservationState.CREATED
     reference = begun.observation.reference
     assert reference is not None
@@ -241,9 +251,8 @@ def test_lost_begin_reply_recovers_cleanup_only_and_cleans_exact_artifact(
 
     _, begun = _begin(root, "destination", 1, plan, runtime=str(runtime), carrier=lost)
 
-    assert begun.observation.state is FileStageObservationState.UNCERTAIN
-    assert begun.observation.error is FileStageObservationError.MISSING_TERMINAL
-    assert begun.observation.reference is None
+    assert begun.runtime_prerequisite.state is RuntimePrerequisiteState.UNKNOWN
+    assert begun.observation is None
     scratch = root / scratch_name(_TOKEN)
     assert scratch.is_dir()
 
@@ -371,7 +380,7 @@ def test_wrong_hash_is_refused_with_exact_cleanup_debt(tmp_path: Path, plan: Ide
         chunk_digest=hashlib.sha256(b"y").digest(),
         plan=plan,
         deadline=Deadline.after(15),
-        runtime_path=sys.executable,
+        runtime_selection=runtime_selection(),
     )
 
     assert result.observation.state is FileStageObservationState.REFUSED
@@ -731,7 +740,7 @@ def test_complete_proxmox_bodies_fit_for_transfer_and_recovery(
             expected_length=MAX_STAGE_CHUNK_BYTES,
             plan=plan,
             deadline=Deadline.after(15),
-            runtime_path=sys.executable,
+            runtime_selection=runtime_selection(),
         )
         reference = begun.observation.reference
         assert reference is not None
@@ -747,7 +756,7 @@ def test_complete_proxmox_bodies_fit_for_transfer_and_recovery(
             chunk_digest=hashlib.sha256(payload).digest(),
             plan=plan,
             deadline=Deadline.after(15),
-            runtime_path=sys.executable,
+            runtime_selection=runtime_selection(),
         )
         recovered = stage_reconcile(
             carrier,
@@ -756,7 +765,7 @@ def test_complete_proxmox_bodies_fit_for_transfer_and_recovery(
             token=_TOKEN,
             plan=plan,
             deadline=Deadline.after(15),
-            runtime_path=sys.executable,
+            runtime_selection=runtime_selection(),
         )
         debt = recovered.observation.cleanup_debt
         assert debt is not None
@@ -768,7 +777,7 @@ def test_complete_proxmox_bodies_fit_for_transfer_and_recovery(
             cleanup_debt=debt,
             plan=plan,
             deadline=Deadline.after(15),
-            runtime_path=sys.executable,
+            runtime_selection=runtime_selection(),
         )
 
     assert begun.dispatch is Dispatch.SENT and begun.observation.state is FileStageObservationState.CREATED

@@ -9,9 +9,10 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
-from agentworks.execution._helper_launcher import build_clean_environment_argv
+from agentworks.execution._helper_launcher import build_clean_environment_argv, build_identity_argv
 
 if TYPE_CHECKING:
+    from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution.carrier import ByteSink
 
 _SHELL = "/bin/sh"
@@ -164,6 +165,22 @@ def build_runtime_helper_argv(
         *candidates,
     )
     return argv, candidates, system_shim
+
+
+def build_runtime_identity_helper_argv(
+    plan: IdentityPlan,
+    *,
+    selection: RuntimeSelection,
+    fixed_source: str,
+    nonce: str,
+) -> tuple[tuple[str, ...], tuple[str, ...], str | None]:
+    """Build one runtime-selected helper invocation under an identity plan."""
+    argv, candidates, system_shim = build_runtime_helper_argv(
+        selection=selection,
+        fixed_source=fixed_source,
+        nonce=nonce,
+    )
+    return build_identity_argv(plan, argv), candidates, system_shim
 
 
 _RECORD = re.compile(
