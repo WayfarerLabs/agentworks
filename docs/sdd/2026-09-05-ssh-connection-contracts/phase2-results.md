@@ -284,6 +284,29 @@ This is Linux loopback evidence for private upload/publication composition. It n
 production FileAccess nor closes terminal, RunContext, creation binding, full file-workflow or
 native Windows/macOS acceptance.
 
+## Managed-process fix integration
+
+Transport's
+[round-1 handoff](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-5768952091)
+publishes `ae1ce293` after clean private reviews and hosted validation. It removes the candidate's
+post-wait helper-failure veto from terminal/lifecycle completion and adds fixed transient-unit
+collection. It changes neither the shared process pump nor SSH interfaces. The requested second
+native round retains both prior material findings as retest obligations, including systemd 252 and
+the unavailable Proxmox 9 cell; green local checks alone do not close them.
+
+Local SSH rebase `3c7ede4d64c4034d87dca88aa1e42bbc00b55284` has no conflicts or SSH-source edits.
+Its full tree `5857ccbc0f66e8591b56cba8bf78282275757ced` exactly equals the requested composition of
+transport `ae1ce293` and published SSH `b57b45df1`; the CLI tree is
+`77a52a47fb94ae74eb7106f41b156eed8b2e7bea`. This proves source equivalence, not native acceptance.
+The published SSH pin remains unchanged while the complete native report is pending.
+
+The combined non-integration suite passes **12,707 tests with 14 skips**. Full Ruff/format, mypy
+(1,067 sources), file lint, locked-SDD, rulesync and typer-isolation checks pass. Website Python and
+Node suites and deterministic double builds for both site bases pass. Earlier SSH runtime reviews
+and live evidence retain their recorded pins; this dependency rebase introduces no SSH behavior.
+Terminal delivery, RunContext composition, production creation binding and full supported-platform
+acceptance remain open.
+
 ## Remaining integration and acceptance
 
 Earlier integration `fefc2b9e` uses transport `f3339f3d3cccace129be58711dc7eeb30ec66dc2`, which adds
