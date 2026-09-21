@@ -24,7 +24,7 @@ from agentworks.execution._file_result import (
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import RuntimeSelection
-from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, PreparedInvocation
+from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, Failure, PreparedInvocation
 from agentworks.execution.files import Change, FileFailureReason
 from agentworks.operations import OperationOwner
 from tests.execution.files._file_read_support import LocalCarrier
@@ -37,10 +37,17 @@ _CONTEXT = {"entity_kind": "workspace file", "entity_name": "settings"}
 
 
 class _ReturnedReportCarrier:
-    def __init__(self, *, missing_completion_call: int | None = None, expiry_call: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        missing_completion_call: int | None = None,
+        expiry_call: int | None = None,
+        returned_failure: Failure | None = None,
+    ) -> None:
         self._carrier = LocalCarrier()
         self._missing_completion_call = missing_completion_call
         self._expiry_call = expiry_call
+        self._returned_failure = returned_failure
         self.calls = 0
 
     @property
@@ -53,7 +60,7 @@ class _ReturnedReportCarrier:
         if self.calls == self._expiry_call:
             object.__setattr__(deadline, "expires_at", 0.0)
         if self.calls == self._missing_completion_call:
-            return replace(report, completion=None)
+            return replace(report, completion=None, failure=self._returned_failure)
         return report
 
 
@@ -254,3 +261,54 @@ def test_real_helper_refusals_precede_later_host_deadline(
         outcome.deadline_exceeded for outcome in (stat_outcome, inventory_outcome, remove_outcome, metadata_outcome)
     )
     owner.close()
+
+
+@pytest.mark.parametrize("operation_name", ["stat", "inventory"])
+def test_real_read_candidate_failure_precedes_later_custody_state(
+    real_operation: tuple[Path, OperationOwner, FileOperation, IdentityPlan, RuntimeSelection],
+    operation_name: str,
+) -> None:
+    root, owner, operation, plan, runtime = real_operation
+    target = root / "target"
+    target.write_bytes(_DATA)
+    listed = root / "listed"
+    listed.mkdir()
+    listed.joinpath("child").write_bytes(_DATA)
+    carrier = _ReturnedReportCarrier(
+        missing_completion_call=1,
+        returned_failure=Failure.OUTPUT,
+    )
+    if operation_name == "stat":
+        stat_outcome = operation.stat(
+            carrier,
+            trusted_root_path=str(root),
+            relative_path="target",
+            plan=plan,
+            deadline=Deadline.after(30),
+            runtime_selection=runtime,
+        )
+        with pytest.raises(ExternalError) as raised:
+            reduce_file_stat(stat_outcome, **_CONTEXT)
+        assert stat_outcome.result is not None and stat_outcome.result.observation is not None
+        assert stat_outcome.pending_remote_effects and stat_outcome.requires_owner_retention
+    else:
+        inventory_outcome = operation.list_directory(
+            carrier,
+            trusted_root_path=str(root),
+            relative_path="listed",
+            max_entries=8,
+            max_depth=1,
+            max_encoded_bytes=4096,
+            plan=plan,
+            deadline=Deadline.after(30),
+            runtime_selection=runtime,
+        )
+        with pytest.raises(ExternalError) as raised:
+            reduce_file_inventory(inventory_outcome, **_CONTEXT)
+        assert inventory_outcome.result is not None and inventory_outcome.result.observation is not None
+        assert inventory_outcome.pending_remote_effects and inventory_outcome.requires_owner_retention
+
+    assert carrier.calls == 1
+    assert _details(raised.value).reason is FileFailureReason.CARRIER_OUTPUT
+    with pytest.raises(StateError):
+        owner.close()

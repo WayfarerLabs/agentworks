@@ -338,21 +338,24 @@ def _mutation_failure_reason(
     return fallback
 
 
-def _require_owned_read[T](
+def _require_owned_read[T: _Candidate](
     outcome: OwnedFileOutcome[T],
     phase: FileOperationPhase,
     *,
     entity_kind: str,
     entity_name: str,
 ) -> T:
+    candidate = outcome.result
+    if candidate is not None:
+        _require_candidate(candidate, phase, entity_kind=entity_kind, entity_name=entity_name)
     if outcome.pending_remote_effects or outcome.coordination_uncertain:
         _raise_reason(phase, FileFailureReason.COORDINATION, entity_kind=entity_kind, entity_name=entity_name)
     if outcome.requires_owner_retention:
         _raise_reason(phase, FileFailureReason.CLEANUP, entity_kind=entity_kind, entity_name=entity_name)
-    if outcome.result is None:
+    if candidate is None:
         reason = FileFailureReason.DEADLINE if outcome.deadline_exceeded else FileFailureReason.INCOMPLETE_RESPONSE
         _raise_reason(phase, reason, entity_kind=entity_kind, entity_name=entity_name)
-    return outcome.result
+    return candidate
 
 
 def _raise_late_read_deadline[T](
@@ -403,7 +406,6 @@ def reduce_file_stat(
     candidate = _require_owned_read(
         outcome, FileOperationPhase.OBSERVATION, entity_kind=entity_kind, entity_name=entity_name
     )
-    _require_candidate(candidate, FileOperationPhase.OBSERVATION, entity_kind=entity_kind, entity_name=entity_name)
     observation = candidate.observation
     if observation is None:
         _raise_late_read_deadline(
@@ -444,7 +446,6 @@ def reduce_file_inventory(
     candidate = _require_owned_read(
         outcome, FileOperationPhase.INVENTORY, entity_kind=entity_kind, entity_name=entity_name
     )
-    _require_candidate(candidate, FileOperationPhase.INVENTORY, entity_kind=entity_kind, entity_name=entity_name)
     observation = candidate.observation
     if observation is None:
         _raise_late_read_deadline(
