@@ -741,15 +741,16 @@ read/merge/publication and cleanup, not just individual exchanges. Private file 
 upload token, original destination binding, content references and cleanup debt. These values are
 working state, not another claim lifetime or a generic transaction framework.
 
-The single-exchange read, stat, inventory and removal compositions use the same serial borrowing
-rule as upload, download and JSON. Metadata convergence holds one borrow across the fixed
-owner/group lookup and the subsequent mutation. It records lookup facts before settling that
-attempt, and may advance only after successful resolution, normal helper termination and a fresh
-check of the same deadline. Local option validation precedes the lookup. No helper in this group
-creates transfer scratch; known partial mutation and unresolved remote effects still remain
-independent outcome facts. Closing a borrow never releases the outer claim, including when an
-exception escapes. These private compositions do not implement the public error reduction or
-production RunContext binding by themselves.
+The single-exchange stat, inventory and removal compositions use the same serial borrowing rule as
+upload, download and JSON. Ordinary reads use the snapshot/download composition, not an inline-read
+wrapper. Metadata convergence holds one borrow across the fixed owner/group lookup and the
+subsequent mutation. It records lookup facts before settling that attempt, and may advance only
+after successful resolution, normal helper termination and a fresh check of the same deadline. Local
+option validation precedes the lookup. No helper in this group creates transfer scratch; known
+partial mutation and unresolved remote effects still remain independent outcome facts. Closing a
+borrow never releases the outer claim, including when an exception escapes. These private
+compositions do not implement the public error reduction or production RunContext binding by
+themselves.
 
 The concrete core owner permits one active serial borrower and one outstanding attempt. Before
 dispatch, the borrower records unresolved state in memory, then commits the first possible-dispatch
@@ -790,8 +791,14 @@ JSON attaches its nested prepared upload before dispatch; failed child fact cons
 child's token and state reachable through the parent. Finishing a call removes its own record by
 identity, so it cannot erase a subsequently admitted call. Outcome retention precedes borrow
 release; a retention failure keeps the working state and serial borrow. This implements in-memory
-custody for these concrete paths, not durable recovery, all file families, shared public views or
-the outer orchestration's release gate.
+custody for these concrete paths, not durable recovery, shared public views or the outer
+orchestration's release gate.
+
+Stat, inventory, conditional removal and metadata/directory convergence also attach their validated
+prepared binding and working state before dispatch. Metadata retains the owner/group lookup result
+before settlement under the same borrow as the mutation. Outcome capture keeps exact original
+bindings and unfinished facts, while failed capture leaves working state attached. This extends the
+same in-memory custody boundary; it does not establish a durable recovery handoff or public API.
 
 Two decisions remain separate: whether old work can still cause effects, and who owns unfinished
 cleanup. Unresolved execution or coordination prevents conflicting admission and claim release.

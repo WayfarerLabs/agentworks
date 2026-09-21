@@ -1324,6 +1324,13 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       omits source streams and JSON bytes. Local tests cover all JSON strategies, no-op, overlap,
       multiple cleanup obligations, uncertain publication and failed capture; public reduction,
       other file families and durable recovery remain incomplete.
+- [x] Extend private core custody to stat, bounded inventory, conditional removal, metadata and
+      directory convergence. Attach validated bindings and working state before dispatch, capture
+      outcomes before borrow release, and retain lookup evidence before metadata settlement under
+      the same borrow. Local tests exercise real helper operations, lookup refusal, partial
+      metadata, overlap, failed fact construction and failed retention. Remove the unused private
+      inline-read wrapper; ordinary reads still use snapshot/download. Public reduction, durable
+      recovery, production ownership and RunContext remain separate gates.
 - [ ] Complete the durable recovery handoff for file work, including pre-dispatch reconciliation
       identity and exact cleanup binding without storing payload contents. Test process loss before
       response, after response and during handoff. A surviving claim without recovery facts is not
