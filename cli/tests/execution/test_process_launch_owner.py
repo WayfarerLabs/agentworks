@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -79,11 +80,11 @@ def _wait_snapshot(
     pytest.fail("local process owner did not publish the expected state")
 
 
-def _fake_process(*, stdin: bool = False) -> Any:
+def _fake_process() -> Any:
     process = type("FakeProcess", (), {})()
     process.pid = 424_242
     process.returncode = None
-    process.stdin = tempfile.TemporaryFile("w+b") if stdin else None  # noqa: SIM115
+    process.stdin = None
     process.stdout = tempfile.TemporaryFile("w+b")  # noqa: SIM115
     process.stderr = tempfile.TemporaryFile("w+b")  # noqa: SIM115
     return process
@@ -140,6 +141,55 @@ def test_dispatch_failure_is_terminal_without_process_capabilities(
     assert terminal.dispatch_failed and terminal.cleaned
     assert terminal.local_status is terminal.exit_status is None
     assert owner.snapshot().pipes is None
+
+
+def test_unexpected_prestart_denial_keeps_snapshot_and_terminal_consistent(tmp_path: Path) -> None:
+    script = r"""
+import sys
+from pathlib import Path
+
+from agentworks.execution import _process as process_core
+
+audit_events = 0
+
+
+def deny_process_start(event, arguments):
+    global audit_events
+    if event == "subprocess.Popen":
+        audit_events += 1
+        raise RuntimeError("deny native process start")
+
+
+sys.addaudithook(deny_process_start)
+owner = process_core.LocalProcessOwner()
+marker = sys.argv[1]
+child = "import sys; from pathlib import Path; Path(sys.argv[1]).touch()"
+request = process_core.LocalProcessRequest((sys.executable, "-c", child, marker), input_piped=False)
+owner.start(request)
+first = owner.close()
+snapshot = owner.snapshot()
+second = owner.close()
+
+assert audit_events == 1
+assert not Path(marker).exists()
+assert first is second
+assert first.admitted and not first.started
+assert first.dispatch_failed and not first.observation_failed
+assert first.cleaned
+assert first.local_status is first.exit_status is None
+assert snapshot.pipes is None
+assert snapshot.exit_status is None
+assert not snapshot.observation_failed
+assert snapshot.terminal is first
+"""
+    marker = tmp_path / "unexpected-child"
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", script, os.fspath(marker)],
+        capture_output=True,
+        timeout=20,
+    )
+
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
 
 
 def test_natural_exit_is_observed_while_stdin_and_pipes_remain_borrowed() -> None:

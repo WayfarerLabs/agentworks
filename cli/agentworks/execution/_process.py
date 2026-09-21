@@ -638,8 +638,8 @@ def _run_local_process_owner(owner: LocalProcessOwner) -> None:
         # sys.unraisablehook. Keep the owner closed and report only a category.
         observation_failed = started
         dispatch_failed = not started
-        owner._publish_observation_failure()
         if started:
+            owner._publish_observation_failure()
             if status is None:
                 assert process is not None
                 status = _ProcessStatus(process)
