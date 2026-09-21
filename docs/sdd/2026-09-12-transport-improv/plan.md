@@ -459,12 +459,21 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       `9d97623c`. Corrections remove repeated interior validation and retain neutral
       existing-document validation failure for parser-capacity and caller-bound refusals; both
       refuse before publication in regression coverage.
-- [ ] Implement [owned download composition](file-operations-lld.md#owned-download-composition)
+- [x] Implement [owned download composition](file-operations-lld.md#owned-download-composition)
       through the existing snapshot exchanges and shared borrowed dispatch gate. Verify binary
       chunks, exact length/digest, empty and absent sources, short/stalled/failing sinks, one claim
       and original deadline, and retained cleanup/uncertainty facts without replay. This private
       stream coordinator does not complete local atomic publication or public FileAccess download;
       those remain required, including optional public size bounds and native host metadata proof.
+      All three private lanes accept `4a53c39a`. Review corrected missing deadline facts across
+      download, upload and JSON and removed duplicate control-flow branches. Admission-driven
+      timeout regressions replace a reproduced startup-timing assumption; both fail against the old
+      settlement behavior and pass under concurrent stress.
+- [ ] Settle explicit local download creation/replacement and metadata semantics before implementing
+      the local staging writer. The operator question distinguishes required create/replace choice
+      from a create-only default; neither imports guest ownership into the workstation. Complete
+      native local publication, cleanup and public result conversion remain required, including
+      propagation of timing failure alongside proved operation facts.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
       access. The models-only checkpoint is not additive-surface completion.
 
@@ -490,6 +499,16 @@ skips. Ruff lint/format and CI's full mypy selection (1029 sources) pass. These 
 helpers and workstation tests, not native platform acceptance. Download composition is the next
 private file work unit; local publication, complete FileAccess and the production ownership gates
 remain required.
+
+The following download/resolver increment is privately accepted at `4a53c39a`. Its full local suite
+passes 12,208 tests with 13 skips; Ruff/format and full mypy (1,033 sources) pass. File lint,
+locked-SDD/rulesync, typer isolation and whitespace gates pass. Website validation passes 160 Python
+and 103 Node tests plus both deterministic double-build comparisons. Private review observed one
+flaky 100 ms timeout assumption despite a passing full suite; the final tests expire only after
+accepted runtime admission, and the independent concurrent stress run passes all eight cases. An
+optional duplicate test-only deadline-property patch remains acknowledged and non-gating. No native
+acceptance is claimed. Local publication, production ownership/recovery, lifecycle and RunContext
+remain required; the scoped interrupt-policy question is still open above.
 
 The publication and account-runtime increment has clean project, complexity and generic correctness
 reviews for the runtime at `66aa55d8`. The full local suite passes 12,050 tests with 13 skips;
@@ -1252,6 +1271,11 @@ isolation, in coexistence releases. Operational safety and selected profile guar
       behind an accessor. Keep Proxmox/WSL2 resolution passive, keep route lifetime in core, and use
       already-observed create-time endpoint facts for the new provisioning result. Retire the
       initial private hook name without a compatibility alias before consumer adoption.
+- [x] Rename the private native hook to `resolve_native_execution_binding` with a required deadline,
+      retaining passive Proxmox/WSL2 resolution and unchanged legacy callers. Update focused tests
+      and permanent developer teaching without adding an alias or claiming cloud/provider and
+      create-time adoption. All three private lanes accept this correction at `4a53c39a`; the
+      broader native composition gate above remains open.
 - [ ] Prove fresh-process platform composition without retirement dependencies, not only calls to
       already-imported native hooks. The first-binding audit at `6149cf06` found that VM-platform
       package initialization imports Lima's legacy dependencies, while plugin initialization imports
