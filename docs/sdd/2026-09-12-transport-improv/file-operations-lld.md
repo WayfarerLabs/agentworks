@@ -4,7 +4,8 @@
 <!-- cspell:ignore multiprocess netstrings noexec nofollow nonblocking nonlocal noreplace -->
 <!-- cspell:ignore openat openatx overclaim pread pwrite statx xattrs -->
 
-- Status: Proposed low-level design; implementation and live feasibility remain unproven.
+- Status: Private helper exchanges implemented in part; public composition and native acceptance
+  remain open.
 - Governing requirements: [FRD R7](frd.md#r7-files), including the
   [file safety and guest runtime rulings](frd.md#file-safety-and-guest-runtime-rulings).
 - Public boundary: [execution contract](execution-contract.md#file-operations-and-bound-policy).
@@ -222,9 +223,10 @@ proof, not a file-layer constant. The private stage exchange uses a smaller 12 K
 32 KiB complete-manifest limit. Its fixed bundle and complete provider serialization are measured by
 local fixtures; native acceptance and every supported connection/identity prefix remain separate
 proof obligations. Close removes only recorded objects; uncertain cleanup is owner debt and never
-hides the primary outcome. A prerequisite probe must establish interpreter, OS/CPU and required
-features without installing anything; no separately installed helper version or executable-digest
-handshake is needed when the executable source travels with each invocation.
+hides the primary outcome. Shared same-invocation admission must establish interpreter prerequisites
+without installing anything; platform/ABI-dependent operations retain their own feature checks. No
+separate probe, installed helper version or executable-digest handshake is needed when the
+executable source travels with each invocation.
 
 Upload consumes its declared finite source once. The unverified scratch reference binds exact object
 identity and expected length, not a whole-file digest that a streaming source cannot yet supply.
@@ -281,9 +283,8 @@ directory name from it and attempts exclusive creation once. Before acknowledgin
 creation, it writes and validates a bounded receipt binding the token, operation, execution
 identity, original authorized parent identity, declared length and acquired directory/data
 identities. A collision refuses; losing a reply never resubmits creation. These private receipt
-mechanics are implemented in `_scratch_receipt.py`. Private stage and snapshot exchanges deliver
-reconciliation and exact cleanup. Publication-stage ownership recovery has a private local
-candidate; its carrier exchange remains unimplemented. Neither these private exchanges nor local
+mechanics are implemented in `_scratch_receipt.py`. Private stage, snapshot and publication
+exchanges deliver reconciliation and exact cleanup. Neither these private exchanges nor local
 evidence complete production FileAccess or native acceptance.
 
 Read-only reconciliation accepts the original core-bound context and token, not paths supplied by a
@@ -302,9 +303,9 @@ receipt alone nor transport loss establishes quiescence.
 Every follow-on mutation must validate the still-existing exact operation receipt before creating
 any artifact. After cleanup, a delayed chunk or publication request therefore refuses instead of
 recreating state. Database exclusion alone does not establish this. Scratch-backed `publish_file`
-now validates and holds its receipt before creating the sibling; the future exchange must preserve
-that primitive-owned admission and prove operation ordering, not duplicate its checks. This is a
-concrete prerequisite, not a tombstone service.
+now validates and holds its receipt before creating the sibling; the private exchange preserves that
+primitive-owned admission rather than duplicating its checks. This requires no tombstone service;
+full operation ordering remains an acceptance gate.
 
 Publication retains a sibling stage in the actual destination directory for its access-metadata
 semantics. Its candidate ownership record is separately bounded and immutable, rather than a rewrite
@@ -323,9 +324,10 @@ receipts. A missing stage is not evidence of successful publication. Interruptio
 is recorded, or between receipt removal and final directory removal, can still leave uncertain
 cleanup. These limits do not become a journal, prefix scavenger, resumed upload promise or
 reboot-durability requirement. `_publication_receipt.py` implements a private local candidate and
-`_file_publication.py` uses it for scratch-backed publication. The complete remote exchange remains
-unimplemented and requires fault tests for lost replies, delayed dispatch, partial creation and
-interrupted cleanup through a carrier.
+`_file_publication.py` uses it for scratch-backed publication. The private carrier exchange now
+delivers publication, reconciliation and exact cleanup. Local complete-transcript and fault tests do
+not close joint native delivery or full upload ordering, including lost replies, delayed dispatch,
+partial creation and interrupted cleanup.
 
 The delivery audit at `0ecb9a2e` found that one monolithic bundle plus a 24 KiB chunk nearly
 exhausts or exceeds the historical 64 KiB Proxmox whole-POST limit before its missing dispatcher is
@@ -397,11 +399,11 @@ request/output bounds, Windows serialization and cross-identity/native execution
 
 ### Private publication exchanges
 
-The next private family contains `publish`, `publication_reconcile` and `publication_cleanup`. Every
-request binds the original approved root, nonempty destination relative path, core token, execution
-identity, plain stage reference and relative budget. The guest derives the parent from that original
-path after identity admission. Scratch and sibling publication use this same parent; neither a
-returned path nor a returned basename can select cleanup authority.
+The private publication family contains `publish`, `publication_reconcile` and
+`publication_cleanup`. Every request binds the original approved root, nonempty destination relative
+path, core token, execution identity, plain stage reference and relative budget. The guest derives
+the parent from that original path after identity admission. Scratch and sibling publication use
+this same parent; neither a returned path nor a returned basename can select cleanup authority.
 
 `publish` adds the final whole-content SHA-256, explicit Create/Replace/Match condition and numeric
 create metadata. It verifies the scratch content before passing the ready reference to the existing
