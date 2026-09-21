@@ -1209,6 +1209,12 @@ isolation, in coexistence releases. Operational safety and selected profile guar
       WSL2 distribution/user binding, independent Lima delivery and explicit SSH placement-host
       endpoint/account/trust/OS facts. Preserve unchanged legacy hooks during coexistence; new
       factories cannot obtain their inputs through those hooks.
+- [ ] Implement and prove the first independent native-binding hooks for Proxmox and WSL2 under the
+      [core binding contract](execution-contract.md#core-native-binding). Preserve passive
+      construction, actual delivery-account facts, explicit runtime selection and old-hook behavior.
+      Proxmox uses the configured CA for both platform API and new QGA delivery, without accepting
+      legacy verification bypass. Other platforms, provisioning-result integration and complete
+      target identity composition remain part of the required gate above.
 - [ ] Validate complete provisioning, native recovery without Tailscale, plugin operations, files,
       backup, host provisioning/rollback and interactive attachment through the new surface. Cover
       required operations, optional refusal, sensitivity and supported workstation/platform

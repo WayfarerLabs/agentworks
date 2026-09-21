@@ -404,6 +404,32 @@ evidence from the inner delivery. Shared host files/jobs use actual host identit
 userspace. Reuse this composition rather than introducing another SSH runner or a generic
 virtualization framework.
 
+### Core native binding
+
+Add `VMPlatform.native_execution_binding(vm, ctx, *, config=None)` alongside the legacy hook. It
+returns a `NativeExecutionBinding` containing the independent carrier, its actual delivery account
+name and explicit runtime selection. This is a core/platform composition boundary, not an accessor
+supplied to file or execution consumers. Construction resolves only already-delivered secrets and
+platform-owned VM metadata; it does not activate routes, probe accounts or launch work. The
+enclosing core operation owns those effects and its lifetime.
+
+Delivery account and requested execution account are distinct facts. QGA delivers as root; WSL2's
+binding explicitly selects the VM's admin account. Target composition must observe the requested
+account and choose a proved identity transition before exposing its view. The binding does not
+certify numeric credentials, grant elevation or claim that a platform supports every identity path.
+
+The first hook implementations cover Proxmox and WSL2. Other platform implementations and
+provisioning-result composition remain required before the additive surface is accepted; an
+unfinished hook is a delivery gap, not an optional native-execution capability. Existing hooks and
+callers remain unchanged. Move legacy execution imports to their actual legacy callers so producing
+a new binding never constructs or imports a retirement transport.
+
+Proxmox configuration adds an explicit workstation CA-bundle path alongside system trust. Apply the
+same CA choice to platform API access and the new QGA connection; never reinterpret
+`verify_ssl=False` as acceptable new-stack trust. That legacy setting retains its old meaning only
+for unmigrated calls, and the new binding rejects it with migration guidance. Loading the selected
+trust material belongs to delivery/readiness, not passive binding construction.
+
 ## Filesystem and package layout
 
 These are proposed destination paths, not directories to create in this documentation revision. Use
@@ -424,6 +450,7 @@ cli/agentworks/
     systemd.py                  private Linux managed-boundary mechanism, after lifecycle proof
     diagnostics.py              safe execution diagnostics, no legacy SSHLogger
     carrier.py                  leaf carrier protocol and carrier-only values
+    binding.py                  core/platform native carrier and delivery-account facts
     carriers/
       _subprocess.py            bounded local process I/O; carrier owns evidence interpretation
       ssh/
