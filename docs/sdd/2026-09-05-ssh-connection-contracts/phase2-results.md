@@ -248,6 +248,42 @@ accepts both, confines its proposed fixes to the managed-process candidate and l
 and SSH behavior unchanged. Neither finding authorizes an SSH contract change or closes an
 acceptance item here. The subsequent fixed head needs its own complete test report.
 
+Hosted [run 35665206011](https://github.com/WayfarerLabs/agentworks/actions/runs/35665206011) passes
+every check for published rebase `191031231`, including Linux Python 3.12/3.13/3.14, Windows Python
+3.13 and the aggregate gate. Full local Ruff/format, mypy (1,066 sources), file lint and locked-SDD
+checks also pass. This resolves the earlier inherited Windows collection failure; it does not supply
+native Windows SSH evidence.
+
+## Owned upload delivery over SSH
+
+Test `eea4ba2ba` composes the actual private `FileOperation` with a temporary database owner,
+installed OpenSSH, fixture-owned keys/server and production fixed helper bundles. It creates binary
+content, replaces it using the returned revision, then refuses duplicate creation and a stale
+revision through typed conflict errors. Content, digest and stat checks prove successful content
+delivery and destination preservation on refusal. Sensitive finite input, empty retained carrier
+output and canary-free representations are checked at the actual carrier boundary.
+
+Each completed call clears active/unfinished upload custody and its exact scratch object. The
+workflow finishes with only the destination in its directory and no database ownership record. The
+fixture retains unresolved custody and reports the exact scratch path if settlement fails; this
+happy-path/refusal proof does not inject unknown remote completion or certify recovery.
+
+The implementation run passes in 4.66 seconds and the lead's independent repeat in 4.84 seconds.
+Targeted Ruff/format and strict mypy pass. The lead independently verifies no owned SSH processes or
+scratch objects remain, then removes the exact fixture directory and credentials. Complexity review
+also observes a passing unmodified run and proves that corrupted finite input fails the digest
+assertion. Its optional redundant final hash assertion is removed after an independently passing
+deletion experiment.
+
+Project and complexity reviews are clean at `eea4ba2ba`; project review independently repeats the
+live workflow in 5.96 seconds. All recorded fixture directories and generated credentials are
+removed, with no owned SSH processes or scratch remaining. The test-only increment changes no
+runtime behavior; earlier runtime correctness reviews retain their original pins.
+
+This is Linux loopback evidence for private upload/publication composition. It neither exposes
+production FileAccess nor closes terminal, RunContext, creation binding, full file-workflow or
+native Windows/macOS acceptance.
+
 ## Remaining integration and acceptance
 
 Earlier integration `fefc2b9e` uses transport `f3339f3d3cccace129be58711dc7eeb30ec66dc2`, which adds

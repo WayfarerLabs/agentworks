@@ -220,6 +220,12 @@ confirmed by the operator.
       forwarding cases and all three private reviews; the
       [evidence record](phase2-results.md#forwarding-uses-the-shared-held-process-owner) retains the
       remaining shared interruption and native acceptance limits.
+- [x] Prove the private owned upload/publication composition through real Linux SSH at `eea4ba2ba`:
+      create, revision-matched replacement, duplicate-create and stale-revision refusal, typed
+      reduction, binary integrity, sensitive delivery and exact custody/scratch cleanup. The
+      [file-workflow record](phase2-results.md#owned-upload-delivery-over-ssh) scopes this to the
+      private composition; production FileAccess, recovery faults and native platform acceptance
+      remain open.
 - [ ] Finish the SSH LLD for R1-R5: complete connection validation, installed-client/path policy,
       config schema and conversion, trust preservation/enrollment/refusal, process/terminal and
       forwarding lifetimes, diagnostics and acceptance fixtures. Name the authority and refresh

@@ -157,7 +157,6 @@ def test_file_operation_upload_conditions_and_cleanup_over_real_ssh(
         assert stale_error.value.details is not None
         assert stale_error.value.details.reason is FileFailureReason.CONFLICT
         assert target.read_bytes() == updated_content
-        assert hashlib.sha256(target.read_bytes()).digest() == hashlib.sha256(updated_content).digest()
         assert _stat_fingerprint(target) == preserved
         assert tuple(root.iterdir()) == (target,)
         assert _all_attempts_succeeded(carrier)
