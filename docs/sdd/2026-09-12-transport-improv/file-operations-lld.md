@@ -97,6 +97,13 @@ download obtains a finite size from the held source snapshot before transferring
 remain bounded. Directory inventory defaults to 1,024 entries, depth 1, and 1 MiB encoded; reviewed
 callers may request up to 4,096 entries, depth 8, and 4 MiB encoded.
 
+Inventory retains one traversal and one canonical response. At its maximum encoded size, the current
+protocol emits at most 5,650,717 stdout bytes including data/control records and runtime prefix.
+PVE's decoded-string JSON envelope adds escaping and status fields. The selected 8 MiB HTTP-response
+bound leaves room for that complete response; it is not a larger inventory grant or unbounded output
+capture. Native PVE/QGA evidence must verify the supported maximum and incomplete output behavior.
+Do not replace this bounded response with repeated traversals presented as one complete inventory.
+
 Ordinary `read_file` composes the owned snapshot/chunk download into a bounded in-memory sink. This
 preserves the caller's byte bound without requiring one carrier response to contain the whole file.
 The complete source revision, verified bytes, deadline and scratch cleanup must agree before

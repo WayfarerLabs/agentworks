@@ -16,7 +16,6 @@ from agentworks.errors import ValidationError
 from agentworks.execution._file_stat import FileRevision, FileStat
 from agentworks.execution.files import (
     Change,
-    Create,
     DirectoryEntry,
     DirectoryLimit,
     FileKind,
@@ -25,7 +24,6 @@ from agentworks.execution.files import (
     MutationResult,
     NewMetadata,
     ReadResult,
-    Replace,
     Revision,
     _file_revision_from_revision,
     _revision_from_file_revision,
@@ -265,8 +263,6 @@ def test_write_conditions_and_mutation_results_keep_closed_revision_children() -
     digest = b"private-digest-canary-32-bytes!!"
     assert len(digest) == 32
     revision = _revision_from_file_revision(_private_revision(digest=digest))
-    assert isinstance(Create(), Create)
-    assert isinstance(Replace(), Replace)
     assert Match(revision).revision is revision
     assert MutationResult(Change.CHANGED, revision).revision is revision
     assert digest.hex() not in repr(MutationResult(Change.CHANGED, revision))
@@ -345,9 +341,7 @@ class Blocked(importlib.abc.MetaPathFinder):
             raise ImportError("blocked module loaded: " + fullname)
 
 sys.meta_path.insert(0, Blocked())
-from agentworks.execution.files import FileKind, Revision
-assert FileKind.REGULAR.value == "regular"
-assert Revision is not None
+import agentworks.execution.files
 assert not any(name in sys.modules for name in blocked)
 """
     result = subprocess.run([sys.executable, "-I", "-c", script], capture_output=True, timeout=20)

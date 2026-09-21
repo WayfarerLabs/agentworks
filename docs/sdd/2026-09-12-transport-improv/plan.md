@@ -1294,6 +1294,10 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       bounds independently of QGA's single-response capacity. Keep the no-staging readiness read
       separately bound before dispatch; prove its complete encoded response fits the selected route.
       Do not retry a failed direct read through staging after uncertain observation.
+- [ ] Accommodate the full bounded directory inventory in the native HTTP response reader, including
+      framing and provider-envelope overhead. Keep one traversal and a finite response limit; prove
+      local maximum-response acceptance and above-bound refusal, then obtain native PVE/QGA evidence
+      before declaring inventory delivery accepted.
 
 ### Buffered execution result checkpoint
 

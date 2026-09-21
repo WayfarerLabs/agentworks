@@ -56,12 +56,12 @@ proof.
 
 `carriers/proxmox.py` accepts resolved connection authority for one VM. It makes one dispatch and
 polls QGA status without replay after a failed observation. Input must be ASCII and at most 65,536
-bytes. An owned workstation-Python HTTP worker bounds response size and consumes the same deadline;
-timeout/interruption kills and reaps that worker, not the guest command. TLS verification is
-mandatory. `ProxmoxConnection.ca_bundle` accepts an explicit PEM CA-bundle `Path`; `None` uses the
-system/default trust context. An explicit bundle selects that trust source, not an additional trust
-bypass. The API hostname must match the certificate; there is no server-name override. Redirects and
-ambient proxies are disabled, and provider exception text is not returned.
+bytes. An owned workstation-Python HTTP worker bounds each complete response to 8 MiB and consumes
+the same deadline; timeout/interruption kills and reaps that worker, not the guest command. TLS
+verification is mandatory. `ProxmoxConnection.ca_bundle` accepts an explicit PEM CA-bundle `Path`;
+`None` uses the system/default trust context. An explicit bundle selects that trust source, not an
+additional trust bypass. The API hostname must match the certificate; there is no server-name
+override. Redirects and ambient proxies are disabled, and provider exception text is not returned.
 
 `binding.py` carries a native carrier, its actual delivery account and explicit runtime selection.
 The private platform resolver is an explicit preparation operation with a required deadline, so a
