@@ -1331,7 +1331,10 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       helper-confirmed change or no-change raises an ordinary typed failure with that exact effect
       when later termination or coordination is incomplete; helper refusal precedes a deadline
       sampled after its response. Record deadline expiry at actual upload/download cleanup entry as
-      cleanup rather than transfer. Real producer-path tests retain custody and no-replay behavior.
+      cleanup rather than transfer. Retained stat/inventory carrier failures precede later generic
+      custody state. Direct JSON observation retains carrier failures even after normal process
+      termination, and phase-less object refusals use the caller's observation/removal phase. Real
+      producer-path tests retain custody and no-replay behavior.
 - [x] Change private upload, download, JSON, memory-read and single-file compositions to accept a
       caller-owned `OperationBorrow` without acquiring or closing it. Nested compositions reuse the
       same borrow. Focused lifetime tests cover normal, invalid and exceptional results and prove
