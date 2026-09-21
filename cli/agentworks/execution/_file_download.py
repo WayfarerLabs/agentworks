@@ -497,34 +497,25 @@ class _DownloadWorkflow:
         return True
 
     def _reconcile_creation(self) -> None:
-        if self._expired() or self._state.pending_remote_effects:
-            self._state.ownership_uncertain = self._state.cleanup_debt is None
-            return
-        result = snapshot_reconcile(
-            self._carrier,
-            token=self._state.token,
-            plan=self._state.binding.identity_plan,
-            deadline=self._deadline,
-            runtime_selection=self._state.binding.runtime_selection,
-        )
-        observation = result.observation
-        if result.dispatch is not Dispatch.NOT_SENT:
-            self._record_runtime(result.runtime_prerequisite)
-        if result.dispatch is not Dispatch.NOT_SENT and observation is not None:
-            self._record_observation(
-                observation,
-                phase=FileDownloadFailurePhase.SNAPSHOT_RECONCILE,
-                dispatch=result.dispatch,
-                carrier_failure=result.carrier_failure,
+        if not self._expired() and not self._state.pending_remote_effects:
+            result = snapshot_reconcile(
+                self._carrier,
+                token=self._state.token,
+                plan=self._state.binding.identity_plan,
+                deadline=self._deadline,
+                runtime_selection=self._state.binding.runtime_selection,
             )
-        normal = self._settle(result.dispatch, result.carrier_completion)
-        if normal and self._runtime_refused(result.runtime_prerequisite):
-            self._state.fail(
-                FileDownloadFailure.RUNTIME_PREREQUISITE,
-                phase=FileDownloadFailurePhase.SNAPSHOT_RECONCILE,
-                dispatch=result.dispatch,
-                carrier_failure=result.carrier_failure,
-            )
+            observation = result.observation
+            if result.dispatch is not Dispatch.NOT_SENT:
+                self._record_runtime(result.runtime_prerequisite)
+            if result.dispatch is not Dispatch.NOT_SENT and observation is not None:
+                self._record_observation(
+                    observation,
+                    phase=FileDownloadFailurePhase.SNAPSHOT_RECONCILE,
+                    dispatch=result.dispatch,
+                    carrier_failure=result.carrier_failure,
+                )
+            self._settle(result.dispatch, result.carrier_completion)
         self._state.ownership_uncertain = self._state.cleanup_debt is None
 
     def _cleanup_after_failure(self) -> None:

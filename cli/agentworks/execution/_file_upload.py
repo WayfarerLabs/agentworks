@@ -109,9 +109,6 @@ class FileUploadFailurePhase(StrEnum):
     STAGE_BEGIN = "stage_begin"
     STAGE_CHUNK = "stage_chunk"
     PUBLICATION = "publication"
-    STAGE_RECONCILE = "stage_reconcile"
-    PUBLICATION_RECONCILE = "publication_reconcile"
-    PUBLICATION_CLEANUP = "publication_cleanup"
     STAGE_CLEANUP = "stage_cleanup"
 
 
@@ -699,43 +696,22 @@ class _UploadWorkflow:
     def _reconcile_stage(self) -> None:
         if self._deadline.expired or self._state.pending_remote_effects:
             self._state.deadline_exceeded = self._state.deadline_exceeded or self._deadline.expired
-            self._state.stage_ownership_uncertain = self._state.scratch_debt is None
-            return
-        result = stage_reconcile(
-            self._carrier,
-            trusted_root_path=self._state.binding.trusted_root_path,
-            relative_path=self._state.binding.relative_path,
-            token=self._state.token,
-            plan=self._state.binding.identity_plan,
-            deadline=self._deadline,
-            runtime_selection=self._state.binding.runtime_selection,
-        )
-        observation = result.observation
-        if result.dispatch is not Dispatch.NOT_SENT:
-            self._record_runtime_prerequisite(result.runtime_prerequisite)
-        if result.dispatch is not Dispatch.NOT_SENT and observation is not None:
-            self._record_stage_observation(observation)
-        normal = self._settle_attempt(result.dispatch, result.carrier_completion)
-        if not normal:
-            self._state.fail(
-                FileUploadFailure.OBSERVATION
-                if result.dispatch is Dispatch.NOT_SENT
-                else FileUploadFailure.TERMINATION,
-                phase=FileUploadFailurePhase.STAGE_RECONCILE,
-                dispatch=result.dispatch,
-                carrier_failure=result.carrier_failure,
+        else:
+            result = stage_reconcile(
+                self._carrier,
+                trusted_root_path=self._state.binding.trusted_root_path,
+                relative_path=self._state.binding.relative_path,
+                token=self._state.token,
+                plan=self._state.binding.identity_plan,
+                deadline=self._deadline,
+                runtime_selection=self._state.binding.runtime_selection,
             )
-            self._state.stage_ownership_uncertain = self._state.scratch_debt is None
-            return
-        if self._runtime_refused(result.runtime_prerequisite):
-            self._state.fail(
-                FileUploadFailure.RUNTIME_PREREQUISITE,
-                phase=FileUploadFailurePhase.STAGE_RECONCILE,
-                dispatch=result.dispatch,
-                carrier_failure=result.carrier_failure,
-            )
-            self._state.stage_ownership_uncertain = self._state.scratch_debt is None
-            return
+            observation = result.observation
+            if result.dispatch is not Dispatch.NOT_SENT:
+                self._record_runtime_prerequisite(result.runtime_prerequisite)
+            if result.dispatch is not Dispatch.NOT_SENT and observation is not None:
+                self._record_stage_observation(observation)
+            self._settle_attempt(result.dispatch, result.carrier_completion)
         self._state.stage_ownership_uncertain = self._state.scratch_debt is None
 
     def _reconcile_publication(self) -> None:
@@ -743,44 +719,23 @@ class _UploadWorkflow:
         assert reference is not None
         if self._deadline.expired or self._state.pending_remote_effects:
             self._state.deadline_exceeded = self._state.deadline_exceeded or self._deadline.expired
-            self._state.publication_ownership_uncertain = self._state.publication_debt is None
-            return
-        result = publication_reconcile(
-            self._carrier,
-            trusted_root_path=self._state.binding.trusted_root_path,
-            relative_path=self._state.binding.relative_path,
-            token=self._state.token,
-            reference=reference,
-            plan=self._state.binding.identity_plan,
-            deadline=self._deadline,
-            runtime_selection=self._state.binding.runtime_selection,
-        )
-        observation = result.observation
-        if result.dispatch is not Dispatch.NOT_SENT:
-            self._record_runtime_prerequisite(result.runtime_prerequisite)
-        if result.dispatch is not Dispatch.NOT_SENT and observation is not None:
-            self._record_publication_observation(observation)
-        normal = self._settle_attempt(result.dispatch, result.carrier_completion)
-        if not normal:
-            self._state.fail(
-                FileUploadFailure.OBSERVATION
-                if result.dispatch is Dispatch.NOT_SENT
-                else FileUploadFailure.TERMINATION,
-                phase=FileUploadFailurePhase.PUBLICATION_RECONCILE,
-                dispatch=result.dispatch,
-                carrier_failure=result.carrier_failure,
+        else:
+            result = publication_reconcile(
+                self._carrier,
+                trusted_root_path=self._state.binding.trusted_root_path,
+                relative_path=self._state.binding.relative_path,
+                token=self._state.token,
+                reference=reference,
+                plan=self._state.binding.identity_plan,
+                deadline=self._deadline,
+                runtime_selection=self._state.binding.runtime_selection,
             )
-            self._state.publication_ownership_uncertain = self._state.publication_debt is None
-            return
-        if self._runtime_refused(result.runtime_prerequisite):
-            self._state.fail(
-                FileUploadFailure.RUNTIME_PREREQUISITE,
-                phase=FileUploadFailurePhase.PUBLICATION_RECONCILE,
-                dispatch=result.dispatch,
-                carrier_failure=result.carrier_failure,
-            )
-            self._state.publication_ownership_uncertain = self._state.publication_debt is None
-            return
+            observation = result.observation
+            if result.dispatch is not Dispatch.NOT_SENT:
+                self._record_runtime_prerequisite(result.runtime_prerequisite)
+            if result.dispatch is not Dispatch.NOT_SENT and observation is not None:
+                self._record_publication_observation(observation)
+            self._settle_attempt(result.dispatch, result.carrier_completion)
         self._state.publication_ownership_uncertain = self._state.publication_debt is None
 
     def _cleanup_after_failure(self) -> None:
@@ -804,7 +759,6 @@ class _UploadWorkflow:
         assert reference is not None and debt is not None
         if self._deadline.expired:
             self._state.deadline_exceeded = True
-            self._state.fail(FileUploadFailure.DEADLINE)
             return
         result = publication_cleanup(
             self._carrier,
@@ -825,13 +779,6 @@ class _UploadWorkflow:
         normal = self._settle_attempt(result.dispatch, result.carrier_completion)
         if normal and observation is not None and observation.state is FilePublicationObservationState.CLEANED:
             self._state.publication_debt = None
-        else:
-            self._state.fail(
-                FileUploadFailure.DEADLINE if self._state.deadline_exceeded else FileUploadFailure.CLEANUP,
-                phase=FileUploadFailurePhase.PUBLICATION_CLEANUP,
-                dispatch=result.dispatch,
-                carrier_failure=result.carrier_failure,
-            )
 
     def _cleanup_scratch(self) -> None:
         debt = self._state.scratch_debt
