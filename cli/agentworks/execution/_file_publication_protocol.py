@@ -10,7 +10,7 @@ import math
 import stat
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ._file_paths import normalized_relative_path, normalized_root
 from ._file_publication import (
@@ -28,13 +28,15 @@ from ._file_publication_wire import (
     encode_publication_cleanup_debt,
 )
 from ._file_revision_wire import FileRevisionWireError, decode_file_revision, encode_file_revision
-from ._file_stat import FileRevision
 from ._file_wire import valid_nonce
 from ._helper_identity import IdentityExpectation, decode_identity
 from ._publication_receipt import PublicationReceiptFailureKind, PublicationStageCleanupDebt
 from ._scratch import ScratchFailureKind, ScratchPhase, ScratchReference
 from ._scratch_receipt import ScratchOperation, ScratchReceiptContext
 from ._scratch_wire import ScratchWireError, decode_scratch_reference, encode_scratch_reference
+
+if TYPE_CHECKING:
+    from ._file_stat import FileRevision
 
 MAX_REQUEST_BYTES = 32_768
 MAX_PATH_BYTES = 4_096
@@ -209,7 +211,12 @@ def _decode_bytes(value: object, maximum: int, *, exact: int | None = None) -> b
         decoded = base64.b64decode(value.encode("ascii"), validate=True)
     except (UnicodeEncodeError, binascii.Error):
         failed = True
-    if failed or len(decoded) > maximum or (exact is not None and len(decoded) != exact) or _encode_bytes(decoded) != value:
+    if (
+        failed
+        or len(decoded) > maximum
+        or (exact is not None and len(decoded) != exact)
+        or _encode_bytes(decoded) != value
+    ):
         raise _invalid_request()
     return decoded
 
@@ -342,8 +349,9 @@ def decode_file_publication_request(data: bytes) -> FilePublicationRequest:
         raise _invalid_request() from None
     if canonical != data:
         raise _invalid_request()
+    operation_value = value.get("operation")
     try:
-        operation = FilePublicationOperation(value.get("operation") if type(value.get("operation")) is str else "")
+        operation = FilePublicationOperation(operation_value if type(operation_value) is str else "")
     except ValueError:
         raise _invalid_request() from None
     expected = {
@@ -405,7 +413,11 @@ def parse_empty_file_publication_body(body: bytes) -> None:
 
 def encode_file_publish_result(result: FilePublishResult) -> bytes:
     return _json_bytes(
-        {"deadline_exceeded": result.deadline_exceeded, "result": "published", "revision": encode_file_revision(result.revision)}
+        {
+            "deadline_exceeded": result.deadline_exceeded,
+            "result": "published",
+            "revision": encode_file_revision(result.revision),
+        }
     )
 
 
@@ -419,7 +431,12 @@ def parse_file_publish_result(body: bytes, digest: bytes, expected_size: int) ->
         revision = decode_file_revision(value["revision"])
     except FileRevisionWireError:
         raise FilePublicationControlError from None
-    if revision.digest is None or revision.stat.size != expected_size or not hmac.compare_digest(revision.digest, digest):
+    if (
+        not stat.S_ISREG(revision.stat.mode)
+        or revision.digest is None
+        or revision.stat.size != expected_size
+        or not hmac.compare_digest(revision.digest, digest)
+    ):
         raise FilePublicationControlError
     return FilePublishResult(revision, value["deadline_exceeded"])
 
@@ -491,7 +508,9 @@ def _cleanup_value(failure: FilePublicationFailureControl) -> object:
     raise FilePublicationControlError
 
 
-def _parse_cleanup(value: object, reference: ScratchReference) -> tuple[PublicationCleanupState, BoundPublicationCleanupDebt | None]:
+def _parse_cleanup(
+    value: object, reference: ScratchReference
+) -> tuple[PublicationCleanupState, BoundPublicationCleanupDebt | None]:
     if type(value) is not dict:
         raise FilePublicationControlError
     if value == {"state": "none"}:
@@ -522,16 +541,28 @@ def encode_file_publication_failure(failure: FilePublicationFailureControl) -> b
             raise FilePublicationControlError
         value.update({"kind": failure.scratch_kind.value, "phase": failure.scratch_phase.value})
     elif failure.code is FilePublicationFailureCode.PUBLICATION:
-        if failure.publication_kind is None or failure.publication_phase is None or any(x is not None for x in details[:2] + details[4:]):
+        if (
+            failure.publication_kind is None
+            or failure.publication_phase is None
+            or any(x is not None for x in details[:2] + details[4:])
+        ):
             raise FilePublicationControlError
         value.update(
-            {"cleanup": _cleanup_value(failure), "kind": failure.publication_kind.value, "phase": failure.publication_phase.value}
+            {
+                "cleanup": _cleanup_value(failure),
+                "kind": failure.publication_kind.value,
+                "phase": failure.publication_phase.value,
+            }
         )
     elif failure.code is FilePublicationFailureCode.RECEIPT:
         if failure.receipt_kind is None or any(x is not None for x in details[:4]):
             raise FilePublicationControlError
         value.update({"cleanup": _cleanup_value(failure), "kind": failure.receipt_kind.value})
-    elif any(x is not None for x in details) or failure.cleanup_state is not PublicationCleanupState.NONE or failure.cleanup_debt is not None:
+    elif (
+        any(x is not None for x in details)
+        or failure.cleanup_state is not PublicationCleanupState.NONE
+        or failure.cleanup_debt is not None
+    ):
         raise FilePublicationControlError
     return _json_bytes(value)
 
@@ -541,8 +572,9 @@ def parse_file_publication_failure(
     reference: ScratchReference,
 ) -> FilePublicationFailureControl:
     value = _canonical_control(body)
+    code_value = value.get("code")
     try:
-        code = FilePublicationFailureCode(value.get("code") if type(value.get("code")) is str else "")
+        code = FilePublicationFailureCode(code_value if type(code_value) is str else "")
     except ValueError:
         raise FilePublicationControlError from None
     if code is FilePublicationFailureCode.SCRATCH:

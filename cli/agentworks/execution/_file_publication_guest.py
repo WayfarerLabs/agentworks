@@ -167,7 +167,9 @@ def _receipt_failure(
     )
 
 
-def _operate_publish(request: FilePublishRequest, parent_fd: int, leaf: str, expires_at: float | None) -> FilePublishResult:
+def _operate_publish(
+    request: FilePublishRequest, parent_fd: int, leaf: str, expires_at: float | None
+) -> FilePublishResult:
     try:
         ready = verify_scratch(parent_fd, request.reference, request.digest, expires_at=expires_at)
     except ScratchTransferError as error:

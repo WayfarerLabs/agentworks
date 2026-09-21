@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from ._file_publication import PublicationCleanupDebt
 from ._publication_receipt import (
@@ -13,7 +14,9 @@ from ._publication_receipt import (
     _Identity,
     publication_stage_name,
 )
-from ._scratch import ScratchReference
+
+if TYPE_CHECKING:
+    from ._scratch import ScratchReference
 
 _MAX_IDENTITY_NUMBER = (1 << 64) - 1
 _DEBT_FIELDS = frozenset({"kind", "parent", "record", "record_state", "stage", "stage_removed"})
@@ -61,6 +64,9 @@ def bind_publication_cleanup_debt(
 ) -> BoundPublicationCleanupDebt:
     """Bind primitive debt to the request facts that authorize one retry."""
     token = reference._ownership._token
+    scratch_parent = reference._ownership._parent
+    if publication_parent != _Identity(scratch_parent.device, scratch_parent.inode):
+        raise FilePublicationWireError
     stage_name = publication_stage_name(token)
     if isinstance(debt, PublicationCleanupDebt):
         if debt.name != stage_name or debt.device is None or debt.inode is None:
@@ -134,7 +140,7 @@ def decode_publication_cleanup_debt(
     record = _decode_identity(value["record"])
     record_state = value["record_state"]
     if record_state == _FINAL_RECORD:
-        record_modes = (_RECORD_MODE,)
+        record_modes: tuple[int, ...] = (_RECORD_MODE,)
     elif record_state == _CREATING_RECORD:
         record_modes = (_RECORD_BUILD_MODE, _RECORD_MODE)
     else:
