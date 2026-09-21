@@ -222,6 +222,7 @@ class OperationAttempt:
         borrow = self._borrow
         owner = borrow._owner  # noqa: SLF001
         with owner._guard:  # noqa: SLF001
+            borrow._require_active_locked()  # noqa: SLF001
             if self._settled or owner._outstanding_attempt is not self:  # noqa: SLF001
                 raise StateError(
                     "operation attempt is no longer outstanding",

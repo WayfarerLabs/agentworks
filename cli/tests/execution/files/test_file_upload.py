@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 import agentworks.execution._file_publication_exchange as publication_exchange
+import agentworks.execution._file_stage_exchange as stage_exchange
 from agentworks.db import Database, OperationClaimState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._file_publication import Create, CreateMetadata, Match, Replace
@@ -22,12 +23,22 @@ from agentworks.execution._file_upload import (
 )
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._runtime_prerequisite import (
+    RuntimePrerequisiteState,
+    RuntimeSelection,
+    RuntimeTargetOS,
+)
+from agentworks.execution._scratch_receipt import scratch_name
 from agentworks.execution.carrier import (
+    ByteSink,
+    CapturedOutput,
     CarrierIO,
     CarrierReport,
     ChannelFeatures,
     Deadline,
+    Dispatch,
     ExitStatus,
+    Retention,
     SinkOutput,
 )
 from agentworks.operations import OperationOwner
@@ -37,8 +48,9 @@ from tests.execution.files._file_publication_support import (
 from tests.execution.files._file_publication_support import (
     install_fixture_bundle as install_publication_bundle,
 )
+from tests.execution.files._file_stage_support import fixture_source as stage_fixture_source
 from tests.execution.files._file_stage_support import install_fixture_bundle as install_stage_bundle
-from tests.execution.files._runtime_support import runtime_selection
+from tests.execution.files._runtime_support import runtime_nonce, runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the private upload helper requires Linux")
 
@@ -56,6 +68,27 @@ def fail_stage_unlink(path,*args,**kwargs):
   raise OSError
  return real_unlink(path,*args,**kwargs)
 publication.os.unlink=fail_stage_unlink
+"""
+_PARTIAL_STAGE_BEGIN = """
+real_begin=guest.begin_scratch
+def partial_begin(*args,**kwargs):
+ result=real_begin(*args,**kwargs)
+ raise guest.ScratchTransferError(
+  guest.ScratchFailureKind.IO,
+  guest.ScratchPhase.BEGIN,
+  cleanup_debt=guest._cleanup_debt(result),
+ )
+guest.begin_scratch=partial_begin
+"""
+_FAIL_STAGE_CLEANUP = """
+real_cleanup=guest.cleanup_scratch
+def failed_cleanup(parent_fd,debt):
+ raise guest.ScratchTransferError(
+  guest.ScratchFailureKind.IO,
+  guest.ScratchPhase.CLEANUP,
+  cleanup_debt=debt,
+ )
+guest.cleanup_scratch=failed_cleanup
 """
 
 
@@ -81,28 +114,6 @@ class BytesSource:
 
     def close(self) -> None:
         self.closed = True
-
-
-class LostFirstStdoutCarrier:
-    def __init__(self) -> None:
-        self._carrier = LocalCarrier()
-        self.calls = 0
-
-    @property
-    def features(self) -> ChannelFeatures:
-        return ChannelFeatures()
-
-    def execute(self, invocation, *, io, deadline) -> CarrierReport:
-        self.calls += 1
-        if self.calls != 1:
-            return self._carrier.execute(invocation, io=io, deadline=deadline)
-        assert isinstance(io.output, SinkOutput)
-        hidden = CarrierIO(
-            input=io.input,
-            output=SinkOutput(_DiscardSink(), io.output.stderr, require_live=False),
-            sensitive=io.sensitive,
-        )
-        return self._carrier.execute(invocation, io=hidden, deadline=deadline)
 
 
 class LostCallStdoutCarrier:
@@ -164,6 +175,36 @@ class MissingCompletionCallCarrier:
         return report
 
 
+class RuntimeRefusalOnCallCarrier:
+    def __init__(self, refusal_call: int, state: RuntimePrerequisiteState) -> None:
+        self._carrier = LocalCarrier()
+        self._refusal_call = refusal_call
+        self._state = state
+        self.calls = 0
+
+    @property
+    def features(self) -> ChannelFeatures:
+        return ChannelFeatures()
+
+    def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        self.calls += 1
+        if self.calls != self._refusal_call:
+            return self._carrier.execute(invocation, io=io, deadline=deadline)
+        del deadline
+        assert isinstance(io.output, SinkOutput)
+        token = "-" if self._state is RuntimePrerequisiteState.MISSING else "0"
+        record = f"AGW_RUNTIME_1:{runtime_nonce(invocation)}:{self._state.value}:{token}\n".encode("ascii")
+        _write(io.output.stdout, record)
+        output = CapturedOutput(complete=True, retention=Retention.DELIVERED)
+        return CarrierReport(
+            Dispatch.SENT,
+            ExitStatus(code=0),
+            0,
+            output,
+            output,
+        )
+
+
 class RestorePublicationBundleCarrier:
     def __init__(self, restore_after_call: int, normal_bundle, monkeypatch: pytest.MonkeyPatch) -> None:
         self._carrier = LocalCarrier()
@@ -187,6 +228,14 @@ class RestorePublicationBundleCarrier:
 class _DiscardSink:
     def try_write(self, data: memoryview) -> int:
         return len(data)
+
+
+def _write(sink: ByteSink, data: bytes) -> None:
+    remaining = memoryview(data)
+    while remaining:
+        written = sink.try_write(remaining)
+        assert written is not None and written > 0
+        remaining = remaining[written:]
 
 
 class FailingSource:
@@ -235,6 +284,12 @@ class CancelingSource:
         self.closed = True
 
 
+class FailingSourceGetter:
+    @property
+    def try_read(self):
+        raise RuntimeError("getter-secret-canary")
+
+
 @pytest.fixture
 def plan() -> IdentityPlan:
     gid = os.getegid()
@@ -266,6 +321,7 @@ def _upload(
     carrier=None,
     condition=None,
     deadline: Deadline | None = None,
+    selected_runtime: RuntimeSelection | None = None,
 ):
     return upload_file(
         carrier or LocalCarrier(),
@@ -277,7 +333,7 @@ def _upload(
         create_metadata=CreateMetadata(os.geteuid(), os.getegid(), 0o640),
         plan=plan,
         deadline=deadline or Deadline.after(30),
-        runtime_selection=runtime_selection(sys.executable),
+        runtime_selection=selected_runtime or runtime_selection(sys.executable),
         owner=owner,
     )
 
@@ -301,8 +357,11 @@ def test_real_helper_create_streams_exact_bytes_once(
         outcome = _upload(owner, root, source, len(content), plan)
 
         assert outcome.status is FileUploadStatus.COMPLETE
-        assert outcome.publication_confirmed and not outcome.owner_retained
+        assert outcome.publication_confirmed and not outcome.requires_owner_retention
         assert outcome.bytes_consumed == len(content)
+        assert outcome.staged_bytes == len(content)
+        assert outcome.runtime_prerequisite is not None
+        assert outcome.runtime_prerequisite.state is RuntimePrerequisiteState.READY
         assert root.joinpath("target").read_bytes() == content
         assert source.offset == len(content) and not source.closed
         assert all(limit <= 12 * 1024 for limit in source.limits)
@@ -348,7 +407,7 @@ def test_lost_creation_reply_reconciles_and_cleans_without_replaying_begin(
     root.mkdir()
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    carrier = LostFirstStdoutCarrier()
+    carrier = LostCallStdoutCarrier(1)
     try:
         outcome = _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
 
@@ -356,8 +415,78 @@ def test_lost_creation_reply_reconciles_and_cleans_without_replaying_begin(
         assert outcome.status is FileUploadStatus.FAILED
         assert outcome.failure is FileUploadFailure.OBSERVATION
         assert outcome.scratch_cleanup_debt is None
-        assert not outcome.owner_retained and not root.joinpath("target").exists()
+        assert not outcome.requires_owner_retention and not root.joinpath("target").exists()
         owner.close()
+    finally:
+        database.close()
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        RuntimePrerequisiteState.MISSING,
+        RuntimePrerequisiteState.SHIM,
+        RuntimePrerequisiteState.UNUSABLE,
+        RuntimePrerequisiteState.UNSUPPORTED_VERSION,
+        RuntimePrerequisiteState.MISSING_MODULES,
+    ],
+)
+def test_known_runtime_refusal_stops_before_pointless_reconciliation(
+    tmp_path: Path,
+    plan: IdentityPlan,
+    state: RuntimePrerequisiteState,
+) -> None:
+    root = tmp_path / "approved"
+    root.mkdir()
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    carrier = RuntimeRefusalOnCallCarrier(1, state)
+    selected_runtime = RuntimeSelection(
+        RuntimeTargetOS.DARWIN if state is RuntimePrerequisiteState.SHIM else RuntimeTargetOS.LINUX,
+        sys.executable,
+    )
+    try:
+        outcome = _upload(
+            owner,
+            root,
+            BytesSource(b"content"),
+            7,
+            plan,
+            carrier=carrier,
+            selected_runtime=selected_runtime,
+        )
+
+        assert carrier.calls == 1
+        assert outcome.failure is FileUploadFailure.RUNTIME_PREREQUISITE
+        assert outcome.runtime_prerequisite is not None
+        assert outcome.runtime_prerequisite.state is state
+        assert not outcome.stage_ownership_uncertain
+        assert not outcome.requires_owner_retention
+        owner.close()
+    finally:
+        database.close()
+
+
+def test_runtime_refusal_after_source_read_preserves_debt_and_distinct_counters(
+    tmp_path: Path,
+    plan: IdentityPlan,
+) -> None:
+    root = tmp_path / "approved"
+    root.mkdir()
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    carrier = RuntimeRefusalOnCallCarrier(2, RuntimePrerequisiteState.MISSING)
+    try:
+        outcome = _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+
+        assert carrier.calls == 2
+        assert outcome.failure is FileUploadFailure.RUNTIME_PREREQUISITE
+        assert outcome.bytes_consumed == 7
+        assert outcome.staged_bytes == 0
+        assert outcome.runtime_prerequisite is not None
+        assert outcome.runtime_prerequisite.state is RuntimePrerequisiteState.MISSING
+        assert outcome.scratch_cleanup_debt is not None
+        assert outcome.requires_owner_retention
     finally:
         database.close()
 
@@ -380,7 +509,7 @@ def test_lost_publish_reply_never_replays_mutation_and_preserves_unknown_cleanup
         assert outcome.publication_uncertain and not outcome.publication_confirmed
         assert outcome.publication_ownership_uncertain
         assert outcome.reference is not None and outcome.scratch_cleanup_debt is not None
-        assert outcome.owner_retained
+        assert outcome.requires_owner_retention
         claim = database.operations.inspect(owner.ownership.scope)
         assert claim is not None and claim.state is OperationClaimState.POSSIBLE_DISPATCH
     finally:
@@ -402,8 +531,8 @@ def test_nonzero_wrapper_exit_records_effect_but_stops_all_follow_on_calls(
         assert carrier.calls == 3
         assert root.joinpath("target").read_bytes() == b"content"
         assert outcome.publication_confirmed
-        assert outcome.pending_remote_effects and outcome.outstanding_attempt is not None
-        assert outcome.owner_retained
+        assert outcome.pending_remote_effects
+        assert outcome.requires_owner_retention
         with pytest.raises(StateError):
             owner.borrow()
         with pytest.raises(StateError):
@@ -427,7 +556,9 @@ def test_missing_completion_with_valid_transcript_stops_follow_on_calls_and_reta
         assert carrier.calls == 2
         assert not root.joinpath("target").exists()
         assert outcome.failure is FileUploadFailure.TERMINATION
-        assert outcome.pending_remote_effects and outcome.outstanding_attempt is not None
+        assert outcome.pending_remote_effects
+        assert outcome.bytes_consumed == 7
+        assert outcome.staged_bytes == 7
         assert outcome.reference is not None and outcome.scratch_cleanup_debt is not None
         with pytest.raises(StateError):
             owner.borrow()
@@ -436,12 +567,12 @@ def test_missing_completion_with_valid_transcript_stops_follow_on_calls_and_reta
 
 
 @pytest.mark.parametrize(
-    ("source", "size"),
+    ("source", "size", "expected_consumed"),
     [
-        (BytesSource(b"short"), 6),
-        (BytesSource(b"excess"), 5),
-        (ContractSource(b"x" * (12 * 1024 + 1)), 20_000),
-        (ContractSource("not-bytes"), 1),
+        (BytesSource(b"short"), 6, 5),
+        (BytesSource(b"excess"), 5, 6),
+        (ContractSource(b"x" * (12 * 1024 + 1)), 20_000, 12 * 1024 + 1),
+        (ContractSource("not-bytes"), 1, 0),
     ],
     ids=["short", "excess", "oversized-response", "nonbytes-response"],
 )
@@ -450,6 +581,7 @@ def test_source_contract_failures_cleanup_exact_scratch(
     plan: IdentityPlan,
     source,
     size: int,
+    expected_consumed: int,
 ) -> None:
     root = tmp_path / "approved"
     root.mkdir()
@@ -460,7 +592,8 @@ def test_source_contract_failures_cleanup_exact_scratch(
 
         assert outcome.status is FileUploadStatus.FAILED
         assert outcome.failure is FileUploadFailure.SOURCE_CONTRACT
-        assert outcome.scratch_cleanup_debt is None and not outcome.owner_retained
+        assert outcome.bytes_consumed == expected_consumed
+        assert outcome.scratch_cleanup_debt is None and not outcome.requires_owner_retention
         assert not root.joinpath("target").exists()
         owner.close()
     finally:
@@ -503,7 +636,7 @@ def test_source_cancellation_propagates_with_bounded_cleanup_facts(
         fact = raised.value.__cause__
         assert isinstance(fact, FileUploadControlFact)
         assert fact.outcome.scratch_cleanup_debt is None
-        assert not fact.outcome.owner_retained and not source.closed
+        assert not fact.outcome.requires_owner_retention and not source.closed
         owner.close()
     finally:
         database.close()
@@ -523,7 +656,7 @@ def test_deadline_exhaustion_after_stage_uses_no_fresh_cleanup_budget(
 
         assert outcome.failure is FileUploadFailure.DEADLINE
         assert outcome.deadline_exceeded and outcome.scratch_cleanup_debt is not None
-        assert outcome.owner_retained
+        assert outcome.requires_owner_retention
         assert not root.joinpath("target").exists()
     finally:
         database.close()
@@ -548,7 +681,7 @@ def test_publish_failure_cleans_publication_debt_before_ordinary_scratch(
         assert outcome.failure is FileUploadFailure.PUBLICATION
         assert outcome.publication_cleanup_debt is None
         assert outcome.scratch_cleanup_debt is None
-        assert not outcome.owner_retained and not root.joinpath("target").exists()
+        assert not outcome.requires_owner_retention and not root.joinpath("target").exists()
         owner.close()
     finally:
         database.close()
@@ -572,8 +705,103 @@ def test_failed_publication_cleanup_preserves_both_bound_debts(
         assert outcome.failure is FileUploadFailure.PUBLICATION
         assert outcome.publication_cleanup_debt is not None
         assert outcome.scratch_cleanup_debt is not None
-        assert outcome.reference is not None and outcome.owner_retained
+        assert outcome.reference is not None and outcome.requires_owner_retention
         assert not root.joinpath("target").exists()
+    finally:
+        database.close()
+
+
+def test_partial_stage_creation_failure_uses_failure_debt_for_cleanup(
+    tmp_path: Path,
+    plan: IdentityPlan,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(stage_exchange, "FIXED_BUNDLE", stage_fixture_source(_PARTIAL_STAGE_BEGIN))
+    root = tmp_path / "approved"
+    root.mkdir()
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    carrier = LocalCarrier()
+    try:
+        outcome = _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+
+        assert carrier.calls == 2
+        assert outcome.failure is FileUploadFailure.STAGE
+        assert outcome.stage_failure is not None
+        assert outcome.stage_failure.cleanup_debt is not None
+        assert outcome.scratch_cleanup_debt is None
+        assert not root.joinpath(scratch_name(outcome.token)).exists()
+        assert not outcome.requires_owner_retention
+        owner.close()
+    finally:
+        database.close()
+
+
+def test_failed_cleanup_after_partial_stage_creation_preserves_failure_debt(
+    tmp_path: Path,
+    plan: IdentityPlan,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        stage_exchange,
+        "FIXED_BUNDLE",
+        stage_fixture_source(_PARTIAL_STAGE_BEGIN + _FAIL_STAGE_CLEANUP),
+    )
+    root = tmp_path / "approved"
+    root.mkdir()
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    carrier = LocalCarrier()
+    try:
+        outcome = _upload(owner, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+
+        assert carrier.calls == 2
+        assert outcome.failure is FileUploadFailure.STAGE
+        assert outcome.stage_failure is not None
+        assert outcome.stage_failure.cleanup_debt == outcome.scratch_cleanup_debt
+        assert root.joinpath(scratch_name(outcome.token)).is_dir()
+        assert outcome.requires_owner_retention
+    finally:
+        database.close()
+
+
+@pytest.mark.parametrize(
+    ("trusted_root", "source"),
+    [
+        ("/approved/\udcff", BytesSource(b"x")),
+        ("/approved", FailingSourceGetter()),
+    ],
+    ids=["invalid-utf8-path", "failing-source-getter"],
+)
+def test_validation_failure_does_not_retain_sensitive_exception_context(
+    tmp_path: Path,
+    plan: IdentityPlan,
+    trusted_root: str,
+    source,
+) -> None:
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    try:
+        with pytest.raises(ValidationError) as raised:
+            upload_file(
+                LocalCarrier(),
+                trusted_root_path=trusted_root,
+                relative_path="target",
+                source=source,
+                size=1,
+                condition=Create(),
+                create_metadata=CreateMetadata(os.geteuid(), os.getegid(), 0o640),
+                plan=plan,
+                deadline=Deadline.after(30),
+                runtime_selection=runtime_selection(sys.executable),
+                owner=owner,
+            )
+
+        assert raised.value.__cause__ is None
+        assert raised.value.__context__ is None
+        claim = database.operations.inspect(owner.ownership.scope)
+        assert claim is not None and claim.state is OperationClaimState.RESERVED
+        owner.close()
     finally:
         database.close()
 

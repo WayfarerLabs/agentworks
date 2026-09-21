@@ -23,6 +23,7 @@ from agentworks.execution._file_publication_protocol import (
     PublicationCleanupState,
 )
 from agentworks.execution._file_stage_exchange import (
+    FileStageObservation,
     FileStageObservationState,
     stage_begin,
     stage_chunk,
@@ -35,7 +36,11 @@ from agentworks.execution._file_stage_protocol import (
     FileStageFailureControl,
 )
 from agentworks.execution._helper_launcher import IdentityPlan, _validate_plan
-from agentworks.execution._runtime_prerequisite import RuntimeSelection
+from agentworks.execution._runtime_prerequisite import (
+    RuntimePrerequisiteObservation,
+    RuntimePrerequisiteState,
+    RuntimeSelection,
+)
 from agentworks.execution._scratch import ScratchReference, _cleanup_debt
 from agentworks.execution.carrier import Deadline, Dispatch, ExitStatus
 from agentworks.operations import OperationAttempt, OperationBorrow, OperationOwner
@@ -47,6 +52,15 @@ if TYPE_CHECKING:
     from agentworks.execution.carrier import ByteSource, Carrier
 
 _MAX_SIZE = (1 << 63) - 1
+_RUNTIME_REFUSALS = frozenset(
+    {
+        RuntimePrerequisiteState.MISSING,
+        RuntimePrerequisiteState.SHIM,
+        RuntimePrerequisiteState.UNUSABLE,
+        RuntimePrerequisiteState.UNSUPPORTED_VERSION,
+        RuntimePrerequisiteState.MISSING_MODULES,
+    }
+)
 
 
 class FileUploadStatus(StrEnum):
@@ -67,6 +81,7 @@ class FileUploadFailure(StrEnum):
     PUBLICATION = "publication"
     CLEANUP = "cleanup"
     OBSERVATION = "observation"
+    RUNTIME_PREREQUISITE = "runtime_prerequisite"
     TERMINATION = "termination"
 
 
@@ -89,6 +104,7 @@ class FileUploadOutcome:
     binding: FileUploadBinding
     token: bytes = field(repr=False)
     bytes_consumed: int
+    staged_bytes: int
     content_digest: bytes | None = field(default=None, repr=False)
     reference: ScratchReference | None = field(default=None, repr=False)
     scratch_cleanup_debt: ScratchCleanupDebt | None = field(default=None, repr=False)
@@ -103,9 +119,9 @@ class FileUploadOutcome:
     failure: FileUploadFailure | None = None
     stage_failure: FileStageFailureControl | None = field(default=None, repr=False)
     publication_failure: FilePublicationFailureControl | None = field(default=None, repr=False)
-    outstanding_attempt: OperationAttempt | None = field(default=None, repr=False)
+    runtime_prerequisite: RuntimePrerequisiteObservation | None = None
     coordination_uncertain: bool = False
-    owner_retained: bool = False
+    requires_owner_retention: bool = False
 
 
 class FileUploadControlFact(Exception):
@@ -122,6 +138,7 @@ class _WorkingState:
     token: bytes
     borrow: OperationBorrow
     bytes_consumed: int = 0
+    staged_bytes: int = 0
     digest: bytes | None = None
     reference: ScratchReference | None = None
     scratch_debt: ScratchCleanupDebt | None = None
@@ -136,6 +153,7 @@ class _WorkingState:
     failure: FileUploadFailure | None = None
     stage_failure: FileStageFailureControl | None = None
     publication_failure: FilePublicationFailureControl | None = None
+    runtime_prerequisite: RuntimePrerequisiteObservation | None = None
     outstanding_attempt: OperationAttempt | None = None
     coordination_uncertain: bool = False
     borrow_closed: bool = False
@@ -168,6 +186,7 @@ class _WorkingState:
             self.binding,
             self.token,
             self.bytes_consumed,
+            self.staged_bytes,
             self.digest,
             self.reference,
             self.scratch_debt,
@@ -182,7 +201,7 @@ class _WorkingState:
             self.failure,
             self.stage_failure,
             self.publication_failure,
-            self.outstanding_attempt,
+            self.runtime_prerequisite,
             self.coordination_uncertain,
             retain,
         )
@@ -288,19 +307,21 @@ class _UploadWorkflow:
             runtime_selection=self._state.binding.runtime_selection,
         )
         observation = result.observation
+        if result.dispatch is not Dispatch.NOT_SENT:
+            self._record_runtime_prerequisite(result.runtime_prerequisite)
         if result.dispatch is not Dispatch.NOT_SENT and observation is not None:
             if observation.reference is not None:
                 self._state.reference = observation.reference
                 self._state.scratch_debt = _cleanup_debt(observation.reference)
-            if observation.cleanup_debt is not None:
-                self._state.scratch_debt = observation.cleanup_debt
-            if observation.failure is not None:
-                self._state.stage_failure = observation.failure
+            self._record_stage_observation(observation)
         normal = self._settle_attempt(attempt, result.dispatch, result.carrier_completion)
         if not normal:
             self._state.fail(
                 FileUploadFailure.OBSERVATION if result.dispatch is Dispatch.NOT_SENT else FileUploadFailure.TERMINATION
             )
+            return False
+        if self._runtime_refused(result.runtime_prerequisite):
+            self._state.fail(FileUploadFailure.RUNTIME_PREREQUISITE)
             return False
         if observation is not None and observation.state is FileStageObservationState.CREATED:
             return True
@@ -337,7 +358,7 @@ class _UploadWorkflow:
                 relative_path=self._state.binding.relative_path,
                 token=self._state.token,
                 reference=reference,
-                offset=self._state.bytes_consumed,
+                offset=self._state.staged_bytes,
                 data=data,
                 chunk_digest=chunk_digest,
                 plan=self._state.binding.identity_plan,
@@ -345,11 +366,13 @@ class _UploadWorkflow:
                 runtime_selection=self._state.binding.runtime_selection,
             )
             observation = result.observation
+            if result.dispatch is not Dispatch.NOT_SENT:
+                self._record_runtime_prerequisite(result.runtime_prerequisite)
             if result.dispatch is not Dispatch.NOT_SENT and observation is not None:
-                if observation.cleanup_debt is not None:
-                    self._state.scratch_debt = observation.cleanup_debt
-                if observation.failure is not None:
-                    self._state.stage_failure = observation.failure
+                self._record_stage_observation(observation)
+                if observation.state is FileStageObservationState.ACCEPTED:
+                    digest.update(data)
+                    self._state.staged_bytes += len(data)
             normal = self._settle_attempt(attempt, result.dispatch, result.carrier_completion)
             if not normal:
                 self._state.fail(
@@ -358,6 +381,9 @@ class _UploadWorkflow:
                     else FileUploadFailure.TERMINATION
                 )
                 return False
+            if self._runtime_refused(result.runtime_prerequisite):
+                self._state.fail(FileUploadFailure.RUNTIME_PREREQUISITE)
+                return False
             if observation is None or observation.state is not FileStageObservationState.ACCEPTED:
                 self._state.fail(
                     FileUploadFailure.STAGE
@@ -365,9 +391,7 @@ class _UploadWorkflow:
                     else FileUploadFailure.OBSERVATION
                 )
                 return False
-            digest.update(data)
-            self._state.bytes_consumed += len(data)
-            remaining -= len(data)
+            remaining = self._state.binding.expected_size - self._state.staged_bytes
         extra = self._read_source(1)
         if extra is None:
             return False
@@ -393,8 +417,11 @@ class _UploadWorkflow:
                 time.sleep(0.001 if remaining is None else min(0.001, remaining))
                 continue
             if type(value) is not bytes or len(value) > limit:
+                if type(value) is bytes:
+                    self._state.bytes_consumed += len(value)
                 self._state.fail(FileUploadFailure.SOURCE_CONTRACT)
                 return None
+            self._state.bytes_consumed += len(value)
             return value
 
     def _publish(self) -> bool:
@@ -416,6 +443,8 @@ class _UploadWorkflow:
             runtime_selection=self._state.binding.runtime_selection,
         )
         observation = result.observation
+        if result.dispatch is not Dispatch.NOT_SENT:
+            self._record_runtime_prerequisite(result.runtime_prerequisite)
         if result.dispatch is not Dispatch.NOT_SENT and observation is not None:
             if observation.revision is not None:
                 self._state.revision = observation.revision
@@ -435,6 +464,9 @@ class _UploadWorkflow:
             )
             if result.dispatch is not Dispatch.NOT_SENT:
                 self._state.publication_uncertain = not self._state.publication_confirmed
+            return False
+        if self._runtime_refused(result.runtime_prerequisite):
+            self._state.fail(FileUploadFailure.RUNTIME_PREREQUISITE)
             return False
         if observation is not None and observation.state is FilePublicationObservationState.PUBLISHED:
             if observation.deadline_exceeded:
@@ -477,13 +509,16 @@ class _UploadWorkflow:
             runtime_selection=self._state.binding.runtime_selection,
         )
         observation = result.observation
+        if result.dispatch is not Dispatch.NOT_SENT:
+            self._record_runtime_prerequisite(result.runtime_prerequisite)
         if result.dispatch is not Dispatch.NOT_SENT and observation is not None:
-            if observation.cleanup_debt is not None:
-                self._state.scratch_debt = observation.cleanup_debt
-            if observation.failure is not None:
-                self._state.stage_failure = observation.failure
+            self._record_stage_observation(observation)
         normal = self._settle_attempt(attempt, result.dispatch, result.carrier_completion)
         if not normal:
+            self._state.stage_ownership_uncertain = self._state.scratch_debt is None
+            return
+        if self._runtime_refused(result.runtime_prerequisite):
+            self._state.fail(FileUploadFailure.RUNTIME_PREREQUISITE)
             self._state.stage_ownership_uncertain = self._state.scratch_debt is None
             return
         self._state.stage_ownership_uncertain = self._state.scratch_debt is None
@@ -507,6 +542,8 @@ class _UploadWorkflow:
             runtime_selection=self._state.binding.runtime_selection,
         )
         observation = result.observation
+        if result.dispatch is not Dispatch.NOT_SENT:
+            self._record_runtime_prerequisite(result.runtime_prerequisite)
         if result.dispatch is not Dispatch.NOT_SENT and observation is not None:
             if observation.cleanup_debt is not None:
                 self._state.publication_debt = observation.cleanup_debt
@@ -518,10 +555,18 @@ class _UploadWorkflow:
         if not normal:
             self._state.publication_ownership_uncertain = self._state.publication_debt is None
             return
+        if self._runtime_refused(result.runtime_prerequisite):
+            self._state.fail(FileUploadFailure.RUNTIME_PREREQUISITE)
+            self._state.publication_ownership_uncertain = self._state.publication_debt is None
+            return
         self._state.publication_ownership_uncertain = self._state.publication_debt is None
 
     def _cleanup_after_failure(self) -> None:
-        if self._state.pending_remote_effects or self._state.deadline_exceeded:
+        if (
+            self._state.pending_remote_effects
+            or self._state.deadline_exceeded
+            or self._runtime_refused(self._state.runtime_prerequisite)
+        ):
             return
         if self._state.publication_debt is not None:
             self._cleanup_publication()
@@ -552,6 +597,8 @@ class _UploadWorkflow:
             runtime_selection=self._state.binding.runtime_selection,
         )
         observation = result.observation
+        if result.dispatch is not Dispatch.NOT_SENT:
+            self._record_runtime_prerequisite(result.runtime_prerequisite)
         if result.dispatch is not Dispatch.NOT_SENT and observation is not None:
             if observation.cleanup_debt is not None:
                 self._state.publication_debt = observation.cleanup_debt
@@ -585,11 +632,10 @@ class _UploadWorkflow:
             runtime_selection=self._state.binding.runtime_selection,
         )
         observation = result.observation
+        if result.dispatch is not Dispatch.NOT_SENT:
+            self._record_runtime_prerequisite(result.runtime_prerequisite)
         if result.dispatch is not Dispatch.NOT_SENT and observation is not None:
-            if observation.cleanup_debt is not None:
-                self._state.scratch_debt = observation.cleanup_debt
-            if observation.failure is not None:
-                self._state.stage_failure = observation.failure
+            self._record_stage_observation(observation)
         normal = self._settle_attempt(attempt, result.dispatch, result.carrier_completion)
         if normal and observation is not None and observation.state is FileStageObservationState.CLEANED:
             self._state.scratch_debt = None
@@ -622,6 +668,27 @@ class _UploadWorkflow:
         self._state.outstanding_attempt = attempt
         return attempt
 
+    def _record_stage_observation(self, observation: FileStageObservation) -> None:
+        if observation.cleanup_debt is not None:
+            self._state.scratch_debt = observation.cleanup_debt
+        failure = observation.failure
+        if failure is not None:
+            if self._state.stage_failure is None:
+                self._state.stage_failure = failure
+            if failure.cleanup_debt is not None:
+                self._state.scratch_debt = failure.cleanup_debt
+
+    def _record_runtime_prerequisite(self, observation: RuntimePrerequisiteObservation) -> None:
+        current = self._state.runtime_prerequisite
+        if current is None or (
+            current.state is RuntimePrerequisiteState.READY and observation.state is not RuntimePrerequisiteState.READY
+        ):
+            self._state.runtime_prerequisite = observation
+
+    @staticmethod
+    def _runtime_refused(observation: RuntimePrerequisiteObservation | None) -> bool:
+        return observation is not None and observation.state in _RUNTIME_REFUSALS
+
 
 def _validate_inputs(
     trusted_root_path: object,
@@ -639,11 +706,16 @@ def _validate_inputs(
         raise ValidationError("Upload requires a normalized absolute trusted root")
     if type(relative_path) is not str or not normalized_relative_path(relative_path):
         raise ValidationError("Upload requires a normalized nonempty relative path")
+    encoding_failed = False
+    root_bytes = b""
+    relative_bytes = b""
     try:
         root_bytes = trusted_root_path.encode("utf-8")
         relative_bytes = relative_path.encode("utf-8")
     except UnicodeEncodeError:
-        raise ValidationError("Upload paths must be valid UTF-8") from None
+        encoding_failed = True
+    if encoding_failed:
+        raise ValidationError("Upload paths must be valid UTF-8")
     if len(root_bytes) > MAX_PATH_BYTES or len(relative_bytes) > MAX_PATH_BYTES:
         raise ValidationError("Upload path exceeds the file protocol bound")
     if type(size) is not int or not 0 <= size <= _MAX_SIZE:
@@ -661,10 +733,12 @@ def _validate_inputs(
         raise ValidationError("Upload requires a bound runtime selection")
     if type(owner) is not OperationOwner:
         raise ValidationError("Upload requires core operation ownership")
+    getter_failed = False
+    reader = None
     try:
         reader = getattr(source, "try_read", None)
     except Exception:
-        raise ValidationError("Upload requires a nonblocking byte source") from None
-    if not callable(reader):
+        getter_failed = True
+    if getter_failed or not callable(reader):
         raise ValidationError("Upload requires a nonblocking byte source")
     return FileUploadBinding(trusted_root_path, relative_path, size, plan, runtime_selection)

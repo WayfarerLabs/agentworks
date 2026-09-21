@@ -98,7 +98,7 @@ def test_closing_stops_new_dispatch_and_requires_later_explicit_close(db: Databa
     assert db.operations.inspect(_scope()) is None
 
 
-def test_relinquished_borrow_leaves_unknown_attempt_on_owner_until_exact_handle_settles(db: Database) -> None:
+def test_relinquished_borrow_leaves_attempt_permanently_unsettled(db: Database) -> None:
     owner = OperationOwner.acquire(db.operations, _scope(), "file-upload")
     borrow = owner.borrow()
     attempt = borrow.begin_attempt()
@@ -109,11 +109,10 @@ def test_relinquished_borrow_leaves_unknown_attempt_on_owner_until_exact_handle_
     with pytest.raises(StateError):
         owner.close()
 
-    attempt.settle()
     with pytest.raises(StateError):
         attempt.settle()
-    owner.close()
-    assert db.operations.inspect(_scope()) is None
+    claim = db.operations.inspect(_scope())
+    assert claim is not None and claim.state is OperationClaimState.POSSIBLE_DISPATCH
 
 
 def test_stale_attempt_cannot_settle_a_later_attempt(db: Database) -> None:
