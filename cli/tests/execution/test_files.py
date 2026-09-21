@@ -322,7 +322,6 @@ def test_public_containers_reject_dataclass_extensions_with_diagnostic_fields() 
 @pytest.mark.windows
 def test_public_file_values_import_without_os_helpers_or_retirement_modules() -> None:
     script = r"""
-import importlib.abc
 import sys
 
 blocked = (
@@ -336,14 +335,19 @@ blocked = (
     "pwd",
     "grp",
 )
-class Blocked(importlib.abc.MetaPathFinder):
+# Importing importlib.abc itself loads pwd and grp on Python 3.13.
+class Blocked:
     def find_spec(self, fullname, path=None, target=None):
         if any(fullname == name or fullname.startswith(name + ".") for name in blocked):
             raise ImportError("blocked module loaded: " + fullname)
 
 sys.meta_path.insert(0, Blocked())
 import agentworks.execution.files
-assert not any(name in sys.modules for name in blocked)
+assert not any(
+    loaded == name or loaded.startswith(name + ".")
+    for loaded in sys.modules
+    for name in blocked
+)
 """
     result = subprocess.run([sys.executable, "-I", "-c", script], capture_output=True, timeout=20)
     assert result.returncode == 0, result.stderr.decode(errors="replace")
