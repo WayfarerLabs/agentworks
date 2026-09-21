@@ -1223,6 +1223,11 @@ isolation, in coexistence releases. Operational safety and selected profile guar
       Proxmox uses the configured CA for both platform API and new QGA delivery, without accepting
       legacy verification bypass. Other platforms, provisioning-result integration and complete
       target identity composition remain part of the required gate above.
+- [ ] Prove fresh-process platform composition without retirement dependencies, not only calls to
+      already-imported native hooks. The first-binding audit at `6149cf06` found that VM-platform
+      package initialization imports Lima's legacy dependencies, while plugin initialization imports
+      providers that still load legacy transports. Keep this initializer work with the complete
+      platform/factory composition gate; concrete hook independence does not complete it.
 - [ ] Validate complete provisioning, native recovery without Tailscale, plugin operations, files,
       backup, host provisioning/rollback and interactive attachment through the new surface. Cover
       required operations, optional refusal, sensitivity and supported workstation/platform

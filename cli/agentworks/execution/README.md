@@ -48,6 +48,18 @@ system/default trust context. An explicit bundle selects that trust source, not 
 bypass. The API hostname must match the certificate; there is no server-name override. Redirects and
 ambient proxies are disabled, and provider exception text is not returned.
 
+`binding.py` carries a native carrier, its actual delivery account and explicit runtime selection.
+The additive platform hooks bind Proxmox QGA as root and WSL2 as the recorded admin account, without
+launching a process or probing the target. They do not resolve the requested workload identity or
+prove elevation. The Proxmox binding rejects disabled TLS verification; current CLI callers still
+use the unchanged legacy native hook. Other platform bindings, provisioning-result adoption and
+production target composition remain unimplemented.
+
+These two binding methods do not call legacy transport constructors. This is narrower than whole
+package import independence: existing VM-platform and plugin initializers still load other providers
+with legacy dependencies. Complete factory composition and eventual package retirement must remove
+those dependencies; a test of an already-imported binding is not fresh-process startup proof.
+
 `_process.py` supplies the standard-library-only process pump for workstation use and destination
 helper composition. `carriers/_subprocess.py` maps carrier input, retention and result policy around
 that core without changing its call signature. The core is compatible with Python 3.11 on POSIX;
