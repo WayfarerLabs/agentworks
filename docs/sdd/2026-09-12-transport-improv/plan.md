@@ -444,13 +444,16 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       helper deadlines and actual-dispatch admission. The final deterministic interruption
       regression detects the old reporting gap between durable ownership and local attempt-handle
       assignment. This is private composition, not production FileAccess or recovery acceptance.
-- [ ] Compose complete private JSON updates through the existing read/stat and upload helpers under
+- [x] Compose complete private JSON updates through the existing read/stat and upload helpers under
       one borrowed operation. Factor borrowed upload so a JSON call never releases and reacquires
       ownership between snapshot and publication. Validate source before target I/O, avoid old-byte
       reads for replace/skip, preserve all four strategies and retry only proved condition conflicts
       within eight attempts and the original deadline. No uncertain dispatch, retained cleanup debt
       or missing termination evidence permits replay. Public FileAccess/result conversion and
-      production ownership remain separate required gates.
+      production ownership remain separate required gates. All three private review lanes accept
+      `9d97623c`. Corrections remove repeated interior validation and retain neutral
+      existing-document validation failure for parser-capacity and caller-bound refusals; both
+      refuse before publication in regression coverage.
 - [ ] Implement [owned download composition](file-operations-lld.md#owned-download-composition)
       through the existing snapshot exchanges and shared borrowed dispatch gate. Verify binary
       chunks, exact length/digest, empty and absent sources, short/stalled/failing sinks, one claim
@@ -467,6 +470,21 @@ the new code's success. The publication bundle's current prefix is 36,372 bytes 
 complete long-path QGA body is 50,783 bytes, below the unchanged 65,536-byte bound. These are local
 serialization and helper results, not native carrier acceptance. Production ownership/recovery,
 complete FileAccess, terminal carrier integration, lifecycle and additive RunContext remain open.
+
+The following JSON/native-binding increment is privately accepted at `9d97623c`. The passive
+Proxmox/WSL2 hooks return actual delivery-account and runtime facts without constructing legacy
+transports; new QGA delivery requires verified TLS and shares explicit CA selection with the
+platform API. Review corrected unhandled CA-path expansion failures, misleading guide claims and
+authored-prose test assertions. A full combined run exposed eight stale WSL bootstrap mock targets
+after moving the production import to its call site; the correction preserves those tests' original
+behavioral assertions. Complete factory/import independence and native execution remain pending, not
+implied by the concrete hook tests.
+
+The corrected `9d97623c` code passes the full local non-integration suite: 12,175 tests and 13
+skips. Ruff lint/format and CI's full mypy selection (1029 sources) pass. These results cover local
+helpers and workstation tests, not native platform acceptance. Download composition is the next
+private file work unit; local publication, complete FileAccess and the production ownership gates
+remain required.
 
 The publication and account-runtime increment has clean project, complexity and generic correctness
 reviews for the runtime at `66aa55d8`. The full local suite passes 12,050 tests with 13 skips;
