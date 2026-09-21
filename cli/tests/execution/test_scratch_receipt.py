@@ -291,17 +291,24 @@ def test_reconcile_checks_deadline_after_receipt_read(tmp_path: Path, monkeypatc
     os.close(parent_fd)
 
 
-@pytest.mark.parametrize("recorded", [True, False])
+@pytest.mark.parametrize("recorded,expire_during_validation", [(True, True), (True, False), (False, False)])
 def test_reconcile_final_expiry_retains_only_verified_cleanup_ownership(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     recorded: bool,
+    expire_during_validation: bool,
 ) -> None:
     parent_fd = _open_parent(tmp_path)
     token, reference = _begin(parent_fd, 0)
     context = current_receipt_context(ScratchOperation.STAGE)
     clock = [0.0]
     original_reconcile = receipt_module.reconcile_scratch_ownership
+    original_require_data = receipt_module._require_data_stat
+
+    def validate_then_expire(observed: os.stat_result, uid: int, gid: int) -> None:
+        original_require_data(observed, uid, gid)
+        if expire_during_validation:
+            clock[0] = 10.0
 
     def reconcile_then_expire(
         parent: int,
@@ -315,6 +322,7 @@ def test_reconcile_final_expiry_retains_only_verified_cleanup_ownership(
         return result
 
     monkeypatch.setattr(scratch_module, "_reconcile_receipt_ownership", reconcile_then_expire)
+    monkeypatch.setattr(receipt_module, "_require_data_stat", validate_then_expire)
     monkeypatch.setattr(scratch_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
     monkeypatch.setattr(receipt_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
     try:

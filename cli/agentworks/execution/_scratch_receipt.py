@@ -259,7 +259,8 @@ def reconcile_scratch_ownership(
             _require_data_stat(data, uid, ownership._gid)
             if _identity(data) != ownership._data or data.st_size > ownership._length:
                 return ScratchOwnershipUncertainty()
-        _check_deadline(expires_at)
+        # The scratch wrapper checks final expiry after these descriptors close,
+        # retaining this verified ownership as cleanup debt on deadline failure.
         return ScratchHistoricalOwnership(ownership)
     except ScratchReceiptError as error:
         if error.kind is ScratchReceiptFailureKind.DEADLINE:
