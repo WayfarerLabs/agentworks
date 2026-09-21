@@ -918,6 +918,32 @@ subclasses. Provider exception text and raw errno values remain internal. Multi-
 checkpoint each confirmed effect; this slice supplies no transaction and never reports a partial or
 uncertain operation as unchanged.
 
+Public reduction follows core custody, never replaces it. Existing error `entity_kind` and
+`entity_name` fields carry a core-supplied safe logical target, not filesystem paths or account
+names. A small immutable `ErrorDetails` value carries closed phase and primary reason enums; the
+shared error module does not import execution implementations. An optional closed effect records a
+proved destination change (`Change.CHANGED`) when a later failure prevents successful return. Its
+absence does not assert that the destination was unchanged. Partial and uncertain metadata errors
+retain only their closed completed/attempted step facts, not the private outcome or helper
+transcript.
+
+Destination-effect evidence takes precedence over the primary failure category. An uncertain
+publication, removal or metadata mutation raises `UncertainOutcomeError`; confirmed incomplete
+metadata convergence raises `PartialMutationError`. The primary deadline, helper or observation
+reason remains available separately. A lost read-only ownership lookup or unfinished private staging
+can retain operation ownership without implying that the destination changed. Conversely, a
+confirmed publication followed by failed cleanup is a known change plus a failure, not an unchanged
+result or an unproved publication. A late deadline also prevents successful public return even when
+the private operation status records completion.
+
+The current carrier's dispatch and observation categories include local startup and protocol
+failures as well as network failures. Neither proves connectivity loss. Reduce those generic facts
+to a general external failure without inventing a network cause; `ConnectivityError` requires
+independent evidence that these categories do not supply. Upload/download composition currently
+discards some exchange-level dispatch/failure detail. Preserve any facts required by public
+diagnostics before exposing that boundary; do not manufacture missing precision from a generic
+termination category. The concrete reducer and its integration remain implementation work.
+
 ## Test and evidence plan
 
 Tests live under `tests/execution/files/` and import no legacy runtime module. Adapt behavioral
