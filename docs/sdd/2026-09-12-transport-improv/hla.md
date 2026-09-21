@@ -86,7 +86,7 @@ execution users or the descriptive RunContext scope. Do not invent a single nest
 are VM-scoped, workspaces are VM-scoped, and session work can involve both. An operation touching
 several resources needs their explicit conflict relationships. Platform-host mutations retain a
 separate shared resource identity; a guest operation does not automatically reserve its host simply
-because the VM lives there. Central admission owns these rules, not per-command lists of subobjects
+because the VM lives there. Central admission owns these rules, not per-command lists of descendants
 to inspect.
 
 Adding enum values to the current exact-key repository is insufficient. Enable finer claims only

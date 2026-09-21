@@ -69,7 +69,7 @@ associated pending acceptance gates are superseded by this ruling.
 - [ ] Cover pre-context activation and nested teardown when wiring ownership. At `806741ca`,
       `gated_vm_boundary` enters `activation_gate` before assembling its ordinary operation context,
       and `LiveVMNode` constructs a separate gate context. Context factories, harness setup's
-      explicit held-guard chain and parameterless realization teardown must retain the same
+      explicit held-guard chain and realization teardown without arguments must retain the same
       core-owned operation when migrated. Adding a field to RunContext alone is insufficient.
 - [ ] Select shared platform-host resource keys before enabling their admission. Canonical VM names
       are available before create dispatch; site names and authored SSH routes are not canonical
