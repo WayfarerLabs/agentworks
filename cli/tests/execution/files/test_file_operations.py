@@ -28,6 +28,7 @@ from agentworks.execution._file_metadata_exchange import (
     FileMetadataObservation,
     FileMetadataObservationState,
 )
+from agentworks.execution._file_metadata_protocol import FileMetadataOperation
 from agentworks.execution._file_object_exchange import (
     FileObjectCandidateResult,
     FileObjectObservation,
@@ -139,10 +140,10 @@ def _object_result(
 
 
 @pytest.mark.parametrize(
-    ("entrypoint", "exchange_name", "result"),
+    ("prepare", "exchange_name", "result"),
     [
         (
-            operations.stat_file,
+            operations._prepare_stat,
             "exchange_stat_file",
             FileObjectCandidateResult(
                 Dispatch.SENT,
@@ -154,7 +155,7 @@ def _object_result(
             ),
         ),
         (
-            operations.list_directory,
+            operations._prepare_inventory,
             "exchange_list_directory",
             FileInventoryCandidateResult(
                 Dispatch.SENT,
@@ -166,7 +167,7 @@ def _object_result(
             ),
         ),
         (
-            operations.remove_file,
+            operations._prepare_remove,
             "exchange_remove_file",
             FileObjectCandidateResult(
                 Dispatch.SENT,
@@ -180,10 +181,10 @@ def _object_result(
     ],
     ids=["stat", "list", "remove"],
 )
-def test_single_exchange_entrypoints_preserve_typed_result_and_settle(
+def test_single_exchange_preparations_preserve_typed_result_and_settle(
     owned: tuple[Database, OperationOwner, OperationBorrow],
     monkeypatch: pytest.MonkeyPatch,
-    entrypoint,
+    prepare,
     exchange_name: str,
     result,
 ) -> None:
@@ -212,12 +213,12 @@ def test_single_exchange_entrypoints_preserve_typed_result_and_settle(
         "runtime_selection": _RUNTIME,
         "borrow": borrow,
     }
-    if entrypoint is operations.list_directory:
+    if prepare is operations._prepare_inventory:
         arguments.update(max_entries=10, max_depth=1, max_encoded_bytes=4096)
-    elif entrypoint is operations.remove_file:
+    elif prepare is operations._prepare_remove:
         arguments.update(expected_kind=FileKind.REGULAR, expected_revision=_REVISION)
 
-    outcome = entrypoint(carrier, **arguments)
+    outcome = prepare(carrier, **arguments).run()
 
     assert outcome.result == result
     assert outcome.ownership_result is None
@@ -257,7 +258,7 @@ def test_settlement_uses_only_supported_termination_evidence(
 
     monkeypatch.setattr(operations, "exchange_stat_file", exchange)
 
-    outcome = operations.stat_file(
+    outcome = operations._prepare_stat(
         carrier,
         trusted_root_path="/approved",
         relative_path="target",
@@ -265,7 +266,7 @@ def test_settlement_uses_only_supported_termination_evidence(
         deadline=Deadline.after(15),
         runtime_selection=_RUNTIME,
         borrow=borrow,
-    )
+    ).run()
 
     assert outcome.result is not None and outcome.result.dispatch is dispatch
     assert outcome.pending_remote_effects is retained
@@ -282,7 +283,7 @@ def test_local_preparation_failure_never_arms_or_dispatches(
     carrier = SyntheticCarrier()
 
     with pytest.raises(ValidationError) as raised:
-        operations.list_directory(
+        operations._prepare_inventory(
             carrier,
             trusted_root_path="/approved",
             relative_path="target",
@@ -293,7 +294,7 @@ def test_local_preparation_failure_never_arms_or_dispatches(
             deadline=Deadline.after(15),
             runtime_selection=_RUNTIME,
             borrow=borrow,
-        )
+        ).run()
 
     fact = raised.value.__cause__
     assert isinstance(fact, operations.OwnedFileControlFact)
@@ -314,7 +315,7 @@ def test_expired_deadline_returns_without_dispatch_and_preserves_borrow(
     database, owner, borrow = owned
     carrier = SyntheticCarrier()
 
-    outcome = operations.stat_file(
+    outcome = operations._prepare_stat(
         carrier,
         trusted_root_path="/approved",
         relative_path="target",
@@ -322,7 +323,7 @@ def test_expired_deadline_returns_without_dispatch_and_preserves_borrow(
         deadline=Deadline.after(0),
         runtime_selection=_RUNTIME,
         borrow=borrow,
-    )
+    ).run()
 
     assert outcome.result is None and outcome.deadline_exceeded
     assert not outcome.requires_owner_retention and carrier.calls == 0
@@ -349,7 +350,7 @@ def test_deadline_after_return_is_independent_of_operation_facts(
         return _object_result(operation, deadline, FileObjectObservation(FileObjectObservationState.ABSENT))
 
     monkeypatch.setattr(operations, "exchange_stat_file", exchange)
-    outcome = operations.stat_file(
+    outcome = operations._prepare_stat(
         carrier,
         trusted_root_path="/approved",
         relative_path="target",
@@ -357,7 +358,7 @@ def test_deadline_after_return_is_independent_of_operation_facts(
         deadline=Deadline.after(15),
         runtime_selection=_RUNTIME,
         borrow=borrow,
-    )
+    ).run()
 
     assert outcome.result is not None and outcome.deadline_exceeded
     assert outcome.requires_owner_retention is (completion.code != 0)
@@ -426,10 +427,15 @@ def test_metadata_lookup_and_mutation_share_one_borrow_and_preserve_both_results
         "set_file_metadata" if entrypoint_name == "set_metadata" else "ensure_file_directory",
         mutate,
     )
-    entrypoint = getattr(operations, entrypoint_name)
+    metadata_operation = (
+        FileMetadataOperation.SET_METADATA
+        if entrypoint_name == "set_metadata"
+        else FileMetadataOperation.ENSURE_DIRECTORY
+    )
 
-    outcome = entrypoint(
+    outcome = operations._prepare_metadata(
         carrier,
+        operation=metadata_operation,
         trusted_root_path="/approved",
         relative_path="target",
         trusted_owner="owner",
@@ -439,7 +445,7 @@ def test_metadata_lookup_and_mutation_share_one_borrow_and_preserve_both_results
         deadline=Deadline.after(15),
         runtime_selection=_RUNTIME,
         borrow=borrow,
-    )
+    ).run()
 
     assert outcome.ownership_result is not None
     assert outcome.ownership_result.observation is not None
@@ -529,8 +535,9 @@ def test_metadata_lookup_must_be_ready_resolved_normal_and_within_deadline(
     monkeypatch.setattr(operations, "resolve_file_ownership", resolve)
     monkeypatch.setattr(operations, "set_file_metadata", mutate)
 
-    outcome = operations.set_metadata(
+    outcome = operations._prepare_metadata(
         carrier,
+        operation=FileMetadataOperation.SET_METADATA,
         trusted_root_path="/approved",
         relative_path="target",
         trusted_owner="owner",
@@ -540,7 +547,7 @@ def test_metadata_lookup_must_be_ready_resolved_normal_and_within_deadline(
         deadline=Deadline.after(15),
         runtime_selection=_RUNTIME,
         borrow=borrow,
-    )
+    ).run()
 
     assert outcome.ownership_result is not None and outcome.result is None
     assert outcome.deadline_exceeded is deadline_expired
@@ -576,8 +583,9 @@ def test_metadata_canonical_validation_precedes_lookup(
     monkeypatch.setattr(operations, "resolve_file_ownership", resolve)
 
     with pytest.raises(ValidationError):
-        operations.set_metadata(
+        operations._prepare_metadata(
             carrier,
+            operation=FileMetadataOperation.SET_METADATA,
             trusted_root_path="/approved",
             relative_path="target",
             trusted_owner=trusted_owner,
@@ -587,7 +595,7 @@ def test_metadata_canonical_validation_precedes_lookup(
             deadline=Deadline.after(15),
             runtime_selection=_RUNTIME,
             borrow=borrow,
-        )
+        ).run()
 
     assert lookup_calls == 0 and carrier.calls == 0
     claim = database.operations.inspect(owner.ownership.scope)
@@ -617,7 +625,7 @@ def test_settlement_failure_retains_previously_returned_fact(
     monkeypatch.setattr(OperationAttempt, "settle", fail_settle)
 
     with pytest.raises(RuntimeError, match="settlement-canary") as raised:
-        operations.stat_file(
+        operations._prepare_stat(
             carrier,
             trusted_root_path="/approved",
             relative_path="target",
@@ -625,7 +633,7 @@ def test_settlement_failure_retains_previously_returned_fact(
             deadline=Deadline.after(15),
             runtime_selection=_RUNTIME,
             borrow=borrow,
-        )
+        ).run()
 
     fact = raised.value.__cause__
     assert isinstance(fact, operations.OwnedFileControlFact)
@@ -673,8 +681,9 @@ def test_metadata_lookup_fact_is_recorded_before_settlement(
     monkeypatch.setattr(OperationAttempt, "settle", fail_settle)
 
     with pytest.raises(RuntimeError, match="lookup-settlement-canary") as raised:
-        operations.set_metadata(
+        operations._prepare_metadata(
             carrier,
+            operation=FileMetadataOperation.SET_METADATA,
             trusted_root_path="/approved",
             relative_path="target",
             trusted_owner="owner",
@@ -684,7 +693,7 @@ def test_metadata_lookup_fact_is_recorded_before_settlement(
             deadline=Deadline.after(15),
             runtime_selection=_RUNTIME,
             borrow=borrow,
-        )
+        ).run()
 
     fact = raised.value.__cause__
     assert isinstance(fact, operations.OwnedFileControlFact)
@@ -711,7 +720,7 @@ def test_escaping_carrier_control_retains_safe_private_facts(
     monkeypatch.setattr(operations, "exchange_stat_file", exchange)
 
     with pytest.raises(type(control)) as raised:
-        operations.stat_file(
+        operations._prepare_stat(
             carrier,
             trusted_root_path="/approved/private-canary",
             relative_path="target-canary",
@@ -719,7 +728,7 @@ def test_escaping_carrier_control_retains_safe_private_facts(
             deadline=Deadline.after(15),
             runtime_selection=_RUNTIME,
             borrow=borrow,
-        )
+        ).run()
 
     assert raised.value is control
     fact = raised.value.__cause__
@@ -750,7 +759,7 @@ def test_owner_close_during_dispatch_retains_the_interrupted_attempt(
     carrier = ClosingCarrier()
 
     with pytest.raises(StateError) as raised:
-        operations.stat_file(
+        operations._prepare_stat(
             carrier,
             trusted_root_path="/approved",
             relative_path="target",
@@ -758,7 +767,7 @@ def test_owner_close_during_dispatch_retains_the_interrupted_attempt(
             deadline=Deadline.after(15),
             runtime_selection=_RUNTIME,
             borrow=borrow,
-        )
+        ).run()
 
     fact = raised.value.__cause__
     assert isinstance(fact, operations.OwnedFileControlFact)

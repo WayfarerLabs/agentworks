@@ -390,7 +390,7 @@ class FileOperation:
             outcome = prepared.run()
         except BaseException as control:
             fact = control.__cause__
-            if isinstance(fact, OwnedFileControlFact) and prepared.state.control_outcome is fact.outcome:
+            if isinstance(fact, OwnedFileControlFact):
                 try:
                     active.outcome = fact.outcome
                     if fact.outcome.requires_owner_retention:
@@ -450,7 +450,7 @@ class FileOperation:
             outcome = prepared.run()
         except BaseException as control:
             fact = control.__cause__
-            if isinstance(fact, OwnedFileControlFact) and prepared.state.control_outcome is fact.outcome:
+            if isinstance(fact, OwnedFileControlFact):
                 try:
                     active.outcome = fact.outcome
                     if fact.outcome.requires_owner_retention:
@@ -508,7 +508,7 @@ class FileOperation:
             outcome = prepared.run()
         except BaseException as control:
             fact = control.__cause__
-            if isinstance(fact, OwnedFileControlFact) and prepared.state.control_outcome is fact.outcome:
+            if isinstance(fact, OwnedFileControlFact):
                 try:
                     active.outcome = fact.outcome
                     if fact.outcome.requires_owner_retention:
@@ -569,7 +569,7 @@ class FileOperation:
             outcome = prepared.run()
         except BaseException as control:
             fact = control.__cause__
-            if isinstance(fact, OwnedFileControlFact) and prepared.state.control_outcome is fact.outcome:
+            if isinstance(fact, OwnedFileControlFact):
                 try:
                     active.outcome = fact.outcome
                     if fact.outcome.requires_owner_retention:
@@ -630,7 +630,7 @@ class FileOperation:
             outcome = prepared.run()
         except BaseException as control:
             fact = control.__cause__
-            if isinstance(fact, OwnedFileControlFact) and prepared.state.control_outcome is fact.outcome:
+            if isinstance(fact, OwnedFileControlFact):
                 try:
                     active.outcome = fact.outcome
                     if fact.outcome.requires_owner_retention:

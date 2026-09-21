@@ -140,7 +140,6 @@ class _State[T: _CandidateResult]:
     result: T | None = None
     ownership_result: FileOwnershipResolutionResult | None = None
     deadline_exceeded: bool = False
-    control_outcome: OwnedFileOutcome[T] | None = None
 
     def note_deadline(self) -> None:
         self.deadline_exceeded = self.deadline_exceeded or self.deadline.expired
@@ -173,7 +172,6 @@ class _State[T: _CandidateResult]:
         try:
             outcome = self.finish()
             fact = OwnedFileControlFact(outcome)
-            self.control_outcome = outcome
         except BaseException:
             raise control from None
         raise control from fact
@@ -296,28 +294,6 @@ class _PreparedMetadata:
         return self.state.finish()
 
 
-def stat_file(
-    carrier: Carrier,
-    *,
-    trusted_root_path: str,
-    relative_path: str,
-    plan: IdentityPlan,
-    deadline: Deadline,
-    runtime_selection: RuntimeSelection,
-    borrow: OperationBorrow,
-) -> OwnedFileOutcome[FileObjectCandidateResult]:
-    """Run one object observation under the caller's active operation borrow."""
-    return _prepare_stat(
-        carrier,
-        trusted_root_path=trusted_root_path,
-        relative_path=relative_path,
-        plan=plan,
-        deadline=deadline,
-        runtime_selection=runtime_selection,
-        borrow=borrow,
-    ).run()
-
-
 def _prepare_stat(
     carrier: Carrier,
     *,
@@ -331,34 +307,6 @@ def _prepare_stat(
     binding = FileStatBinding(trusted_root_path, relative_path, plan, runtime_selection)
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
     return _PreparedStat(binding, _State(binding, operation, deadline))
-
-
-def list_directory(
-    carrier: Carrier,
-    *,
-    trusted_root_path: str,
-    relative_path: str,
-    max_entries: int,
-    max_depth: int,
-    max_encoded_bytes: int,
-    plan: IdentityPlan,
-    deadline: Deadline,
-    runtime_selection: RuntimeSelection,
-    borrow: OperationBorrow,
-) -> OwnedFileOutcome[FileInventoryCandidateResult]:
-    """Run one bounded inventory under the caller's active operation borrow."""
-    return _prepare_inventory(
-        carrier,
-        trusted_root_path=trusted_root_path,
-        relative_path=relative_path,
-        max_entries=max_entries,
-        max_depth=max_depth,
-        max_encoded_bytes=max_encoded_bytes,
-        plan=plan,
-        deadline=deadline,
-        runtime_selection=runtime_selection,
-        borrow=borrow,
-    ).run()
 
 
 def _prepare_inventory(
@@ -387,32 +335,6 @@ def _prepare_inventory(
     return _PreparedInventory(binding, _State(binding, operation, deadline))
 
 
-def remove_file(
-    carrier: Carrier,
-    *,
-    trusted_root_path: str,
-    relative_path: str,
-    expected_kind: FileKind,
-    expected_revision: FileRevision,
-    plan: IdentityPlan,
-    deadline: Deadline,
-    runtime_selection: RuntimeSelection,
-    borrow: OperationBorrow,
-) -> OwnedFileOutcome[FileObjectCandidateResult]:
-    """Run one conditional removal under the caller's active operation borrow."""
-    return _prepare_remove(
-        carrier,
-        trusted_root_path=trusted_root_path,
-        relative_path=relative_path,
-        expected_kind=expected_kind,
-        expected_revision=expected_revision,
-        plan=plan,
-        deadline=deadline,
-        runtime_selection=runtime_selection,
-        borrow=borrow,
-    ).run()
-
-
 def _prepare_remove(
     carrier: Carrier,
     *,
@@ -435,64 +357,6 @@ def _prepare_remove(
     )
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
     return _PreparedRemove(binding, _State(binding, operation, deadline))
-
-
-def set_metadata(
-    carrier: Carrier,
-    *,
-    trusted_root_path: str,
-    relative_path: str,
-    trusted_owner: str,
-    trusted_group: str,
-    mode: int,
-    plan: IdentityPlan,
-    deadline: Deadline,
-    runtime_selection: RuntimeSelection,
-    borrow: OperationBorrow,
-) -> OwnedFileOutcome[FileMetadataCandidateResult]:
-    """Resolve names and converge one object's metadata under one borrow."""
-    return _prepare_metadata(
-        carrier,
-        operation=FileMetadataOperation.SET_METADATA,
-        trusted_root_path=trusted_root_path,
-        relative_path=relative_path,
-        trusted_owner=trusted_owner,
-        trusted_group=trusted_group,
-        mode=mode,
-        plan=plan,
-        deadline=deadline,
-        runtime_selection=runtime_selection,
-        borrow=borrow,
-    ).run()
-
-
-def ensure_directory(
-    carrier: Carrier,
-    *,
-    trusted_root_path: str,
-    relative_path: str,
-    trusted_owner: str,
-    trusted_group: str,
-    mode: int,
-    plan: IdentityPlan,
-    deadline: Deadline,
-    runtime_selection: RuntimeSelection,
-    borrow: OperationBorrow,
-) -> OwnedFileOutcome[FileMetadataCandidateResult]:
-    """Resolve names and create or converge one directory under one borrow."""
-    return _prepare_metadata(
-        carrier,
-        operation=FileMetadataOperation.ENSURE_DIRECTORY,
-        trusted_root_path=trusted_root_path,
-        relative_path=relative_path,
-        trusted_owner=trusted_owner,
-        trusted_group=trusted_group,
-        mode=mode,
-        plan=plan,
-        deadline=deadline,
-        runtime_selection=runtime_selection,
-        borrow=borrow,
-    ).run()
 
 
 def _prepare_metadata(
