@@ -1292,8 +1292,8 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       required; these private building blocks do not close those gates.
 - [ ] Use the owned snapshot/chunk download for general in-memory reads, preserving caller byte
       bounds independently of QGA's single-response capacity. Keep the no-staging readiness read
-      separately bound before dispatch; prove its complete encoded response fits the selected
-      route. Do not retry a failed direct read through staging after uncertain observation.
+      separately bound before dispatch; prove its complete encoded response fits the selected route.
+      Do not retry a failed direct read through staging after uncertain observation.
 
 ### Buffered execution result checkpoint
 

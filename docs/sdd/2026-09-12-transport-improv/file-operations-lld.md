@@ -97,13 +97,13 @@ download obtains a finite size from the held source snapshot before transferring
 remain bounded. Directory inventory defaults to 1,024 entries, depth 1, and 1 MiB encoded; reviewed
 callers may request up to 4,096 entries, depth 8, and 4 MiB encoded.
 
-Ordinary `read_file` composes the owned snapshot/chunk download into a bounded in-memory sink.
-This preserves the caller's byte bound without requiring one carrier response to contain the whole
-file. The complete source revision, verified bytes, deadline and scratch cleanup must agree before
-returning a public result. Readiness binds the separate no-staging inline read described below,
-with a proved response bound selected before dispatch. An oversized or lost observation never
-triggers a retry through another read mechanism. This selection is an operation constraint, not
-deferred permission enforcement.
+Ordinary `read_file` composes the owned snapshot/chunk download into a bounded in-memory sink. This
+preserves the caller's byte bound without requiring one carrier response to contain the whole file.
+The complete source revision, verified bytes, deadline and scratch cleanup must agree before
+returning a public result. Readiness binds the separate no-staging inline read described below, with
+a proved response bound selected before dispatch. An oversized or lost observation never triggers a
+retry through another read mechanism. This selection is an operation constraint, not deferred
+permission enforcement.
 
 `FileAccess` exposes only these forms:
 

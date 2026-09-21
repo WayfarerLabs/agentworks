@@ -35,6 +35,13 @@ output semantics, no recorded failure or expired deadline, and confirmed owned c
 returns that same result or raises `CheckedExecutionError` carrying it; neither path invents a
 scalar return code or copies provider exception text into result fields or the error message.
 
+`files.py` defines frozen public file values without a FileAccess service. Opaque versioned
+revisions preserve the observed object identity, metadata and optional content digest. Their
+4,096-byte token bound limits metadata encoding, not file size. Public metadata must agree with its
+revision; a read result also verifies its bytes against the revision's size and digest. Payloads and
+tokens stay out of diagnostic representations. Directory limits and explicit publication conditions
+are values, not evidence of remote effects or active permission grants.
+
 The bootstrap waits for source and stdin producers as well as output encoders. Unexpected producer
 failure invalidates delivery even if the command exits zero. Intentional early input closure is
 allowed; GNU env's `--default-signal=PIPE` ensures its SIGPIPE outcome is observable.
@@ -512,6 +519,13 @@ Neither a caller crash nor a missing scratch receipt proves remote mutation has 
 whole nested operation. Its first attempt commits possible dispatch before returning permission to
 send work. Later attempts reuse the durable claim. Explicit close stops admission and refuses while
 a borrow or unresolved attempt remains; it does not infer remote quiescence from local return.
+
+`_file_operations.py` borrows that owner for bounded inline read, stat, inventory, conditional
+removal and metadata composition. Metadata name lookup and mutation share one borrow and deadline;
+successful lookup and normal helper termination are required before mutation. Candidate observations
+are recorded before settlement, independently of expiry and unresolved ownership. These calls close
+only their borrow, including on escaping control flow. They do not release the database claim,
+replay a failed request or provide public FileAccess error reduction.
 
 `_file_upload.py` composes staging, finite source consumption, publication and ordered cleanup under
 one borrowed owner. It consumes bounded chunks without rewinding or retaining the whole source and

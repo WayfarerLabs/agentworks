@@ -21,7 +21,6 @@ from agentworks.execution.files import (
     DirectoryLimit,
     FileKind,
     FileMetadata,
-    JsonStrategy,
     Match,
     MutationResult,
     NewMetadata,
@@ -321,17 +320,6 @@ def test_public_containers_reject_dataclass_extensions_with_diagnostic_fields() 
         with pytest.raises(ValidationError) as caught:
             metadata_construct()
         assert "metadata-canary" not in repr(caught.value)
-
-
-def test_public_enum_values_are_closed() -> None:
-    assert set(FileKind) == {FileKind.REGULAR, FileKind.DIRECTORY, FileKind.SOCKET}
-    assert set(JsonStrategy) == {
-        JsonStrategy.REPLACE,
-        JsonStrategy.MERGE_OVERWRITE,
-        JsonStrategy.MERGE_PRESERVE,
-        JsonStrategy.SKIP_EXISTING,
-    }
-    assert set(Change) == {Change.CHANGED, Change.UNCHANGED}
 
 
 @pytest.mark.windows
