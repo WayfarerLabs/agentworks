@@ -533,6 +533,23 @@ is not a promise about every future interpreter. The
 [preparation candidate](preparation-lld.md#retrospective-completion-candidate) keeps eager launch,
 signal ambiguity and native-platform acceptance separate.
 
+A 2026-09-21 source audit across released CPython 3.11 through 3.14 found that the fixed
+`start_new_session=True` launch control excludes `posix_spawn` and selects the native `_fork_exec`
+family. This is an implementation fact, not a public API guarantee about future releases. The
+audited predicates are visible in
+[3.11.16](https://github.com/python/cpython/blob/v3.11.16/Lib/subprocess.py#L1825-L1844),
+[3.12.14](https://github.com/python/cpython/blob/v3.12.14/Lib/subprocess.py#L1825-L1844),
+[3.13.15](https://github.com/python/cpython/blob/v3.13.15/Lib/subprocess.py#L1861-L1880) and
+[3.14.7](https://github.com/python/cpython/blob/v3.14.7/Lib/subprocess.py#L1860-L1879).
+`close_fds=True` alone does not exclude that route in the newer lines; the session control matters.
+The native family may internally use `vfork`, so the claim is not that a literal `fork` system call
+is always used. The
+[public documentation](https://docs.python.org/3.14/library/subprocess.html#popen-constructor)
+promises the requested new session, not this mechanism choice. There is no supported public runtime
+predicate for the choice; assigning a private subprocess switch or copying subprocess internals is
+not the selected production solution. This audit does not add a Python version cap or accept the
+retrospective reducer. A supported-runtime decision and producer evidence still gate that reducer.
+
 Linux process flags do not close the eager-start gap. In Bookworm's kernel,
 [`begin_new_exec()`](https://sources.debian.org/src/linux/6.1.176-1/fs/exec.c/#L1259) clears the
 fork-without-exec flag and closes close-on-exec descriptors before the ELF loader's

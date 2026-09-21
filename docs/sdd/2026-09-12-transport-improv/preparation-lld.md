@@ -768,9 +768,10 @@ for the joint terminal implementation and native acceptance gates.
 
 ## Public result and check behavior
 
-`ExecutionResult` carries `DispatchEvidence`, application state, optional application status,
-separate `ExecutionOutput` values, an optional `ExecutionFailure`, and whether owned cleanup was
-confirmed. It does not compress those facts into a return code.
+`ExecutionResult` carries the shared carrier `Dispatch` value, application state, optional
+application status, separate `ExecutionOutput` values, an optional `ExecutionFailure`, and whether
+owned cleanup was confirmed. An independent `deadline_exceeded` flag preserves expiry even when a
+different failure is primary. It does not compress those facts into a return code.
 
 `ApplicationState` is `NOT_STARTED`, `STARTED`, `COMPLETED`, or `UNKNOWN`. `NOT_STARTED` needs
 positive evidence, such as local refusal before dispatch or a trusted pre-launch `FAILED` frame.
@@ -779,11 +780,12 @@ start. `UNKNOWN` covers every gap, including `LAUNCHING` alone and every direct 
 required start evidence. `status` exists only for `COMPLETED` and is the honest union
 `WaitCode | ExitCode | Signal`; the direct shell path produces only `WaitCode`.
 
-`ExecutionOutput` contains retained bytes, `complete`, and retention
-`CAPTURED`/`DISCARDED`/`SUPPRESSED`. Intentional discard or suppression does not claim empty guest
-output and does not by itself make a completed zero result fail. Captured overflow returns the
-prefix up to the caller bound with `complete=False` and `failure=OUTPUT_LIMIT`. A transfer or frame
-failure similarly leaves partial bytes explicitly incomplete.
+`ExecutionOutput` contains retained bytes, `complete`, and the shared `Retention` value
+`CAPTURED`/`DELIVERED`/`DISCARDED`/`SUPPRESSED`. Delivered output records acceptance by the
+requested sink, not captured bytes or durable storage. Intentional discard or suppression does not
+claim empty guest output and does not by itself make a completed zero result fail. Captured overflow
+returns the prefix up to the caller bound with `complete=False` and `failure=OUTPUT_LIMIT`. A
+transfer or frame failure similarly leaves partial bytes explicitly incomplete.
 
 `ExecutionFailure` is a closed transport-neutral fact such as `PREPARATION`, `DELIVERY`, `DEADLINE`,
 `OBSERVATION`, `PROTOCOL`, `INPUT`, `OUTPUT`, `OUTPUT_LIMIT`, or `CLEANUP`. Safe phase and target
@@ -791,8 +793,9 @@ metadata may accompany it. Provider exception text, raw account output, payload 
 scratch paths, and credentials never do.
 
 `result.ok` is true only when application completion is known, the exact exit or wait code is zero,
-no operational failure affects the requested semantics, and requested captured output is complete.
-It is never true for `STARTED` or `UNKNOWN`, and no unknown status is converted to zero.
+no operational failure affects the requested semantics, the deadline has not expired, owned cleanup
+is confirmed, and requested captured or delivered output is complete. It is never true for `STARTED`
+or `UNKNOWN`, and no unknown status is converted to zero.
 
 Request validation, unavailable optional features, expired target lifetime, control-flow
 interruption, and eventually activated authorization denials raise regardless of `check`. After an
@@ -807,9 +810,13 @@ attempt begins:
 
 The minimal error addition is one `CheckedExecutionError(ExternalError)` with a `.result` attribute.
 The result's structured facts, rather than a growing exception subclass matrix, distinguish known
-guest failure from uncertainty and incomplete output. The lead must approve this base-class choice
-against CLI rendering before implementation. The exception message is safe fixed prose; renderers
-use result fields for detail.
+guest failure from uncertainty and incomplete output. The lead approves this base after inspecting
+the CLI's external-error handler and ordinary traceback logging: the exception message is safe fixed
+prose and no raw provider exception is attached. `ExecutionResult.check()` returns the same instance
+when `ok`, otherwise raises this error with implicit exception-context rendering suppressed. The
+target's `check=True` path delegates to that method; `check=False` returns the result unchanged.
+Renderers use safe result fields for detail, never output bytes by default. These result values do
+not supply evidence: producer and reducer acceptance remain separate implementation gates.
 
 ## Reuse by supervisor and file helpers
 
