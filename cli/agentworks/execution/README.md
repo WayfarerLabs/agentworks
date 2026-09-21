@@ -533,8 +533,9 @@ not require write access to the source directory.
 
 Requests use sensitive stdin with a 32 KiB manifest bound. Chunk replies carry at most 12 KiB of
 binary data in `AGWF1` records, followed by range, length and digest evidence. The host releases
-typed results only after complete nonce-bound framing and delivered streams. A missing source is
-distinct from an empty file; invalid, reflected or incomplete output does not establish either.
+typed results only after complete nonce-bound framing and delivered streams. A missing source root
+or file is distinct from an empty file; invalid, reflected or incomplete output does not establish
+either.
 
 Reconciliation recovers cleanup ownership only, never ready content or proof that an earlier request
 has stopped. Known cleanup debt survives deadline failure. Cleanup accepts the original token and

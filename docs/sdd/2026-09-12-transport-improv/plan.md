@@ -341,6 +341,13 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       deadline/descriptor handling. Local fixtures prove a non-root download from a read-only source
       parent, and a separate read-only host probe admits UID 0/mode 01777. Native VM/macOS selection
       and remote snapshot delivery remain unproved.
+- [x] Deliver private snapshot creation, exact-range chunks, historical ownership reconciliation and
+      cleanup through the fixed Linux helper. Verify binary data and ready/source revision agreement
+      before exposing typed results; preserve exact known debt on expiry, reject substituted cleanup
+      identities and phases, and treat missing source roots as absence without bypassing
+      prerequisite or final deadline checks. Local Python 3.11 helper evidence and independent
+      review at `9cdce7e6` establish this internal slice, not complete downloads, production
+      operation coordination, FileAccess or native carrier acceptance.
 - [ ] Jointly accept and prove the privately implemented carrier sink extension with the SSH owner
       before enabling its production use or exposing it through RunContext.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext

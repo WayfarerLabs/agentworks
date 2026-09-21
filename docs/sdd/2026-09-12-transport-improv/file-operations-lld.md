@@ -350,7 +350,7 @@ before its first deletion and accepts only the original identity-bound debt. Ret
 failure debt must match it. These exchanges do not prove earlier-request quiescence or implement
 complete upload/publication; delayed chunk requests refuse after exact cleanup removes the receipt.
 
-### Snapshot exchange candidate
+### Private snapshot exchanges
 
 Use a separate fixed snapshot family, not stage operations with a caller-selectable storage root.
 Every request carries the version, nonce, core token, execution identity and relative budget.
