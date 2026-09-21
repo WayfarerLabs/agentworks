@@ -1446,6 +1446,18 @@ deterministic double-build comparisons. The initial failure's cause is unproved;
 not a claimed fix. No live infrastructure was exercised. Hosted checks for the write-custody
 increment remain pending; no public review/test/merge signal is raised.
 
+Hosted run `35617821328` at `bb7ebb58` subsequently passes every required check, including Windows
+Python 3.13 and Linux Python 3.12/3.13/3.14. No native backend acceptance is implied.
+
+A read-only browser investigation at `9d8ff26a` reproduces the mouse-tap snapshot by delaying the
+first animation frame by 300 ms. Native pointer events arrive and queue thrust, but the simulation's
+existing 100 ms discontinuity rule discards the frame and the controller clears input before a
+physics step. Four ordinary browser runs and one instrumented control pass; the delayed-frame
+experiment reproduces the failure. The original failing run lacks event/frame evidence, so its cause
+remains unproved. Extending the wait cannot restore an already discarded input edge. No website
+source was changed: changing discontinuity behavior would require a separate behavior decision;
+bounded event/queue/frame evidence is the next diagnostic step if this recurs.
+
 ### Buffered execution result checkpoint
 
 - [x] Implement safe immutable application result values, honest wait/exit/signal precision and one
