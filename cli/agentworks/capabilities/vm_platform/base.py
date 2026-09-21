@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from agentworks.db import VMRow, VMStatus
     from agentworks.debian import DebianRelease
     from agentworks.execution.binding import NativeExecutionBinding
+    from agentworks.execution.carrier import Deadline
     from agentworks.transports import ExecTransport
 
 
@@ -348,20 +349,24 @@ class VMPlatform(Capability):
         distinct from the bound ``platform_config``.
         """
 
-    def native_execution_binding(
+    def resolve_native_execution_binding(
         self,
         vm: VMRow,
         ctx: RunContext,
         *,
+        deadline: Deadline,
         config: Config | None = None,
     ) -> NativeExecutionBinding:
-        """Build this platform's required independent native carrier binding.
+        """Resolve this platform's required independent native carrier binding.
 
-        The concrete default keeps existing platform implementations usable
-        during additive delivery, but calling an unfinished hook fails rather
-        than treating native execution as optional.
+        Resolution is an explicit bounded preparation operation. Providers may
+        perform endpoint reads within ``deadline``; they must not defer those
+        reads to the returned binding or implicitly open a route. The concrete
+        default keeps existing platform implementations usable during additive
+        delivery, but calling an unfinished hook fails rather than treating
+        native execution as optional.
         """
-        del vm, ctx, config
+        del vm, ctx, deadline, config
         raise StateError(
             f"VM platform '{self.name}' has not implemented its native execution binding",
             entity_kind="vm-platform",

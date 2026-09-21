@@ -18,6 +18,7 @@ from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import VMRow
 from agentworks.errors import ConfigError, StateError, ValidationError
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier
 from agentworks.execution.carriers.wsl2 import WSL2Carrier
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
@@ -79,9 +80,10 @@ def test_wsl2_binding_is_passive_and_uses_recorded_distribution_and_admin(
     monkeypatch.setattr("subprocess.Popen", lambda *_args, **_kwargs: pytest.fail("process launched"))
     _block_legacy_imports(monkeypatch)
 
-    binding = WSL2Platform("wsl2", {}).native_execution_binding(
+    binding = WSL2Platform("wsl2", {}).resolve_native_execution_binding(
         _vm(metadata={"distro_name": "recorded-distro"}, admin_username="delivery-user"),
         RunContext(),
+        deadline=Deadline(None),
     )
 
     assert isinstance(binding.carrier, WSL2Carrier)
@@ -113,7 +115,11 @@ def test_proxmox_binding_uses_scoped_secret_platform_metadata_and_verified_conne
     monkeypatch.setattr("subprocess.Popen", lambda *_args, **_kwargs: pytest.fail("process launched"))
     _block_legacy_imports(monkeypatch)
 
-    binding = platform.native_execution_binding(_vm(metadata=metadata), RunContext(secrets=secrets))
+    binding = platform.resolve_native_execution_binding(
+        _vm(metadata=metadata),
+        RunContext(secrets=secrets),
+        deadline=Deadline(None),
+    )
 
     assert secrets.requests == ["native-binding-token"]
     assert isinstance(binding.carrier, ProxmoxCarrier)
@@ -130,9 +136,10 @@ def test_proxmox_binding_uses_scoped_secret_platform_metadata_and_verified_conne
 
 def test_proxmox_binding_uses_system_trust_when_ca_bundle_is_omitted() -> None:
     secrets = _Secrets({"native-binding-token": _SECRET})
-    binding = ProxmoxPlatform("pve-site", _PROXMOX_CONFIG).native_execution_binding(
+    binding = ProxmoxPlatform("pve-site", _PROXMOX_CONFIG).resolve_native_execution_binding(
         _vm(metadata={"vmid": "101"}),
         RunContext(secrets=secrets),
+        deadline=Deadline(None),
     )
 
     assert cast("ProxmoxCarrier", binding.carrier)._wire._connection.ca_bundle is None
@@ -143,9 +150,10 @@ def test_proxmox_binding_rejects_legacy_tls_bypass_before_secret_delivery() -> N
     platform = ProxmoxPlatform("pve-site", {**_PROXMOX_CONFIG, "verify_ssl": False})
 
     with pytest.raises(ConfigError) as raised:
-        platform.native_execution_binding(
+        platform.resolve_native_execution_binding(
             _vm(metadata={"vmid": "101"}),
             RunContext(secrets=secrets),
+            deadline=Deadline(None),
         )
 
     assert raised.value.entity_kind == "vm-site"
@@ -159,9 +167,10 @@ def test_proxmox_binding_rejects_unsafe_secret_without_retaining_its_value() -> 
     platform = ProxmoxPlatform("pve-site", _PROXMOX_CONFIG)
 
     with pytest.raises(ValidationError) as raised:
-        platform.native_execution_binding(
+        platform.resolve_native_execution_binding(
             _vm(metadata={"vmid": "101"}),
             RunContext(secrets=_Secrets({"native-binding-token": secret})),
+            deadline=Deadline(None),
         )
 
     assert "native-binding-token" in str(raised.value)
@@ -199,9 +208,10 @@ def test_proxmox_ca_expansion_failure_is_scoped_without_loading_or_dispatch(
 
     with pytest.raises(ConfigError) as raised:
         if path == "binding":
-            platform.native_execution_binding(
+            platform.resolve_native_execution_binding(
                 _vm(metadata={"vmid": "101"}),
                 RunContext(secrets=secrets),
+                deadline=Deadline(None),
             )
         else:
             platform._build_api(_SECRET)
@@ -220,7 +230,11 @@ def test_unimplemented_platform_hook_fails_without_making_old_subclass_abstract(
     platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
 
     with pytest.raises(StateError) as raised:
-        platform.native_execution_binding(_vm(metadata={"instance_name": "vm-one"}), RunContext())
+        platform.resolve_native_execution_binding(
+            _vm(metadata={"instance_name": "vm-one"}),
+            RunContext(),
+            deadline=Deadline(None),
+        )
 
     assert raised.value.entity_kind == "vm-platform"
     assert raised.value.entity_name == "lima"

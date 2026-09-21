@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.execution.binding import NativeExecutionBinding
+    from agentworks.execution.carrier import Deadline
     from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
 
 
@@ -547,11 +548,12 @@ class ProxmoxPlatform(VMPlatform):
             admin_username=vm.admin_username,
         )
 
-    def native_execution_binding(
+    def resolve_native_execution_binding(
         self,
         vm: VMRow,
         ctx: RunContext,
         *,
+        deadline: Deadline,
         config: Config | None = None,
     ) -> NativeExecutionBinding:
         """Bind verified QGA delivery without probing or constructing legacy execution."""
@@ -563,7 +565,7 @@ class ProxmoxPlatform(VMPlatform):
             require_line_safe_secret,
         )
 
-        del config
+        del deadline, config
         if not self.config.verify_ssl:
             raise ConfigError(
                 f"Native execution for vm-site '{self.site_name}' requires TLS certificate verification",

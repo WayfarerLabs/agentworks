@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.execution.binding import NativeExecutionBinding
+    from agentworks.execution.carrier import Deadline
     from agentworks.resources.graph import Readiness
     from agentworks.transports import Transport
 
@@ -902,11 +903,12 @@ class WSL2Platform(VMPlatform):
 
         return WSL2Transport(distro_name=self._distro_name(vm), user=vm.admin_username)
 
-    def native_execution_binding(
+    def resolve_native_execution_binding(
         self,
         vm: VMRow,
         ctx: RunContext,
         *,
+        deadline: Deadline,
         config: Config | None = None,
     ) -> NativeExecutionBinding:
         """Bind literal local WSL delivery without probing or starting it."""
@@ -914,7 +916,7 @@ class WSL2Platform(VMPlatform):
         from agentworks.execution.binding import NativeExecutionBinding
         from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
 
-        del ctx, config
+        del ctx, deadline, config
         account = vm.admin_username
         return NativeExecutionBinding(
             WSL2Carrier(WSL2Connection(self._distro_name(vm), account, "wsl")),
