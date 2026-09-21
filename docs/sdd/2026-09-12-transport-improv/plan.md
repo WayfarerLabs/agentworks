@@ -1304,6 +1304,12 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       bounds independently of QGA's single-response capacity. Keep the no-staging readiness read
       separately bound before dispatch; prove its complete encoded response fits the selected route.
       Do not retry a failed direct read through staging after uncertain observation.
+- [x] Implement the private in-memory adapter over the owned snapshot/chunk download. Preserve the
+      exact download outcome, expose bytes only after complete verified transfer and cleanup, and
+      discard partial buffers on normal or exceptional exit. Local tests cover empty, multi-chunk,
+      absent, bounded-refusal and failure paths; a synthetic chunk source exceeds one 8 MiB
+      response. This does not complete public FileAccess, readiness response sizing or native
+      acceptance.
 - [ ] Accommodate the full bounded directory inventory in the native HTTP response reader, including
       framing and provider-envelope overhead. Keep one traversal and a finite response limit; prove
       local maximum-response acceptance and above-bound refusal, then obtain native PVE/QGA evidence
@@ -1334,6 +1340,19 @@ installing the guard, transitively loading `pwd` and `grp` through Python 3.13's
 correction uses a minimal finder without that setup dependency and continues to make the blocked
 modules unavailable during the tested import. Production code is unchanged; the 35 file-value tests
 pass locally on Python 3.12. Hosted Python 3.13 confirmation remains pending.
+
+All three private lanes accept the memory-read and import-test correction at `2c3af751` without
+material findings. Each passes the 73 memory-read, download and public-value tests. Fault injection
+confirms that failed final byte allocation preserves the exact exception and clears the temporary
+buffer; withholding partial bytes is independently mutation-tested. The updated handoff design
+distinguishes cleanup responsibility from possible remote effects and leaves production and durable
+recovery gates unchecked.
+
+That pin passes the full local suite with 12,365 tests and 13 skips. Full Ruff/format, mypy (1043
+sources), file lint, locked-SDD/rulesync, typer isolation and whitespace gates pass. Website gates
+pass 160 Python tests, 103 Node tests and both deterministic double-build comparisons. No live
+infrastructure was exercised. The draft remains in implementation, with all three public
+feedback/fix rounds unused.
 
 ### Buffered execution result checkpoint
 
