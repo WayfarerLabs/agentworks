@@ -195,17 +195,24 @@ settlement and observes worker termination. A delayed worker can make terminatio
 cannot skip shared cleanup or resume pipe use. Natural client exit remains distinct from a status
 produced by local cleanup.
 
-The forwarding selection passes 48 non-integration cases, the broader SSH selection passes 265 with
-five skips, and all 20 shared-owner tests pass. These include worker-start interruption before and
-after native startup, interruption after process admission with no pipe reads, interruption before
-pipe publication, repeated close interruptions preserving the first control exception, concurrent
-wait/close, natural exit with held stdin, safe startup failure reporting and delayed worker
-termination. Ruff/format and focused strict typing pass.
+At `140f6758`, the initial forwarding selection passes 48 non-integration cases, the broader SSH
+selection passes 265 with five skips, and all 20 shared-owner tests pass. Private project review
+then caught an unsupported concurrent wait/close test claim; `6c53edcb` adds the actual two-thread
+regression. Complexity review removes duplicate terminal/worker state, redundant owner-fact
+assertions and unused stdin configuration in `8c3c4e5b`.
 
-The lead repeated all eight installed-OpenSSH forwarding cases at `140f6758`; all passed. They
-exercise real binary forwarding, first/later listener refusal, IPv4/IPv6 partial setup,
-authentication/trust/command refusal and listener release. The fixture verifies rebinding; the lead
-independently found no owned fixture SSH processes and removed its exact directory and credentials.
+The corrected forwarding selection passes **49 cases** at `8c3c4e5b`, plus all 20 shared-owner
+cases. Coverage includes worker-start interruption before and after native startup, interruption
+after process admission with no pipe reads, interruption before pipe publication, repeated close
+interruptions preserving the first control exception, concurrent wait/close, natural exit with held
+stdin, safe startup failure reporting and delayed worker termination. Full Ruff/format and mypy
+(1,059 source files) pass.
+
+The lead repeated all eight installed-OpenSSH forwarding cases at both `140f6758` and `8c3c4e5b`;
+all passed. They exercise real binary forwarding, first/later listener refusal, IPv4/IPv6 partial
+setup, authentication/trust/command refusal and listener release. The fixture verifies rebinding;
+the lead independently found no owned fixture SSH processes and removed each exact directory and its
+credentials.
 
 These are focused Linux loopback results, not complete asynchronous interruption or native-platform
 acceptance. The shared cleanup-entry gap and unbounded process-construction time retain their
