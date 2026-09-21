@@ -512,9 +512,11 @@ match the source revision, including for empty files. Confirmed absence returns 
 The outcome separates accepted bytes, whole-stream verification, remote cleanup debt and possible
 future effects. A verified stream is not complete while required cleanup remains unresolved. Sink
 failures retain closed facts, not raw exception text; escaping control flow carries bounded recovery
-facts. This private entry requires a finite positive source bound. Public optional bounds, local
-staging/publication and local cleanup remain unimplemented; the coordinator cannot publish a local
-file or provide public FileAccess on its own.
+facts. Private completion and absence can coexist with `deadline_exceeded`; callers must preserve
+that timing fact rather than interpret the status alone as in-budget success. Upload and JSON
+composition retain the same independent timing fact. This private entry requires a finite positive
+source bound. Public optional bounds, local staging/publication and local cleanup remain
+unimplemented; the coordinator cannot publish a local file or provide public FileAccess on its own.
 
 ## Private object observation and removal
 

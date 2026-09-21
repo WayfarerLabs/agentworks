@@ -493,6 +493,12 @@ Private results retain closed failure facts, byte counts and original recovery b
 content or raw sink exceptions. Local publication and its cleanup obligations remain separate from
 remote scratch cleanup and must both be accounted for by the complete public operation.
 
+Private completion and absence statuses describe established operation facts; they are not an
+in-budget success guarantee. A complete normal-chain observation can survive a late deadline, with
+`deadline_exceeded` retained independently. Public result conversion must report the timing failure
+without discarding proved absence, changes, verification or cleanup, and must not turn the status
+alone into an ordinary success. Apply the same interpretation to upload and JSON composition.
+
 This is the next private composition boundary, not implemented download or Windows/macOS acceptance.
 The host-specific publication design and native evidence remain required before exposing download
 through FileAccess.
