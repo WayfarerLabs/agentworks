@@ -10,7 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.execution._file_stage_protocol import FileStageBeginRequest, encode_file_stage_request
+from agentworks.execution._file_snapshot_bundle import FIXED_LOADER, FIXED_SOURCE
+from agentworks.execution._file_snapshot_protocol import FileSnapshotBeginRequest, encode_file_snapshot_request
 from agentworks.execution._helper_bundle import build_helper_modules
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan, build_helper_argv
@@ -108,13 +109,6 @@ finally:
 """
 _SNAPSHOT_SOURCE = build_helper_modules(_SNAPSHOT_PACKAGE, _SNAPSHOT_MODULE_NAMES) + _SNAPSHOT_DISPATCHER
 
-_SURROGATE_PACKAGE = "_agw_snapshot_surrogate"
-_SURROGATE_MODULE_NAMES = _SNAPSHOT_MODULE_NAMES + ("_file_stage_protocol", "_file_stage_guest")
-_SURROGATE_LOADER = build_helper_modules(_SURROGATE_PACKAGE, _SURROGATE_MODULE_NAMES)
-_SURROGATE_SOURCE = _SURROGATE_LOADER + (
-    f"raise SystemExit(sys.modules[{(_SURROGATE_PACKAGE + '._file_stage_guest')!r}].main(sys.argv[1]))\n"
-)
-
 
 @_LINUX_ONLY
 @pytest.mark.parametrize(
@@ -194,15 +188,15 @@ def test_snapshot_module_bundle_spools_from_read_only_source_into_fixed_scratch(
     assert retained.read_bytes() == b"unrelated"
 
 
-def test_snapshot_surrogate_retains_windows_and_qga_delivery_headroom() -> None:
+def test_snapshot_helper_retains_windows_and_qga_delivery_headroom() -> None:
     identity = IdentityExpectation(1001, 1001, (1001,))
     plan = IdentityPlan(identity, IdentityMode.DEMOTE)
-    request = encode_file_stage_request(
-        FileStageBeginRequest(
+    request = encode_file_snapshot_request(
+        FileSnapshotBeginRequest(
             "0" * 32,
+            bytes(range(16)),
             "/approved/source",
             "nested/payload-delivery-canary",
-            bytes(range(16)),
             1 << 30,
             identity,
             60.0,
@@ -212,7 +206,7 @@ def test_snapshot_surrogate_retains_windows_and_qga_delivery_headroom() -> None:
         build_helper_argv(
             plan,
             runtime_path="/usr/bin/python3",
-            fixed_source=_SURROGATE_SOURCE,
+            fixed_source=FIXED_SOURCE,
             nonce="0" * 32,
         )
     )
@@ -227,6 +221,6 @@ def test_snapshot_surrogate_retains_windows_and_qga_delivery_headroom() -> None:
     windows_command = subprocess.list2cmdline(ssh_argv)
     qga_body = json.dumps({"command": invocation.argv, "input-data": request.decode("ascii")}).encode("ascii")
 
-    assert request.decode("ascii") not in _SURROGATE_SOURCE
-    assert len(_SURROGATE_LOADER) < len(_SURROGATE_SOURCE) < len(ssh_argv[-1]) < len(windows_command) < 32_767
-    assert len(_SURROGATE_SOURCE) < len(qga_body) < 65_536
+    assert request.decode("ascii") not in FIXED_SOURCE
+    assert len(FIXED_LOADER) < len(FIXED_SOURCE) < len(ssh_argv[-1]) < len(windows_command) < 32_767
+    assert len(FIXED_SOURCE) < len(qga_body) < 65_536

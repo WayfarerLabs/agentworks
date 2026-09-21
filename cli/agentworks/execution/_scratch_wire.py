@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ._scratch import ScratchReference
+from ._scratch import ReadyScratchReference, ScratchReference
 from ._scratch_receipt import (
     _RECEIPT_BUILD_MODE,
     _RECEIPT_MODE,
@@ -15,7 +15,11 @@ from ._scratch_receipt import (
 
 _MAX_LENGTH = (1 << 63) - 1
 _MAX_IDENTITY_NUMBER = (1 << 64) - 1
+_MIN_TIME_NS = -(1 << 63)
+_MAX_TIME_NS = (1 << 63) - 1
+_LOWER_HEX = frozenset("0123456789abcdef")
 _REFERENCE_FIELDS = frozenset({"artifact_gid", "data", "directory", "length", "parent", "receipt"})
+_READY_FIELDS = frozenset({"changed_ns", "digest", "modified_ns", "reference"})
 _DEBT_FIELDS = frozenset({"artifact_gid", "data", "directory", "parent", "receipt", "receipt_state"})
 _CREATING_RECEIPT = "creating_or_final"
 _FINAL_RECEIPT = "final"
@@ -93,6 +97,41 @@ def decode_scratch_reference(
         _decode_identity(value["receipt"]),
     )
     return ScratchReference(ownership)
+
+
+def encode_ready_scratch_reference(ready: ReadyScratchReference) -> dict[str, object]:
+    """Encode a content-ready active reference without exporting scratch paths."""
+    return {
+        "changed_ns": ready._changed_ns,
+        "digest": ready._digest.hex(),
+        "modified_ns": ready._modified_ns,
+        "reference": encode_scratch_reference(ready._reference),
+    }
+
+
+def decode_ready_scratch_reference(
+    value: object,
+    token: bytes,
+    context: ScratchReceiptContext,
+) -> ReadyScratchReference:
+    """Decode syntax for one active ready reference under an external context."""
+    if type(value) is not dict or set(value) != _READY_FIELDS:
+        raise ScratchWireError
+    digest = value["digest"]
+    if type(digest) is not str or len(digest) != 64 or any(character not in _LOWER_HEX for character in digest):
+        raise ScratchWireError
+    return ReadyScratchReference(
+        decode_scratch_reference(value["reference"], token, context),
+        bytes.fromhex(digest),
+        _bounded_time(value["modified_ns"]),
+        _bounded_time(value["changed_ns"]),
+    )
+
+
+def _bounded_time(value: object) -> int:
+    if type(value) is not int or not _MIN_TIME_NS <= value <= _MAX_TIME_NS:
+        raise ScratchWireError
+    return value
 
 
 def encode_cleanup_debt(

@@ -300,7 +300,8 @@ and supplies the fresh operation token and execution identity before copying. Th
 binds this operation to snapshot creation, not upload staging. Expiry is checked after source
 descriptors close, including initial absence. Failure attempts exact scratch cleanup and preserves
 unresolved cleanup debt. Local receipt reconciliation can recover cleanup ownership after a lost
-return, not the ready snapshot or its content revision. Remote download delivery is not implemented.
+return, not the ready snapshot or its content revision. The private snapshot exchanges below deliver
+these operations; complete download composition is not implemented.
 
 Descriptor bookkeeping is not signal-atomic. An asynchronous interruption before an intermediate
 ancestor close can leave that descriptor open until helper exit; callers cannot assume leak-free
@@ -511,13 +512,32 @@ Local tests exercise the actual request serializer, a fake provider executing th
 Windows SSH command-line sizing for explicit fixtures. Those measurements do not establish native
 platform acceptance or fit for every connection/identity prefix.
 
-These entries are not complete upload or FileAccess operations. Snapshot retrieval and publication
-composition and recovery remain unfinished. The caller must retain the token, original binding and
+These entries are not complete upload or FileAccess operations. Whole-download and publication
+composition and publication recovery remain unfinished. The caller must retain the token, original binding and
 known references; an unavailable creation reply does not establish absence or quiescence.
 
 `_scratch_root.py` opens the fixed Linux `/tmp` directory without following symlinks and requires
 UID 0 and mode 01777. It creates and repairs nothing, ignores environment-selected temporary paths,
 and returns a caller-owned descriptor or a closed failure kind. Download snapshots can use this
 parent independently of read-only source authority. This private selection grants no access to
-arbitrary temporary-directory contents. macOS root selection and remote snapshot delivery are not
-implemented.
+arbitrary temporary-directory contents. macOS root selection is not implemented.
+
+## Private file snapshot exchanges
+
+`_file_snapshot_exchange.py` delivers snapshot creation, exact-range retrieval, historical ownership
+reconciliation and cleanup through a fixed Linux helper. The helper checks the execution identity
+before opening either the source or the fixed scratch parent. It copies the held source into private
+scratch once; later requests read that copy, not a changing source file. Source-read authority does
+not require write access to the source directory.
+
+Requests use sensitive stdin with a 32 KiB manifest bound. Chunk replies carry at most 12 KiB of
+binary data in `AGWF1` records, followed by range, length and digest evidence. The host releases typed
+results only after complete nonce-bound framing and delivered streams. A missing source is distinct
+from an empty file; invalid, reflected or incomplete output does not establish either.
+
+Reconciliation recovers cleanup ownership only, never ready content or proof that an earlier request
+has stopped. Known cleanup debt survives deadline failure. Cleanup accepts the original token and
+identity-bound objects; delayed chunks refuse after receipt removal. The caller must serialize the
+complete logical operation and retain its token and known references. These private exchanges do
+not yet compose a complete download or enable public FileAccess. Local helper tests and serialized
+request-size measurements do not establish native carrier acceptance.

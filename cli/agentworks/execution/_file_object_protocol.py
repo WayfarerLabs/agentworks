@@ -9,37 +9,24 @@ import math
 import stat
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ._file_objects import FileKind, FileObjectFailureKind, FileObjectPhase
 from ._file_paths import normalized_relative_path, normalized_root
-from ._file_stat import FileRevision, FileStat
+from ._file_revision_wire import (
+    FileRevisionWireError,
+    decode_file_revision,
+    encode_file_revision,
+)
 from ._file_wire import valid_nonce
 from ._helper_identity import IdentityExpectation, decode_identity
 
+if TYPE_CHECKING:
+    from ._file_stat import FileRevision
+
 MAX_REQUEST_BYTES = 32_768
 MAX_PATH_BYTES = 4_096
-_MAX_ID = 2**32 - 1
-_MAX_STAT_VALUE = 2**64 - 1
-_MIN_TIME_NS = -(2**63)
-_MAX_TIME_NS = 2**63 - 1
-_LOWER_HEX = frozenset("0123456789abcdef")
 _COMMON_REQUEST_FIELDS = frozenset({"identity", "nonce", "operation", "path", "remaining_seconds", "root", "version"})
-_REVISION_FIELDS = frozenset(
-    {
-        "changed_ns",
-        "device",
-        "digest",
-        "gid",
-        "inode",
-        "link_count",
-        "mode",
-        "modified_ns",
-        "size",
-        "uid",
-        "version",
-    }
-)
 
 
 class FileObjectOperation(StrEnum):
@@ -168,14 +155,6 @@ def _identity(value: object) -> IdentityExpectation:
     return identity
 
 
-def _bounded_integer(value: object, minimum: int, maximum: int, *, request: bool) -> int:
-    if type(value) is not int or not minimum <= value <= maximum:
-        if request:
-            raise _invalid_request()
-        raise FileObjectControlError
-    return value
-
-
 def _kind_for_mode(mode: int, *, request: bool) -> FileKind:
     if stat.S_ISREG(mode):
         return FileKind.REGULAR
@@ -188,61 +167,13 @@ def _kind_for_mode(mode: int, *, request: bool) -> FileKind:
     raise FileObjectControlError
 
 
-def _encode_revision(revision: FileRevision) -> dict[str, object]:
-    observed = revision.stat
-    return {
-        "changed_ns": observed.changed_ns,
-        "device": observed.device,
-        "digest": None if revision.digest is None else revision.digest.hex(),
-        "gid": observed.gid,
-        "inode": observed.inode,
-        "link_count": observed.link_count,
-        "mode": observed.mode,
-        "modified_ns": observed.modified_ns,
-        "size": observed.size,
-        "uid": observed.uid,
-        "version": 1,
-    }
-
-
 def _decode_revision(value: object, *, request: bool) -> FileRevision:
-    if (
-        type(value) is not dict
-        or set(value) != _REVISION_FIELDS
-        or value["version"] != 1
-        or type(value["version"]) is not int
-    ):
+    try:
+        return decode_file_revision(value)
+    except FileRevisionWireError:
         if request:
-            raise _invalid_request()
-        raise FileObjectControlError
-    digest_value = value["digest"]
-    if digest_value is not None and (
-        type(digest_value) is not str
-        or len(digest_value) != 64
-        or any(character not in _LOWER_HEX for character in digest_value)
-    ):
-        if request:
-            raise _invalid_request()
-        raise FileObjectControlError
-    observed = FileStat(
-        device=_bounded_integer(value["device"], 0, _MAX_STAT_VALUE, request=request),
-        inode=_bounded_integer(value["inode"], 1, _MAX_STAT_VALUE, request=request),
-        mode=_bounded_integer(value["mode"], 0, 0o177777, request=request),
-        link_count=_bounded_integer(value["link_count"], 1, _MAX_STAT_VALUE, request=request),
-        uid=_bounded_integer(value["uid"], 0, _MAX_ID, request=request),
-        gid=_bounded_integer(value["gid"], 0, _MAX_ID, request=request),
-        size=_bounded_integer(value["size"], 0, _MAX_STAT_VALUE, request=request),
-        modified_ns=_bounded_integer(value["modified_ns"], _MIN_TIME_NS, _MAX_TIME_NS, request=request),
-        changed_ns=_bounded_integer(value["changed_ns"], _MIN_TIME_NS, _MAX_TIME_NS, request=request),
-    )
-    kind = _kind_for_mode(observed.mode, request=request)
-    if (kind is FileKind.REGULAR and observed.link_count != 1) or (
-        digest_value is not None and kind is not FileKind.REGULAR
-    ):
-        if request:
-            raise _invalid_request()
-        raise FileObjectControlError
-    return FileRevision(observed, None if digest_value is None else bytes.fromhex(digest_value))
+            raise _invalid_request() from None
+        raise FileObjectControlError from None
 
 
 def encode_file_object_request(request: FileObjectRequest) -> bytes:
@@ -263,7 +194,7 @@ def encode_file_object_request(request: FileObjectRequest) -> bytes:
     if request.operation is FileObjectOperation.REMOVE:
         value["expected_kind"] = None if request.expected_kind is None else request.expected_kind.value
         value["expected_revision"] = (
-            None if request.expected_revision is None else _encode_revision(request.expected_revision)
+            None if request.expected_revision is None else encode_file_revision(request.expected_revision)
         )
     failed = False
     encoded = b""
@@ -356,7 +287,7 @@ def encode_file_object_result(result: FileObjectResultControl) -> bytes:
     value: dict[str, object] = {"result": result.kind.value}
     if result.kind is FileObjectResultKind.PRESENT:
         value["kind"] = None if result.object_kind is None else result.object_kind.value
-        value["revision"] = None if result.revision is None else _encode_revision(result.revision)
+        value["revision"] = None if result.revision is None else encode_file_revision(result.revision)
     return _json_bytes(value)
 
 

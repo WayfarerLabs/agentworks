@@ -8,6 +8,7 @@ _PACKAGE = "_agw_file_object"
 _MODULE_NAMES = (
     "_helper_identity",
     "_file_stat",
+    "_file_revision_wire",
     "_file_paths",
     "_file_snapshot",
     "_file_objects",
