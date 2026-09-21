@@ -84,7 +84,7 @@ def test_file_read_through_buffered_proxmox_delivery(
             IdentityMode.DIRECT,
         ),
         deadline=Deadline.after(15),
-        runtime_selection=runtime_selection(),
+        runtime_selection=runtime_selection(sys.executable),
     )
 
     assert requests == [("POST", "exec"), ("GET", "exec-status?pid=42")]

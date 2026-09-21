@@ -51,7 +51,7 @@ from agentworks.execution.carrier import (
 )
 from agentworks.execution.carriers._subprocess import run_process
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
-from tests.execution.files._runtime_support import runtime_selection
+from tests.execution.files._runtime_support import require_observation, require_value, runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the inventory helper requires Linux")
 
@@ -158,16 +158,19 @@ def test_isolated_bundle_lists_sorted_utf8_metadata_without_content_reads(
 
     assert carrier.calls == 1
     assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
-    assert result.observation.state is FileInventoryObservationState.PRESENT
-    assert result.observation.entries is not None
-    assert [entry.relative_path for entry in result.observation.entries] == [
+    assert require_observation(result.observation).state is FileInventoryObservationState.PRESENT
+    assert require_observation(result.observation).entries is not None
+    assert [entry.relative_path for entry in require_value(require_observation(result.observation).entries)] == [
         "nested",
         "nested/child",
         "snowman-☃",
     ]
-    assert all(entry.revision.digest is None for entry in result.observation.entries)
-    assert revision_kind(result.observation.entries[0].revision) is FileKind.DIRECTORY
-    assert result.observation.entries[-1].revision.stat.size == len(b"private-content-canary")
+    assert all(
+        entry.revision.digest is None for entry in require_value(require_observation(result.observation).entries)
+    )
+    entries = require_value(require_observation(result.observation).entries)
+    assert revision_kind(entries[0].revision) is FileKind.DIRECTORY
+    assert entries[-1].revision.stat.size == len(b"private-content-canary")
     assert carrier.io is not None and carrier.io.sensitive
     assert carrier.invocation is not None and str(approved) not in " ".join(carrier.invocation.argv)
     assert "private-content-canary" not in repr(result)
@@ -183,10 +186,10 @@ def test_empty_directory_and_missing_target_are_distinct_complete_outcomes(tmp_p
     _, missing = _list(approved, "missing", plan, source, runtime=Path(sys.executable))
     _, missing_root = _list(tmp_path / "absent", "leaf", plan, source, runtime=Path(sys.executable))
 
-    assert empty.observation.state is FileInventoryObservationState.PRESENT
-    assert empty.observation.entries == ()
-    assert missing.observation.state is FileInventoryObservationState.NOT_FOUND
-    assert missing_root.observation.state is FileInventoryObservationState.NOT_FOUND
+    assert require_observation(empty.observation).state is FileInventoryObservationState.PRESENT
+    assert require_observation(empty.observation).entries == ()
+    assert require_observation(missing.observation).state is FileInventoryObservationState.NOT_FOUND
+    assert require_observation(missing_root.observation).state is FileInventoryObservationState.NOT_FOUND
 
 
 @pytest.mark.parametrize("object_kind", ["symlink", "hardlink", "fifo"])
@@ -206,8 +209,8 @@ def test_helper_refuses_links_and_special_entries(tmp_path: Path, plan: Identity
 
     _, result = _list(approved, "target", plan, source, runtime=Path(sys.executable))
 
-    assert result.observation.state is FileInventoryObservationState.REFUSED
-    assert result.observation.failure is FileInventoryFailureCode.UNSUPPORTED_OBJECT
+    assert require_observation(result.observation).state is FileInventoryObservationState.REFUSED
+    assert require_observation(result.observation).failure is FileInventoryFailureCode.UNSUPPORTED_OBJECT
 
 
 def test_helper_observes_socket_metadata(tmp_path: Path, plan: IdentityPlan) -> None:
@@ -224,8 +227,9 @@ def test_helper_observes_socket_metadata(tmp_path: Path, plan: IdentityPlan) -> 
         os.close(target_fd)
         listener.close()
 
-    assert result.observation.entries is not None
-    assert revision_kind(result.observation.entries[0].revision) is FileKind.SOCKET
+    assert require_observation(result.observation).entries is not None
+    entries = require_value(require_observation(result.observation).entries)
+    assert revision_kind(entries[0].revision) is FileKind.SOCKET
 
 
 def test_helper_refuses_target_mount_crossing(tmp_path: Path, plan: IdentityPlan) -> None:
@@ -235,8 +239,8 @@ def test_helper_refuses_target_mount_crossing(tmp_path: Path, plan: IdentityPlan
 
     _, result = _list(Path("/"), "proc", plan, source, runtime=Path(sys.executable))
 
-    assert result.observation.state is FileInventoryObservationState.REFUSED
-    assert result.observation.failure is FileInventoryFailureCode.TARGET_REFUSED
+    assert require_observation(result.observation).state is FileInventoryObservationState.REFUSED
+    assert require_observation(result.observation).failure is FileInventoryFailureCode.TARGET_REFUSED
 
 
 def test_helper_enforces_requested_depth_entry_and_encoded_bounds(tmp_path: Path, plan: IdentityPlan) -> None:
@@ -266,10 +270,11 @@ def test_helper_enforces_requested_depth_entry_and_encoded_bounds(tmp_path: Path
         max_encoded_bytes=2,
     )
 
-    assert shallow.observation.entries is not None
-    assert [entry.relative_path for entry in shallow.observation.entries] == ["nested"]
-    assert entry_limited.observation.failure is FileInventoryFailureCode.LIMIT
-    assert byte_limited.observation.failure is FileInventoryFailureCode.LIMIT
+    assert require_observation(shallow.observation).entries is not None
+    entries = require_value(require_observation(shallow.observation).entries)
+    assert [entry.relative_path for entry in entries] == ["nested"]
+    assert require_observation(entry_limited.observation).failure is FileInventoryFailureCode.LIMIT
+    assert require_observation(byte_limited.observation).failure is FileInventoryFailureCode.LIMIT
 
 
 def _prepared_request(plan: IdentityPlan, root: Path, *, nonce: str = "0" * 32) -> bytes:
@@ -389,11 +394,12 @@ def test_complete_proxmox_envelope_fits_and_delivers_real_helper_response(
             max_encoded_bytes=4096,
             plan=plan,
             deadline=Deadline.after(15),
-            runtime_selection=runtime_selection(),
+            runtime_selection=runtime_selection(sys.executable),
         )
 
     assert len(FIXED_BUNDLE.prefix) < body_sizes[0] < 65_536
     assert result.dispatch is Dispatch.SENT
-    assert result.observation.state is FileInventoryObservationState.PRESENT
-    assert result.observation.entries is not None
-    assert [entry.relative_path for entry in result.observation.entries] == ["alpha"]
+    assert require_observation(result.observation).state is FileInventoryObservationState.PRESENT
+    assert require_observation(result.observation).entries is not None
+    entries = require_value(require_observation(result.observation).entries)
+    assert [entry.relative_path for entry in entries] == ["alpha"]

@@ -37,7 +37,7 @@ from agentworks.execution.carrier import (
 from agentworks.execution.carriers._subprocess import run_process
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 from tests.execution.files._fixed_bundle_support import fixture_file_bundle
-from tests.execution.files._runtime_support import runtime_selection
+from tests.execution.files._runtime_support import require_observation, require_value, runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the metadata helper requires Linux")
 
@@ -184,13 +184,13 @@ def test_fixed_bundle_creates_converges_and_is_idempotent(
     assert carrier.io is not None and carrier.io.sensitive
     assert carrier.invocation is not None and str(root) not in " ".join(carrier.invocation.argv)
     assert changed_file.runtime_prerequisite.state is RuntimePrerequisiteState.READY
-    assert changed_file.observation.state is FileMetadataObservationState.CHANGED
-    assert changed_file.observation.revision is not None
+    assert require_observation(changed_file.observation).state is FileMetadataObservationState.CHANGED
+    assert require_observation(changed_file.observation).revision is not None
     assert existing.read_bytes() == b"unrelated-content"
     assert stat.S_IMODE(existing.stat().st_mode) == 0o640
-    assert created.observation.state is FileMetadataObservationState.CHANGED
+    assert require_observation(created.observation).state is FileMetadataObservationState.CHANGED
     assert stat.S_IMODE((root / "shared").stat().st_mode) == 0o3770
-    assert unchanged.observation.state is FileMetadataObservationState.UNCHANGED
+    assert require_observation(unchanged.observation).state is FileMetadataObservationState.UNCHANGED
 
 
 def test_ensure_creates_only_final_component_and_preserves_children(tmp_path: Path, plan: IdentityPlan) -> None:
@@ -205,11 +205,14 @@ def test_ensure_creates_only_final_component_and_preserves_children(tmp_path: Pa
     _, missing_parent = _ensure(root, "missing/final", plan, source, mode=0o755)
     _, existing_parent = _ensure(root, "parent", plan, source, mode=0o2770)
 
-    assert missing_parent.observation.state is FileMetadataObservationState.REFUSED
-    assert missing_parent.observation.failure is not None
-    assert missing_parent.observation.failure.code is FileMetadataFailureCode.PARENT_REFUSED
+    assert require_observation(missing_parent.observation).state is FileMetadataObservationState.REFUSED
+    assert require_observation(missing_parent.observation).failure is not None
+    assert (
+        require_value(require_observation(missing_parent.observation).failure).code
+        is FileMetadataFailureCode.PARENT_REFUSED
+    )
     assert not (root / "missing").exists()
-    assert existing_parent.observation.state is FileMetadataObservationState.CHANGED
+    assert require_observation(existing_parent.observation).state is FileMetadataObservationState.CHANGED
     assert child.read_bytes() == b"child-content"
     assert stat.S_IMODE(child.stat().st_mode) == 0o600
 
@@ -233,13 +236,16 @@ def test_missing_root_conflicting_file_socket_and_unsupported_modes_refuse(
     finally:
         listener.close()
 
-    assert missing_root.observation.state is FileMetadataObservationState.REFUSED
-    assert missing_root.observation.failure is not None
-    assert missing_root.observation.failure.code is FileMetadataFailureCode.ROOT_REFUSED
+    assert require_observation(missing_root.observation).state is FileMetadataObservationState.REFUSED
+    assert require_observation(missing_root.observation).failure is not None
+    assert (
+        require_value(require_observation(missing_root.observation).failure).code
+        is FileMetadataFailureCode.ROOT_REFUSED
+    )
     for result in (conflict, socket_result, setuid_file):
-        assert result.observation.state is FileMetadataObservationState.REFUSED
-        assert result.observation.failure is not None
-        assert result.observation.failure.code is FileMetadataFailureCode.METADATA
+        assert require_observation(result.observation).state is FileMetadataObservationState.REFUSED
+        assert require_observation(result.observation).failure is not None
+        assert require_value(require_observation(result.observation).failure).code is FileMetadataFailureCode.METADATA
     assert regular.read_bytes() == b"content"
 
 
@@ -259,13 +265,15 @@ def test_identity_mismatch_precedes_target_access(tmp_path: Path, plan: Identity
             mode=0o600,
             plan=mismatched,
             deadline=Deadline.after(15),
-            runtime_selection=runtime_selection(),
+            runtime_selection=runtime_selection(sys.executable),
         )
 
     assert carrier.calls == 1
-    assert result.observation.state is FileMetadataObservationState.REFUSED
-    assert result.observation.failure is not None
-    assert result.observation.failure.code is FileMetadataFailureCode.IDENTITY_MISMATCH
+    assert require_observation(result.observation).state is FileMetadataObservationState.REFUSED
+    assert require_observation(result.observation).failure is not None
+    assert (
+        require_value(require_observation(result.observation).failure).code is FileMetadataFailureCode.IDENTITY_MISMATCH
+    )
     assert not (tmp_path / "absent-target").exists()
 
 
@@ -309,11 +317,11 @@ def test_verified_partial_creation_and_uncertain_attempt_are_not_replayed(
     )
 
     assert partial_carrier.calls == 1
-    assert partial.observation.state is FileMetadataObservationState.PARTIAL
+    assert require_observation(partial.observation).state is FileMetadataObservationState.PARTIAL
     assert (root / "partial").is_dir()
     assert stat.S_IMODE((root / "partial").stat().st_mode) == 0o700
     assert uncertain_carrier.calls == 1
-    assert uncertain.observation.state is FileMetadataObservationState.UNCERTAIN
+    assert require_observation(uncertain.observation).state is FileMetadataObservationState.UNCERTAIN
     assert stat.S_IMODE(target.stat().st_mode) == 0o640
 
 
@@ -339,7 +347,7 @@ def test_proc_bridge_changes_held_inode_not_replacement_name(tmp_path: Path, pla
 
     _, result = _set(root, "target", plan, _fixture_source(injection), mode=0o640)
 
-    assert result.observation.state is FileMetadataObservationState.PARTIAL
+    assert require_observation(result.observation).state is FileMetadataObservationState.PARTIAL
     assert retained.stat().st_ino == old_inode
     assert stat.S_IMODE(retained.stat().st_mode) == 0o640
     assert target.read_bytes() == b"new"
@@ -357,7 +365,7 @@ def test_metadata_mutation_succeeds_without_protected_lock_namespace(
     target.chmod(0o600)
     _, result = _set(root, "target", plan, _fixture_source(), mode=0o640)
 
-    assert result.observation.state is FileMetadataObservationState.CHANGED
+    assert require_observation(result.observation).state is FileMetadataObservationState.CHANGED
     assert stat.S_IMODE(target.stat().st_mode) == 0o640
 
 
@@ -407,11 +415,13 @@ def test_complete_proxmox_post_fits_provider_bound_and_returns_typed_refusal(
         mode=0o600,
         plan=mismatched,
         deadline=Deadline.after(15),
-        runtime_selection=runtime_selection(),
+        runtime_selection=runtime_selection(sys.executable),
     )
 
     assert len(FIXED_BUNDLE.prefix) < body_sizes[0] < 65_536
     assert result.dispatch is Dispatch.SENT
-    assert result.observation.state is FileMetadataObservationState.REFUSED
-    assert result.observation.failure is not None
-    assert result.observation.failure.code is FileMetadataFailureCode.IDENTITY_MISMATCH
+    assert require_observation(result.observation).state is FileMetadataObservationState.REFUSED
+    assert require_observation(result.observation).failure is not None
+    assert (
+        require_value(require_observation(result.observation).failure).code is FileMetadataFailureCode.IDENTITY_MISMATCH
+    )

@@ -67,7 +67,12 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
-from tests.execution.files._runtime_support import runtime_ready_record, runtime_selection
+from tests.execution.files._runtime_support import (
+    require_observation,
+    require_value,
+    runtime_ready_record,
+    runtime_selection,
+)
 
 _TOKEN = bytes(range(16))
 
@@ -200,9 +205,9 @@ def test_complete_begin_exposes_reference_only_after_sensitive_terminal_exchange
     )
 
     assert carrier.calls == 1
-    assert result.observation.state is FileStageObservationState.CREATED
-    assert result.observation.reference is not None
-    assert result.observation.reference._ownership._token == _TOKEN
+    assert require_observation(result.observation).state is FileStageObservationState.CREATED
+    assert require_observation(result.observation).reference is not None
+    assert require_value(require_observation(result.observation).reference)._ownership._token == _TOKEN
     assert result.carrier_completion == ExitStatus(code=29)
     assert carrier.io is not None and isinstance(carrier.io.input, FiniteInput)
     assert carrier.io.input.sensitive and carrier.io.input.data.isascii()
@@ -232,9 +237,9 @@ def test_complete_begin_with_different_declared_length_is_uncertain_control(plan
         runtime_selection=runtime_selection(),
     )
 
-    assert result.observation.state is FileStageObservationState.UNCERTAIN
-    assert result.observation.error is FileStageObservationError.CONTROL
-    assert result.observation.reference is None
+    assert require_observation(result.observation).state is FileStageObservationState.UNCERTAIN
+    assert require_observation(result.observation).error is FileStageObservationError.CONTROL
+    assert require_observation(result.observation).reference is None
 
 
 def test_complete_chunk_is_accepted_once_without_payload_retention(plan: IdentityPlan) -> None:
@@ -265,7 +270,7 @@ def test_complete_chunk_is_accepted_once_without_payload_retention(plan: Identit
     )
 
     assert carrier.calls == 1
-    assert result.observation.state is FileStageObservationState.ACCEPTED
+    assert require_observation(result.observation).state is FileStageObservationState.ACCEPTED
     assert payload.decode() not in repr(result)
     assert carrier.invocation is not None and payload.decode() not in carrier.invocation.argv
 
@@ -283,9 +288,9 @@ def test_complete_reconcile_exposes_only_cleanup_debt_after_terminal(plan: Ident
         runtime_selection=runtime_selection(),
     )
 
-    assert result.observation.state is FileStageObservationState.RECOVERED
-    assert result.observation.cleanup_debt is not None
-    assert result.observation.reference is None
+    assert require_observation(result.observation).state is FileStageObservationState.RECOVERED
+    assert require_observation(result.observation).cleanup_debt is not None
+    assert require_observation(result.observation).reference is None
     assert carrier.io is not None and carrier.io.sensitive
     assert carrier.invocation is not None
     assert "root-canary" not in carrier.invocation.argv
@@ -303,9 +308,9 @@ def test_truncated_reconcile_never_exposes_parsed_cleanup_debt(plan: IdentityPla
         runtime_selection=runtime_selection(),
     )
 
-    assert result.observation.state is FileStageObservationState.UNCERTAIN
-    assert result.observation.cleanup_debt is None
-    assert result.observation.error is FileWireError.TRUNCATED
+    assert require_observation(result.observation).state is FileStageObservationState.UNCERTAIN
+    assert require_observation(result.observation).cleanup_debt is None
+    assert require_observation(result.observation).error is FileWireError.TRUNCATED
 
 
 def test_complete_reconcile_can_report_ownership_uncertainty(plan: IdentityPlan) -> None:
@@ -327,8 +332,8 @@ def test_complete_reconcile_can_report_ownership_uncertainty(plan: IdentityPlan)
         runtime_selection=runtime_selection(),
     )
 
-    assert result.observation.state is FileStageObservationState.OWNERSHIP_UNCERTAIN
-    assert result.observation.cleanup_debt is None
+    assert require_observation(result.observation).state is FileStageObservationState.OWNERSHIP_UNCERTAIN
+    assert require_observation(result.observation).cleanup_debt is None
 
 
 def _reconcile_refusal(
@@ -359,9 +364,9 @@ def _reconcile_refusal(
 def test_reconcile_deadline_refusal_accepts_complete_historical_debt(plan: IdentityPlan) -> None:
     result = _reconcile_refusal(plan, lambda debt: debt)
 
-    assert result.observation.state is FileStageObservationState.REFUSED
-    assert result.observation.failure is not None
-    assert result.observation.failure.cleanup_debt is not None
+    assert require_observation(result.observation).state is FileStageObservationState.REFUSED
+    assert require_observation(result.observation).failure is not None
+    assert require_value(require_observation(result.observation).failure).cleanup_debt is not None
 
 
 @pytest.mark.parametrize(
@@ -381,9 +386,9 @@ def test_reconcile_deadline_refusal_rejects_impossible_historical_debt(
 ) -> None:
     result = _reconcile_refusal(plan, debt_change)
 
-    assert result.observation.state is FileStageObservationState.UNCERTAIN
-    assert result.observation.error is FileStageObservationError.CONTROL
-    assert result.observation.failure is None
+    assert require_observation(result.observation).state is FileStageObservationState.UNCERTAIN
+    assert require_observation(result.observation).error is FileStageObservationError.CONTROL
+    assert require_observation(result.observation).failure is None
 
 
 def test_reconcile_reply_from_another_request_nonce_is_uncertain(plan: IdentityPlan) -> None:
@@ -405,9 +410,9 @@ def test_reconcile_reply_from_another_request_nonce_is_uncertain(plan: IdentityP
         runtime_selection=runtime_selection(),
     )
 
-    assert result.observation.state is FileStageObservationState.UNCERTAIN
-    assert result.observation.error is FileWireError.NONCE
-    assert result.observation.cleanup_debt is None
+    assert require_observation(result.observation).state is FileStageObservationState.UNCERTAIN
+    assert require_observation(result.observation).error is FileWireError.NONCE
+    assert require_observation(result.observation).cleanup_debt is None
 
 
 def test_complete_cleanup_reports_only_attempt_observation(plan: IdentityPlan) -> None:
@@ -423,8 +428,8 @@ def test_complete_cleanup_reports_only_attempt_observation(plan: IdentityPlan) -
         runtime_selection=runtime_selection(),
     )
 
-    assert result.observation.state is FileStageObservationState.CLEANED
-    assert result.observation.cleanup_debt is None
+    assert require_observation(result.observation).state is FileStageObservationState.CLEANED
+    assert require_observation(result.observation).cleanup_debt is None
 
 
 @pytest.mark.parametrize(
@@ -454,9 +459,9 @@ def test_lost_creation_acknowledgement_is_never_replayed_or_reported_absent(
     )
 
     assert carrier.calls == 1
-    assert result.observation.state is expected
-    assert result.observation.error is FileStageObservationError.MISSING_TERMINAL
-    assert result.observation.reference is None
+    assert require_observation(result.observation).state is expected
+    assert require_observation(result.observation).error is FileStageObservationError.MISSING_TERMINAL
+    assert require_observation(result.observation).reference is None
 
 
 def test_complete_refusal_exposes_known_cleanup_debt(plan: IdentityPlan) -> None:
@@ -484,10 +489,10 @@ def test_complete_refusal_exposes_known_cleanup_debt(plan: IdentityPlan) -> None
         runtime_selection=runtime_selection(),
     )
 
-    assert result.observation.state is FileStageObservationState.REFUSED
-    assert result.observation.failure is not None
-    assert result.observation.failure.cleanup_debt is not None
-    assert result.observation.reference is None
+    assert require_observation(result.observation).state is FileStageObservationState.REFUSED
+    assert require_observation(result.observation).failure is not None
+    assert require_value(require_observation(result.observation).failure).cleanup_debt is not None
+    assert require_observation(result.observation).reference is None
 
 
 def test_truncated_refusal_never_exposes_parsed_cleanup_debt(plan: IdentityPlan) -> None:
@@ -515,9 +520,9 @@ def test_truncated_refusal_never_exposes_parsed_cleanup_debt(plan: IdentityPlan)
         runtime_selection=runtime_selection(),
     )
 
-    assert result.observation.state is FileStageObservationState.UNCERTAIN
-    assert result.observation.failure is None
-    assert result.observation.error is FileWireError.TRUNCATED
+    assert require_observation(result.observation).state is FileStageObservationState.UNCERTAIN
+    assert require_observation(result.observation).failure is None
+    assert require_observation(result.observation).error is FileWireError.TRUNCATED
 
 
 def _chunk_refusal(
@@ -569,9 +574,9 @@ def _chunk_refusal(
 def test_chunk_scratch_refusal_exposes_only_matching_reference_debt(plan: IdentityPlan) -> None:
     result = _chunk_refusal(plan, lambda debt: debt)
 
-    assert result.observation.state is FileStageObservationState.REFUSED
-    assert result.observation.failure is not None
-    assert result.observation.failure.cleanup_debt is not None
+    assert require_observation(result.observation).state is FileStageObservationState.REFUSED
+    assert require_observation(result.observation).failure is not None
+    assert require_value(require_observation(result.observation).failure).cleanup_debt is not None
 
 
 @pytest.mark.parametrize(
@@ -593,18 +598,18 @@ def test_chunk_scratch_refusal_rejects_debt_not_equal_to_request_reference(
 ) -> None:
     result = _chunk_refusal(plan, debt_change)
 
-    assert result.observation.state is FileStageObservationState.UNCERTAIN
-    assert result.observation.error is FileStageObservationError.CONTROL
-    assert result.observation.failure is None
+    assert require_observation(result.observation).state is FileStageObservationState.UNCERTAIN
+    assert require_observation(result.observation).error is FileStageObservationError.CONTROL
+    assert require_observation(result.observation).failure is None
 
 
 def test_chunk_prescratch_refusal_accepts_non_scratch_failure_without_debt(plan: IdentityPlan) -> None:
     result = _chunk_refusal(plan, lambda _debt: None, code=FileStageFailureCode.ROOT_REFUSED)
 
-    assert result.observation.state is FileStageObservationState.REFUSED
-    assert result.observation.failure is not None
-    assert result.observation.failure.code is FileStageFailureCode.ROOT_REFUSED
-    assert result.observation.failure.cleanup_debt is None
+    assert require_observation(result.observation).state is FileStageObservationState.REFUSED
+    assert require_observation(result.observation).failure is not None
+    assert require_value(require_observation(result.observation).failure).code is FileStageFailureCode.ROOT_REFUSED
+    assert require_value(require_observation(result.observation).failure).cleanup_debt is None
 
 
 def _cleanup_refusal(
@@ -639,9 +644,9 @@ def _cleanup_refusal(
 def test_cleanup_scratch_refusal_exposes_only_matching_request_debt(plan: IdentityPlan) -> None:
     result = _cleanup_refusal(plan, lambda debt: debt)
 
-    assert result.observation.state is FileStageObservationState.REFUSED
-    assert result.observation.failure is not None
-    assert result.observation.failure.cleanup_debt is not None
+    assert require_observation(result.observation).state is FileStageObservationState.REFUSED
+    assert require_observation(result.observation).failure is not None
+    assert require_value(require_observation(result.observation).failure).cleanup_debt is not None
 
 
 @pytest.mark.parametrize(
@@ -663,9 +668,9 @@ def test_cleanup_scratch_refusal_rejects_debt_not_equal_to_request(
 ) -> None:
     result = _cleanup_refusal(plan, debt_change)
 
-    assert result.observation.state is FileStageObservationState.UNCERTAIN
-    assert result.observation.error is FileStageObservationError.CONTROL
-    assert result.observation.failure is None
+    assert require_observation(result.observation).state is FileStageObservationState.UNCERTAIN
+    assert require_observation(result.observation).error is FileStageObservationError.CONTROL
+    assert require_observation(result.observation).failure is None
 
 
 @pytest.mark.parametrize(
@@ -715,8 +720,8 @@ def test_noisy_wrong_nonce_duplicate_and_stderr_creation_responses_are_uncertain
         runtime_selection=runtime_selection(),
     )
 
-    assert result.observation.state is FileStageObservationState.UNCERTAIN
-    assert result.observation.error is error
+    assert require_observation(result.observation).state is FileStageObservationState.UNCERTAIN
+    assert require_observation(result.observation).error is error
     assert "foreign-stderr-canary" not in repr(result)
 
 

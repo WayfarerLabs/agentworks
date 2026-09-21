@@ -59,7 +59,7 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
-from tests.execution.files._runtime_support import runtime_ready_record, runtime_selection
+from tests.execution.files._runtime_support import require_observation, runtime_ready_record, runtime_selection
 
 
 def _json(value: object) -> bytes:
@@ -436,9 +436,9 @@ def test_complete_stat_result_does_not_depend_on_carrier_exit(plan: IdentityPlan
 
     assert carrier.calls == 1
     assert result.carrier_completion == ExitStatus(code=29)
-    assert result.observation.state is FileObjectObservationState.PRESENT
-    assert result.observation.revision == revision
-    assert result.observation.object_kind is FileKind.SOCKET
+    assert require_observation(result.observation).state is FileObjectObservationState.PRESENT
+    assert require_observation(result.observation).revision == revision
+    assert require_observation(result.observation).object_kind is FileKind.SOCKET
 
 
 @pytest.mark.parametrize(
@@ -467,8 +467,8 @@ def test_lost_remove_acknowledgement_is_never_retried_or_reported_unchanged(
 
     assert carrier.calls == 1
     assert result.dispatch is dispatch
-    assert result.observation.state is expected
-    assert result.observation.error is FileObjectObservationError.MISSING_TERMINAL
+    assert require_observation(result.observation).state is expected
+    assert require_observation(result.observation).error is FileObjectObservationError.MISSING_TERMINAL
 
 
 def test_complete_primitive_uncertainty_retains_kind_and_phase(plan: IdentityPlan) -> None:
@@ -492,9 +492,9 @@ def test_complete_primitive_uncertainty_retains_kind_and_phase(plan: IdentityPla
         runtime_selection=runtime_selection(),
     )
 
-    assert result.observation.state is FileObjectObservationState.UNCERTAIN
-    assert result.observation.failure == failure
-    assert result.observation.error is None
+    assert require_observation(result.observation).state is FileObjectObservationState.UNCERTAIN
+    assert require_observation(result.observation).failure == failure
+    assert require_observation(result.observation).error is None
 
 
 def test_stat_rejects_mutation_only_uncertain_failure_phase(plan: IdentityPlan) -> None:
@@ -516,9 +516,9 @@ def test_stat_rejects_mutation_only_uncertain_failure_phase(plan: IdentityPlan) 
         runtime_selection=runtime_selection(),
     )
 
-    assert result.observation.state is FileObjectObservationState.INVALID
-    assert result.observation.error is FileObjectObservationError.CONTROL
-    assert result.observation.failure is None
+    assert require_observation(result.observation).state is FileObjectObservationState.INVALID
+    assert require_observation(result.observation).error is FileObjectObservationError.CONTROL
+    assert require_observation(result.observation).failure is None
 
 
 @pytest.mark.parametrize(
@@ -566,8 +566,8 @@ def test_noisy_wrong_nonce_truncated_and_stderr_remove_responses_are_uncertain(
         deadline=Deadline.after(1),
         runtime_selection=runtime_selection(),
     )
-    assert result.observation.state is FileObjectObservationState.UNCERTAIN
-    assert result.observation.error is error
+    assert require_observation(result.observation).state is FileObjectObservationState.UNCERTAIN
+    assert require_observation(result.observation).error is error
     assert "diagnostic-canary" not in repr(result)
 
 

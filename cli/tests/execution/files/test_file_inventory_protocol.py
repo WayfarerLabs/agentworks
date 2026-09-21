@@ -51,7 +51,12 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
-from tests.execution.files._runtime_support import runtime_nonce, runtime_ready_record, runtime_selection
+from tests.execution.files._runtime_support import (
+    require_observation,
+    runtime_nonce,
+    runtime_ready_record,
+    runtime_selection,
+)
 
 pytestmark = pytest.mark.windows
 
@@ -359,8 +364,8 @@ def test_exchange_uses_sensitive_finite_input_and_releases_verified_entries(monk
         runtime_selection=runtime_selection(),
     )
 
-    assert result.observation.state is FileInventoryObservationState.PRESENT
-    assert result.observation.entries == (_entry("alpha"),)
+    assert require_observation(result.observation).state is FileInventoryObservationState.PRESENT
+    assert require_observation(result.observation).entries == (_entry("alpha"),)
     assert carrier.io is not None and carrier.io.sensitive
     assert carrier.invocation is not None and "/srv/workspace" not in " ".join(carrier.invocation.argv)
     assert "target" not in carrier.invocation.argv
@@ -419,8 +424,8 @@ def test_exchange_rejects_truncated_transcript_despite_complete_carrier_flags(
         runtime_selection=runtime_selection(),
     )
 
-    assert result.observation.state is FileInventoryObservationState.INCOMPLETE
-    assert result.observation.entries is None
+    assert require_observation(result.observation).state is FileInventoryObservationState.INCOMPLETE
+    assert require_observation(result.observation).entries is None
 
 
 def test_host_modules_import_without_posix_identity_calls(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -55,7 +55,13 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
-from tests.execution.files._runtime_support import runtime_nonce, runtime_ready_record, runtime_selection
+from tests.execution.files._runtime_support import (
+    require_observation,
+    require_value,
+    runtime_nonce,
+    runtime_ready_record,
+    runtime_selection,
+)
 
 
 def _write(sink: ByteSink, data: bytes) -> int:
@@ -225,8 +231,11 @@ def test_complete_transcript_is_authoritative_even_with_nonzero_carrier_status(p
     result = _read(carrier, plan)
 
     assert result.carrier_completion == ExitStatus(code=23)
-    assert result.observation.state is FileReadObservationState.PRESENT
-    assert result.observation.snapshot is not None and result.observation.snapshot.data == data
+    assert require_observation(result.observation).state is FileReadObservationState.PRESENT
+    assert (
+        require_observation(result.observation).snapshot is not None
+        and require_value(require_observation(result.observation).snapshot).data == data
+    )
     assert carrier.calls == 1 and carrier.sink_calls > 1
 
 
@@ -234,9 +243,9 @@ def test_exit_zero_without_a_complete_transcript_is_not_success(plan: IdentityPl
     result = _read(TranscriptCarrier(b""), plan)
 
     assert result.carrier_completion == ExitStatus(code=0)
-    assert result.observation.state is FileReadObservationState.INCOMPLETE
-    assert result.observation.snapshot is None
-    assert result.observation.error is FileReadObservationError.MISSING_TERMINAL
+    assert require_observation(result.observation).state is FileReadObservationState.INCOMPLETE
+    assert require_observation(result.observation).snapshot is None
+    assert require_observation(result.observation).error is FileReadObservationError.MISSING_TERMINAL
 
 
 @pytest.mark.parametrize(
@@ -289,9 +298,9 @@ def test_malformed_reflected_wrong_nonce_order_truncation_and_trailing_records_a
 ) -> None:
     result = _read(TranscriptCarrier(build), plan, max_bytes=32)
 
-    assert result.observation.state is expected_state
-    assert result.observation.error is expected_error
-    assert result.observation.snapshot is None
+    assert require_observation(result.observation).state is expected_state
+    assert require_observation(result.observation).error is expected_error
+    assert require_observation(result.observation).snapshot is None
 
 
 def test_digest_mismatch_and_incomplete_stream_disclose_no_data_or_hash(plan: IdentityPlan) -> None:
@@ -314,11 +323,11 @@ def test_digest_mismatch_and_incomplete_stream_disclose_no_data_or_hash(plan: Id
     )
 
     for result in (invalid, incomplete):
-        assert result.observation.snapshot is None
+        assert require_observation(result.observation).snapshot is None
         assert canary.decode() not in repr(result)
         assert hashlib.sha256(canary).hexdigest() not in repr(result)
-    assert invalid.observation.state is FileReadObservationState.INVALID
-    assert incomplete.observation.state is FileReadObservationState.INCOMPLETE
+    assert require_observation(invalid.observation).state is FileReadObservationState.INVALID
+    assert require_observation(incomplete.observation).state is FileReadObservationState.INCOMPLETE
 
 
 @pytest.mark.parametrize("invalid_mode", [False, True])
@@ -343,11 +352,11 @@ def test_result_metadata_must_bind_stream_and_closed_regular_mode(
 
     result = _read(TranscriptCarrier(transcript), plan, max_bytes=32)
 
-    assert result.observation.state is FileReadObservationState.INVALID
-    assert result.observation.error is (
+    assert require_observation(result.observation).state is FileReadObservationState.INVALID
+    assert require_observation(result.observation).error is (
         FileReadObservationError.CONTROL if invalid_mode else FileReadObservationError.CONTENT
     )
-    assert result.observation.snapshot is None
+    assert require_observation(result.observation).snapshot is None
 
 
 @pytest.mark.parametrize("interruption_type", [KeyboardInterrupt, SystemExit, RuntimeError])
@@ -411,9 +420,9 @@ def test_stderr_noise_is_rejected_without_retention(plan: IdentityPlan) -> None:
         max_bytes=32,
     )
 
-    assert result.observation.state is FileReadObservationState.INVALID
-    assert result.observation.error is FileReadObservationError.STDERR
-    assert result.observation.snapshot is None
+    assert require_observation(result.observation).state is FileReadObservationState.INVALID
+    assert require_observation(result.observation).error is FileReadObservationError.STDERR
+    assert require_observation(result.observation).snapshot is None
     assert canary.decode() not in repr(result)
     assert result.carrier_failure is None
 
@@ -437,17 +446,17 @@ def test_absence_and_refusal_are_complete_typed_outcomes(
 
     result = _read(TranscriptCarrier(transcript), plan, max_bytes=32)
 
-    assert result.observation.state is expected_state
-    assert result.observation.failure is failure
-    assert result.observation.snapshot is None
+    assert require_observation(result.observation).state is expected_state
+    assert require_observation(result.observation).failure is failure
+    assert require_observation(result.observation).snapshot is None
 
 
 def test_oversized_record_is_bounded_and_rejected(plan: IdentityPlan) -> None:
     result = _read(TranscriptCarrier(b"A" * (MAX_RECORD_BYTES + 20) + b"\n"), plan, max_bytes=32)
 
-    assert result.observation.state is FileReadObservationState.INVALID
-    assert result.observation.error is FileWireError.OVERSIZED
-    assert result.observation.snapshot is None
+    assert require_observation(result.observation).state is FileReadObservationState.INVALID
+    assert require_observation(result.observation).error is FileWireError.OVERSIZED
+    assert require_observation(result.observation).snapshot is None
 
 
 def test_record_callback_exception_clears_buffer_and_propagates_without_raw_retention() -> None:
