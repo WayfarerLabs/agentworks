@@ -42,8 +42,10 @@ __all__ = [
     "Create",
     "DirectoryEntry",
     "DirectoryLimit",
+    "FileFailureReason",
     "FileKind",
     "FileMetadata",
+    "FileOperationPhase",
     "JsonObject",
     "JsonStrategy",
     "JsonValue",
@@ -67,6 +69,59 @@ class FileKind(StrEnum):
     REGULAR = "regular"
     DIRECTORY = "directory"
     SOCKET = "socket"
+
+
+class FileOperationPhase(StrEnum):
+    """Safe public phases for file-operation diagnostics."""
+
+    OWNERSHIP_LOOKUP = "ownership_lookup"
+    OBSERVATION = "observation"
+    INVENTORY = "inventory"
+    TRANSFER = "transfer"
+    CONDITION = "condition"
+    CREATION = "creation"
+    METADATA = "metadata"
+    PUBLICATION = "publication"
+    CLEANUP = "cleanup"
+    TRANSFORM = "transform"
+    TERMINATION = "termination"
+
+
+class FileFailureReason(StrEnum):
+    """Closed value-free reasons retained at the public file boundary."""
+
+    DEADLINE = "deadline"
+    MISSING_OWNER = "missing_owner"
+    MISSING_GROUP = "missing_group"
+    RUNTIME_MISSING = "runtime_missing"
+    RUNTIME_SHIM = "runtime_shim"
+    RUNTIME_UNUSABLE = "runtime_unusable"
+    RUNTIME_UNSUPPORTED_VERSION = "runtime_unsupported_version"
+    RUNTIME_MISSING_MODULES = "runtime_missing_modules"
+    RUNTIME_UNKNOWN = "runtime_unknown"
+    NOT_FOUND = "not_found"
+    UNSUPPORTED = "unsupported"
+    REFUSED = "refused"
+    LIMIT = "limit"
+    CONFLICT = "conflict"
+    INTEGRITY = "integrity"
+    INVALID_RESPONSE = "invalid_response"
+    INCOMPLETE_RESPONSE = "incomplete_response"
+    CARRIER_DISPATCH = "carrier_dispatch"
+    CARRIER_OBSERVATION = "carrier_observation"
+    CARRIER_INPUT = "carrier_input"
+    CARRIER_OUTPUT = "carrier_output"
+    CARRIER_OUTPUT_LIMIT = "carrier_output_limit"
+    SOURCE = "source"
+    SOURCE_CONTRACT = "source_contract"
+    SINK = "sink"
+    SINK_CONTRACT = "sink_contract"
+    TERMINATION = "termination"
+    IO = "io"
+    CLEANUP = "cleanup"
+    COORDINATION = "coordination"
+    EXISTING_CONTENT = "existing_content"
+    TRANSFORM = "transform"
 
 
 class JsonStrategy(StrEnum):
@@ -257,8 +312,8 @@ def _validate_ownership_names(owner: object, group: object) -> None:
 class NewMetadata:
     """Requested ownership and mode for a newly created object."""
 
-    owner: str
-    group: str
+    owner: str = field(repr=False)
+    group: str = field(repr=False)
     mode: int
 
     def __post_init__(self) -> None:
