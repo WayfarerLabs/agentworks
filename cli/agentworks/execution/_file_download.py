@@ -252,15 +252,21 @@ class _PreparedDownload:
         try:
             return self.workflow.run()
         except BaseException as control:
-            self.workflow.note_control_stop()
-            if not self.state.operation.coordination_uncertain:
-                try:
-                    self.workflow.cleanup_after_local_stop()
-                except BaseException:
-                    self.workflow.note_control_stop()
-                    self.state.fail(FileDownloadFailure.CLEANUP)
-            self.workflow.note_control_stop()
-            raise control from FileDownloadControlFact(self.state.finish())
+            try:
+                self.workflow.note_control_stop()
+                if not self.state.operation.coordination_uncertain:
+                    try:
+                        self.workflow.cleanup_after_local_stop()
+                    except BaseException:
+                        self.workflow.note_control_stop()
+                        self.state.fail(FileDownloadFailure.CLEANUP)
+                self.workflow.note_control_stop()
+                fact = FileDownloadControlFact(self.state.finish())
+            except BaseException:
+                # No fact for this call exists. Do not reuse a prior cause as
+                # current evidence; core still owns the attached working state.
+                raise control from None
+            raise control from fact
 
     def release_sink(self) -> None:
         """Drop the caller sink after core has captured the complete outcome."""

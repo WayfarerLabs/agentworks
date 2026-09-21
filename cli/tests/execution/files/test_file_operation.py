@@ -6,19 +6,19 @@ import os
 import sys
 from pathlib import Path
 from threading import Event, Thread
-from typing import cast
 
 import pytest
 
 from agentworks.db import Database, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
+from agentworks.execution import _file_download
 from agentworks.execution._file_download import (
     FileDownloadControlFact,
     FileDownloadFailure,
     FileDownloadStatus,
     _WorkingState,
 )
-from agentworks.execution._file_operation import FileOperation, UnfinishedFileDownload, _ActiveFileDownload
+from agentworks.execution._file_operation import FileOperation, UnfinishedFileDownload
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution.carrier import CarrierIO, CarrierReport, ChannelFeatures, Deadline, PreparedInvocation
@@ -273,32 +273,6 @@ def test_completed_call_forgets_only_its_record_when_next_call_attaches(
         database.close()
 
 
-def test_identity_key_removal_survives_other_custody_mutation(tmp_path: Path) -> None:
-    database = Database(tmp_path / "state.db")
-    owner = _owner(database)
-    operation = FileOperation(owner)
-    first = cast(_ActiveFileDownload, object())
-    second = cast(_ActiveFileDownload, object())
-    third = cast(_ActiveFileDownload, object())
-
-    class MutatingCustody(dict[int, _ActiveFileDownload]):
-        def pop(self, key: int, /) -> _ActiveFileDownload:  # type: ignore[override]
-            if key == id(second):
-                dict.pop(self, id(first))
-                self[id(third)] = third
-            return dict.pop(self, key)
-
-    custody = MutatingCustody({id(first): first, id(second): second})
-    operation._active_downloads = custody  # noqa: SLF001
-    try:
-        operation._forget_active(second)  # noqa: SLF001
-
-        assert operation.active_downloads == (third,)
-        owner.close()
-    finally:
-        database.close()
-
-
 def test_successive_inert_cleanup_debts_remain_distinct(
     tmp_path: Path,
     roots: tuple[Path, Path],
@@ -510,6 +484,68 @@ def test_outcome_allocation_failure_keeps_previously_attached_state_and_borrow(
         assert active is not None and active.outcome is None
         assert active.prepared.state.binding is active.binding
         assert operation.unfinished_downloads == ()
+        with pytest.raises(StateError):
+            owner.borrow()
+        with pytest.raises(StateError):
+            owner.close()
+    finally:
+        database.close()
+
+
+@pytest.mark.parametrize("failure_point", ["outcome", "fact"])
+def test_exceptional_fact_failure_preserves_control_without_reusing_prior_cause(
+    tmp_path: Path,
+    roots: tuple[Path, Path],
+    plan: IdentityPlan,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_point: str,
+) -> None:
+    source, _ = roots
+    source.joinpath("source").write_bytes(b"payload")
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    operation = FileOperation(owner)
+    try:
+        previous = operation.download(
+            LocalCarrier(),
+            trusted_root_path=str(source),
+            relative_path="source",
+            sink=BytesSink(),
+            max_bytes=64,
+            plan=plan,
+            deadline=Deadline.after(30),
+            runtime_selection=runtime_selection(sys.executable),
+        )
+        control = KeyboardInterrupt("control-canary")
+        control.__cause__ = FileDownloadControlFact(previous)
+        carrier = InterruptingCarrier(control)
+
+        def fail_allocation(*args: object) -> None:
+            raise MemoryError("allocation-canary")
+
+        if failure_point == "outcome":
+            monkeypatch.setattr(_WorkingState, "finish", fail_allocation)
+        else:
+            monkeypatch.setattr(_file_download, "FileDownloadControlFact", fail_allocation)
+
+        with pytest.raises(KeyboardInterrupt) as raised:
+            operation.download(
+                carrier,
+                trusted_root_path=str(source),
+                relative_path="source",
+                sink=BytesSink(),
+                max_bytes=64,
+                plan=plan,
+                deadline=Deadline.after(30),
+                runtime_selection=runtime_selection(sys.executable),
+            )
+
+        assert raised.value is control and raised.value.__cause__ is None
+        assert operation.unfinished_downloads == ()
+        assert len(operation.active_downloads) == 1
+        active = operation.active_downloads[0]
+        assert active.carrier is carrier and active.outcome is None
+        assert active.prepared.state.token != previous.token
         with pytest.raises(StateError):
             owner.borrow()
         with pytest.raises(StateError):

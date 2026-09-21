@@ -106,22 +106,12 @@ class FileOperation:
         return outcome
 
     def _capture(self, active: _ActiveFileDownload, outcome: FileDownloadOutcome) -> None:
-        if self._active_downloads.get(id(active)) is not active:
-            raise AssertionError("download capture lost its attached working state")
         active.outcome = outcome
         active.prepared.release_sink()
         if outcome.requires_owner_retention:
             self._retain_unfinished(UnfinishedFileDownload(active.carrier, active.binding, outcome))
         active.borrow.close()
-        self._forget_active(active)
+        self._active_downloads.pop(id(active))
 
     def _retain_unfinished(self, download: UnfinishedFileDownload) -> None:
         self._unfinished_downloads.append(download)
-
-    def _forget_active(self, active: _ActiveFileDownload) -> None:
-        try:
-            removed = self._active_downloads.pop(id(active))
-        except KeyError:
-            raise AssertionError("download capture lost its attached working state") from None
-        if removed is not active:
-            raise AssertionError("download capture lost its attached working state")
