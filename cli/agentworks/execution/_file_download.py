@@ -532,7 +532,7 @@ class _DownloadWorkflow:
         debt = self._state.cleanup_debt
         if debt is None or self._state.pending_remote_effects:
             return
-        if self._expired():
+        if self._expired(phase=FileDownloadFailurePhase.SNAPSHOT_CLEANUP):
             return
         result = snapshot_cleanup(
             self._carrier,
@@ -606,11 +606,11 @@ class _DownloadWorkflow:
         )
         return normal
 
-    def _expired(self) -> bool:
+    def _expired(self, *, phase: FileDownloadFailurePhase | None = None) -> bool:
         if not self._deadline.expired:
             return False
         self._state.deadline_exceeded = True
-        self._state.fail(FileDownloadFailure.DEADLINE)
+        self._state.fail(FileDownloadFailure.DEADLINE, phase=phase)
         return True
 
     def _record_runtime(self, observation: RuntimePrerequisiteObservation) -> None:

@@ -10,7 +10,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
-from agentworks.execution._account import FileOwnershipResolutionResult, resolve_file_ownership
+from agentworks.execution._account import AccountObservationState, FileOwnershipResolutionResult, resolve_file_ownership
 from agentworks.execution._file_paths import normalized_relative_path, normalized_root
 from agentworks.execution._file_publication import Create, CreateMetadata, Match, PublicationFailureKind, Replace
 from agentworks.execution._file_publication_exchange import (
@@ -420,6 +420,18 @@ class _UploadWorkflow:
         if result.dispatch is not Dispatch.NOT_SENT:
             self._record_runtime_prerequisite(result.runtime_prerequisite)
         normal = self._settle_attempt(result.dispatch, result.carrier_completion)
+        observation = result.observation
+        if normal and (
+            self._runtime_refused(result.runtime_prerequisite)
+            or (observation is not None and observation.state is AccountObservationState.REFUSED)
+        ):
+            self._state.fail(
+                FileUploadFailure.OWNERSHIP,
+                phase=FileUploadFailurePhase.OWNERSHIP,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
+            )
+            return False
         if self._state.deadline_exceeded:
             self._state.fail(
                 FileUploadFailure.DEADLINE,
@@ -428,7 +440,7 @@ class _UploadWorkflow:
                 carrier_failure=result.carrier_failure,
             )
             return False
-        if not normal or self._runtime_refused(result.runtime_prerequisite):
+        if not normal:
             self._state.fail(
                 FileUploadFailure.OWNERSHIP,
                 phase=FileUploadFailurePhase.OWNERSHIP,
@@ -436,7 +448,6 @@ class _UploadWorkflow:
                 carrier_failure=result.carrier_failure,
             )
             return False
-        observation = result.observation
         if observation is None or observation.ownership is None:
             self._state.fail(
                 FileUploadFailure.OWNERSHIP,
@@ -498,10 +509,12 @@ class _UploadWorkflow:
         if observation is not None and observation.state is FileStageObservationState.CREATED:
             return True
         self._state.fail(
-            FileUploadFailure.DEADLINE
+            FileUploadFailure.STAGE
+            if observation is not None
+            and observation.state is FileStageObservationState.REFUSED
+            and (observation.failure is None or not self._stage_deadline(observation.failure))
+            else FileUploadFailure.DEADLINE
             if self._state.deadline_exceeded
-            else FileUploadFailure.STAGE
-            if observation is not None and observation.state is FileStageObservationState.REFUSED
             else FileUploadFailure.OBSERVATION,
             phase=FileUploadFailurePhase.STAGE_BEGIN,
             dispatch=result.dispatch,
@@ -570,10 +583,12 @@ class _UploadWorkflow:
                 return False
             if observation is None or observation.state is not FileStageObservationState.ACCEPTED:
                 self._state.fail(
-                    FileUploadFailure.DEADLINE
+                    FileUploadFailure.STAGE
+                    if observation is not None
+                    and observation.state is FileStageObservationState.REFUSED
+                    and (observation.failure is None or not self._stage_deadline(observation.failure))
+                    else FileUploadFailure.DEADLINE
                     if self._state.deadline_exceeded
-                    else FileUploadFailure.STAGE
-                    if observation is not None and observation.state is FileStageObservationState.REFUSED
                     else FileUploadFailure.OBSERVATION,
                     phase=FileUploadFailurePhase.STAGE_CHUNK,
                     dispatch=result.dispatch,
@@ -668,7 +683,8 @@ class _UploadWorkflow:
                 return False
             return True
         if observation is not None and observation.state is FilePublicationObservationState.REFUSED:
-            failure = FileUploadFailure.DEADLINE if self._state.deadline_exceeded else FileUploadFailure.PUBLICATION
+            reported_deadline = observation.failure is not None and self._publication_deadline(observation.failure)
+            failure = FileUploadFailure.DEADLINE if reported_deadline else FileUploadFailure.PUBLICATION
         else:
             failure = FileUploadFailure.OBSERVATION
             self._state.publication_uncertain = True
@@ -786,7 +802,7 @@ class _UploadWorkflow:
             return
         if self._deadline.expired:
             self._state.deadline_exceeded = True
-            self._state.fail(FileUploadFailure.DEADLINE)
+            self._state.fail(FileUploadFailure.DEADLINE, phase=FileUploadFailurePhase.STAGE_CLEANUP)
             return
         result = stage_cleanup(
             self._carrier,
@@ -835,10 +851,14 @@ class _UploadWorkflow:
                 self._state.stage_failure = failure
             if failure.cleanup_debt is not None:
                 self._state.scratch_debt = failure.cleanup_debt
-            if failure.code is FileStageFailureCode.DEADLINE or (
-                failure.code is FileStageFailureCode.SCRATCH and failure.kind is ScratchFailureKind.DEADLINE
-            ):
+            if self._stage_deadline(failure):
                 self._state.deadline_exceeded = True
+
+    @staticmethod
+    def _stage_deadline(failure: FileStageFailureControl) -> bool:
+        return failure.code is FileStageFailureCode.DEADLINE or (
+            failure.code is FileStageFailureCode.SCRATCH and failure.kind is ScratchFailureKind.DEADLINE
+        )
 
     def _record_publication_observation(self, observation: FilePublicationObservation) -> None:
         if observation.revision is not None:

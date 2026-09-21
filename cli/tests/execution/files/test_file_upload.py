@@ -13,7 +13,7 @@ import pytest
 import agentworks.execution._file_publication_exchange as publication_exchange
 import agentworks.execution._file_stage_exchange as stage_exchange
 from agentworks.db import Database, OperationClaimState, OperationResourceKind, OperationScope
-from agentworks.errors import StateError
+from agentworks.errors import ConflictError, ExternalError, StateError
 from agentworks.execution._account import FileOwnershipObservationState
 from agentworks.execution._account_protocol import FileOwnershipFailure
 from agentworks.execution._file_publication import Match, PublicationFailureKind, PublicationPhase, Replace
@@ -24,6 +24,7 @@ from agentworks.execution._file_publication_protocol import (
     empty_file_publication_body,
     encode_file_publication_failure,
 )
+from agentworks.execution._file_result_transfer import reduce_file_upload
 from agentworks.execution._file_stage_protocol import (
     FileStageFailureCode,
     FileStageFailureControl,
@@ -60,7 +61,7 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
-from agentworks.execution.files import NewMetadata
+from agentworks.execution.files import Change, FileFailureReason, FileOperationPhase, NewMetadata
 from agentworks.operations import OperationOwner
 from tests.execution.files._file_deadline_support import AdmittedTimeoutCarrier
 from tests.execution.files._file_publication_support import (
@@ -184,6 +185,24 @@ class MissingCompletionCallCarrier:
         report = self._carrier.execute(invocation, io=io, deadline=deadline)
         if self.calls == self._incomplete_call:
             return replace(report, completion=None)
+        return report
+
+
+class ExpiringCallCarrier:
+    def __init__(self, expiry_call: int) -> None:
+        self._carrier = LocalCarrier()
+        self._expiry_call = expiry_call
+        self.calls = 0
+
+    @property
+    def features(self) -> ChannelFeatures:
+        return self._carrier.features
+
+    def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        self.calls += 1
+        report = self._carrier.execute(invocation, io=io, deadline=deadline)
+        if self.calls == self._expiry_call:
+            object.__setattr__(deadline, "expires_at", 0.0)
         return report
 
 
@@ -885,6 +904,112 @@ def test_deadline_exhaustion_after_stage_uses_no_fresh_cleanup_budget(
         assert outcome.deadline_exceeded and outcome.scratch_cleanup_debt is not None
         assert outcome.requires_owner_retention
         assert not root.joinpath("target").exists()
+    finally:
+        database.close()
+
+
+def test_cleanup_entry_expiry_records_cleanup_phase_after_confirmed_publication(
+    tmp_path: Path,
+    plan: IdentityPlan,
+) -> None:
+    root = tmp_path / "approved"
+    root.mkdir()
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    borrow = owner.borrow()
+    carrier = ExpiringCallCarrier(4)
+    try:
+        outcome = _upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+
+        assert carrier.calls == 4 and root.joinpath("target").read_bytes() == b"content"
+        assert outcome.publication_confirmed and outcome.deadline_exceeded
+        assert outcome.failure is FileUploadFailure.DEADLINE
+        assert outcome.failure_phase is FileUploadFailurePhase.STAGE_CLEANUP
+        assert outcome.scratch_cleanup_debt is not None and outcome.requires_owner_retention
+        with pytest.raises(ExternalError) as raised:
+            reduce_file_upload(outcome, entity_kind="workspace file", entity_name="settings")
+        assert raised.value.details is not None
+        assert raised.value.details.phase is FileOperationPhase.CLEANUP
+        assert raised.value.details.reason is FileFailureReason.DEADLINE
+        assert raised.value.details.effect is Change.CHANGED
+    finally:
+        database.close()
+
+
+def test_ownership_refusal_precedes_later_host_deadline(
+    tmp_path: Path,
+    plan: IdentityPlan,
+) -> None:
+    root = tmp_path / "approved"
+    root.mkdir()
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    borrow = owner.borrow()
+    carrier = ExpiringCallCarrier(1)
+    metadata = replace(new_metadata(), owner="agentworks-missing-owner-canary")
+    try:
+        outcome = _upload(
+            borrow,
+            root,
+            BytesSource(b"content"),
+            7,
+            plan,
+            carrier=carrier,
+            metadata=metadata,
+        )
+
+        assert carrier.calls == 1 and outcome.deadline_exceeded
+        assert outcome.failure is FileUploadFailure.OWNERSHIP
+        with pytest.raises(StateError) as raised:
+            reduce_file_upload(outcome, entity_kind="workspace file", entity_name="settings")
+        assert raised.value.details is not None
+        assert raised.value.details.reason is FileFailureReason.MISSING_OWNER
+    finally:
+        database.close()
+
+
+def test_stage_refusal_precedes_later_host_deadline(
+    tmp_path: Path,
+    plan: IdentityPlan,
+) -> None:
+    root = tmp_path / "missing-approved-root"
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    borrow = owner.borrow()
+    carrier = ExpiringCallCarrier(2)
+    try:
+        outcome = _upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+
+        assert carrier.calls == 2 and outcome.deadline_exceeded
+        assert outcome.failure is FileUploadFailure.STAGE
+        with pytest.raises(StateError) as raised:
+            reduce_file_upload(outcome, entity_kind="workspace file", entity_name="settings")
+        assert raised.value.details is not None
+        assert raised.value.details.reason is FileFailureReason.REFUSED
+    finally:
+        database.close()
+
+
+def test_publication_conflict_precedes_later_host_deadline(
+    tmp_path: Path,
+    plan: IdentityPlan,
+) -> None:
+    root = tmp_path / "approved"
+    root.mkdir()
+    root.joinpath("target").write_bytes(b"existing")
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    borrow = owner.borrow()
+    carrier = ExpiringCallCarrier(4)
+    try:
+        outcome = _upload(borrow, root, BytesSource(b"content"), 7, plan, carrier=carrier)
+
+        assert carrier.calls == 4 and outcome.deadline_exceeded
+        assert outcome.failure is FileUploadFailure.PUBLICATION
+        with pytest.raises(ConflictError) as raised:
+            reduce_file_upload(outcome, entity_kind="workspace file", entity_name="settings")
+        assert raised.value.details is not None
+        assert raised.value.details.reason is FileFailureReason.CONFLICT
     finally:
         database.close()
 

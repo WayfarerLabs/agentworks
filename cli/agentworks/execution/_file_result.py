@@ -345,15 +345,25 @@ def _require_owned_read[T](
     entity_kind: str,
     entity_name: str,
 ) -> T:
-    if outcome.deadline_exceeded:
-        _raise_reason(phase, FileFailureReason.DEADLINE, entity_kind=entity_kind, entity_name=entity_name)
     if outcome.pending_remote_effects or outcome.coordination_uncertain:
         _raise_reason(phase, FileFailureReason.COORDINATION, entity_kind=entity_kind, entity_name=entity_name)
     if outcome.requires_owner_retention:
         _raise_reason(phase, FileFailureReason.CLEANUP, entity_kind=entity_kind, entity_name=entity_name)
     if outcome.result is None:
-        _raise_reason(phase, FileFailureReason.INCOMPLETE_RESPONSE, entity_kind=entity_kind, entity_name=entity_name)
+        reason = FileFailureReason.DEADLINE if outcome.deadline_exceeded else FileFailureReason.INCOMPLETE_RESPONSE
+        _raise_reason(phase, reason, entity_kind=entity_kind, entity_name=entity_name)
     return outcome.result
+
+
+def _raise_late_read_deadline[T](
+    outcome: OwnedFileOutcome[T],
+    phase: FileOperationPhase,
+    *,
+    entity_kind: str,
+    entity_name: str,
+) -> None:
+    if outcome.deadline_exceeded:
+        _raise_reason(phase, FileFailureReason.DEADLINE, entity_kind=entity_kind, entity_name=entity_name)
 
 
 def _read_failure_reason(failure: FileReadFailure) -> FileFailureReason:
@@ -396,6 +406,9 @@ def reduce_file_stat(
     _require_candidate(candidate, FileOperationPhase.OBSERVATION, entity_kind=entity_kind, entity_name=entity_name)
     observation = candidate.observation
     if observation is None:
+        _raise_late_read_deadline(
+            outcome, FileOperationPhase.OBSERVATION, entity_kind=entity_kind, entity_name=entity_name
+        )
         _raise_reason(
             FileOperationPhase.OBSERVATION,
             FileFailureReason.INCOMPLETE_RESPONSE,
@@ -403,9 +416,19 @@ def reduce_file_stat(
             entity_name=entity_name,
         )
     if observation.state is FileObjectObservationState.ABSENT:
+        _raise_late_read_deadline(
+            outcome, FileOperationPhase.OBSERVATION, entity_kind=entity_kind, entity_name=entity_name
+        )
         return None
     if observation.state is FileObjectObservationState.PRESENT and observation.revision is not None:
+        _raise_late_read_deadline(
+            outcome, FileOperationPhase.OBSERVATION, entity_kind=entity_kind, entity_name=entity_name
+        )
         return _metadata(observation.revision)
+    if observation.failure is None:
+        _raise_late_read_deadline(
+            outcome, FileOperationPhase.OBSERVATION, entity_kind=entity_kind, entity_name=entity_name
+        )
     _raise_object_observation(
         observation, FileOperationPhase.OBSERVATION, entity_kind=entity_kind, entity_name=entity_name
     )
@@ -424,6 +447,9 @@ def reduce_file_inventory(
     _require_candidate(candidate, FileOperationPhase.INVENTORY, entity_kind=entity_kind, entity_name=entity_name)
     observation = candidate.observation
     if observation is None:
+        _raise_late_read_deadline(
+            outcome, FileOperationPhase.INVENTORY, entity_kind=entity_kind, entity_name=entity_name
+        )
         _raise_reason(
             FileOperationPhase.INVENTORY,
             FileFailureReason.INCOMPLETE_RESPONSE,
@@ -431,6 +457,9 @@ def reduce_file_inventory(
             entity_name=entity_name,
         )
     if observation.state is FileInventoryObservationState.PRESENT and observation.entries is not None:
+        _raise_late_read_deadline(
+            outcome, FileOperationPhase.INVENTORY, entity_kind=entity_kind, entity_name=entity_name
+        )
         return tuple(_entry(entry) for entry in observation.entries)
     if observation.state is FileInventoryObservationState.NOT_FOUND:
         _raise_reason(
@@ -452,6 +481,7 @@ def reduce_file_inventory(
             FileInventoryFailureCode.IO: FileFailureReason.IO,
         }[observation.failure]
         _raise_reason(FileOperationPhase.INVENTORY, reason, entity_kind=entity_kind, entity_name=entity_name)
+    _raise_late_read_deadline(outcome, FileOperationPhase.INVENTORY, entity_kind=entity_kind, entity_name=entity_name)
     reason = (
         FileFailureReason.INCOMPLETE_RESPONSE
         if observation.state is FileInventoryObservationState.INCOMPLETE
@@ -469,8 +499,40 @@ def reduce_file_remove(
     """Reduce one conditional removal and preserve mutation uncertainty."""
     candidate = outcome.result
     dispatch = None if candidate is None else candidate.dispatch
+    observation = None if candidate is None else candidate.observation
+    if observation is not None and observation.state in {
+        FileObjectObservationState.CHANGED,
+        FileObjectObservationState.UNCHANGED,
+    }:
+        assert candidate is not None
+        change = Change.CHANGED if observation.state is FileObjectObservationState.CHANGED else Change.UNCHANGED
+        candidate_reason = _candidate_failure_reason(candidate)
+        if candidate_reason is not None:
+            _raise_reason(
+                FileOperationPhase.REMOVAL,
+                candidate_reason,
+                entity_kind=entity_kind,
+                entity_name=entity_name,
+                effect=change,
+            )
+        if outcome.deadline_exceeded:
+            _raise_reason(
+                FileOperationPhase.REMOVAL,
+                FileFailureReason.DEADLINE,
+                entity_kind=entity_kind,
+                entity_name=entity_name,
+                effect=change,
+            )
+        if outcome.pending_remote_effects or outcome.coordination_uncertain or outcome.requires_owner_retention:
+            _raise_reason(
+                FileOperationPhase.CLEANUP,
+                FileFailureReason.COORDINATION,
+                entity_kind=entity_kind,
+                entity_name=entity_name,
+                effect=change,
+            )
+        return MutationResult(change, None)
     if outcome.pending_remote_effects or outcome.coordination_uncertain:
-        observation = None if candidate is None else candidate.observation
         failure = None if observation is None else observation.failure
         effect = (
             Change.CHANGED
@@ -516,46 +578,8 @@ def reduce_file_remove(
             entity_name=entity_name,
             dispatch=candidate.dispatch,
         )
-    if observation is not None and observation.state in {
-        FileObjectObservationState.CHANGED,
-        FileObjectObservationState.UNCHANGED,
-    }:
-        change = Change.CHANGED if observation.state is FileObjectObservationState.CHANGED else Change.UNCHANGED
-        candidate_reason = _candidate_failure_reason(candidate)
-        if candidate_reason is not None:
-            _raise_reason(
-                FileOperationPhase.REMOVAL,
-                candidate_reason,
-                entity_kind=entity_kind,
-                entity_name=entity_name,
-                effect=change if change is Change.CHANGED else None,
-            )
-        if outcome.deadline_exceeded:
-            _raise_reason(
-                FileOperationPhase.REMOVAL,
-                FileFailureReason.DEADLINE,
-                entity_kind=entity_kind,
-                entity_name=entity_name,
-                effect=change if change is Change.CHANGED else None,
-            )
-        if outcome.requires_owner_retention:
-            _raise_reason(
-                FileOperationPhase.CLEANUP,
-                FileFailureReason.COORDINATION,
-                entity_kind=entity_kind,
-                entity_name=entity_name,
-                effect=change if change is Change.CHANGED else None,
-            )
-        return MutationResult(change, None)
     _require_candidate(candidate, FileOperationPhase.REMOVAL, entity_kind=entity_kind, entity_name=entity_name)
     if observation is not None and observation.state is FileObjectObservationState.REFUSED:
-        if outcome.deadline_exceeded:
-            _raise_reason(
-                FileOperationPhase.REMOVAL,
-                FileFailureReason.DEADLINE,
-                entity_kind=entity_kind,
-                entity_name=entity_name,
-            )
         _raise_object_observation(
             observation, FileOperationPhase.REMOVAL, entity_kind=entity_kind, entity_name=entity_name
         )
@@ -641,6 +665,38 @@ def reduce_file_metadata(
     observation = candidate.observation
     failure = None if observation is None else observation.failure
     dispatch = candidate.dispatch
+    if (
+        observation is not None
+        and observation.state in {FileMetadataObservationState.CHANGED, FileMetadataObservationState.UNCHANGED}
+        and observation.revision is not None
+    ):
+        change = Change.CHANGED if observation.state is FileMetadataObservationState.CHANGED else Change.UNCHANGED
+        candidate_reason = _candidate_failure_reason(candidate)
+        if candidate_reason is not None:
+            _raise_reason(
+                FileOperationPhase.METADATA,
+                candidate_reason,
+                entity_kind=entity_kind,
+                entity_name=entity_name,
+                effect=change,
+            )
+        if outcome.deadline_exceeded:
+            _raise_reason(
+                FileOperationPhase.METADATA,
+                FileFailureReason.DEADLINE,
+                entity_kind=entity_kind,
+                entity_name=entity_name,
+                effect=change,
+            )
+        if outcome.pending_remote_effects or outcome.coordination_uncertain or outcome.requires_owner_retention:
+            _raise_reason(
+                FileOperationPhase.CLEANUP,
+                FileFailureReason.COORDINATION,
+                entity_kind=entity_kind,
+                entity_name=entity_name,
+                effect=change,
+            )
+        return MutationResult(change, _revision_from_file_revision(observation.revision))
     if outcome.pending_remote_effects or outcome.coordination_uncertain:
         completed = () if failure is None else failure.completed_steps
         attempted = None if failure is None else failure.attempted_step
@@ -698,54 +754,14 @@ def reduce_file_metadata(
             hint="Inspect the target before retrying the operation.",
             details=_details(_metadata_phase(failure), reason),
         ) from None
-    if (
-        observation is not None
-        and observation.state in {FileMetadataObservationState.CHANGED, FileMetadataObservationState.UNCHANGED}
-        and observation.revision is not None
-    ):
-        change = Change.CHANGED if observation.state is FileMetadataObservationState.CHANGED else Change.UNCHANGED
-        candidate_reason = _candidate_failure_reason(candidate)
-        if candidate_reason is not None:
-            _raise_reason(
-                FileOperationPhase.METADATA,
-                candidate_reason,
-                entity_kind=entity_kind,
-                entity_name=entity_name,
-                effect=change if change is Change.CHANGED else None,
-            )
-        if outcome.deadline_exceeded:
-            _raise_reason(
-                FileOperationPhase.METADATA,
-                FileFailureReason.DEADLINE,
-                entity_kind=entity_kind,
-                entity_name=entity_name,
-                effect=change if change is Change.CHANGED else None,
-            )
-        if outcome.requires_owner_retention:
-            _raise_reason(
-                FileOperationPhase.CLEANUP,
-                FileFailureReason.COORDINATION,
-                entity_kind=entity_kind,
-                entity_name=entity_name,
-                effect=change if change is Change.CHANGED else None,
-            )
-        return MutationResult(change, _revision_from_file_revision(observation.revision))
     _require_candidate(candidate, FileOperationPhase.METADATA, entity_kind=entity_kind, entity_name=entity_name)
-    if observation is not None and observation.state is FileMetadataObservationState.REFUSED:
-        if outcome.deadline_exceeded:
-            _raise_reason(
-                FileOperationPhase.METADATA,
-                FileFailureReason.DEADLINE,
-                entity_kind=entity_kind,
-                entity_name=entity_name,
-            )
-        if failure is not None:
-            _raise_reason(
-                _metadata_phase(failure),
-                _metadata_failure_reason(failure),
-                entity_kind=entity_kind,
-                entity_name=entity_name,
-            )
+    if observation is not None and observation.state is FileMetadataObservationState.REFUSED and failure is not None:
+        _raise_reason(
+            _metadata_phase(failure),
+            _metadata_failure_reason(failure),
+            entity_kind=entity_kind,
+            entity_name=entity_name,
+        )
     if outcome.deadline_exceeded and dispatch is not Dispatch.NOT_SENT:
         _raise_uncertain(
             FileOperationPhase.METADATA,
@@ -789,13 +805,6 @@ def _reduce_ownership_stop(
         reason = FileFailureReason.DEADLINE if outcome.deadline_exceeded else FileFailureReason.INCOMPLETE_RESPONSE
         _raise_reason(FileOperationPhase.OWNERSHIP_LOOKUP, reason, entity_kind=entity_kind, entity_name=entity_name)
     _require_candidate(result, FileOperationPhase.OWNERSHIP_LOOKUP, entity_kind=entity_kind, entity_name=entity_name)
-    if outcome.deadline_exceeded:
-        _raise_reason(
-            FileOperationPhase.OWNERSHIP_LOOKUP,
-            FileFailureReason.DEADLINE,
-            entity_kind=entity_kind,
-            entity_name=entity_name,
-        )
     observation = result.observation
     if (
         observation is not None
@@ -804,6 +813,13 @@ def _reduce_ownership_stop(
     ):
         reason = _ownership_failure_reason(observation.failure)
         _raise_reason(FileOperationPhase.OWNERSHIP_LOOKUP, reason, entity_kind=entity_kind, entity_name=entity_name)
+    if outcome.deadline_exceeded:
+        _raise_reason(
+            FileOperationPhase.OWNERSHIP_LOOKUP,
+            FileFailureReason.DEADLINE,
+            entity_kind=entity_kind,
+            entity_name=entity_name,
+        )
     if outcome.pending_remote_effects or outcome.coordination_uncertain or outcome.requires_owner_retention:
         _raise_reason(
             FileOperationPhase.OWNERSHIP_LOOKUP,

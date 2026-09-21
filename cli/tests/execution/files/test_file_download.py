@@ -667,6 +667,43 @@ class _NonzeroCleanupCarrier:
         return report
 
 
+class _ExpiringSink(BytesSink):
+    def __init__(self, deadline: Deadline) -> None:
+        super().__init__()
+        self.deadline = deadline
+
+    def try_write(self, data: memoryview) -> int | None:
+        written = super().try_write(data)
+        object.__setattr__(self.deadline, "expires_at", 0.0)
+        return written
+
+
+def test_cleanup_entry_expiry_records_cleanup_phase(
+    tmp_path: Path,
+    roots: tuple[Path, Path],
+    plan: IdentityPlan,
+) -> None:
+    source, scratch = roots
+    source.joinpath("source").write_bytes(b"payload")
+    database = Database(tmp_path / "state.db")
+    operation_owner = owner(database)
+    borrow = operation_owner.borrow()
+    carrier = LocalCarrier()
+    deadline = Deadline.after(30)
+    sink = _ExpiringSink(deadline)
+    try:
+        outcome = download(borrow, source, sink, 64, plan, carrier=carrier, deadline=deadline)
+
+        assert carrier.calls == 2 and bytes(sink.data) == b"payload"
+        assert outcome.stream_verified and outcome.deadline_exceeded
+        assert outcome.failure is FileDownloadFailure.DEADLINE
+        assert outcome.failure_phase is FileDownloadFailurePhase.SNAPSHOT_CLEANUP
+        assert outcome.cleanup_debt is not None and outcome.requires_owner_retention
+        assert tuple(scratch.iterdir())
+    finally:
+        database.close()
+
+
 @pytest.mark.parametrize(
     "completion",
     [ExitStatus(code=9), ExitStatus(signal=9)],
