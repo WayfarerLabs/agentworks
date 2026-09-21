@@ -560,6 +560,13 @@ recording lookup evidence before settlement. Completed unfinished records retain
 binding and typed outcome; failed fact capture leaves the prepared state attached. Ordinary
 in-memory reads use the snapshot/download composition, not an inline-read wrapper.
 
+`_file_result.py` and `_file_result_transfer.py` reduce retained private outcomes to public file
+values or kind-based errors. Public diagnostics retain closed phase/reason facts, confirmed change
+and partial/uncertain mutation evidence without attaching private paths, account names or helper
+transcripts. Read-only lookup or staging uncertainty does not imply destination mutation, and
+generic dispatch/observation failures do not establish network failure. These reducers do not
+dispatch work or manage ownership; public FileAccess integration remains incomplete.
+
 This custody path adds no claim or admission lock and never closes the outer owner. Retaining an
 unfinished record does not establish remote quiescence or authorize claim release. It covers these
 private file calls, not complete user/admin FileAccess views, durable crash recovery or production

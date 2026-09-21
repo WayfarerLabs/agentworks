@@ -942,7 +942,8 @@ to a general external failure without inventing a network cause; `ConnectivityEr
 independent evidence that these categories do not supply. Upload/download composition currently
 discards some exchange-level dispatch/failure detail. Preserve any facts required by public
 diagnostics before exposing that boundary; do not manufacture missing precision from a generic
-termination category. The concrete reducer and its integration remain implementation work.
+termination category. Concrete private reducers now provide the public value/error projection;
+production FileAccess integration remains implementation work.
 
 ## Test and evidence plan
 

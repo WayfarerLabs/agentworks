@@ -1300,6 +1300,12 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       cannot lose cleanup responsibility, and distinguish unresolved remote effects from
       proved-inert cleanup debt rather than using `requires_owner_retention` as a blanket claim
       release rule. Keep the coordinator free of file protocols and a second file lock.
+- [x] Add concrete private result reducers for stat, inventory, removal, metadata, download,
+      memory-read, upload and JSON outcomes. Preserve closed diagnostic facts, known destination
+      change and partial/uncertain mutation evidence without exposing private outcome objects.
+      Generic carrier failures do not imply connectivity loss. These reducers neither manage
+      custody nor complete public FileAccess; upload/download exchange-detail retention and
+      production integration remain required.
 - [x] Change private upload, download, JSON, memory-read and single-file compositions to accept a
       caller-owned `OperationBorrow` without acquiring or closing it. Nested compositions reuse the
       same borrow. Focused lifetime tests cover normal, invalid and exceptional results and prove
