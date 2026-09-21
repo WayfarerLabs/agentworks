@@ -970,6 +970,23 @@ snapshot reader, and keep genuinely host-only response parsing outside the guest
 Neither may duplicate validation, remove correctness guards or introduce configurable codecs, source
 minification or executable staging. The actual resulting family must be measured again.
 
+The two reductions still leave representative Windows commands at 32,754 characters for direct
+execution, 32,792 for root elevation and 32,864 for demotion with base85. Thirteen characters of
+headroom in only one case is not a viable delivery boundary. The next candidate instead keeps a
+short fixed argv launcher and sends the core bundle as a fixed-length, digest-bound stdin prefix,
+followed by the unchanged operation manifest. This retains base64 and `bz2`, with no executable
+staging or fallback.
+
+A local lead prototype using the larger unreduced `4f1bef04` source family measures 758 launcher
+characters and a 36,212-byte prefix. Complete representative Windows commands are 1,862 / 1,900 /
+1,972 characters for direct/root/demotion; QGA bodies with an invalid two-byte manifest are 37,164 /
+37,206 / 37,281 bytes. These are not maximum valid requests or native carrier acceptance. Under
+isolated distribution Python 3.11, the valid prefix yields the expected framed invalid-request
+response, short and changed prefixes exit without output, and Python-looking request bytes remain an
+invalid operation manifest rather than executed source. Both interpreter paths tested on this host
+select distribution Python 3.11, not two Python-version cells. Production integration still needs
+fragmented reads, complete real requests, all-family regressions and native delivery proof.
+
 ## Held-object metadata and search-only traversal
 
 The Linux [open documentation](https://man7.org/linux/man-pages/man2/open.2.html) distinguishes

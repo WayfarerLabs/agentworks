@@ -192,22 +192,29 @@ availability checks and platform proof remain open. New guest packages do not sa
 prerequisite. Runtime download, on-target compilation, elevation retry, and a legacy-helper fallback
 are outside this design.
 
-`execution/file_helper.py` owns the operation's exchanges and recorded data scratch. Each exchange
-delivers a fixed, core-selected standard-library source bundle inline to the already-available
-interpreter under the clean core environment. The helper executable is neither installed nor staged.
-A small transfer bundle carries chunk requests; observation and mutation bundles carry only their
-relevant implementation dependencies. Core selects these closed operation families, never a
-caller-supplied module name, source, executable or fallback. Bundling compresses trusted sources
-together once before ASCII armoring; this changes representation, not the request boundary. Every
-invocation verifies its bound identity before accessing workload paths.
+`execution/file_helper.py` owns the operation's exchanges and recorded data scratch. The selected
+next delivery uses a short fixed launcher in literal argv and a fixed core bundle followed by the
+operation manifest in one sensitive finite stdin stream. The helper executable is neither installed
+nor staged. Core alone selects the closed operation family and packaged modules. Transfer,
+observation and mutation families carry their relevant dependencies; callers cannot select modules,
+source, executables or a fallback.
 
-The next bundle representation uses one fixed standard-library `bz2` codec. Local measurements of
-the snapshot dependencies plus a conservative dispatcher surrogate exceed Windows command-line
-capacity with zlib, but fit with `bz2`; see the
-[sizing investigation](prior-art-research.md#snapshot-helper-delivery-sizing). This selects neither
-a codec option nor executable staging. Bookworm's distribution Python supplies the module; arbitrary
-Python builds may omit it. Selected-runtime readiness must prove that `bz2` imports and report a
-missing prerequisite cleanly before workload dispatch. No implicit macOS installation is allowed.
+The launcher fixes the armored bundle's byte length and SHA-256 in core-generated source. It reads
+exactly that many bytes with unbuffered reads, verifies the digest before decoding or executing
+anything from stdin, then loads the trusted modules and calls the fixed family entry point. The
+remaining stdin bytes are the bounded canonical operation manifest. A short or changed bundle
+refuses before any helper module executes; request bytes never become source or select the bundle's
+length, digest or entry point. This is one invocation, not a source-upload handshake or a generic
+file-operation code parameter. Identity admission still precedes workload-path access.
+
+Bundling retains one fixed standard-library `bz2` codec and base64 armoring. The
+[publication sizing investigation](prior-art-research.md#publication-helper-delivery-sizing) shows
+that the complete helper cannot reliably fit Windows argv, including after dependency reductions.
+Moving the fixed bundle to stdin removes that command-line dependency without another codec option.
+Bookworm's distribution Python supplies `bz2`; arbitrary Python builds may omit it. Selected-runtime
+readiness must prove the required imports and report missing prerequisites cleanly before workload
+dispatch. No implicit macOS installation is allowed. This delivery revision remains subject to
+implementation review, all-family regression coverage and native acceptance.
 
 Data staging and snapshot spools still reuse preparation's exact-offset, length/digest-verified
 scratch mechanics. The shared 24 KiB raw chunk is a candidate pending complete SSH/QGA request
@@ -329,12 +336,14 @@ workstation command line, including framing, quoting and privilege prefixes. Ret
 Proxmox compatibility floor rather than silently adding a package prerequisite. Oversized requests
 must refuse before dispatch; there is no automatic executable-staging fallback.
 
-Every exchange is one `Carrier.execute` with literal absolute argv. Requests use bounded canonical
-ASCII JSON with a version, 32-hex request ID, one closed operation, identity, and operation-specific
-fields. Paths and other byte payloads use canonical base64. Responses use the existing sequenced
-`AGWF1` records, matching that request ID, with closed result/failure bodies and a final terminator.
-The framing codec is shared between concrete file exchanges; their request schemas and response
-grammars remain operation-specific. Unknown, duplicate, non-canonical or extra fields refuse. Strict
+Every exchange is one `Carrier.execute` with literal absolute argv. After the fixed bundle prefix,
+requests use bounded canonical ASCII JSON with a version, 32-hex request ID, one closed operation,
+identity, and operation-specific fields. Manifest bounds do not replace aggregate carrier bounds:
+count the bundle, manifest, complete argv, quoting and provider serialization before dispatch. Paths
+and other byte payloads use canonical base64. Responses use the existing sequenced `AGWF1` records,
+matching that request ID, with closed result/failure bodies and a final terminator. The framing
+codec is shared between concrete file exchanges; their request schemas and response grammars remain
+operation-specific. Unknown, duplicate, non-canonical or extra fields refuse. Strict
 field/line/decoded/total bounds must fit the complete carrier request. No request value becomes argv
 or shell source; fixed preparation bootstrap source cannot be reused for file operations.
 

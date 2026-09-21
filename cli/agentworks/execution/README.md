@@ -93,6 +93,16 @@ owner relinquishes command data and pipe capabilities before publishing its term
 inert bootstrap or final native-thread return tail may finish later, but cannot use borrowed
 endpoints or launch work.
 
+`LocalProcessOwner` exposes that same private ownership mechanism independently of byte pumping.
+Construct it before dispatch, call `start(LocalProcessRequest(...))` once, and observe immutable
+snapshots. One caller serializes start and close; other threads may read snapshots. Published pipes
+remain borrowed until every reader/writer has stopped, after which `close()` relinquishes them and
+returns stable terminal facts. A terminal with `admitted=False` records canceled admission without
+waiting for an inert bootstrap. Natural exit remains observable with stdin held open; closing stdin
+alone is EOF, not owner close. Status first learned during cleanup is never natural-exit evidence.
+The ordinary pump uses this interface. SSH forwarding adoption remains with its owning lane, which
+must stop and join its pipe users before closing the common owner.
+
 Local Linux tests exercise interrupted startup, admission and cleanup, including the interval after
 admission but before pumping. They do not establish native Windows/macOS acceptance or update the
 existing SSH-private copy. A separately reproduced SIGINT at entry to the cleanup loop can escape

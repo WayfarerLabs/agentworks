@@ -153,6 +153,17 @@ types and behavior until deletion. No union type, runtime stack selector, fallba
 context object is introduced. Core composition owns both sets of passive handles during coexistence
 without routing a call from one implementation through the other.
 
+Database operation ownership is explicit at the new workflow's core entry boundary, before
+activation, not a side effect of first accessing a target. At `d07fcbc2`, the ordinary VM boundary
+already has the database and canonical VM name before entering activation; VM creation and retained
+rollback nodes have separate roots that must carry the same ownership. Adding unconditional claims
+to those existing roots would change legacy commands immediately. The additive PR instead supplies
+the new operation boundary and ownership carriage, proves new-only workflows through it, and leaves
+unmigrated calls unchanged. First adoption of a production consumer opts into that boundary as part
+of its migration batch. This adds no runtime stack selector or second RunContext type. Passive
+accessors alone cannot satisfy the pre-activation gate, and a legacy runner's successful return is
+not generic evidence that uncertain remote effects have stopped.
+
 The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) defers new recipient permission
 enforcement, including the successor core file ceiling, until legacy is physically removed. Record
 consumer intent in the migration inventory and prepare small grant values and isolated denial tests,

@@ -74,6 +74,12 @@ associated pending acceptance gates are superseded by this ruling.
 - [ ] Select shared platform-host resource keys before enabling their admission. Canonical VM names
       are available before create dispatch; site names and authored SSH routes are not canonical
       host identities. Do not silently treat different aliases or users as independent hosts.
+- [ ] Prove additive ownership without silently migrating legacy callers: enter the new workflow's
+      core operation boundary before activation, carry the claim through nested contexts and
+      retained teardown nodes, and validate new-only workflows there. Keep old boundary calls and
+      passive accessor construction unchanged. Consumer migration explicitly adopts the new
+      operation boundary; neither first accessor use after activation nor a generic legacy exit
+      substitutes for acquisition or no-further-effects evidence.
 - [ ] Prove crash, disconnect and deadline handling retain unresolved ownership. Recovery must
       establish that prior remote work cannot still mutate before admitting conflicting work, and
       must not replay uncertain mutation or silently expire a claim. Report incomplete recovery
@@ -376,6 +382,12 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       production bundle's complete carrier sizing before accepting its delivery representation, then
       fault-test lost replies and partial observations through the exchange. This slice does not
       itself complete upload orchestration, FileAccess or production operation ownership.
+- [ ] Replace argv-embedded fixed file bundles with the reviewed bounded stdin-prefix delivery. Keep
+      one fixed codec and one invocation, verify the core-fixed length/digest before decoding or
+      executing the prefix, and leave request bytes solely to the operation parser. Exercise all
+      existing file families, fragmented/short/corrupt prefixes, exact manifest boundaries,
+      sensitive retention and complete carrier-size refusal. Do not claim native Windows/QGA
+      acceptance from a locally serialized command or an invalid-request bootstrap probe.
 - [ ] Jointly accept and prove the privately implemented carrier sink extension with the SSH owner
       before enabling its production use or exposing it through RunContext.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
