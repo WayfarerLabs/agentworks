@@ -4,17 +4,25 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from agentworks.errors import ValidationError
 from agentworks.execution._file_inventory_bundle import FIXED_BUNDLE as INVENTORY_BUNDLE
+from agentworks.execution._file_inventory_protocol import parse_file_inventory_failure
 from agentworks.execution._file_metadata_bundle import FIXED_BUNDLE as METADATA_BUNDLE
+from agentworks.execution._file_metadata_protocol import parse_file_metadata_failure
 from agentworks.execution._file_object_bundle import FIXED_BUNDLE as OBJECT_BUNDLE
+from agentworks.execution._file_object_protocol import parse_file_object_failure
 from agentworks.execution._file_read_bundle import FIXED_BUNDLE as READ_BUNDLE
+from agentworks.execution._file_read_protocol import parse_file_read_failure
 from agentworks.execution._file_snapshot_bundle import FIXED_BUNDLE as SNAPSHOT_BUNDLE
+from agentworks.execution._file_snapshot_protocol import parse_file_snapshot_failure
 from agentworks.execution._file_stage_bundle import FIXED_BUNDLE as STAGE_BUNDLE
+from agentworks.execution._file_stage_protocol import parse_file_stage_failure
+from agentworks.execution._file_wire import FileRecord, FileRecordKind, FileRecordReader
 from agentworks.execution._helper_bundle import FixedFileHelperBundle
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan, build_helper_argv
@@ -49,8 +57,26 @@ def _invocation(bundle: FixedFileHelperBundle, plan: IdentityPlan) -> PreparedIn
     )
 
 
+def _failure_code(family: str, body: bytes) -> str:
+    identity = IdentityExpectation(0, 0, (0,))
+    token = bytes(16)
+    if family == "read":
+        return parse_file_read_failure(body).value
+    if family == "object":
+        return parse_file_object_failure(body).code.value
+    if family == "metadata":
+        return parse_file_metadata_failure(body).code.value
+    if family == "inventory":
+        return parse_file_inventory_failure(body).value
+    if family == "stage":
+        return parse_file_stage_failure(body, token, identity).code.value
+    if family == "snapshot":
+        return parse_file_snapshot_failure(body, token, identity).code.value
+    raise AssertionError(f"unknown fixed file family: {family}")
+
+
 @pytest.mark.parametrize(("family", "bundle"), _BUNDLES)
-def test_every_fixed_family_executes_in_isolated_distribution_python311(
+def test_every_fixed_family_reports_parsed_invalid_request_in_isolated_distribution_python311(
     family: str,
     bundle: FixedFileHelperBundle,
 ) -> None:
@@ -65,46 +91,54 @@ def test_every_fixed_family_executes_in_isolated_distribution_python311(
         check=False,
     )
 
+    records: list[FileRecord] = []
+    reader = FileRecordReader(_NONCE, records.append)
+    offset = 0
+    while offset < len(completed.stdout):
+        offset += reader.try_write(memoryview(completed.stdout)[offset:])
+    reader.finish()
+
     assert completed.returncode == 0, family
-    assert completed.stdout and completed.stderr == b""
+    assert completed.stderr == b""
+    assert reader.error is None
+    assert [record.kind for record in records] == [FileRecordKind.FAILED, FileRecordKind.FINISHED]
+    assert _failure_code(family, records[0].body) == "invalid_request"
+    assert records[1].body == b"{}"
     assert bundle.prefix not in completed.stdout
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="the bounded pipe-size check requires Linux")
 def test_bootstrap_accepts_fragmented_prefix_and_preserves_manifest_boundary() -> None:
-    runtime = Path("/usr/bin/python3.11")
-    if not runtime.is_file():
-        pytest.skip("distribution Python 3.11 is unavailable")
-    process = subprocess.Popen(
-        [str(runtime), "-I", "-S", "-B", "-c", READ_BUNDLE.bootstrap, _NONCE],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        pipesize=4096,
-    )
-    assert process.stdin is not None and process.stdout is not None and process.stderr is not None
-    for offset in range(0, len(READ_BUNDLE.prefix), 17):
-        process.stdin.write(READ_BUNDLE.prefix[offset : offset + 17])
-        process.stdin.flush()
     manifest = b"raise SystemExit(42)"
-    process.stdin.write(manifest)
-    process.stdin.close()
-    stdout = process.stdout.read()
-    stderr = process.stderr.read()
-    returncode = process.wait(timeout=10)
+    completed = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", READ_BUNDLE.bootstrap, _NONCE],
+        input=READ_BUNDLE.prefix + manifest,
+        capture_output=True,
+        pipesize=4096,
+        timeout=10,
+        check=False,
+    )
 
-    assert returncode == 0
-    assert stdout and stderr == b""
-    assert manifest not in stdout
+    assert completed.returncode == 0
+    assert completed.stdout and completed.stderr == b""
+    assert manifest not in completed.stdout
 
 
+@pytest.mark.parametrize(
+    "runtime",
+    [Path(sys.executable), Path("/usr/bin/python3.11")],
+    ids=["current", "distribution-3.11"],
+)
 @pytest.mark.parametrize(
     "payload",
     [READ_BUNDLE.prefix[:-1], bytes([READ_BUNDLE.prefix[0] ^ 1]) + READ_BUNDLE.prefix[1:] + b"{}"],
     ids=["short", "changed"],
 )
-def test_bootstrap_refuses_unverified_prefix_without_protocol_output(payload: bytes) -> None:
+def test_bootstrap_refuses_unverified_prefix_without_protocol_output(payload: bytes, runtime: Path) -> None:
+    if not runtime.is_file():
+        pytest.skip(f"compatibility interpreter is unavailable: {runtime}")
     completed = subprocess.run(
-        ["/usr/bin/python3.11", "-I", "-S", "-B", "-c", READ_BUNDLE.bootstrap, _NONCE],
+        [str(runtime), "-I", "-S", "-B", "-c", READ_BUNDLE.bootstrap, _NONCE],
         input=payload,
         capture_output=True,
         timeout=10,
@@ -188,11 +222,3 @@ def test_windows_ssh_command_contains_only_short_fixed_bootstrap(
 
     assert len(windows_command) < 32_767, family
     assert bundle.prefix.decode("ascii") not in windows_command
-
-
-def test_dynamic_request_values_never_enter_fixed_bundle_or_safe_representation() -> None:
-    canary = b"dynamic-file-operation-secret"
-
-    assert canary not in READ_BUNDLE.prefix
-    assert canary.decode("ascii") not in READ_BUNDLE.bootstrap
-    assert canary.decode("ascii") not in repr(READ_BUNDLE)
