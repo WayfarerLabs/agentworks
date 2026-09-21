@@ -151,6 +151,17 @@ def _cleanup_progress(
     return candidate == expected
 
 
+def _cleanup_failure_matches_input(
+    request: FilePublicationCleanupRequest,
+    failure: FilePublicationFailureControl,
+) -> bool:
+    if failure.cleanup_state is PublicationCleanupState.OWNERSHIP_UNCERTAIN:
+        return failure.cleanup_debt is None
+    return failure.cleanup_state is PublicationCleanupState.EXACT and _cleanup_progress(
+        request.cleanup_debt, failure.cleanup_debt
+    )
+
+
 class _FilePublicationCollector:
     """Reduce one closed transcript without retaining partial publication facts."""
 
@@ -243,21 +254,17 @@ class _FilePublicationCollector:
                 return True
             if not isinstance(self._request, FilePublicationCleanupRequest):
                 return False
-            return (
-                failure.publication_phase is PublicationPhase.CLEANUP
-                and failure.cleanup_state is PublicationCleanupState.EXACT
-                and _cleanup_progress(self._request.cleanup_debt, failure.cleanup_debt)
+            return failure.publication_phase is PublicationPhase.CLEANUP and _cleanup_failure_matches_input(
+                self._request, failure
             )
         if failure.code is FilePublicationFailureCode.RECEIPT:
             if isinstance(self._request, FilePublicationReconcileRequest):
                 return failure.cleanup_state is PublicationCleanupState.NONE
             if not isinstance(self._request, FilePublicationCleanupRequest):
                 return False
-            return (
-                isinstance(self._request.cleanup_debt._debt, PublicationStageCleanupDebt)
-                and failure.cleanup_state is PublicationCleanupState.EXACT
-                and _cleanup_progress(self._request.cleanup_debt, failure.cleanup_debt)
-            )
+            return isinstance(
+                self._request.cleanup_debt._debt, PublicationStageCleanupDebt
+            ) and _cleanup_failure_matches_input(self._request, failure)
         return True
 
     def _fail(self, error: FilePublicationObservationError) -> None:

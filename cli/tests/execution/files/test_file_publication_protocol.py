@@ -323,6 +323,40 @@ def test_complete_results_preserve_effect_and_deadline_facts(plan: IdentityPlan)
     assert cleaned.observation.deadline_exceeded is True
 
 
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [("stage_removed", True), ("record_state", "creating_or_final")],
+)
+def test_reconcile_rejects_impossible_recovered_cleanup_shape(
+    plan: IdentityPlan,
+    field: str,
+    replacement: object,
+) -> None:
+    reference = _reference(plan)
+    value = json.loads(
+        encode_file_publication_reconcile_result(FilePublicationReconcileResult(_receipt_debt(reference), False))
+    )
+    value["cleanup"][field] = replacement
+    body = json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("ascii")
+
+    def impossible_recovery(request: FilePublicationRequest) -> bytes:
+        return _records(request, FileRecordKind.RESULT, body)
+
+    result = publication_reconcile(
+        TranscriptCarrier(impossible_recovery),
+        trusted_root_path="/trusted",
+        relative_path="target",
+        token=_TOKEN,
+        reference=reference,
+        plan=plan,
+        deadline=Deadline.after(1),
+    )
+
+    assert result.observation.state is FilePublicationObservationState.UNCERTAIN
+    assert result.observation.error is FilePublicationObservationError.CONTROL
+    assert result.observation.cleanup_debt is None
+
+
 def test_cleanup_failure_accepts_only_monotonic_exact_debt_progress(plan: IdentityPlan) -> None:
     reference = _reference(plan)
     original = _receipt_debt(reference)

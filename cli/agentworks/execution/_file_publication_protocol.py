@@ -30,7 +30,7 @@ from ._file_publication_wire import (
 from ._file_revision_wire import FileRevisionWireError, decode_file_revision, encode_file_revision
 from ._file_wire import valid_nonce
 from ._helper_identity import IdentityExpectation, decode_identity
-from ._publication_receipt import PublicationReceiptFailureKind, PublicationStageCleanupDebt
+from ._publication_receipt import _RECORD_MODE, PublicationReceiptFailureKind, PublicationStageCleanupDebt
 from ._scratch import ScratchFailureKind, ScratchPhase, ScratchReference
 from ._scratch_receipt import ScratchOperation, ScratchReceiptContext
 from ._scratch_wire import ScratchWireError, decode_scratch_reference, encode_scratch_reference
@@ -170,6 +170,15 @@ class FilePublicationFailureControl:
 
 def publication_context(identity: IdentityExpectation) -> ScratchReceiptContext:
     return ScratchReceiptContext(ScratchOperation.STAGE, identity)
+
+
+def _reconciled_cleanup_shape(debt: BoundPublicationCleanupDebt) -> bool:
+    cleanup = debt._debt
+    return (
+        isinstance(cleanup, PublicationStageCleanupDebt)
+        and not cleanup._stage_removed
+        and cleanup._ownership._record_modes == (_RECORD_MODE,)
+    )
 
 
 def _invalid_request() -> FilePublicationRequestError:
@@ -464,7 +473,7 @@ def parse_file_publication_reconcile_result(
         debt = decode_publication_cleanup_debt(value["cleanup"], reference)
     except FilePublicationWireError:
         raise FilePublicationControlError from None
-    if not isinstance(debt._debt, PublicationStageCleanupDebt):
+    if not _reconciled_cleanup_shape(debt):
         raise FilePublicationControlError
     return FilePublicationReconcileResult(debt, deadline)
 

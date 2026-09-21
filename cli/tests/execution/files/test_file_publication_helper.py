@@ -38,6 +38,7 @@ from agentworks.execution._file_snapshot import read_snapshot
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._publication_receipt import (
+    PublicationReceiptFailureKind,
     PublicationStageCleanupDebt,
     _Identity,
     cleanup_publication_stage,
@@ -96,6 +97,32 @@ def uncertain_publish(*args,**kwargs):
   cleanup_debt=guest.PublicationCleanupDebt('untrusted-name',None,None),
  )
 guest.publish_file=uncertain_publish
+"""
+_FAIL_CLEANUP_BINDING_IDENTITY = """
+def fail_cleanup_binding_identity(*args,**kwargs):
+ raise guest._SafeFailure(
+  guest.FilePublicationFailureControl(guest.FilePublicationFailureCode.PARENT_REFUSED)
+ )
+guest._parent_identity=fail_cleanup_binding_identity
+"""
+_PROGRESS_CLEANUP_THEN_LOSE_BINDING_IDENTITY = """
+real_parent_identity=guest._parent_identity
+parent_identity_calls=[0]
+def fail_second_parent_identity(*args,**kwargs):
+ parent_identity_calls[0]+=1
+ if parent_identity_calls[0]==2:
+  raise guest._SafeFailure(
+   guest.FilePublicationFailureControl(guest.FilePublicationFailureCode.PARENT_REFUSED)
+  )
+ return real_parent_identity(*args,**kwargs)
+guest._parent_identity=fail_second_parent_identity
+def progressed_cleanup(scratch_parent_fd,publication_parent_fd,debt,*args,**kwargs):
+ guest.os.unlink(debt.name,dir_fd=publication_parent_fd)
+ raise guest.PublicationReceiptError(
+  guest.PublicationReceiptFailureKind.IO,
+  cleanup_debt=guest.PublicationStageCleanupDebt(debt._ownership,True),
+ )
+guest.cleanup_publication_stage=progressed_cleanup
 """
 _FAIL_AFTER_RECORD_REMOVAL = """
 publication=sys.modules['_agw_file_publication._file_publication']
@@ -655,7 +682,10 @@ def test_uncertain_primitive_failure_never_becomes_publication_or_cleanup_author
     plan: IdentityPlan,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    install_fixture_bundle(monkeypatch, _UNCERTAIN_PUBLICATION_WITH_UNIDENTIFIED_DEBT)
+    install_fixture_bundle(
+        monkeypatch,
+        _UNCERTAIN_PUBLICATION_WITH_UNIDENTIFIED_DEBT + _FAIL_CLEANUP_BINDING_IDENTITY,
+    )
     root = tmp_path / "approved"
     root.mkdir()
     content = b"content"
@@ -671,9 +701,59 @@ def test_uncertain_primitive_failure_never_becomes_publication_or_cleanup_author
     assert result.observation.revision is None and result.observation.cleanup_debt is None
     failure = result.observation.failure
     assert failure is not None and failure.publication_kind is PublicationFailureKind.UNCERTAIN
+    assert failure.publication_phase is PublicationPhase.PUBLICATION
     assert failure.cleanup_state is PublicationCleanupState.OWNERSHIP_UNCERTAIN
     assert not (root / "target").exists()
     _cleanup_scratch(root, ready)
+
+
+def test_progressed_cleanup_binding_loss_preserves_receipt_failure_and_effect(
+    tmp_path: Path,
+    plan: IdentityPlan,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_fixture_bundle(monkeypatch, _PROGRESS_CLEANUP_THEN_LOSE_BINDING_IDENTITY)
+    root = tmp_path / "approved"
+    root.mkdir()
+    parent_fd = open_parent(root)
+    try:
+        ready = ready_scratch(parent_fd, _TOKEN, b"content")
+        ownership, stage_fd = record_stage(parent_fd, ready, parent_fd)
+        os.close(stage_fd)
+        parent_stat = os.fstat(parent_fd)
+        debt = bind_publication_cleanup_debt(
+            ready._reference,
+            _Identity(parent_stat.st_dev, parent_stat.st_ino),
+            PublicationStageCleanupDebt(ownership, False),
+        )
+    finally:
+        os.close(parent_fd)
+
+    result = publication_cleanup(
+        LocalCarrier(),
+        trusted_root_path=str(root),
+        relative_path="target",
+        token=_TOKEN,
+        reference=ready._reference,
+        cleanup_debt=debt,
+        plan=plan,
+        deadline=Deadline.after(15),
+        runtime_path=sys.executable,
+    )
+
+    assert result.observation.state is FilePublicationObservationState.REFUSED
+    failure = result.observation.failure
+    assert failure is not None and failure.code is FilePublicationFailureCode.RECEIPT
+    assert failure.receipt_kind is PublicationReceiptFailureKind.IO
+    assert failure.cleanup_state is PublicationCleanupState.OWNERSHIP_UNCERTAIN
+    assert result.observation.cleanup_debt is None
+    assert not (root / publication_stage_name(_TOKEN)).exists()
+    parent_fd = open_parent(root)
+    try:
+        cleanup_publication_stage(parent_fd, parent_fd, PublicationStageCleanupDebt(ownership, True))
+        cleanup_scratch(parent_fd, ready)
+    finally:
+        os.close(parent_fd)
 
 
 def test_post_rename_record_failure_preserves_written_destination_as_uncertain(

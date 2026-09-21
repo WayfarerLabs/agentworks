@@ -124,9 +124,13 @@ def _bind_cleanup(
     debt: PublicationCleanupDebt | PublicationStageCleanupDebt,
 ) -> tuple[PublicationCleanupState, BoundPublicationCleanupDebt | None]:
     try:
+        parent = _parent_identity(parent_fd)
+    except _SafeFailure:
+        return PublicationCleanupState.OWNERSHIP_UNCERTAIN, None
+    try:
         return (
             PublicationCleanupState.EXACT,
-            bind_publication_cleanup_debt(request.reference, _parent_identity(parent_fd), debt),
+            bind_publication_cleanup_debt(request.reference, parent, debt),
         )
     except FilePublicationWireError:
         return PublicationCleanupState.OWNERSHIP_UNCERTAIN, None
