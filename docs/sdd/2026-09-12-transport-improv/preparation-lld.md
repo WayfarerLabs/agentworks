@@ -651,12 +651,13 @@ loader admission, not proof of every operation-specific prerequisite. Account-da
 filesystem features and launch mechanisms retain their existing operation-level checks. Selection
 and admission leave stdin untouched; helper entry preserves the original nonce argument.
 
-One bounded nonce-bound prerequisite record precedes the family transcript. A shared prefix sink
-consumes that record and, only on readiness, forwards subsequent bytes unchanged to the existing
-family sink, including partial writes and temporary sink stalls. A refusal never enters that
-collector; trailing bytes after refusal invalidate the prerequisite transcript. Closed observations
-are ready, missing, shim, unusable, unsupported version, missing required modules and unknown, with
-the selected path derived from a core-bound candidate index rather than guest diagnostic text.
+One bounded nonce-bound prerequisite record precedes the family transcript. For pipe I/O, a shared
+prefix sink consumes that record and, only on readiness, forwards subsequent bytes unchanged to the
+existing family sink, including partial writes and temporary sink stalls. A refusal never enters
+that collector; trailing bytes after refusal invalidate the prerequisite transcript. Closed
+observations are ready, missing, shim, unusable, unsupported version, missing required modules and
+unknown, with the selected path derived from a core-bound candidate index rather than guest
+diagnostic text.
 
 Each exchange keeps this prerequisite observation beside unchanged carrier facts. Its operation
 observation is absent when admission did not occur; readiness itself is not application start or
@@ -687,6 +688,30 @@ this separate transformation. Terminal composition must prove prerequisite obser
 payload gate under actual initial terminal settings. Keep the non-terminal parser strict and
 application bytes unchanged after handoff; do not normalize the guest output stream to make a
 readiness fixture pass. This is a local mechanism finding, not native terminal acceptance.
+
+Further local PTY checks at `d95a5c47` observed the same selector emit LF with output processing
+disabled, CRLF under default settings, and an entirely uppercase CRLF record with `OLCUC` enabled.
+The existing terminal handoff tests already require uppercase-output-mode support. Extend the
+existing readiness sink with one bounded prerequisite phase: suppress setup noise, recognize the
+bound nonce, and accept only the exact canonical or entirely uppercase control-record spelling with
+LF or CRLF. Normalize that record alone before the shared closed decoder. A malformed, oversized or
+truncated nonce-bound candidate fails closed; a later record cannot repair it. Reuse one generated
+nonce, lowercase for runtime admission and uppercase for the existing terminal markers.
+
+Runtime readiness only advances to waiting for payload readiness. Bootstrap bytes remain withheld
+until the guest helper has configured raw mode and supplied its existing payload-ready marker.
+Preserve split/coalesced records, downstream partial writes and stalls, and exact application bytes
+after handoff. A complete terminal refusal is an immutable observed control-record fact and stops
+the endpoint without releasing bootstrap bytes. It does not claim the pipe collector's whole-stream
+validation: terminal setup noise is already permitted, and immediate refusal prevents observing all
+later output. Later terminal failure or temporary-buffer disposal must not erase that prerequisite
+fact.
+
+Preparation remains separate from carrier integration. The transport-owned execution wrapper must
+finalize readiness when the carrier attempt ends, including a truncated pre-handoff stream; the SSH
+carrier does not parse these control records. The inspected SSH snapshot `34a4eb71` has no terminal
+endpoint or production caller of this preparation helper. Candidate tests therefore cannot stand in
+for the joint terminal implementation and native acceptance gates.
 
 ## Public result and check behavior
 

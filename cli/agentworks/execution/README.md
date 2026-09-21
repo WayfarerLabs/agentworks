@@ -435,8 +435,9 @@ permission to remove an object.
 Carrier facts remain separate from file evidence. Lost, partial, noisy or substituted replies cannot
 establish publication or cleanup, and no exchange retries automatically. A final descriptor-close
 deadline flag can accompany confirmed publication, recovered ownership or completed cleanup without
-erasing that effect. Requests and replies remain sensitive and bounded. Full uploads, FileAccess,
-operation ownership and native carrier acceptance remain separate work.
+erasing that effect. Requests and replies remain sensitive and bounded. Complete upload composition
+lives separately in `_file_upload.py`; FileAccess, production operation admission and native carrier
+acceptance remain unfinished.
 
 ## Private file coordination
 
@@ -450,6 +451,20 @@ Production composition must provide database-backed operation ownership across p
 operations and retain unresolved ownership after loss of remote observation. That composition is not
 enabled here. These private helpers are not safe to expose as an uncoordinated public file service.
 Neither a caller crash nor a missing scratch receipt proves remote mutation has stopped.
+
+`agentworks.operations.OperationOwner` wraps one exact database claim with a serial borrow for the
+whole nested operation. Its first attempt commits possible dispatch before returning permission to
+send work. Later attempts reuse the durable claim. Explicit close stops admission and refuses while
+a borrow or unresolved attempt remains; it does not infer remote quiescence from local return.
+
+`_file_upload.py` composes staging, finite source consumption, publication and ordered cleanup under
+one borrowed owner. It consumes bounded chunks without rewinding or retaining the whole source and
+checks exact EOF before publication. Follow-on calls require independently observed normal-zero
+completion of the supported nonspawning helper chain, or evidence that the previous attempt was not
+sent. Missing completion stops further calls, including cleanup. Publication evidence, remaining
+cleanup obligations and possible future effects are distinct. The caller retains the original
+binding and token for unresolved work. These private mechanics do not acquire production ownership
+before activation or provide crash recovery.
 
 ## Private object observation and removal
 
@@ -601,9 +616,10 @@ Local tests exercise the actual request serializer, a fake provider executing th
 Windows SSH command-line sizing for explicit fixtures. Those measurements do not establish native
 platform acceptance or fit for every connection/identity prefix.
 
-These entries are not complete upload or FileAccess operations. Whole-download and publication
-composition remain unfinished. The caller must retain the token, original binding and known
-references; an unavailable creation reply does not establish absence or quiescence.
+These entries are individual exchanges, not FileAccess operations. Private upload composition uses
+them through `_file_upload.py`; whole-download composition remains unfinished. The caller must
+retain the token, original binding and known references; an unavailable creation reply does not
+establish absence or quiescence.
 
 `_scratch_root.py` opens the fixed Linux `/tmp` directory without following symlinks and requires
 UID 0 and mode 01777. It creates and repairs nothing, ignores environment-selected temporary paths,

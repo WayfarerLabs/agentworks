@@ -308,6 +308,11 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       identity and bundle-sizing tests to admitted entrypoints. At `925cbdbf` there are no
       production callers; confirm sibling SSH callers before removal rather than retaining a bypass
       solely for tests.
+- [ ] Admit terminal preparation through the shared runtime selector with a bounded terminal-only
+      control-record adapter. Prove LF/CRLF and existing uppercase-output-mode support under real
+      local PTY settings without relaxing pipe parsing or releasing payload before raw-mode
+      readiness. Keep carrier terminal integration, transport-owned finalization and native proof as
+      separate acceptance gates.
 - [x] Implement private revision-aware publication with explicit Create/Replace/Match conditions,
       bounded streaming from verified scratch, stat-only observations without old-content reads, and
       a content-bound post-publication revision. At `75aaaa5e`, all three private lanes are clean
@@ -429,6 +434,13 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       acceptance from a locally serialized command or an invalid-request bootstrap probe.
 - [ ] Jointly accept and prove the privately implemented carrier sink extension with the SSH owner
       before enabling its production use or exposing it through RunContext.
+- [ ] Review and prove complete private upload under a borrowed core operation owner. Cover one
+      durable claim across staging, finite source consumption, publication and ordered cleanup;
+      preserve prerequisite refusals, failure-carried debt and uncertain completion without replay.
+      The candidate at `1fa2614d` passes 969 local file/owner tests, but private review found
+      inactive settlement authority, lost refusal debt, exception-context disclosure and misleading
+      result accounting. Correct those boundaries and add regressions before accepting this
+      increment.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
       access. The models-only checkpoint is not additive-surface completion.
 
