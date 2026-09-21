@@ -1276,6 +1276,25 @@ uses short explicit IDs, preserving all inputs, assertions and Windows coverage.
 complexity reviews are clean; all 35 identity tests pass locally. All hosted checks pass in run
 `35598300799`, including Windows 3.13 and Linux 3.12/3.13/3.14.
 
+### File values and owned composition checkpoint
+
+- [ ] Implement the frozen public file values and opaque revision conversion described in the file
+      LLD. Reuse the existing versioned revision schema, validate consistent metadata and
+      content-bound read results, and preserve payload privacy and portable module imports. These
+      values do not establish remote evidence or activate permissions.
+- [ ] Compose bounded read, stat, inventory, conditional removal and metadata operations under one
+      borrowed operation owner and deadline. Metadata name resolution and mutation share that
+      borrow; record observations before settlement and retain ownership on unresolved effects or
+      coordination failure. Preserve partial mutation separately from deadline and termination.
+- [ ] Bind these primitives into the complete public FileAccess surface with typed error reduction,
+      exact-operation path confinement and safe target/phase diagnostics. Complete production
+      ownership, local download publication, directory transfer and native acceptance remain
+      required; these private building blocks do not close those gates.
+- [ ] Use the owned snapshot/chunk download for general in-memory reads, preserving caller byte
+      bounds independently of QGA's single-response capacity. Keep the no-staging readiness read
+      separately bound before dispatch; prove its complete encoded response fits the selected
+      route. Do not retry a failed direct read through staging after uncertain observation.
+
 ### Buffered execution result checkpoint
 
 - [x] Implement safe immutable application result values, honest wait/exit/signal precision and one

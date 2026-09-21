@@ -80,11 +80,30 @@ regular file and overwrites it unconditionally; it is not the default for read/m
 observation evidence, not authority. It contains object kind, filesystem/object identity, size,
 timestamps, mode, owner, and group. A regular-file snapshot also binds its content digest.
 
+The first token format reuses the private version-1 revision fragment: compact, sorted-key ASCII
+JSON encoded as exact bytes. Construction decodes the existing closed schema and requires a
+canonical byte-for-byte round trip, rejecting unknown versions, extra or duplicate fields and
+encodings outside that canonical form. The token has a 4,096-byte structural bound, independent of
+file size. Only private conversion code interprets it; callers retain and return the opaque
+`Revision`. Public metadata reports permission bits separately from object kind, while the token
+retains the full observed mode. Every metadata field must agree with its revision. A `ReadResult`
+additionally requires a regular-file revision whose size and digest match its exact contents; stat
+and inventory observations need not have a content digest. A caller-constructed consistent value
+does not prove remote observation or grant authority.
+
 Every in-memory read has a positive caller-selected byte bound; a product default may be offered,
 but there is no universal total-file ceiling. Streaming upload declares its exact finite size, and
 download obtains a finite size from the held source snapshot before transferring. Chunk buffers
 remain bounded. Directory inventory defaults to 1,024 entries, depth 1, and 1 MiB encoded; reviewed
 callers may request up to 4,096 entries, depth 8, and 4 MiB encoded.
+
+Ordinary `read_file` composes the owned snapshot/chunk download into a bounded in-memory sink.
+This preserves the caller's byte bound without requiring one carrier response to contain the whole
+file. The complete source revision, verified bytes, deadline and scratch cleanup must agree before
+returning a public result. Readiness binds the separate no-staging inline read described below,
+with a proved response bound selected before dispatch. An oversized or lost observation never
+triggers a retry through another read mechanism. This selection is an operation constraint, not
+deferred permission enforcement.
 
 `FileAccess` exposes only these forms:
 
@@ -703,6 +722,16 @@ serial-use guard covers an entire public file call across user/admin views, incl
 read/merge/publication and cleanup, not just individual exchanges. Private file composition owns the
 upload token, original destination binding, content references and cleanup debt. These values are
 working state, not another claim lifetime or a generic transaction framework.
+
+The single-exchange read, stat, inventory and removal compositions use the same serial borrowing
+rule as upload, download and JSON. Metadata convergence holds one borrow across the fixed
+owner/group lookup and the subsequent mutation. It records lookup facts before settling that
+attempt, and may advance only after successful resolution, normal helper termination and a fresh
+check of the same deadline. Local option validation precedes the lookup. No helper in this group
+creates transfer scratch; known partial mutation and unresolved remote effects still remain
+independent outcome facts. Closing a borrow never releases the outer claim, including when an
+exception escapes. These private compositions do not implement the public error reduction or
+production RunContext binding by themselves.
 
 The concrete core owner permits one active serial borrower and one outstanding attempt. Before
 dispatch, the borrower records unresolved state in memory, then commits the first possible-dispatch
