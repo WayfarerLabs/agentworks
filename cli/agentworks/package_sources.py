@@ -328,7 +328,13 @@ class PackageCapture:
                 continue
         return size
 
-    def _run(self, repository: Path, *args: str, output_limit: int | None = None) -> bytes:
+    def _run(
+        self,
+        repository: Path,
+        *args: str,
+        output_limit: int | None = None,
+        check_storage_while_running: bool = True,
+    ) -> bytes:
         self.check()
         maximum = self.limits.member_bytes if output_limit is None else output_limit
         command = [
@@ -374,9 +380,8 @@ class PackageCapture:
             try:
                 while process.poll() is None:
                     self.check()
-                    size = self._storage_size()
                     if (
-                        size > self.limits.storage_bytes
+                        (check_storage_while_running and self._storage_size() > self.limits.storage_bytes)
                         or os.fstat(stdout.fileno()).st_size > maximum
                         or os.fstat(stderr.fileno()).st_size > self.limits.member_bytes
                     ):
@@ -415,7 +420,10 @@ class PackageCapture:
         if key not in self._repositories:
             repository = self.root / str(len(self._repositories))
             repository.mkdir()
-            self._run(repository, "init", "--bare", "--template=")
+            # Empty bare initialization has fixed local growth. Let it release
+            # its directory handles before rejecting an undersized limit;
+            # remote acquisition remains continuously monitored below.
+            self._run(repository, "init", "--bare", "--template=", check_storage_while_running=False)
             self._run(
                 repository,
                 "fetch",
