@@ -304,15 +304,15 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       the identity transition encloses selection, prerequisite evidence is independent, and helper
       observations are absent without READY. All three private lanes are clean at `925cbdbf`.
       Terminal, native and production composition remain separate gates.
-- [ ] Retire the direct-runtime `build_helper_argv` constructor after converting its remaining
-      identity and bundle-sizing tests to admitted entrypoints. At `925cbdbf` there are no
-      production callers; confirm sibling SSH callers before removal rather than retaining a bypass
-      solely for tests.
-- [ ] Admit terminal preparation through the shared runtime selector with a bounded terminal-only
+- [x] Retire the direct-runtime constructors and convert their remaining identity and bundle-sizing
+      tests to admitted entrypoints. Private review at `02e8498a` confirms no remaining Python
+      callers. The sibling SSH audit at `34a4eb71` also found no callers; complete runtime selector
+      and identity prefixes remain in provider-size measurements.
+- [x] Admit terminal preparation through the shared runtime selector with a bounded terminal-only
       control-record adapter. Prove LF/CRLF and existing uppercase-output-mode support under real
       local PTY settings without relaxing pipe parsing or releasing payload before raw-mode
-      readiness. Keep carrier terminal integration, transport-owned finalization and native proof as
-      separate acceptance gates.
+      readiness. All three private lanes accept this terminal slice at `02e8498a`. Carrier terminal
+      integration, transport-owned finalization and native proof remain separate acceptance gates.
 - [x] Implement private revision-aware publication with explicit Create/Replace/Match conditions,
       bounded streaming from verified scratch, stat-only observations without old-content reads, and
       a content-bound post-publication revision. At `75aaaa5e`, all three private lanes are clean
@@ -434,15 +434,31 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       acceptance from a locally serialized command or an invalid-request bootstrap probe.
 - [ ] Jointly accept and prove the privately implemented carrier sink extension with the SSH owner
       before enabling its production use or exposing it through RunContext.
-- [ ] Review and prove complete private upload under a borrowed core operation owner. Cover one
+- [x] Review and prove complete private upload under a borrowed core operation owner. Cover one
       durable claim across staging, finite source consumption, publication and ordered cleanup;
       preserve prerequisite refusals, failure-carried debt and uncertain completion without replay.
-      The candidate at `1fa2614d` passes 969 local file/owner tests, but private review found
-      inactive settlement authority, lost refusal debt, exception-context disclosure and misleading
-      result accounting. Correct those boundaries and add regressions before accepting this
-      increment.
+      All three private lanes accept `faf99365`. Corrections cover inactive settlement authority,
+      lost refusal debt, exception-context disclosure, byte accounting, canonical option validation,
+      helper deadlines and actual-dispatch admission. The final deterministic interruption
+      regression detects the old reporting gap between durable ownership and local attempt-handle
+      assignment. This is private composition, not production FileAccess or recovery acceptance.
+- [ ] Compose complete private JSON updates through the existing read/stat and upload helpers under
+      one borrowed operation. Factor borrowed upload so a JSON call never releases and reacquires
+      ownership between snapshot and publication. Validate source before target I/O, avoid old-byte
+      reads for replace/skip, preserve all four strategies and retry only proved condition conflicts
+      within eight attempts and the original deadline. No uncertain dispatch, retained cleanup debt
+      or missing termination evidence permits replay. Public FileAccess/result conversion and
+      production ownership remain separate required gates.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
       access. The models-only checkpoint is not additive-surface completion.
+
+The owned-upload and terminal increment is privately reviewed at `faf99365`. Its complete local
+suite passes 12,126 tests with 13 skips; Ruff/format and full mypy (1024 sources) pass. Final
+focused reviews verify the interruption regression against the old assignment boundary, not merely
+the new code's success. The publication bundle's current prefix is 36,372 bytes and the measured
+complete long-path QGA body is 50,783 bytes, below the unchanged 65,536-byte bound. These are local
+serialization and helper results, not native carrier acceptance. Production ownership/recovery,
+complete FileAccess, terminal carrier integration, lifecycle and additive RunContext remain open.
 
 The publication and account-runtime increment has clean project, complexity and generic correctness
 reviews for the runtime at `66aa55d8`. The full local suite passes 12,050 tests with 13 skips;
