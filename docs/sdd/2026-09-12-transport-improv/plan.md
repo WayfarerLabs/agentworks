@@ -388,7 +388,7 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       production bundle's complete carrier sizing before accepting its delivery representation, then
       fault-test lost replies and partial observations through the exchange. This slice does not
       itself complete upload orchestration, FileAccess or production operation ownership.
-- [ ] Replace argv-embedded fixed file bundles with the reviewed bounded stdin-prefix delivery. Keep
+- [x] Replace argv-embedded fixed file bundles with the reviewed bounded stdin-prefix delivery. Keep
       one fixed codec and one invocation, verify the core-fixed length/digest before decoding or
       executing the prefix, and leave request bytes solely to the operation parser. Exercise all
       existing file families, fragmented/short/corrupt prefixes, exact manifest boundaries,
@@ -398,6 +398,20 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       before enabling its production use or exposing it through RunContext.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
       access. The models-only checkpoint is not additive-surface completion.
+
+Fixed file delivery has three clean private reviews at `72897a31`, with 11,958 full-suite passes and
+13 skips. The six production bundles produce parsed invalid-request transcripts under distribution
+Python 3.11. Successful operation tests separately cover every family: object/inventory use the
+production bundle, read/metadata/stage add trusted test entrypoints, and snapshot also redirects its
+scratch parent. These local measurements do not establish native SSH/QGA acceptance.
+
+The packaged prefixes measure 12,024 to 27,524 bytes. Complete Windows SSH command strings measure
+1,823 to 1,968 characters across the representative connection and all three identity modes.
+Complete QGA JSON bodies with a synthetic 32 KiB ASCII manifest measure 45,691 to 61,336 bytes; that
+payload is a sizing fixture, not a valid-operation proof or a guarantee about every escaped
+manifest. Oversized complete bodies refuse before wire access. Review removed a duplicate stage-size
+test and collapsed fixture setup into one patch input without dropping fault coverage. Publication
+delivery, joint SSH proof, module readiness and public FileAccess remain open.
 
 The [operator ruling](frd.md#file-safety-and-guest-runtime-rulings) approves adding `python3` to
 early guest provisioning, with helper code compatible with Bookworm's distribution Python. The
