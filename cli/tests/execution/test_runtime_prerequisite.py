@@ -94,7 +94,14 @@ def _run(
 
 def _run_trampoline(preamble: str) -> tuple[RuntimePrerequisiteObservation, _Sink, _Sink, ProcessResult]:
     helper = "import os\nos.write(1,b'helper-entered')\n"
-    harness = preamble + "\nexec(compile(" + repr(_runtime_prerequisite._TRAMPOLINE) + ",'<runtime-test>','exec'))\n"
+    # Exercise Windows text translation on every test host; protocol output is binary.
+    harness = (
+        "import sys\nsys.stdout.reconfigure(newline='\\r\\n')\n"
+        + preamble
+        + "\nexec(compile("
+        + repr(_runtime_prerequisite._TRAMPOLINE)
+        + ",'<runtime-test>','exec'))\n"
+    )
     output = _Sink()
     stderr = _Sink()
     prefix = RuntimePrefixSink(_NONCE, (sys.executable,), output)
@@ -178,6 +185,17 @@ def test_target_os_selects_fixed_candidates_without_host_inference() -> None:
     assert linux_shim is None
     assert darwin_candidates == ("/opt/homebrew/bin/python3", "/usr/local/bin/python3")
     assert darwin_shim == "/usr/bin/python3"
+
+
+@pytest.mark.windows
+def test_ready_trampoline_preserves_binary_record_before_helper_output() -> None:
+    observation, output, stderr, result = _run_trampoline("")
+
+    assert observation == RuntimePrerequisiteObservation(RuntimePrerequisiteState.READY, sys.executable)
+    assert bytes(output.data) == b"helper-entered"
+    assert not stderr.data
+    assert result.failure is None
+    assert result.exit_status == 0
 
 
 @pytest.mark.windows

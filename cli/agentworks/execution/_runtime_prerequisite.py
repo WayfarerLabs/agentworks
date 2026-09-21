@@ -25,17 +25,17 @@ n=sys.argv[1]
 i=sys.argv[2]
 s=sys.argv[3]
 if sys.version_info < (3,11):
- sys.stdout.write('AGW_RUNTIME_1:%s:unsupported_version:%s\n' % (n,i))
- sys.stdout.flush()
+ sys.stdout.buffer.write(('AGW_RUNTIME_1:%s:unsupported_version:%s\n' % (n,i)).encode('ascii'))
+ sys.stdout.buffer.flush()
 else:
  try:
   import base64,bz2,hashlib,json,os,sys,types
  except ImportError:
-  sys.stdout.write('AGW_RUNTIME_1:%s:missing_modules:%s\n' % (n,i))
-  sys.stdout.flush()
+  sys.stdout.buffer.write(('AGW_RUNTIME_1:%s:missing_modules:%s\n' % (n,i)).encode('ascii'))
+  sys.stdout.buffer.flush()
  else:
-  sys.stdout.write('AGW_RUNTIME_1:%s:ready:%s\n' % (n,i))
-  sys.stdout.flush()
+  sys.stdout.buffer.write(('AGW_RUNTIME_1:%s:ready:%s\n' % (n,i)).encode('ascii'))
+  sys.stdout.buffer.flush()
   sys.argv=['agentworks-fixed-helper',n]
   exec(compile(s,'<agentworks-fixed-helper>','exec'),{'__name__':'__main__'})
 """
