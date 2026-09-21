@@ -22,6 +22,7 @@ from agentworks.execution._runtime_prerequisite import (
 )
 from agentworks.execution.carrier import PreparedInvocation
 from agentworks.execution.carriers.ssh.connection import SSHConnection, build_ssh_argv
+from agentworks.execution.carriers.ssh.trust import SSHTrustFiles
 
 _LINUX_ONLY = pytest.mark.skipif(sys.platform != "linux", reason="Linux file helper")
 
@@ -217,13 +218,14 @@ def test_snapshot_helper_retains_windows_and_qga_delivery_headroom() -> None:
         )[0]
     )
     native_root = Path(Path.cwd().anchor)
+    trust = SSHTrustFiles((native_root / "keys" / "known-hosts",))
     connection = SSHConnection(
         "host.example",
         "agent",
         native_root / "keys" / "identity",
-        native_root / "keys" / "known-hosts",
+        trust,
     )
-    ssh_argv = build_ssh_argv(connection, invocation)
+    ssh_argv = build_ssh_argv(connection, invocation, trust=trust)
     windows_command = subprocess.list2cmdline(ssh_argv)
     qga_body = json.dumps(
         {"command": invocation.argv, "input-data": (FIXED_BUNDLE.prefix + request).decode("ascii")}
