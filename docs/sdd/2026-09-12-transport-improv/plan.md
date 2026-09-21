@@ -299,6 +299,15 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       facts and account results. Private review at `66aa55d8` is clean; synthetic faults execute the
       actual trampoline and detect removal of its checks. File, inline, terminal and native adoption
       remain part of the open integration gate above.
+- [x] Apply the same private runtime admission to all seven file families and buffered inline
+      execution. Seventeen file entrypoints and inline preparation now require `RuntimeSelection`;
+      the identity transition encloses selection, prerequisite evidence is independent, and helper
+      observations are absent without READY. All three private lanes are clean at `925cbdbf`.
+      Terminal, native and production composition remain separate gates.
+- [ ] Retire the direct-runtime `build_helper_argv` constructor after converting its remaining
+      identity and bundle-sizing tests to admitted entrypoints. At `925cbdbf` there are no
+      production callers; confirm sibling SSH callers before removal rather than retaining a bypass
+      solely for tests.
 - [x] Implement private revision-aware publication with explicit Create/Replace/Match conditions,
       bounded streaming from verified scratch, stat-only observations without old-content reads, and
       a content-bound post-publication revision. At `75aaaa5e`, all three private lanes are clean
@@ -461,6 +470,22 @@ both deterministic builds. Representative account Windows command strings now me
 characters for Linux/Darwin selection. All hosted checks, including Windows, pass on `6d066728` in
 [run 35576186411](https://github.com/WayfarerLabs/agentworks/actions/runs/35576186411). This CI
 correction neither expands supported workload platforms nor consumes a public feedback round.
+
+The file and inline admission increment has clean project, complexity and generic correctness
+reviews at `925cbdbf`. Its full suite passes 12,062 tests with 13 skips; Ruff/format, full mypy
+(1018 sources), file lint, locked-SDD and rulesync gates pass. Review fixed a Windows workstation
+path leaking into synthetic Linux selection, narrowed optional observations explicitly in tests, and
+reduced inline reader finalization to one call on normal and exceptional paths. The independent
+project lane also exercised 42 Windows-selected tests with a synthetic Windows interpreter path.
+This is portability evidence, not native Windows or provider acceptance.
+
+Complete representative Windows SSH commands now measure 3,677 to 3,836 characters across the seven
+file bundles and direct/root/demoted identity modes. QGA size guards continue to include the
+complete runtime launcher and serialized request. Neither measurement proves native execution. The
+read-only SSH audit at `34a4eb71` found 13 file exchanges requiring explicit selection and
+optional-observation adaptation; SSH-owned code remains untouched. Terminal runtime composition,
+complete file workflows, core ownership/recovery, lifecycle and additive RunContext remain open. No
+public feedback round is consumed by this private increment.
 
 Fixed file delivery has three clean private reviews at `72897a31`, with 11,958 full-suite passes and
 13 skips. The six production bundles produce parsed invalid-request transcripts under distribution
