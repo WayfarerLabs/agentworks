@@ -200,11 +200,46 @@ def test_diagnostics_drain_before_and_after_readiness(synthetic: SyntheticForwar
     )
     with synthetic.open() as resource:
         assert resource.wait() == 23
+        assert resource._terminal is not None
+        assert resource._terminal.exit_status == resource._terminal.local_status == 23
+    synthetic.assert_closed()
+
+
+def test_natural_exit_with_held_stdin_retains_natural_status(synthetic: SyntheticForwarding) -> None:
+    synthetic.script = "os.write(1,marker); time.sleep(.05); sys.exit(23)"
+
+    resource = synthetic.open()
+    assert synthetic.children[-1].stdin is not None and not synthetic.children[-1].stdin.closed
+    assert resource.wait() == 23
+    assert resource._terminal is not None
+    assert resource._terminal.exit_status == resource._terminal.local_status == 23
+    assert resource._terminal.cleaned
+    synthetic.assert_closed()
+
+
+def test_forward_dispatch_failure_retains_only_safe_evidence(
+    synthetic: SyntheticForwarding, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spawn = subprocess.Popen
+
+    def fail_forward(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        if argv[-1] == "-V":
+            return spawn(argv, **kwargs)
+        raise OSError("private-forward-dispatch-canary")
+
+    monkeypatch.setattr(subprocess, "Popen", fail_forward)
+
+    with pytest.raises(ForwardingError) as caught:
+        synthetic.open()
+
+    assert caught.value.failure == Failure.DISPATCH
+    assert caught.value.local_status is None
+    assert "private-forward-dispatch-canary" not in repr(caught.value)
     synthetic.assert_closed()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="waitpid ownership is POSIX-specific")
-def test_lost_wait_status_never_becomes_forwarding_exit_zero() -> None:
+def test_lost_wait_status_never_becomes_forwarding_exit_zero(monkeypatch: pytest.MonkeyPatch) -> None:
     process = subprocess.Popen(
         [sys.executable, "-c", "import sys; sys.exit(23)"],
         stdin=subprocess.PIPE,
@@ -212,11 +247,10 @@ def test_lost_wait_status_never_becomes_forwarding_exit_zero() -> None:
         stderr=subprocess.PIPE,
     )
     os.waitpid(process.pid, 0)
-    status = process_core._ProcessStatus(process)
-    assert status.poll() is None and status.lost
-    assert process.returncode == 0  # Internal destructor bookkeeping only.
-    resource = forwarding.OwnedForwarding(status, b"unused\n")
-    resource._thread.start()
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+    owner = process_core.LocalProcessOwner()
+    resource = forwarding.OwnedForwarding(owner, b"unused\n")
+    resource._start(process_core.LocalProcessRequest(("unused",), True))
 
     with pytest.raises(ForwardingError) as caught:
         resource.wait()
@@ -224,6 +258,8 @@ def test_lost_wait_status_never_becomes_forwarding_exit_zero() -> None:
     assert caught.value.failure == Failure.OBSERVATION
     assert caught.value.local_status is None
     assert not resource._thread.is_alive()
+    assert resource._terminal is not None
+    assert resource._terminal.observation_failed and not resource._terminal.cleaned
     assert all(pipe is None or pipe.closed for pipe in (process.stdin, process.stdout, process.stderr))
 
 
@@ -264,7 +300,37 @@ def test_read_error_closes_owned_client(synthetic: SyntheticForwarding, monkeypa
     with pytest.raises(ForwardingError) as caught:
         resource.wait()
     assert caught.value.failure == Failure.OUTPUT
+    assert resource._terminal is not None
+    assert resource._terminal.exit_status is None
+    assert resource._terminal.local_status is not None
     assert not resource._thread.is_alive()
+    synthetic.assert_closed()
+
+
+def test_owner_interruption_before_pipe_publication_retains_cleanup(
+    synthetic: SyntheticForwarding, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workers: list[threading.Thread] = []
+    original_start = threading.Thread.start
+
+    def capture_start(worker: threading.Thread) -> None:
+        workers.append(worker)
+        original_start(worker)
+
+    def interrupt_publication(
+        owner: process_core.LocalProcessOwner,
+        pipes: process_core.LocalProcessPipes,
+    ) -> None:
+        raise KeyboardInterrupt("owner-publication-boundary")
+
+    monkeypatch.setattr(threading.Thread, "start", capture_start)
+    monkeypatch.setattr(process_core.LocalProcessOwner, "_publish_ready", interrupt_publication)
+
+    with pytest.raises(ForwardingError) as caught:
+        synthetic.open()
+
+    assert caught.value.failure == Failure.OBSERVATION
+    assert all(not worker.is_alive() for worker in workers)
     synthetic.assert_closed()
 
 
@@ -285,24 +351,32 @@ def test_pipe_setup_error_closes_before_returning(
     synthetic.assert_closed()
 
 
-def test_delayed_cleanup_reports_uncertainty_within_join_bound(
+def test_delayed_worker_exit_reports_uncertainty_without_losing_process_cleanup(
     synthetic: SyntheticForwarding, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     release = threading.Event()
-    original = process_core._cleanup
+    blocked = threading.Event()
+    original = forwarding.OwnedForwarding._read
 
-    def delayed(status: process_core._ProcessStatus) -> bool:
-        release.wait(timeout=5)
-        return original(status)
+    def delayed(self: forwarding.OwnedForwarding, pipe: Any) -> bytes | None:
+        chunk = original(self, pipe)
+        if self._ready.is_set() and not release.is_set():
+            blocked.set()
+            release.wait(timeout=5)
+        return chunk
 
-    monkeypatch.setattr(forwarding, "_cleanup", delayed)
+    synthetic.script = "os.write(1,marker); os.write(2,b'x'); sys.stdin.buffer.read()"
+    monkeypatch.setattr(forwarding.OwnedForwarding, "_read", delayed)
     resource = synthetic.open()
+    assert blocked.wait(timeout=2)
     started = time.monotonic()
     try:
         with pytest.raises(ForwardingError) as caught:
             resource.close()
         assert caught.value.failure == Failure.OBSERVATION
         assert time.monotonic() - started < 2
+        assert resource._terminal is not None and resource._terminal.cleaned
+        synthetic.assert_closed()
     finally:
         release.set()
         resource.close()
@@ -386,7 +460,7 @@ def test_installed_ssh_readiness_does_not_claim_destination_health(local_sshd: S
     with open_local_forwards(local_sshd, [spec], deadline=Deadline.after(5)) as resource:
         with socket.create_connection(("127.0.0.1", spec.local_port), timeout=2) as peer:
             assert peer.recv(1) == b""
-        assert resource._process.poll() is None
+        assert resource._owner.snapshot().exit_status is None
 
 
 @pytest.mark.integration
@@ -528,6 +602,7 @@ def test_thread_start_interruption_retains_worker_ownership(
         with pytest.raises(interruption) as caught:
             synthetic.open()
         assert not any(worker.is_alive() for worker in workers)
+        assert len(synthetic.calls) == 1
         if not after_start:
             assert caught.value.__notes__
         synthetic.assert_closed()
@@ -535,3 +610,97 @@ def test_thread_start_interruption_retains_worker_ownership(
         for worker in workers:
             if worker.ident is not None:
                 worker.join(timeout=2)
+
+
+def test_ordinary_thread_start_failure_is_safe_observation(
+    synthetic: SyntheticForwarding, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_start(worker: threading.Thread) -> None:
+        raise RuntimeError("private-thread-start-canary")
+
+    monkeypatch.setattr(threading.Thread, "start", fail_start)
+
+    with pytest.raises(ForwardingError) as caught:
+        synthetic.open()
+
+    assert caught.value.failure == Failure.OBSERVATION
+    assert "private-thread-start-canary" not in repr(caught.value)
+    assert len(synthetic.calls) == 1
+    synthetic.assert_closed()
+
+
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit])
+def test_post_admission_interruption_never_admits_pipe_borrowing(
+    synthetic: SyntheticForwarding,
+    monkeypatch: pytest.MonkeyPatch,
+    interruption: type[BaseException],
+) -> None:
+    original_admit = process_core.LocalProcessOwner._admit
+    original_read = forwarding.OwnedForwarding._read
+    workers: list[threading.Thread] = []
+    reads = 0
+
+    def interrupt_after_admit(
+        owner: process_core.LocalProcessOwner,
+        request: process_core.LocalProcessRequest,
+    ) -> bool:
+        original_admit(owner, request)
+        raise interruption("post-admission-boundary")
+
+    def count_read(self: forwarding.OwnedForwarding, pipe: Any) -> bytes | None:
+        nonlocal reads
+        reads += 1
+        return original_read(self, pipe)
+
+    original_start = threading.Thread.start
+
+    def capture_start(worker: threading.Thread) -> None:
+        workers.append(worker)
+        original_start(worker)
+
+    monkeypatch.setattr(process_core.LocalProcessOwner, "_admit", interrupt_after_admit)
+    monkeypatch.setattr(forwarding.OwnedForwarding, "_read", count_read)
+    monkeypatch.setattr(threading.Thread, "start", capture_start)
+
+    with pytest.raises(interruption, match="post-admission-boundary"):
+        synthetic.open()
+
+    assert reads == 0
+    assert all(not worker.is_alive() for worker in workers)
+    synthetic.assert_closed()
+
+
+def test_repeated_close_interruptions_preserve_first_and_finish_cleanup(
+    synthetic: SyntheticForwarding,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_drain = forwarding.OwnedForwarding._drain
+    original_join = threading.Thread.join
+    first = KeyboardInterrupt("first-close-control")
+    second = SystemExit("second-close-control")
+    interruptions = iter((first, second))
+
+    def delayed_return(self: forwarding.OwnedForwarding) -> None:
+        original_drain(self)
+        time.sleep(0.05)
+
+    def interrupt_join(worker: threading.Thread, timeout: float | None = None) -> None:
+        if worker.name == "ssh-forwarding":
+            try:
+                raise next(interruptions)
+            except StopIteration:
+                pass
+        original_join(worker, timeout)
+
+    monkeypatch.setattr(forwarding.OwnedForwarding, "_drain", delayed_return)
+    monkeypatch.setattr(threading.Thread, "join", interrupt_join)
+    resource = synthetic.open()
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        resource.close()
+
+    assert caught.value is first
+    resource.close()
+    assert resource._terminal is not None and resource._terminal.cleaned
+    assert not resource._thread.is_alive()
+    synthetic.assert_closed()
