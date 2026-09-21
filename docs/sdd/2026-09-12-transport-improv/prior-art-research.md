@@ -931,6 +931,22 @@ required. Operation-family splitting can shrink range and cleanup bundles, but c
 source-copy bundle's dependencies. Final requests and supported connection prefixes still need
 measured bounds.
 
+### Publication helper delivery sizing
+
+At `5f68ab1e`, the publication dependencies, framing and existing scratch/revision wire fragments
+produce a 30,398-character loader and a 31,612-character Windows SSH command with the same explicit
+demotion shape, before adding the publication protocol and dispatcher. The measurement excludes the
+unused read-protocol module. This leaves little room; the complete production exchange must be
+measured rather than inferred from the smaller test dispatcher.
+
+A local representation experiment retained the same `bz2` bytes and fixed loader, replacing only
+base64 armoring with standard-library base85. The loader became 28,520 characters and the serialized
+Windows SSH command 29,734 characters. Both loaders imported the entire selected module family under
+isolated distribution Python 3.11 with exit zero and no output. This is a possible bounded
+representation adjustment, not an adopted codec option or proof of the missing exchange. It adds no
+executable staging. Actual dispatcher execution, complete requests, all supported prefixes and
+native carrier acceptance remain required before selecting its production use.
+
 ## Held-object metadata and search-only traversal
 
 The Linux [open documentation](https://man7.org/linux/man-pages/man2/open.2.html) distinguishes
