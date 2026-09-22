@@ -752,14 +752,23 @@ borrow never releases the outer claim, including when an exception escapes. Thes
 compositions do not implement the public error reduction or production RunContext binding by
 themselves.
 
-The concrete core owner permits one active serial borrower and one outstanding attempt. Before its
-first dispatch, a borrower registers and arms one generic `carrier-dispatch` obligation, then
-records each unresolved attempt in memory. Later exchanges re-arm only that in-memory state within
-the same durable claim. The generic obligation resolves only when its borrow closes with no
-outstanding attempt. Independently recoverable adapter effects still register their own obligations.
-The file workflow records returned effects, references and cleanup debt before acknowledging no
-further effects; only the current borrow can settle its outstanding attempt. The coordinator does
-not interpret carrier reports or file protocols.
+The concrete core owner permits one active serial borrower and one outstanding attempt. By default,
+a borrower registers and arms one generic `carrier-dispatch` obligation before its first dispatch,
+then records each unresolved attempt in memory. A protocol adapter may instead install one
+adapter-owned dispatch obligation before that first attempt. The supplied row takes the generic
+row's place for every exchange under that borrow; it does not accompany a second generic row. Later
+exchanges re-arm only the in-memory attempt state within the same durable obligation. File work uses
+one supplied `file-call` row for one logical public call, including every observation and nested
+publication exchange in one JSON update. The file workflow records returned effects, references and
+cleanup debt before acknowledging no further effects; only the current borrow can settle its
+outstanding attempt. The coordinator treats the adapter payload as opaque and does not interpret
+carrier reports or file protocols.
+
+The caller chooses and retains the obligation identifier before registration. Repeating
+registration after an interruption is idempotent only for the exact same operation, identifier,
+kind, payload version and payload. A conflicting reuse refuses. This closes the commit-without-reply
+window without introducing a workflow transaction or allowing the caller to infer that a failed
+database call rolled back.
 
 Validate caller publication options with the canonical protocol schema before staging or consuming
 input. Local preparation can still reject a complete encoded request, for example when identity,
@@ -773,16 +782,18 @@ Closing the owner and admitting a borrow share the same guard. Close first preve
 active borrow prevents release and requires explicit later finalization. A borrower cannot close
 while its attempt is outstanding, so it cannot orphan the attempt's in-memory evidence. A returning
 borrower may instead explicitly hand off an unresolved attempt after it has captured the typed
-custody fact. That terminal handoff makes the borrow unusable, leaves its attempt and generic
-carrier obligation unresolved, and keeps the owner blocked for recovery. A safe close first refuses
-new attempts and handoff, then resolves the generic obligation before relinquishing authority. An
-interrupted close remains in that closing state until a retry completes it. The last borrower does
-not implicitly release the claim. Only core's explicit whole-operation resolution, after all child
-attempts and lifecycle obligations are quiescent, transitions the durable claim to resolved,
-followed by exact-owner release. Never attempt release before it is safe, or assume a failed
-database call committed or rolled back. A safe release may have committed before interruption; do
-not compensate by claiming the resource again. Cleanup debt remains distinct from possible future
-effects and must be returned or retained with its original binding, even after normal helper exit.
+custody fact. A file borrower with no outstanding attempt may likewise hand off an armed supplied
+obligation when typed cleanup or recovery responsibility remains. Either terminal handoff makes the
+borrow unusable, leaves its dispatch obligation unresolved and keeps the owner blocked for recovery.
+A safe close first refuses new attempts and handoff, then resolves its dispatch obligation before
+relinquishing authority. An interrupted close remains in that closing state until a retry completes
+it. The last borrower does not implicitly release the claim. Only core's explicit whole-operation
+resolution, after all child attempts and lifecycle obligations are quiescent, transitions the
+durable claim to resolved, followed by exact-owner release. Never attempt release before it is safe,
+or assume a failed database call committed or rolled back. A safe release may have committed before
+interruption; do not compensate by claiming the resource again. Cleanup debt remains distinct from
+possible future effects and must be returned or retained with its original binding, even after
+normal helper exit.
 
 The production file boundary must own that handoff, not leave it to the caller of a private helper.
 Core file composition acquires the serial borrow and keeps its working state attached to the outer
@@ -790,6 +801,26 @@ operation. Borrowed helpers perform exchanges without acquiring or closing that 
 public result conversion or relinquishment, core captures the typed outcome and original binding,
 including on exceptional exits. All user/admin file views share this operation state. No second file
 lock or protocol-aware recovery callback belongs in the generic database coordinator.
+
+The version-one `file-call` payload is lifecycle evidence, not a serialized workflow. Its prepared
+form binds the exact managed target kind, name, incarnation fingerprint and boot UUID; the confined
+trusted root and normalized relative path; the closed file-operation family; the exact helper
+identity plan and runtime selection; and the fresh scratch token for upload or download. File
+composition receives the managed target identity from activation-owned composition and verifies
+that its logical resource matches the enclosing operation scope. Recovery may compose a fresh
+authorized route to that exact target; it never persists a connection object, route, credential or
+provider secret.
+
+JSON owns one parent `file-call` row. Before any nested upload can dispatch, it publishes that
+child's fresh token and attempt number into the same row. A retry may replace those fields only
+after the prior child has a typed terminal result with no retained responsibility. It does not add a
+child row or persist the source document, existing document, transformed value, diff or retry
+material. Upload and download outcomes may publish exact scratch references, cleanup debt and
+publication cleanup receipts. Clean quiescent calls may resolve without persisting their application
+result. Any pending remote effect, coordination uncertainty, ownership uncertainty or cleanup debt
+must be published before in-memory custody is released, and leaves the row in `possible-effect`.
+The payload never contains file bytes, JSON values, source or sink objects, raw helper responses,
+commands, credentials or unrestricted paths.
 
 The private download, upload and JSON custody slice attaches validated prepared workflows to
 `FileOperation` before running them. This preserves original carrier, binding and token through

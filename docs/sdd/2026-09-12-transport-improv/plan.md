@@ -1566,6 +1566,14 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       overlap, failed fact construction and failed retention. Remove the unused private inline-read
       wrapper; ordinary reads still use snapshot/download. Public reduction, durable recovery,
       production ownership and RunContext remain separate gates.
+- [ ] Give each logical file call one adapter-owned lifecycle obligation that also provides its
+      carrier-dispatch admission. Use a caller-retained identifier for exact registration retry;
+      persist the managed target fence, confined location, helper identity/runtime and scratch token
+      before dispatch; update the same row with exact retained cleanup facts before releasing
+      in-memory custody. JSON must keep one parent row and publish each nested upload token before
+      that child can dispatch. Never persist file/JSON contents, source streams, credentials or
+      replay material. Prove clean resolution, cleanup-only retention, before/after-commit database
+      interruption and process loss around response and handoff.
 - [ ] Complete the durable recovery handoff for file work, including pre-dispatch reconciliation
       identity and exact cleanup binding without storing payload contents. Test process loss before
       response, after response and during handoff. A surviving claim without recovery facts is not
