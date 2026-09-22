@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import grp
 import os
-import pwd
 import socket
 import sys
 from dataclasses import replace
@@ -118,6 +116,9 @@ def plan() -> IdentityPlan:
 
 @pytest.fixture
 def metadata() -> NewMetadata:
+    import grp
+    import pwd
+
     return NewMetadata(pwd.getpwuid(os.geteuid()).pw_name, grp.getgrgid(os.getegid()).gr_name, 0o640)
 
 
