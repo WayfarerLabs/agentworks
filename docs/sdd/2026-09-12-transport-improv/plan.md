@@ -87,6 +87,24 @@ associated pending acceptance gates are superseded by this ruling.
       not prove quiescence. An uncertain hold exit or cleanup retains the claim. Build this as a
       parallel new-stack lifecycle contract and keep legacy callers unchanged until their migration
       batch supplies the required evidence.
+- [ ] Implement the bounded durable lifecycle-obligation ledger. Permit several independently
+      identified obligations of the same registered kind; commit `possible-effect` before each
+      effect; publish bounded, versioned, non-secret adapter-owned recovery identity when observed;
+      retain unresolved work; and seal the ledger before whole-operation resolution. Release only
+      when every obligation has typed no-further-effects evidence and no in-memory custody remains.
+      Keep managed runs specialized and do not add a workflow engine, scheduler, automatic expiry or
+      generic payload interpreter.
+- [ ] Implement and prove a recovery takeover fence before any restarted controller acts on an old
+      obligation. The takeover makes the previous database owner stale, but that neither drains an
+      admitted request nor stops remote work. For every admitted obligation, prove that no earlier
+      dispatch can still arrive and that existing effects are quiescent, using carrier-proved
+      non-dispatch plus exact absence, an operation-specific remote fence, or equally strong
+      synchronous-substrate evidence. Otherwise retain the obligation and report incomplete
+      recovery. For WSL2, persist its opaque provider locator, expected VM marker, distribution and
+      account plus exact Windows controller identity before dispatch, publish exact guest
+      boot/PID/start-time after `READY`, and give each `vm_active()` lifetime an independent
+      obligation. Replace the legacy hold only after nested lifetimes, delayed delivery, every crash
+      window, controller/locator/marker/boot mismatch and production recovery pass live validation.
 - [ ] Select shared platform-host resource keys before enabling their admission. Canonical VM names
       are available before create dispatch; site names and authored SSH routes are not canonical
       host identities. Do not silently treat different aliases or users as independent hosts.
@@ -1700,9 +1718,9 @@ available.
       trusted helper observation phase only where the result phase is unknown. Result-only
       projection refuses to reconstruct discarded phase evidence, while known nonzero application
       status is application-status evidence. This adds no target, accessor or RunContext exposure.
-- [ ] Bind that seam during complete target/reducer composition, as required by FRD R5. The
-      result-only addition does not itself deliver the complete public error contract; that remains
-      required before public ExecutionAccess and RunContext delivery.
+- [ ] Bind that seam during complete target/reducer composition, as required by FRD R5. The private
+      checker does not itself deliver the complete public error contract; that remains required
+      before public ExecutionAccess and RunContext delivery.
 - [x] Preserve a valid helper terminal transcript when only later carrier observation is lost, while
       retaining the carrier error. Missing terminal, wire corruption and post-terminal records must
       still prevent trusted terminal evidence.

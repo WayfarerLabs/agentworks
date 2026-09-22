@@ -247,10 +247,75 @@ Closing an owner with a possible-dispatch claim but no explicit whole-operation 
 it never promotes "no child attempt is currently open" into quiescence. Interrupted admission,
 resolution and release reconcile the same fenced record before any later dispatch or release.
 
+### Durable lifecycle-obligation ledger
+
+Production ownership needs a durable handoff between the coarse resource claim and the independent
+effect owners inside one workflow. A bounded `lifecycle_obligations` ledger supplies that handoff.
+It is generic coordination state, not a serialized workflow. Each row belongs to one exact fenced
+operation identity and has a fresh obligation identifier, a registered lower-kebab kind, a positive
+payload version, a bounded opaque non-secret payload, timestamps and one closed state:
+
+- `registered`: the obligation exists and no effect is yet admitted;
+- `possible-effect`: admission committed before the remote or local effect;
+- `resolved`: typed adapter evidence proves this obligation can cause no further effects.
+
+Core validates the exact operation fence for every transition but never decodes adapter payloads.
+The registered adapter owns payload validation, target/incarnation comparison, observation and the
+typed evidence accepted for resolution. Bound both the encoded payload size and number of
+obligations per operation. Payloads may contain target identity, protected namespaces and cleanup
+receipts, but never credentials, application input/output or arbitrary workflow state. Keep managed
+run records specialized until a real consumer proves that folding their typed schema into opaque
+obligations would simplify rather than weaken it.
+
+An adapter may replace its opaque payload with exact recovery identity while the obligation remains
+`possible-effect`. That update is not a generic lifecycle state or a sealing prerequisite. A typed
+no-effect result can resolve an obligation that never created a runtime identity.
+
+Registration refuses after the ledger is sealed. The first `possible-effect` transition also arms
+the coarse claim in the same short transaction; later obligations advance independently. Once the
+workflow cannot create more effects, core seals the ledger. Whole-operation resolution requires a
+sealed ledger, every registered obligation in `resolved`, and no active borrow, outstanding attempt
+or retained in-memory cleanup custody. Final release deletes the resolved obligations and releases
+the exact claim atomically. No automatic expiry, generic retry runner, dependency graph or
+force-release belongs in this layer.
+
+Recovery must be fenced from a delayed original controller before it mutates an old obligation. Core
+rotates a database ownership generation or equivalent token and makes the predecessor stale,
+preventing further cooperating submissions. For every obligation already in `possible-effect`, the
+adapter must then prove both that no admitted dispatch can still arrive and that any existing effect
+can cause no more work. Acceptable evidence includes carrier-proved non-dispatch paired with exact
+absence, an operation-specific remote generation fence, or equally strong proof from a synchronous
+local substrate whose controller and dispatch endpoint are both gone. Controller absence by itself
+is insufficient because provider, carrier or guest queues may outlive it. This recovery fence is
+separate from #377's future resource hierarchy. The ledger remains attached to the logical operation
+across that transition so later hierarchy can bind one operation to several resource memberships
+without moving adapter state onto one VM row.
+
+The unavoidable crash window is conservative. Core registers and marks `possible-effect` before
+dispatch, then the adapter publishes exact identity as soon as it observes it. If the controller
+dies after the effect but before identity publication, recovery never replays the mutation. It uses
+the registered preparation payload to discover exact identity or prove exact absence when the
+adapter supports that operation. Missing identity publication is not absence. If delayed delivery,
+discovery, quiescence or absence cannot be established, the obligation stays `possible-effect` and
+the resource claim remains held.
+
+For a WSL2 platform hold, the adapter payload binds the opaque provider locator, VM instance marker,
+exact distribution, execution user and exact Windows controller process identity. After `READY`, it
+adds the guest boot UUID, PID and Linux process start time; PID/start-time evidence is meaningful
+only within that boot. Host Job settlement and `wsl.exe` exit remain host-client evidence only.
+Recovery must prove the recorded controller process is absent before using the creation-time Job and
+synchronous Windows process-launch facts to establish that no delayed client launch remains, then
+independently observe that the acknowledged guest identity is absent. A changed guest boot proves
+the old guest process cannot survive but does not excuse locator or marker mismatch. Each
+`vm_active()` lifetime registers its own obligation and anchor under the enclosing operation. Do not
+add hidden reference counting or collapse nested holds into one platform process. A recovery adapter
+retains the obligation when dispatch drain, identity, quiescence or absence cannot be established
+safely.
+
 This checkpoint does not wire `systemd.py`, carriers, platform factories, public `ExecutionAccess`,
 `JobRef` or RunContext. It does not implement OPERATION liveness, leases, application/output
-evidence, stop/cleanup, retention, disposal, session adoption or production recovery. Those remain
-the proof gates below.
+evidence, stop/cleanup, retention, disposal, the lifecycle-obligation ledger, its recovery fence,
+session adoption or production recovery. Those remain the proof gates below.
 
 ## Session containment and #770 reconciliation
 

@@ -67,6 +67,24 @@ write transaction held across remote work. Claims are coordination, not permissi
 process containment. The [file LLD](file-operations-lld.md#cooperating-writers-and-honest-limits)
 defines uncertainty and recovery.
 
+Each owned operation also has a bounded durable ledger of lifecycle obligations. Activation,
+platform holds, routes, nested teardown and other effect owners register independent obligations;
+several obligations of the same kind may coexist. An obligation records a closed generic state and a
+bounded, versioned, non-secret recovery payload that only its registered adapter interprets. Core
+seals the ledger after the workflow can create no more obligations and releases the operation claim
+only after every obligation has typed no-further-effects evidence. A context exit, local client
+exit, settled child attempt or ordinary workflow success is not that evidence.
+
+The ledger attaches to the operation identity, not to one resource level. This leaves the same
+mechanism usable when #377 extends one operation across hierarchical or multi-resource claims. A
+recovery controller obtains a fresh database fence that makes the predecessor stale, then proves for
+every admitted obligation both that no earlier dispatch can still arrive and that any existing
+effect is quiescent. Controller absence stops future cooperating submissions but does not drain a
+provider, carrier or guest queue. Resolution therefore also needs carrier-proved non-dispatch plus
+exact absence, an operation-specific remote fence, or equally strong adapter evidence for a
+synchronous local substrate. The ledger is not a workflow engine, scheduler, permission system or
+lease, and claims never expire automatically.
+
 The initial implementation uses coarse VM and shared platform-host resource keys. Its repository
 currently conflicts only on an exact kind/name pair. This is not hierarchical locking and does not
 complete [#377](https://github.com/WayfarerLabs/agentworks/issues/377). Coarse VM ownership

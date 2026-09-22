@@ -93,6 +93,16 @@ quiescence. `close()` abandons a never-armed reservation or releases an explicit
 it does not infer whole-operation resolution from settled children. Production orchestration and
 RunContext are not yet wired, so this is a usable primitive rather than completed coordination.
 
+The required aggregate is a bounded durable obligation ledger, not a fixed one-field-per-lifecycle
+structure. One operation may own several holds, routes or nested teardowns; each registers its own
+obligation and may publish adapter-owned recovery identity after an effect starts. Sealing means no
+more obligations can be registered; it does not require identity from an effect proved never
+created. Opaque payloads remain non-secret and platform-specific while state and fencing remain
+core-owned. A recovery controller invalidates the predecessor through a fresh database fence, then
+proves each admitted dispatch is drained or remotely fenced and each effect is quiescent. The
+current schema implements neither the ledger nor that takeover transition, so no production hold,
+route or teardown may treat the existing claim row as a recovery record.
+
 ### Recovery-target identity inventory, 2026-09-21
 
 The read-only audit at `368f5f0c` distinguishes logical admission from target identification.
