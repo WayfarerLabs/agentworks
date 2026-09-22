@@ -866,6 +866,16 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
             )
         );
     """,
+    41: """
+        ALTER TABLE vms ADD COLUMN instance_marker TEXT
+            CHECK (
+                instance_marker IS NULL
+                OR (
+                    length(instance_marker) = 32
+                    AND instance_marker NOT GLOB '*[^0-9a-f]*'
+                )
+            );
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -1034,6 +1044,7 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
             "launch_reconciled_at",
         )
     },
+    41: {"vms": ("instance_marker",)},
 }
 
 _SCHEMA_SENTINEL_REMOVED_TABLES: dict[int, tuple[str, ...]] = {

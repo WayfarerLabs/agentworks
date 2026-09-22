@@ -423,6 +423,7 @@ class EC2Platform(VMPlatform):
             provisioning_packages=PROVISIONING_PACKAGES,
             tailscale_auth_key=None,
             hostname=request.hostname,
+            instance_marker=request.instance_marker,
             swap=swap,
         )
         user_data = _generate_ec2_user_data(

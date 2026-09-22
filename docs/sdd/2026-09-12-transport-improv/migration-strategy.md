@@ -89,10 +89,18 @@ host identities.
 `prepare_target_identity` resolves execution accounts, not VM identity. Neither it nor the current
 RunContext supplies the durable target/recovery handoff. That integration must retain the original
 operation's relevant selectors and file recovery facts without persisting carrier credentials. This
-inventory does not introduce a mandatory new guest marker or claim a universal provider incarnation
+Migration 41 adds nullable `vms.instance_marker`, constrained to exactly 32 lowercase hexadecimal
+characters when present. Existing rows stay NULL. New creation persists one core-generated marker
+before provider dispatch and passes that exact value to each platform's shared bootstrap. This does
+not adopt old VMs, establish provider incarnation identity or claim a universal provider incarnation
 guarantee. Claims coordinate participating operations in one state database; when recovery lacks the
 target or no-further-effects evidence it needs, it must report that gap rather than reinterpret a
 name, timestamp or claim row as proof.
+
+The marker field is receive-side additive for vm-platform v1. A third-party v1 platform may ignore
+it and therefore cannot establish a managed target identity merely by accepting the request. The
+planned v2 locator-and-marker observation contract, not this migration, makes marker delivery and
+guest marker reads a conformance requirement.
 
 ### Remaining-native-platform inventory, 2026-09-21
 

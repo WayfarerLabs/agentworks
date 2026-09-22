@@ -447,6 +447,7 @@ class ProxmoxPlatform(VMPlatform):
                     provisioning_packages=PROVISIONING_PACKAGES,
                     tailscale_auth_key=request.tailscale_auth_key,
                     hostname=request.hostname,
+                    instance_marker=request.instance_marker,
                     swap=request.swap_gib,
                 )
                 tailscale_ip = self._run_bootstrap_via_agent(node, newid, bootstrap, ctx)

@@ -186,6 +186,20 @@ operation does not silently write that marker. `/etc/machine-id` does not replac
 it does not reliably distinguish clones. Production target composition remains blocked until it can
 construct and verify these facts.
 
+New VM creation generates and persists one non-secret marker before provider dispatch. The marker is
+exactly 32 lowercase hexadecimal characters and the shared create bootstrap writes that same value
+to `/var/lib/agentworks/instance-id` as a root-owned `0444` regular file. Bootstrap replaces an
+ordinary template-cloned predecessor but refuses a symlink, non-regular leaf or a leaf with more
+than one hard link. Existing rows remain NULL and existing-VM operations do not write a missing
+marker. This is only creation evidence: explicit legacy adoption, provider locator binding, guest
+marker reads and fingerprint construction remain delivery gates.
+
+`ProvisionRequest.instance_marker` is receive-side additive to the v1 platform contract: existing
+third-party v1 implementations can receive and ignore it, so they do not thereby establish managed
+target identity. Bundled create paths install the marker as described above. The future v2
+locator-and-marker observation hook must make marker delivery and guest marker reads a conformance
+gate before managed target composition supports third-party platforms.
+
 Reservation commits before dispatch, and possible dispatch commits before calling the one-shot
 launch boundary. An exception or ambiguous result retains possible dispatch and cannot call the
 boundary again. Reconciliation accepts an exact receipt only when run, unit, target incarnation,

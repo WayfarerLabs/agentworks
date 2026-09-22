@@ -316,6 +316,7 @@ def _request(progress: BootstrapProgress | None = None) -> ProvisionRequest:
         debian_release=DebianRelease.TRIXIE,
         hostname="vm-a",
         system_slug=None,
+        instance_marker="0123456789abcdef0123456789abcdef",
         admin_username="agentworks",
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=None,

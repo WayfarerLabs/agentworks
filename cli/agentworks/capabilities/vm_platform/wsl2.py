@@ -772,6 +772,7 @@ class WSL2Platform(VMPlatform):
                     ssh_public_key=request.ssh_public_key,
                     tailscale_auth_key=request.tailscale_auth_key,
                     hostname=request.hostname,
+                    instance_marker=request.instance_marker,
                     swap_gib=0,
                     progress=request.progress,
                 )

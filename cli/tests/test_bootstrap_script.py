@@ -10,6 +10,7 @@ from agentworks.capabilities.vm_platform.bootstrap_script import (
     parse_bootstrap_output,
 )
 from agentworks.errors import ValidationError
+from agentworks.vms.identity import VM_INSTANCE_MARKER_PATH
 from tests.conftest import requires_posix_shell
 
 
@@ -21,12 +22,14 @@ def test_generate_bootstrap_script_all_steps() -> None:
         provisioning_packages=["curl", "git"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
 
     assert script.startswith("#!/bin/bash\n")
     assert "set -euo pipefail" in script
     assert "##STEP## Ensure user" in script
+    assert "##STEP## VM instance marker" in script
     assert "##STEP## Provisioning packages" in script
     assert "##STEP## SSH public key" in script
     assert "##STEP## Swap file" in script
@@ -37,6 +40,42 @@ def test_generate_bootstrap_script_all_steps() -> None:
     assert "tskey-auth-test123" in script
     assert "SWAP_GB=4" in script
     assert "lima--myvm" in script
+    assert VM_INSTANCE_MARKER_PATH in script
+    assert "[ -L \"$MARKER_DIR\" ]" in script
+    assert "chown root:root \"$MARKER_DIR\"" in script
+    assert "chmod 0755 \"$MARKER_DIR\"" in script
+    assert "chown root:root \"$MARKER_FILE\"" in script
+    assert "chmod 0444 \"$MARKER_FILE\"" in script
+    assert "[ -L \"$MARKER_FILE\" ]" in script
+    assert "[ ! -f \"$MARKER_FILE\" ]" in script
+    assert "stat -c %h \"$MARKER_FILE\"" in script
+
+
+def test_generate_bootstrap_script_rejects_noncanonical_instance_marker() -> None:
+    with pytest.raises(ValidationError):
+        generate_bootstrap_script(
+            admin_username="testuser",
+            ssh_public_key="ssh-ed25519 AAAA testkey",
+            provisioning_packages=["curl"],
+            tailscale_auth_key=None,
+            hostname="lima--myvm",
+            instance_marker="not-a-marker",
+            swap=0,
+        )
+
+
+def test_generate_bootstrap_script_omits_marker_for_v1_helper_compatibility() -> None:
+    script = generate_bootstrap_script(
+        admin_username="testuser",
+        ssh_public_key="ssh-ed25519 AAAA testkey",
+        provisioning_packages=["curl"],
+        tailscale_auth_key=None,
+        hostname="lima--myvm",
+        swap=0,
+    )
+
+    assert "##STEP## VM instance marker" not in script
+    assert VM_INSTANCE_MARKER_PATH not in script
 
 
 def test_generate_bootstrap_script_can_omit_join_from_retained_payload() -> None:
@@ -48,6 +87,7 @@ def test_generate_bootstrap_script_can_omit_join_from_retained_payload() -> None
         provisioning_packages=["curl", "git"],
         tailscale_auth_key=sentinel,
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
     script = generate_bootstrap_script(
@@ -56,6 +96,7 @@ def test_generate_bootstrap_script_can_omit_join_from_retained_payload() -> None
         provisioning_packages=["curl", "git"],
         tailscale_auth_key=None,
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
 
@@ -75,6 +116,7 @@ def test_generate_bootstrap_script_rejects_line_unsafe_tailscale_key() -> None:
             provisioning_packages=["curl", "git"],
             tailscale_auth_key=auth_key,
             hostname="lima--myvm",
+            instance_marker="0123456789abcdef0123456789abcdef",
             swap=4,
         )
 
@@ -90,6 +132,7 @@ def test_generate_bootstrap_script_masks_sve_gated_on_apple() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
 
@@ -123,6 +166,7 @@ def test_sve_gate_matches_sve_and_sve2_as_whole_words() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
 
@@ -161,6 +205,7 @@ def test_generate_bootstrap_script_preserves_ssh_host_keys() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
 
@@ -178,6 +223,7 @@ def test_generate_bootstrap_script_swap_disabled() -> None:
         provisioning_packages=["curl", "git"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="azure--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=0,
     )
 
@@ -203,6 +249,7 @@ def test_generate_bootstrap_script_writes_shell_rc_seeds() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
 
@@ -232,6 +279,7 @@ def test_authorized_keys_install_is_idempotent() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
 
@@ -258,6 +306,7 @@ def test_ssh_key_install_is_skipped_when_the_key_is_empty() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
     # The step is present but gated on a non-empty key, and the skip branch runs.
@@ -274,6 +323,7 @@ def test_ssh_key_install_is_skipped_when_the_key_is_empty() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
     assert "ssh-ed25519 AAAA testkey" in with_key
@@ -294,6 +344,7 @@ def test_swap_fstab_append_is_guarded_against_re_execution() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
 
@@ -322,6 +373,7 @@ def test_generate_bootstrap_script_passes_bash_syntax_check() -> None:
         provisioning_packages=["curl", "tmux"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=2,
     )
     # Pass the script as a real file rather than /dev/stdin, which does not
@@ -359,6 +411,7 @@ def test_generate_bootstrap_script_no_platform_specific_tailscale_config() -> No
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="wsl2--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
 

@@ -379,12 +379,17 @@ class Database:
         disk_gib: int | None = None,
         swap_gib: int | None = None,
         admin_username: str = "agentworks",
+        instance_marker: str | None = None,
     ) -> VMRow:
+        if instance_marker is not None:
+            from agentworks.vms.identity import validate_vm_instance_marker
+
+            instance_marker = validate_vm_instance_marker(instance_marker)
         self._conn.execute(
             "INSERT INTO vms "
             "(name, site, hostname, template, admin_template, cpus, "
-            "memory_gib, disk_gib, swap_gib, admin_username) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "memory_gib, disk_gib, swap_gib, admin_username, instance_marker) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 site,
@@ -396,6 +401,7 @@ class Database:
                 disk_gib,
                 swap_gib,
                 admin_username,
+                instance_marker,
             ),
         )
         self._commit_unless_in_tx()

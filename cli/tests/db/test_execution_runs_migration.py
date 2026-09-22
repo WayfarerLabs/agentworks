@@ -44,7 +44,7 @@ def test_v39_migration_adds_empty_execution_runs_without_backfilling_sessions(tm
     run_count = database._conn.execute("SELECT COUNT(*) FROM execution_runs").fetchone()[0]
     database.close()
 
-    assert version == LATEST_VERSION == 40
+    assert version == LATEST_VERSION == 41
     assert tuple(session) == (session_uuid, None)
     assert run_count == 0
 

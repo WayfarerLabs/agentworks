@@ -385,6 +385,7 @@ class LimaPlatform(VMPlatform):
             provisioning_packages=PROVISIONING_PACKAGES,
             tailscale_auth_key=None,
             hostname=request.hostname,
+            instance_marker=request.instance_marker,
             swap=swap,
         )
 

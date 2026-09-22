@@ -55,6 +55,7 @@ def _request() -> ProvisionRequest:
         debian_release=DebianRelease.TRIXIE,
         hostname="vm1",
         system_slug=None,
+        instance_marker="0123456789abcdef0123456789abcdef",
         admin_username="agw",
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=None,
@@ -143,6 +144,7 @@ def test_success_runs_primary_bootstrap_before_create_returns(monkeypatch: pytes
         "ssh_public_key": "ssh-ed25519 AAAA test",
         "tailscale_auth_key": "tskey-test",
         "hostname": "vm1",
+        "instance_marker": "0123456789abcdef0123456789abcdef",
         "swap_gib": 0,
         "progress": request.progress,
     }

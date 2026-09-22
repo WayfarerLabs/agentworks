@@ -1202,6 +1202,17 @@ connection and trust only. Before broader lifecycle implementation, complete the
       and launch evidence. Application, cleanup, output retention and disposal evidence remain later
       gates, to be introduced with real producers and consumers. This adds no supervisor/carrier
       wiring, lease, stop/disposal, public job/RunContext surface or session backfill.
+- [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
+      provisional row and install that same non-secret 32-lowercase-hex value through every shared
+      create bootstrap. Migration 41 leaves legacy rows NULL; ordinary existing-VM operations never
+      write a marker. Bootstrap uses `/var/lib/agentworks/instance-id`, replaces only an ordinary
+      regular leaf and refuses symlinks, non-regular leaves and multiply-linked leaves. Explicit
+      adoption, provider locator binding, guest marker reads and target-fingerprint composition
+      remain later gates.
+- [ ] Introduce the vm-platform v2 locator-and-marker observation hook before managed target
+      composition supports third-party platforms. `ProvisionRequest.instance_marker` is receive-side
+      additive for v1, so an old external platform may ignore it and is not eligible to establish a
+      managed target identity until v2 proves delivery and guest marker reads.
 - [ ] Complete and prove Linux supervisor launch through SSH and native QGA: protected identity,
       secret/source delivery, privilege changes, foreground wait, independent launch, output
       retention and terminal evidence. No workload code runs before boundary entry.

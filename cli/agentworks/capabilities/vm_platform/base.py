@@ -79,6 +79,10 @@ class ProvisionRequest:
     # bootstrap paths and tailscaled picks it up as the node name.
     hostname: str
     system_slug: str | None
+    # Core generates this once before provider dispatch and retains it on the
+    # provisional VM row. Platforms pass it unchanged into their shared
+    # create-time bootstrap.
+    instance_marker: str
     admin_username: str
     ssh_public_key: str
     # Path to the operator's SSH private key when a platform's create path

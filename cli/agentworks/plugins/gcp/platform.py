@@ -306,6 +306,7 @@ class GCEPlatform(VMPlatform):
             provisioning_packages=PROVISIONING_PACKAGES,
             tailscale_auth_key=None,
             hostname=request.hostname,
+            instance_marker=request.instance_marker,
             swap=request.swap_gib,
         )
         startup_script = build_startup_script(bootstrap, instance_name=names.backend_name)
