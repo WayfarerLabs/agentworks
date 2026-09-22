@@ -94,9 +94,9 @@ it does not infer whole-operation resolution from settled children. Production o
 RunContext are not yet wired, so this is a usable primitive rather than completed coordination.
 
 The required aggregate is a bounded durable obligation ledger, not a fixed one-field-per-lifecycle
-structure. One operation may own several holds, routes or nested teardowns; each registers its own
-obligation and may publish adapter-owned recovery identity after an effect starts. Sealing means no
-more obligations can be registered; it does not require identity from an effect proved never
+structure. One operation may own several holds, routes or nested teardown steps; each registers its
+own obligation and may publish adapter-owned recovery identity after an effect starts. Sealing means
+no more obligations can be registered; it does not require identity from an effect proved never
 created. Opaque payloads remain non-secret and platform-specific while state and fencing remain
 core-owned. A recovery controller invalidates the predecessor through a fresh database fence, then
 proves each admitted dispatch is drained or remotely fenced and each effect is quiescent. The
