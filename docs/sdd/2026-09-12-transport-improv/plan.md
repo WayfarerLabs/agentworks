@@ -1195,12 +1195,13 @@ connection and trust only. Before broader lifecycle implementation, complete the
       child-boundary emptiness. Preparation is atomically one-shot and carries no replay, public
       job, RunContext or production-factory surface.
 - [x] Implement the private durable managed-run reservation and receipt-reconciliation kernel. A
-      fresh run and derived unit are stored before dispatch; possible dispatch is committed before a
-      supplied one-shot launch boundary; ambiguous launch is never replayed; exact receipts and
+      fresh run is stored and its unit is derived before dispatch; possible dispatch commits before
+      the supplied one-shot launch boundary; ambiguous launch is never replayed; exact receipts and
       exact protected-namespace absence after `NOT_SENT` reconcile idempotently. Persist only
       bounded non-secret target/incarnation/boot, workload, shell, profile, owner/lifetime, protocol
-      and orthogonal lifecycle facts. This adds no supervisor/carrier wiring, lease, output,
-      stop/disposal, public job/RunContext surface or session backfill.
+      and launch evidence. Application, cleanup, output retention and disposal evidence remain later
+      gates, to be introduced with real producers and consumers. This adds no supervisor/carrier
+      wiring, lease, stop/disposal, public job/RunContext surface or session backfill.
 - [ ] Complete and prove Linux supervisor launch through SSH and native QGA: protected identity,
       secret/source delivery, privilege changes, foreground wait, independent launch, output
       retention and terminal evidence. No workload code runs before boundary entry.

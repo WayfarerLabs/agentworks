@@ -794,7 +794,7 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
     """,
     # -- Private durable identity and launch reconciliation for one managed -
     # -- execution. Payloads and output remain target-owned; the database ---
-    # -- records only bounded, non-secret identity and lifecycle facts. -----
+    # -- records only bounded, non-secret identity and launch evidence. -----
     40: """
         CREATE TABLE execution_runs (
             run_id TEXT PRIMARY KEY
@@ -802,8 +802,6 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
                     length(run_id) = 32
                     AND run_id NOT GLOB '*[^0-9a-f]*'
                 ),
-            unit_name TEXT NOT NULL UNIQUE
-                CHECK (unit_name = 'agw-managed-' || run_id || '.service'),
             target_kind TEXT NOT NULL
                 CHECK (target_kind IN ('vm', 'platform-host')),
             target_name TEXT NOT NULL
@@ -841,12 +839,6 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
                 CHECK (typeof(receipt_protocol_version) = 'integer' AND receipt_protocol_version > 0),
             launch_state TEXT NOT NULL
                 CHECK (launch_state IN ('reserved', 'possible-dispatch', 'receipt-confirmed', 'not-launched')),
-            application_state TEXT NOT NULL
-                CHECK (application_state IN ('unobserved', 'started', 'completed')),
-            cleanup_state TEXT NOT NULL
-                CHECK (cleanup_state IN ('unobserved', 'required', 'complete', 'incomplete')),
-            disposal_state TEXT NOT NULL
-                CHECK (disposal_state IN ('retained', 'disposed')),
             created_at TEXT NOT NULL CHECK (length(created_at) = 20),
             updated_at TEXT NOT NULL CHECK (length(updated_at) = 20),
             possible_dispatch_at TEXT CHECK (possible_dispatch_at IS NULL OR length(possible_dispatch_at) = 20),
@@ -1018,7 +1010,6 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
     40: {
         "execution_runs": (
             "run_id",
-            "unit_name",
             "target_kind",
             "target_name",
             "target_incarnation",
@@ -1037,9 +1028,6 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
             "receipt_namespace",
             "receipt_protocol_version",
             "launch_state",
-            "application_state",
-            "cleanup_state",
-            "disposal_state",
             "created_at",
             "updated_at",
             "possible_dispatch_at",

@@ -218,12 +218,12 @@ carrier-proved `NOT_SENT` result closes as not launched only when paired with a 
 observation for the same run, unit, target incarnation, boot, protected receipt namespace and
 protocol. Exceptions, missing observations and contradictions retain possible dispatch.
 
-The `execution_runs` row stores bounded non-secret identity and lifecycle facts, not source, argv,
+The `execution_runs` row stores bounded non-secret identity and launch evidence, not source, argv,
 stdin, environment, output, credentials, provider objects or mutable remote paths. The requested
 shell kind is separate from its canonical resolved executable identity, so user-default selection is
-not collapsed into `sh` or `bash`. Launch, application, cleanup and disposal facts remain separate;
-this slice changes only launch evidence, while disposal begins retained. Malformed rows and stale or
-mismatched target, boot, unit, workload, shell, profile, owner or protocol facts fail closed.
+not collapsed into `sh` or `bash`. Application, cleanup and disposal evidence remain later gates, to
+be added only with their producers and consumers. Malformed rows and stale or mismatched target,
+boot, unit, workload, shell, profile, owner or protocol facts fail closed.
 
 The target name is a core resource identity for binding and diagnostics, not authority on its own.
 Its `v1:<sha256>` incarnation fingerprint must bind the provider-owned locator with a

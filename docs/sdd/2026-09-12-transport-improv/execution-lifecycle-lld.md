@@ -173,9 +173,10 @@ retention and abandoned-job cleanup.
 The first persistence slice records one `execution_runs` row before launch and remains private and
 non-production. Its canonical 32-character run ID derives one stable `agw-managed-<run-id>.service`
 name. The row stores only bounded non-secret target, incarnation, boot, workload identity, shell
-identity, MANAGED profile revision, owner/lifetime, receipt protocol and timestamps. It has separate
-launch, application, cleanup and disposal fields rather than a global status. This slice transitions
-only launch evidence; disposal begins retained, and no application or cleanup producer exists yet.
+identity, MANAGED profile revision, owner/lifetime, receipt protocol, launch state and timestamps.
+The unit name is derived from the run ID rather than persisted. Application, cleanup and disposal
+evidence are later proof gates, to be added with real producers and consumers rather than dormant
+state fields.
 
 Target identity is structured as a core resource kind/name, a versioned incarnation fingerprint and
 a separate boot UUID. The core name supports binding and diagnostics but is not authority. The

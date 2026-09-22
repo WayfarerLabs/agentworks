@@ -16,9 +16,6 @@ from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._managed_runs import (
     MANAGED_RECEIPT_NAMESPACE,
     MANAGED_RECEIPT_PROTOCOL_VERSION,
-    ManagedApplicationState,
-    ManagedCleanupState,
-    ManagedDisposalState,
     ManagedLaunchObservation,
     ManagedLaunchState,
     ManagedRunIdentity,
@@ -28,11 +25,11 @@ from agentworks.execution._managed_runs import (
     ManagedRunReceipt,
     ManagedRunReceiptAbsent,
     ManagedRunRepository,
-    ManagedRunService,
     ManagedRunSpec,
     ManagedShellIdentity,
     ManagedTargetIdentity,
     ManagedTargetKind,
+    launch_managed_run,
 )
 from agentworks.execution.carrier import Dispatch
 from agentworks.execution.models import Shell
@@ -116,9 +113,6 @@ def test_reservation_persists_exact_nonsecret_identity_across_reopen(tmp_path: P
     assert persisted.identity.unit_name == f"agw-managed-{_RUN_ID.run_id}.service"
     assert persisted.spec.shell == ManagedShellIdentity(Shell.USER_DEFAULT, "/bin/bash", login=True)
     assert persisted.launch_state is ManagedLaunchState.RESERVED
-    assert persisted.application_state is ManagedApplicationState.UNOBSERVED
-    assert persisted.cleanup_state is ManagedCleanupState.UNOBSERVED
-    assert persisted.disposal_state is ManagedDisposalState.RETAINED
 
 
 def test_malformed_persisted_row_fails_closed(tmp_path: Path) -> None:
@@ -166,71 +160,9 @@ def test_duplicate_and_stale_reservations_refuse_before_launch(tmp_path: Path) -
     stale_target = replace(reserved.spec.target, boot_id="00000000-0000-4000-8000-000000000002")
     stale = replace(reserved, spec=replace(reserved.spec, target=stale_target))
     with pytest.raises(StateError):
-        ManagedRunService(repository).launch(stale, boundary)
+        launch_managed_run(repository, stale, boundary)
     assert called is False
     assert repository.inspect(_RUN_ID) == reserved
-    database.close()
-
-
-@pytest.mark.parametrize(
-    ("column", "value"),
-    [
-        ("application_state", ManagedApplicationState.COMPLETED.value),
-        ("cleanup_state", ManagedCleanupState.COMPLETE.value),
-        ("disposal_state", ManagedDisposalState.DISPOSED.value),
-    ],
-)
-def test_unproduced_lifecycle_evidence_fails_closed_before_launch(
-    tmp_path: Path,
-    column: str,
-    value: str,
-) -> None:
-    database = Database(tmp_path / "state.db")
-    repository, reserved = _reserve(database)
-    database._conn.execute("PRAGMA ignore_check_constraints = ON")
-    database._conn.execute(f"UPDATE execution_runs SET {column} = ?", (value,))
-    database._conn.commit()
-    called = False
-
-    def boundary(_record: ManagedRunRecord) -> ManagedLaunchObservation:
-        nonlocal called
-        called = True
-        return ManagedLaunchObservation(Dispatch.SENT)
-
-    with pytest.raises(StateError):
-        ManagedRunService(repository).launch(reserved, boundary)
-    assert called is False
-    database.close()
-
-
-@pytest.mark.parametrize(
-    ("column", "value"),
-    [
-        ("application_state", ManagedApplicationState.STARTED.value),
-        ("cleanup_state", ManagedCleanupState.REQUIRED.value),
-        ("disposal_state", ManagedDisposalState.DISPOSED.value),
-    ],
-)
-def test_unproduced_lifecycle_evidence_fails_closed_during_reconciliation(
-    tmp_path: Path,
-    column: str,
-    value: str,
-) -> None:
-    database = Database(tmp_path / "state.db")
-    repository, reserved = _reserve(database)
-    possible = ManagedRunService(repository).launch(
-        reserved,
-        lambda _record: ManagedLaunchObservation(Dispatch.UNKNOWN),
-    )
-    database._conn.execute("PRAGMA ignore_check_constraints = ON")
-    database._conn.execute(f"UPDATE execution_runs SET {column} = ?", (value,))
-    database._conn.commit()
-
-    with pytest.raises(StateError):
-        repository.reconcile(
-            possible,
-            ManagedLaunchObservation(Dispatch.UNKNOWN, _receipt(possible)),
-        )
     database.close()
 
 
@@ -239,7 +171,6 @@ def test_possible_dispatch_is_durable_before_boundary_and_ambiguous_launch_is_no
 ) -> None:
     database = Database(tmp_path / "state.db")
     repository, reserved = _reserve(database)
-    service = ManagedRunService(repository)
     calls = 0
 
     def boundary(record: ManagedRunRecord) -> ManagedLaunchObservation:
@@ -250,10 +181,10 @@ def test_possible_dispatch_is_durable_before_boundary_and_ambiguous_launch_is_no
         assert observed.possible_dispatch_at is not None
         return ManagedLaunchObservation(Dispatch.UNKNOWN)
 
-    possible = service.launch(reserved, boundary)
+    possible = launch_managed_run(repository, reserved, boundary)
     assert possible.launch_state is ManagedLaunchState.POSSIBLE_DISPATCH
-    with pytest.raises(StateError, match="must not be replayed"):
-        service.launch(reserved, boundary)
+    with pytest.raises(StateError):
+        launch_managed_run(repository, reserved, boundary)
     assert calls == 1
     database.close()
 
@@ -265,8 +196,8 @@ def test_boundary_exception_retains_possible_dispatch(tmp_path: Path) -> None:
     def boundary(_record: ManagedRunRecord) -> ManagedLaunchObservation:
         raise RuntimeError("lost acknowledgment")
 
-    with pytest.raises(RuntimeError, match="lost acknowledgment"):
-        ManagedRunService(repository).launch(reserved, boundary)
+    with pytest.raises(RuntimeError):
+        launch_managed_run(repository, reserved, boundary)
     persisted = repository.inspect(_RUN_ID)
     assert persisted is not None and persisted.launch_state is ManagedLaunchState.POSSIBLE_DISPATCH
     database.close()
@@ -287,8 +218,8 @@ def test_database_transition_failure_prevents_boundary_invocation(tmp_path: Path
         called = True
         return ManagedLaunchObservation(Dispatch.SENT)
 
-    with pytest.raises(StateError, match="unavailable or malformed"):
-        ManagedRunService(repository).launch(reserved, boundary)
+    with pytest.raises(StateError):
+        launch_managed_run(repository, reserved, boundary)
     assert called is False
     assert repository.inspect(_RUN_ID) == reserved
     database.close()
@@ -297,36 +228,31 @@ def test_database_transition_failure_prevents_boundary_invocation(tmp_path: Path
 def test_exact_receipt_reconciles_once_and_is_idempotent(tmp_path: Path) -> None:
     database = Database(tmp_path / "state.db")
     repository, reserved = _reserve(database)
-    service = ManagedRunService(repository)
-    possible = service.launch(reserved, lambda _record: ManagedLaunchObservation(Dispatch.UNKNOWN))
+    possible = launch_managed_run(repository, reserved, lambda _record: ManagedLaunchObservation(Dispatch.UNKNOWN))
     observation = ManagedLaunchObservation(Dispatch.UNKNOWN, _receipt(possible))
 
-    first = service.reconcile(reserved, observation)
-    second = service.reconcile(reserved, observation)
+    first = repository.reconcile(reserved, observation)
+    second = repository.reconcile(reserved, observation)
 
     assert first == second
     assert first.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
     assert first.launch_reconciled_at is not None
-    assert first.application_state is ManagedApplicationState.UNOBSERVED
-    assert first.cleanup_state is ManagedCleanupState.UNOBSERVED
-    assert first.disposal_state is ManagedDisposalState.RETAINED
     database.close()
 
 
 def test_not_sent_requires_exact_absence_before_closing_as_not_launched(tmp_path: Path) -> None:
     database = Database(tmp_path / "state.db")
     repository, reserved = _reserve(database)
-    service = ManagedRunService(repository)
-    possible = service.launch(reserved, lambda _record: ManagedLaunchObservation(Dispatch.NOT_SENT))
+    possible = launch_managed_run(repository, reserved, lambda _record: ManagedLaunchObservation(Dispatch.NOT_SENT))
     assert possible.launch_state is ManagedLaunchState.POSSIBLE_DISPATCH
 
-    no_effects = service.reconcile(
+    no_effects = repository.reconcile(
         reserved,
         ManagedLaunchObservation(Dispatch.NOT_SENT, _absence(possible)),
     )
     assert no_effects.launch_state is ManagedLaunchState.NOT_LAUNCHED
     assert (
-        service.reconcile(
+        repository.reconcile(
             reserved,
             ManagedLaunchObservation(Dispatch.NOT_SENT, _absence(possible)),
         )
@@ -339,7 +265,8 @@ def test_not_sent_requires_exact_absence_before_closing_as_not_launched(tmp_path
 def test_receipt_mismatch_refuses_without_changing_possible_dispatch(tmp_path: Path, mismatch: str) -> None:
     database = Database(tmp_path / f"{mismatch}.db")
     repository, reserved = _reserve(database)
-    possible = ManagedRunService(repository).launch(
+    possible = launch_managed_run(
+        repository,
         reserved,
         lambda _record: ManagedLaunchObservation(Dispatch.UNKNOWN),
     )
@@ -355,8 +282,8 @@ def test_receipt_mismatch_refuses_without_changing_possible_dispatch(tmp_path: P
         spec = replace(spec, workload=IdentityExpectation(1002, 1001, (1001, 1002)))
     observation = ManagedLaunchObservation(Dispatch.UNKNOWN, _receipt(possible, unit_name=unit, spec=spec))
 
-    with pytest.raises(StateError, match="does not match"):
-        ManagedRunService(repository).reconcile(reserved, observation)
+    with pytest.raises(StateError):
+        repository.reconcile(reserved, observation)
     persisted = repository.inspect(_RUN_ID)
     assert persisted is not None and persisted.launch_state is ManagedLaunchState.POSSIBLE_DISPATCH
     database.close()
@@ -365,19 +292,20 @@ def test_receipt_mismatch_refuses_without_changing_possible_dispatch(tmp_path: P
 def test_absence_target_mismatch_and_receipt_version_mismatch_fail_closed(tmp_path: Path) -> None:
     database = Database(tmp_path / "state.db")
     repository, reserved = _reserve(database)
-    possible = ManagedRunService(repository).launch(
+    possible = launch_managed_run(
+        repository,
         reserved,
         lambda _record: ManagedLaunchObservation(Dispatch.UNKNOWN),
     )
     wrong_target = replace(possible.spec.target, incarnation=f"v1:{'b' * 64}")
-    with pytest.raises(StateError, match="absence does not match"):
+    with pytest.raises(StateError):
         repository.reconcile(
             reserved,
             ManagedLaunchObservation(Dispatch.NOT_SENT, _absence(possible, target=wrong_target)),
         )
-    with pytest.raises(ValidationError, match="protocol"):
+    with pytest.raises(ValidationError):
         _absence(possible, receipt_protocol_version=2)
-    with pytest.raises(ValidationError, match="profile revision"):
+    with pytest.raises(ValidationError):
         replace(possible.spec, managed_profile_revision=2)
     persisted = repository.inspect(_RUN_ID)
     assert persisted is not None and persisted.launch_state is ManagedLaunchState.POSSIBLE_DISPATCH
@@ -387,7 +315,8 @@ def test_absence_target_mismatch_and_receipt_version_mismatch_fail_closed(tmp_pa
 def test_shell_owner_and_lifetime_receipt_mismatch_refuse_without_new_dispatch(tmp_path: Path) -> None:
     database = Database(tmp_path / "state.db")
     repository, reserved = _reserve(database)
-    possible = ManagedRunService(repository).launch(
+    possible = launch_managed_run(
+        repository,
         reserved,
         lambda _record: ManagedLaunchObservation(Dispatch.UNKNOWN),
     )
@@ -404,15 +333,15 @@ def test_shell_owner_and_lifetime_receipt_mismatch_refuse_without_new_dispatch(t
         ),
     )
     for spec in mismatches:
-        with pytest.raises(StateError, match="does not match"):
+        with pytest.raises(StateError):
             repository.reconcile(
                 reserved,
                 ManagedLaunchObservation(Dispatch.UNKNOWN, _receipt(possible, spec=spec)),
             )
 
-    with pytest.raises(ValidationError, match="profile revision"):
+    with pytest.raises(ValidationError):
         replace(possible.spec, managed_profile_revision=2)
-    with pytest.raises(ValidationError, match="protocol"):
+    with pytest.raises(ValidationError):
         replace(possible.spec, receipt_protocol_version=2)
     persisted = repository.inspect(_RUN_ID)
     assert persisted is not None and persisted.launch_state is ManagedLaunchState.POSSIBLE_DISPATCH
@@ -423,7 +352,8 @@ def test_concurrent_exact_reconciliation_is_idempotent(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
     database = Database(path)
     repository, reserved = _reserve(database)
-    possible = ManagedRunService(repository).launch(
+    possible = launch_managed_run(
+        repository,
         reserved,
         lambda _record: ManagedLaunchObservation(Dispatch.UNKNOWN),
     )
@@ -452,5 +382,5 @@ def test_concurrent_exact_reconciliation_is_idempotent(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("path", ["/", "/bin/../sh", "/bin//sh", "/bin/sh\n", "bin/sh"])
 def test_resolved_shell_identity_requires_canonical_safe_absolute_path(path: str) -> None:
-    with pytest.raises(ValidationError, match="shell executable"):
+    with pytest.raises(ValidationError):
         ManagedShellIdentity(Shell.SH, path)

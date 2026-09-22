@@ -63,36 +63,12 @@ class ManagedTargetKind(StrEnum):
 
 
 class ManagedLaunchState(StrEnum):
-    """Launch evidence, independent from application and cleanup facts."""
+    """The launch evidence persisted by this private checkpoint."""
 
     RESERVED = "reserved"
     POSSIBLE_DISPATCH = "possible-dispatch"
     RECEIPT_CONFIRMED = "receipt-confirmed"
     NOT_LAUNCHED = "not-launched"
-
-
-class ManagedApplicationState(StrEnum):
-    """Application evidence retained separately from launch evidence."""
-
-    UNOBSERVED = "unobserved"
-    STARTED = "started"
-    COMPLETED = "completed"
-
-
-class ManagedCleanupState(StrEnum):
-    """Cleanup evidence retained separately from launch evidence."""
-
-    UNOBSERVED = "unobserved"
-    REQUIRED = "required"
-    COMPLETE = "complete"
-    INCOMPLETE = "incomplete"
-
-
-class ManagedDisposalState(StrEnum):
-    """Disposal evidence retained separately from launch evidence."""
-
-    RETAINED = "retained"
-    DISPOSED = "disposed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,14 +211,11 @@ class ManagedRunSpec:
 
 @dataclass(frozen=True, slots=True)
 class ManagedRunRecord:
-    """One persisted managed-run reservation and its orthogonal evidence."""
+    """One persisted managed-run reservation and launch evidence."""
 
     identity: ManagedRunIdentity
     spec: ManagedRunSpec
     launch_state: ManagedLaunchState
-    application_state: ManagedApplicationState
-    cleanup_state: ManagedCleanupState
-    disposal_state: ManagedDisposalState
     created_at: str
     updated_at: str
     possible_dispatch_at: str | None
@@ -330,12 +303,11 @@ class ManagedRunRepository:
                 raise StateError("managed run identity is already reserved", entity_kind="execution-run")
             self._connection.execute(
                 "INSERT INTO execution_runs ("
-                "run_id, unit_name, target_kind, target_name, target_incarnation, target_boot_id, "
+                "run_id, target_kind, target_name, target_incarnation, target_boot_id, "
                 "workload_euid, workload_egid, workload_groups, requested_shell, resolved_shell, "
                 "shell_login, shell_interactive, managed_profile_revision, owner_kind, owner_id, lifetime, "
-                "receipt_namespace, receipt_protocol_version, launch_state, application_state, cleanup_state, "
-                "disposal_state, created_at, updated_at"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "receipt_namespace, receipt_protocol_version, launch_state, created_at, updated_at"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 _insert_values(identity, spec, now),
             )
             return self._require_record(identity)
@@ -489,8 +461,6 @@ class ManagedRunRepository:
         """Validate every persisted fact before lifecycle code may use it."""
         try:
             identity = ManagedRunIdentity(row["run_id"])
-            if row["unit_name"] != identity.unit_name:
-                raise ValueError
             requested_value = row["requested_shell"]
             requested = None if requested_value == "none" else Shell(requested_value)
             login, interactive = row["shell_login"], row["shell_interactive"]
@@ -518,15 +488,11 @@ class ManagedRunRepository:
                 row["receipt_protocol_version"],
             )
             launch_state = ManagedLaunchState(row["launch_state"])
-            application_state = ManagedApplicationState(row["application_state"])
-            cleanup_state = ManagedCleanupState(row["cleanup_state"])
-            disposal_state = ManagedDisposalState(row["disposal_state"])
             created_at = _decode_timestamp(row["created_at"])
             updated_at = _decode_timestamp(row["updated_at"])
             possible_at = _decode_optional_timestamp(row["possible_dispatch_at"])
             reconciled_at = _decode_optional_timestamp(row["launch_reconciled_at"])
             _validate_state_timestamps(launch_state, possible_at, reconciled_at)
-            _validate_private_lifecycle_evidence(application_state, cleanup_state, disposal_state)
         except (IndexError, KeyError, TypeError, ValueError, ValidationError):
             raise StateError(
                 "persisted managed run is malformed",
@@ -537,9 +503,6 @@ class ManagedRunRepository:
             identity,
             spec,
             launch_state,
-            application_state,
-            cleanup_state,
-            disposal_state,
             created_at,
             updated_at,
             possible_at,
@@ -547,41 +510,27 @@ class ManagedRunRepository:
         )
 
 
-class ManagedRunService:
-    """One-shot launch orchestration over durable managed-run state."""
-
-    def __init__(self, repository: ManagedRunRepository) -> None:
-        if not isinstance(repository, ManagedRunRepository):
-            raise ValidationError("Managed run service requires its private repository")
-        self._repository = repository
-
-    def reserve(self, spec: ManagedRunSpec) -> ManagedRunRecord:
-        return self._repository.reserve(spec)
-
-    def launch(self, reserved: ManagedRunRecord, boundary: ManagedLaunchBoundary) -> ManagedRunRecord:
-        """Dispatch exactly once after possible dispatch is durable."""
-        if not callable(boundary):
-            raise ValidationError("Managed launch requires a callable boundary")
-        possible = self._repository.mark_possible_dispatch(reserved)
-        observation = boundary(possible)
-        if not isinstance(observation, ManagedLaunchObservation):
-            raise ValidationError("Managed launch boundary returned an invalid observation")
-        return self._repository.reconcile(possible, observation)
-
-    def reconcile(
-        self,
-        reserved: ManagedRunRecord,
-        observation: ManagedLaunchObservation,
-    ) -> ManagedRunRecord:
-        """Reconcile an earlier uncertain launch without invoking its boundary."""
-        return self._repository.reconcile(reserved, observation)
+def launch_managed_run(
+    repository: ManagedRunRepository,
+    reserved: ManagedRunRecord,
+    boundary: ManagedLaunchBoundary,
+) -> ManagedRunRecord:
+    """Dispatch exactly once after possible dispatch is durable."""
+    if not isinstance(repository, ManagedRunRepository):
+        raise ValidationError("Managed launch requires its private repository")
+    if not callable(boundary):
+        raise ValidationError("Managed launch requires a callable boundary")
+    possible = repository.mark_possible_dispatch(reserved)
+    observation = boundary(possible)
+    if not isinstance(observation, ManagedLaunchObservation):
+        raise ValidationError("Managed launch boundary returned an invalid observation")
+    return repository.reconcile(possible, observation)
 
 
 def _insert_values(identity: ManagedRunIdentity, spec: ManagedRunSpec, now: str) -> tuple[object, ...]:
     requested_shell = "none" if spec.shell.requested is None else spec.shell.requested.value
     return (
         identity.run_id,
-        identity.unit_name,
         spec.target.kind,
         spec.target.name,
         spec.target.incarnation,
@@ -600,9 +549,6 @@ def _insert_values(identity: ManagedRunIdentity, spec: ManagedRunSpec, now: str)
         spec.receipt_namespace,
         spec.receipt_protocol_version,
         ManagedLaunchState.RESERVED,
-        ManagedApplicationState.UNOBSERVED,
-        ManagedCleanupState.UNOBSERVED,
-        ManagedDisposalState.RETAINED,
         now,
         now,
     )
@@ -709,24 +655,4 @@ def _validate_state_timestamps(
     else:
         valid = possible_at is not None and reconciled_at is not None
     if not valid:
-        raise ValueError
-
-
-def _validate_private_lifecycle_evidence(
-    application: ManagedApplicationState,
-    cleanup: ManagedCleanupState,
-    disposal: ManagedDisposalState,
-) -> None:
-    """Refuse lifecycle evidence for which this private slice has no producer.
-
-    Launch receipt is the only evidence this checkpoint can create or consume.
-    Future application, cleanup, and disposal transitions must expand this
-    verifier with their producers and cross-state proof, rather than allowing
-    SQL-valid values to acquire operational meaning prematurely.
-    """
-    if (
-        application is not ManagedApplicationState.UNOBSERVED
-        or cleanup is not ManagedCleanupState.UNOBSERVED
-        or disposal is not ManagedDisposalState.RETAINED
-    ):
         raise ValueError
