@@ -579,29 +579,35 @@ it. Generic XNU directory support is not live APFS acceptance. Network filesyste
 semantics; in particular an exclusive NFS lock can require write access. Do not infer a portable
 lock from the Python function's availability.
 
-The candidate remains one fixed, protected Agentworks lock inode shared by every helper identity,
-not a per-effective-user cache. Root ownership is not intrinsically required: a stable host-account
-namespace can suffice if all bound identities can open the same inode and other in-scope identities
-cannot replace it. Core setup must preserve that inode throughout helper use. Provisioned Debian
-state and the actual macOS host namespace still need selection and cross-identity tests; a new admin
-installation or host prerequisite would need operator direction. Locking `/` avoids new state but
-shares an unrelated third-party lock namespace, so it is not selected. This investigation does not
-close the file LLD's transaction-lock gate.
+The investigated candidate was one fixed, protected Agentworks lock inode shared by every helper
+identity, not a per-effective-user cache. Root ownership was not intrinsically required: a stable
+host-account namespace could suffice if all bound identities could open the same inode and other
+in-scope identities could not replace it. Locking `/` would avoid new state but share an unrelated
+third-party lock namespace, so it was not selected.
 
-The setup-path audit at `aa82b8f2` identifies shared Debian bootstrap immediately after provisioning
-package installation as the new-guest insertion point. Lima, WSL2, Proxmox, Azure, EC2 and GCE all
-render that template. For already reachable guests, common `run_initialization` enters its mutation
-guard before Phase B; setup there can precede migrated file consumers. Neither path repairs a
-stranded existing guest: ordinary reinitialization requires completed provisioning and a Tailscale
-address, and create-time payloads are not a general upgrade mechanism. GCE already stores bootstrap
-state under `/var/lib/agentworks`, so setup must preserve unrelated contents there.
+The operator subsequently superseded this candidate. The selected design uses core database-level
+operation ownership to coordinate cooperating file mutations, while helpers use conflict-free
+scratch names and conservative object checks. Production integration of that ownership remains open.
+Guests and platform hosts do not require a protected destination lock or new administrator setup. A
+destination-side lock may return only for a demonstrated residual race that core ownership cannot
+address. The experiments above remain mechanism history, not a current implementation or acceptance
+gate.
+
+The historical lock-setup audit at `aa82b8f2` identifies shared Debian bootstrap immediately after
+provisioning package installation as the new-guest insertion point. Lima, WSL2, Proxmox, Azure, EC2
+and GCE all render that template. For already reachable guests, common `run_initialization` enters
+its mutation guard before Phase B; setup there can precede migrated file consumers. Neither path
+repairs a stranded existing guest: ordinary reinitialization requires completed provisioning and a
+Tailscale address, and create-time payloads are not a general upgrade mechanism. GCE already stores
+bootstrap state under `/var/lib/agentworks`, so setup must preserve unrelated contents there. This
+inventory remains relevant to early Python provisioning, but no destination-lock setup is selected.
 
 Remote Lima currently runs host commands as the configured SSH login account, allocates
 account-owned temporary state, and does not request privileged host setup. Its guest-side sudo
-invocation is not evidence of host sudo availability. A root-protected machine-wide lock on macOS
-therefore requires an explicit new host prerequisite, not an implicit extension of Debian package
-approval. The operator has been asked; no host installation or cross-identity proof is claimed. Code
-anchors: `capabilities/vm_platform/bootstrap_script.py`, `vms/initializer/driver.py`,
+invocation is not evidence of host sudo availability. This ruled out silently treating a
+root-protected machine-wide macOS lock as part of Debian package approval. The later operator ruling
+removed that proposed prerequisite entirely in favor of core database coordination. Code anchors:
+`capabilities/vm_platform/bootstrap_script.py`, `vms/initializer/driver.py`,
 `vms/manager/lifecycle.py`, `capabilities/vm_platform/lima.py`, and `plugins/gcp/bootstrap.py` under
 `cli/agentworks/`.
 
@@ -616,9 +622,10 @@ refuse a missing prerequisite rather than install Python implicitly.
 The [OS module documentation](https://docs.python.org/3/library/os.html) describes
 platform-dependent descriptor APIs and Linux-only extended-attribute APIs. A Python helper therefore
 still needs a proved macOS metadata implementation. It also does not prove unique-sibling atomic
-publication, observed-link refusal, required owner/mode/ACL behavior, or cooperative conflict
-handling and cross-identity locking on supported filesystems. Those remain implementation acceptance
-gates within the revised threat boundary.
+publication, observed-link refusal, required owner/mode/ACL behavior, or production integration of
+the [selected database-backed coordination](plan.md#operation-coordination-correction-2026-09-20)
+for cooperating writers. Those remain implementation acceptance gates within the revised threat
+boundary.
 
 ### Local process startup and interruption
 
@@ -1047,6 +1054,35 @@ than copying or enumerating them. Current session socket and shared-workspace di
 set-group-ID modes, so directory metadata must support those explicitly; regular-file modes remain
 limited to ordinary permission bits. Privileged ownership transitions and native filesystem proof
 remain open.
+
+## WSL2 native client ownership
+
+The legacy WSL keepalive starts `wsl.exe` and assigns it to a Job Object afterward. That is useful
+Job-limit prior art but not an acceptable new-stack ownership mechanism: controller death between
+process creation and assignment can leave an unowned client. `subprocess.Popen` also cannot express
+the selected creation-time Job-list attribute.
+
+The selected native candidate uses
+[`CreateProcessW`](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw)
+with one `STARTUPINFOEXW` attribute list. Microsoft documents
+[`PROC_THREAD_ATTRIBUTE_JOB_LIST`](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute)
+for assigning Job handles at process creation on Windows 10 and Windows Server 2016 or newer. The
+same list carries `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`, restricted to the child standard handles. The
+Job is configured with kill-on-close before creation, and it is not inheritable. There is no
+post-spawn assignment, suspended-create fallback or compatibility downgrade.
+
+The creation-time Job association closes the hard-controller-death assignment gap, but does not by
+itself make Python publication interruption-safe. Native acquisition therefore runs behind the
+new-stack default-deny owner-thread handshake. Anonymous pipes do not support overlapped I/O, and
+Microsoft warns that
+[`PeekNamedPipe`](https://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-peeknamedpipe)
+can block on a synchronous handle in a multithreaded process. Bounded stdout observation instead has
+an explicit reader owner, bounded retained bytes and retryable settlement.
+
+A synthetic Windows test can establish client Job membership, descendant cleanup, restricted handle
+inheritance and local handle settlement. It cannot establish that `wsl.exe` carried EOF correctly
+into a guest, that an acknowledged Linux PID/start-time identity disappeared, that unrelated guest
+work survived, or that the WSL platform hold behaved correctly. Those remain live WSL2 proof gates.
 
 ## Windows-local download publication
 

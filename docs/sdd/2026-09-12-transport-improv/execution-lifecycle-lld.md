@@ -342,11 +342,17 @@ cgroup-equivalent descendant ownership.
 The controller constructs an inert native WSL client owner and wraps it in a caller-owned guest
 anchor lifecycle before dispatch. Construction has no native effects. The native owner owns the
 `wsl.exe` process, its process and pipe handles, and any Windows Job Object handle as one local
-capability. It must publish each acquired handle into itself before an interruption can escape. Job
-assignment remains a separate observation because successful assignment neither closes the Job
-handle nor removes the spawn-to-assignment orphan window. The later native adapter must prove its
-actual Windows create/assign mechanism; the portable interface does not make that proof by naming
-the obligation.
+capability. The caller never receives those handles. Job assignment remains a separate observation
+from Job-handle settlement. The selected Windows adapter must create the process with both
+`PROC_THREAD_ATTRIBUTE_JOB_LIST` and an explicit `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`. Assignment
+therefore occurs before the initial thread runs; post-spawn assignment, suspended-create fallback
+and unmanaged downgrade are not supported. A default-deny owner thread retains the Job, process and
+pipe capabilities through caller interruption. Python delivers the supported caller control
+interruption on the main thread, not by unwinding this raw owner. Each native API primitive either
+returns a complete handle value or fails, returned values are retained immediately, and preallocated
+process information is harvested in `finally` if process creation returns or raises. Arbitrary
+external exception injection into the raw owner thread is not a supported cancellation mechanism.
+The portable interface does not make those native facts true merely by naming the obligation.
 
 `start` dispatches one literal, no-shell Python helper and accepts only its nonce-bound `READY`
 record with the guest PID and Linux process start time. The caller retains the lifecycle object if
@@ -364,11 +370,12 @@ the independent exact-identity guest observation after local resources have sett
 Job handle proves the guest anchor is absent. Only the exact guest PID/start-time observer may make
 that claim.
 
-The private implementation and portable tests establish this orchestration shape and execute the
-helper protocol on local Linux procfs. They do not provide the native Windows owner, prove
-interrupt-safe Windows handle capture, exercise a live WSL distribution, establish cleanup after
-controller hard death, or wire a production platform hold. Those remain requirements of the WSL2
-proof gate below.
+The portable implementation and tests establish this orchestration shape and execute the helper
+protocol on local Linux procfs. Hosted synthetic Windows tests separately exercise creation-time Job
+membership, restricted handle inheritance, bounded pipe observation, retryable exact settlement and
+controller hard-death cleanup. That host proof does not exercise a live WSL distribution, establish
+acknowledged guest-anchor absence, or wire a production platform hold. Those remain requirements of
+the WSL2 proof gate below.
 
 ## Delivery sequence and proof criteria
 

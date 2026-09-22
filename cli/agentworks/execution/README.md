@@ -179,21 +179,30 @@ not narrow that requirement. Real WSL argument/byte fidelity, status interpretat
 and distribution lifetime require proof, including native acceptance of the shared launch owner.
 
 `_wsl2_lifecycle.py` is a separate private guest-anchor ownership candidate. A caller constructs its
-lifecycle object around an inert native owner before calling `start`, so failed or interrupted
-startup cannot discard the only cleanup capability. The native-owner contract keeps the WSL client,
-its process and pipe handles, and any Job Object handle together while reporting client exit, client
-handle closure, Job assignment and Job handle closure as separate facts. Local settlement uses one
-fresh 0.5-second allowance per attempt and remains retryable when any handle or observation is
-uncertain. The operation deadline continues to bound dispatch, helper receipts and guest
-observation.
+lifecycle object around an inert native owner before calling `start`, so a reported startup failure
+or supported main-thread caller interruption leaves the cleanup capability reachable. The
+native-owner contract keeps the WSL client, its process and pipe handles, and any Job Object handle
+together while reporting client exit, client handle closure, Job assignment and Job handle closure
+as separate facts. Local settlement uses one fresh 0.5-second allowance per attempt and remains
+retryable when any handle or observation is uncertain. The operation deadline continues to bound
+dispatch, helper receipts and guest observation.
+
+The Windows owner uses public process-creation attributes to place the client in its kill-on-close
+Job before the initial thread runs and to inherit only its explicit standard handles. It has no
+post-spawn assignment or weaker fallback. Native acquisition runs behind default-deny admission so a
+supported main-thread caller interruption retains one cleanup owner, and bounded line observation
+never relies on `PeekNamedPipe` as a deadline primitive. These are host-client ownership mechanics
+only.
 
 The fixed no-shell helper emits a nonce-bound `READY` record containing its Linux PID and process
 start time, waits for controller EOF, then emits `EXITING`. These records, `wsl.exe` exit and Job
 Object state are not guest-absence evidence. Only an injected exact PID/start-time observer may
 report absence, and it can be retried after local settlement. Portable tests execute this helper on
-local Linux procfs and exercise lifecycle failure orderings. There is no native Windows owner or
-production composition yet; live WSL behavior, interrupt-safe handle capture, controller hard death
-and platform-hold integration remain open proof gates.
+local Linux procfs and exercise lifecycle failure orderings. Hosted synthetic Windows tests exercise
+Job membership, handle confinement, deadlines, settlement and controller hard death without invoking
+`wsl.exe`. That is host-client evidence, not live WSL evidence. There is no production composition
+yet; live WSL argument and pipe behavior, exact guest cleanup and platform-hold integration remain
+open proof gates.
 
 ## Observation and guest lifetime
 

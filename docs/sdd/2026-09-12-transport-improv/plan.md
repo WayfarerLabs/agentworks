@@ -1273,16 +1273,20 @@ connection and trust only. Before broader lifecycle implementation, complete the
       and controller hard death while unrelated guest work survives. Until that live WSL2 evidence
       exists, report release unconfirmed rather than inferring guest cleanup.
 
-The private WSL2 ownership candidate is implemented at `23089c8a`. The caller owns an inert
-lifecycle object before `start`; one native-owner interface retains the WSL client, process/pipe
-handles and Job Object handle across startup and cleanup interruption. Its snapshot keeps client
-exit, client-handle closure, Job assignment and Job-handle closure independent, invalidates
-pre-dispatch certainty before native effects, and permits bounded settlement and guest-observer
-retries without replay. Portable tests execute the fixed helper against Linux procfs, cover late or
-invalid readiness, failed cleanup and snapshot observation, fresh cleanup allowance, control
-interruption and separate guest evidence. This is contract/mechanism evidence only. No native
-Windows owner or live WSL2 distribution was exercised, so the checkbox and controller-hard-death
-acceptance above remain open.
+The private WSL2 ownership candidate is implemented through `a1bb1034`. The caller owns an inert
+lifecycle object before `start`; one native owner retains the WSL client, process/pipe handles and
+Job Object handle across startup and cleanup interruption. Its snapshot keeps client exit,
+client-handle closure, Job assignment and Job-handle closure independent, invalidates pre-dispatch
+certainty before native effects, and permits bounded settlement and guest-observer retries without
+replay. The native adapter selects creation-time Job membership and explicit handle inheritance with
+no weaker fallback. Portable tests execute the fixed helper against Linux procfs and inject native
+API failures; native-Windows cases are present for Job membership, handle confinement, descendant
+cleanup and abrupt controller death without invoking WSL. Hosted Windows 2025 with Python 3.13.15
+passes all 496 selected cases with 39 skips at `dca96813` in
+[run 35710387854](https://github.com/WayfarerLabs/agentworks/actions/runs/35710387854). That
+establishes the synthetic host-client cases, including abrupt controller death while unrelated work
+survives. No live WSL2 distribution exercised this candidate, so exact guest-anchor absence,
+platform-hold integration and the checkbox above remain open.
 
 The durable launch checkpoint is privately accepted at `ead879ce`. Project, complexity and
 independent correctness reviews are clean. Review removed the dormant application, cleanup and
