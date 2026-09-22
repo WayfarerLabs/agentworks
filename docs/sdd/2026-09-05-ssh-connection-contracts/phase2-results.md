@@ -450,8 +450,19 @@ inspects the durable ledger before sealing and release. It requires exactly four
 `file-call` obligations with the expected target, confined path and upload tokens, and checks that
 the file-content canaries are absent from their persisted payloads. Existing binary integrity,
 metadata, typed conflict, sensitive delivery and exact scratch/custody assertions remain in place.
-The adapted proof passes over installed OpenSSH: **1 passed in 4.37 seconds**. Full combined gates
-and private SSH reviews are pending for this adaptation.
+The adapted proof passes over installed OpenSSH: **1 passed in 4.37 seconds**.
+
+Independent project, complexity and correctness reviews are clean at
+`4f747f1fef98bbad5b0b3fb4075f8868df36ddc0`. The correctness lane independently repeats the real
+proof: **1 passed in 4.33 seconds**. Both runs leave no host-visible fixture daemon, no scratch and
+zero operation owner, claim or obligation rows; only the intended destination remains before exact
+fixture teardown removes the generated keys and files. These reviews cover this adaptation only.
+
+Combined validation passes **13,093 non-integration tests with 22 skips** in 183.18 seconds. Ruff
+checks and formatting across 1,141 files, mypy across 1,104 sources, typer isolation, file lint,
+locked-SDD and Rulesync checks all pass. Website validation passes 160 Python and 103 Node tests,
+with identical double builds at both site bases. Hosted validation of the updated SSH head remains
+pending.
 
 This clean-transfer proof does not establish process-loss recovery, retained-debt handoff under
 faults, production recovery takeover, activation/publication binding or native platform acceptance.
