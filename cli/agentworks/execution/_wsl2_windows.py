@@ -73,7 +73,6 @@ class WindowsWSL2HostClient:
         self._job_uncertain = False
         self._job_failed_generation: int | None = None
         self._handles: dict[str, int] = {}
-        self._handle_uncertain: set[str] = set()
         self._handle_failed_generation: dict[str, int] = {}
         self._stdin_close_requested = False
         self._cleanup_generation = 0
@@ -351,6 +350,8 @@ class WindowsWSL2HostClient:
                     self._job_assignment = JobAssignment.ASSIGNED_AT_CREATION
                 elif process or thread:
                     self._process_info_incomplete = True
+        if not process or not thread:
+            raise OSError("Windows WSL host-client CreateProcessW returned incomplete process information")
         # The child copies are no longer needed. Keep their array storage alive
         # through CreateProcessW, then release every non-parent duplicate.
         for name in ("stdin_child", "stdout_child", "stderr_child"):
@@ -461,7 +462,7 @@ class WindowsWSL2HostClient:
             with self._condition:
                 exited = self._host_status == HostClientStatus.EXITED
                 not_created = self._host_status == HostClientStatus.NOT_CREATED
-                unknown = self._host_status == HostClientStatus.UNKNOWN
+                incomplete = self._process_info_incomplete
                 drain_terminal = self._drain_terminal or self._drain_admission != _Admission.ADMITTED
             active = self._job_active_processes()
             if active is not None and active > 0:
@@ -477,7 +478,7 @@ class WindowsWSL2HostClient:
                     self._close_handle(name)
                 self._close_job()
                 return
-            if unknown and active == 0 and drain_terminal:
+            if incomplete and active == 0 and drain_terminal:
                 for name in tuple(self._handles):
                     self._close_handle(name)
                 self._close_job()
@@ -494,20 +495,31 @@ class WindowsWSL2HostClient:
         if handle is None or already_exited:
             return
         api = self._require_api()
-        result = api.wait_process(handle, 0)
+        try:
+            result = api.wait_process(handle, 0)
+        except OSError:
+            self._record_unknown_host_observation()
+            return
         if result == api.WAIT_OBJECT_0:
             if self._process_info_incomplete:
                 self._close_handle("process")
                 return
-            status = api.exit_code(handle)
+            try:
+                status = api.exit_code(handle)
+            except OSError:
+                self._record_unknown_host_observation()
+                return
             with self._condition:
                 self._host_status = HostClientStatus.EXITED
                 self._exit_status = status
                 self._condition.notify_all()
         elif result == api.WAIT_FAILED:
-            with self._condition:
-                self._host_status = HostClientStatus.UNKNOWN
-                self._condition.notify_all()
+            self._record_unknown_host_observation()
+
+    def _record_unknown_host_observation(self) -> None:
+        with self._condition:
+            self._host_status = HostClientStatus.UNKNOWN
+            self._condition.notify_all()
 
     def _close_job(self) -> None:
         with self._condition:
@@ -565,13 +577,11 @@ class WindowsWSL2HostClient:
             self._require_api().close_handle(handle)
         except OSError:
             with self._condition:
-                self._handle_uncertain.add(name)
                 self._handle_failed_generation[name] = self._cleanup_generation
                 self._condition.notify_all()
         else:
             with self._condition:
                 self._handles.pop(name, None)
-                self._handle_uncertain.discard(name)
                 self._handle_failed_generation.pop(name, None)
                 self._condition.notify_all()
 
@@ -585,7 +595,11 @@ class WindowsWSL2HostClient:
         return HandleSettlement.CLOSED
 
     def _host_settlement_locked(self) -> HandleSettlement:
-        if self._handle_uncertain or self._acquiring or self._cleanup_generation > self._cleanup_finished_generation:
+        if (
+            self._handle_failed_generation
+            or self._acquiring
+            or self._cleanup_generation > self._cleanup_finished_generation
+        ):
             return HandleSettlement.UNKNOWN
         if self._handles:
             return HandleSettlement.OPEN
