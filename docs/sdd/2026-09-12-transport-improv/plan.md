@@ -1273,6 +1273,17 @@ connection and trust only. Before broader lifecycle implementation, complete the
       and controller hard death while unrelated guest work survives. Until that live WSL2 evidence
       exists, report release unconfirmed rather than inferring guest cleanup.
 
+The private WSL2 ownership candidate is implemented at `23089c8a`. The caller owns an inert
+lifecycle object before `start`; one native-owner interface retains the WSL client, process/pipe
+handles and Job Object handle across startup and cleanup interruption. Its snapshot keeps client
+exit, client-handle closure, Job assignment and Job-handle closure independent, invalidates
+pre-dispatch certainty before native effects, and permits bounded settlement and guest-observer
+retries without replay. Portable tests execute the fixed helper against Linux procfs, cover late or
+invalid readiness, failed cleanup and snapshot observation, fresh cleanup allowance, control
+interruption and separate guest evidence. This is contract/mechanism evidence only. No native
+Windows owner or live WSL2 distribution was exercised, so the checkbox and controller-hard-death
+acceptance above remain open.
+
 The durable launch checkpoint is privately accepted at `ead879ce`. Project, complexity and
 independent correctness reviews are clean. Review removed the dormant application, cleanup and
 disposal fields, the redundant stored unit name and a forwarding service object; the final schema

@@ -337,6 +337,39 @@ recovery requirements, not a hostile-platform boundary. Linux guest sessions ret
 guarantees above. The host workflow must report any cleanup it cannot establish rather than claiming
 cgroup-equivalent descendant ownership.
 
+### WSL2 guest-anchor ownership candidate
+
+The controller constructs an inert native WSL client owner and wraps it in a caller-owned guest
+anchor lifecycle before dispatch. Construction has no native effects. The native owner owns the
+`wsl.exe` process, its process and pipe handles, and any Windows Job Object handle as one local
+capability. It must publish each acquired handle into itself before an interruption can escape. Job
+assignment remains a separate observation because successful assignment neither closes the Job
+handle nor removes the spawn-to-assignment orphan window. The later native adapter must prove its
+actual Windows create/assign mechanism; the portable interface does not make that proof by naming
+the obligation.
+
+`start` dispatches one literal, no-shell Python helper and accepts only its nonce-bound `READY`
+record with the guest PID and Linux process start time. The caller retains the lifecycle object if
+dispatch, readiness, handoff or local cleanup is interrupted, so cleanup can be retried without
+replay. The operation deadline bounds dispatch and receipt observation. Local settlement instead
+gets one fresh 0.5-second allowance per explicit attempt and returns immutable facts for client
+exit, client-handle closure, Job assignment and Job-handle closure. Settlement is complete only when
+the client is known never-created or exited and both handle sets are known never-created or closed.
+Missing observations remain unknown and cannot reuse a pre-dispatch settled snapshot.
+
+`release` first requests cooperative EOF and observes the helper and client under the caller's
+deadline, then invokes local settlement. A later call may retry unresolved local cleanup or repeat
+the independent exact-identity guest observation after local resources have settled. Neither an
+`EXITING` helper record, client exit, closed client handles, successful Job assignment nor closed
+Job handle proves the guest anchor is absent. Only the exact guest PID/start-time observer may make
+that claim.
+
+The private implementation and portable tests establish this orchestration shape and execute the
+helper protocol on local Linux procfs. They do not provide the native Windows owner, prove
+interrupt-safe Windows handle capture, exercise a live WSL distribution, establish cleanup after
+controller hard death, or wire a production platform hold. Those remain requirements of the WSL2
+proof gate below.
+
 ## Delivery sequence and proof criteria
 
 The reviewed design is published and the operator has settled implementation ownership. Complete

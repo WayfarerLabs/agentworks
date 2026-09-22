@@ -178,6 +178,23 @@ establish every required application exit and signal independently; this conserv
 not narrow that requirement. Real WSL argument/byte fidelity, status interpretation, interruption
 and distribution lifetime require proof, including native acceptance of the shared launch owner.
 
+`_wsl2_lifecycle.py` is a separate private guest-anchor ownership candidate. A caller constructs its
+lifecycle object around an inert native owner before calling `start`, so failed or interrupted
+startup cannot discard the only cleanup capability. The native-owner contract keeps the WSL client,
+its process and pipe handles, and any Job Object handle together while reporting client exit, client
+handle closure, Job assignment and Job handle closure as separate facts. Local settlement uses one
+fresh 0.5-second allowance per attempt and remains retryable when any handle or observation is
+uncertain. The operation deadline continues to bound dispatch, helper receipts and guest
+observation.
+
+The fixed no-shell helper emits a nonce-bound `READY` record containing its Linux PID and process
+start time, waits for controller EOF, then emits `EXITING`. These records, `wsl.exe` exit and Job
+Object state are not guest-absence evidence. Only an injected exact PID/start-time observer may
+report absence, and it can be retried after local settlement. Portable tests execute this helper on
+local Linux procfs and exercise lifecycle failure orderings. There is no native Windows owner or
+production composition yet; live WSL behavior, interrupt-safe handle capture, controller hard death
+and platform-hold integration remain open proof gates.
+
 ## Observation and guest lifetime
 
 A deadline bounds local observation only. Ordinary guest commands and bootstrap descendants can
