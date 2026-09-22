@@ -442,6 +442,11 @@ class LifecycleObligation:
             )
             return self._obligation
 
+    @property
+    def _persisted_obligation(self) -> PersistedLifecycleObligation:
+        """Return the exact persisted row for private recovery adapters."""
+        return self._obligation
+
     def resolve(self) -> None:
         """Persist adapter-established no-further-effects evidence."""
         owner = self._owner
@@ -473,14 +478,6 @@ class RecoveredLifecycleObligation:
     _owner: OperationOwner
     _obligation: PersistedLifecycleObligation
 
-    @property
-    def obligation_id(self) -> str:
-        return self._obligation.obligation_id
-
-    @property
-    def payload_revision(self) -> int:
-        return self._obligation.payload_revision
-
     def open_dispatch(self) -> RecoveryDispatch:
         """Reserve this owner for one recovery dispatcher without mutation."""
         owner = self._owner
@@ -511,12 +508,6 @@ class RecoveryDispatch:
     @property
     def ownership(self) -> OperationOwnership:
         return self._owner.ownership
-
-    @property
-    def has_outstanding_attempt(self) -> bool:
-        owner = self._owner
-        with owner._guard:  # noqa: SLF001
-            return owner._outstanding_attempt is self._attempt and self._attempt is not None  # noqa: SLF001
 
     def begin_attempt(self) -> RecoveryAttempt:
         """Revalidate exact durable admission before one adapter dispatch."""
