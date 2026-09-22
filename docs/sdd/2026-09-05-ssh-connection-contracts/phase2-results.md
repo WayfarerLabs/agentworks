@@ -405,17 +405,30 @@ only the SSH test's final ownership sequence; the shared ledger and all runtime 
 transport-owned.
 
 The combined non-integration suite passes: **13,037 passed, 22 skipped** in 195.07 seconds. Ruff
-checks and formatting pass, as does mypy across 1,101 sources. Typer isolation, locked-SDD and
-Rulesync checks pass. Website validation passes all 160 Python and 103 Node tests, with identical
-double builds at both site bases. Independent fixture inspection finds no owned SSH daemon or
-transfer scratch residue: the refused baseline retains one claim and four obligations, while the
-adapted proof leaves no owner, claim or obligation rows. Both exact fixture directories are removed.
+checks and formatting pass, as does mypy across 1,101 sources. File lint, typer isolation,
+locked-SDD and Rulesync checks pass. Website validation passes all 160 Python and 103 Node tests,
+with identical double builds at both site bases. Independent fixture inspection finds no owned SSH
+daemon or transfer scratch residue: the refused baseline retains one claim and four obligations,
+while the adapted proof leaves no owner, claim or obligation rows. Both exact fixture directories
+are removed.
 
-The prior Windows/WSL2 report applies to its recorded CLI tree, not this newer composition. SSH
-private review is required for this adoption. Terminal delivery,
-production RunContext/platform composition, creation/publication binding, recovery and the remaining
-native acceptance gates stay open. This dependency adaptation consumes no public feedback/fix round
-and keeps #832 draft without a checkpoint or ready signal.
+Independent project, complexity and correctness reviews are clean at
+`2b23952be7310e864702bb231b70a8f9c4215ab1`. The correctness lane reruns the real SSH proof: **1
+passed in 4.26 seconds**, with host-visible daemon absence, zero owner/claim/obligation rows, only
+the intended destination and no scratch residue. Its exact fixture and generated credentials are
+removed. These are scoped adaptation reviews, not full-PR approval.
+
+Transport's [hosted CI run](https://github.com/WayfarerLabs/agentworks/actions/runs/35725994550)
+fails an existing subprocess stream-order assertion on Python 3.14 and an authenticated Proxmox
+request test on Windows. The
+[SSH coordination report](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-5776442982)
+routes both observed failures to transport without assuming their cause. Local success does not
+resolve those failures; hosted validation of the updated SSH head remains pending.
+
+The prior Windows/WSL2 report applies to its recorded CLI tree, not this newer composition. Terminal
+delivery, production RunContext/platform composition, creation/publication binding, recovery and the
+remaining native acceptance gates stay open. This dependency adaptation consumes no public
+feedback/fix round and keeps #832 draft without a checkpoint or ready signal.
 
 ## Managed-process fix integration
 
