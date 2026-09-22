@@ -1226,6 +1226,15 @@ connection and trust only. Before broader lifecycle implementation, complete the
       concrete workflow, not a required replacement for Lima's runtime. Do not treat numeric PID
       records as authority to kill unrelated host work.
 
+The durable launch checkpoint is privately accepted at `ead879ce`. Project, complexity and
+independent correctness reviews are clean. Review removed the dormant application, cleanup and
+disposal fields, the redundant stored unit name and a forwarding service object; the final schema
+records only facts the checkpoint can produce and consume. Reviewer runs pass 121 and 177 relevant
+execution, migration, backup and migration-safety tests. Independent experiments also confirm
+cross-connection commit visibility before the launch boundary, one dispatch under concurrent launch,
+exact idempotent reconciliation, malformed-state refusal and no replay after either terminal launch
+outcome. No native destination or production workflow was exercised by this private review.
+
 The checked private candidate is local mechanism evidence only. Its source harness executes the real
 bundled supervisor against a test-local cgroup-filesystem shim and deliberately avoids detached
 payloads. It does not prove Debian systemd 252+ delegation, root control to non-root service
@@ -1589,7 +1598,7 @@ available.
 - [x] Preserve a valid helper terminal transcript when only later carrier observation is lost, while
       retaining the carrier error. Missing terminal, wire corruption and post-terminal records must
       still prevent trusted terminal evidence.
-- [ ] Implement and verify the selected retrospective normal-completion producer/reducer.
+- [x] Implement and verify the selected retrospective normal-completion producer/reducer.
       Eligibility is inline-only CPython 3.11 through 3.14, the range covered by the source and
       mechanism audit; the shared file-helper prerequisite remains Python 3.11 or newer. Outside the
       selected range, inline execution refuses before `LAUNCHING` rather than inventing stronger
@@ -1607,9 +1616,18 @@ readable.
 The final full local suite passes 12,291 tests with 13 skips. Ruff/format, full mypy (1037 sources),
 file lint, locked-SDD/rulesync, typer isolation and whitespace checks pass. Website gates pass 160
 Python tests, 103 Node tests and both deterministic double-build comparisons. No live infrastructure
-was exercised. Production integration remains open: producer/reducer acceptance, safe target/phase
-metadata, native evidence and the complete public target/RunContext surface are not delivered by
-this checkpoint.
+was exercised. Production integration remains open: safe target/phase metadata, native evidence and
+the complete public target/RunContext surface are not delivered by this checkpoint.
+
+The retrospective producer/reducer gate is subsequently complete at `c161b431`. The helper admits
+only Linux CPython 3.11 through 3.14 before launch, emits nonce-bound exact-child normal wait
+evidence, and the reducer accepts completion only after trusted terminal framing and settled
+custody. Private project and complexity review corrections keep unfinished archives payload-free
+without weakening the immediate caller result. The independent correctness lane passes 365 focused
+tests plus real `ExecutionOperation` to local-carrier probes for success, exit 255, signal,
+sensitive-output suppression and overflow. Hosted Linux 3.12 through 3.14, Windows 3.13, static,
+documentation and website checks pass. This evidence does not close eager-start, signaled-entry,
+native-platform or public-composition gates.
 
 ## 5. Add the complete new RunContext surface
 
