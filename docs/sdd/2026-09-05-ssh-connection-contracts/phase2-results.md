@@ -286,22 +286,36 @@ native Windows/macOS acceptance.
 
 ## Explicit whole-operation resolution
 
-Transport checkpoint `c4d9e54d667a0c9bdb0915f21a828e02e8eec77e` separates child-attempt
-settlement from whole-operation resolution. SSH rebases cleanly onto it at `58292ba3`.
-The installed-OpenSSH upload proof reproduces refusal at `owner.close()` after all four
-uploads finish: child settlement alone no longer releases the durable claim.
+Transport checkpoint `c4d9e54d667a0c9bdb0915f21a828e02e8eec77e` separates child-attempt settlement
+from whole-operation resolution. SSH rebases cleanly onto it at `58292ba3`. The installed-OpenSSH
+upload proof reproduces refusal at `owner.close()` after all four uploads finish: child settlement
+alone no longer releases the durable claim.
 
-The proof now records whole-operation effects resolved only after verifying all four outcomes,
-empty active/unfinished custody, no cleanup debt, no pending remote effects or coordination
-uncertainty, and absence of every exact scratch object. These uploads are the entire operation;
-there is no activation, route or power hold to settle. A failing assertion closes the fixture
-database without asserting resolution or automatically releasing the claim. SSH runtime code is
-unchanged, and production orchestration remains transport-owned.
+The proof now records whole-operation effects resolved only after verifying all four outcomes, empty
+active/unfinished custody, no cleanup debt, no pending remote effects or coordination uncertainty,
+and absence of every exact scratch object. These uploads are the entire operation; there is no
+activation, route or power hold to settle. A failing assertion closes the fixture database without
+asserting resolution or automatically releasing the claim. SSH runtime code is unchanged, and
+production orchestration remains transport-owned.
 
 The adapted proof passes over installed Linux OpenSSH in 4.32 seconds. Independent cleanup
 inspection finds no matching fixture process and only the intended destination in each upload
 directory; both before/after fixture directories and credentials are removed. This is local
 private-composition evidence, not production lifecycle or native Windows/macOS acceptance.
+
+Project, complexity and independent correctness/security reviews are clean at `c55c1aa16`. The
+correctness reviewer independently repeats the installed-OpenSSH proof in 4.95 seconds and verifies
+its fixture process, scratch and credential cleanup. The combined non-integration suite passes
+**12,945 tests with 14 skips**. Full Ruff/format, mypy (1,093 sources), file lint, locked-SDD,
+Rulesync and typer-isolation checks pass. Website checks pass 160 Python and 103 Node tests, with
+identical deterministic double builds for both site bases. Subsequent documentation formatting and
+this validation record do not change the reviewed CLI tree.
+
+The earlier managed-process native report below retains its measured tree and scope; it does not
+certify the newer platform identity, creation marker, FileAccess or ownership composition. Terminal,
+additive RunContext/platform orchestration, production creation/publication binding and
+supported-platform acceptance remain open. This dependency adaptation consumes no public feedback
+round and leaves the PR draft without a checkpoint or ready signal.
 
 ## Managed-process fix integration
 
