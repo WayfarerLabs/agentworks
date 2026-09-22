@@ -1751,6 +1751,27 @@ proof around before/after-commit registration, response and final handoff are no
 private checkpoint. It adds no RunContext surface, production factory or #377 hierarchy, and raises
 no public review/test/merge signal.
 
+The database takeover kernel is complete at `60a9ce8d`. One stable operation identifier retains the
+ledger while a separate caller-retained generation rotates from an exact persisted predecessor and
+seals the ledger atomically. Exact retry after commit without reply survives database reopen;
+competing generations, fabricated predecessors, delayed repository transitions and later attempts
+from an already-armed predecessor all fail stale. Recovery can rebind exact persisted obligations,
+publish identity only for an effect that was already possible and resolve typed evidence. It cannot
+borrow ordinary dispatch, retry registration as rebind, or admit or publish a previously registered
+effect. Migration 43 rebuilds only the changed owner table and proves existing obligation payloads,
+revisions, timestamps, foreign keys and cascades survive.
+
+Final project and correctness re-reviews are clean at `f7a2ecac`; the final complexity review's two
+material simplifications are incorporated, and its optional duplicate wrapper check is removed at
+`60a9ce8d`. The combined execution/database selection passes 2,947 tests with 14 skips. After that
+last deletion, 251 focused tests and the full non-integration suite pass 12,892 tests with 21 skips.
+Ruff, formatting, mypy across 1,090 source files, file lint, locked-SDD and Rulesync drift checks
+pass. This closes only the durable database-generation portion of the open recovery checkbox above.
+It does not prove predecessor dispatch drain, remote quiescence, process-loss adapter recovery,
+production recovery factories, operation-root composition or RunContext delivery. The next private
+vertical remains DOWNLOAD snapshot recovery behind an explicit adapter-owned drain fence; no test
+binding may be presented as SSH, QGA or native production evidence.
+
 ### Buffered execution result checkpoint
 
 - [x] Implement safe immutable application result values, honest wait/exit/signal precision and one
