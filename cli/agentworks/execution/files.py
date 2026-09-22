@@ -32,6 +32,10 @@ from ._file_revision_wire import (
 )
 
 if TYPE_CHECKING:
+    from ._file_objects import FileKind as _PrivateFileKind
+    from ._file_publication import Create as _PrivateCreate
+    from ._file_publication import Match as _PrivateMatch
+    from ._file_publication import Replace as _PrivateReplace
     from ._file_stat import FileRevision as _FileRevision
 
 _MAX_REVISION_TOKEN_BYTES = 4_096
@@ -194,6 +198,41 @@ def _revision_from_file_revision(revision: _FileRevision) -> Revision:
 def _file_revision_from_revision(revision: Revision) -> _FileRevision:
     """Recover the validated private fact carried by one public revision."""
     return _decode_revision_token(revision.token)
+
+
+def _private_file_kind(kind: FileKind) -> _PrivateFileKind:
+    """Convert one exact public object kind to the closed helper kind."""
+    from ._file_objects import FileKind as PrivateFileKind
+
+    if type(kind) is not FileKind:
+        raise ValidationError("File operation requires a supported object kind")
+    return {
+        FileKind.REGULAR: PrivateFileKind.REGULAR,
+        FileKind.DIRECTORY: PrivateFileKind.DIRECTORY,
+        FileKind.SOCKET: PrivateFileKind.SOCKET,
+    }[kind]
+
+
+def _private_write_condition(condition: WriteCondition) -> _PrivateCreate | _PrivateReplace | _PrivateMatch:
+    """Convert one public publication condition without exposing helper facts."""
+    from ._file_publication import Create as PrivateCreate
+    from ._file_publication import Match as PrivateMatch
+    from ._file_publication import Replace as PrivateReplace
+
+    if type(condition) is Create:
+        return PrivateCreate()
+    if type(condition) is Replace:
+        return PrivateReplace()
+    if type(condition) is Match:
+        return PrivateMatch(_file_revision_from_revision(condition.revision))
+    raise ValidationError("File operation requires an exact write condition")
+
+
+def _private_json_strategy(strategy: JsonStrategy) -> str:
+    """Convert one exact public JSON strategy to the private closed selector."""
+    if type(strategy) is not JsonStrategy:
+        raise ValidationError("File operation requires a supported JSON strategy")
+    return strategy.value
 
 
 def _kind_from_mode(mode: int) -> FileKind:
