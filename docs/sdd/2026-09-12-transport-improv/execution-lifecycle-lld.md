@@ -279,14 +279,23 @@ or retained in-memory cleanup custody. Final release deletes the resolved obliga
 the exact claim atomically. No automatic expiry, generic retry runner, dependency graph or
 force-release belongs in this layer.
 
-Recovery must be fenced from a delayed original controller before it mutates an old obligation. Core
-rotates a database ownership generation or equivalent token and makes the predecessor stale,
-preventing further cooperating submissions. For every obligation already in `possible-effect`, the
-adapter must then prove both that no admitted dispatch can still arrive and that any existing effect
-can cause no more work. Acceptable evidence includes carrier-proved non-dispatch paired with exact
-absence, an operation-specific remote generation fence, or equally strong proof from a synchronous
-local substrate whose controller and dispatch endpoint are both gone. Controller absence by itself
-is insufficient because provider, carrier or guest queues may outlive it. This recovery fence is
+Recovery must be fenced from a delayed original controller before it mutates an old obligation. The
+logical operation keeps its stable random operation identifier, while each database owner carries a
+separate random generation identifier. Initial acquisition creates both. A recovery controller
+chooses and retains a fresh generation identifier before its takeover transaction. The transaction
+compares the complete predecessor ownership, rotates only the generation, and seals the obligation
+ledger atomically. An exact retry with the same predecessor and requested generation is idempotent,
+including after commit without reply; a different generation or delayed predecessor update is stale.
+Obligations remain attached to the stable operation identifier, so takeover neither copies nor moves
+adapter state to a different owner.
+
+That database fence prevents further cooperating submissions but does not establish remote
+quiescence. For every obligation already in `possible-effect`, the adapter must then prove both that
+no admitted dispatch can still arrive and that any existing effect can cause no more work.
+Acceptable evidence includes carrier-proved non-dispatch paired with exact absence, an
+operation-specific remote generation fence, or equally strong proof from a synchronous local
+substrate whose controller and dispatch endpoint are both gone. Controller absence by itself is
+insufficient because provider, carrier or guest queues may outlive it. This recovery fence is
 separate from #377's future resource hierarchy. The ledger remains attached to the logical operation
 across that transition so later hierarchy can bind one operation to several resource memberships
 without moving adapter state onto one VM row.

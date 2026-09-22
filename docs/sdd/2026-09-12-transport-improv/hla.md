@@ -94,10 +94,11 @@ implemented.
 Preserve one core admission boundary for extending this model to system, workspace, agent, session
 and console resources. The extension must atomically check equal, ancestor and descendant conflicts
 and insert ownership in the same transaction. A VM-wide claim blocks conflicting descendant claims;
-an existing descendant claim also blocks a conflicting VM-wide claim. System-wide exclusion covers
-all participating resources in that state database. Independent siblings may proceed when their
-actual resource sets do not overlap. Fail immediately with the blocking resource, operation and
-available claim metadata, rather than waiting for another operation to finish.
+an existing descendant claim also blocks a conflicting VM-wide claim. Future system-wide exclusion
+is one claim against all participating resources in its authoritative state database; it does not
+coordinate independent databases. Independent siblings may proceed when their actual resource sets
+do not overlap. Fail immediately with the blocking resource, operation and available claim metadata,
+rather than waiting for another operation to finish.
 
 Resource relationships come from core-owned entity identities, not path prefixes, transport routes,
 execution users or the descriptive RunContext scope. Do not invent a single nesting chain: agents

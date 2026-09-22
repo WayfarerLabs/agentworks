@@ -95,8 +95,11 @@ associated pending acceptance gates are superseded by this ruling.
       Keep managed runs specialized and do not add a workflow engine, scheduler, automatic expiry or
       generic payload interpreter.
 - [ ] Implement and prove a recovery takeover fence before any restarted controller acts on an old
-      obligation. The takeover makes the previous database owner stale, but that neither drains an
-      admitted request nor stops remote work. For every admitted obligation, prove that no earlier
+      obligation. Keep one stable logical operation identifier and rotate a separate caller-chosen
+      random generation identifier, atomically sealing the ledger. Make exact retry after commit
+      without reply idempotent while a different recovery generation and every predecessor mutation
+      fail stale. The takeover neither moves obligation rows nor proves that an admitted request is
+      drained or remote work has stopped. For every admitted obligation, prove that no earlier
       dispatch can still arrive and that existing effects are quiescent, using carrier-proved
       non-dispatch plus exact absence, an operation-specific remote fence, or equally strong
       synchronous-substrate evidence. Otherwise retain the obligation and report incomplete
@@ -1489,6 +1492,13 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       exact-operation path confinement and safe target/phase diagnostics. Complete production
       ownership, local download publication, directory transfer and native acceptance remain
       required; these private building blocks do not close those gates.
+- [ ] Resolve lifecycle-ledger capacity before migrating high-volume artifact publication. Keep the
+      current 128-row bound and commit-without-reply evidence model; do not prune resolved rows
+      without a separate durable tombstone protocol or merely raise the limit. Prove that one
+      bounded logical directory/package operation can publish many physical members under one
+      obligation, including the current maximum supported package, or introduce an explicit lower
+      product limit before production adoption. Per-file public calls must not make a supported
+      artifact package fail only because its owning command accumulated resolved rows.
 - [ ] Resolve the public filesystem-root edge before claiming complete path coverage: the current
       nonempty parent/leaf helper contract cannot address `/` itself. The operator has been asked
       whether to exclude root targets initially or support read-only root stat/inventory. Keep
