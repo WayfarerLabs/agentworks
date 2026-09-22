@@ -112,7 +112,7 @@ def _candidate(report: CarrierReport, *, payload: bytes = b"") -> InlineCandidat
     )
 
 
-def _patch_candidate_execution(monkeypatch: pytest.MonkeyPatch) -> list[Deadline]:
+def _patch_candidate_execution(monkeypatch: pytest.MonkeyPatch, *, payload: bytes = b"") -> list[Deadline]:
     deadlines: list[Deadline] = []
 
     def prepare(*args: object, **kwargs: object) -> object:
@@ -128,7 +128,7 @@ def _patch_candidate_execution(monkeypatch: pytest.MonkeyPatch) -> list[Deadline
         del prepared
         deadlines.append(deadline)
         report = carrier.execute(PreparedInvocation(("/bin/true",)), io=CarrierIO(), deadline=deadline)
-        return _candidate(report)
+        return _candidate(report, payload=payload)
 
     monkeypatch.setattr(execution_operation, "prepare_inline_candidate", prepare)
     monkeypatch.setattr(execution_operation, "execute_inline_candidate", execute)
@@ -277,6 +277,28 @@ def test_carrier_failure_is_retained_as_a_candidate_fact(
     assert not outcome.deadline_exceeded
     assert not outcome.requires_owner_retention
     owner.close()
+
+
+def test_unfinished_archive_omits_captured_inline_bytes(
+    operation: tuple[Database, OperationOwner, execution_operation.ExecutionOperation],
+    plan: IdentityPlan,
+    runtime_selection: RuntimeSelection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, owner, owned = operation
+    payload = b"captured-inline-bytes"
+    _patch_candidate_execution(monkeypatch, payload=payload)
+
+    outcome = _run(owned, RecordingCarrier(CarrierReport(Dispatch.SENT)), plan, runtime_selection, Deadline.after(30))
+
+    assert outcome.candidate is not None
+    observation = outcome.candidate.observation
+    assert observation is not None and observation.stdout is not None
+    assert observation.stdout.data == payload
+    (unfinished,) = owned.unfinished_inline_executions
+    assert unfinished.outcome.candidate is None
+    with pytest.raises(StateError):
+        owner.borrow()
 
 
 @pytest.mark.parametrize("control", [KeyboardInterrupt("control-canary"), RuntimeError("provider-canary")])

@@ -204,6 +204,16 @@ class InvalidUploadSource:
     read = "not-callable"
 
 
+class DescriptorUploadSource:
+    def __init__(self) -> None:
+        self.inspections = 0
+
+    @property
+    def read(self) -> object:
+        self.inspections += 1
+        raise AssertionError("upload source read descriptor must not be inspected")
+
+
 @pytest.fixture
 def plan() -> IdentityPlan:
     gid = os.getegid()
@@ -576,7 +586,7 @@ def test_unavailable_elevation_refuses_before_validation_or_dispatch(
         OperationScope(OperationResourceKind.VM, "file-access-elevation"),
         "file-access",
     )
-    carrier = LocalCarrier()
+    carrier = NoDispatchCarrier()
     access = FileAccess(
         FileOperation(owner),
         carrier,
@@ -597,7 +607,7 @@ def test_unavailable_elevation_refuses_before_validation_or_dispatch(
                 create=True,
                 create_metadata=metadata,
             )
-        assert carrier.calls == 0
+        assert carrier.invocations == []
         with pytest.raises(StateError):
             access.update_json(
                 PurePosixPath(root / "target"),
@@ -607,7 +617,20 @@ def test_unavailable_elevation_refuses_before_validation_or_dispatch(
                 create_metadata=metadata,
                 sudo=True,
             )
-        assert carrier.calls == 0
+        assert carrier.invocations == []
+
+        source = DescriptorUploadSource()
+        with pytest.raises(StateError):
+            access.upload(
+                PurePosixPath(root / "target"),
+                source,  # type: ignore[arg-type]
+                size=1,
+                condition=Create(),
+                create_metadata=metadata,
+                sudo=True,
+            )
+        assert source.inspections == 0
+        assert carrier.invocations == []
         owner.close()
     finally:
         database.close()

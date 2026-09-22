@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
@@ -27,10 +27,10 @@ if TYPE_CHECKING:
 class OwnedInlineOutcome:
     """Captured inline facts and independent operation-ownership state.
 
-    ``candidate`` is absent only on escaping control flow. Retaining a partial
-    helper transcript in an exception's custody chain would unnecessarily keep
-    request-derived bytes alive. The original exception remains the escaping
-    object, with a safe fact carrying the ownership state instead.
+    A completed call retains its candidate for its immediate caller. Custody
+    records that can outlive the call omit it, avoiding retention of helper
+    transcript bytes. Escaping control flow also exposes only a safe ownership
+    fact through its exception cause.
     """
 
     candidate: InlineCandidateResult | None = None
@@ -166,6 +166,6 @@ class ExecutionOperation:
     def _capture(self, active: _ActiveInlineCall, outcome: OwnedInlineOutcome) -> None:
         active.outcome = outcome
         if outcome.requires_owner_retention:
-            self._unfinished_inline_executions.append(UnfinishedInlineExecution(outcome))
+            self._unfinished_inline_executions.append(UnfinishedInlineExecution(replace(outcome, candidate=None)))
         active.borrow.close()
         self._active_inline_calls.pop(id(active))

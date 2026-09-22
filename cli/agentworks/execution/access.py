@@ -206,13 +206,13 @@ class FileAccess:
         sudo: bool = False,
     ) -> MutationResult:
         """Publish one exact finite value from a caller-owned source."""
+        root, leaf, plan, deadline = self._request(path, sudo)
         source = _validate_upload_source(source)
         if type(size) is not int or not 0 <= size <= _MAX_UPLOAD_SIZE:
             raise ValidationError("File upload size must be a nonnegative bounded integer")
         if type(create_metadata) is not NewMetadata:
             raise ValidationError("File upload requires exact creation metadata")
         private_condition = _private_write_condition(condition)
-        root, leaf, plan, deadline = self._request(path, sudo)
         outcome = self._operation.upload(
             self._carrier,
             trusted_root_path=root,
