@@ -770,8 +770,9 @@ proves that remote effects stopped.
 Closing the owner and admitting a borrow share the same guard. Close first prevents new dispatch; an
 active borrow prevents release and requires explicit later finalization. A returning borrower may
 record the outstanding attempt's facts but cannot start another exchange after close. The last
-borrower does not implicitly release the claim. Only final settlement transitions the durable claim
-to resolved, followed by exact-owner release. Never attempt release before it is safe, or assume a
+borrower does not implicitly release the claim. Only core's explicit whole-operation resolution,
+after all child attempts and lifecycle obligations are quiescent, transitions the durable claim to
+resolved, followed by exact-owner release. Never attempt release before it is safe, or assume a
 failed database call committed or rolled back. A safe release may have committed before
 interruption; do not compensate by claiming the resource again. Cleanup debt remains distinct from
 possible future effects and must be returned or retained with its original binding, even after

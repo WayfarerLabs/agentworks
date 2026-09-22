@@ -68,6 +68,14 @@ and settle the owner only after every obligation is discharged. Individual lifec
 release the owner, and opaque legacy success is not a no-further-effects witness. This requirement
 does not retrofit or migrate legacy callers.
 
+The private owner now models that distinction directly. `arm()` persists possible dispatch before
+the outer lifecycle begins without retaining a borrow; sequential target, file and execution work
+then borrow the same owner and settle only their own attempts. Core must call
+`record_effects_resolved()` after the complete activation/workflow/teardown aggregate proves
+quiescence. `close()` abandons a never-armed reservation or releases an explicitly resolved claim;
+it does not infer whole-operation resolution from settled children. Production orchestration and
+RunContext are not yet wired, so this is a usable primitive rather than completed coordination.
+
 ### Recovery-target identity inventory, 2026-09-21
 
 The read-only audit at `368f5f0c` distinguishes logical admission from target identification.

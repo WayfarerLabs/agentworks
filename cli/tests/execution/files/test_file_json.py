@@ -274,6 +274,7 @@ def test_replace_uses_stat_without_parsing_existing_bytes(tmp_path: Path, plan: 
         assert outcome.upload_outcome is not None and outcome.upload_outcome.ownership_result is None
         assert json.loads(target.read_bytes()) == {"value": None}
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -348,6 +349,7 @@ def test_skip_existing_leaves_any_regular_file_unchanged(
         assert outcome.publication_attempts == 0 and carrier.calls == 1
         assert target.read_bytes() == existing
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -371,6 +373,7 @@ def test_absent_destination_respects_create(
         assert outcome.failure is FileJsonFailure.ABSENT
         assert outcome.publication_attempts == 0 and not (root / "target").exists()
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -406,6 +409,7 @@ def test_each_strategy_creates_an_absent_destination(
         assert outcome.upload_outcome.ownership_result.observation.state is FileOwnershipObservationState.RESOLVED
         assert json.loads((root / "target").read_bytes()) == {"created": [None, {"nested": True}]}
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -444,6 +448,7 @@ def test_absent_creation_retains_nested_ownership_failure(
         assert raised.value.details.reason is FileFailureReason.MISSING_OWNER
         assert not (root / "target").exists()
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -513,6 +518,7 @@ def test_merge_uses_bounded_snapshot_and_atomic_leaf_semantics(
         assert outcome.upload_outcome is not None and outcome.upload_outcome.ownership_result is None
         assert json.loads(target.read_bytes()) == expected
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -540,6 +546,7 @@ def test_merge_rejects_invalid_existing_without_publication(
         assert outcome.publication_attempts == 0 and carrier.calls == 1
         assert target.read_bytes() == existing
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -574,6 +581,7 @@ def test_valid_existing_json_beyond_depth_bound_does_not_publish(
         assert outcome.publication_attempts == 0 and carrier.calls == 1
         assert target.read_bytes() == existing
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -611,6 +619,7 @@ def test_valid_existing_json_beyond_integer_parser_capacity_does_not_publish(
         assert outcome.publication_attempts == 0 and carrier.calls == 1
         assert target.read_bytes() == existing
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -645,6 +654,7 @@ def test_merge_enforces_snapshot_byte_bound_without_partial_publication(
         assert outcome.publication_attempts == 0 and carrier.calls == 1
         assert target.read_text() == '{"existing":"value beyond bound"}'
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -676,6 +686,7 @@ def test_merge_reports_result_capacity_separately_from_invalid_existing(
         assert outcome.publication_attempts == 0
         assert json.loads(target.read_bytes()) == {"existing": "1234567890"}
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -706,6 +717,7 @@ def test_known_runtime_refusal_stops_before_upload(tmp_path: Path, plan: Identit
         assert outcome.publication_attempts == 0 and carrier.calls == 1
         assert not outcome.requires_owner_retention
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -745,6 +757,7 @@ def test_merge_retries_a_later_exact_match_conflict_with_one_deadline_and_borrow
         assert json.loads(target.read_bytes()) == {"concurrent": True, "source": {"nested": None}}
         assert len({id(deadline) for deadline in seen_deadlines}) == 1
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -805,6 +818,7 @@ def test_merge_stops_after_eight_total_condition_conflicts(
         assert not outcome.requires_owner_retention
         assert json.loads(target.read_bytes()) == {"existing": True}
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -831,6 +845,7 @@ def test_merge_does_not_retry_a_noncondition_publication_conflict(
         assert outcome.publication_attempts == 1
         assert json.loads(target.read_bytes()) == {"existing": True}
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -868,6 +883,7 @@ def test_whole_json_call_holds_borrow_against_sibling_upload(
 
         assert outcome.status is FileJsonStatus.COMPLETE and sibling_refused
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -904,6 +920,7 @@ def test_read_and_upload_share_one_durable_dispatch_transition(
         assert outcome.status is FileJsonStatus.COMPLETE
         assert outcome.publication_attempts == 1 and marks == 1
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -928,6 +945,7 @@ def test_lost_read_observation_stops_without_replay_or_owner_retention(
         assert outcome.publication_attempts == 0 and carrier.calls == 1
         assert not outcome.requires_owner_retention
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()

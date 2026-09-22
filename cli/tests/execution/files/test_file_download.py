@@ -92,6 +92,7 @@ def test_real_helper_downloads_verified_content_and_cleans_snapshot(
         assert outcome.cleanup_debt is None and not outcome.requires_owner_retention
         assert not tuple(scratch.iterdir())
         borrow.close()
+        operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
         database.close()
@@ -114,6 +115,7 @@ def test_proven_absence_writes_nothing(
         assert outcome.accepted_bytes == 0 and sink.calls == 0
         assert outcome.source_revision is None and not outcome.requires_owner_retention
         borrow.close()
+        operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
         database.close()
@@ -213,6 +215,7 @@ def test_bad_sink_is_sanitized_and_snapshot_is_cleaned(
         assert outcome.cleanup_debt is None and not outcome.requires_owner_retention
         assert not tuple(scratch.iterdir())
         borrow.close()
+        operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
         database.close()
@@ -238,6 +241,7 @@ def test_sink_control_flow_propagates_with_bounded_clean_state(
         assert fact.outcome.accepted_bytes == 0 and not fact.outcome.requires_owner_retention
         assert not tuple(scratch.iterdir())
         borrow.close()
+        operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
         database.close()
@@ -361,6 +365,7 @@ def test_runtime_refusal_stops_without_reconciliation(
         assert outcome.runtime_prerequisite.state is RuntimePrerequisiteState.MISSING
         assert not outcome.requires_owner_retention
         borrow.close()
+        operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
         database.close()
@@ -385,6 +390,7 @@ def test_source_exceeding_bound_is_refused_without_sink_bytes(
         assert sink.calls == 0 and outcome.accepted_bytes == 0
         assert outcome.cleanup_debt is None and not tuple(scratch.iterdir())
         borrow.close()
+        operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
         database.close()
@@ -411,6 +417,7 @@ def test_lost_creation_observation_reconciles_and_cleans_without_replay(
         assert sink.calls == 0 and outcome.cleanup_debt is None
         assert not outcome.requires_owner_retention and not tuple(scratch.iterdir())
         borrow.close()
+        operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
         database.close()
@@ -468,6 +475,7 @@ def test_lost_chunk_observation_hands_no_bytes_then_cleans_known_snapshot(
         assert outcome.cleanup_debt is None and not outcome.requires_owner_retention
         assert not tuple(scratch.iterdir())
         borrow.close()
+        operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
         database.close()
@@ -766,6 +774,7 @@ def test_helper_declared_deadline_stops_before_sink_delivery(
         assert outcome.cleanup_debt is None and not outcome.requires_owner_retention
         assert not tuple(scratch.iterdir())
         borrow.close()
+        operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
         database.close()
@@ -899,6 +908,7 @@ def test_one_borrow_spans_snapshot_delivery_and_cleanup(
 
         assert outcome.status is FileDownloadStatus.COMPLETE and sink.refused
         borrow.close()
+        operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
         database.close()
@@ -1028,6 +1038,7 @@ def test_whole_digest_mismatch_is_not_complete_and_still_cleans(
         assert not outcome.stream_verified and bytes(sink.data) == b"payload"
         assert outcome.cleanup_debt is None and not tuple(scratch.iterdir())
         borrow.close()
+        operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
         database.close()

@@ -222,6 +222,7 @@ def test_real_fixed_helper_composes_current_direct_identity_under_one_borrow(
     assert result.delivery_result is result.workload_result
     assert carrier.calls == 1
     assert not result.requires_owner_retention
+    owner.record_effects_resolved()
     owner.close()
 
 
@@ -273,6 +274,8 @@ def test_synthetic_identity_selection(
     assert result.plan is not None and result.plan.mode is mode
     assert len(carrier.calls) == calls
     assert len({id(deadline) for deadline in carrier.deadlines}) == 1
+    assert not result.requires_owner_retention
+    owner.record_effects_resolved()
     owner.close()
 
 
@@ -288,6 +291,9 @@ def test_duplicate_name_reuses_one_observation_only_within_the_call(
     assert first.delivery_result is first.workload_result
     assert second.delivery_result is second.workload_result
     assert carrier.calls == ["worker", "worker"]
+    assert not first.requires_owner_retention
+    assert not second.requires_owner_retention
+    owner.record_effects_resolved()
     owner.close()
 
 
@@ -314,6 +320,7 @@ def test_unproved_cross_identity_paths_are_refused_without_root_lookup(
     assert result.failure is TargetIdentityFailure.IDENTITY_PATH
     assert result.plan is None and carrier.calls == ["delivery", "workload"]
     assert not result.requires_owner_retention
+    owner.record_effects_resolved()
     owner.close()
 
 
@@ -365,6 +372,7 @@ def test_late_normal_completion_settles_attempt_but_cannot_produce_plan(
     assert result.status is TargetIdentityStatus.FAILED
     assert result.failure is TargetIdentityFailure.DEADLINE and result.deadline_exceeded
     assert result.plan is None and not result.requires_owner_retention
+    owner.record_effects_resolved()
     owner.close()
 
 
@@ -395,6 +403,7 @@ def test_closed_lookup_failures_stop_before_the_next_account(
     assert result.failure is failure and result.plan is None
     assert carrier.calls == ["delivery"] and result.workload_result is None
     assert not result.requires_owner_retention
+    owner.record_effects_resolved()
     owner.close()
 
 
@@ -423,6 +432,7 @@ def test_abnormal_and_no_send_completion_facts_are_conservative(
     assert result.requires_owner_retention is retained
     assert result.pending_remote_effects is retained
     if not retained:
+        owner.record_effects_resolved()
         owner.close()
 
 
@@ -457,6 +467,7 @@ def test_expiry_crossed_during_abnormal_exchange_preserves_primary_failure(
     assert result.plan is None and result.requires_owner_retention is retained
     assert result.pending_remote_effects is retained
     if not retained:
+        owner.record_effects_resolved()
         owner.close()
 
 
@@ -559,4 +570,6 @@ def test_default_representations_do_not_disclose_account_names(
     result = _prepare(owner, carrier, delivery=delivery, workload=workload)
 
     assert delivery not in repr(result) and workload not in repr(result)
+    assert not result.requires_owner_retention
+    owner.record_effects_resolved()
     owner.close()

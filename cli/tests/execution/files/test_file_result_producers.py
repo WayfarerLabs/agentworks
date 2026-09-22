@@ -147,6 +147,10 @@ def test_real_root_refusal_uses_callers_observation_or_removal_phase(
     assert _details(raised_remove.value).reason is FileFailureReason.REFUSED
     assert _details(raised_remove.value).phase is FileOperationPhase.REMOVAL
     assert target.read_bytes() == _DATA
+    assert not stat_outcome.requires_owner_retention
+    assert not present.requires_owner_retention
+    assert not remove_outcome.requires_owner_retention
+    owner.record_effects_resolved()
     owner.close()
 
 
@@ -311,6 +315,11 @@ def test_real_helper_refusals_precede_later_host_deadline(
     assert all(
         outcome.deadline_exceeded for outcome in (stat_outcome, inventory_outcome, remove_outcome, metadata_outcome)
     )
+    assert not any(
+        outcome.requires_owner_retention
+        for outcome in (stat_outcome, inventory_outcome, remove_outcome, metadata_outcome)
+    )
+    owner.record_effects_resolved()
     owner.close()
 
 

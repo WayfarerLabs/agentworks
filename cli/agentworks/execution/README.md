@@ -601,10 +601,14 @@ operations and retain unresolved ownership after loss of remote observation. Tha
 enabled here. These private helpers are not safe to expose as an uncoordinated public file service.
 Neither a caller crash nor a missing scratch receipt proves remote mutation has stopped.
 
-`agentworks.operations.OperationOwner` wraps one exact database claim with a serial borrow for the
-whole nested operation. Its first attempt commits possible dispatch before returning permission to
-send work. Later attempts reuse the durable claim. Explicit close stops admission and refuses while
-a borrow or unresolved attempt remains; it does not infer remote quiescence from local return.
+`agentworks.operations.OperationOwner` wraps one exact database claim with serial borrows for child
+operations. Core can arm the owner before an outer lifecycle effect without retaining a borrow; the
+first child attempt otherwise commits possible dispatch before returning permission to send work.
+Later attempts reuse the durable claim. A settled child attempt proves only that attempt is done.
+Core separately records whole-operation no-further-effects evidence after activation, workflow and
+teardown are quiescent. Explicit close stops admission and releases only a never-armed reservation
+or an explicitly resolved claim; it does not infer remote quiescence from local return or from the
+absence of an open child attempt.
 
 `_file_operations.py` uses the caller's active borrow for stat, inventory, conditional removal and
 metadata composition. Metadata name lookup and mutation share one borrow and deadline; successful

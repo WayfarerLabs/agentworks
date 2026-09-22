@@ -343,6 +343,10 @@ def test_real_helpers_reduce_stat_inventory_and_conflict_without_private_state(t
         )
         with pytest.raises(ConflictError):
             reduce_file_remove(refused, **_CONTEXT)
+        assert not present.requires_owner_retention
+        assert not inventory.requires_owner_retention
+        assert not refused.requires_owner_retention
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()

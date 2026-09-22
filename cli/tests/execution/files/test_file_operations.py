@@ -228,6 +228,7 @@ def test_single_exchange_preparations_preserve_typed_result_and_settle(
     with pytest.raises(StateError):
         owner.close()
     borrow.close()
+    owner.record_effects_resolved()
     owner.close()
 
 
@@ -273,6 +274,7 @@ def test_settlement_uses_only_supported_termination_evidence(
     assert outcome.requires_owner_retention is retained
     if not retained:
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
 
 
@@ -364,6 +366,7 @@ def test_deadline_after_return_is_independent_of_operation_facts(
     assert outcome.requires_owner_retention is (completion.code != 0)
     if not outcome.requires_owner_retention:
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
 
 
@@ -453,6 +456,7 @@ def test_metadata_lookup_and_mutation_share_one_borrow_and_preserve_both_results
     assert len(operations_seen) == 2 and operations_seen[0] is operations_seen[1]
     assert carrier.calls == 2 and not outcome.requires_owner_retention
     borrow.close()
+    owner.record_effects_resolved()
     owner.close()
 
 
@@ -556,6 +560,7 @@ def test_metadata_lookup_must_be_ready_resolved_normal_and_within_deadline(
     assert outcome.requires_owner_retention is retained
     if not retained:
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
 
 

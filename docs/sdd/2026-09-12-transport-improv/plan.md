@@ -61,6 +61,12 @@ associated pending acceptance gates are superseded by this ruling.
 - [x] Implement atomic database operation admission for conflicting resource scopes, with durable
       ownership and explicit terminal release. Keep SQL transactions short; do not hold a database
       write lock during remote execution or coordinate independent databases through a new service.
+- [x] Separate whole-operation lifecycle admission and resolution from child dispatch attempts in
+      the private ownership primitive. Core can durably arm the claim before activation without
+      holding an in-memory borrow, lend the same owner to sequential child operations, and release
+      only after core records explicit whole-workflow no-further-effects evidence. Settled child
+      attempts never imply that activation, holds, routes, workflow or teardown are quiescent;
+      interrupted admission, resolution and release reconcile against the fenced claim.
 - [ ] Carry the same operation ownership through core orchestration, RunContext and nested file
       composition. Serialize conflicting exchanges inside that ownership; cover user/admin writers
       and shared platform-host resources without splitting ownership by transport route or identity.
@@ -1260,6 +1266,12 @@ connection and trust only. Before broader lifecycle implementation, complete the
       stop and rollback for the supported drivers. A foreground anchor is an option to justify for a
       concrete workflow, not a required replacement for Lima's runtime. Do not treat numeric PID
       records as authority to kill unrelated host work.
+- [ ] Prove WSL2 host-client and guest-anchor cleanup independently before wiring a production
+      platform hold. A Windows Job Object or observed `wsl.exe` exit proves only host-client
+      cleanup. The candidate must obtain a guest-ready acknowledgment, retain an exact guest process
+      identity, request cooperative exit, and verify that identity is absent after ordinary release
+      and controller hard death while unrelated guest work survives. Until that live WSL2 evidence
+      exists, report release unconfirmed rather than inferring guest cleanup.
 
 The durable launch checkpoint is privately accepted at `ead879ce`. Project, complexity and
 independent correctness reviews are clean. Review removed the dormant application, cleanup and

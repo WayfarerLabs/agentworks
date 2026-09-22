@@ -120,6 +120,7 @@ def test_source_contract_failures_cleanup_exact_scratch(
         assert outcome.scratch_cleanup_debt is None and not outcome.requires_owner_retention
         assert not root.joinpath("target").exists()
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -142,6 +143,7 @@ def test_source_exception_is_sanitized_and_borrowed_source_is_not_closed(
         assert "source-secret-canary" not in repr(outcome)
         assert outcome.scratch_cleanup_debt is None and not source.closed
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -166,6 +168,7 @@ def test_source_cancellation_propagates_with_bounded_cleanup_facts(
         assert fact.outcome.scratch_cleanup_debt is None
         assert not fact.outcome.requires_owner_retention and not source.closed
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -386,6 +389,7 @@ def test_local_publication_preparation_failure_cleans_completed_stage(
         assert carrier.calls == 4 and source.offset == 7
         assert not root.joinpath(scratch_name(fact.outcome.token)).exists()
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()

@@ -449,6 +449,7 @@ def test_real_helper_create_streams_exact_bytes_once(
         assert source.offset == len(content) and not source.closed
         assert all(limit <= 12 * 1024 for limit in source.limits)
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
         assert database.operations.inspect(owner.ownership.scope) is None
     finally:
@@ -484,6 +485,7 @@ def test_owner_is_durably_marked_once_before_each_real_carrier_execute(
         assert carrier.calls == 5
         assert marks == 1
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -513,6 +515,7 @@ def test_local_source_failure_does_not_inherit_cleanup_exchange_evidence(
         assert outcome.carrier_failure is None
         assert carrier.calls == 3 and outcome.scratch_cleanup_debt is None
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -559,6 +562,7 @@ def test_real_helper_replace_and_match_use_the_same_owner_without_overlapping_bo
         assert replace_carrier.calls == match_carrier.calls == 4
         assert root.joinpath("target").read_bytes() == b"third"
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -603,6 +607,7 @@ def test_missing_create_owner_and_group_are_distinct_and_stop_before_staging(
         assert carrier.calls == 1 and source.calls == 0
         assert not outcome.publication_uncertain and not root.joinpath("target").exists()
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -655,6 +660,7 @@ def test_lost_creation_reply_reconciles_and_cleans_without_replaying_begin(
         assert outcome.scratch_cleanup_debt is None
         assert not outcome.requires_owner_retention and not root.joinpath("target").exists()
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -703,6 +709,7 @@ def test_known_runtime_refusal_stops_before_pointless_reconciliation(
         assert not outcome.stage_ownership_uncertain
         assert not outcome.requires_owner_retention
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -1088,6 +1095,7 @@ def test_closed_stage_deadline_transcript_stops_without_fresh_cleanup(
         assert outcome.stage_failure == failure
         assert not outcome.requires_owner_retention
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -1169,6 +1177,7 @@ def test_publish_failure_cleans_publication_debt_before_ordinary_scratch(
         assert outcome.scratch_cleanup_debt is None
         assert not outcome.requires_owner_retention and not root.joinpath("target").exists()
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -1283,6 +1292,7 @@ def test_partial_stage_creation_failure_uses_failure_debt_for_cleanup(
         assert not root.joinpath(scratch_name(outcome.token)).exists()
         assert not outcome.requires_owner_retention
         borrow.close()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()

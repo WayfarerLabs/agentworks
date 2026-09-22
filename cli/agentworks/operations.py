@@ -18,8 +18,8 @@ class OperationOwner:
 
     Acquisition belongs to core orchestration. Consumers borrow the owner for
     one complete nested operation and settle each carrier attempt before
-    another can begin. Closing never guesses that an outstanding attempt has
-    stopped.
+    another can begin. Closing never infers whole-operation resolution from
+    settled child attempts.
     """
 
     def __init__(
@@ -33,8 +33,9 @@ class OperationOwner:
         self._active_borrow: OperationBorrow | None = None
         self._outstanding_attempt: OperationAttempt | None = None
         self._durable_possible_dispatch = False
+        self._effects_resolved = False
+        self._transition_uncertain = False
         self._close_requested = False
-        self._close_transition_uncertain = False
         self._release_may_have_committed = False
         self._released = False
 
@@ -52,15 +53,29 @@ class OperationOwner:
     def ownership(self) -> OperationOwnership:
         return self._ownership
 
+    def arm(self) -> None:
+        """Durably permit a whole-operation lifecycle effect.
+
+        Unlike a borrowed attempt, successful arming leaves no in-memory
+        attempt active. An interrupted transition retains ownership until its
+        durable state is reconciled.
+        """
+        with self._guard:
+            self._require_no_active_work_locked()
+            if self._transition_uncertain:
+                self._reconcile_transition_locked()
+            self._require_dispatch_admission_locked()
+            if self._durable_possible_dispatch:
+                return
+            self._transition_uncertain = True
+            self._repository.mark_possible_dispatch(self._ownership)
+            self._durable_possible_dispatch = True
+            self._transition_uncertain = False
+
     def borrow(self) -> OperationBorrow:
         """Borrow the whole-operation serial guard without waiting."""
         with self._guard:
-            if self._close_requested or self._released:
-                raise StateError(
-                    "operation ownership is closing",
-                    entity_kind=self._ownership.scope.resource_kind,
-                    entity_name=self._ownership.scope.resource_name,
-                )
+            self._require_dispatch_admission_locked()
             if self._active_borrow is not None:
                 raise StateError(
                     "operation ownership is already borrowed",
@@ -77,72 +92,132 @@ class OperationOwner:
             self._active_borrow = borrowed
             return borrowed
 
-    def close(self) -> None:
-        """Stop admission and release only after all borrowed work settled.
+    def record_effects_resolved(self) -> None:
+        """Persist caller-established evidence that effects cannot remain.
 
-        A refused close stays closed to new borrowers. The current borrower
-        may only record and settle its already-started attempt and relinquish
-        the borrow. Calling ``close`` again performs explicit finalization.
+        Resolution is whole-operation evidence, not an inference from settled
+        child attempts. Retrying after an interrupted transition first reads
+        the fenced claim to distinguish a committed resolution from a retry.
         """
         with self._guard:
-            self._close_requested = True
-            if self._active_borrow is not None or self._outstanding_attempt is not None:
+            self._require_no_active_work_locked()
+            if self._transition_uncertain:
+                self._reconcile_transition_locked()
+            if self._released:
                 raise StateError(
-                    "operation ownership still has active or unresolved work",
+                    "operation ownership is already released",
                     entity_kind=self._ownership.scope.resource_kind,
                     entity_name=self._ownership.scope.resource_name,
                 )
+            if self._effects_resolved:
+                return
+            if not self._durable_possible_dispatch:
+                raise StateError(
+                    "operation ownership was not armed for dispatch",
+                    entity_kind=self._ownership.scope.resource_kind,
+                    entity_name=self._ownership.scope.resource_name,
+                )
+            self._transition_uncertain = True
+            self._repository.record_effects_resolved(self._ownership)
+            self._effects_resolved = True
+            self._transition_uncertain = False
+
+    def close(self) -> None:
+        """Stop admission and release only after explicit effects resolution.
+
+        A refused close stays closed to new borrowers. The current borrower
+        may only record and settle its already-started attempt and relinquish
+        the borrow. Later close calls require the caller to record
+        whole-operation no-further-effects evidence before finalization.
+        """
+        with self._guard:
+            self._close_requested = True
+            self._require_no_active_work_locked()
             self._finalize_close_locked()
 
     def _finalize_close_locked(self) -> None:
         if self._released:
             return
-        if self._close_transition_uncertain:
-            claim = self._repository.inspect(self._ownership.scope)
-            if claim is None:
-                if self._release_may_have_committed:
-                    self._released = True
-                    return
-                raise StateError(
-                    "operation ownership disappeared before safe release",
-                    entity_kind=self._ownership.scope.resource_kind,
-                    entity_name=self._ownership.scope.resource_name,
-                )
-            if claim.ownership != self._ownership:
-                raise StateError(
-                    "operation ownership is stale",
-                    entity_kind=self._ownership.scope.resource_kind,
-                    entity_name=self._ownership.scope.resource_name,
-                )
-            self._durable_possible_dispatch = claim.state is not OperationClaimState.RESERVED
-            if claim.state is OperationClaimState.RESOLVED:
-                self._release_resolved_locked()
-                return
-            self._close_transition_uncertain = False
+        if self._transition_uncertain:
+            self._reconcile_transition_locked()
+        if self._released:
+            return
+        if self._effects_resolved:
+            self._release_resolved_locked()
+            return
         if not self._durable_possible_dispatch:
-            try:
-                self._repository.abandon_reserved(self._ownership)
-            except BaseException:
-                self._close_transition_uncertain = True
-                self._release_may_have_committed = True
-                raise
+            self._transition_uncertain = True
+            self._release_may_have_committed = True
+            self._repository.abandon_reserved(self._ownership)
+            self._released = True
+            self._transition_uncertain = False
+            return
+        raise StateError(
+            "operation ownership effects require explicit resolution",
+            entity_kind=self._ownership.scope.resource_kind,
+            entity_name=self._ownership.scope.resource_name,
+        )
+
+    def _reconcile_transition_locked(self) -> None:
+        claim = self._repository.inspect(self._ownership.scope)
+        if claim is None:
+            if self._release_may_have_committed:
+                self._transition_uncertain = False
+                self._released = True
+                return
+            raise StateError(
+                "operation ownership disappeared before safe release",
+                entity_kind=self._ownership.scope.resource_kind,
+                entity_name=self._ownership.scope.resource_name,
+            )
+        if claim.ownership != self._ownership and self._release_may_have_committed:
+            self._transition_uncertain = False
             self._released = True
             return
-        try:
-            self._repository.record_effects_resolved(self._ownership)
-        except BaseException:
-            self._close_transition_uncertain = True
-            raise
-        self._release_resolved_locked()
+        if claim.ownership != self._ownership:
+            raise StateError(
+                "operation ownership is stale",
+                entity_kind=self._ownership.scope.resource_kind,
+                entity_name=self._ownership.scope.resource_name,
+            )
+        self._durable_possible_dispatch = claim.state is not OperationClaimState.RESERVED
+        self._effects_resolved = claim.state is OperationClaimState.RESOLVED
+        self._transition_uncertain = False
+
+    def _require_no_active_work_locked(self) -> None:
+        if self._active_borrow is not None or self._outstanding_attempt is not None:
+            raise StateError(
+                "operation ownership still has active or unresolved work",
+                entity_kind=self._ownership.scope.resource_kind,
+                entity_name=self._ownership.scope.resource_name,
+            )
+
+    def _require_dispatch_admission_locked(self) -> None:
+        if self._close_requested or self._released:
+            raise StateError(
+                "operation ownership is closing",
+                entity_kind=self._ownership.scope.resource_kind,
+                entity_name=self._ownership.scope.resource_name,
+            )
+        if self._transition_uncertain:
+            raise StateError(
+                "operation ownership transition is uncertain",
+                entity_kind=self._ownership.scope.resource_kind,
+                entity_name=self._ownership.scope.resource_name,
+            )
+        if self._effects_resolved:
+            raise StateError(
+                "operation ownership effects are already resolved",
+                entity_kind=self._ownership.scope.resource_kind,
+                entity_name=self._ownership.scope.resource_name,
+            )
 
     def _release_resolved_locked(self) -> None:
         self._release_may_have_committed = True
-        try:
-            self._repository.release_resolved(self._ownership)
-        except BaseException:
-            self._close_transition_uncertain = True
-            raise
+        self._transition_uncertain = True
+        self._repository.release_resolved(self._ownership)
         self._released = True
+        self._transition_uncertain = False
 
 
 @dataclass(slots=True, repr=False)

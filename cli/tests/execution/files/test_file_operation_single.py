@@ -203,6 +203,7 @@ def test_real_stat_inventory_and_conditional_remove_share_core_custody(
         assert operation.active_removals == ()
         assert operation.unfinished_owned_files == ()
         assert database.operations.inspect(owner.ownership.scope) is not None
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -272,6 +273,7 @@ def test_real_metadata_and_directory_paths_preserve_noop_and_refusal(
         assert operation.active_metadata == ()
         assert operation.unfinished_owned_files == ()
         assert database.operations.inspect(owner.ownership.scope) is not None
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -322,6 +324,7 @@ def test_real_partial_directory_creation_is_captured_without_replay(
         assert stat.S_IMODE(root.joinpath("partial").stat().st_mode) == 0o700
         assert operation.active_metadata == ()
         assert operation.unfinished_owned_files == ()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -362,6 +365,7 @@ def test_cross_family_reentry_uses_the_same_owner(
         )
 
         assert outcome.result is not None and carrier.rejected
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
@@ -432,6 +436,7 @@ def test_normal_outcome_is_attached_before_borrow_closes(
 
         assert observed == [outcome]
         assert operation.active_stats == ()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
