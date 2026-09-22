@@ -35,6 +35,16 @@ output semantics, no recorded failure or expired deadline, and confirmed owned c
 returns that same result or raises `CheckedExecutionError` carrying it; neither path invents a
 scalar return code or copies provider exception text into result fields or the error message.
 
+`_execution_result.py` reduces an operation-owned inline outcome into those public facts. The fixed
+inline helper accepts retrospective normal completion only on CPython 3.11 through 3.14, after its
+trusted terminal records an exact normal wait and the operation owner has settled. This produces a
+completed `ExitCode` without emitting or accepting a synthetic `STARTED` record. A signaled wait
+remains application-unknown. Runtime and prelaunch refusals can establish not-started, while every
+missing or corrupt evidence path stays unknown. The reducer retains only validated captured stream
+bytes and safe retention/completeness facts. It preserves a later carrier failure separately from a
+trusted helper terminal, and never confirms cleanup while ownership or helper observation remains
+uncertain.
+
 `files.py` defines frozen public file values. Opaque versioned revisions preserve the observed
 object identity, metadata and optional content digest. Their 4,096-byte token bound limits metadata
 encoding, not file size. Public metadata must agree with its revision; a read result also verifies

@@ -61,6 +61,7 @@ class PreparedInlineCandidate:
     invocation: PreparedInvocation
     io: CarrierIO
     nonce: str
+    output_mode: OutputMode
     _runtime: RuntimePrefixSink = field(repr=False)
     _reader: FrameReader = field(repr=False)
     _observer: InlineObserver = field(repr=False)
@@ -82,6 +83,7 @@ class InlineCandidateResult:
     carrier_failure: Failure | None
     runtime_prerequisite: RuntimePrerequisiteObservation
     observation: InlineObservation | None
+    requested_output: OutputMode = OutputMode.CAPTURE
 
 
 def _utf8(value: str) -> bytes:
@@ -235,6 +237,7 @@ def prepare_inline_candidate(
             sensitive=sensitive,
         ),
         nonce=nonce,
+        output_mode=output_mode,
         _runtime=runtime,
         _reader=reader,
         _observer=observer,
@@ -270,4 +273,5 @@ def execute_inline_candidate(
         carrier_failure=report.failure,
         runtime_prerequisite=runtime_prerequisite,
         observation=observation,
+        requested_output=prepared.output_mode,
     )

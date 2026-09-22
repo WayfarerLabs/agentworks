@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pytest
 
@@ -201,8 +202,20 @@ def test_guest_identity_requires_real_effective_saved_and_exact_groups(
     assert _helper_identity.matches_current_identity(_identity()) is matches
 
 
+@pytest.mark.parametrize(
+    ("platform", "implementation", "version"),
+    [
+        ("darwin", "cpython", (3, 12)),
+        ("linux", "pypy", (3, 12)),
+        ("linux", "cpython", (3, 10)),
+        ("linux", "cpython", (3, 15)),
+    ],
+)
 def test_inline_guest_refuses_unsupported_runtime_before_identity_or_workload_access(
     monkeypatch: pytest.MonkeyPatch,
+    platform: str,
+    implementation: str,
+    version: tuple[int, int],
 ) -> None:
     prepared = prepare_inline_candidate(
         Command(["/bin/true"]),
@@ -226,7 +239,9 @@ def test_inline_guest_refuses_unsupported_runtime_before_identity_or_workload_ac
 
     monkeypatch.setattr(os, "read", read)
     monkeypatch.setattr(os, "write", write)
-    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr(sys, "implementation", SimpleNamespace(name=implementation))
+    monkeypatch.setattr(sys, "version_info", version)
     monkeypatch.setattr(_inline_guest, "matches_current_identity", unexpected)
     monkeypatch.setattr(_inline_guest, "run_owned_process", unexpected)
 

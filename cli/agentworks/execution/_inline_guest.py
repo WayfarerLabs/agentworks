@@ -198,6 +198,11 @@ def _finish_failure(emitter: _Emitter, failure: FailureFact) -> int:
     return 0
 
 
+def _supports_retrospective_completion() -> bool:
+    """Return whether this helper has the audited exact-child wait mechanism."""
+    return sys.implementation.name == "cpython" and (3, 11) <= sys.version_info[:2] <= (3, 14)
+
+
 def main(nonce: str) -> int:
     """Run one manifest and report only bounded nonce-bound evidence."""
     emitter = _Emitter(nonce)
@@ -214,7 +219,7 @@ def main(nonce: str) -> int:
         return _finish_failure(emitter, FailureFact(FailurePhase.REQUEST, code))
     if manifest.nonce != nonce:
         return _finish_failure(emitter, FailureFact(FailurePhase.REQUEST, FailureCode.NONCE))
-    if sys.platform != "linux":
+    if sys.platform != "linux" or not _supports_retrospective_completion():
         return _finish_failure(emitter, FailureFact(FailurePhase.PREPARE, FailureCode.RUNTIME))
     if not matches_current_identity(manifest.identity):
         return _finish_failure(emitter, FailureFact(FailurePhase.IDENTITY, FailureCode.MISMATCH))

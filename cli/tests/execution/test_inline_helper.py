@@ -11,6 +11,8 @@ from pathlib import Path
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution._execution_operation import OwnedInlineOutcome
+from agentworks.execution._execution_result import reduce_owned_inline_result
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._inline import (
@@ -37,6 +39,7 @@ from agentworks.execution.carrier import (
 )
 from agentworks.execution.carriers._subprocess import run_process
 from agentworks.execution.models import Command, Script, Shell
+from agentworks.execution.result import ApplicationState, ExitCode
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the inline guest candidate requires Linux")
 PYTHON_311 = Path("/usr/bin/python3.11")
@@ -126,6 +129,9 @@ def test_literal_command_preserves_every_normal_exit(status: int, plan: Identity
     assert wait.value == status
     assert observation.failure is None
     assert result.carrier_completion == ExitStatus(code=0)
+    public_result = reduce_owned_inline_result(OwnedInlineOutcome(candidate=result))
+    assert public_result.application_state is ApplicationState.COMPLETED
+    assert public_result.status == ExitCode(status)
 
 
 def test_signaled_command_keeps_exact_signal_separate(plan: IdentityPlan) -> None:
