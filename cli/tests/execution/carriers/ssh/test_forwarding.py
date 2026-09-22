@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import re
 import socket
@@ -423,17 +424,29 @@ def _unused_port() -> int:
         return int(listener.getsockname()[1])
 
 
-def test_setup_failure_releases_partial_owned_listener(synthetic: SyntheticForwarding) -> None:
-    port = _unused_port()
+def test_setup_failure_releases_partial_owned_listener(synthetic: SyntheticForwarding, tmp_path: Path) -> None:
+    port_file = tmp_path / "listener-port"
     synthetic.script = (
-        f"listener=socket.socket(); listener.bind(('127.0.0.1',{port})); listener.listen(); "
+        "from pathlib import Path; "
+        "listener=socket.socket(); listener.bind(('127.0.0.1',0)); listener.listen(); "
+        f"Path({str(port_file)!r}).write_text(str(listener.getsockname()[1]), encoding='ascii'); "
         "os.write(1,b'wrong\\n'); sys.stdin.buffer.read()"
     )
-    with pytest.raises(ForwardingError):
+    with pytest.raises(ForwardingError) as caught:
         synthetic.open()
+    assert caught.value.failure is Failure.INVALID_RESPONSE
     synthetic.assert_closed()
+    port = int(port_file.read_text(encoding="ascii"))
     with socket.socket() as listener:
-        listener.bind(("127.0.0.1", port))
+        deadline = time.monotonic() + 1
+        while True:
+            try:
+                listener.bind(("127.0.0.1", port))
+                break
+            except OSError as error:
+                if error.errno != errno.EADDRINUSE or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.01)
 
 
 @pytest.mark.integration
