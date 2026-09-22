@@ -74,7 +74,7 @@ class _TLSServer(HTTPServer):
     def get_request(self) -> tuple[ssl.SSLSocket, tuple[str, int]]:
         connection, address = super().get_request()
         self.connections += 1
-        connection.settimeout(2)
+        connection.settimeout(30)
         try:
             return self.context.wrap_socket(connection, server_side=True), address
         except BaseException:
