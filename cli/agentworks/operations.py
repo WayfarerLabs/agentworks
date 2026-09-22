@@ -346,6 +346,8 @@ class OperationBorrow:
 
     _owner: OperationOwner
     _carrier_obligation: PersistedLifecycleObligation | None = field(default=None, init=False)
+    _carrier_armed: bool = field(default=False, init=False)
+    _closing: bool = field(default=False, init=False)
     _closed: bool = field(default=False, init=False)
 
     @property
@@ -370,6 +372,12 @@ class OperationBorrow:
         owner = self._owner
         with owner._guard:  # noqa: SLF001
             self._require_active_locked()
+            if self._closing:
+                raise StateError(
+                    "operation borrow is closing",
+                    entity_kind=self.ownership.scope.resource_kind,
+                    entity_name=self.ownership.scope.resource_name,
+                )
             if owner._close_requested:  # noqa: SLF001
                 raise StateError(
                     "operation ownership is closing",
@@ -383,18 +391,22 @@ class OperationBorrow:
                     entity_name=self.ownership.scope.resource_name,
                 )
             if self._carrier_obligation is None:
+                owner._transition_uncertain = True  # noqa: SLF001
                 obligation = owner._register_carrier_dispatch_locked()  # noqa: SLF001
                 self._carrier_obligation = obligation
-                attempt = OperationAttempt(self)
-                owner._outstanding_attempt = attempt  # noqa: SLF001
+            attempt = OperationAttempt(self)
+            owner._outstanding_attempt = attempt  # noqa: SLF001
+            if not self._carrier_armed:
+                obligation = self._carrier_obligation
+                assert obligation is not None
+                owner._transition_uncertain = True  # noqa: SLF001
                 owner._repository.mark_lifecycle_obligation_possible_effect(  # noqa: SLF001
                     self.ownership,
                     obligation.obligation_id,
                 )
+                self._carrier_armed = True
                 owner._durable_possible_dispatch = True  # noqa: SLF001
-                return attempt
-            attempt = OperationAttempt(self)
-            owner._outstanding_attempt = attempt  # noqa: SLF001
+                owner._transition_uncertain = False  # noqa: SLF001
             return attempt
 
     def close(self) -> None:
@@ -408,13 +420,16 @@ class OperationBorrow:
                     entity_kind=self.ownership.scope.resource_kind,
                     entity_name=self.ownership.scope.resource_name,
                 )
+            self._closing = True
             if self._carrier_obligation is not None:
+                owner._transition_uncertain = True  # noqa: SLF001
                 owner._repository.resolve_lifecycle_obligation(  # noqa: SLF001
                     self.ownership,
                     self._carrier_obligation.obligation_id,
                 )
-            self._closed = True
+                owner._transition_uncertain = False  # noqa: SLF001
             owner._active_borrow = None  # noqa: SLF001
+            self._closed = True
 
     def handoff_unresolved(self) -> None:
         """Terminally retain this borrow's outstanding effect for recovery.
@@ -426,6 +441,12 @@ class OperationBorrow:
         owner = self._owner
         with owner._guard:  # noqa: SLF001
             self._require_active_locked()
+            if self._closing:
+                raise StateError(
+                    "operation borrow is closing",
+                    entity_kind=self.ownership.scope.resource_kind,
+                    entity_name=self.ownership.scope.resource_name,
+                )
             attempt = owner._outstanding_attempt  # noqa: SLF001
             if attempt is None or attempt._borrow is not self:  # noqa: SLF001
                 raise StateError(
@@ -433,8 +454,8 @@ class OperationBorrow:
                     entity_kind=self.ownership.scope.resource_kind,
                     entity_name=self.ownership.scope.resource_name,
                 )
-            self._closed = True
             owner._active_borrow = None  # noqa: SLF001
+            self._closed = True
 
     def _require_active_locked(self) -> None:
         if self._closed or self._owner._active_borrow is not self:  # noqa: SLF001
@@ -450,7 +471,6 @@ class OperationAttempt:
     """The sole outstanding attempt originated by one serial borrow."""
 
     _borrow: OperationBorrow
-    _settled: bool = field(default=False, init=False)
 
     def settle(self) -> None:
         """Acknowledge caller-established no-further-effects evidence."""
@@ -458,13 +478,12 @@ class OperationAttempt:
         owner = borrow._owner  # noqa: SLF001
         with owner._guard:  # noqa: SLF001
             borrow._require_active_locked()  # noqa: SLF001
-            if self._settled or owner._outstanding_attempt is not self:  # noqa: SLF001
+            if owner._outstanding_attempt is not self:  # noqa: SLF001
                 raise StateError(
                     "operation attempt is no longer outstanding",
                     entity_kind=borrow.ownership.scope.resource_kind,
                     entity_name=borrow.ownership.scope.resource_name,
                 )
-            self._settled = True
             owner._outstanding_attempt = None  # noqa: SLF001
 
 

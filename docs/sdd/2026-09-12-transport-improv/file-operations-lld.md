@@ -774,8 +774,10 @@ active borrow prevents release and requires explicit later finalization. A borro
 while its attempt is outstanding, so it cannot orphan the attempt's in-memory evidence. A returning
 borrower may instead explicitly hand off an unresolved attempt after it has captured the typed
 custody fact. That terminal handoff makes the borrow unusable, leaves its attempt and generic
-carrier obligation unresolved, and keeps the owner blocked for recovery. The last borrower does not
-implicitly release the claim. Only core's explicit whole-operation resolution, after all child
+carrier obligation unresolved, and keeps the owner blocked for recovery. A safe close first refuses
+new attempts and handoff, then resolves the generic obligation before relinquishing authority. An
+interrupted close remains in that closing state until a retry completes it. The last borrower does
+not implicitly release the claim. Only core's explicit whole-operation resolution, after all child
 attempts and lifecycle obligations are quiescent, transitions the durable claim to resolved,
 followed by exact-owner release. Never attempt release before it is safe, or assume a failed
 database call committed or rolled back. A safe release may have committed before interruption; do

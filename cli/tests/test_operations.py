@@ -9,9 +9,15 @@ from typing import Any
 
 import pytest
 
-from agentworks.db import Database, OperationClaimState, OperationResourceKind, OperationScope
+from agentworks.db import (
+    Database,
+    LifecycleObligationState,
+    OperationClaimState,
+    OperationResourceKind,
+    OperationScope,
+)
 from agentworks.errors import StateError
-from agentworks.operations import LifecycleObligation, OperationOwner
+from agentworks.operations import LifecycleObligation, OperationBorrow, OperationOwner
 
 pytestmark = pytest.mark.windows
 
@@ -89,7 +95,7 @@ def test_shared_owner_refuses_overlapping_borrows_without_waiting(db: Database) 
     assert db.operations.inspect(_scope()) is None
 
 
-def test_each_attempt_registers_an_independent_durable_obligation(
+def test_one_borrow_arms_its_generic_obligation_once(
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -113,7 +119,7 @@ def test_each_attempt_registers_an_independent_durable_obligation(
     second = borrow.begin_attempt()
     second.settle()
 
-    assert calls == 2
+    assert calls == 1
     borrow.close()
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
@@ -146,7 +152,7 @@ def test_relinquished_borrow_leaves_attempt_permanently_unsettled(db: Database) 
     owner = OperationOwner.acquire(db.operations, _scope(), "file-upload")
     borrow = owner.borrow()
     attempt = borrow.begin_attempt()
-    borrow.close()
+    borrow.handoff_unresolved()
 
     with pytest.raises(StateError):
         owner.borrow()
@@ -231,9 +237,11 @@ def test_interrupted_safe_release_accepts_absent_row_on_repeated_close(
     assert db.operations.inspect(_scope()) is None
 
 
-def test_failed_first_durable_mark_never_returns_dispatch_permission(
+@pytest.mark.parametrize("committed", [False, True], ids=["before-mark", "after-mark"])
+def test_interrupted_first_durable_mark_never_returns_dispatch_permission(
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
+    committed: bool,
 ) -> None:
     repository = db.operations
     owner = OperationOwner.acquire(repository, _scope(), "file-upload")
@@ -241,20 +249,110 @@ def test_failed_first_durable_mark_never_returns_dispatch_permission(
     original = repository.mark_lifecycle_obligation_possible_effect
 
     def mark_then_interrupt(ownership, obligation_id):
-        original(ownership, obligation_id)
+        if committed:
+            original(ownership, obligation_id)
         raise KeyboardInterrupt
 
     monkeypatch.setattr(repository, "mark_lifecycle_obligation_possible_effect", mark_then_interrupt)
     with pytest.raises(KeyboardInterrupt):
         borrow.begin_attempt()
-    borrow.close()
+    assert borrow.has_outstanding_attempt
+    with pytest.raises(StateError):
+        borrow.begin_attempt()
+    borrow.handoff_unresolved()
 
     claim = db.operations.inspect(_scope())
-    assert claim is not None and claim.state is OperationClaimState.POSSIBLE_DISPATCH
+    assert claim is not None
+    assert claim.state is (OperationClaimState.POSSIBLE_DISPATCH if committed else OperationClaimState.RESERVED)
     with pytest.raises(StateError):
         owner.close()
     with pytest.raises(StateError):
         owner.borrow()
+
+
+def test_interrupted_registration_before_attempt_retries_with_durable_admission(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = db.operations
+    owner = OperationOwner.acquire(repository, _scope(), "file-upload")
+    borrow = owner.borrow()
+    _interrupt_after_repository_return(
+        monkeypatch,
+        repository=repository,
+        method_name="register_lifecycle_obligation",
+        owner_method=OperationBorrow.begin_attempt,
+    )
+
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            borrow.begin_attempt()
+    finally:
+        sys.settrace(None)
+
+    attempt = borrow.begin_attempt()
+    claim = repository.inspect(_scope())
+    obligations = repository.list_lifecycle_obligations(owner.ownership)
+    assert claim is not None and claim.state is OperationClaimState.POSSIBLE_DISPATCH
+    assert any(obligation.state is LifecycleObligationState.POSSIBLE_EFFECT for obligation in obligations)
+
+    attempt.settle()
+    borrow.close()
+    assert any(obligation.state is LifecycleObligationState.REGISTERED for obligation in obligations)
+
+
+@pytest.mark.parametrize("committed", [False, True], ids=["before-commit", "after-commit"])
+def test_interrupted_borrow_close_blocks_admission_until_retry(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    committed: bool,
+) -> None:
+    repository = db.operations
+    owner = OperationOwner.acquire(repository, _scope(), "file-upload")
+    borrow = owner.borrow()
+    attempt = borrow.begin_attempt()
+    attempt.settle()
+    original = repository.resolve_lifecycle_obligation
+
+    if committed:
+        _interrupt_after_repository_return(
+            monkeypatch,
+            repository=repository,
+            method_name="resolve_lifecycle_obligation",
+            owner_method=OperationBorrow.close,
+        )
+        try:
+            with pytest.raises(KeyboardInterrupt):
+                borrow.close()
+        finally:
+            sys.settrace(None)
+    else:
+
+        def resolve_then_interrupt(ownership, obligation_id):
+            del ownership, obligation_id
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(repository, "resolve_lifecycle_obligation", resolve_then_interrupt)
+        with pytest.raises(KeyboardInterrupt):
+            borrow.close()
+
+    obligations = repository.list_lifecycle_obligations(owner.ownership)
+    assert obligations[0].state is (
+        LifecycleObligationState.RESOLVED if committed else LifecycleObligationState.POSSIBLE_EFFECT
+    )
+    with pytest.raises(StateError):
+        borrow.begin_attempt()
+    with pytest.raises(StateError):
+        borrow.handoff_unresolved()
+    with pytest.raises(StateError):
+        owner.borrow()
+
+    monkeypatch.setattr(repository, "resolve_lifecycle_obligation", original)
+    borrow.close()
+    assert repository.list_lifecycle_obligations(owner.ownership)[0].state is LifecycleObligationState.RESOLVED
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
 
 
 def test_admitted_effect_permits_later_sequential_child_borrows(db: Database) -> None:
