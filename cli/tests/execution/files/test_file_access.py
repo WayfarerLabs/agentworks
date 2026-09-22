@@ -40,6 +40,7 @@ from agentworks.execution.files import (
 )
 from agentworks.operations import OperationOwner
 from tests.execution.files._file_read_support import LocalCarrier
+from tests.execution.files._file_snapshot_support import install_fixture_bundle
 from tests.execution.files._runtime_support import runtime_selection
 
 if TYPE_CHECKING:
@@ -121,9 +122,13 @@ def metadata() -> NewMetadata:
 
 
 @pytest.fixture
-def bound_access(tmp_path: Path, plan: IdentityPlan):
+def bound_access(tmp_path: Path, plan: IdentityPlan, monkeypatch: pytest.MonkeyPatch):
     root = tmp_path / "approved"
     root.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    scratch.chmod(0o1777)
+    install_fixture_bundle(monkeypatch, scratch)
     database = Database(tmp_path / "state.db")
     owner = OperationOwner.acquire(
         database.operations,
