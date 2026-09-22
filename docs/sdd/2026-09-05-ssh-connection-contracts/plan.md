@@ -188,9 +188,9 @@ The [implementation progress record](phase2-results.md) pins the completed indep
 local validation separately from the remaining shared integration and platform acceptance.
 
 Shared subprocess adoption introduces an implementation dependency on transport #833. Current
-integration uses `a51a28ff157796827aa3d862cf41039d7440275f`; completed records retain the pins they
-validated. The [lifecycle-ledger adoption](phase2-results.md#lifecycle-ledger-adoption) records the
-required sealing step in the SSH upload proof. The earlier
+integration uses `e27a466f38d9a257a6c20f4ced4308163851657a`; completed records retain the pins they
+validated. The [file-custody adoption](phase2-results.md#durable-file-call-custody-adoption) records
+the managed-target binding and durable obligations in the SSH upload proof. The earlier
 [joint Windows/WSL2 report](phase2-results.md#joint-windowswsl2-mechanism-proof) retains its
 measured composition and mechanism scope. #832 stacks on transport's implementation branch;
 transport lands first. Buffered adapter validation does not close the shared launch-interruption
