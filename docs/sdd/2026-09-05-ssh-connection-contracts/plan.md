@@ -188,12 +188,14 @@ The [implementation progress record](phase2-results.md) pins the completed indep
 local validation separately from the remaining shared integration and platform acceptance.
 
 Shared subprocess adoption introduces an implementation dependency on transport #833. Current
-integration uses `f13f48e55c632d33c405de9210ff658ddc627612`; completed records retain the pins they
-validated. The [joint Windows/WSL2 report](phase2-results.md#joint-windowswsl2-mechanism-proof)
-validates the identical rebased CLI tree within its recorded mechanism scope. #832 stacks on
-transport's implementation branch; transport lands first. Buffered adapter validation does not close
-the shared launch-interruption gate, live I/O, terminal preparation or additive RunContext delivery.
-Terminal/PTY work is proceeding in parallel in the transport lane, as confirmed by the operator.
+integration uses `a51a28ff157796827aa3d862cf41039d7440275f`; completed records retain the pins they
+validated. The [lifecycle-ledger adoption](phase2-results.md#lifecycle-ledger-adoption) records the
+required sealing step in the SSH upload proof. The earlier
+[joint Windows/WSL2 report](phase2-results.md#joint-windowswsl2-mechanism-proof) retains its
+measured composition and mechanism scope. #832 stacks on transport's implementation branch;
+transport lands first. Buffered adapter validation does not close the shared launch-interruption
+gate, live I/O, terminal preparation or additive RunContext delivery. Terminal/PTY work is
+proceeding in parallel in the transport lane, as confirmed by the operator.
 
 ### Complete the carrier and migration
 

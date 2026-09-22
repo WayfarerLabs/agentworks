@@ -388,6 +388,35 @@ exact recovery wiring. The full Phase 2 acceptance gates remain open. This depen
 consumes no SSH public feedback/fix round and leaves #832 draft without a checkpoint or ready
 signal.
 
+## Lifecycle-ledger adoption
+
+Transport checkpoint `a51a28ff157796827aa3d862cf41039d7440275f` adds durable lifecycle obligations
+and requires their ledger to be sealed before whole-operation resolution. SSH rebases cleanly at
+`a57db43df97a533be80a65dca2dbc97689ec171e`; all 69 carried commits remain patch-equivalent.
+Transport records clean project, complexity and correctness reviews of its private ledger at
+`3f06c91c`. Its production orchestration and recovery takeover remain separate work.
+
+The unchanged real-SSH upload proof reproduces the new sealing refusal after all four upload cases
+and their cleanup assertions pass. It now calls `seal_lifecycle_obligations()` immediately before
+`record_effects_resolved()`, after confirming the complete operation has no pending transfer,
+scratch object, cleanup debt or uncertain custody. No activation, route or platform hold belongs to
+this fixture. The adapted proof passes over installed Linux OpenSSH in 4.28 seconds. This changes
+only the SSH test's final ownership sequence; the shared ledger and all runtime code remain
+transport-owned.
+
+The combined non-integration suite passes: **13,037 passed, 22 skipped** in 195.07 seconds. Ruff
+checks and formatting pass, as does mypy across 1,101 sources. Typer isolation, locked-SDD and
+Rulesync checks pass. Website validation passes all 160 Python and 103 Node tests, with identical
+double builds at both site bases. Independent fixture inspection finds no owned SSH daemon or
+transfer scratch residue: the refused baseline retains one claim and four obligations, while the
+adapted proof leaves no owner, claim or obligation rows. Both exact fixture directories are removed.
+
+The prior Windows/WSL2 report applies to its recorded CLI tree, not this newer composition. SSH
+private review is required for this adoption. Terminal delivery,
+production RunContext/platform composition, creation/publication binding, recovery and the remaining
+native acceptance gates stay open. This dependency adaptation consumes no public feedback/fix round
+and keeps #832 draft without a checkpoint or ready signal.
+
 ## Managed-process fix integration
 
 Transport's
