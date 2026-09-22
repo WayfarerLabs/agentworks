@@ -694,3 +694,29 @@ def test_retained_effect_handoff_requires_an_armed_supplied_obligation(db: Datab
     with pytest.raises(StateError):
         release_borrow_after_custody(borrow, retain_effect=True)
     borrow.close()
+
+
+def test_prepared_supplied_payload_stays_on_the_row_armed_for_dispatch(db: Database) -> None:
+    owner = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    borrow = owner.borrow()
+    obligation = borrow.install_dispatch_obligation(
+        "8" * 32,
+        "adapter-dispatch",
+        payload_version=1,
+        payload=b"prepared",
+    )
+
+    obligation.publish_payload(
+        expected_revision=obligation.payload_revision,
+        payload_version=2,
+        payload=b"child-token",
+    )
+    attempt = borrow.begin_attempt()
+    row = db.operations.list_lifecycle_obligations(owner.ownership)[0]
+
+    assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert row.payload_version == 2
+    assert row.payload == b"child-token"
+    assert row.payload_revision == 1
+    attempt.settle()
+    borrow.close()

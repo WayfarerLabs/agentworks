@@ -381,7 +381,7 @@ class OperationRepository:
         payload_version: int,
         payload: bytes,
     ) -> LifecycleObligation:
-        """CAS-replace identity payload only while the effect may still exist.
+        """CAS-replace identity payload while the obligation is unresolved.
 
         Repeating a committed publication is safe when it requests the exact
         same adapter payload. A concurrent different publication refuses
@@ -395,9 +395,9 @@ class OperationRepository:
         with self._standalone_transaction():
             self._require_owned_claim(ownership)
             obligation = self._load_obligation(ownership, obligation_id)
-            if obligation.state is not LifecycleObligationState.POSSIBLE_EFFECT:
+            if obligation.state is LifecycleObligationState.RESOLVED:
                 raise StateError(
-                    "lifecycle obligation payload can be published only after effect admission",
+                    "lifecycle obligation payload cannot be published after resolution",
                     entity_kind=ownership.scope.resource_kind,
                     entity_name=ownership.scope.resource_name,
                 )
@@ -406,13 +406,14 @@ class OperationRepository:
             cursor = self._connection.execute(
                 "UPDATE lifecycle_obligations "
                 "SET payload_version = ?, payload = ?, payload_revision = payload_revision + 1, updated_at = ? "
-                "WHERE operation_id = ? AND obligation_id = ? AND state = ? AND payload_revision = ?",
+                "WHERE operation_id = ? AND obligation_id = ? AND state IN (?, ?) AND payload_revision = ?",
                 (
                     payload_version,
                     payload,
                     now,
                     ownership.operation_id,
                     obligation_id,
+                    LifecycleObligationState.REGISTERED,
                     LifecycleObligationState.POSSIBLE_EFFECT,
                     expected_revision,
                 ),

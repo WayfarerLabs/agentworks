@@ -13,6 +13,7 @@ import pytest
 from agentworks.db import (
     LATEST_VERSION,
     Database,
+    LifecycleObligationState,
     OperationClaimState,
     OperationOwnership,
     OperationResourceKind,
@@ -457,4 +458,52 @@ def test_caller_retained_obligation_id_retries_only_an_exact_registration(db: Da
             1,
             b"changed",
             obligation_id=obligation_id,
+        )
+
+
+def test_registered_obligation_payload_publication_uses_cas_and_refuses_after_resolution(db: Database) -> None:
+    ownership = db.operations.claim(_scope(), "vm-reinitialize")
+    obligation = db.operations.register_lifecycle_obligation(
+        ownership,
+        "prepared-route",
+        1,
+        b"prepared",
+        obligation_id="7" * 32,
+    )
+
+    published = db.operations.publish_lifecycle_obligation_payload(
+        ownership,
+        obligation.obligation_id,
+        expected_revision=obligation.payload_revision,
+        payload_version=2,
+        payload=b"child-token",
+    )
+    retried = db.operations.publish_lifecycle_obligation_payload(
+        ownership,
+        obligation.obligation_id,
+        expected_revision=obligation.payload_revision,
+        payload_version=2,
+        payload=b"child-token",
+    )
+
+    assert published.state is LifecycleObligationState.REGISTERED
+    assert published.payload_revision == 1
+    assert retried == published
+    with pytest.raises(StateError):
+        db.operations.publish_lifecycle_obligation_payload(
+            ownership,
+            obligation.obligation_id,
+            expected_revision=obligation.payload_revision,
+            payload_version=2,
+            payload=b"different-token",
+        )
+
+    db.operations.resolve_lifecycle_obligation(ownership, obligation.obligation_id)
+    with pytest.raises(StateError):
+        db.operations.publish_lifecycle_obligation_payload(
+            ownership,
+            obligation.obligation_id,
+            expected_revision=published.payload_revision,
+            payload_version=2,
+            payload=b"child-token",
         )
