@@ -897,12 +897,8 @@ def test_post_exit_short_writes_are_delivered_fairly(children: list[subprocess.P
     assert_closed(children)
 
 
-@pytest.mark.skipif(
-    os.name == "nt" or not all(hasattr(os, name) for name in ("waitid", "P_PID", "WEXITED", "WNOWAIT")),
-    reason="deterministic non-reaping exit observation requires POSIX waitid WNOWAIT",
-)
 def test_same_iteration_pending_transition_stops_fresh_other_stream_read(
-    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class StalledSink:
         def __init__(self) -> None:
@@ -920,28 +916,50 @@ def test_same_iteration_pending_transition_stops_fresh_other_stream_read(
             self.bytes_written += len(data)
             return len(data)
 
-    spawn = subprocess.Popen
-
-    def completed_start(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
-        process = spawn(argv, **kwargs)
-        os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT)
-        return process
-
-    stdout = StalledSink()
-    stderr = CountingSink()
-    monkeypatch.setattr(subprocess, "Popen", completed_start)
-    result = execute(
-        "import sys; sys.stdout.write('out'); sys.stdout.flush(); sys.stderr.write('err'); sys.stderr.flush()",
-        io=CarrierIO(output=SinkOutput(stdout, stderr)),
-        seconds=0.5,
+    stdout_read, stdout_write = os.pipe()
+    stderr_read, stderr_write = os.pipe()
+    stdout_pipe = os.fdopen(stdout_read, "rb", buffering=0)
+    stderr_pipe = os.fdopen(stderr_read, "rb", buffering=0)
+    pipes = process_core.LocalProcessPipes(None, stdout_pipe, stderr_pipe)
+    owner = process_core.LocalProcessOwner()
+    monkeypatch.setattr(
+        owner,
+        "snapshot",
+        lambda: process_core.LocalProcessSnapshot(pipes, 0, False, None),
     )
+    stalled_stdout = StalledSink()
+    counting_stderr = CountingSink()
+    stdout = process_core._Output(None, sink=stalled_stdout)
+    stderr = process_core._Output(None, sink=counting_stderr)
 
-    assert result.local_status == result.exit_status == 0
-    assert result.failure == Failure.DEADLINE
-    assert stdout.calls > 1
-    assert stderr.bytes_written == 0
-    assert not result.stdout.complete and not result.stderr.complete
-    assert_closed(children)
+    try:
+        os.write(stdout_write, b"out")
+        os.write(stderr_write, b"err")
+        os.close(stdout_write)
+        stdout_write = -1
+        os.close(stderr_write)
+        stderr_write = -1
+        failure, exit_status = process_core._pump_owned_pipes(
+            owner,
+            pipes,
+            process_core.ProcessInput(),
+            process_core.Deadline(time.monotonic() + 0.05),
+            stdout,
+            stderr,
+        )
+    finally:
+        if stdout_write != -1:
+            os.close(stdout_write)
+        if stderr_write != -1:
+            os.close(stderr_write)
+        stdout_pipe.close()
+        stderr_pipe.close()
+
+    assert exit_status == 0
+    assert failure == process_core.ProcessFailure.DEADLINE
+    assert stalled_stdout.calls > 1
+    assert counting_stderr.bytes_written == 0
+    assert not stdout.report().complete and not stderr.report().complete
 
 
 @pytest.mark.skipif(
