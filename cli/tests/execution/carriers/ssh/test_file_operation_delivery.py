@@ -106,7 +106,6 @@ def test_file_operation_upload_conditions_and_cleanup_over_real_ssh(
     created_content = bytes(range(256)) + b"\x00\xffcreated-over-ssh\r\n"
     updated_content = bytes(reversed(range(256))) + b"\xff\x00updated-over-ssh\n"
     refused_content = b"must-not-replace-destination\x00\xff"
-    close_attempted = False
 
     try:
         created = _upload(operation, carrier, root, created_content, Create())
@@ -174,10 +173,8 @@ def test_file_operation_upload_conditions_and_cleanup_over_real_ssh(
         for canary in ("created-over-ssh", "updated-over-ssh", "must-not-replace-destination"):
             assert canary not in repr(outcomes)
 
-        close_attempted = True
+        owner.record_effects_resolved()
         owner.close()
         assert database.operations.inspect(owner.ownership.scope) is None
     finally:
-        if not close_attempted and not operation.active_uploads and not operation.unfinished_uploads:
-            owner.close()
         database.close()
