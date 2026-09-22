@@ -9,6 +9,12 @@ import pytest
 
 from agentworks.errors import ExternalError, ValidationError
 from agentworks.execution.carrier import Dispatch, Retention
+from agentworks.execution.diagnostics import (
+    ExecutionDiagnostic,
+    ExecutionFailureReason,
+    ExecutionPhase,
+    check_execution_result,
+)
 from agentworks.execution.result import (
     ApplicationState,
     CheckedExecutionError,
@@ -191,3 +197,137 @@ def test_check_carries_the_same_immutable_safe_result_without_rendering_context(
     rendered = repr(result) + repr(caught.value) + "".join(traceback.format_exception(caught.value))
     assert output_canary.decode() not in rendered
     assert context_canary not in rendered
+
+
+def test_diagnostic_check_binds_safe_target_and_application_status_to_the_same_result() -> None:
+    result = _result(status=ExitCode(1))
+    diagnostic = ExecutionDiagnostic.from_result(result, entity_kind="vm", entity_name="test-vm")
+
+    with pytest.raises(CheckedExecutionError) as caught:
+        diagnostic.check()
+
+    error = caught.value
+    assert error.result is result
+    assert error.entity_kind == "vm"
+    assert error.entity_name == "test-vm"
+    assert error.details is not None
+    assert error.details.phase is ExecutionPhase.APPLICATION
+    assert error.details.reason is ExecutionFailureReason.APPLICATION_STATUS
+
+
+@pytest.mark.parametrize(
+    ("failure", "phase", "reason"),
+    [
+        (ExecutionFailure.PREPARATION, ExecutionPhase.PREPARATION, ExecutionFailureReason.PREPARATION),
+        (ExecutionFailure.DELIVERY, ExecutionPhase.DELIVERY, ExecutionFailureReason.DELIVERY),
+        (ExecutionFailure.DEADLINE, ExecutionPhase.UNKNOWN, ExecutionFailureReason.DEADLINE),
+        (ExecutionFailure.OBSERVATION, ExecutionPhase.UNKNOWN, ExecutionFailureReason.OBSERVATION),
+        (ExecutionFailure.PROTOCOL, ExecutionPhase.UNKNOWN, ExecutionFailureReason.PROTOCOL),
+        (ExecutionFailure.INPUT, ExecutionPhase.UNKNOWN, ExecutionFailureReason.INPUT),
+        (ExecutionFailure.OUTPUT, ExecutionPhase.UNKNOWN, ExecutionFailureReason.OUTPUT),
+        (ExecutionFailure.OUTPUT_LIMIT, ExecutionPhase.UNKNOWN, ExecutionFailureReason.OUTPUT_LIMIT),
+        (ExecutionFailure.CLEANUP, ExecutionPhase.CLEANUP, ExecutionFailureReason.CLEANUP),
+    ],
+)
+def test_result_diagnostics_keep_only_failure_phase_precision(
+    failure: ExecutionFailure,
+    phase: ExecutionPhase,
+    reason: ExecutionFailureReason,
+) -> None:
+    diagnostic = ExecutionDiagnostic.from_result(_result(failure=failure), entity_kind="vm", entity_name="test-vm")
+
+    assert diagnostic.phase is phase
+    assert diagnostic.reason is reason
+
+
+def test_result_diagnostic_does_not_infer_phase_from_deadline_or_incomplete_ownership() -> None:
+    deadline = ExecutionDiagnostic.from_result(_result(deadline_exceeded=True), entity_kind="vm", entity_name="test-vm")
+    incomplete = ExecutionDiagnostic.from_result(
+        _result(owned_cleanup_confirmed=False), entity_kind="vm", entity_name="test-vm"
+    )
+
+    assert (deadline.phase, deadline.reason) == (ExecutionPhase.UNKNOWN, ExecutionFailureReason.DEADLINE)
+    assert (incomplete.phase, incomplete.reason) == (ExecutionPhase.UNKNOWN, ExecutionFailureReason.INCOMPLETE)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"entity_kind": ""},
+        {"entity_kind": " vm"},
+        {"entity_name": "vm/name"},
+        {"entity_name": "vm\\name"},
+        {"entity_name": "vm\nname"},
+        {"entity_name": "vm\x00name"},
+        {"entity_name": "vm-caf\u00e9"},
+        {"entity_name": ""},
+        {"phase": "application"},
+        {"reason": "application_status"},
+    ],
+)
+def test_execution_diagnostic_refuses_untyped_or_incomplete_context(changes: dict[str, object]) -> None:
+    values: dict[str, object] = {
+        "result": _result(status=ExitCode(1)),
+        "entity_kind": "vm",
+        "entity_name": "test-vm",
+        "phase": ExecutionPhase.APPLICATION,
+        "reason": ExecutionFailureReason.APPLICATION_STATUS,
+    }
+    values.update(changes)
+
+    with pytest.raises(ValidationError):
+        ExecutionDiagnostic(**values)  # type: ignore[arg-type]
+
+
+def test_execution_diagnostic_refuses_success_and_reason_that_disagrees_with_its_result() -> None:
+    success = _result()
+    failed = _result(status=ExitCode(1))
+
+    with pytest.raises(ValidationError):
+        ExecutionDiagnostic.from_result(success, entity_kind="vm", entity_name="test-vm")
+    with pytest.raises(ValidationError):
+        ExecutionDiagnostic(
+            failed,
+            "vm",
+            "test-vm",
+            ExecutionPhase.APPLICATION,
+            ExecutionFailureReason.OUTPUT,
+        )
+
+
+def test_check_execution_result_returns_success_without_constructing_a_diagnostic() -> None:
+    result = _result()
+
+    assert check_execution_result(result, entity_kind="vm", entity_name="test-vm") is result
+
+
+def test_check_execution_result_validates_context_that_would_become_public_on_failure() -> None:
+    result = _result()
+
+    with pytest.raises(ValidationError):
+        check_execution_result(result, entity_kind="vm", entity_name="unsafe/name")
+    with pytest.raises(ValidationError):
+        check_execution_result(
+            result,
+            entity_kind="vm",
+            entity_name="test-vm",
+            phase=ExecutionPhase.APPLICATION,
+        )
+
+
+def test_explicit_diagnostic_can_preserve_stronger_core_phase_evidence() -> None:
+    result = _result(failure=ExecutionFailure.INPUT)
+    diagnostic = ExecutionDiagnostic(
+        result,
+        "vm",
+        "test-vm",
+        ExecutionPhase.DELIVERY,
+        ExecutionFailureReason.INPUT,
+    )
+
+    with pytest.raises(CheckedExecutionError) as caught:
+        diagnostic.check()
+
+    assert caught.value.details is not None
+    assert caught.value.details.phase is ExecutionPhase.DELIVERY
+    assert caught.value.details.reason is ExecutionFailureReason.INPUT

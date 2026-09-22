@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Self
 
-from agentworks.errors import ExternalError, ValidationError
+from agentworks.errors import ErrorDetails, ExternalError, ValidationError
 from agentworks.execution.carrier import Dispatch, Retention
 
 
@@ -155,6 +155,18 @@ def _output_succeeded(output: ExecutionOutput) -> bool:
 class CheckedExecutionError(ExternalError):
     """A checked execution did not meet the result success predicate."""
 
-    def __init__(self, result: ExecutionResult) -> None:
-        super().__init__("execution did not complete successfully")
+    def __init__(
+        self,
+        result: ExecutionResult,
+        *,
+        entity_kind: str | None = None,
+        entity_name: str | None = None,
+        details: ErrorDetails | None = None,
+    ) -> None:
+        super().__init__(
+            "execution did not complete successfully",
+            entity_kind=entity_kind,
+            entity_name=entity_name,
+            details=details,
+        )
         self.result = result

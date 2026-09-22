@@ -35,6 +35,21 @@ output semantics, no recorded failure or expired deadline, and confirmed owned c
 returns that same result or raises `CheckedExecutionError` carrying it; neither path invents a
 scalar return code or copies provider exception text into result fields or the error message.
 
+`diagnostics.py` supplies the separate core-composition seam for a checked error's logical target
+identity and closed phase/reason facts. `ExecutionDiagnostic.from_result(...)` uses only phase
+precision retained in the immutable result. In particular, a known nonzero application status is an
+application-status failure, while deadline, stream, protocol and incomplete-ownership outcomes
+remain phase-unknown when their private cause was discarded. `check_owned_inline_result(...)`
+reduces once, returning a successful result or raising an error bound to its core logical target; it
+preserves trusted helper observation evidence where it exists. A future reducer may refine an
+otherwise unknown phase through `from_result(..., phase=...)`, but it cannot replace the
+result-derived reason or an already established phase. Diagnostics exist only for unsuccessful
+results. `check_execution_result(...)` is the ordinary target `check=True` path; its
+`ExecutionDiagnostic` preserves the same result object and attaches standard `ErrorDetails`.
+Ordinary `ExecutionResult.check()` remains context-free. Core supplies only a logical target
+identity to these values, never carrier, account, command, path, provider, credential, output or
+payload facts.
+
 `_execution_result.py` reduces an operation-owned inline outcome into those public facts. The fixed
 inline helper accepts retrospective normal completion only on CPython 3.11 through 3.14, after its
 trusted terminal records an exact normal wait and the operation owner has settled. This produces a

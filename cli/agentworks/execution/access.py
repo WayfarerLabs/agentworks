@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Literal, cast
 from agentworks.errors import StateError, ValidationError
 
 from . import _file_memory_read
+from ._diagnostic_values import validate_logical_entity_value
 from ._file_operation import FileOperation
 from ._file_paths import normalized_relative_path, normalized_root
 from ._file_result import (
@@ -105,8 +106,8 @@ class FileAccess:
             elevated_plan is not None and type(elevated_plan) is not IdentityPlan
         ):
             raise ValidationError("File access requires bound identity plans")
-        _validate_diagnostic_value(entity_kind, "kind")
-        _validate_diagnostic_value(entity_name, "name")
+        validate_logical_entity_value(entity_kind, "kind", subject="File access")
+        validate_logical_entity_value(entity_name, "name", subject="File access")
         if not callable(deadline):
             raise ValidationError("File access requires a composition-owned deadline policy")
 
@@ -368,17 +369,6 @@ class FileAccess:
         if not normalized_root(str(parent)) or not normalized_relative_path(leaf):
             raise ValidationError("File operation requires one confined target")
         return str(parent), leaf
-
-
-def _validate_diagnostic_value(value: object, label: str) -> None:
-    if (
-        type(value) is not str
-        or not value
-        or value.strip() != value
-        or not value.isascii()
-        or any(character in value for character in "\\/\x00\r\n")
-    ):
-        raise ValidationError(f"File access requires a safe logical entity {label}")
 
 
 def _validate_upload_source(source: object) -> UploadSource:

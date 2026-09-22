@@ -1693,9 +1693,16 @@ available.
       checked-result error. Keep deadline expiry and owned cleanup independent of the primary
       failure; distinguish captured, delivered, discarded and suppressed output. Result values must
       not infer completion from raw carrier status.
-- [ ] Bind safe target identity and execution phase to errors during target/reducer composition, as
-      required by FRD R5. The minimal result values alone do not satisfy that complete error
-      contract; this remains required before public ExecutionAccess and RunContext delivery.
+- [x] Add the safe checked-error composition seam: core supplies logical target identity and closed
+      execution phase/reason facts through `ExecutionDiagnostic`, which preserves the exact
+      immutable result in `CheckedExecutionError` and its standard `ErrorDetails`. The private
+      inline checked reducer reduces once, returns success or raises that bound error, and retains
+      trusted helper observation phase. Result-only projection refuses to reconstruct discarded
+      phase evidence, while known nonzero application status is application-status evidence. This
+      adds no target, accessor or RunContext exposure.
+- [ ] Bind that seam during complete target/reducer composition, as required by FRD R5. The
+      result-only addition does not itself deliver the complete public error contract; that remains
+      required before public ExecutionAccess and RunContext delivery.
 - [x] Preserve a valid helper terminal transcript when only later carrier observation is lost, while
       retaining the carrier error. Missing terminal, wire corruption and post-terminal records must
       still prevent trusted terminal evidence.

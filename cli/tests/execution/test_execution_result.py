@@ -5,11 +5,12 @@ from __future__ import annotations
 import hashlib
 import subprocess
 import sys
+import traceback
 
 import pytest
 
 from agentworks.execution._execution_operation import OwnedInlineOutcome
-from agentworks.execution._execution_result import reduce_owned_inline_result
+from agentworks.execution._execution_result import check_owned_inline_result, reduce_owned_inline_result
 from agentworks.execution._inline import InlineCandidateResult
 from agentworks.execution._inline_control import (
     FailureCode,
@@ -23,7 +24,8 @@ from agentworks.execution._inline_observer import InlineObservation, Observation
 from agentworks.execution._inline_request import OutputMode
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteObservation, RuntimePrerequisiteState
 from agentworks.execution.carrier import Dispatch, ExitStatus, Failure, Retention
-from agentworks.execution.result import ApplicationState, ExecutionFailure, ExitCode
+from agentworks.execution.diagnostics import ExecutionFailureReason, ExecutionPhase
+from agentworks.execution.result import ApplicationState, CheckedExecutionError, ExecutionFailure, ExitCode
 
 _NORMAL_WAIT = WaitFact(WaitKind.EXIT, 0)
 
@@ -83,6 +85,17 @@ def _reduce(
     **outcome: bool,
 ):
     return reduce_owned_inline_result(OwnedInlineOutcome(candidate=candidate or _candidate(), **outcome))
+
+
+def _check(
+    candidate: InlineCandidateResult | None = None,
+    **outcome: bool,
+):
+    return check_owned_inline_result(
+        OwnedInlineOutcome(candidate=candidate or _candidate(), **outcome),
+        entity_kind="vm",
+        entity_name="test-vm",
+    )
 
 
 def test_retrospective_normal_wait_returns_exact_exit_code_for_every_value() -> None:
@@ -172,6 +185,87 @@ def test_helper_failures_keep_their_safe_public_category(
 
     assert result.failure is expected
     assert result.owned_cleanup_confirmed is (failure.phase is not FailurePhase.CLEANUP)
+
+
+@pytest.mark.parametrize(
+    ("failure", "phase", "reason"),
+    [
+        (
+            FailureFact(FailurePhase.OBSERVE, FailureCode.INPUT),
+            ExecutionPhase.OBSERVATION,
+            ExecutionFailureReason.INPUT,
+        ),
+        (
+            FailureFact(FailurePhase.OBSERVE, FailureCode.OUTPUT),
+            ExecutionPhase.OBSERVATION,
+            ExecutionFailureReason.OUTPUT,
+        ),
+        (
+            FailureFact(FailurePhase.OBSERVE, FailureCode.OBSERVATION),
+            ExecutionPhase.OBSERVATION,
+            ExecutionFailureReason.OBSERVATION,
+        ),
+        (
+            FailureFact(FailurePhase.CLEANUP, FailureCode.RESOURCE),
+            ExecutionPhase.CLEANUP,
+            ExecutionFailureReason.CLEANUP,
+        ),
+    ],
+)
+def test_inline_checked_reducer_preserves_trusted_helper_phase(
+    failure: FailureFact,
+    phase: ExecutionPhase,
+    reason: ExecutionFailureReason,
+) -> None:
+    with pytest.raises(CheckedExecutionError) as caught:
+        _check(_candidate(_observation(wait=None, failure=failure)))
+
+    assert caught.value.result.failure is not None
+    assert caught.value.details is not None
+    assert caught.value.details.phase is phase
+    assert caught.value.details.reason is reason
+
+
+def test_inline_checked_reducer_keeps_carrier_input_failure_phase_unknown() -> None:
+    with pytest.raises(CheckedExecutionError) as caught:
+        _check(_candidate(carrier_failure=Failure.INPUT))
+
+    assert caught.value.result.failure is ExecutionFailure.INPUT
+    assert caught.value.details is not None
+    assert caught.value.details.phase is ExecutionPhase.UNKNOWN
+    assert caught.value.details.reason is ExecutionFailureReason.INPUT
+
+
+def test_inline_checked_reducer_returns_a_successful_result() -> None:
+    result = _check()
+
+    assert result.ok
+    assert result.status == ExitCode(0)
+
+
+def test_inline_checked_reducer_projects_known_nonzero_application_status() -> None:
+    with pytest.raises(CheckedExecutionError) as caught:
+        _check(_candidate(_observation(wait=WaitFact(WaitKind.EXIT, 1))))
+
+    assert caught.value.result.status == ExitCode(1)
+    assert caught.value.details is not None
+    assert caught.value.details.phase is ExecutionPhase.APPLICATION
+    assert caught.value.details.reason is ExecutionFailureReason.APPLICATION_STATUS
+
+
+def test_inline_checked_reducer_does_not_retain_payload_or_caller_exception_context() -> None:
+    payload = b"private-output-canary"
+    context = "provider-exception-canary"
+
+    try:
+        raise RuntimeError(context)
+    except RuntimeError:
+        with pytest.raises(CheckedExecutionError) as caught:
+            _check(_candidate(_observation(wait=WaitFact(WaitKind.EXIT, 1), stdout=_stream(payload))))
+
+    rendered = repr(caught.value) + "".join(traceback.format_exception(caught.value))
+    assert payload.decode() not in rendered
+    assert context not in rendered
 
 
 @pytest.mark.parametrize(
