@@ -430,6 +430,35 @@ delivery, production RunContext/platform composition, creation/publication bindi
 remaining native acceptance gates stay open. This dependency adaptation consumes no public
 feedback/fix round and keeps #832 draft without a checkpoint or ready signal.
 
+## Durable file-call custody adoption
+
+Transport's
+[file-custody checkpoint](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-5777873573)
+publishes implementation `693e9e48cbe5edc4032e4e5fbcaaf619d40efae4` and evidence head
+`e27a466f38d9a257a6c20f4ced4308163851657a` after clean private project, complexity and correctness
+reviews. SSH rebases cleanly at `16bfa95c8884add45994926524bbd8c4c84558cc`; all 71 carried commits
+remain patch-equivalent.
+
+The existing real upload proof now supplies the shared test helper's managed-target identity to
+`FileOperation`. Its resource kind and name match the operation scope; its incarnation and boot
+values are synthetic fixture data. This exercises private composition, not production creation
+provenance or a real VM incarnation fence. The foreground SSH server remains an owned Linux loopback
+fixture.
+
+After create, matched replacement, duplicate-create refusal and stale-revision refusal, the proof
+inspects the durable ledger before sealing and release. It requires exactly four resolved
+`file-call` obligations with the expected target, confined path and upload tokens, and checks that
+the file-content canaries are absent from their persisted payloads. Existing binary integrity,
+metadata, typed conflict, sensitive delivery and exact scratch/custody assertions remain in place.
+The adapted proof passes over installed OpenSSH: **1 passed in 4.37 seconds**. Full combined gates
+and private SSH reviews are pending for this adaptation.
+
+This clean-transfer proof does not establish process-loss recovery, retained-debt handoff under
+faults, production recovery takeover, activation/publication binding or native platform acceptance.
+Those gates remain open alongside terminal and production RunContext composition. Earlier native
+reports retain their measured compositions. This dependency adaptation consumes no public
+feedback/fix round and keeps #832 draft without a checkpoint or ready signal.
+
 ## Managed-process fix integration
 
 Transport's
