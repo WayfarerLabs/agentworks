@@ -823,6 +823,44 @@ must be published before in-memory custody is released, and leaves the row in `p
 payload never contains file bytes, JSON values, source or sink objects, raw helper responses,
 commands, credentials or unrestricted paths.
 
+### DOWNLOAD recovery dispatch
+
+The first process-loss recovery vertical is deliberately narrower than ordinary file execution. A
+private DOWNLOAD recovery adapter rebinds an exact persisted `file-call` obligation and accepts only
+adapter-produced drain evidence covering all outstanding dispatches for that obligation across its
+generation history. It exposes snapshot reconciliation and exact cleanup only. Snapshot creation,
+chunk transfer, arbitrary helper requests and ordinary carrier replay are unreachable through this
+surface.
+
+The generic database retains only the immediate takeover predecessor. It does not invent a durable
+generation lineage or accept caller-supplied generation lists as proof. The adapter instead proves
+the stronger obligation-wide fact from its concrete dispatch substrate. The local checkpoint uses an
+external test-owned helper journal to observe every helper associated with the exact token across
+spawned controller loss. If that coverage cannot be reconstructed, or any helper remains live, the
+adapter refuses dispatch and retains the claim.
+
+Reconciliation can discover exact `ScratchCleanupDebt` that was not published before the controller
+died. The adapter must compare-and-swap that debt into the existing `possible-effect` payload,
+confirm the committed revision and rebind the updated exact row before dispatching cleanup. This
+ordering is required even when the scratch directory is already absent: cleanup with durable exact
+debt can accept absence, while reconciliation from the original token alone must report ownership
+uncertainty. Cleanup based only on newly discovered in-memory debt could delete the snapshot and
+then lose the sole safe retry path in a second crash.
+
+The generic recovery-dispatch object remains publication-free and resolution-free. The DOWNLOAD
+adapter owns the typed payload update and may explicitly resolve the obligation only after complete
+dispatch drain and exact evidence that no effect or cleanup responsibility remains. Ownership
+uncertainty, response loss or an uncertain cleanup attempt leaves the row `possible-effect`.
+Recovery of recovery repeats the full obligation-wide drain proof rather than trusting the most
+recent controller's absence.
+
+The local proof uses a spawned controller, a real SQLite file and the bundled synchronous helper. It
+must independently observe helper termination, and it must refuse recovery while a launched helper
+survives controller death. Crash windows cover helper completion before identity publication, debt
+publication before cleanup, cleanup before result consumption and takeover commit before reply. The
+row remains possible until an explicit resolution step. These tests prove only the local synchronous
+substrate and database protocol, not SSH, QGA or production native recovery.
+
 The private download, upload and JSON custody slice attaches validated prepared workflows to
 `FileOperation` before running them. This preserves original carrier, binding and token through
 outcome capture; completed capture retains only unfinished facts, not streams or file/JSON bytes.

@@ -104,8 +104,20 @@ no more obligations can be registered; it does not require identity from an effe
 created. Opaque payloads remain non-secret and platform-specific while state and fencing remain
 core-owned. A recovery controller invalidates the predecessor through a fresh database fence, then
 proves each admitted dispatch is drained or remotely fenced and each effect is quiescent. The
-current schema implements the ledger but not the takeover transition, so no production hold, route
-or teardown may treat the existing claim row as a recovery record.
+current schema implements the ledger and database takeover fence but not adapter drain evidence or
+production recovery composition, so no production hold, route or teardown may treat the existing
+claim row alone as completed recovery.
+
+Recovery dispatch is a separate restricted path rather than a mode on the ordinary borrow. It
+revalidates the sealed owner generation and one exact already-possible obligation before every
+attempt, participates in the owner's serial-use guard and never registers, admits, generically
+publishes or automatically resolves durable state. Each adapter owns typed drain evidence covering
+all outstanding dispatches for that obligation across earlier generations. The generic database
+retains only the immediate takeover predecessor; it does not accept caller-supplied lineage as
+quiescence proof. The first DOWNLOAD vertical permits reconciliation and exact cleanup only, durably
+publishes discovered cleanup debt before cleanup and cannot replay snapshot creation or transfer.
+Its spawned local proof is a database and synchronous-helper checkpoint, not production evidence for
+SSH, QGA or native carrier recovery.
 
 ### Recovery-target identity inventory, 2026-09-21
 

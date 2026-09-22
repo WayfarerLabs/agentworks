@@ -296,6 +296,26 @@ row with typed evidence. It cannot borrow the ordinary dispatch path, treat regi
 rebind, or transition a previously `registered` row to `possible-effect`. Any future recovery probe
 or cleanup dispatch requires its own adapter-owned admission contract and remote-drain proof.
 
+That contract uses a distinct internal recovery-dispatch object, not a recovery mode on the ordinary
+borrow. Admission requires the sealed recovery owner, its exact current generation, a
+`possible-dispatch` coarse claim and the exact `possible-effect` obligation identity, state, payload
+revision and bytes. Every attempt revalidates those facts in the database, including after an
+adapter publishes more exact recovery identity. The object shares the owner's serial-use guard, so
+an active or uncertain recovery attempt excludes another recovery dispatch, obligation resolution
+and owner finalization. Settling and closing it release only in-memory dispatch custody. They never
+register an obligation, mark an effect possible, publish payload, resolve the obligation or infer
+whole-operation quiescence.
+
+Concrete drain evidence and its producer remain adapter-owned. The generic operation coordinator
+validates exact ownership and row custody; it does not learn carrier process identities, helper
+tokens or proof mechanisms, and it exposes no generic replay surface or proof-provider registry. A
+proof is bound to the requested generation transition and obligation, but its meaning is broader:
+every outstanding dispatch for that obligation across all earlier generations has drained or been
+remotely fenced. Recovery of recovery cannot forget work admitted by an earlier predecessor. A
+controller exit, an arbitrary list of generation identifiers or a proof covering only the immediate
+predecessor is insufficient. If the adapter cannot reconstruct complete coverage after restart, it
+refuses recovery and retains the claim.
+
 That database fence prevents further cooperating submissions but does not establish remote
 quiescence. For every obligation already in `possible-effect`, the adapter must then prove both that
 no admitted dispatch can still arrive and that any existing effect can cause no more work.
@@ -306,6 +326,14 @@ insufficient because provider, carrier or guest queues may outlive it. This reco
 separate from #377's future resource hierarchy. The ledger remains attached to the logical operation
 across that transition so later hierarchy can bind one operation to several resource memberships
 without moving adapter state onto one VM row.
+
+Local process-loss evidence must observe the actual dispatch endpoint or helper, not merely join the
+controller process. A controller may die after launching a subprocess that continues independently.
+The local proof therefore observes every helper associated with the exact obligation before
+admitting recovery and includes a negative surviving-helper case that retains the claim. A
+test-owned helper journal may demonstrate this local property; it is not production state or a
+generic registry. This evidence says nothing about SSH, QGA or another native carrier until that
+adapter proves an equivalent boundary.
 
 The unavoidable crash window is conservative. Core registers and marks `possible-effect` before
 dispatch, then the adapter publishes exact identity as soon as it observes it. If the controller

@@ -1588,7 +1588,15 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       identity and exact cleanup binding without storing payload contents. Test process loss before
       response, after response and during handoff. A surviving claim without recovery facts is not
       completion evidence; do not close the production ownership gate with in-memory retention
-      alone.
+      alone. Use a distinct restricted recovery-dispatch object rather than ordinary borrow mode.
+      Revalidate the exact generation, obligation state, payload revision and bytes before every
+      attempt; share the serial-use guard; and keep registration, initial effect admission, generic
+      publication and automatic resolution unreachable. Adapter drain evidence must cover every
+      outstanding dispatch for the obligation across all earlier generations. For DOWNLOAD, expose
+      only reconciliation and exact cleanup, persist newly discovered cleanup debt before cleanup
+      dispatch, independently observe local helper termination and refuse while a helper survives
+      controller loss. Treat this local spawned-process proof as substrate evidence only, not SSH,
+      QGA or native production acceptance.
 - [ ] Use the owned snapshot/chunk download for general in-memory reads, preserving caller byte
       bounds independently of QGA's single-response capacity. Keep the no-staging readiness read
       separately bound before dispatch; prove its complete encoded response fits the selected route.
