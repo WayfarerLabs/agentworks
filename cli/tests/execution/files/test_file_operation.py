@@ -22,12 +22,12 @@ from agentworks.execution._file_obligation import FileCallFamily, FileCallObliga
 from agentworks.execution._file_operation import FileOperation, UnfinishedFileDownload
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
-from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTargetKind
 from agentworks.execution.carrier import CarrierIO, CarrierReport, ChannelFeatures, Deadline, PreparedInvocation
 from agentworks.operations import OperationBorrow, OperationOwner
 from tests.execution.files._file_download_support import BytesSink, LostCallStdoutCarrier
 from tests.execution.files._file_snapshot_support import LocalCarrier, install_fixture_bundle
 from tests.execution.files._runtime_support import runtime_selection
+from tests.execution.files._target_support import target_for_owner
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the private snapshot helper requires Linux")
 
@@ -125,6 +125,25 @@ class ObligationInspectingCarrier:
         return self._inner.execute(invocation, io=io, deadline=deadline)
 
 
+class ClosingLostCarrier:
+    def __init__(self, owner: OperationOwner, lost_call: int) -> None:
+        self._owner = owner
+        self._lost_call = lost_call
+        self._inner = LostCallStdoutCarrier(lost_call)
+        self.calls = 0
+
+    @property
+    def features(self) -> ChannelFeatures:
+        return self._inner.features
+
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.calls += 1
+        if self.calls == self._lost_call:
+            with pytest.raises(StateError):
+                self._owner.close()
+        return self._inner.execute(invocation, io=io, deadline=deadline)
+
+
 @pytest.fixture
 def plan() -> IdentityPlan:
     gid = os.getegid()
@@ -151,23 +170,13 @@ def _owner(database: Database) -> OperationOwner:
     )
 
 
-def _target(owner: OperationOwner) -> ManagedTargetIdentity:
-    scope = owner.ownership.scope
-    return ManagedTargetIdentity(
-        ManagedTargetKind(scope.resource_kind.value),
-        scope.resource_name,
-        "v1:" + "a" * 64,
-        "123e4567-e89b-12d3-a456-426614174000",
-    )
-
-
 def test_local_refusal_closes_predispatch_borrow_without_retained_state(
     tmp_path: Path,
     plan: IdentityPlan,
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     carrier = LocalCarrier()
     try:
         with pytest.raises(ValidationError):
@@ -200,7 +209,7 @@ def test_download_installs_one_tokenized_file_call_before_dispatch_and_resolves_
     source.joinpath("source").write_bytes(b"download-custody")
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     carrier = ObligationInspectingCarrier(database, owner)
     try:
         outcome = operation.download(
@@ -237,7 +246,7 @@ def test_shared_operation_rejects_overlapping_view_call(
     source.joinpath("source").write_bytes(b"payload")
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     carrier = ReentrantCarrier(operation, source, plan)
     sink = BytesSink()
     try:
@@ -273,7 +282,7 @@ def test_completed_call_forgets_only_its_record_when_next_call_attaches(
     source.joinpath("source").write_bytes(b"payload")
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     entered = Event()
     release = Event()
     second_carrier = BlockingCarrier(entered, release)
@@ -353,7 +362,7 @@ def test_successive_inert_cleanup_debts_remain_distinct(
     source.joinpath("source").write_bytes(b"payload")
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     carriers = (LostCallStdoutCarrier(3), LostCallStdoutCarrier(3))
     try:
         outcomes = tuple(
@@ -384,6 +393,39 @@ def test_successive_inert_cleanup_debts_remain_distinct(
         database.close()
 
 
+def test_download_final_cleanup_hands_off_after_owner_close_was_requested(
+    tmp_path: Path,
+    roots: tuple[Path, Path],
+    plan: IdentityPlan,
+) -> None:
+    source, _ = roots
+    source.joinpath("source").write_bytes(b"payload")
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    operation = FileOperation(owner, target_for_owner(owner))
+    carrier = ClosingLostCarrier(owner, 3)
+    try:
+        outcome = operation.download(
+            carrier,
+            trusted_root_path=str(source),
+            relative_path="source",
+            sink=BytesSink(),
+            max_bytes=64,
+            plan=plan,
+            deadline=Deadline.after(30),
+            runtime_selection=runtime_selection(sys.executable),
+        )
+
+        assert outcome.failure is FileDownloadFailure.CLEANUP
+        assert outcome.cleanup_debt is not None
+        assert len(operation.unfinished_downloads) == 1
+        assert operation.active_downloads == ()
+        with pytest.raises(StateError):
+            owner.borrow()
+    finally:
+        database.close()
+
+
 def test_exceptional_outcome_is_retained_before_borrow_handoff(
     tmp_path: Path,
     plan: IdentityPlan,
@@ -391,7 +433,7 @@ def test_exceptional_outcome_is_retained_before_borrow_handoff(
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     control = KeyboardInterrupt("control-canary")
     carrier = InterruptingCarrier(control)
     handoff_observations: list[UnfinishedFileDownload] = []
@@ -441,7 +483,7 @@ def test_failed_unfinished_capture_keeps_attached_working_state_and_borrow(
     source.joinpath("source").write_bytes(b"payload")
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     captured: list[UnfinishedFileDownload] = []
 
     def fail_capture(self: FileOperation, download: UnfinishedFileDownload) -> None:
@@ -483,7 +525,7 @@ def test_failed_exceptional_capture_preserves_control_identity_and_fact(
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     control = KeyboardInterrupt("control-canary")
     carrier = InterruptingCarrier(control)
 
@@ -529,7 +571,7 @@ def test_outcome_allocation_failure_keeps_previously_attached_state_and_borrow(
     source.joinpath("source").write_bytes(b"payload")
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     control = CaptureStop("outcome-allocation-canary")
 
     def fail_finish(self: _WorkingState) -> None:
@@ -575,7 +617,7 @@ def test_exceptional_fact_failure_preserves_control_without_reusing_prior_cause(
     source.joinpath("source").write_bytes(b"payload")
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     try:
         previous = operation.download(
             LocalCarrier(),

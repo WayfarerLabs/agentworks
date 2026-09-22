@@ -402,6 +402,8 @@ def test_upload_deadline_rejection_precedes_source_read_and_does_not_close_sourc
         assert source.calls == 0
         assert not source.closed
     finally:
+        owner.seal_lifecycle_obligations()
+        owner.record_effects_resolved()
         owner.close()
         database.close()
 

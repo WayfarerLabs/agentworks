@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import replace
 
 import pytest
 
 from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES
 from agentworks.execution._file_obligation import (
+    _FILE_CALL_RECOVERY_HEADROOM_BYTES,
     FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
     FileCallFamily,
     FileCallObligation,
     FileCallObligationCodecError,
     FileCallUncertainty,
     decode_file_call_obligation,
+    encode_file_call_admission,
     encode_file_call_obligation,
 )
 from agentworks.execution._file_publication import PublicationCleanupDebt
@@ -22,11 +25,20 @@ from agentworks.execution._file_publication_wire import bind_publication_cleanup
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTargetKind
-from agentworks.execution._publication_receipt import _Identity as PublicationIdentity
-from agentworks.execution._publication_receipt import publication_stage_name
+from agentworks.execution._publication_receipt import (
+    _RECORD_BUILD_MODE,
+    _RECORD_MODE,
+    PublicationStageCleanupDebt,
+    PublicationStageOwnership,
+    publication_stage_name,
+)
+from agentworks.execution._publication_receipt import (
+    _Identity as PublicationIdentity,
+)
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution._scratch import ScratchReference
 from agentworks.execution._scratch_receipt import (
+    _RECEIPT_BUILD_MODE,
     _RECEIPT_MODE,
     ScratchCleanupDebt,
     ScratchOperation,
@@ -47,6 +59,7 @@ _TARGET = ManagedTargetIdentity(
 )
 _PLAN = IdentityPlan(IdentityExpectation(1001, 1002, (1002, 1003)), IdentityMode.DIRECT)
 _RUNTIME = RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3")
+_MAXIMUM = (1 << 64) - 1
 
 
 def _context(family: FileCallFamily, plan: IdentityPlan = _PLAN) -> ScratchReceiptContext:
@@ -80,6 +93,49 @@ def _cleanup_debt(token: bytes = _TOKEN, plan: IdentityPlan = _PLAN) -> ScratchC
         plan.expected.euid,
         1002,
     )
+
+
+def _maximum_reference(family: FileCallFamily) -> ScratchReference:
+    identity = ScratchIdentity(_MAXIMUM, _MAXIMUM)
+    return ScratchReference(
+        ScratchOwnership(
+            _TOKEN,
+            _context(family),
+            identity,
+            identity,
+            identity,
+            _MAXIMUM,
+            (1 << 63) - 1,
+            identity,
+        )
+    )
+
+
+def _maximum_cleanup_debt() -> ScratchCleanupDebt:
+    identity = ScratchIdentity(_MAXIMUM, _MAXIMUM)
+    return ScratchCleanupDebt(
+        scratch_name(_TOKEN),
+        identity,
+        identity,
+        identity,
+        identity,
+        (_RECEIPT_BUILD_MODE, _RECEIPT_MODE),
+        _PLAN.expected.euid,
+        _MAXIMUM,
+    )
+
+
+def _maximum_publication_debt(reference: ScratchReference):
+    identity = PublicationIdentity(_MAXIMUM, _MAXIMUM)
+    ownership = PublicationStageOwnership(
+        reference._ownership,
+        identity,
+        publication_stage_name(_TOKEN),
+        identity,
+        identity,
+        (_RECORD_BUILD_MODE, _RECORD_MODE),
+    )
+    return bind_publication_cleanup_debt(reference, identity, PublicationStageCleanupDebt(ownership, False))
 
 
 def _obligation(family: FileCallFamily, *, token: bytes | None = None) -> FileCallObligation:
@@ -203,6 +259,101 @@ def test_envelope_bound_accepts_8192_bytes_within_each_path_bound_and_refuses_81
     assert len(encoded) == MAX_LIFECYCLE_PAYLOAD_BYTES
     with pytest.raises(FileCallObligationCodecError):
         encode_file_call_obligation(replace(accepted, relative_path=accepted.relative_path + "a"))
+
+
+def _maximum_recovery_obligation(family: FileCallFamily) -> FileCallObligation:
+    initial = _obligation(family)
+    uncertainty = {
+        FileCallUncertainty.PENDING_REMOTE_EFFECT,
+        FileCallUncertainty.COORDINATION_UNCERTAINTY,
+    }
+    if family not in {FileCallFamily.DOWNLOAD, FileCallFamily.UPLOAD, FileCallFamily.JSON_UPDATE}:
+        return replace(initial, uncertainty=frozenset(uncertainty))
+
+    reference = _maximum_reference(family)
+    uncertainty.add(FileCallUncertainty.SCRATCH_OWNERSHIP)
+    changes: dict[str, object] = {
+        "token": _TOKEN,
+        "scratch_reference": reference,
+        "scratch_cleanup_debt": _maximum_cleanup_debt(),
+        "uncertainty": frozenset(uncertainty),
+    }
+    if family is FileCallFamily.JSON_UPDATE:
+        changes["attempt"] = 8
+    if family in {FileCallFamily.UPLOAD, FileCallFamily.JSON_UPDATE}:
+        uncertainty.add(FileCallUncertainty.PUBLICATION_OWNERSHIP)
+        changes["publication_cleanup_debt"] = _maximum_publication_debt(reference)
+        changes["uncertainty"] = frozenset(uncertainty)
+    return replace(initial, **changes)  # type: ignore[arg-type]
+
+
+def test_admission_reserves_the_actual_largest_recovery_payload_for_every_family() -> None:
+    expected_growth = {
+        FileCallFamily.DOWNLOAD: 814,
+        FileCallFamily.UPLOAD: 1150,
+        FileCallFamily.JSON_UPDATE: 1205,
+        FileCallFamily.STAT: 50,
+        FileCallFamily.INVENTORY: 50,
+        FileCallFamily.REMOVE: 50,
+        FileCallFamily.SET_METADATA: 50,
+        FileCallFamily.ENSURE_DIRECTORY: 50,
+    }
+
+    assert expected_growth == _FILE_CALL_RECOVERY_HEADROOM_BYTES
+    for family, growth in expected_growth.items():
+        initial = _obligation(family)
+        recovery = _maximum_recovery_obligation(family)
+
+        assert len(encode_file_call_obligation(recovery)) - len(encode_file_call_obligation(initial)) == growth
+        assert encode_file_call_admission(initial) == encode_file_call_obligation(initial)
+
+
+def _obligation_with_encoded_length(family: FileCallFamily, length: int) -> FileCallObligation:
+    baseline = replace(_obligation(family), root="/", relative_path="a")
+    remaining = length - len(encode_file_call_obligation(baseline))
+    relative_padding = min(remaining, 4_095)
+    root_padding = remaining - relative_padding
+    assert 0 <= root_padding <= 4_095
+    return replace(baseline, root="/" + "a" * root_padding, relative_path="a" * (relative_padding + 1))
+
+
+@pytest.mark.parametrize("family", list(FileCallFamily))
+def test_admission_ceiling_leaves_room_for_the_largest_retained_payload(family: FileCallFamily) -> None:
+    growth = _FILE_CALL_RECOVERY_HEADROOM_BYTES[family]
+    admitted = _obligation_with_encoded_length(family, MAX_LIFECYCLE_PAYLOAD_BYTES - growth)
+    recovery = replace(
+        _maximum_recovery_obligation(family),
+        root=admitted.root,
+        relative_path=admitted.relative_path,
+    )
+    one_byte_larger = _obligation_with_encoded_length(family, MAX_LIFECYCLE_PAYLOAD_BYTES - growth + 1)
+    oversized_recovery = replace(
+        _maximum_recovery_obligation(family),
+        root=one_byte_larger.root,
+        relative_path=one_byte_larger.relative_path,
+    )
+
+    assert len(encode_file_call_admission(admitted)) == MAX_LIFECYCLE_PAYLOAD_BYTES - growth
+    assert len(encode_file_call_obligation(recovery)) == MAX_LIFECYCLE_PAYLOAD_BYTES
+    assert len(encode_file_call_obligation(one_byte_larger)) == MAX_LIFECYCLE_PAYLOAD_BYTES - growth + 1
+    with pytest.raises(FileCallObligationCodecError):
+        encode_file_call_admission(one_byte_larger)
+    with pytest.raises(FileCallObligationCodecError):
+        encode_file_call_obligation(oversized_recovery)
+    if family is FileCallFamily.JSON_UPDATE:
+        child = replace(admitted, token=_TOKEN, attempt=8)
+        assert len(encode_file_call_obligation(child)) == len(encode_file_call_obligation(admitted)) + 55
+
+
+def test_decoder_normalizes_python_integer_digit_refusal() -> None:
+    previous_limit = sys.get_int_max_str_digits()
+    sys.set_int_max_str_digits(640)
+    try:
+        payload = b'{"version":' + b"9" * 641 + b"}"
+        with pytest.raises(FileCallObligationCodecError):
+            decode_file_call_obligation(payload)
+    finally:
+        sys.set_int_max_str_digits(previous_limit)
 
 
 def test_upload_and_download_tokens_do_not_carry_json_attempt_identity() -> None:

@@ -22,12 +22,12 @@ from agentworks.execution._file_objects import FileKind
 from agentworks.execution._file_operation import FileOperation, UnfinishedOwnedFile
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
-from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTargetKind
 from agentworks.execution.carrier import CarrierIO, CarrierReport, ChannelFeatures, Deadline, PreparedInvocation
 from agentworks.operations import OperationAttempt, OperationBorrow, OperationOwner
 from tests.execution.files._file_read_support import LocalCarrier
 from tests.execution.files._fixed_bundle_support import fixture_file_bundle
 from tests.execution.files._runtime_support import runtime_selection
+from tests.execution.files._target_support import target_for_owner
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the fixed file helpers require Linux")
 
@@ -93,16 +93,6 @@ def _owner(database: Database) -> OperationOwner:
     )
 
 
-def _target(owner: OperationOwner) -> ManagedTargetIdentity:
-    scope = owner.ownership.scope
-    return ManagedTargetIdentity(
-        ManagedTargetKind(scope.resource_kind.value),
-        scope.resource_name,
-        "v1:" + "a" * 64,
-        "123e4567-e89b-12d3-a456-426614174000",
-    )
-
-
 def _owner_name() -> str:
     import pwd
 
@@ -113,6 +103,35 @@ def _group_name() -> str:
     import grp
 
     return grp.getgrgid(os.getegid()).gr_name
+
+
+@pytest.mark.parametrize("trusted_root_path", ["../bad", "/" + "\u00e9" * 1300])
+def test_single_call_admission_refusal_closes_predispatch_borrow(
+    tmp_path: Path,
+    plan: IdentityPlan,
+    trusted_root_path: str,
+) -> None:
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    operation = FileOperation(owner, target_for_owner(owner))
+    carrier = LocalCarrier()
+    try:
+        with pytest.raises(ValidationError):
+            operation.stat(
+                carrier,
+                trusted_root_path=trusted_root_path,
+                relative_path="target",
+                plan=plan,
+                deadline=Deadline.after(30),
+                runtime_selection=runtime_selection(sys.executable),
+            )
+
+        assert carrier.calls == 0
+        assert operation.active_stats == ()
+        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        owner.close()
+    finally:
+        database.close()
 
 
 def test_real_stat_inventory_and_conditional_remove_share_core_custody(
@@ -128,7 +147,7 @@ def test_real_stat_inventory_and_conditional_remove_share_core_custody(
     listed.joinpath("target").write_bytes(b"content")
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     carrier = LocalCarrier()
     try:
         present = operation.stat(
@@ -233,7 +252,7 @@ def test_real_metadata_and_directory_paths_preserve_noop_and_refusal(
     link.symlink_to(target)
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     carrier = LocalCarrier()
 
     def set_metadata(relative_path: str, mode: int):
@@ -317,7 +336,7 @@ def test_real_partial_directory_creation_is_captured_without_replay(
     monkeypatch.setattr("agentworks.execution._file_metadata_exchange.FIXED_BUNDLE", bundle)
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     try:
         outcome = operation.ensure_directory(
             LocalCarrier(),
@@ -352,7 +371,7 @@ def test_cross_family_reentry_uses_the_same_owner(
     root.joinpath("target").write_bytes(b"content")
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
 
     def inventory(deadline: Deadline) -> None:
         operation.list_directory(
@@ -393,7 +412,7 @@ def test_local_inventory_refusal_relinquishes_borrow_without_custody(
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     carrier = LocalCarrier()
     try:
         with pytest.raises(ValidationError):
@@ -429,7 +448,7 @@ def test_normal_outcome_is_attached_before_borrow_closes(
     root.joinpath("target").write_bytes(b"content")
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     observed = []
     close = OperationBorrow.close
 
@@ -468,12 +487,14 @@ def test_multiple_unfinished_single_file_outcomes_remain_distinct(
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     carriers = (LocalCarrier(), LocalCarrier())
 
     def retained(
         prepared: operations._PreparedStat,  # noqa: SLF001
     ) -> operations.OwnedFileOutcome[FileObjectCandidateResult]:
+        attempt = prepared.state.operation._borrow.begin_attempt()  # noqa: SLF001
+        attempt.settle()
         return operations.OwnedFileOutcome(
             prepared.binding,
             coordination_uncertain=True,
@@ -523,7 +544,7 @@ def test_fact_allocation_failure_preserves_current_binding_and_original_control(
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     control = KeyboardInterrupt("single-control-canary")
     control.__cause__ = RuntimeError("unrelated-prior-cause")
     carrier = InterruptingCarrier(control)
@@ -567,7 +588,7 @@ def test_capture_failure_preserves_original_fact_and_active_state(
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     control = KeyboardInterrupt("capture-control-canary")
     carrier = InterruptingCarrier(control)
     captured: list[UnfinishedOwnedFile] = []
@@ -610,7 +631,7 @@ def test_metadata_lookup_fact_is_attached_before_failed_settlement(
     root.joinpath("target").write_bytes(b"content")
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
 
     def fail_settlement(attempt: OperationAttempt) -> None:
         del attempt

@@ -27,7 +27,9 @@ from agentworks.execution._file_obligation import (
     FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
     FileCallFamily,
     FileCallObligation,
+    FileCallObligationCodecError,
     FileCallUncertainty,
+    encode_file_call_admission,
     encode_file_call_obligation,
 )
 from agentworks.execution._file_operations import (
@@ -89,9 +91,15 @@ class _ActiveFileCall[BindingT, PreparedT, OutcomeT]:
     binding: BindingT
     borrow: OperationBorrow
     prepared: PreparedT
-    obligation_id: str | None = None
+    obligation_id: str
     obligation: LifecycleObligation | None = None
     outcome: OutcomeT | None = None
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class _FileCallAdmission:
+    obligation_id: str
+    payload: bytes
 
 
 class _FileCallBinding(Protocol):
@@ -256,7 +264,10 @@ class FileOperation:
                 runtime_selection=runtime_selection,
                 borrow=borrow,
             )
-            active: _ActiveFileDownload = _ActiveFileCall(carrier, prepared.binding, borrow, prepared)
+            admission = self._prepare_admission(FileCallFamily.DOWNLOAD, prepared.binding, token=prepared.state.token)
+            active: _ActiveFileDownload = _ActiveFileCall(
+                carrier, prepared.binding, borrow, prepared, admission.obligation_id
+            )
         except BaseException:
             borrow.close()
             raise
@@ -266,7 +277,7 @@ class FileOperation:
         except BaseException:
             borrow.close()
             raise
-        self._install(active, FileCallFamily.DOWNLOAD, token=prepared.state.token)
+        self._install(active, admission)
 
         try:
             outcome = prepared.run()
@@ -312,7 +323,10 @@ class FileOperation:
                 runtime_selection=runtime_selection,
                 borrow=borrow,
             )
-            active: _ActiveFileUpload = _ActiveFileCall(carrier, prepared.binding, borrow, prepared)
+            admission = self._prepare_admission(FileCallFamily.UPLOAD, prepared.binding, token=prepared.state.token)
+            active: _ActiveFileUpload = _ActiveFileCall(
+                carrier, prepared.binding, borrow, prepared, admission.obligation_id
+            )
         except BaseException:
             borrow.close()
             raise
@@ -322,7 +336,7 @@ class FileOperation:
         except BaseException:
             borrow.close()
             raise
-        self._install(active, FileCallFamily.UPLOAD, token=prepared.state.token)
+        self._install(active, admission)
 
         try:
             outcome = prepared.run()
@@ -372,7 +386,10 @@ class FileOperation:
                 runtime_selection=runtime_selection,
                 borrow=borrow,
             )
-            active: _ActiveFileJsonUpdate = _ActiveFileCall(carrier, prepared.binding, borrow, prepared)
+            admission = self._prepare_admission(FileCallFamily.JSON_UPDATE, prepared.binding)
+            active: _ActiveFileJsonUpdate = _ActiveFileCall(
+                carrier, prepared.binding, borrow, prepared, admission.obligation_id
+            )
         except BaseException:
             borrow.close()
             raise
@@ -382,7 +399,7 @@ class FileOperation:
         except BaseException:
             borrow.close()
             raise
-        self._install(active, FileCallFamily.JSON_UPDATE)
+        self._install(active, admission)
         prepared.set_child_upload_callback(lambda child, attempt: self._publish_json_child(active, child, attempt))
 
         try:
@@ -421,7 +438,10 @@ class FileOperation:
                 runtime_selection=runtime_selection,
                 borrow=borrow,
             )
-            active: _ActiveFileStat = _ActiveFileCall(carrier, prepared.binding, borrow, prepared)
+            admission = self._prepare_admission(FileCallFamily.STAT, prepared.binding)
+            active: _ActiveFileStat = _ActiveFileCall(
+                carrier, prepared.binding, borrow, prepared, admission.obligation_id
+            )
         except BaseException:
             borrow.close()
             raise
@@ -430,7 +450,7 @@ class FileOperation:
         except BaseException:
             borrow.close()
             raise
-        self._install(active, FileCallFamily.STAT)
+        self._install(active, admission)
         try:
             outcome = prepared.run()
         except BaseException as control:
@@ -474,7 +494,10 @@ class FileOperation:
                 runtime_selection=runtime_selection,
                 borrow=borrow,
             )
-            active: _ActiveFileInventory = _ActiveFileCall(carrier, prepared.binding, borrow, prepared)
+            admission = self._prepare_admission(FileCallFamily.INVENTORY, prepared.binding)
+            active: _ActiveFileInventory = _ActiveFileCall(
+                carrier, prepared.binding, borrow, prepared, admission.obligation_id
+            )
         except BaseException:
             borrow.close()
             raise
@@ -483,7 +506,7 @@ class FileOperation:
         except BaseException:
             borrow.close()
             raise
-        self._install(active, FileCallFamily.INVENTORY)
+        self._install(active, admission)
         try:
             outcome = prepared.run()
         except BaseException as control:
@@ -525,7 +548,10 @@ class FileOperation:
                 runtime_selection=runtime_selection,
                 borrow=borrow,
             )
-            active: _ActiveFileRemove = _ActiveFileCall(carrier, prepared.binding, borrow, prepared)
+            admission = self._prepare_admission(FileCallFamily.REMOVE, prepared.binding)
+            active: _ActiveFileRemove = _ActiveFileCall(
+                carrier, prepared.binding, borrow, prepared, admission.obligation_id
+            )
         except BaseException:
             borrow.close()
             raise
@@ -534,7 +560,7 @@ class FileOperation:
         except BaseException:
             borrow.close()
             raise
-        self._install(active, FileCallFamily.REMOVE)
+        self._install(active, admission)
         try:
             outcome = prepared.run()
         except BaseException as control:
@@ -579,7 +605,10 @@ class FileOperation:
                 runtime_selection=runtime_selection,
                 borrow=borrow,
             )
-            active: _ActiveFileMetadata = _ActiveFileCall(carrier, prepared.binding, borrow, prepared)
+            admission = self._prepare_admission(FileCallFamily.SET_METADATA, prepared.binding)
+            active: _ActiveFileMetadata = _ActiveFileCall(
+                carrier, prepared.binding, borrow, prepared, admission.obligation_id
+            )
         except BaseException:
             borrow.close()
             raise
@@ -588,7 +617,7 @@ class FileOperation:
         except BaseException:
             borrow.close()
             raise
-        self._install(active, FileCallFamily.SET_METADATA)
+        self._install(active, admission)
         try:
             outcome = prepared.run()
         except BaseException as control:
@@ -633,7 +662,10 @@ class FileOperation:
                 runtime_selection=runtime_selection,
                 borrow=borrow,
             )
-            active: _ActiveFileMetadata = _ActiveFileCall(carrier, prepared.binding, borrow, prepared)
+            admission = self._prepare_admission(FileCallFamily.ENSURE_DIRECTORY, prepared.binding)
+            active: _ActiveFileMetadata = _ActiveFileCall(
+                carrier, prepared.binding, borrow, prepared, admission.obligation_id
+            )
         except BaseException:
             borrow.close()
             raise
@@ -642,7 +674,7 @@ class FileOperation:
         except BaseException:
             borrow.close()
             raise
-        self._install(active, FileCallFamily.ENSURE_DIRECTORY)
+        self._install(active, admission)
         try:
             outcome = prepared.run()
         except BaseException as control:
@@ -661,20 +693,27 @@ class FileOperation:
     def _install[BindingT: _FileCallBinding, PreparedT, OutcomeT](
         self,
         active: _ActiveFileCall[BindingT, PreparedT, OutcomeT],
-        family: FileCallFamily,
-        *,
-        token: bytes | None = None,
-        attempt: int | None = None,
+        admission: _FileCallAdmission,
     ) -> None:
-        obligation = self._obligation(family, active.binding, token=token, attempt=attempt)
-        if active.obligation_id is None:
-            active.obligation_id = secrets.token_hex(16)
         active.obligation = active.borrow.install_dispatch_obligation(
-            active.obligation_id,
+            admission.obligation_id,
             "file-call",
             payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
-            payload=encode_file_call_obligation(obligation),
+            payload=admission.payload,
         )
+
+    def _prepare_admission(
+        self,
+        family: FileCallFamily,
+        binding: _FileCallBinding,
+        *,
+        token: bytes | None = None,
+    ) -> _FileCallAdmission:
+        try:
+            payload = encode_file_call_admission(self._obligation(family, binding, token=token))
+        except FileCallObligationCodecError:
+            raise ValidationError("File call lifecycle recovery identity is too large or invalid") from None
+        return _FileCallAdmission(secrets.token_hex(16), payload)
 
     def _publish_json_child(
         self,
@@ -745,17 +784,6 @@ class FileOperation:
             payload=encode_file_call_obligation(recovery),
         )
 
-    def _release_custody[BindingT, PreparedT, OutcomeT](
-        self,
-        active: _ActiveFileCall[BindingT, PreparedT, OutcomeT],
-        *,
-        retain_effect: bool,
-    ) -> None:
-        if retain_effect and not active.borrow.has_outstanding_attempt:
-            retained_attempt = active.borrow.begin_attempt()
-            retained_attempt.settle()
-        release_borrow_after_custody(active.borrow, retain_effect=retain_effect)
-
     @staticmethod
     def _uncertainty(
         *,
@@ -808,7 +836,7 @@ class FileOperation:
                     cast("_OwnedFileOutcome", outcome),
                 )
             )
-        self._release_custody(active, retain_effect=outcome.requires_owner_retention)
+        release_borrow_after_custody(active.borrow, retain_effect=outcome.requires_owner_retention)
 
     def _capture(self, active: _ActiveFileDownload, outcome: FileDownloadOutcome) -> None:
         active.outcome = outcome
@@ -832,7 +860,7 @@ class FileOperation:
                 ),
             )
             self._retain_unfinished(UnfinishedFileDownload(active.carrier, active.binding, outcome))
-        self._release_custody(active, retain_effect=outcome.requires_owner_retention)
+        release_borrow_after_custody(active.borrow, retain_effect=outcome.requires_owner_retention)
         self._active_downloads.pop(id(active))
 
     def _retain_unfinished(self, download: UnfinishedFileDownload) -> None:
@@ -855,7 +883,7 @@ class FileOperation:
                 ),
             )
             self._retain_unfinished_upload(UnfinishedFileUpload(active.carrier, active.binding, outcome))
-        self._release_custody(active, retain_effect=outcome.requires_owner_retention)
+        release_borrow_after_custody(active.borrow, retain_effect=outcome.requires_owner_retention)
         self._active_uploads.pop(id(active))
 
     def _retain_unfinished_upload(self, upload: UnfinishedFileUpload) -> None:
@@ -885,7 +913,7 @@ class FileOperation:
                 ),
             )
             self._retain_unfinished_json_update(UnfinishedFileJsonUpdate(active.carrier, active.binding, outcome))
-        self._release_custody(active, retain_effect=outcome.requires_owner_retention)
+        release_borrow_after_custody(active.borrow, retain_effect=outcome.requires_owner_retention)
         self._active_json_updates.pop(id(active))
 
     def _retain_unfinished_json_update(self, update: UnfinishedFileJsonUpdate) -> None:

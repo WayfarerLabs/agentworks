@@ -65,6 +65,7 @@ from tests.execution.files._file_read_support import install_fixture_bundle as i
 from tests.execution.files._file_stage_support import install_fixture_bundle as install_stage_bundle
 from tests.execution.files._file_upload_support import BytesSource, LostCallStdoutCarrier, new_metadata
 from tests.execution.files._runtime_support import runtime_selection
+from tests.execution.files._target_support import target_for_owner
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the private file helpers require Linux")
 
@@ -162,6 +163,25 @@ class ObligationInspectingCarrier:
         return self._inner.execute(invocation, io=io, deadline=deadline)
 
 
+class ClosingLostCarrier:
+    def __init__(self, owner: OperationOwner, lost_call: int) -> None:
+        self._owner = owner
+        self._lost_call = lost_call
+        self._inner = LostCallStdoutCarrier(lost_call)
+        self.calls = 0
+
+    @property
+    def features(self) -> ChannelFeatures:
+        return self._inner.features
+
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.calls += 1
+        if self.calls == self._lost_call:
+            with pytest.raises(StateError):
+                self._owner.close()
+        return self._inner.execute(invocation, io=io, deadline=deadline)
+
+
 @pytest.fixture(autouse=True)
 def fixture_bundles(monkeypatch: pytest.MonkeyPatch) -> None:
     install_stage_bundle(monkeypatch)
@@ -188,16 +208,6 @@ def _owner(database: Database) -> OperationOwner:
         database.operations,
         OperationScope(OperationResourceKind.VM, "core-file-write-vm"),
         "core-file-write",
-    )
-
-
-def _target(owner: OperationOwner) -> ManagedTargetIdentity:
-    scope = owner.ownership.scope
-    return ManagedTargetIdentity(
-        ManagedTargetKind(scope.resource_kind.value),
-        scope.resource_name,
-        "v1:" + "a" * 64,
-        "123e4567-e89b-12d3-a456-426614174000",
     )
 
 
@@ -256,7 +266,7 @@ def test_real_upload_has_no_completed_custody_or_source_retention(
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     source = BytesSource(b"private-upload-payload")
     source_reference = weakref.ref(source)
     try:
@@ -284,7 +294,7 @@ def test_upload_installs_one_tokenized_file_call_before_dispatch_and_resolves_it
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     carrier = ObligationInspectingCarrier(database, owner)
     try:
         outcome = _upload(operation, root, plan, BytesSource(b"custody-payload"), carrier=carrier)
@@ -330,7 +340,7 @@ def test_json_replaces_its_tokenless_file_call_payload_before_child_dispatch(
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     carrier = ObligationInspectingCarrier(database, owner)
     try:
         outcome = _update(operation, root, plan, b'{"custody":true}', "replace", carrier=carrier)
@@ -363,7 +373,7 @@ def test_interrupted_install_keeps_the_attached_upload_and_owner_borrow(
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
 
     def interrupt_install(*args: object, **kwargs: object) -> LifecycleObligation:
         del args, kwargs
@@ -389,7 +399,7 @@ def test_interrupted_json_payload_publication_keeps_its_attached_child_and_owner
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
 
     def interrupt_publish(*args: object, **kwargs: object) -> None:
         del args, kwargs
@@ -418,7 +428,7 @@ def test_real_json_strategies_share_core_custody_and_preserve_noop(
     root.joinpath("target").write_text('{"base":1,"shared":"old"}')
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     source = b'{"incoming":2,"shared":"new"}'
     try:
         outcome = _update(operation, root, plan, source, strategy)
@@ -469,7 +479,7 @@ def test_json_observation_carrier_failure_precedes_success_or_invalid_response(
     target.write_text('{"base":1}')
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     carrier = OutputFailureCarrier(stdout_complete=stdout_complete)
     try:
         outcome = _update(operation, root, plan, b'{"incoming":2}', strategy, carrier=carrier)
@@ -501,7 +511,7 @@ def test_cross_family_reentry_is_rejected_by_one_owner(
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
 
     def update(deadline: Deadline) -> None:
         operation.update_json(
@@ -540,7 +550,7 @@ def test_local_write_refusals_close_predispatch_borrows(
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     upload_carrier = LocalCarrier()
     json_carrier = LocalCarrier()
     try:
@@ -581,6 +591,55 @@ def test_local_write_refusals_close_predispatch_borrows(
         database.close()
 
 
+def test_upload_and_json_admission_overflow_closes_predispatch_borrows(
+    tmp_path: Path,
+    plan: IdentityPlan,
+) -> None:
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    operation = FileOperation(owner, target_for_owner(owner))
+    upload_carrier = LocalCarrier()
+    json_carrier = LocalCarrier()
+    overflow_root = "/" + "\u00e9" * 1100
+    try:
+        with pytest.raises(ValidationError):
+            operation.upload(
+                upload_carrier,
+                trusted_root_path=overflow_root,
+                relative_path="target",
+                source=BytesSource(b"payload"),
+                size=len(b"payload"),
+                condition=Create(),
+                create_metadata=new_metadata(),
+                plan=plan,
+                deadline=Deadline.after(30),
+                runtime_selection=runtime_selection(sys.executable),
+            )
+        with pytest.raises(ValidationError):
+            operation.update_json(
+                json_carrier,
+                trusted_root_path=overflow_root,
+                relative_path="target",
+                source=b'{"valid":true}',
+                strategy="replace",
+                create=True,
+                create_metadata=new_metadata(),
+                max_bytes=64,
+                max_depth=8,
+                plan=plan,
+                deadline=Deadline.after(30),
+                runtime_selection=runtime_selection(sys.executable),
+            )
+
+        assert upload_carrier.calls == json_carrier.calls == 0
+        assert operation.active_uploads == ()
+        assert operation.active_json_updates == ()
+        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        owner.close()
+    finally:
+        database.close()
+
+
 def test_nested_json_upload_uses_one_whole_call_borrow(
     tmp_path: Path,
     root: Path,
@@ -590,7 +649,7 @@ def test_nested_json_upload_uses_one_whole_call_borrow(
     root.joinpath("target").write_text('{"existing":true}')
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     borrow = owner.borrow
     calls = 0
 
@@ -620,7 +679,7 @@ def test_multiple_upload_cleanup_obligations_remain_exact_and_bounded(
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     carriers = (LostCallStdoutCarrier(5), LostCallStdoutCarrier(5))
     try:
         outcomes = tuple(
@@ -648,6 +707,28 @@ def test_multiple_upload_cleanup_obligations_remain_exact_and_bounded(
         database.close()
 
 
+def test_upload_final_cleanup_hands_off_after_owner_close_was_requested(
+    tmp_path: Path,
+    root: Path,
+    plan: IdentityPlan,
+) -> None:
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    operation = FileOperation(owner, target_for_owner(owner))
+    carrier = ClosingLostCarrier(owner, 5)
+    try:
+        outcome = _upload(operation, root, plan, BytesSource(b"payload"), carrier=carrier)
+
+        assert outcome.failure is FileUploadFailure.CLEANUP
+        assert outcome.scratch_cleanup_debt is not None
+        assert len(operation.unfinished_uploads) == 1
+        assert operation.active_uploads == ()
+        with pytest.raises(StateError):
+            owner.borrow()
+    finally:
+        database.close()
+
+
 def test_json_uncertain_publication_retains_child_upload_without_payload(
     tmp_path: Path,
     root: Path,
@@ -656,7 +737,7 @@ def test_json_uncertain_publication_retains_child_upload_without_payload(
     root.joinpath("target").write_text('{"existing":true}')
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     carrier = LostCallStdoutCarrier(4)
     source = b'{"private-json-canary":true}'
     try:
@@ -687,7 +768,7 @@ def test_ownership_result_is_attached_before_failed_settlement_and_outcome_alloc
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
 
     def fail_outcome_allocation(state: _UploadWorkingState) -> None:
         assert state.ownership_result is not None
@@ -723,7 +804,7 @@ def test_upload_retention_failure_preserves_original_control_and_attached_source
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     control = KeyboardInterrupt("upload-control-canary")
     carrier = NthInterruptCarrier(1, control)
     source = BytesSource(b"private-source-canary")
@@ -762,7 +843,7 @@ def test_upload_allocation_failure_cannot_reuse_source_exception_cause(
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     try:
         previous = _upload(operation, root, plan, BytesSource(b"prior"), relative_path="prior")
         prior_fact = FileUploadControlFact(previous)
@@ -812,7 +893,7 @@ def test_json_child_ownership_lookup_allocation_failure_preserves_original_contr
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     previous = _upload(operation, root, plan, BytesSource(b"prior"), relative_path="prior")
     prior_fact = FileUploadControlFact(previous)
     control = KeyboardInterrupt("json-child-control-canary")
@@ -854,7 +935,7 @@ def test_json_retention_failure_preserves_original_control_and_parent_fact(
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     control = KeyboardInterrupt("json-control-canary")
     carrier = NthInterruptCarrier(1, control)
     captured: list[UnfinishedFileJsonUpdate] = []
@@ -890,7 +971,7 @@ def test_json_child_capture_failure_does_not_reuse_unrelated_upload_fact(
 ) -> None:
     database = Database(tmp_path / "state.db")
     owner = _owner(database)
-    operation = FileOperation(owner, _target(owner))
+    operation = FileOperation(owner, target_for_owner(owner))
     previous = _upload(operation, root, plan, BytesSource(b"prior"), relative_path="prior")
     prior_fact = FileUploadControlFact(previous)
     control = KeyboardInterrupt("child-capture-control-canary")

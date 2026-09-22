@@ -70,6 +70,20 @@ class FileCallUncertainty(StrEnum):
     PUBLICATION_OWNERSHIP = "publication-ownership"
 
 
+# The maximum expansions from an initial payload to its retained recovery
+# identity. Typed maximum-object and exact-boundary tests prove these values.
+_FILE_CALL_RECOVERY_HEADROOM_BYTES = {
+    FileCallFamily.DOWNLOAD: 814,
+    FileCallFamily.UPLOAD: 1150,
+    FileCallFamily.JSON_UPDATE: 1205,
+    FileCallFamily.STAT: 50,
+    FileCallFamily.INVENTORY: 50,
+    FileCallFamily.REMOVE: 50,
+    FileCallFamily.SET_METADATA: 50,
+    FileCallFamily.ENSURE_DIRECTORY: 50,
+}
+
+
 class FileCallObligationCodecError(ValueError):
     """A persisted file-call lifecycle payload is not a supported canonical record."""
 
@@ -102,6 +116,7 @@ def encode_file_call_obligation(obligation: FileCallObligation) -> bytes:
     """Encode one valid file-call obligation as bounded canonical ASCII JSON."""
     if type(obligation) is not FileCallObligation:
         raise FileCallObligationCodecError
+    _validate_obligation(obligation)
     value = _encode_obligation(obligation)
     try:
         encoded = json.dumps(value, allow_nan=False, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode(
@@ -114,6 +129,15 @@ def encode_file_call_obligation(obligation: FileCallObligation) -> bytes:
     return encoded
 
 
+def encode_file_call_admission(obligation: FileCallObligation) -> bytes:
+    """Encode an initial payload while reserving its possible recovery facts."""
+    encoded = encode_file_call_obligation(obligation)
+    reserve = _FILE_CALL_RECOVERY_HEADROOM_BYTES[obligation.family]
+    if len(encoded) + reserve > MAX_LIFECYCLE_PAYLOAD_BYTES:
+        raise FileCallObligationCodecError
+    return encoded
+
+
 def decode_file_call_obligation(payload: bytes) -> FileCallObligation:
     """Decode one bounded canonical payload into validated recovery types."""
     if type(payload) is not bytes or len(payload) > MAX_LIFECYCLE_PAYLOAD_BYTES:
@@ -121,7 +145,7 @@ def decode_file_call_obligation(payload: bytes) -> FileCallObligation:
     try:
         text = payload.decode("ascii")
         value = json.loads(text)
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError):
         raise FileCallObligationCodecError from None
     obligation = _decode_obligation(value)
     if encode_file_call_obligation(obligation) != payload:
@@ -191,7 +215,6 @@ def _validate_obligation(obligation: FileCallObligation) -> None:
 
 
 def _encode_obligation(obligation: FileCallObligation) -> dict[str, object]:
-    _validate_obligation(obligation)
     value: dict[str, object] = {
         "family": obligation.family.value,
         "identity": _encode_identity_plan(obligation.identity_plan),
@@ -282,7 +305,7 @@ def _decode_target(value: object) -> ManagedTargetIdentity:
 
 
 def _encode_identity_plan(plan: IdentityPlan) -> dict[str, object]:
-    expected = _validate_identity_plan(plan)
+    expected = plan.expected
     return {
         "egid": expected.egid,
         "euid": expected.euid,
@@ -326,7 +349,6 @@ def _validate_identity_plan(plan: object) -> IdentityExpectation:
 
 
 def _encode_runtime_selection(selection: RuntimeSelection) -> dict[str, str | None]:
-    _validate_runtime_selection(selection)
     return {"explicit_path": selection.explicit_path, "target_os": selection.target_os.value}
 
 
