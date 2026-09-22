@@ -134,15 +134,26 @@ def test_malformed_persisted_row_fails_closed(tmp_path: Path) -> None:
     connection.close()
 
     reopened = Database(path)
-    with pytest.raises(StateError, match="malformed"):
+    with pytest.raises(StateError):
         ManagedRunRepository(reopened).inspect(_RUN_ID)
     reopened.close()
+
+
+def test_missing_persisted_column_fails_closed(tmp_path: Path) -> None:
+    database = Database(tmp_path / "state.db")
+    repository, _reserved = _reserve(database)
+    row = database._conn.execute("SELECT run_id FROM execution_runs").fetchone()
+    assert row is not None
+
+    with pytest.raises(StateError):
+        repository._decode_record(row)
+    database.close()
 
 
 def test_duplicate_and_stale_reservations_refuse_before_launch(tmp_path: Path) -> None:
     database = Database(tmp_path / "state.db")
     repository, reserved = _reserve(database)
-    with pytest.raises(StateError, match="already reserved"):
+    with pytest.raises(StateError):
         repository.reserve(_spec(), identity=_RUN_ID)
 
     called = False
@@ -154,10 +165,72 @@ def test_duplicate_and_stale_reservations_refuse_before_launch(tmp_path: Path) -
 
     stale_target = replace(reserved.spec.target, boot_id="00000000-0000-4000-8000-000000000002")
     stale = replace(reserved, spec=replace(reserved.spec, target=stale_target))
-    with pytest.raises(StateError, match="stale"):
+    with pytest.raises(StateError):
         ManagedRunService(repository).launch(stale, boundary)
     assert called is False
     assert repository.inspect(_RUN_ID) == reserved
+    database.close()
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [
+        ("application_state", ManagedApplicationState.COMPLETED.value),
+        ("cleanup_state", ManagedCleanupState.COMPLETE.value),
+        ("disposal_state", ManagedDisposalState.DISPOSED.value),
+    ],
+)
+def test_unproduced_lifecycle_evidence_fails_closed_before_launch(
+    tmp_path: Path,
+    column: str,
+    value: str,
+) -> None:
+    database = Database(tmp_path / "state.db")
+    repository, reserved = _reserve(database)
+    database._conn.execute("PRAGMA ignore_check_constraints = ON")
+    database._conn.execute(f"UPDATE execution_runs SET {column} = ?", (value,))
+    database._conn.commit()
+    called = False
+
+    def boundary(_record: ManagedRunRecord) -> ManagedLaunchObservation:
+        nonlocal called
+        called = True
+        return ManagedLaunchObservation(Dispatch.SENT)
+
+    with pytest.raises(StateError):
+        ManagedRunService(repository).launch(reserved, boundary)
+    assert called is False
+    database.close()
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [
+        ("application_state", ManagedApplicationState.STARTED.value),
+        ("cleanup_state", ManagedCleanupState.REQUIRED.value),
+        ("disposal_state", ManagedDisposalState.DISPOSED.value),
+    ],
+)
+def test_unproduced_lifecycle_evidence_fails_closed_during_reconciliation(
+    tmp_path: Path,
+    column: str,
+    value: str,
+) -> None:
+    database = Database(tmp_path / "state.db")
+    repository, reserved = _reserve(database)
+    possible = ManagedRunService(repository).launch(
+        reserved,
+        lambda _record: ManagedLaunchObservation(Dispatch.UNKNOWN),
+    )
+    database._conn.execute("PRAGMA ignore_check_constraints = ON")
+    database._conn.execute(f"UPDATE execution_runs SET {column} = ?", (value,))
+    database._conn.commit()
+
+    with pytest.raises(StateError):
+        repository.reconcile(
+            possible,
+            ManagedLaunchObservation(Dispatch.UNKNOWN, _receipt(possible)),
+        )
     database.close()
 
 

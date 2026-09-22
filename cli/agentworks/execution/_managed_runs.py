@@ -526,7 +526,8 @@ class ManagedRunRepository:
             possible_at = _decode_optional_timestamp(row["possible_dispatch_at"])
             reconciled_at = _decode_optional_timestamp(row["launch_reconciled_at"])
             _validate_state_timestamps(launch_state, possible_at, reconciled_at)
-        except (KeyError, TypeError, ValueError, ValidationError):
+            _validate_private_lifecycle_evidence(application_state, cleanup_state, disposal_state)
+        except (IndexError, KeyError, TypeError, ValueError, ValidationError):
             raise StateError(
                 "persisted managed run is malformed",
                 entity_kind="database",
@@ -708,4 +709,24 @@ def _validate_state_timestamps(
     else:
         valid = possible_at is not None and reconciled_at is not None
     if not valid:
+        raise ValueError
+
+
+def _validate_private_lifecycle_evidence(
+    application: ManagedApplicationState,
+    cleanup: ManagedCleanupState,
+    disposal: ManagedDisposalState,
+) -> None:
+    """Refuse lifecycle evidence for which this private slice has no producer.
+
+    Launch receipt is the only evidence this checkpoint can create or consume.
+    Future application, cleanup, and disposal transitions must expand this
+    verifier with their producers and cross-state proof, rather than allowing
+    SQL-valid values to acquire operational meaning prematurely.
+    """
+    if (
+        application is not ManagedApplicationState.UNOBSERVED
+        or cleanup is not ManagedCleanupState.UNOBSERVED
+        or disposal is not ManagedDisposalState.RETAINED
+    ):
         raise ValueError
