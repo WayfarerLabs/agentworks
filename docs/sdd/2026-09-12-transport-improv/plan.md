@@ -73,6 +73,13 @@ associated pending acceptance gates are superseded by this ruling.
       core-owned operation when migrated. Adding a field to RunContext alone is insufficient. The
       [2026-09-21 integration inventory](migration-strategy.md#owned-boundary-integration-inventory-2026-09-21)
       identifies common boundaries, bypassing activation roots and retained teardown paths.
+- [ ] Require typed aggregate no-further-effects evidence before releasing production ownership.
+      Activation, power hold, route/repair, workflow and nested teardown contribute facts to one
+      whole-operation decision; no individual component releases the claim. Ordinary success or an
+      exception from the legacy `start`, `vm_active`, transient-route or Tailscale-repair APIs does
+      not prove quiescence. An uncertain hold exit or cleanup retains the claim. Build this as a
+      parallel new-stack lifecycle contract and keep legacy callers unchanged until their migration
+      batch supplies the required evidence.
 - [ ] Select shared platform-host resource keys before enabling their admission. Canonical VM names
       are available before create dispatch; site names and authored SSH routes are not canonical
       host identities. Do not silently treat different aliases or users as independent hosts.
@@ -1387,6 +1394,15 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       observation separately from carrier facts. Isolated tests cover unsafe leaves, malformed
       values, incomplete streams, stderr, oversize, wrong responses, pre-expired deadlines and
       buffer clearing.
+- [x] Compose the private VM target preparation under an already-acquired exact-VM operation owner
+      and one finite deadline. Refuse mismatched ownership, unavailable locators, legacy NULL or
+      malformed markers and expired budgets before borrowing or dispatching; use one serialized
+      helper attempt; retain the typed guest result; record it before settlement; reject carrier
+      failures, abnormal termination, runtime refusal, invalid observations and identity mismatch;
+      and retain ownership after ambiguous dispatch or interrupted control flow. This function does
+      not acquire or close the owner, activate a VM or route, look up a platform, adopt/persist
+      identity, or expose a production target. Replace exact scope equality with the future
+      core-owned hierarchy coverage predicate when #377's admission model lands.
 - [ ] Complete the target-identity gate with production/platform composition and live carrier proof.
       No explicit adoption workflow, locator-unavailable alternative or public RunContext claim is
       complete at this checkpoint.

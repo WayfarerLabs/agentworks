@@ -59,6 +59,15 @@ scope. Finalization also remains explicit: returning from a legacy helper or lea
 does not prove that remote effects stopped. This inventory locates the integration work, not
 implemented production ownership or accepted recovery.
 
+The follow-up activation audit confirms that acquisition can precede the existing gate, but safe
+release cannot be inferred from that gate's current return path. `platform.start` may take effect
+before raising; WSL's current hold suppresses cleanup errors; route and Tailscale repair span remote
+and local mutations; and nested workflow teardown can itself become uncertain. The new stack must
+aggregate typed completion and cleanup evidence across the entire activation/workflow/teardown span
+and settle the owner only after every obligation is discharged. Individual lifecycle steps do not
+release the owner, and opaque legacy success is not a no-further-effects witness. This requirement
+does not retrofit or migrate legacy callers.
+
 ### Recovery-target identity inventory, 2026-09-21
 
 The read-only audit at `368f5f0c` distinguishes logical admission from target identification.

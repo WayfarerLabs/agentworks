@@ -196,6 +196,18 @@ legacy NULL markers, unsafe guest paths and mismatches refuse without mutation. 
 production/platform wiring, explicit adoption, a locator-unavailable alternative or a public
 RunContext target; the combined target-identity gate remains open.
 
+Private target preparation now consumes those pieces under one caller-owned exact-VM operation and
+finite deadline. It validates that the current coarse claim covers the VM, refuses static missing or
+malformed evidence before borrowing, makes one serialized helper attempt, records the guest result
+before settlement and retains the operation after uncertain dispatch or control flow. Normal helper
+completion may settle that attempt while preparation still rejects an invalid observation, runtime
+refusal, carrier failure or identity mismatch. The helper neither acquires nor closes the outer
+owner and performs no activation, route selection, platform lookup, adoption or persistence.
+Production composition therefore still needs an owner acquired before activation plus typed
+whole-span lifecycle and cleanup evidence; legacy lifecycle returns cannot close that gate. Future
+hierarchical admission replaces exact-VM equality with a core-owned coverage decision rather than a
+target-local ancestry guess.
+
 New VM creation generates and persists one non-secret marker before provider dispatch. The marker is
 exactly 32 lowercase hexadecimal characters and the shared create bootstrap writes that same value
 to `/var/lib/agentworks/instance-id` as a root-owned `0444` regular file. Bootstrap replaces an
