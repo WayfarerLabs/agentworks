@@ -279,6 +279,175 @@ def test_recovery_refuses_ordinary_borrow_but_rebinds_exact_supplied_obligation(
     recovered.close()
 
 
+def test_recovery_dispatch_revalidates_exact_possible_effect_without_auto_resolution(db: Database) -> None:
+    predecessor = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    obligation = predecessor.register_lifecycle_obligation(
+        "file-call",
+        payload_version=1,
+        payload=b"first",
+        obligation_id="e" * 32,
+    )
+    obligation.mark_possible_effect()
+    recovered = OperationOwner.recover(db.operations, predecessor.ownership, "f" * 32)
+
+    bound = recovered.rebind_possible_effect_lifecycle_obligation(
+        obligation.obligation_id,
+        "file-call",
+        payload_version=1,
+        payload=b"first",
+        payload_revision=0,
+    )
+    dispatch = bound.open_dispatch()
+    attempt = dispatch.begin_attempt()
+
+    with pytest.raises(StateError):
+        recovered.rebind_lifecycle_obligation(
+            obligation.obligation_id,
+            "file-call",
+            payload_version=1,
+            payload=b"first",
+        )
+    with pytest.raises(StateError):
+        dispatch.close()
+
+    attempt.settle()
+    dispatch.close()
+    persisted = db.operations.list_lifecycle_obligations(recovered.ownership)
+    assert persisted[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+
+    changed = recovered.rebind_lifecycle_obligation(
+        obligation.obligation_id,
+        "file-call",
+        payload_version=1,
+        payload=b"first",
+    )
+    changed.publish_payload(expected_revision=0, payload_version=2, payload=b"second")
+    stale = bound.open_dispatch()
+    with pytest.raises(StateError):
+        stale.begin_attempt()
+    stale.close()
+
+    changed.resolve()
+    recovered.record_effects_resolved()
+    recovered.close()
+
+
+def test_recovery_dispatch_uncertain_handoff_retains_owner_and_effect(db: Database) -> None:
+    predecessor = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    obligation = predecessor.register_lifecycle_obligation(
+        "file-call",
+        payload_version=1,
+        payload=b"prepared",
+        obligation_id="a" * 32,
+    )
+    obligation.mark_possible_effect()
+    recovered = OperationOwner.recover(db.operations, predecessor.ownership, "b" * 32)
+    bound = recovered.rebind_possible_effect_lifecycle_obligation(
+        obligation.obligation_id,
+        "file-call",
+        payload_version=1,
+        payload=b"prepared",
+        payload_revision=0,
+    )
+    dispatch = bound.open_dispatch()
+    dispatch.begin_attempt()
+    dispatch.handoff_unresolved()
+
+    with pytest.raises(StateError):
+        recovered.close()
+    with pytest.raises(StateError):
+        recovered.rebind_lifecycle_obligation(
+            obligation.obligation_id,
+            "file-call",
+            payload_version=1,
+            payload=b"prepared",
+        )
+    persisted = db.operations.list_lifecycle_obligations(recovered.ownership)
+    assert persisted[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+
+
+def test_recovery_dispatch_refuses_nonpossible_rows_and_changed_exact_identity(db: Database) -> None:
+    predecessor = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    registered = predecessor.register_lifecycle_obligation(
+        "file-call",
+        payload_version=1,
+        payload=b"registered",
+        obligation_id="c" * 32,
+    )
+    recovered = OperationOwner.recover(db.operations, predecessor.ownership, "d" * 32)
+    with pytest.raises(StateError):
+        recovered.rebind_possible_effect_lifecycle_obligation(
+            registered.obligation_id,
+            "file-call",
+            payload_version=1,
+            payload=b"registered",
+            payload_revision=0,
+        )
+
+    predecessor = OperationOwner.acquire(
+        db.operations,
+        OperationScope(OperationResourceKind.VM, "other-vm"),
+        "file-upload",
+    )
+    resolved = predecessor.register_lifecycle_obligation(
+        "file-call",
+        payload_version=1,
+        payload=b"resolved",
+        obligation_id="e" * 32,
+    )
+    resolved.mark_possible_effect()
+    resolved.resolve()
+    recovered = OperationOwner.recover(db.operations, predecessor.ownership, "f" * 32)
+    with pytest.raises(StateError):
+        recovered.rebind_possible_effect_lifecycle_obligation(
+            resolved.obligation_id,
+            "file-call",
+            payload_version=1,
+            payload=b"resolved",
+            payload_revision=0,
+        )
+
+    predecessor = OperationOwner.acquire(
+        db.operations,
+        OperationScope(OperationResourceKind.VM, "third-vm"),
+        "file-upload",
+    )
+    possible = predecessor.register_lifecycle_obligation(
+        "file-call",
+        payload_version=1,
+        payload=b"first",
+        obligation_id="a" * 32,
+    )
+    possible.mark_possible_effect()
+    recovered = OperationOwner.recover(db.operations, predecessor.ownership, "b" * 32)
+    with pytest.raises(StateError):
+        recovered.rebind_possible_effect_lifecycle_obligation(
+            possible.obligation_id,
+            "file-call",
+            payload_version=1,
+            payload=b"first",
+            payload_revision=1,
+        )
+    bound = recovered.rebind_possible_effect_lifecycle_obligation(
+        possible.obligation_id,
+        "file-call",
+        payload_version=1,
+        payload=b"first",
+        payload_revision=0,
+    )
+    changed = recovered.rebind_lifecycle_obligation(
+        possible.obligation_id,
+        "file-call",
+        payload_version=1,
+        payload=b"first",
+    )
+    changed.publish_payload(expected_revision=0, payload_version=2, payload=b"changed")
+    stale = bound.open_dispatch()
+    with pytest.raises(StateError):
+        stale.begin_attempt()
+    stale.close()
+
+
 def test_ordinary_owner_cannot_rebind_an_obligation_even_after_sealing(db: Database) -> None:
     owner = OperationOwner.acquire(db.operations, _scope(), "file-upload")
 

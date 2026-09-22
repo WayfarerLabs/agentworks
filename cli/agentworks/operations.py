@@ -44,7 +44,8 @@ class OperationOwner:
         self._ownership = ownership
         self._guard = threading.Lock()
         self._active_borrow: OperationBorrow | None = None
-        self._outstanding_attempt: OperationAttempt | None = None
+        self._active_recovery_dispatch: RecoveryDispatch | None = None
+        self._outstanding_attempt: OperationAttempt | RecoveryAttempt | None = None
         self._durable_possible_dispatch = False
         self._effects_resolved = False
         self._obligations_sealed = False
@@ -151,6 +152,42 @@ class OperationOwner:
                 payload,
             )
             return LifecycleObligation(self, obligation)
+
+    def rebind_possible_effect_lifecycle_obligation(
+        self,
+        obligation_id: str,
+        obligation_kind: str,
+        *,
+        payload_version: int,
+        payload: bytes,
+        payload_revision: int,
+    ) -> RecoveredLifecycleObligation:
+        """Bind one exact admitted effect for a recovery-only dispatch.
+
+        The returned handle deliberately has no registration, publication, or
+        resolution operations.  It only opens a serial recovery dispatch.
+        Adapters establish their own drain proof before opening that dispatch.
+        """
+        with self._guard:
+            if not self._recovery_owner:
+                raise StateError(
+                    "recovery dispatch requires recovery ownership",
+                    entity_kind=self._ownership.scope.resource_kind,
+                    entity_name=self._ownership.scope.resource_name,
+                )
+            self._require_no_active_work_locked()
+            if self._transition_uncertain:
+                self._reconcile_transition_locked()
+            self._require_dispatch_admission_locked()
+            obligation = self._repository.rebind_possible_effect_lifecycle_obligation(
+                self._ownership,
+                obligation_id,
+                obligation_kind,
+                payload_version,
+                payload,
+                payload_revision,
+            )
+            return RecoveredLifecycleObligation(self, obligation)
 
     def seal_lifecycle_obligations(self) -> None:
         """Forbid later effect registration after workflow construction ends."""
@@ -285,7 +322,11 @@ class OperationOwner:
         self._transition_uncertain = False
 
     def _require_no_active_work_locked(self) -> None:
-        if self._active_borrow is not None or self._outstanding_attempt is not None:
+        if (
+            self._active_borrow is not None
+            or self._active_recovery_dispatch is not None
+            or self._outstanding_attempt is not None
+        ):
             raise StateError(
                 "operation ownership still has active or unresolved work",
                 entity_kind=self._ownership.scope.resource_kind,
@@ -374,7 +415,13 @@ class LifecycleObligation:
             owner._durable_possible_dispatch = True  # noqa: SLF001
             owner._transition_uncertain = False  # noqa: SLF001
 
-    def publish_payload(self, *, expected_revision: int, payload_version: int, payload: bytes) -> None:
+    def publish_payload(
+        self,
+        *,
+        expected_revision: int,
+        payload_version: int,
+        payload: bytes,
+    ) -> PersistedLifecycleObligation:
         """CAS-publish adapter identity while this effect remains possible."""
         owner = self._owner
         with owner._guard:  # noqa: SLF001
@@ -393,6 +440,7 @@ class LifecycleObligation:
                 payload_version=payload_version,
                 payload=payload,
             )
+            return self._obligation
 
     def resolve(self) -> None:
         """Persist adapter-established no-further-effects evidence."""
@@ -411,6 +459,149 @@ class LifecycleObligation:
                 owner._ownership,  # noqa: SLF001
                 self.obligation_id,
             )
+
+
+@dataclass(slots=True, repr=False)
+class RecoveredLifecycleObligation:
+    """One exact recovery-only binding for an already possible effect.
+
+    This narrow handle has no generic durable mutation methods.  A caller can
+    only open a :class:`RecoveryDispatch`, which rechecks the retained row for
+    each concrete adapter attempt.
+    """
+
+    _owner: OperationOwner
+    _obligation: PersistedLifecycleObligation
+
+    @property
+    def obligation_id(self) -> str:
+        return self._obligation.obligation_id
+
+    @property
+    def payload_revision(self) -> int:
+        return self._obligation.payload_revision
+
+    def open_dispatch(self) -> RecoveryDispatch:
+        """Reserve this owner for one recovery dispatcher without mutation."""
+        owner = self._owner
+        with owner._guard:  # noqa: SLF001
+            owner._require_no_active_work_locked()  # noqa: SLF001
+            if owner._transition_uncertain:  # noqa: SLF001
+                owner._reconcile_transition_locked()  # noqa: SLF001
+            owner._require_dispatch_admission_locked()  # noqa: SLF001
+            dispatch = RecoveryDispatch(owner, self._obligation)
+            owner._active_recovery_dispatch = dispatch  # noqa: SLF001
+            return dispatch
+
+
+@dataclass(slots=True, repr=False)
+class RecoveryDispatch:
+    """Serial custody for adapter-specific recovery work.
+
+    This type intentionally has no carrier, invocation, publication, or
+    resolution API.  Its attempt only revalidates durable recovery admission;
+    the adapter owns concrete dispatch and proof of its effects.
+    """
+
+    _owner: OperationOwner
+    _obligation: PersistedLifecycleObligation
+    _attempt: RecoveryAttempt | None = field(default=None, init=False)
+    _closed: bool = field(default=False, init=False)
+
+    @property
+    def ownership(self) -> OperationOwnership:
+        return self._owner.ownership
+
+    @property
+    def has_outstanding_attempt(self) -> bool:
+        owner = self._owner
+        with owner._guard:  # noqa: SLF001
+            return owner._outstanding_attempt is self._attempt and self._attempt is not None  # noqa: SLF001
+
+    def begin_attempt(self) -> RecoveryAttempt:
+        """Revalidate exact durable admission before one adapter dispatch."""
+        owner = self._owner
+        with owner._guard:  # noqa: SLF001
+            self._require_active_locked()
+            if self._attempt is not None or owner._outstanding_attempt is not None:  # noqa: SLF001
+                raise StateError(
+                    "recovery dispatch already has an outstanding attempt",
+                    entity_kind=self.ownership.scope.resource_kind,
+                    entity_name=self.ownership.scope.resource_name,
+                )
+            if owner._transition_uncertain:  # noqa: SLF001
+                owner._reconcile_transition_locked()  # noqa: SLF001
+            owner._require_dispatch_admission_locked()  # noqa: SLF001
+            self._obligation = owner._repository.rebind_possible_effect_lifecycle_obligation(  # noqa: SLF001
+                owner._ownership,  # noqa: SLF001
+                self._obligation.obligation_id,
+                self._obligation.obligation_kind,
+                self._obligation.payload_version,
+                self._obligation.payload,
+                self._obligation.payload_revision,
+            )
+            attempt = RecoveryAttempt(self)
+            self._attempt = attempt
+            owner._outstanding_attempt = attempt  # noqa: SLF001
+            return attempt
+
+    def close(self) -> None:
+        """Release only in-memory recovery custody after a settled attempt."""
+        owner = self._owner
+        with owner._guard:  # noqa: SLF001
+            self._require_active_locked()
+            if self._attempt is not None or owner._outstanding_attempt is not None:  # noqa: SLF001
+                raise StateError(
+                    "recovery dispatch has an outstanding attempt",
+                    entity_kind=self.ownership.scope.resource_kind,
+                    entity_name=self.ownership.scope.resource_name,
+                )
+            owner._active_recovery_dispatch = None  # noqa: SLF001
+            self._closed = True
+
+    def handoff_unresolved(self) -> None:
+        """Relinquish local custody while retaining an uncertain effect."""
+        owner = self._owner
+        with owner._guard:  # noqa: SLF001
+            self._require_active_locked()
+            if self._attempt is None or owner._outstanding_attempt is not self._attempt:  # noqa: SLF001
+                raise StateError(
+                    "recovery dispatch has no outstanding attempt to retain",
+                    entity_kind=self.ownership.scope.resource_kind,
+                    entity_name=self.ownership.scope.resource_name,
+                )
+            owner._active_recovery_dispatch = None  # noqa: SLF001
+            self._closed = True
+
+    def _require_active_locked(self) -> None:
+        if self._closed or self._owner._active_recovery_dispatch is not self:  # noqa: SLF001
+            raise StateError(
+                "recovery dispatch is no longer active",
+                entity_kind=self.ownership.scope.resource_kind,
+                entity_name=self.ownership.scope.resource_name,
+            )
+
+
+@dataclass(slots=True, repr=False)
+class RecoveryAttempt:
+    """One local recovery attempt that never settles a durable obligation."""
+
+    _dispatch: RecoveryDispatch
+
+    def settle(self) -> None:
+        """Release only this adapter attempt after its own termination proof."""
+        dispatch = self._dispatch
+        owner = dispatch._owner  # noqa: SLF001
+        with owner._guard:  # noqa: SLF001
+            dispatch._require_active_locked()  # noqa: SLF001
+            if dispatch._attempt is not self or owner._outstanding_attempt is not self:  # noqa: SLF001
+                raise StateError(
+                    "recovery attempt is no longer outstanding",
+                    entity_kind=dispatch.ownership.scope.resource_kind,
+                    entity_name=dispatch.ownership.scope.resource_name,
+                )
+            dispatch._attempt = None  # noqa: SLF001
+            owner._outstanding_attempt = None  # noqa: SLF001
 
 
 @dataclass(slots=True, repr=False)
@@ -436,7 +627,7 @@ class OperationBorrow:
         owner = self._owner
         with owner._guard:  # noqa: SLF001
             attempt = owner._outstanding_attempt  # noqa: SLF001
-            return attempt is not None and attempt._borrow is self  # noqa: SLF001
+            return isinstance(attempt, OperationAttempt) and attempt._borrow is self  # noqa: SLF001
 
     def install_dispatch_obligation(
         self,
@@ -629,7 +820,7 @@ class OperationBorrow:
                     entity_name=self.ownership.scope.resource_name,
                 )
             attempt = owner._outstanding_attempt  # noqa: SLF001
-            if attempt is None or attempt._borrow is not self:  # noqa: SLF001
+            if not isinstance(attempt, OperationAttempt) or attempt._borrow is not self:  # noqa: SLF001
                 raise StateError(
                     "operation borrow has no outstanding attempt to hand off",
                     entity_kind=self.ownership.scope.resource_kind,

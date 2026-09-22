@@ -364,6 +364,54 @@ class OperationRepository:
                 )
             return obligation
 
+    def rebind_possible_effect_lifecycle_obligation(
+        self,
+        ownership: OperationOwnership,
+        obligation_id: str,
+        obligation_kind: str,
+        payload_version: int,
+        payload: bytes,
+        payload_revision: int,
+    ) -> LifecycleObligation:
+        """Return one exact possible effect for a sealed recovery dispatch.
+
+        This is deliberately narrower than generic rebind.  A recovery
+        dispatcher can only observe an already admitted effect whose current
+        durable identity still exactly matches the adapter's retained facts.
+        It does not mutate the claim or obligation.
+        """
+        _validate_obligation_id(obligation_id)
+        _validate_operation_kind(obligation_kind)
+        _validate_payload(payload_version, payload)
+        if not isinstance(payload_revision, int) or isinstance(payload_revision, bool) or payload_revision < 0:
+            raise ValueError("payload_revision must be a non-negative integer")
+        with self._connection_lock:
+            claim = self._require_owned_claim(ownership)
+            if (
+                not self._is_recovery_ownership(ownership)
+                or claim.obligations_sealed_at is None
+                or claim.state is not OperationClaimState.POSSIBLE_DISPATCH
+            ):
+                raise StateError(
+                    "recovery dispatch requires sealed possible-dispatch ownership",
+                    entity_kind=ownership.scope.resource_kind,
+                    entity_name=ownership.scope.resource_name,
+                )
+            obligation = self._load_obligation(ownership, obligation_id)
+            if (
+                obligation.state is not LifecycleObligationState.POSSIBLE_EFFECT
+                or obligation.obligation_kind != obligation_kind
+                or obligation.payload_version != payload_version
+                or obligation.payload != payload
+                or obligation.payload_revision != payload_revision
+            ):
+                raise StateError(
+                    "lifecycle obligation recovery dispatch binding is stale",
+                    entity_kind=ownership.scope.resource_kind,
+                    entity_name=ownership.scope.resource_name,
+                )
+            return obligation
+
     def register_lifecycle_obligation(
         self,
         ownership: OperationOwnership,
