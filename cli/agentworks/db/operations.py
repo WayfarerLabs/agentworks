@@ -258,14 +258,41 @@ class OperationRepository:
         obligation_kind: str,
         payload_version: int,
         payload: bytes,
+        *,
+        obligation_id: str | None = None,
     ) -> LifecycleObligation:
-        """Register one effect before admission, refusing a sealed operation."""
+        """Register one effect before admission, refusing a sealed operation.
+
+        A caller that retains ``obligation_id`` can safely retry registration
+        after an interrupted commit. That retry succeeds only when every
+        persisted registration field is identical.
+        """
         _validate_operation_kind(obligation_kind)
         _validate_payload(payload_version, payload)
-        obligation_id = uuid4().hex
+        if obligation_id is None:
+            obligation_id = uuid4().hex
+        else:
+            _validate_obligation_id(obligation_id)
         now = _utc_now()
         with self._standalone_transaction():
             claim = self._require_owned_claim(ownership)
+            existing = self._connection.execute(
+                "SELECT * FROM lifecycle_obligations WHERE operation_id = ? AND obligation_id = ?",
+                (ownership.operation_id, obligation_id),
+            ).fetchone()
+            if existing is not None:
+                obligation = self._decode_obligation(existing, ownership)
+                if (
+                    obligation.obligation_kind == obligation_kind
+                    and obligation.payload_version == payload_version
+                    and obligation.payload == payload
+                ):
+                    return obligation
+                raise StateError(
+                    "lifecycle obligation registration conflicts with an existing obligation",
+                    entity_kind=ownership.scope.resource_kind,
+                    entity_name=ownership.scope.resource_name,
+                )
             if claim.obligations_sealed_at is not None:
                 raise StateError(
                     "operation lifecycle obligations are sealed",

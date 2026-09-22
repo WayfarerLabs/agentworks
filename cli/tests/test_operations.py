@@ -17,7 +17,7 @@ from agentworks.db import (
     OperationScope,
 )
 from agentworks.errors import StateError
-from agentworks.operations import LifecycleObligation, OperationBorrow, OperationOwner
+from agentworks.operations import LifecycleObligation, OperationBorrow, OperationOwner, release_borrow_after_custody
 
 pytestmark = pytest.mark.windows
 
@@ -298,7 +298,9 @@ def test_interrupted_registration_before_attempt_retries_with_durable_admission(
 
     attempt.settle()
     borrow.close()
-    assert any(obligation.state is LifecycleObligationState.REGISTERED for obligation in obligations)
+    assert [obligation.state for obligation in repository.list_lifecycle_obligations(owner.ownership)] == [
+        LifecycleObligationState.RESOLVED
+    ]
 
 
 @pytest.mark.parametrize("committed", [False, True], ids=["before-commit", "after-commit"])
@@ -567,3 +569,128 @@ def test_close_abandons_a_reserved_owner(db: Database) -> None:
 
     owner.close()
     assert db.operations.inspect(_scope()) is None
+
+
+def test_supplied_dispatch_obligation_replaces_carrier_row_across_attempts(db: Database) -> None:
+    owner = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    borrow = owner.borrow()
+    obligation_id = "1" * 32
+    borrow.install_dispatch_obligation(
+        obligation_id,
+        "adapter-dispatch",
+        payload_version=1,
+        payload=b"prepared",
+    )
+
+    for _ in range(3):
+        attempt = borrow.begin_attempt()
+        attempt.settle()
+
+    obligations = db.operations.list_lifecycle_obligations(owner.ownership)
+    assert [(obligation.obligation_id, obligation.obligation_kind, obligation.state) for obligation in obligations] == [
+        (obligation_id, "adapter-dispatch", LifecycleObligationState.POSSIBLE_EFFECT)
+    ]
+
+    borrow.close()
+    assert db.operations.list_lifecycle_obligations(owner.ownership)[0].state is LifecycleObligationState.RESOLVED
+
+
+@pytest.mark.parametrize("committed", [False, True], ids=["before-commit", "after-commit"])
+def test_interrupted_supplied_installation_retries_the_same_row(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    committed: bool,
+) -> None:
+    repository = db.operations
+    owner = OperationOwner.acquire(repository, _scope(), "file-upload")
+    borrow = owner.borrow()
+    obligation_id = "2" * 32
+    original = repository.register_lifecycle_obligation
+
+    if committed:
+        _interrupt_after_repository_return(
+            monkeypatch,
+            repository=repository,
+            method_name="register_lifecycle_obligation",
+            owner_method=OperationBorrow.install_dispatch_obligation,
+        )
+    else:
+
+        def interrupt_before_commit(*args: Any, **kwargs: Any) -> object:
+            del args, kwargs
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(repository, "register_lifecycle_obligation", interrupt_before_commit)
+
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            borrow.install_dispatch_obligation(
+                obligation_id,
+                "adapter-dispatch",
+                payload_version=1,
+                payload=b"prepared",
+            )
+    finally:
+        sys.settrace(None)
+
+    monkeypatch.setattr(repository, "register_lifecycle_obligation", original)
+    borrow.install_dispatch_obligation(
+        obligation_id,
+        "adapter-dispatch",
+        payload_version=1,
+        payload=b"prepared",
+    )
+    obligations = repository.list_lifecycle_obligations(owner.ownership)
+    assert [obligation.obligation_id for obligation in obligations] == [obligation_id]
+
+
+def test_borrow_refuses_a_second_or_late_supplied_dispatch_obligation(db: Database) -> None:
+    owner = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    borrow = owner.borrow()
+    borrow.install_dispatch_obligation("3" * 32, "adapter-dispatch", payload_version=1, payload=b"prepared")
+
+    with pytest.raises(StateError):
+        borrow.install_dispatch_obligation("4" * 32, "other-dispatch", payload_version=1, payload=b"prepared")
+
+    attempt = borrow.begin_attempt()
+    attempt.settle()
+    with pytest.raises(StateError):
+        borrow.install_dispatch_obligation("3" * 32, "adapter-dispatch", payload_version=1, payload=b"prepared")
+
+
+def test_retained_supplied_effect_refuses_outer_resolution_until_adapter_cleanup(db: Database) -> None:
+    owner = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    borrow = owner.borrow()
+    obligation_id = "5" * 32
+    obligation = borrow.install_dispatch_obligation(
+        obligation_id,
+        "adapter-dispatch",
+        payload_version=1,
+        payload=b"prepared",
+    )
+    attempt = borrow.begin_attempt()
+    attempt.settle()
+
+    release_borrow_after_custody(borrow, retain_effect=True)
+    obligations = db.operations.list_lifecycle_obligations(owner.ownership)
+    assert obligations[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+
+    owner.seal_lifecycle_obligations()
+    with pytest.raises(StateError):
+        owner.record_effects_resolved()
+    with pytest.raises(StateError):
+        db.operations.release_resolved(owner.ownership)
+
+    obligation.resolve()
+    owner.record_effects_resolved()
+    owner.close()
+    assert db.operations.inspect(_scope()) is None
+
+
+def test_retained_effect_handoff_requires_an_armed_supplied_obligation(db: Database) -> None:
+    owner = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    borrow = owner.borrow()
+    with pytest.raises(StateError):
+        release_borrow_after_custody(borrow, retain_effect=True)
+    borrow.close()

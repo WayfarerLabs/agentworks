@@ -410,3 +410,51 @@ def test_manually_reconstructed_stale_ownership_is_fenced(db: Database) -> None:
     claim = db.operations.inspect(current.scope)
     assert claim is not None
     assert claim.ownership == current
+
+
+def test_caller_retained_obligation_id_retries_only_an_exact_registration(db: Database) -> None:
+    ownership = db.operations.claim(_scope(), "vm-reinitialize")
+    obligation_id = "6" * 32
+    registered = db.operations.register_lifecycle_obligation(
+        ownership,
+        "platform-hold",
+        1,
+        b"prepared",
+        obligation_id=obligation_id,
+    )
+    retried = db.operations.register_lifecycle_obligation(
+        ownership,
+        "platform-hold",
+        1,
+        b"prepared",
+        obligation_id=obligation_id,
+    )
+
+    assert retried == registered
+    assert [obligation.obligation_id for obligation in db.operations.list_lifecycle_obligations(ownership)] == [
+        obligation_id
+    ]
+    with pytest.raises(StateError):
+        db.operations.register_lifecycle_obligation(
+            ownership,
+            "other-hold",
+            1,
+            b"prepared",
+            obligation_id=obligation_id,
+        )
+    with pytest.raises(StateError):
+        db.operations.register_lifecycle_obligation(
+            ownership,
+            "platform-hold",
+            2,
+            b"prepared",
+            obligation_id=obligation_id,
+        )
+    with pytest.raises(StateError):
+        db.operations.register_lifecycle_obligation(
+            ownership,
+            "platform-hold",
+            1,
+            b"changed",
+            obligation_id=obligation_id,
+        )

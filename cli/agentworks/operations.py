@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from agentworks.db.operations import (
     LifecycleObligation as PersistedLifecycleObligation,
@@ -67,6 +68,7 @@ class OperationOwner:
         *,
         payload_version: int,
         payload: bytes,
+        obligation_id: str | None = None,
     ) -> LifecycleObligation:
         """Register one adapter-owned effect before it can be admitted."""
         with self._guard:
@@ -85,6 +87,7 @@ class OperationOwner:
                 obligation_kind,
                 payload_version,
                 payload,
+                obligation_id=obligation_id,
             )
             return LifecycleObligation(self, obligation)
 
@@ -253,7 +256,7 @@ class OperationOwner:
         self._released = True
         self._transition_uncertain = False
 
-    def _register_carrier_dispatch_locked(self) -> PersistedLifecycleObligation:
+    def _register_carrier_dispatch_locked(self, obligation_id: str) -> PersistedLifecycleObligation:
         """Register the one generic carrier effect for an active borrow."""
         if self._obligations_sealed:
             raise StateError(
@@ -266,6 +269,7 @@ class OperationOwner:
             "carrier-dispatch",
             1,
             b"",
+            obligation_id=obligation_id,
         )
 
 
@@ -345,8 +349,11 @@ class OperationBorrow:
     """One identity-bound serial borrow from an :class:`OperationOwner`."""
 
     _owner: OperationOwner
-    _carrier_obligation: PersistedLifecycleObligation | None = field(default=None, init=False)
-    _carrier_armed: bool = field(default=False, init=False)
+    _dispatch_obligation: PersistedLifecycleObligation | None = field(default=None, init=False)
+    _dispatch_obligation_id: str | None = field(default=None, init=False)
+    _supplied_dispatch: tuple[str, str, int, bytes] | None = field(default=None, init=False)
+    _dispatch_armed: bool = field(default=False, init=False)
+    _attempt_started: bool = field(default=False, init=False)
     _closing: bool = field(default=False, init=False)
     _closed: bool = field(default=False, init=False)
 
@@ -362,6 +369,66 @@ class OperationBorrow:
             attempt = owner._outstanding_attempt  # noqa: SLF001
             return attempt is not None and attempt._borrow is self  # noqa: SLF001
 
+    def install_dispatch_obligation(
+        self,
+        obligation_id: str,
+        obligation_kind: str,
+        *,
+        payload_version: int,
+        payload: bytes,
+    ) -> LifecycleObligation:
+        """Install this borrow's adapter-owned dispatch obligation.
+
+        The caller retains the fresh identifier so an interrupted registration
+        can repeat the exact durable request without creating another row.
+        """
+        owner = self._owner
+        with owner._guard:  # noqa: SLF001
+            self._require_active_locked()
+            if owner._transition_uncertain:  # noqa: SLF001
+                owner._reconcile_transition_locked()  # noqa: SLF001
+            if self._closing or owner._close_requested:  # noqa: SLF001
+                raise StateError(
+                    "operation borrow is closing",
+                    entity_kind=self.ownership.scope.resource_kind,
+                    entity_name=self.ownership.scope.resource_name,
+                )
+            if self._attempt_started:
+                raise StateError(
+                    "operation borrow dispatch obligation must be installed before its first attempt",
+                    entity_kind=self.ownership.scope.resource_kind,
+                    entity_name=self.ownership.scope.resource_name,
+                )
+            supplied = (obligation_id, obligation_kind, payload_version, payload)
+            if self._supplied_dispatch is not None:
+                if self._supplied_dispatch != supplied:
+                    raise StateError(
+                        "operation borrow already has a dispatch obligation",
+                        entity_kind=self.ownership.scope.resource_kind,
+                        entity_name=self.ownership.scope.resource_name,
+                    )
+                if self._dispatch_obligation is not None:
+                    return LifecycleObligation(owner, self._dispatch_obligation)
+            elif self._dispatch_obligation is not None:
+                raise StateError(
+                    "operation borrow already has a dispatch obligation",
+                    entity_kind=self.ownership.scope.resource_kind,
+                    entity_name=self.ownership.scope.resource_name,
+                )
+            else:
+                self._supplied_dispatch = supplied
+                self._dispatch_obligation_id = obligation_id
+            owner._transition_uncertain = True  # noqa: SLF001
+            self._dispatch_obligation = owner._repository.register_lifecycle_obligation(  # noqa: SLF001
+                self.ownership,
+                obligation_kind,
+                payload_version,
+                payload,
+                obligation_id=obligation_id,
+            )
+            owner._transition_uncertain = False  # noqa: SLF001
+            return LifecycleObligation(owner, self._dispatch_obligation)
+
     def begin_attempt(self) -> OperationAttempt:
         """Durably arm ownership before returning permission to dispatch.
 
@@ -372,6 +439,8 @@ class OperationBorrow:
         owner = self._owner
         with owner._guard:  # noqa: SLF001
             self._require_active_locked()
+            if owner._transition_uncertain:  # noqa: SLF001
+                owner._reconcile_transition_locked()  # noqa: SLF001
             if self._closing:
                 raise StateError(
                     "operation borrow is closing",
@@ -390,21 +459,33 @@ class OperationBorrow:
                     entity_kind=self.ownership.scope.resource_kind,
                     entity_name=self.ownership.scope.resource_name,
                 )
-            if self._carrier_obligation is None:
+            self._attempt_started = True
+            if self._dispatch_obligation is None:
+                if self._dispatch_obligation_id is None:
+                    self._dispatch_obligation_id = uuid4().hex
                 owner._transition_uncertain = True  # noqa: SLF001
-                obligation = owner._register_carrier_dispatch_locked()  # noqa: SLF001
-                self._carrier_obligation = obligation
+                if self._supplied_dispatch is None:
+                    obligation = owner._register_carrier_dispatch_locked(self._dispatch_obligation_id)  # noqa: SLF001
+                else:
+                    obligation = owner._repository.register_lifecycle_obligation(  # noqa: SLF001
+                        self.ownership,
+                        self._supplied_dispatch[1],
+                        self._supplied_dispatch[2],
+                        self._supplied_dispatch[3],
+                        obligation_id=self._dispatch_obligation_id,
+                    )
+                self._dispatch_obligation = obligation
             attempt = OperationAttempt(self)
             owner._outstanding_attempt = attempt  # noqa: SLF001
-            if not self._carrier_armed:
-                obligation = self._carrier_obligation
+            if not self._dispatch_armed:
+                obligation = self._dispatch_obligation
                 assert obligation is not None
                 owner._transition_uncertain = True  # noqa: SLF001
                 owner._repository.mark_lifecycle_obligation_possible_effect(  # noqa: SLF001
                     self.ownership,
                     obligation.obligation_id,
                 )
-                self._carrier_armed = True
+                self._dispatch_armed = True
                 owner._durable_possible_dispatch = True  # noqa: SLF001
                 owner._transition_uncertain = False  # noqa: SLF001
             return attempt
@@ -421,13 +502,34 @@ class OperationBorrow:
                     entity_name=self.ownership.scope.resource_name,
                 )
             self._closing = True
-            if self._carrier_obligation is not None:
+            if self._dispatch_obligation is not None:
                 owner._transition_uncertain = True  # noqa: SLF001
                 owner._repository.resolve_lifecycle_obligation(  # noqa: SLF001
                     self.ownership,
-                    self._carrier_obligation.obligation_id,
+                    self._dispatch_obligation.obligation_id,
                 )
                 owner._transition_uncertain = False  # noqa: SLF001
+            owner._active_borrow = None  # noqa: SLF001
+            self._closed = True
+
+    def handoff_retained_effect(self) -> None:
+        """Relinquish a settled borrow while retaining its armed adapter effect."""
+        owner = self._owner
+        with owner._guard:  # noqa: SLF001
+            self._require_active_locked()
+            if owner._outstanding_attempt is not None:  # noqa: SLF001
+                raise StateError(
+                    "operation borrow has an outstanding attempt",
+                    entity_kind=self.ownership.scope.resource_kind,
+                    entity_name=self.ownership.scope.resource_name,
+                )
+            obligation = self._dispatch_obligation
+            if not self._dispatch_armed or obligation is None or self._supplied_dispatch is None:
+                raise StateError(
+                    "operation borrow has no armed adapter effect to retain",
+                    entity_kind=self.ownership.scope.resource_kind,
+                    entity_name=self.ownership.scope.resource_name,
+                )
             owner._active_borrow = None  # noqa: SLF001
             self._closed = True
 
@@ -435,8 +537,8 @@ class OperationBorrow:
         """Terminally retain this borrow's outstanding effect for recovery.
 
         The handoff only relinquishes in-memory borrow authority. It leaves
-        both the outstanding attempt and its generic carrier obligation
-        unresolved, so the owner remains durably blocked from new work.
+        both the outstanding attempt and its dispatch obligation unresolved,
+        so the owner remains durably blocked from new work.
         """
         owner = self._owner
         with owner._guard:  # noqa: SLF001
@@ -487,9 +589,11 @@ class OperationAttempt:
             owner._outstanding_attempt = None  # noqa: SLF001
 
 
-def release_borrow_after_custody(borrow: OperationBorrow) -> None:
-    """Complete a settled borrow or explicitly retain its unresolved custody."""
+def release_borrow_after_custody(borrow: OperationBorrow, *, retain_effect: bool = False) -> None:
+    """Complete a borrow or explicitly retain its outstanding custody or effect."""
     if borrow.has_outstanding_attempt:
         borrow.handoff_unresolved()
+    elif retain_effect:
+        borrow.handoff_retained_effect()
     else:
         borrow.close()
