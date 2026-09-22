@@ -317,6 +317,25 @@ additive RunContext/platform orchestration, production creation/publication bind
 supported-platform acceptance remain open. This dependency adaptation consumes no public feedback
 round and leaves the PR draft without a checkpoint or ready signal.
 
+### Windows forwarding fixture correction
+
+Hosted [run 35696932549](https://github.com/WayfarerLabs/agentworks/actions/runs/35696932549) passes
+Linux Python 3.12/3.13/3.14 and the static/repository/website gates, but Windows Python 3.13 fails
+the synthetic partial-listener test at its final rebind with WinError 10048. Exact child-exit and
+pipe-closure assertions already passed. The log does not distinguish another port owner from
+socket-closing latency, both permitted by Microsoft's
+[Winsock error definition](https://learn.microsoft.com/en-us/windows/win32/winsock/windows-sockets-error-codes-2).
+It does not establish a production process leak.
+
+The fixture previously released a parent-selected ephemeral port before the child bound it and
+accepted any forwarding error, so it did not prove the partial listener ever existed. The child now
+binds port zero, listens, and writes its selected port to an owned sidecar before emitting the
+invalid readiness marker. The test requires that receipt, the precise invalid-response failure and
+exact child/pipe cleanup. Default socket rebinding retries only address-in-use for at most one
+second; other errors fail immediately, and a persistent holder still fails. No address-reuse option
+or production cleanup relaxation is introduced. Native Windows acceptance still requires its own
+evidence; the corrected hosted test must pass before this increment is considered green.
+
 ## Managed-process fix integration
 
 Transport's
