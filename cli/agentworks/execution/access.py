@@ -33,6 +33,7 @@ from .files import (
     NewMetadata,
     ReadResult,
     Revision,
+    UploadSource,
     WriteCondition,
     _file_revision_from_revision,
     _private_file_kind,
@@ -47,6 +48,7 @@ if TYPE_CHECKING:
 
 _DEFAULT_JSON_MAX_BYTES = 64 * 1_024
 _DEFAULT_JSON_MAX_DEPTH = 64
+_MAX_UPLOAD_SIZE = (1 << 63) - 1
 
 type _JsonFileStrategy = Literal["replace", "merge-overwrite", "merge-preserve", "skip-existing"]
 
@@ -58,13 +60,23 @@ class _BytesSource:
         self._data = data
         self._offset = 0
 
-    def try_read(self, limit: int) -> bytes:
+    def read(self, limit: int, /) -> bytes:
         if self._offset == len(self._data):
             return b""
         end = min(self._offset + limit, len(self._data))
         result = self._data[self._offset : end]
         self._offset = end
         return result
+
+
+class _UploadSourceAdapter:
+    """Adapt the public source shape to the private upload carrier shape."""
+
+    def __init__(self, source: UploadSource) -> None:
+        self._source = source
+
+    def try_read(self, limit: int) -> bytes | None:
+        return self._source.read(limit)
 
 
 class FileAccess:
@@ -172,16 +184,41 @@ class FileAccess:
         sudo: bool = False,
     ) -> MutationResult:
         """Publish one exact finite byte value under an explicit condition."""
-        root, leaf, plan, deadline = self._request(path, sudo)
         if type(data) is not bytes or type(create_metadata) is not NewMetadata:
             raise ValidationError("File publication requires exact bytes and creation metadata")
+        return self.upload(
+            path,
+            _BytesSource(data),
+            size=len(data),
+            condition=condition,
+            create_metadata=create_metadata,
+            sudo=sudo,
+        )
+
+    def upload(
+        self,
+        path: PurePosixPath,
+        source: UploadSource,
+        *,
+        size: int,
+        condition: WriteCondition,
+        create_metadata: NewMetadata,
+        sudo: bool = False,
+    ) -> MutationResult:
+        """Publish one exact finite value from a caller-owned source."""
+        source = _validate_upload_source(source)
+        if type(size) is not int or not 0 <= size <= _MAX_UPLOAD_SIZE:
+            raise ValidationError("File upload size must be a nonnegative bounded integer")
+        if type(create_metadata) is not NewMetadata:
+            raise ValidationError("File upload requires exact creation metadata")
         private_condition = _private_write_condition(condition)
+        root, leaf, plan, deadline = self._request(path, sudo)
         outcome = self._operation.upload(
             self._carrier,
             trusted_root_path=root,
             relative_path=leaf,
-            source=_BytesSource(data),
-            size=len(data),
+            source=_UploadSourceAdapter(source),
+            size=size,
             condition=private_condition,
             create_metadata=create_metadata,
             plan=plan,
@@ -342,6 +379,16 @@ def _validate_diagnostic_value(value: object, label: str) -> None:
         or any(character in value for character in "\\/\x00\r\n")
     ):
         raise ValidationError(f"File access requires a safe logical entity {label}")
+
+
+def _validate_upload_source(source: object) -> UploadSource:
+    try:
+        reader = getattr(source, "read", None)
+    except Exception:
+        raise ValidationError("File upload requires a nonblocking byte source") from None
+    if not callable(reader):
+        raise ValidationError("File upload requires a nonblocking byte source")
+    return cast("UploadSource", source)
 
 
 def _json_source(document: JsonObject, *, max_bytes: int, max_depth: int) -> bytes:
