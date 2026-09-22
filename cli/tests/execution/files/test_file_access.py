@@ -40,6 +40,7 @@ from agentworks.operations import OperationOwner
 from tests.execution.files._file_read_support import LocalCarrier
 from tests.execution.files._file_snapshot_support import install_fixture_bundle
 from tests.execution.files._runtime_support import runtime_selection
+from tests.execution.files._target_support import target_for_owner
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -244,7 +245,7 @@ def bound_access(tmp_path: Path, plan: IdentityPlan, monkeypatch: pytest.MonkeyP
         "file-access",
     )
     access = FileAccess(
-        FileOperation(owner),
+        FileOperation(owner, target_for_owner(owner)),
         LocalCarrier(),
         trusted_root=PurePosixPath(root),
         runtime_selection=runtime_selection(sys.executable),
@@ -377,7 +378,7 @@ def test_upload_deadline_rejection_precedes_source_read_and_does_not_close_sourc
     )
     source = StallingUploadSource()
     access = FileAccess(
-        FileOperation(owner),
+        FileOperation(owner, target_for_owner(owner)),
         LocalCarrier(),
         trusted_root=PurePosixPath(root),
         runtime_selection=runtime_selection(sys.executable),
@@ -441,7 +442,7 @@ def test_upload_validation_rejects_before_source_read_or_dispatch(
     carrier = NoDispatchCarrier()
     source = RecordingUploadSource(b"secret")
     access = FileAccess(
-        FileOperation(owner),
+        FileOperation(owner, target_for_owner(owner)),
         carrier,
         trusted_root=PurePosixPath(root),
         runtime_selection=runtime_selection(sys.executable),
@@ -492,7 +493,7 @@ def test_upload_sudo_selects_bound_elevated_plan_before_dispatch(
     carrier = FirstDispatchCarrier()
     elevated = IdentityPlan(IdentityExpectation(0, 0, (0,)), IdentityMode.SUDO_ROOT)
     access = FileAccess(
-        FileOperation(owner),
+        FileOperation(owner, target_for_owner(owner)),
         carrier,
         trusted_root=PurePosixPath(root),
         runtime_selection=runtime_selection(sys.executable),
@@ -609,7 +610,7 @@ def test_unavailable_elevation_refuses_before_validation_or_dispatch(
     )
     carrier = NoDispatchCarrier()
     access = FileAccess(
-        FileOperation(owner),
+        FileOperation(owner, target_for_owner(owner)),
         carrier,
         trusted_root=PurePosixPath(root),
         runtime_selection=runtime_selection(sys.executable),
@@ -671,7 +672,7 @@ def test_json_workflow_reuses_one_bound_deadline(tmp_path: Path, plan: IdentityP
     carrier = RecordingCarrier()
     deadline = Deadline.after(30)
     access = FileAccess(
-        FileOperation(owner),
+        FileOperation(owner, target_for_owner(owner)),
         carrier,
         trusted_root=PurePosixPath(root),
         runtime_selection=runtime_selection(sys.executable),
@@ -711,7 +712,7 @@ def test_sudo_selects_the_bound_elevated_plan_before_dispatch(tmp_path: Path, pl
     carrier = NoDispatchCarrier()
     elevated = IdentityPlan(IdentityExpectation(0, 0, (0,)), IdentityMode.SUDO_ROOT)
     access = FileAccess(
-        FileOperation(owner),
+        FileOperation(owner, target_for_owner(owner)),
         carrier,
         trusted_root=PurePosixPath(root),
         runtime_selection=runtime_selection(sys.executable),
@@ -744,7 +745,7 @@ def test_bound_views_share_the_supplied_serial_owner(tmp_path: Path, plan: Ident
     )
     carrier = ReentrantCarrier()
     access = FileAccess(
-        FileOperation(owner),
+        FileOperation(owner, target_for_owner(owner)),
         carrier,
         trusted_root=PurePosixPath(root),
         runtime_selection=runtime_selection(sys.executable),
@@ -776,7 +777,7 @@ def test_unresolved_observation_keeps_owner_close_refused(tmp_path: Path, plan: 
         "file-access",
     )
     access = FileAccess(
-        FileOperation(owner),
+        FileOperation(owner, target_for_owner(owner)),
         UnsettledCarrier(),
         trusted_root=PurePosixPath(root),
         runtime_selection=runtime_selection(sys.executable),

@@ -142,6 +142,7 @@ from agentworks.execution.files import Change, FileFailureReason, FileOperationP
 from agentworks.operations import OperationOwner
 from tests.execution.files._file_read_support import LocalCarrier
 from tests.execution.files._runtime_support import runtime_ready_record, runtime_selection
+from tests.execution.files._target_support import target_for_owner
 
 _READY = RuntimePrerequisiteObservation(RuntimePrerequisiteState.READY, "/usr/bin/python3")
 _PLAN = IdentityPlan(IdentityExpectation(1001, 1002, (1002,)), IdentityMode.DIRECT)
@@ -298,7 +299,7 @@ def test_real_helpers_reduce_stat_inventory_and_conflict_without_private_state(t
         OperationScope(OperationResourceKind.VM, "file-result-vm"),
         "file-result",
     )
-    operation = FileOperation(owner)
+    operation = FileOperation(owner, target_for_owner(owner))
     carrier = LocalCarrier()
     runtime = runtime_selection(sys.executable)
     try:
@@ -362,7 +363,7 @@ def test_real_operation_retains_carrier_failure_across_runtime_unknown_and_mutat
         OperationScope(OperationResourceKind.VM, "file-result-failure-vm"),
         "file-result",
     )
-    operation = FileOperation(owner)
+    operation = FileOperation(owner, target_for_owner(owner))
     try:
         stat_outcome = operation.stat(
             _ClosedFailureCarrier(Dispatch.NOT_SENT, Failure.DISPATCH),

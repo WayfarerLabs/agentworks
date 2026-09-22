@@ -31,6 +31,7 @@ from agentworks.execution.carrier import Deadline
 from tests.execution.files._file_download_support import LostCallStdoutCarrier, owner
 from tests.execution.files._file_snapshot_support import LocalCarrier, install_fixture_bundle
 from tests.execution.files._runtime_support import runtime_selection
+from tests.execution.files._target_support import target_for_owner
 
 if TYPE_CHECKING:
     from agentworks.execution.carrier import ByteSink, Carrier
@@ -129,7 +130,7 @@ def test_real_linux_read_returns_only_complete_verified_data(
     source.joinpath("target").write_bytes(content)
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
-    operation = FileOperation(operation_owner)
+    operation = FileOperation(operation_owner, target_for_owner(operation_owner))
     try:
         outcome = _read(LocalCarrier(), operation, source, "target", max(1, len(content)), plan)
 
@@ -155,7 +156,7 @@ def test_real_linux_absence_returns_no_data(
     source, scratch = roots
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
-    operation = FileOperation(operation_owner)
+    operation = FileOperation(operation_owner, target_for_owner(operation_owner))
     try:
         outcome = _read(LocalCarrier(), operation, source, "absent", 1, plan)
 
@@ -180,7 +181,7 @@ def test_real_linux_caller_bound_refusal_exposes_no_partial_data(
     source.joinpath("target").write_bytes(b"bounded-content")
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
-    operation = FileOperation(operation_owner)
+    operation = FileOperation(operation_owner, target_for_owner(operation_owner))
     try:
         outcome = _read(LocalCarrier(), operation, source, "target", 4, plan)
 
@@ -237,7 +238,7 @@ def test_partial_bytes_are_discarded_without_changing_download_facts(
 ) -> None:
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
-    operation = FileOperation(operation_owner)
+    operation = FileOperation(operation_owner, target_for_owner(operation_owner))
     fake = _FakeDownload(download, (b"partial",))
     monkeypatch.setattr(operation, "download", fake)
     try:
@@ -297,7 +298,7 @@ def test_original_control_and_download_fact_escape_unchanged(
         assert sink.try_write(memoryview(b"partial")) == 7
         raise control from fact
 
-    operation = FileOperation(operation_owner)
+    operation = FileOperation(operation_owner, target_for_owner(operation_owner))
     monkeypatch.setattr(operation, "download", fail_download)
     try:
         with pytest.raises(ControlStop) as raised:
@@ -325,7 +326,7 @@ def test_original_control_and_download_fact_escape_unchanged(
 def test_invalid_caller_bound_releases_borrow_and_never_dispatches(tmp_path: Path) -> None:
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
-    operation = FileOperation(operation_owner)
+    operation = FileOperation(operation_owner, target_for_owner(operation_owner))
     carrier = LocalCarrier()
     try:
         with pytest.raises(ValidationError):
@@ -358,7 +359,7 @@ def test_result_allocation_failure_preserves_inert_download_custody(
     source.joinpath("target").write_bytes(b"payload")
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
-    operation = FileOperation(operation_owner)
+    operation = FileOperation(operation_owner, target_for_owner(operation_owner))
     carrier = LostCallStdoutCarrier(3)
     sink = _file_memory_read._MemorySink()  # noqa: SLF001
     stop = AllocationStop("result-allocation-canary")
@@ -400,7 +401,7 @@ def test_complete_byte_allocation_failure_releases_borrow_after_cleanup(
     source.joinpath("target").write_bytes(b"payload")
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
-    operation = FileOperation(operation_owner)
+    operation = FileOperation(operation_owner, target_for_owner(operation_owner))
     sink = _file_memory_read._MemorySink()  # noqa: SLF001
     downloads: list[FileDownloadOutcome] = []
     download = operation.download
@@ -475,7 +476,7 @@ def test_bounded_fake_collects_more_than_one_qga_response_without_native_proof(
     fake = _FakeDownload(download, chunks)
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
-    operation = FileOperation(operation_owner)
+    operation = FileOperation(operation_owner, target_for_owner(operation_owner))
     monkeypatch.setattr(operation, "download", fake)
     try:
         outcome = read_file(

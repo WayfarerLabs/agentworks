@@ -29,6 +29,7 @@ from agentworks.execution.files import Change, FileFailureReason, FileOperationP
 from agentworks.operations import OperationOwner
 from tests.execution.files._file_read_support import LocalCarrier
 from tests.execution.files._runtime_support import runtime_selection
+from tests.execution.files._target_support import target_for_owner
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the fixed file helpers require Linux")
 
@@ -82,7 +83,7 @@ def real_operation(
         "file-result",
     )
     try:
-        yield root, owner, FileOperation(owner), plan, runtime_selection(sys.executable)
+        yield root, owner, FileOperation(owner, target_for_owner(owner)), plan, runtime_selection(sys.executable)
     finally:
         database.close()
 
