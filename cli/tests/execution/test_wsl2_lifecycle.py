@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import subprocess
+import sys
 from dataclasses import dataclass, field
-from typing import cast
+from pathlib import Path
 
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution import _wsl2_lifecycle as lifecycle
 from agentworks.execution._wsl2_lifecycle import (
     _HELPER_SOURCE,
     GuestAnchorIdentity,
     GuestAnchorPresence,
     HelperExitReceipt,
+    HostClientSettlement,
     HostClientStatus,
     JobAssignment,
     WSL2GuestAnchorLauncher,
@@ -23,72 +26,65 @@ from agentworks.execution.carriers.wsl2 import WSL2Connection
 
 
 @dataclass
-class FakeProcess:
-    receipts: list[object]
-    pid: int = 43
-    exit_status: int | None = 0
-    close_fails: bool = False
+class FakeOwner:
+    lines: list[object]
+    statuses: list[int | None] = field(default_factory=lambda: [0])
+    spawn_interrupt: BaseException | None = None
+    close_fails_without_eof: bool = False
     read_fails: bool = False
-    read_interrupt: BaseException | None = None
-    wait_fails: bool = False
-    terminate_fails: bool = False
+    spawned: bool = False
     closed_stdin: bool = False
     terminated: bool = False
+    spawn_deadlines: list[Deadline] = field(default_factory=list)
+    cleanup_deadlines: list[Deadline] = field(default_factory=list)
+    argv: tuple[str, ...] = ()
 
-    def read_stdout(self, limit: int, deadline: Deadline) -> bytes:
+    def spawn_owned(self, argv: tuple[str, ...], deadline: Deadline) -> None:
+        assert not deadline.expired
+        self.spawned = True
+        self.argv = argv
+        self.spawn_deadlines.append(deadline)
+        if self.spawn_interrupt is not None:
+            raise self.spawn_interrupt
+
+    def read_stdout_line(self, limit: int, deadline: Deadline) -> bytes:
         assert limit == 513
         assert not deadline.expired
-        if self.read_interrupt is not None:
-            raise self.read_interrupt
         if self.read_fails:
             raise OSError
-        value = self.receipts.pop(0)
-        if type(value) is not bytes:
-            return value  # type: ignore[return-value]
-        return value
+        value = self.lines.pop(0)
+        return value  # type: ignore[return-value]
 
     def close_stdin(self) -> None:
-        self.closed_stdin = True
-        if self.close_fails:
+        if self.close_fails_without_eof:
             raise OSError
+        self.closed_stdin = True
 
     def wait(self, deadline: Deadline) -> int | None:
-        assert not deadline.expired
-        if self.wait_fails:
-            raise OSError
-        return self.exit_status
+        if deadline not in self.spawn_deadlines:
+            assert not deadline.expired
+            self.cleanup_deadlines.append(deadline)
+        return self.statuses.pop(0) if self.statuses else None
 
     def terminate(self, deadline: Deadline) -> None:
         assert not deadline.expired
         self.terminated = True
-        if self.terminate_fails:
-            raise OSError
-
-
-@dataclass
-class FakeHost:
-    process: FakeProcess | None = None
-    interrupt: BaseException | None = None
-    argv: tuple[str, ...] | None = None
-
-    def spawn(self, argv: tuple[str, ...]) -> FakeProcess:
-        self.argv = argv
-        if self.interrupt is not None:
-            raise self.interrupt
-        assert self.process is not None
-        return self.process
+        self.cleanup_deadlines.append(deadline)
 
 
 @dataclass
 class FakeJob:
-    assign_interrupt: BaseException | None = None
     assign_fails: bool = False
+    assign_interrupt: BaseException | None = None
     close_fails: bool = False
-    assigned: list[FakeProcess] = field(default_factory=list)
+    assigned: list[FakeOwner] = field(default_factory=list)
+    deadlines: list[Deadline] = field(default_factory=list)
     closed: bool = False
 
-    def assign(self, process: FakeProcess) -> None:
-        self.assigned.append(process)
+    def assign(self, owner: FakeOwner, deadline: Deadline) -> None:
+        assert not deadline.expired
+        self.assigned.append(owner)
+        self.deadlines.append(deadline)
         if self.assign_interrupt is not None:
             raise self.assign_interrupt
         if self.assign_fails:
@@ -97,6 +93,7 @@ class FakeJob:
     def close(self, deadline: Deadline) -> None:
         assert not deadline.expired
         self.closed = True
+        self.deadlines.append(deadline)
         if self.close_fails:
             raise OSError
 
@@ -105,8 +102,11 @@ class FakeJob:
 class FakeJobs:
     job: FakeJob | None = field(default_factory=FakeJob)
     unavailable: bool = False
+    deadlines: list[Deadline] = field(default_factory=list)
 
-    def create(self) -> FakeJob:
+    def __call__(self, deadline: Deadline) -> FakeJob:
+        assert not deadline.expired
+        self.deadlines.append(deadline)
         if self.unavailable:
             raise OSError
         assert self.job is not None
@@ -133,34 +133,29 @@ def ready(nonce: str = "a" * 32) -> bytes:
 
 
 def launcher(
-    process: FakeProcess,
+    owner: FakeOwner,
     jobs: FakeJobs | None = None,
     observer: FakeObserver | None = None,
-    nonce: object = "a" * 32,
-) -> tuple[WSL2GuestAnchorLauncher, FakeHost, FakeJobs]:
-    host = FakeHost(process)
+) -> tuple[WSL2GuestAnchorLauncher, FakeJobs]:
     actual_jobs = jobs or FakeJobs()
     return (
-        WSL2GuestAnchorLauncher(
-            connection(),
-            host=host,
-            jobs=actual_jobs,
-            observer=observer,
-            nonce_factory=cast(Callable[[], str], lambda: nonce),
-        ),
-        host,
+        WSL2GuestAnchorLauncher(connection(), owner_factory=lambda: owner, job_factory=actual_jobs, observer=observer),
         actual_jobs,
     )
 
 
-def test_launch_uses_one_fixed_literal_python_helper_argv() -> None:
-    process = FakeProcess([ready(), b"EXITING " + b"a" * 32 + b"\n"])
-    subject, host, _ = launcher(process)
+def token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(lifecycle.secrets, "token_hex", lambda size: "a" * (size * 2))  # type: ignore[attr-defined]
+
+
+def test_launch_uses_one_fixed_literal_python_helper_argv(monkeypatch: pytest.MonkeyPatch) -> None:
+    token(monkeypatch)
+    owner = FakeOwner([ready(), b"EXITING " + b"a" * 32 + b"\n"])
+    subject, _ = launcher(owner)
 
     anchor = subject.start(Deadline.after(1))
 
-    assert host.argv is not None
-    assert host.argv[:7] == (
+    assert owner.argv[:7] == (
         r"C:\Windows\System32\wsl.exe",
         "--distribution",
         "test-distro",
@@ -169,42 +164,59 @@ def test_launch_uses_one_fixed_literal_python_helper_argv() -> None:
         "--exec",
         "/usr/bin/python3",
     )
-    assert host.argv[7:12] == ("-I", "-S", "-B", "-c", _HELPER_SOURCE)
-    assert host.argv[12] == "a" * 32
-    assert anchor.evidence.job_assignment == JobAssignment.ASSIGNED
-    assert anchor.evidence.pre_assignment_orphan_window
+    assert owner.argv[7:12] == ("-I", "-S", "-B", "-c", _HELPER_SOURCE)
+    assert owner.argv[12] == "a" * 32
+    assert anchor.evidence.job_assignment == JobAssignment.ASSIGNED_AFTER_SPAWN
 
 
-def test_ready_identity_and_exit_receipt_are_not_guest_absence_evidence() -> None:
-    process = FakeProcess([ready(), b"EXITING " + b"a" * 32 + b"\n"])
-    subject, _, _ = launcher(process)
+def test_helper_protocol_runs_under_local_python_and_waits_for_eof() -> None:
+    if not Path("/proc/self/stat").is_file():
+        pytest.skip("requires procfs")
+    nonce = "a" * 32
+    process = subprocess.Popen(
+        [sys.executable, "-I", "-S", "-B", "-c", _HELPER_SOURCE, nonce],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert process.stdin is not None and process.stdout is not None and process.stderr is not None
+    line = process.stdout.readline(513)
+    _, received_nonce, pid_text, start_text = line.decode("ascii").split()
+    assert received_nonce == nonce
+    pid = int(pid_text)
+    stat = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+    assert int(stat[stat.rfind(")") + 2 :].split()[19]) == int(start_text)
+    assert process.poll() is None
+    process.stdin.close()
+    assert process.stdout.readline(513) == f"EXITING {nonce}\n".encode()
+    assert process.wait(timeout=2) == 0
+    assert process.stderr.read() == b""
+
+
+def test_ready_identity_and_exit_receipt_are_not_guest_absence_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
+    token(monkeypatch)
+    owner = FakeOwner([ready(), b"EXITING " + b"a" * 32 + b"\n"])
+    subject, _ = launcher(owner)
     anchor = subject.start(Deadline.after(1))
 
     evidence = anchor.release(Deadline.after(1))
 
-    assert process.closed_stdin
+    assert owner.closed_stdin
     assert evidence.identity == GuestAnchorIdentity(137, 8192)
     assert evidence.helper_exit_receipt == HelperExitReceipt.RECEIVED
     assert evidence.host_client_status == HostClientStatus.EXITED
-    assert evidence.host_client_exit_status == 0
+    assert evidence.host_client_settlement == HostClientSettlement.EXIT_CONFIRMED
     assert evidence.guest_anchor_presence == GuestAnchorPresence.UNKNOWN
 
 
-def test_eof_without_helper_exit_receipt_is_not_a_malformed_receipt() -> None:
-    process = FakeProcess([ready(), b""])
-    subject, _, _ = launcher(process)
-    anchor = subject.start(Deadline.after(1))
-
-    evidence = anchor.release(Deadline.after(1))
-
-    assert evidence.helper_exit_receipt == HelperExitReceipt.NOT_OBSERVED
-
-
 @pytest.mark.parametrize("presence", list(GuestAnchorPresence))
-def test_only_injected_exact_identity_observer_supplies_guest_presence(presence: GuestAnchorPresence) -> None:
-    process = FakeProcess([ready(), b""])
+def test_only_injected_exact_identity_observer_supplies_guest_presence(
+    monkeypatch: pytest.MonkeyPatch, presence: GuestAnchorPresence
+) -> None:
+    token(monkeypatch)
+    owner = FakeOwner([ready(), b""])
     observer = FakeObserver(presence)
-    subject, _, _ = launcher(process, observer=observer)
+    subject, _ = launcher(owner, observer=observer)
     anchor = subject.start(Deadline.after(1))
 
     evidence = anchor.release(Deadline.after(1))
@@ -213,131 +225,124 @@ def test_only_injected_exact_identity_observer_supplies_guest_presence(presence:
     assert evidence.guest_anchor_presence == presence
 
 
-def test_job_unavailability_and_assignment_failure_remain_visible() -> None:
-    unavailable_process = FakeProcess([ready(), b""])
-    unavailable, _, _ = launcher(unavailable_process, jobs=FakeJobs(unavailable=True))
+def test_job_unavailability_and_assignment_failure_remain_visible(monkeypatch: pytest.MonkeyPatch) -> None:
+    token(monkeypatch)
+    unavailable, _ = launcher(FakeOwner([ready(), b""]), jobs=FakeJobs(unavailable=True))
     unavailable_anchor = unavailable.start(Deadline.after(1))
-    failed_process = FakeProcess([ready(), b""])
-    failed, _, _ = launcher(failed_process, jobs=FakeJobs(job=FakeJob(assign_fails=True)))
+    failed, _ = launcher(FakeOwner([ready(), b""]), jobs=FakeJobs(job=FakeJob(assign_fails=True)))
     failed_anchor = failed.start(Deadline.after(1))
 
     assert unavailable_anchor.evidence.job_assignment == JobAssignment.NOT_AVAILABLE
     assert failed_anchor.evidence.job_assignment == JobAssignment.FAILED
-    assert unavailable_anchor.evidence.pre_assignment_orphan_window
-    assert failed_anchor.evidence.pre_assignment_orphan_window
 
 
 @pytest.mark.parametrize(
     "receipt",
     [b"READY " + b"b" * 32 + b" 137 8192\n", b"READY " + b"a" * 32 + b" nope 8192\n", b"x" * 513],
 )
-def test_malformed_foreign_and_oversized_ready_records_abort_with_cleanup(receipt: bytes) -> None:
-    process = FakeProcess([receipt])
-    subject, _, jobs = launcher(process)
+def test_malformed_foreign_and_oversized_ready_records_abort_with_cleanup(
+    monkeypatch: pytest.MonkeyPatch, receipt: bytes
+) -> None:
+    token(monkeypatch)
+    owner = FakeOwner([receipt])
+    subject, jobs = launcher(owner)
 
     with pytest.raises(ValidationError):
         subject.start(Deadline.after(1))
 
-    assert process.terminated
+    assert owner.terminated
     assert jobs.job is not None and jobs.job.closed
 
 
-def test_interruption_after_spawn_preserves_original_exception_and_attempts_cleanup() -> None:
+def test_spawn_interruption_after_os_creation_cleans_precreated_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    token(monkeypatch)
     interrupted = KeyboardInterrupt()
-    process = FakeProcess([ready()], read_interrupt=interrupted, terminate_fails=True)
-    subject, _, jobs = launcher(process)
+    owner = FakeOwner([], spawn_interrupt=interrupted)
+    subject, jobs = launcher(owner)
 
     with pytest.raises(KeyboardInterrupt) as raised:
         subject.start(Deadline.after(1))
 
     assert raised.value is interrupted
-    assert process.terminated
+    assert owner.spawned and owner.terminated
+    assert jobs.job is not None and jobs.job.closed
+
+
+def test_assignment_interruption_preserves_original_exception_and_attempts_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token(monkeypatch)
+    interrupted = KeyboardInterrupt()
+    owner = FakeOwner([ready()])
+    jobs = FakeJobs(job=FakeJob(assign_interrupt=interrupted))
+    subject, _ = launcher(owner, jobs=jobs)
+
+    with pytest.raises(KeyboardInterrupt) as raised:
+        subject.start(Deadline.after(1))
+
+    assert raised.value is interrupted
+    assert owner.terminated
     assert jobs.job is not None and jobs.job.closed
     assert raised.value.__notes__
 
 
-def test_interruption_before_spawn_preserves_exception_and_closes_unused_job() -> None:
-    interrupted = KeyboardInterrupt()
-    host = FakeHost(interrupt=interrupted)
-    jobs = FakeJobs()
-    subject = WSL2GuestAnchorLauncher(connection(), host=host, jobs=jobs, nonce_factory=lambda: "a" * 32)
-
-    with pytest.raises(KeyboardInterrupt) as raised:
-        subject.start(Deadline.after(1))
-
-    assert raised.value is interrupted
-    assert jobs.job is not None and jobs.job.closed
-
-
-def test_interruption_during_assignment_is_uncertain_and_preserves_original_exception() -> None:
-    interrupted = KeyboardInterrupt()
-    process = FakeProcess([ready()])
-    jobs = FakeJobs(job=FakeJob(assign_interrupt=interrupted))
-    subject, _, _ = launcher(process, jobs=jobs)
-
-    with pytest.raises(KeyboardInterrupt) as raised:
-        subject.start(Deadline.after(1))
-
-    assert raised.value is interrupted
-    assert process.terminated
-    assert jobs.job is not None and jobs.job.closed
-
-
-def test_release_cleanup_failure_is_evidence_not_a_guest_absence_claim() -> None:
-    process = FakeProcess([ready(), b"not a receipt"], close_fails=True, wait_fails=True)
-    jobs = FakeJobs(job=FakeJob(close_fails=True))
-    subject, _, _ = launcher(process, jobs=jobs)
+def test_close_stdin_failure_without_eof_forces_host_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
+    token(monkeypatch)
+    owner = FakeOwner([ready()], statuses=[0], close_fails_without_eof=True)
+    subject, _ = launcher(owner)
     anchor = subject.start(Deadline.after(1))
 
     evidence = anchor.release(Deadline.after(1))
 
-    assert evidence.cleanup_failed
-    assert evidence.helper_exit_receipt == HelperExitReceipt.INVALID
-    assert evidence.host_client_status == HostClientStatus.NOT_OBSERVED
-    assert evidence.guest_anchor_presence == GuestAnchorPresence.UNKNOWN
+    assert not owner.closed_stdin
+    assert owner.terminated
+    assert owner.cleanup_deadlines
+    assert all(not deadline.expired for deadline in owner.cleanup_deadlines)
+    assert evidence.host_client_settlement == HostClientSettlement.EXIT_CONFIRMED
 
 
-def test_release_interruption_preserves_original_exception_after_emergency_cleanup() -> None:
-    interrupted = KeyboardInterrupt()
-    process = FakeProcess([ready(), b""], wait_fails=True)
-    jobs = FakeJobs(job=FakeJob(close_fails=True))
-    subject, _, _ = launcher(process, jobs=jobs)
+def test_cooperative_release_forces_cleanup_when_wait_is_not_exact(monkeypatch: pytest.MonkeyPatch) -> None:
+    token(monkeypatch)
+    owner = FakeOwner([ready(), b"EXITING " + b"a" * 32 + b"\n"], statuses=[None, 0])
+    subject, _ = launcher(owner)
     anchor = subject.start(Deadline.after(1))
-    process.close_stdin = lambda: (_ for _ in ()).throw(interrupted)  # type: ignore[method-assign]
 
-    with pytest.raises(KeyboardInterrupt) as raised:
-        anchor.release(Deadline.after(1))
+    evidence = anchor.release(Deadline.after(1))
 
-    assert raised.value is interrupted
-    assert process.terminated
-    assert raised.value.__notes__
+    assert owner.closed_stdin and owner.terminated
+    assert evidence.helper_exit_receipt == HelperExitReceipt.RECEIVED
+    assert evidence.host_client_settlement == HostClientSettlement.EXIT_CONFIRMED
 
 
-@pytest.mark.parametrize("nonce", ["A" * 32, "a" * 31, "a" * 33, None])
-def test_invalid_nonce_source_refuses_before_process_creation(nonce: object) -> None:
-    process = FakeProcess([ready()])
-    subject, host, _ = launcher(process, nonce=nonce)
+def test_expired_operation_budget_uses_fresh_cleanup_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    token(monkeypatch)
+    owner = FakeOwner([ready()], statuses=[0])
+    subject, _ = launcher(owner)
+    anchor = subject.start(Deadline.after(1))
 
-    with pytest.raises(ValidationError):
-        subject.start(Deadline.after(1))
+    evidence = anchor.release(Deadline.after(0))
 
-    assert host.argv is None
+    assert owner.terminated
+    assert owner.cleanup_deadlines
+    assert all(not deadline.expired for deadline in owner.cleanup_deadlines)
+    assert evidence.host_client_settlement == HostClientSettlement.EXIT_CONFIRMED
 
 
-def test_expired_deadline_refuses_before_process_creation() -> None:
-    process = FakeProcess([ready()])
-    subject, host, _ = launcher(process)
+def test_uncertain_force_cleanup_retains_retryable_host_capability(monkeypatch: pytest.MonkeyPatch) -> None:
+    token(monkeypatch)
+    owner = FakeOwner([ready()], statuses=[None, 0], close_fails_without_eof=True)
+    subject, _ = launcher(owner)
+    anchor = subject.start(Deadline.after(1))
 
-    with pytest.raises(ValidationError):
-        subject.start(Deadline.after(0))
+    first = anchor.release(Deadline.after(0))
+    second = anchor.release(Deadline.after(0))
 
-    assert host.argv is None
+    assert first.host_client_settlement == HostClientSettlement.UNCERTAIN
+    assert second.host_client_settlement == HostClientSettlement.EXIT_CONFIRMED
+    assert owner.terminated
 
 
 def test_import_does_not_load_legacy_wsl_or_transport_modules() -> None:
-    import subprocess
-    import sys
-
     script = r"""
 import sys
 class Blocker:
