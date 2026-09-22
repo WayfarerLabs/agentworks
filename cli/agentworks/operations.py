@@ -6,7 +6,14 @@ import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agentworks.db.operations import OperationClaimState, OperationOwnership, OperationScope
+from agentworks.db.operations import (
+    LifecycleObligation as PersistedLifecycleObligation,
+)
+from agentworks.db.operations import (
+    OperationClaimState,
+    OperationOwnership,
+    OperationScope,
+)
 from agentworks.errors import StateError
 
 if TYPE_CHECKING:
@@ -34,6 +41,7 @@ class OperationOwner:
         self._outstanding_attempt: OperationAttempt | None = None
         self._durable_possible_dispatch = False
         self._effects_resolved = False
+        self._obligations_sealed = False
         self._transition_uncertain = False
         self._close_requested = False
         self._release_may_have_committed = False
@@ -53,24 +61,49 @@ class OperationOwner:
     def ownership(self) -> OperationOwnership:
         return self._ownership
 
-    def arm(self) -> None:
-        """Durably permit a whole-operation lifecycle effect.
-
-        Unlike a borrowed attempt, successful arming leaves no in-memory
-        attempt active. An interrupted transition retains ownership until its
-        durable state is reconciled.
-        """
+    def register_lifecycle_obligation(
+        self,
+        obligation_kind: str,
+        *,
+        payload_version: int,
+        payload: bytes,
+    ) -> LifecycleObligation:
+        """Register one adapter-owned effect before it can be admitted."""
         with self._guard:
             self._require_no_active_work_locked()
             if self._transition_uncertain:
                 self._reconcile_transition_locked()
             self._require_dispatch_admission_locked()
-            if self._durable_possible_dispatch:
+            if self._obligations_sealed:
+                raise StateError(
+                    "operation lifecycle obligations are sealed",
+                    entity_kind=self._ownership.scope.resource_kind,
+                    entity_name=self._ownership.scope.resource_name,
+                )
+            obligation = self._repository.register_lifecycle_obligation(
+                self._ownership,
+                obligation_kind,
+                payload_version,
+                payload,
+            )
+            return LifecycleObligation(self, obligation)
+
+    def seal_lifecycle_obligations(self) -> None:
+        """Forbid later effect registration after workflow construction ends."""
+        with self._guard:
+            self._require_no_active_work_locked()
+            if self._transition_uncertain:
+                self._reconcile_transition_locked()
+            if self._released:
+                raise StateError(
+                    "operation ownership is already released",
+                    entity_kind=self._ownership.scope.resource_kind,
+                    entity_name=self._ownership.scope.resource_name,
+                )
+            if self._obligations_sealed:
                 return
-            self._transition_uncertain = True
-            self._repository.mark_possible_dispatch(self._ownership)
-            self._durable_possible_dispatch = True
-            self._transition_uncertain = False
+            self._repository.seal_lifecycle_obligations(self._ownership)
+            self._obligations_sealed = True
 
     def borrow(self) -> OperationBorrow:
         """Borrow the whole-operation serial guard without waiting."""
@@ -111,9 +144,9 @@ class OperationOwner:
                 )
             if self._effects_resolved:
                 return
-            if not self._durable_possible_dispatch:
+            if not self._obligations_sealed:
                 raise StateError(
-                    "operation ownership was not armed for dispatch",
+                    "operation lifecycle obligations must be sealed before resolution",
                     entity_kind=self._ownership.scope.resource_kind,
                     entity_name=self._ownership.scope.resource_name,
                 )
@@ -145,7 +178,7 @@ class OperationOwner:
         if self._effects_resolved:
             self._release_resolved_locked()
             return
-        if not self._durable_possible_dispatch:
+        if not self._durable_possible_dispatch and not self._obligations_sealed:
             self._transition_uncertain = True
             self._release_may_have_committed = True
             self._repository.abandon_reserved(self._ownership)
@@ -182,6 +215,7 @@ class OperationOwner:
             )
         self._durable_possible_dispatch = claim.state is not OperationClaimState.RESERVED
         self._effects_resolved = claim.state is OperationClaimState.RESOLVED
+        self._obligations_sealed = claim.obligations_sealed_at is not None
         self._transition_uncertain = False
 
     def _require_no_active_work_locked(self) -> None:
@@ -218,6 +252,85 @@ class OperationOwner:
         self._repository.release_resolved(self._ownership)
         self._released = True
         self._transition_uncertain = False
+
+    def _register_borrowed_attempt_locked(self) -> PersistedLifecycleObligation:
+        """Register the generic helper admission under its active borrow."""
+        if self._obligations_sealed:
+            raise StateError(
+                "operation lifecycle obligations are sealed",
+                entity_kind=self._ownership.scope.resource_kind,
+                entity_name=self._ownership.scope.resource_name,
+            )
+        return self._repository.register_lifecycle_obligation(
+            self._ownership,
+            "carrier-dispatch",
+            1,
+            b"",
+        )
+
+
+@dataclass(slots=True, repr=False)
+class LifecycleObligation:
+    """Owner-bound handle for one independently discharged lifecycle effect."""
+
+    _owner: OperationOwner
+    _obligation: PersistedLifecycleObligation
+
+    @property
+    def obligation_id(self) -> str:
+        return self._obligation.obligation_id
+
+    @property
+    def state(self) -> object:
+        return self._obligation.state
+
+    @property
+    def payload_revision(self) -> int:
+        return self._obligation.payload_revision
+
+    def mark_possible_effect(self) -> None:
+        """Commit admission before the owning adapter begins its effect."""
+        owner = self._owner
+        with owner._guard:  # noqa: SLF001
+            owner._require_dispatch_admission_locked()  # noqa: SLF001
+            owner._transition_uncertain = True  # noqa: SLF001
+            self._obligation = owner._repository.mark_lifecycle_obligation_possible_effect(  # noqa: SLF001
+                owner._ownership,  # noqa: SLF001
+                self.obligation_id,
+            )
+            owner._durable_possible_dispatch = True  # noqa: SLF001
+            owner._transition_uncertain = False  # noqa: SLF001
+
+    def publish_payload(self, *, expected_revision: int, payload_version: int, payload: bytes) -> None:
+        """CAS-publish adapter identity while this effect remains possible."""
+        owner = self._owner
+        with owner._guard:  # noqa: SLF001
+            owner._require_dispatch_admission_locked()  # noqa: SLF001
+            self._obligation = owner._repository.publish_lifecycle_obligation_payload(  # noqa: SLF001
+                owner._ownership,  # noqa: SLF001
+                self.obligation_id,
+                expected_revision=expected_revision,
+                payload_version=payload_version,
+                payload=payload,
+            )
+
+    def resolve(self) -> None:
+        """Persist adapter-established no-further-effects evidence."""
+        owner = self._owner
+        with owner._guard:  # noqa: SLF001
+            owner._require_no_active_work_locked()  # noqa: SLF001
+            if owner._transition_uncertain:  # noqa: SLF001
+                owner._reconcile_transition_locked()  # noqa: SLF001
+            if owner._released:  # noqa: SLF001
+                raise StateError(
+                    "operation ownership is already released",
+                    entity_kind=owner._ownership.scope.resource_kind,  # noqa: SLF001
+                    entity_name=owner._ownership.scope.resource_name,  # noqa: SLF001
+                )
+            self._obligation = owner._repository.resolve_lifecycle_obligation(  # noqa: SLF001
+                owner._ownership,  # noqa: SLF001
+                self.obligation_id,
+            )
 
 
 @dataclass(slots=True, repr=False)
@@ -261,11 +374,14 @@ class OperationBorrow:
                     entity_kind=self.ownership.scope.resource_kind,
                     entity_name=self.ownership.scope.resource_name,
                 )
-            attempt = OperationAttempt(self)
+            obligation = owner._register_borrowed_attempt_locked()  # noqa: SLF001
+            attempt = OperationAttempt(self, obligation)
             owner._outstanding_attempt = attempt  # noqa: SLF001
-            if not owner._durable_possible_dispatch:  # noqa: SLF001
-                owner._repository.mark_possible_dispatch(self.ownership)  # noqa: SLF001
-                owner._durable_possible_dispatch = True  # noqa: SLF001
+            owner._repository.mark_lifecycle_obligation_possible_effect(  # noqa: SLF001
+                self.ownership,
+                obligation.obligation_id,
+            )
+            owner._durable_possible_dispatch = True  # noqa: SLF001
             return attempt
 
     def close(self) -> None:
@@ -290,6 +406,7 @@ class OperationAttempt:
     """The sole outstanding attempt originated by one serial borrow."""
 
     _borrow: OperationBorrow
+    _obligation: PersistedLifecycleObligation
     _settled: bool = field(default=False, init=False)
 
     def settle(self) -> None:
@@ -304,5 +421,9 @@ class OperationAttempt:
                     entity_kind=borrow.ownership.scope.resource_kind,
                     entity_name=borrow.ownership.scope.resource_name,
                 )
+            owner._repository.resolve_lifecycle_obligation(  # noqa: SLF001
+                borrow.ownership,
+                self._obligation.obligation_id,
+            )
             self._settled = True
             owner._outstanding_attempt = None  # noqa: SLF001

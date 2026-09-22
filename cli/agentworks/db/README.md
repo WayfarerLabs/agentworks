@@ -3,21 +3,32 @@
 ## Operation ownership
 
 `Database.operations` reserves coarse VM or platform-host resources for participating operations
-using the same state database. A fresh operation ID identifies each claim; it is not a secret or an
-authentication credential. Claims are committed in short standalone transactions, not held-open SQL
-transactions around network work. Nested command transactions cannot acquire or change them.
+using the same state database. A fresh operation ID identifies an operation root; its current exact
+resource claim is one membership of that root. The lifecycle ledger attaches to the operation root,
+not that membership, so a later hierarchical coordinator can add memberships without moving adapter
+recovery facts. The ID is not a secret or an authentication credential. Claims are committed in
+short standalone transactions, not held-open SQL transactions around network work. Nested command
+transactions cannot acquire or change them.
 
-Core reserves before work, records possible dispatch before sending a remote mutation, and records
-effects resolved only after obtaining operation-specific evidence that no further effects can occur.
-The repository persists that conclusion; it does not establish remote quiescence. Reserved claims
-can be explicitly abandoned, and resolved claims can be explicitly released. Possible-dispatch
-claims cannot use either release path. Every transition matches the claim's ID and prior state, so a
-delayed database update or release cannot affect a subsequent owner.
+Core registers each independent lifecycle obligation before its effect can be admitted. A row has a
+fresh ID, bounded lower-kebab kind, positive adapter payload version, and at most 8,192 bytes of
+opaque non-secret payload. There may be at most 128 rows for one operation. Its closed state is
+`registered`, `possible-effect`, or `resolved`; recovery identity uses a revision-checked payload
+replacement while an effect remains possible, not another state. The first possible-effect
+transition atomically arms the coarse claim. Later obligations advance independently.
+
+Core seals the ledger when the workflow can create no additional effects. Only then, after every
+obligation is resolved by typed adapter evidence and no owner work remains, can it record whole
+operation resolution. Final release removes those resolved rows and the exact claim in one short
+transaction. A reserved claim with no ledger rows may be abandoned; rows cannot be discarded through
+that path. The repository records core's conclusions, it does not establish remote quiescence. Every
+transition matches the claim's ID and prior state, so a delayed database update or release cannot
+affect a subsequent owner.
 
 Closing the database, process death and elapsed time do not delete claims. Inspection reports their
 bounded metadata without command arguments, environment or file contents. There is no lease expiry,
-automatic takeover or coordination across independent databases. Backup preserves recorded claims;
-restoring one does not establish that target state matches the snapshot.
+automatic takeover or coordination across independent databases. Backup preserves claims and their
+ledger rows; restoring one does not establish that target state matches the snapshot.
 
 This persistence primitive is not yet connected to production operation admission or RunContext. The
 caller composition and recovery paths must be implemented before it can protect file workflows.

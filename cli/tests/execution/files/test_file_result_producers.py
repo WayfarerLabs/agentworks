@@ -150,6 +150,7 @@ def test_real_root_refusal_uses_callers_observation_or_removal_phase(
     assert not stat_outcome.requires_owner_retention
     assert not present.requires_owner_retention
     assert not remove_outcome.requires_owner_retention
+    owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 
@@ -319,6 +320,7 @@ def test_real_helper_refusals_precede_later_host_deadline(
         outcome.requires_owner_retention
         for outcome in (stat_outcome, inventory_outcome, remove_outcome, metadata_outcome)
     )
+    owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 

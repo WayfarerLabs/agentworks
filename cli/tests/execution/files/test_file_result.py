@@ -346,6 +346,7 @@ def test_real_helpers_reduce_stat_inventory_and_conflict_without_private_state(t
         assert not present.requires_owner_retention
         assert not inventory.requires_owner_retention
         assert not refused.requires_owner_retention
+        owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
     finally:

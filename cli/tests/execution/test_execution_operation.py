@@ -176,6 +176,7 @@ def test_arms_durable_attempt_before_single_carrier_dispatch(
     assert carrier.deadlines is None
     assert outcome.candidate is not None and outcome.candidate.dispatch is Dispatch.SENT
     assert not outcome.requires_owner_retention
+    owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 
@@ -208,6 +209,7 @@ def test_captures_candidate_before_settlement(
     assert settled_after_capture == [True]
     assert outcome.candidate is not None
     assert not outcome.requires_owner_retention
+    owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 
@@ -241,6 +243,7 @@ def test_preserves_dispatch_and_refuses_release_without_supported_termination(
         with pytest.raises(StateError):
             owner.borrow()
     else:
+        owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
 
@@ -262,6 +265,7 @@ def test_carrier_failure_and_expired_deadline_remain_separate_facts(
     assert outcome.candidate.carrier_failure is Failure.DEADLINE
     assert outcome.deadline_exceeded
     assert not outcome.requires_owner_retention
+    owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 
@@ -281,6 +285,7 @@ def test_carrier_failure_is_retained_as_a_candidate_fact(
     assert outcome.candidate.carrier_failure is Failure.OUTPUT
     assert not outcome.deadline_exceeded
     assert not outcome.requires_owner_retention
+    owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 
@@ -355,6 +360,7 @@ def test_reuses_the_identical_deadline_for_preparation_and_dispatch(
     assert carrier_deadlines == [deadline]
     assert candidate_deadlines[0] is deadline is carrier_deadlines[0]
     assert not outcome.requires_owner_retention
+    owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 

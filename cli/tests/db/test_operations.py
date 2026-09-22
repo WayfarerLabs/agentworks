@@ -52,25 +52,33 @@ def _simultaneous_claim_worker(path: Path, start: Any, outcomes: Any) -> None:
         database.close()
 
 
-def test_fresh_schema_has_operation_claims_without_resource_foreign_keys(tmp_path: Path) -> None:
+def test_fresh_schema_has_claim_and_lifecycle_obligation_shape(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
     Database(path).close()
 
     connection = sqlite3.connect(path)
     columns = [str(row[1]) for row in connection.execute("PRAGMA table_info(operation_claims)")]
     foreign_keys = connection.execute("PRAGMA foreign_key_list(operation_claims)").fetchall()
+    lifecycle_columns = [str(row[1]) for row in connection.execute("PRAGMA table_info(lifecycle_obligations)")]
+    lifecycle_foreign_keys = connection.execute("PRAGMA foreign_key_list(lifecycle_obligations)").fetchall()
     connection.close()
 
-    assert columns == [
-        "resource_kind",
-        "resource_name",
+    assert columns == ["resource_kind", "resource_name", "operation_id"]
+    assert foreign_keys == [(0, 0, "operation_owners", "operation_id", "operation_id", "NO ACTION", "CASCADE", "NONE")]
+    assert lifecycle_columns == [
         "operation_id",
-        "operation_kind",
+        "obligation_id",
+        "obligation_kind",
         "state",
-        "claimed_at",
+        "payload_version",
+        "payload",
+        "payload_revision",
+        "registered_at",
         "updated_at",
     ]
-    assert foreign_keys == []
+    assert lifecycle_foreign_keys == [
+        (0, 0, "operation_owners", "operation_id", "operation_id", "NO ACTION", "CASCADE", "NONE")
+    ]
 
 
 def test_v38_migration_preserves_existing_data_and_adds_empty_claim_store(tmp_path: Path) -> None:
@@ -170,7 +178,7 @@ def test_reserved_claim_can_be_abandoned_before_dispatch(db: Database) -> None:
     assert db.operations.inspect(ownership.scope) is None
 
 
-def test_every_claim_state_survives_close_and_possible_dispatch_requires_resolution(tmp_path: Path) -> None:
+def test_lifecycle_obligation_states_survive_close_and_require_resolution(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
     database = Database(path)
     ownership = database.operations.claim(_scope(), "vm-reinitialize")
@@ -182,8 +190,17 @@ def test_every_claim_state_survives_close_and_possible_dispatch_requires_resolut
         assert retained is not None
         assert retained.ownership == ownership
         assert retained.state is OperationClaimState.RESERVED
-        possible = reserved_database.operations.mark_possible_dispatch(ownership)
-        assert possible.state is OperationClaimState.POSSIBLE_DISPATCH
+        obligation = reserved_database.operations.register_lifecycle_obligation(
+            ownership,
+            "platform-hold",
+            1,
+            b"prepared",
+        )
+        possible = reserved_database.operations.mark_lifecycle_obligation_possible_effect(
+            ownership,
+            obligation.obligation_id,
+        )
+        assert possible.state.value == "possible-effect"
     finally:
         reserved_database.close()
 
@@ -197,6 +214,8 @@ def test_every_claim_state_survives_close_and_possible_dispatch_requires_resolut
         with pytest.raises(StateError):
             possible_database.operations.release_resolved(ownership)
 
+        possible_database.operations.resolve_lifecycle_obligation(ownership, possible.obligation_id)
+        possible_database.operations.seal_lifecycle_obligations(ownership)
         resolved = possible_database.operations.record_effects_resolved(ownership)
         assert resolved.state is OperationClaimState.RESOLVED
     finally:
@@ -219,7 +238,7 @@ def test_stale_owner_cannot_change_or_delete_a_later_claim(db: Database) -> None
     current = db.operations.claim(_scope(), "vm-delete")
 
     with pytest.raises(StateError):
-        db.operations.mark_possible_dispatch(stale)
+        db.operations.register_lifecycle_obligation(stale, "platform-hold", 1, b"")
     with pytest.raises(StateError):
         db.operations.abandon_reserved(stale)
 
@@ -262,7 +281,7 @@ def test_malformed_persisted_claim_is_not_treated_as_absent(tmp_path: Path) -> N
     connection = sqlite3.connect(path)
     connection.execute("PRAGMA ignore_check_constraints = ON")
     connection.execute(
-        "UPDATE operation_claims SET state = 'invented' WHERE operation_id = ?",
+        "UPDATE operation_owners SET state = 'invented' WHERE operation_id = ?",
         (ownership.operation_id,),
     )
     connection.commit()
@@ -290,7 +309,8 @@ def test_backup_and_restore_preserve_retained_operation_claim(tmp_path: Path) ->
         OperationScope(OperationResourceKind.PLATFORM_HOST, "builder.example"),
         "platform-provision",
     )
-    database.operations.mark_possible_dispatch(ownership)
+    obligation = database.operations.register_lifecycle_obligation(ownership, "platform-hold", 1, b"prepared")
+    database.operations.mark_lifecycle_obligation_possible_effect(ownership, obligation.obligation_id)
     database.close()
 
     backup = create_manual_backup(source)
@@ -314,7 +334,7 @@ def test_manually_reconstructed_stale_ownership_is_fenced(db: Database) -> None:
     stale = OperationOwnership(current.scope, "0" * 32)
 
     with pytest.raises(StateError):
-        db.operations.mark_possible_dispatch(stale)
+        db.operations.register_lifecycle_obligation(stale, "platform-hold", 1, b"")
 
     claim = db.operations.inspect(current.scope)
     assert claim is not None

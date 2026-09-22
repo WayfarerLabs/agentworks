@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -82,6 +83,7 @@ class Database:
         """
         assert timeout is None or read_only, "timeout only applies to the read-only path"
         self._read_only = read_only
+        self._operation_lock = threading.RLock()
         self._read_tx_active = False
         self._tx_depth = 0
         self._use_lock: sqlite3.Connection | None = None
@@ -147,7 +149,7 @@ class Database:
             raise BusyStateError()
         writable_connection: sqlite3.Connection | None = None
         try:
-            writable_connection = sqlite3.connect(str(db_path))
+            writable_connection = sqlite3.connect(str(db_path), check_same_thread=False)
             self._conn = writable_connection
             self._conn.row_factory = sqlite3.Row
             self._conn.execute("PRAGMA foreign_keys = ON")

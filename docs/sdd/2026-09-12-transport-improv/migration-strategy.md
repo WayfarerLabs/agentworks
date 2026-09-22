@@ -85,13 +85,14 @@ and settle the owner only after every obligation is discharged. Individual lifec
 release the owner, and opaque legacy success is not a no-further-effects witness. This requirement
 does not retrofit or migrate legacy callers.
 
-The private owner now models that distinction directly. `arm()` persists possible dispatch before
-the outer lifecycle begins without retaining a borrow; sequential target, file and execution work
-then borrow the same owner and settle only their own attempts. Core must call
-`record_effects_resolved()` after the complete activation/workflow/teardown aggregate proves
-quiescence. `close()` abandons a never-armed reservation or releases an explicitly resolved claim;
-it does not infer whole-operation resolution from settled children. Production orchestration and
-RunContext are not yet wired, so this is a usable primitive rather than completed coordination.
+The private owner now models that distinction directly. Each effect first registers one lifecycle
+obligation, then marks it possible before dispatch; sequential target, file and execution work
+borrow the same owner and settle only their own obligations. Core seals the ledger after the
+complete activation/workflow/teardown aggregate can create no more effects, then calls
+`record_effects_resolved()` only after every obligation has typed quiescence evidence. `close()`
+abandons only an empty never-admitted reservation or releases an explicitly resolved claim; it does
+not infer whole-operation resolution from settled children. Production orchestration and RunContext
+are not yet wired, so this is a usable primitive rather than completed coordination.
 
 The required aggregate is a bounded durable obligation ledger, not a fixed one-field-per-lifecycle
 structure. One operation may own several holds, routes or nested teardown steps; each registers its
@@ -100,8 +101,8 @@ no more obligations can be registered; it does not require identity from an effe
 created. Opaque payloads remain non-secret and platform-specific while state and fencing remain
 core-owned. A recovery controller invalidates the predecessor through a fresh database fence, then
 proves each admitted dispatch is drained or remotely fenced and each effect is quiescent. The
-current schema implements neither the ledger nor that takeover transition, so no production hold,
-route or teardown may treat the existing claim row as a recovery record.
+current schema implements the ledger but not the takeover transition, so no production hold, route
+or teardown may treat the existing claim row as a recovery record.
 
 ### Recovery-target identity inventory, 2026-09-21
 

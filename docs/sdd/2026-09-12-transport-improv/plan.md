@@ -87,7 +87,7 @@ associated pending acceptance gates are superseded by this ruling.
       not prove quiescence. An uncertain hold exit or cleanup retains the claim. Build this as a
       parallel new-stack lifecycle contract and keep legacy callers unchanged until their migration
       batch supplies the required evidence.
-- [ ] Implement the bounded durable lifecycle-obligation ledger. Permit several independently
+- [x] Implement the bounded durable lifecycle-obligation ledger. Permit several independently
       identified obligations of the same registered kind; commit `possible-effect` before each
       effect; publish bounded, versioned, non-secret adapter-owned recovery identity when observed;
       retain unresolved work; and seal the ledger before whole-operation resolution. Release only

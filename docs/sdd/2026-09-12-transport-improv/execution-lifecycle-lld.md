@@ -314,8 +314,8 @@ safely.
 
 This checkpoint does not wire `systemd.py`, carriers, platform factories, public `ExecutionAccess`,
 `JobRef` or RunContext. It does not implement OPERATION liveness, leases, application/output
-evidence, stop/cleanup, retention, disposal, the lifecycle-obligation ledger, its recovery fence,
-session adoption or production recovery. Those remain the proof gates below.
+evidence, stop/cleanup, retention, disposal, the recovery takeover fence, session adoption or
+production recovery. Those remain the proof gates below.
 
 ## Session containment and #770 reconciliation
 

@@ -189,6 +189,7 @@ def test_shared_operation_rejects_overlapping_view_call(
         assert bytes(sink.data) == b"payload" and carrier.rejected
         assert operation.active_downloads == ()
         assert operation.unfinished_downloads == ()
+        owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
     finally:
@@ -266,6 +267,7 @@ def test_completed_call_forgets_only_its_record_when_next_call_attaches(
         assert len(second_outcomes) == 1
         assert second_outcomes[0].status is FileDownloadStatus.COMPLETE
         assert not operation.active_downloads
+        owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
     finally:

@@ -22,6 +22,26 @@ if TYPE_CHECKING:
 _OPERATION_KIND = re.compile(r"[a-z](?:[a-z0-9]*)(?:-[a-z0-9]+)*\Z")
 _IDENTIFIER = re.compile(r"[0-9a-f]{32}\Z")
 _TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+_CLAIM_SELECT = """
+    SELECT
+        claims.resource_kind,
+        claims.resource_name,
+        claims.operation_id,
+        owners.operation_kind,
+        owners.state,
+        owners.claimed_at,
+        owners.updated_at,
+        owners.obligations_sealed_at
+    FROM operation_claims AS claims
+    JOIN operation_owners AS owners ON owners.operation_id = claims.operation_id
+"""
+
+# Lifecycle payloads are recovery metadata, not a general workflow store.
+# Keep the shared envelope small enough that a stuck operation remains cheap
+# to inspect, back up, and move through SQLite's single writer.
+MAX_LIFECYCLE_OBLIGATIONS = 128
+MAX_LIFECYCLE_PAYLOAD_BYTES = 8_192
+MAX_LIFECYCLE_PAYLOAD_VERSION = 2_147_483_647
 
 
 class OperationResourceKind(StrEnum):
@@ -36,6 +56,14 @@ class OperationClaimState(StrEnum):
 
     RESERVED = "reserved"
     POSSIBLE_DISPATCH = "possible-dispatch"
+    RESOLVED = "resolved"
+
+
+class LifecycleObligationState(StrEnum):
+    """Closed durable states for one independently discharged effect."""
+
+    REGISTERED = "registered"
+    POSSIBLE_EFFECT = "possible-effect"
     RESOLVED = "resolved"
 
 
@@ -76,6 +104,27 @@ class OperationClaim:
     state: OperationClaimState
     claimed_at: str
     updated_at: str
+    obligations_sealed_at: str | None
+
+
+@dataclass(frozen=True)
+class LifecycleObligation:
+    """Bounded adapter-owned recovery facts for one exact operation effect.
+
+    ``payload`` is opaque to this repository. Callers must keep it non-secret
+    and limited to durable recovery identity or receipts, never command input,
+    output, credentials, or arbitrary workflow state.
+    """
+
+    ownership: OperationOwnership
+    obligation_id: str
+    obligation_kind: str
+    state: LifecycleObligationState
+    payload_version: int
+    payload: bytes
+    payload_revision: int
+    registered_at: str
+    updated_at: str
 
 
 def _validate_scope(scope: OperationScope) -> None:
@@ -98,6 +147,26 @@ def _validate_operation_kind(operation_kind: str) -> None:
         raise TypeError("operation_kind must be a string")
     if len(operation_kind) > 64 or _OPERATION_KIND.fullmatch(operation_kind) is None:
         raise ValueError("operation_kind must be 1 to 64 lower-kebab ASCII characters")
+
+
+def _validate_obligation_id(obligation_id: str) -> None:
+    if (
+        not isinstance(obligation_id, str)
+        or len(obligation_id) != 32
+        or _IDENTIFIER.fullmatch(obligation_id) is None
+    ):
+        raise ValueError("obligation_id must be a 32-character lowercase hexadecimal identifier")
+
+
+def _validate_payload(payload_version: int, payload: bytes) -> None:
+    if not isinstance(payload_version, int) or isinstance(payload_version, bool):
+        raise TypeError("payload_version must be an integer")
+    if not 1 <= payload_version <= MAX_LIFECYCLE_PAYLOAD_VERSION:
+        raise ValueError(f"payload_version must be between 1 and {MAX_LIFECYCLE_PAYLOAD_VERSION}")
+    if not isinstance(payload, bytes):
+        raise TypeError("payload must be bytes")
+    if len(payload) > MAX_LIFECYCLE_PAYLOAD_BYTES:
+        raise ValueError(f"payload must contain at most {MAX_LIFECYCLE_PAYLOAD_BYTES} bytes")
 
 
 def _validate_ownership(ownership: OperationOwnership) -> None:
@@ -134,6 +203,7 @@ class OperationRepository:
     def __init__(self, database: Database) -> None:
         self._database = database
         self._connection = database._conn  # noqa: SLF001
+        self._connection_lock = database._operation_lock  # noqa: SLF001
 
     def claim(self, scope: OperationScope, operation_kind: str) -> OperationOwnership:
         """Reserve one unclaimed scope and return its fresh stale-owner fence."""
@@ -142,19 +212,18 @@ class OperationRepository:
         now = _utc_now()
 
         with self._standalone_transaction():
+            self._connection.execute(
+                "INSERT INTO operation_owners "
+                "(operation_id, operation_kind, state, claimed_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (ownership.operation_id, operation_kind, OperationClaimState.RESERVED, now, now),
+            )
             cursor = self._connection.execute(
-                "INSERT INTO operation_claims "
-                "(resource_kind, resource_name, operation_id, operation_kind, state, claimed_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "INSERT INTO operation_claims (resource_kind, resource_name, operation_id) VALUES (?, ?, ?) "
                 "ON CONFLICT(resource_kind, resource_name) DO NOTHING",
                 (
                     scope.resource_kind,
                     scope.resource_name,
                     ownership.operation_id,
-                    operation_kind,
-                    OperationClaimState.RESERVED,
-                    now,
-                    now,
                 ),
             )
             if cursor.rowcount != 1:
@@ -167,19 +236,226 @@ class OperationRepository:
 
     def inspect(self, scope: OperationScope) -> OperationClaim | None:
         """Return bounded non-secret persisted facts for one resource claim."""
-        row = self._connection.execute(
-            "SELECT * FROM operation_claims WHERE resource_kind = ? AND resource_name = ?",
-            (scope.resource_kind, scope.resource_name),
-        ).fetchone()
-        return None if row is None else self._decode_claim(row)
+        with self._connection_lock:
+            row = self._connection.execute(
+                _CLAIM_SELECT + " WHERE claims.resource_kind = ? AND claims.resource_name = ?",
+                (scope.resource_kind, scope.resource_name),
+            ).fetchone()
+            return None if row is None else self._decode_claim(row)
 
-    def mark_possible_dispatch(self, ownership: OperationOwnership) -> OperationClaim:
-        """Durably record that remote effects may occur before remote work starts."""
-        return self._transition(
-            ownership,
-            expected=OperationClaimState.RESERVED,
-            target=OperationClaimState.POSSIBLE_DISPATCH,
-        )
+    def list_lifecycle_obligations(self, ownership: OperationOwnership) -> tuple[LifecycleObligation, ...]:
+        """Return every bounded obligation for one exact currently owned operation."""
+        with self._connection_lock:
+            claim = self._inspect_owned(ownership)
+            if claim is None:
+                self._raise_stale_or_invalid_state(ownership, None)
+            rows = self._connection.execute(
+                "SELECT * FROM lifecycle_obligations WHERE operation_id = ? ORDER BY registered_at, obligation_id",
+                (ownership.operation_id,),
+            ).fetchall()
+            return tuple(self._decode_obligation(row, ownership) for row in rows)
+
+    def register_lifecycle_obligation(
+        self,
+        ownership: OperationOwnership,
+        obligation_kind: str,
+        payload_version: int,
+        payload: bytes,
+    ) -> LifecycleObligation:
+        """Register one effect before admission, refusing a sealed operation."""
+        _validate_operation_kind(obligation_kind)
+        _validate_payload(payload_version, payload)
+        obligation_id = uuid4().hex
+        now = _utc_now()
+        with self._standalone_transaction():
+            claim = self._require_owned_claim(ownership)
+            if claim.obligations_sealed_at is not None:
+                raise StateError(
+                    "operation lifecycle obligations are sealed",
+                    entity_kind=ownership.scope.resource_kind,
+                    entity_name=ownership.scope.resource_name,
+                )
+            cursor = self._connection.execute(
+                "INSERT INTO lifecycle_obligations "
+                "(operation_id, obligation_id, obligation_kind, state, payload_version, payload, payload_revision, "
+                "registered_at, updated_at) "
+                "SELECT ?, ?, ?, ?, ?, ?, 0, ?, ? "
+                "WHERE (SELECT COUNT(*) FROM lifecycle_obligations WHERE operation_id = ?) < ?",
+                (
+                    ownership.operation_id,
+                    obligation_id,
+                    obligation_kind,
+                    LifecycleObligationState.REGISTERED,
+                    payload_version,
+                    payload,
+                    now,
+                    now,
+                    ownership.operation_id,
+                    MAX_LIFECYCLE_OBLIGATIONS,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise StateError(
+                    "operation lifecycle obligation limit is reached",
+                    entity_kind=ownership.scope.resource_kind,
+                    entity_name=ownership.scope.resource_name,
+                )
+            return self._load_obligation(ownership, obligation_id)
+
+    def mark_lifecycle_obligation_possible_effect(
+        self,
+        ownership: OperationOwnership,
+        obligation_id: str,
+    ) -> LifecycleObligation:
+        """Record admission before an effect and atomically arm its claim."""
+        _validate_obligation_id(obligation_id)
+        now = _utc_now()
+        with self._standalone_transaction():
+            claim = self._require_owned_claim(ownership)
+            obligation = self._load_obligation(ownership, obligation_id)
+            if obligation.state is LifecycleObligationState.RESOLVED:
+                raise StateError(
+                    "lifecycle obligation is already resolved",
+                    entity_kind=ownership.scope.resource_kind,
+                    entity_name=ownership.scope.resource_name,
+                )
+            if obligation.state is LifecycleObligationState.REGISTERED:
+                cursor = self._connection.execute(
+                    "UPDATE lifecycle_obligations SET state = ?, updated_at = ? "
+                    "WHERE operation_id = ? AND obligation_id = ? AND state = ?",
+                    (
+                        LifecycleObligationState.POSSIBLE_EFFECT,
+                        now,
+                        ownership.operation_id,
+                        obligation_id,
+                        LifecycleObligationState.REGISTERED,
+                    ),
+                )
+                assert cursor.rowcount == 1
+            if claim.state is OperationClaimState.RESERVED:
+                cursor = self._connection.execute(
+                    "UPDATE operation_owners SET state = ?, updated_at = ? "
+                    "WHERE operation_id = ? AND state = ?",
+                    (
+                        OperationClaimState.POSSIBLE_DISPATCH,
+                        now,
+                        ownership.operation_id,
+                        OperationClaimState.RESERVED,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    self._raise_stale_or_invalid_state(ownership, OperationClaimState.RESERVED)
+            elif claim.state is not OperationClaimState.POSSIBLE_DISPATCH:
+                self._raise_stale_or_invalid_state(ownership, OperationClaimState.POSSIBLE_DISPATCH)
+            return self._load_obligation(ownership, obligation_id)
+
+    def publish_lifecycle_obligation_payload(
+        self,
+        ownership: OperationOwnership,
+        obligation_id: str,
+        *,
+        expected_revision: int,
+        payload_version: int,
+        payload: bytes,
+    ) -> LifecycleObligation:
+        """CAS-replace identity payload only while the effect may still exist.
+
+        Repeating a committed publication is safe when it requests the exact
+        same adapter payload. A concurrent different publication refuses
+        rather than silently overwriting another adapter observation.
+        """
+        _validate_obligation_id(obligation_id)
+        if not isinstance(expected_revision, int) or isinstance(expected_revision, bool) or expected_revision < 0:
+            raise ValueError("expected_revision must be a non-negative integer")
+        _validate_payload(payload_version, payload)
+        now = _utc_now()
+        with self._standalone_transaction():
+            self._require_owned_claim(ownership)
+            obligation = self._load_obligation(ownership, obligation_id)
+            if obligation.state is not LifecycleObligationState.POSSIBLE_EFFECT:
+                raise StateError(
+                    "lifecycle obligation payload can be published only after effect admission",
+                    entity_kind=ownership.scope.resource_kind,
+                    entity_name=ownership.scope.resource_name,
+                )
+            if obligation.payload_version == payload_version and obligation.payload == payload:
+                return obligation
+            cursor = self._connection.execute(
+                "UPDATE lifecycle_obligations "
+                "SET payload_version = ?, payload = ?, payload_revision = payload_revision + 1, updated_at = ? "
+                "WHERE operation_id = ? AND obligation_id = ? AND state = ? AND payload_revision = ?",
+                (
+                    payload_version,
+                    payload,
+                    now,
+                    ownership.operation_id,
+                    obligation_id,
+                    LifecycleObligationState.POSSIBLE_EFFECT,
+                    expected_revision,
+                ),
+            )
+            if cursor.rowcount != 1:
+                current = self._load_obligation(ownership, obligation_id)
+                if current.payload_version == payload_version and current.payload == payload:
+                    return current
+                raise StateError(
+                    "lifecycle obligation payload changed concurrently",
+                    entity_kind=ownership.scope.resource_kind,
+                    entity_name=ownership.scope.resource_name,
+                )
+            return self._load_obligation(ownership, obligation_id)
+
+    def resolve_lifecycle_obligation(
+        self,
+        ownership: OperationOwnership,
+        obligation_id: str,
+    ) -> LifecycleObligation:
+        """Record adapter-established no-further-effects evidence for one row."""
+        _validate_obligation_id(obligation_id)
+        now = _utc_now()
+        with self._standalone_transaction():
+            self._require_owned_claim(ownership)
+            obligation = self._load_obligation(ownership, obligation_id)
+            if obligation.state is LifecycleObligationState.RESOLVED:
+                return obligation
+            cursor = self._connection.execute(
+                "UPDATE lifecycle_obligations SET state = ?, updated_at = ? "
+                "WHERE operation_id = ? AND obligation_id = ? AND state IN (?, ?)",
+                (
+                    LifecycleObligationState.RESOLVED,
+                    now,
+                    ownership.operation_id,
+                    obligation_id,
+                    LifecycleObligationState.REGISTERED,
+                    LifecycleObligationState.POSSIBLE_EFFECT,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise StateError(
+                    "lifecycle obligation could not be resolved",
+                    entity_kind=ownership.scope.resource_kind,
+                    entity_name=ownership.scope.resource_name,
+                )
+            return self._load_obligation(ownership, obligation_id)
+
+    def seal_lifecycle_obligations(self, ownership: OperationOwnership) -> OperationClaim:
+        """Forbid further registrations once the workflow cannot create effects."""
+        now = _utc_now()
+        with self._standalone_transaction():
+            claim = self._require_owned_claim(ownership)
+            if claim.obligations_sealed_at is None:
+                cursor = self._connection.execute(
+                    "UPDATE operation_owners SET obligations_sealed_at = ?, updated_at = ? "
+                    "WHERE operation_id = ? "
+                    "AND obligations_sealed_at IS NULL",
+                    (
+                        now,
+                        now,
+                        ownership.operation_id,
+                    ),
+                )
+                assert cursor.rowcount == 1
+            return self._require_owned_claim(ownership)
 
     def record_effects_resolved(self, ownership: OperationOwnership) -> OperationClaim:
         """Record core's evidence that no remote effects can remain.
@@ -188,76 +464,147 @@ class OperationRepository:
         no-further-effects fact before calling this method. The database only
         persists that decision; it does not observe or prove remote quiescence.
         """
-        return self._transition(
-            ownership,
-            expected=OperationClaimState.POSSIBLE_DISPATCH,
-            target=OperationClaimState.RESOLVED,
-        )
+        with self._standalone_transaction():
+            claim = self._require_owned_claim(ownership)
+            if claim.obligations_sealed_at is None:
+                raise StateError(
+                    "operation lifecycle obligations must be sealed before resolution",
+                    entity_kind=ownership.scope.resource_kind,
+                    entity_name=ownership.scope.resource_name,
+                )
+            obligations = self.list_lifecycle_obligations(ownership)
+            if any(obligation.state is not LifecycleObligationState.RESOLVED for obligation in obligations):
+                raise StateError(
+                    "operation lifecycle obligations require explicit resolution",
+                    entity_kind=ownership.scope.resource_kind,
+                    entity_name=ownership.scope.resource_name,
+                )
+            if claim.state is OperationClaimState.RESOLVED:
+                return claim
+            return self._transition_in_transaction(
+                ownership,
+                expected=claim.state,
+                target=OperationClaimState.RESOLVED,
+            )
 
     def abandon_reserved(self, ownership: OperationOwnership) -> None:
         """Release a claim only while core knows dispatch was never possible."""
-        self._delete(ownership, expected=OperationClaimState.RESERVED)
+        with self._standalone_transaction():
+            claim = self._require_owned_claim(ownership)
+            if claim.state is not OperationClaimState.RESERVED:
+                self._raise_stale_or_invalid_state(ownership, OperationClaimState.RESERVED)
+            if claim.obligations_sealed_at is not None or self.list_lifecycle_obligations(ownership):
+                raise StateError(
+                    "operation lifecycle obligations require explicit resolution",
+                    entity_kind=ownership.scope.resource_kind,
+                    entity_name=ownership.scope.resource_name,
+                )
+            self._delete_in_transaction(ownership, expected=OperationClaimState.RESERVED)
 
     def release_resolved(self, ownership: OperationOwnership) -> None:
         """Release a claim after core explicitly recorded effects as resolved."""
-        self._delete(ownership, expected=OperationClaimState.RESOLVED)
+        with self._standalone_transaction():
+            claim = self._require_owned_claim(ownership)
+            if claim.state is not OperationClaimState.RESOLVED:
+                self._raise_stale_or_invalid_state(ownership, OperationClaimState.RESOLVED)
+            obligations = self.list_lifecycle_obligations(ownership)
+            if any(obligation.state is not LifecycleObligationState.RESOLVED for obligation in obligations):
+                raise StateError(
+                    "operation lifecycle obligations require explicit resolution",
+                    entity_kind=ownership.scope.resource_kind,
+                    entity_name=ownership.scope.resource_name,
+                )
+            self._connection.execute(
+                "DELETE FROM lifecycle_obligations WHERE operation_id = ? AND state = ?",
+                (ownership.operation_id, LifecycleObligationState.RESOLVED),
+            )
+            self._delete_in_transaction(ownership, expected=OperationClaimState.RESOLVED)
 
-    def _transition(
+    def _transition_in_transaction(
         self,
         ownership: OperationOwnership,
         *,
         expected: OperationClaimState,
         target: OperationClaimState,
+        updated_at: str | None = None,
     ) -> OperationClaim:
-        updated_at = _utc_now()
-        with self._standalone_transaction():
-            cursor = self._connection.execute(
-                "UPDATE operation_claims SET state = ?, updated_at = ? "
-                "WHERE resource_kind = ? AND resource_name = ? AND operation_id = ? AND state = ?",
+        cursor = self._connection.execute(
+                "UPDATE operation_owners SET state = ?, updated_at = ? "
+                "WHERE operation_id = ? AND state = ?",
                 (
                     target,
-                    updated_at,
-                    ownership.scope.resource_kind,
-                    ownership.scope.resource_name,
+                    updated_at or _utc_now(),
                     ownership.operation_id,
                     expected,
                 ),
             )
-            if cursor.rowcount != 1:
-                self._raise_stale_or_invalid_state(ownership, expected)
-            row = self._connection.execute(
-                "SELECT * FROM operation_claims WHERE resource_kind = ? AND resource_name = ?",
-                (ownership.scope.resource_kind, ownership.scope.resource_name),
-            ).fetchone()
-            assert row is not None
-            return self._decode_claim(row)
+        if cursor.rowcount != 1:
+            self._raise_stale_or_invalid_state(ownership, expected)
+        claim = self._require_owned_claim(ownership)
+        return claim
 
     def _delete(self, ownership: OperationOwnership, *, expected: OperationClaimState) -> None:
         with self._standalone_transaction():
-            cursor = self._connection.execute(
-                "DELETE FROM operation_claims "
-                "WHERE resource_kind = ? AND resource_name = ? AND operation_id = ? AND state = ?",
+            self._delete_in_transaction(ownership, expected=expected)
+
+    def _delete_in_transaction(self, ownership: OperationOwnership, *, expected: OperationClaimState) -> None:
+        cursor = self._connection.execute(
+                "DELETE FROM operation_owners WHERE operation_id = ? AND state = ?",
                 (
-                    ownership.scope.resource_kind,
-                    ownership.scope.resource_name,
                     ownership.operation_id,
                     expected,
                 ),
             )
-            if cursor.rowcount != 1:
-                self._raise_stale_or_invalid_state(ownership, expected)
+        if cursor.rowcount != 1:
+            self._raise_stale_or_invalid_state(ownership, expected)
+
+    def _inspect_owned(self, ownership: OperationOwnership) -> OperationClaim | None:
+        row = self._connection.execute(
+            _CLAIM_SELECT + " WHERE claims.resource_kind = ? AND claims.resource_name = ?",
+            (ownership.scope.resource_kind, ownership.scope.resource_name),
+        ).fetchone()
+        if row is None:
+            return None
+        claim = self._decode_claim(row)
+        return claim if claim.ownership == ownership else None
+
+    def _require_owned_claim(self, ownership: OperationOwnership) -> OperationClaim:
+        claim = self._inspect_owned(ownership)
+        if claim is None:
+            self._raise_stale_or_invalid_state(ownership, None)
+        assert claim is not None
+        return claim
+
+    def _load_obligation(self, ownership: OperationOwnership, obligation_id: str) -> LifecycleObligation:
+        row = self._connection.execute(
+            "SELECT * FROM lifecycle_obligations WHERE operation_id = ? AND obligation_id = ?",
+            (ownership.operation_id, obligation_id),
+        ).fetchone()
+        if row is None:
+            raise StateError(
+                "lifecycle obligation is not owned by this operation",
+                entity_kind=ownership.scope.resource_kind,
+                entity_name=ownership.scope.resource_name,
+            )
+        return self._decode_obligation(row, ownership)
 
     def _raise_stale_or_invalid_state(
         self,
         ownership: OperationOwnership,
-        expected: OperationClaimState,
+        expected: OperationClaimState | None,
     ) -> None:
         row = self._connection.execute(
-            "SELECT * FROM operation_claims WHERE resource_kind = ? AND resource_name = ?",
+            _CLAIM_SELECT + " WHERE claims.resource_kind = ? AND claims.resource_name = ?",
             (ownership.scope.resource_kind, ownership.scope.resource_name),
         ).fetchone()
         claim = None if row is None else self._decode_claim(row)
         if claim is None or claim.ownership.operation_id != ownership.operation_id:
+            raise StateError(
+                "operation ownership is stale",
+                entity_kind=ownership.scope.resource_kind,
+                entity_name=ownership.scope.resource_name,
+            )
+        if expected is None:
             raise StateError(
                 "operation ownership is stale",
                 entity_kind=ownership.scope.resource_kind,
@@ -271,23 +618,33 @@ class OperationRepository:
 
     @contextmanager
     def _standalone_transaction(self) -> Iterator[None]:
-        if self._database._read_only:  # noqa: SLF001
-            raise StateError("operation claims require a writable database", entity_kind="database")
-        if self._database._tx_depth or self._connection.in_transaction:  # noqa: SLF001
-            raise StateError(
-                "operation claim mutations cannot join another database transaction",
-                entity_kind="database",
-            )
-        try:
-            with self._database.transaction():
-                yield
-        except sqlite3.DatabaseError as error:
-            from agentworks.db.backup import _is_busy
-            from agentworks.errors import BusyStateError
+        with self._connection_lock:
+            if self._database._read_only:  # noqa: SLF001
+                raise StateError("operation claims require a writable database", entity_kind="database")
+            if self._database._tx_depth or self._connection.in_transaction:  # noqa: SLF001
+                raise StateError(
+                    "operation claim mutations cannot join another database transaction",
+                    entity_kind="database",
+                )
+            try:
+                # Claim and ledger transitions read before they write. Take
+                # SQLite's write slot before that read so concurrent owners
+                # serialize instead of one retaining a stale snapshot and
+                # receiving SQLITE_BUSY_SNAPSHOT after another commits.
+                self._database._tx_depth = 1  # noqa: SLF001
+                try:
+                    with self._connection:
+                        self._connection.execute("BEGIN IMMEDIATE")
+                        yield
+                finally:
+                    self._database._tx_depth = 0  # noqa: SLF001
+            except sqlite3.DatabaseError as error:
+                from agentworks.db.backup import _is_busy
+                from agentworks.errors import BusyStateError
 
-            if _is_busy(error):
-                raise BusyStateError() from error
-            raise
+                if _is_busy(error):
+                    raise BusyStateError() from error
+                raise
 
     @staticmethod
     def _decode_claim(row: sqlite3.Row) -> OperationClaim:
@@ -303,10 +660,50 @@ class OperationRepository:
             state = OperationClaimState(row["state"])
             claimed_at = _decode_timestamp(row["claimed_at"])
             updated_at = _decode_timestamp(row["updated_at"])
+            sealed_at = row["obligations_sealed_at"]
+            if sealed_at is not None:
+                sealed_at = _decode_timestamp(sealed_at)
         except (KeyError, TypeError, ValueError):
             raise StateError(
                 "persisted operation claim is malformed",
                 entity_kind="database",
                 hint="Repair the state database and reconcile outstanding remote operations before retrying.",
             ) from None
-        return OperationClaim(ownership, operation_kind, state, claimed_at, updated_at)
+        return OperationClaim(ownership, operation_kind, state, claimed_at, updated_at, sealed_at)
+
+    @staticmethod
+    def _decode_obligation(row: sqlite3.Row, ownership: OperationOwnership) -> LifecycleObligation:
+        """Validate opaque-envelope shape without interpreting adapter payload."""
+        try:
+            if row["operation_id"] != ownership.operation_id:
+                raise ValueError
+            obligation_id = row["obligation_id"]
+            _validate_obligation_id(obligation_id)
+            obligation_kind = row["obligation_kind"]
+            _validate_operation_kind(obligation_kind)
+            state = LifecycleObligationState(row["state"])
+            payload_version = row["payload_version"]
+            payload = row["payload"]
+            _validate_payload(payload_version, payload)
+            payload_revision = row["payload_revision"]
+            if not isinstance(payload_revision, int) or isinstance(payload_revision, bool) or payload_revision < 0:
+                raise ValueError
+            registered_at = _decode_timestamp(row["registered_at"])
+            updated_at = _decode_timestamp(row["updated_at"])
+        except (KeyError, TypeError, ValueError):
+            raise StateError(
+                "persisted lifecycle obligation is malformed",
+                entity_kind="database",
+                hint="Repair the state database and reconcile outstanding remote operations before retrying.",
+            ) from None
+        return LifecycleObligation(
+            ownership,
+            obligation_id,
+            obligation_kind,
+            state,
+            payload_version,
+            payload,
+            payload_revision,
+            registered_at,
+            updated_at,
+        )

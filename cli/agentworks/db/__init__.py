@@ -83,6 +83,10 @@ from agentworks.db.models import (
     WorkspaceRow,
 )
 from agentworks.db.operations import (
+    MAX_LIFECYCLE_OBLIGATIONS,
+    MAX_LIFECYCLE_PAYLOAD_BYTES,
+    LifecycleObligation,
+    LifecycleObligationState,
     OperationClaim,
     OperationClaimState,
     OperationOwnership,
@@ -122,7 +126,11 @@ __all__ = [
     "InstanceRecordDiagnostic",
     "InstanceRecordMetadata",
     "InstanceStateInspection",
+    "LifecycleObligation",
+    "LifecycleObligationState",
     "MigrationContext",
+    "MAX_LIFECYCLE_OBLIGATIONS",
+    "MAX_LIFECYCLE_PAYLOAD_BYTES",
     "OperationClaim",
     "OperationClaimState",
     "OperationOwnership",

@@ -187,6 +187,7 @@ def test_prepares_identity_under_one_borrow_and_leaves_owner_open(
     assert database.operations.inspect(owner.ownership.scope).state is OperationClaimState.POSSIBLE_DISPATCH  # type: ignore[union-attr]
     follow_up = owner.borrow()
     follow_up.close()
+    owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 
@@ -296,6 +297,7 @@ def test_typed_guest_refusal_and_invalid_observation_fail_without_retention(
     assert result.failure is failure
     assert result.guest_result is not None
     assert not result.requires_owner_retention
+    owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 
@@ -318,6 +320,7 @@ def test_runtime_prerequisite_must_be_ready(owned: tuple[Database, OperationOwne
     assert result.failure is VMTargetPreparationFailure.RUNTIME_PREREQUISITE
     assert result.guest_result is not None
     assert not result.requires_owner_retention
+    owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 
@@ -331,6 +334,7 @@ def test_not_sent_is_settled_failed_without_owner_retention(owned: tuple[Databas
     assert result.guest_result is not None
     assert not result.requires_owner_retention
     assert database.operations.inspect(owner.ownership.scope).state is OperationClaimState.POSSIBLE_DISPATCH  # type: ignore[union-attr]
+    owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 
@@ -437,6 +441,7 @@ def test_carrier_failure_overrides_a_forged_valid_guest_transcript(
     assert result.guest_result is not None
     assert result.guest_result.observation is not None
     assert not result.requires_owner_retention
+    owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 
@@ -448,6 +453,7 @@ def test_marker_mismatch_is_a_typed_identity_failure(owned: tuple[Database, Oper
     assert result.status is VMTargetPreparationStatus.FAILED
     assert result.failure is VMTargetPreparationFailure.IDENTITY
     assert not result.requires_owner_retention
+    owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 
@@ -460,6 +466,7 @@ def test_late_observation_is_not_prepared(owned: tuple[Database, OperationOwner]
     assert result.failure is VMTargetPreparationFailure.DEADLINE
     assert result.deadline_exceeded
     assert not result.requires_owner_retention
+    owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 
