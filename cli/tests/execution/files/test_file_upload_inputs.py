@@ -355,7 +355,7 @@ def test_interrupt_at_owned_carrier_handoff_exports_coordination_uncertainty(
         assert claim is not None and claim.state is OperationClaimState.POSSIBLE_DISPATCH
         with pytest.raises(StateError):
             owner.close()
-        borrow.close()
+        borrow.handoff_unresolved()
         with pytest.raises(StateError):
             owner.close()
     finally:

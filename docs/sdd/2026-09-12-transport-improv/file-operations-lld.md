@@ -752,12 +752,14 @@ borrow never releases the outer claim, including when an exception escapes. Thes
 compositions do not implement the public error reduction or production RunContext binding by
 themselves.
 
-The concrete core owner permits one active serial borrower and one outstanding attempt. Before
-dispatch, the borrower records unresolved state in memory, then commits the first possible-dispatch
-transition. Later exchanges re-arm that in-memory state within the same durable claim. The file
-workflow records returned effects, references and cleanup debt before acknowledging no further
-effects; only the current borrow can settle its outstanding attempt. The coordinator does not
-interpret carrier reports or file protocols.
+The concrete core owner permits one active serial borrower and one outstanding attempt. Before its
+first dispatch, a borrower registers and arms one generic `carrier-dispatch` obligation, then
+records each unresolved attempt in memory. Later exchanges re-arm only that in-memory state within
+the same durable claim. The generic obligation resolves only when its borrow closes with no
+outstanding attempt. Independently recoverable adapter effects still register their own obligations.
+The file workflow records returned effects, references and cleanup debt before acknowledging no
+further effects; only the current borrow can settle its outstanding attempt. The coordinator does
+not interpret carrier reports or file protocols.
 
 Validate caller publication options with the canonical protocol schema before staging or consuming
 input. Local preparation can still reject a complete encoded request, for example when identity,
@@ -768,15 +770,17 @@ After actual execution begins, an exception retains the unresolved attempt; no e
 proves that remote effects stopped.
 
 Closing the owner and admitting a borrow share the same guard. Close first prevents new dispatch; an
-active borrow prevents release and requires explicit later finalization. A returning borrower may
-record the outstanding attempt's facts but cannot start another exchange after close. The last
-borrower does not implicitly release the claim. Only core's explicit whole-operation resolution,
-after all child attempts and lifecycle obligations are quiescent, transitions the durable claim to
-resolved, followed by exact-owner release. Never attempt release before it is safe, or assume a
-failed database call committed or rolled back. A safe release may have committed before
-interruption; do not compensate by claiming the resource again. Cleanup debt remains distinct from
-possible future effects and must be returned or retained with its original binding, even after
-normal helper exit.
+active borrow prevents release and requires explicit later finalization. A borrower cannot close
+while its attempt is outstanding, so it cannot orphan the attempt's in-memory evidence. A returning
+borrower may instead explicitly hand off an unresolved attempt after it has captured the typed
+custody fact. That terminal handoff makes the borrow unusable, leaves its attempt and generic
+carrier obligation unresolved, and keeps the owner blocked for recovery. The last borrower does not
+implicitly release the claim. Only core's explicit whole-operation resolution, after all child
+attempts and lifecycle obligations are quiescent, transitions the durable claim to resolved,
+followed by exact-owner release. Never attempt release before it is safe, or assume a failed
+database call committed or rolled back. A safe release may have committed before interruption; do
+not compensate by claiming the resource again. Cleanup debt remains distinct from possible future
+effects and must be returned or retained with its original binding, even after normal helper exit.
 
 The production file boundary must own that handoff, not leave it to the caller of a private helper.
 Core file composition acquires the serial borrow and keeps its working state attached to the outer

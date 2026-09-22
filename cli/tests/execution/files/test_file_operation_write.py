@@ -235,6 +235,7 @@ def test_real_upload_has_no_completed_custody_or_source_retention(
         del source
         gc.collect()
         assert source_reference() is None
+        owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
     finally:
@@ -274,6 +275,7 @@ def test_real_json_strategies_share_core_custody_and_preserve_noop(
         else:
             assert outcome.change is FileJsonChange.CHANGED
             assert content == {"base": 1, "incoming": 2, "shared": "old"}
+        owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
     finally:
@@ -319,6 +321,7 @@ def test_json_observation_carrier_failure_precedes_success_or_invalid_response(
         assert raised.value.details is not None
         assert raised.value.details.phase is FileOperationPhase.OBSERVATION
         assert raised.value.details.reason is FileFailureReason.CARRIER_OUTPUT
+        owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
     finally:
@@ -357,6 +360,7 @@ def test_cross_family_reentry_is_rejected_by_one_owner(
         assert outcome.status is FileUploadStatus.COMPLETE
         assert carrier.rejected
         assert not root.joinpath("other").exists()
+        owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
     finally:
@@ -436,6 +440,7 @@ def test_nested_json_upload_uses_one_whole_call_borrow(
         assert outcome.status is FileJsonStatus.COMPLETE
         assert outcome.publication_attempts == 1
         assert calls == 1
+        owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
     finally:

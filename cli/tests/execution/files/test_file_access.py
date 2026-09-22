@@ -298,6 +298,7 @@ def test_real_bound_methods_preserve_exact_public_values(
     assert current is not None
     removed = access.remove(target, expected_kind=FileKind.REGULAR, expected=current.revision)
     assert removed.change is Change.CHANGED and removed.revision is None
+    owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 
@@ -322,6 +323,7 @@ def test_upload_uses_bounded_caller_owned_source_and_exact_eof_probe(
     assert source.limits[-1] == 1
     assert all(0 < limit <= 12 * 1_024 for limit in source.limits)
     assert not source.closed
+    owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 
@@ -357,6 +359,7 @@ def test_upload_reduces_source_failures_without_closing_source(
     assert raised.value.details is not None
     assert raised.value.details.reason.value == expected_reason
     assert not source.closed
+    owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 
@@ -419,6 +422,7 @@ def test_upload_retries_temporary_none_without_closing_source(
     assert result.change is Change.CHANGED
     assert source.calls >= 3
     assert not source.closed
+    owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 
@@ -512,6 +516,7 @@ def test_upload_sudo_selects_bound_elevated_plan_before_dispatch(
         assert any(invocation.argv[0] == "/usr/bin/sudo" for invocation in carrier.invocations)
         assert source.calls == 0
         assert not source.closed
+        owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
     finally:
@@ -553,6 +558,7 @@ def test_paths_are_exactly_confined_and_root_is_refused(
     for path in invalid:
         with pytest.raises(ValidationError):
             access.stat(path)
+    owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 
@@ -585,6 +591,7 @@ def test_lower_layer_object_refusals_and_diagnostics_remain_safe(
             access.read_file(PurePosixPath(socket_path), max_bytes=32)
     finally:
         listener.close()
+    owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 
@@ -685,6 +692,7 @@ def test_json_workflow_reuses_one_bound_deadline(tmp_path: Path, plan: IdentityP
         assert result.change is Change.CHANGED
         assert len(carrier.deadlines) > 1
         assert {id(observed) for observed in carrier.deadlines} == {id(deadline)}
+        owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
     finally:
@@ -717,6 +725,7 @@ def test_sudo_selects_the_bound_elevated_plan_before_dispatch(tmp_path: Path, pl
         with pytest.raises(ExternalError):
             access.stat(PurePosixPath(root / "target"), sudo=True)
         assert carrier.invocations[0].argv[0] == "/usr/bin/sudo"
+        owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
     finally:
@@ -749,6 +758,7 @@ def test_bound_views_share_the_supplied_serial_owner(tmp_path: Path, plan: Ident
     try:
         assert access.stat(PurePosixPath(root / "target")) is not None
         assert carrier.calls == 1
+        owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
     finally:

@@ -45,6 +45,7 @@ from agentworks.execution._file_upload import (
     _prepare_upload,
     _PreparedUpload,
 )
+from agentworks.operations import release_borrow_after_custody
 
 if TYPE_CHECKING:
     from agentworks.execution._file_inventory_exchange import FileInventoryCandidateResult
@@ -398,7 +399,7 @@ class FileOperation:
                         self._unfinished_owned_files.append(
                             UnfinishedOwnedFile(active.carrier, active.binding, fact.outcome)
                         )
-                    active.borrow.close()
+                    release_borrow_after_custody(active.borrow)
                     self._active_stats.pop(id(active))
                 except BaseException:
                     raise control from fact
@@ -406,7 +407,7 @@ class FileOperation:
         active.outcome = outcome
         if outcome.requires_owner_retention:
             self._unfinished_owned_files.append(UnfinishedOwnedFile(active.carrier, active.binding, outcome))
-        active.borrow.close()
+        release_borrow_after_custody(active.borrow)
         self._active_stats.pop(id(active))
         return outcome
 
@@ -458,7 +459,7 @@ class FileOperation:
                         self._unfinished_owned_files.append(
                             UnfinishedOwnedFile(active.carrier, active.binding, fact.outcome)
                         )
-                    active.borrow.close()
+                    release_borrow_after_custody(active.borrow)
                     self._active_inventories.pop(id(active))
                 except BaseException:
                     raise control from fact
@@ -466,7 +467,7 @@ class FileOperation:
         active.outcome = outcome
         if outcome.requires_owner_retention:
             self._unfinished_owned_files.append(UnfinishedOwnedFile(active.carrier, active.binding, outcome))
-        active.borrow.close()
+        release_borrow_after_custody(active.borrow)
         self._active_inventories.pop(id(active))
         return outcome
 
@@ -516,7 +517,7 @@ class FileOperation:
                         self._unfinished_owned_files.append(
                             UnfinishedOwnedFile(active.carrier, active.binding, fact.outcome)
                         )
-                    active.borrow.close()
+                    release_borrow_after_custody(active.borrow)
                     self._active_removals.pop(id(active))
                 except BaseException:
                     raise control from fact
@@ -524,7 +525,7 @@ class FileOperation:
         active.outcome = outcome
         if outcome.requires_owner_retention:
             self._unfinished_owned_files.append(UnfinishedOwnedFile(active.carrier, active.binding, outcome))
-        active.borrow.close()
+        release_borrow_after_custody(active.borrow)
         self._active_removals.pop(id(active))
         return outcome
 
@@ -577,7 +578,7 @@ class FileOperation:
                         self._unfinished_owned_files.append(
                             UnfinishedOwnedFile(active.carrier, active.binding, fact.outcome)
                         )
-                    active.borrow.close()
+                    release_borrow_after_custody(active.borrow)
                     self._active_metadata.pop(id(active))
                 except BaseException:
                     raise control from fact
@@ -585,7 +586,7 @@ class FileOperation:
         active.outcome = outcome
         if outcome.requires_owner_retention:
             self._unfinished_owned_files.append(UnfinishedOwnedFile(active.carrier, active.binding, outcome))
-        active.borrow.close()
+        release_borrow_after_custody(active.borrow)
         self._active_metadata.pop(id(active))
         return outcome
 
@@ -638,7 +639,7 @@ class FileOperation:
                         self._unfinished_owned_files.append(
                             UnfinishedOwnedFile(active.carrier, active.binding, fact.outcome)
                         )
-                    active.borrow.close()
+                    release_borrow_after_custody(active.borrow)
                     self._active_metadata.pop(id(active))
                 except BaseException:
                     raise control from fact
@@ -646,7 +647,7 @@ class FileOperation:
         active.outcome = outcome
         if outcome.requires_owner_retention:
             self._unfinished_owned_files.append(UnfinishedOwnedFile(active.carrier, active.binding, outcome))
-        active.borrow.close()
+        release_borrow_after_custody(active.borrow)
         self._active_metadata.pop(id(active))
         return outcome
 
@@ -655,7 +656,7 @@ class FileOperation:
         active.prepared.release_sink()
         if outcome.requires_owner_retention:
             self._retain_unfinished(UnfinishedFileDownload(active.carrier, active.binding, outcome))
-        active.borrow.close()
+        release_borrow_after_custody(active.borrow)
         self._active_downloads.pop(id(active))
 
     def _retain_unfinished(self, download: UnfinishedFileDownload) -> None:
@@ -665,7 +666,7 @@ class FileOperation:
         active.outcome = outcome
         if outcome.requires_owner_retention:
             self._retain_unfinished_upload(UnfinishedFileUpload(active.carrier, active.binding, outcome))
-        active.borrow.close()
+        release_borrow_after_custody(active.borrow)
         self._active_uploads.pop(id(active))
 
     def _retain_unfinished_upload(self, upload: UnfinishedFileUpload) -> None:
@@ -675,7 +676,7 @@ class FileOperation:
         active.outcome = outcome
         if outcome.requires_owner_retention:
             self._retain_unfinished_json_update(UnfinishedFileJsonUpdate(active.carrier, active.binding, outcome))
-        active.borrow.close()
+        release_borrow_after_custody(active.borrow)
         self._active_json_updates.pop(id(active))
 
     def _retain_unfinished_json_update(self, update: UnfinishedFileJsonUpdate) -> None:

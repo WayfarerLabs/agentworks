@@ -5,6 +5,7 @@ from __future__ import annotations
 import multiprocessing
 import sqlite3
 from pathlib import Path
+from threading import Event, Thread
 from typing import Any
 
 import pytest
@@ -256,6 +257,76 @@ def test_claim_mutation_refuses_to_join_a_caller_transaction(db: Database) -> No
 
     assert db.get_setting("unrelated") == "committed"
     assert db.operations.inspect(_scope()) is None
+
+
+def test_operation_rollback_cannot_join_or_erase_an_ordinary_transaction(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    database = Database(path)
+    operation_started = Event()
+    allow_rollback = Event()
+    operation_finished = Event()
+    worker_errors: list[BaseException] = []
+
+    def roll_back_operation() -> None:
+        repository = database.operations
+        try:
+            with repository._standalone_transaction():  # noqa: SLF001
+                repository._connection.execute("INSERT INTO settings (key, value) VALUES ('operation', 'discarded')")  # noqa: SLF001
+                operation_started.set()
+                assert allow_rollback.wait(timeout=10)
+                raise RuntimeError("discard operation state")
+        except RuntimeError:
+            pass
+        except BaseException as error:  # pragma: no cover - reported below
+            worker_errors.append(error)
+        finally:
+            operation_finished.set()
+
+    try:
+        with database.transaction():
+            database._conn.execute("SELECT 1")  # noqa: SLF001
+            worker = Thread(target=roll_back_operation)
+            worker.start()
+            assert operation_started.wait(timeout=10)
+            allow_rollback.set()
+            assert operation_finished.wait(timeout=10)
+            worker.join(timeout=10)
+            assert not worker.is_alive()
+            assert not worker_errors
+            assert database._conn.in_transaction  # noqa: SLF001
+            database.set_setting("ordinary", "committed")
+
+        assert database.get_setting("ordinary") == "committed"
+        assert database.get_setting("operation") is None
+    finally:
+        database.close()
+
+
+def test_database_close_closes_its_operation_connection(tmp_path: Path) -> None:
+    database = Database(tmp_path / "state.db")
+    repository = database.operations
+    connection = repository._connection  # noqa: SLF001
+
+    database.close()
+
+    with pytest.raises(sqlite3.ProgrammingError):
+        connection.execute("SELECT 1")
+
+
+def test_read_only_operation_inspection_uses_a_read_only_connection(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    writer = Database(path)
+    ownership = writer.operations.claim(_scope(), "vm-reinitialize")
+    writer.close()
+
+    reader = Database(path, read_only=True)
+    try:
+        claim = reader.operations.inspect(ownership.scope)
+        assert claim is not None and claim.ownership == ownership
+        with pytest.raises(StateError):
+            reader.operations.abandon_reserved(ownership)
+    finally:
+        reader.close()
 
 
 def test_claim_does_not_interfere_with_unrelated_database_writes(tmp_path: Path) -> None:

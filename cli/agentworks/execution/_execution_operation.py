@@ -12,6 +12,7 @@ from agentworks.execution._inline import (
     execute_inline_candidate,
     prepare_inline_candidate,
 )
+from agentworks.operations import release_borrow_after_custody
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -167,5 +168,5 @@ class ExecutionOperation:
         active.outcome = outcome
         if outcome.requires_owner_retention:
             self._unfinished_inline_executions.append(UnfinishedInlineExecution(replace(outcome, candidate=None)))
-        active.borrow.close()
+        release_borrow_after_custody(active.borrow)
         self._active_inline_calls.pop(id(active))

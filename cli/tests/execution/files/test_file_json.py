@@ -905,7 +905,7 @@ def test_whole_json_call_holds_borrow_against_sibling_upload(
         database.close()
 
 
-def test_read_and_upload_register_independent_durable_obligations(
+def test_read_and_upload_share_one_borrow_durable_obligation(
     tmp_path: Path,
     plan: IdentityPlan,
     monkeypatch: pytest.MonkeyPatch,
@@ -934,7 +934,7 @@ def test_read_and_upload_register_independent_durable_obligations(
         outcome = _update(borrow, root, plan, b'{"source":true}', "merge-overwrite")
 
         assert outcome.status is FileJsonStatus.COMPLETE
-        assert outcome.publication_attempts == 1 and marks == 5
+        assert outcome.publication_attempts == 1 and marks == 1
         borrow.close()
         owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
@@ -1016,7 +1016,7 @@ def test_interrupted_dispatch_exports_bounded_retention_fact(
         assert "source" not in repr(outcome)
         with pytest.raises(StateError):
             owner.close()
-        borrow.close()
+        borrow.handoff_unresolved()
         with pytest.raises(StateError):
             owner.close()
     finally:

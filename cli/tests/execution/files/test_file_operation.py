@@ -317,7 +317,7 @@ def test_successive_inert_cleanup_debts_remain_distinct(
         database.close()
 
 
-def test_exceptional_outcome_is_retained_before_borrow_closes(
+def test_exceptional_outcome_is_retained_before_borrow_handoff(
     tmp_path: Path,
     plan: IdentityPlan,
     monkeypatch: pytest.MonkeyPatch,
@@ -327,18 +327,18 @@ def test_exceptional_outcome_is_retained_before_borrow_closes(
     operation = FileOperation(owner)
     control = KeyboardInterrupt("control-canary")
     carrier = InterruptingCarrier(control)
-    close_observations: list[UnfinishedFileDownload] = []
-    close = OperationBorrow.close
+    handoff_observations: list[UnfinishedFileDownload] = []
+    handoff = OperationBorrow.handoff_unresolved
 
-    def observe_close(borrow: OperationBorrow) -> None:
+    def observe_handoff(borrow: OperationBorrow) -> None:
         retained = operation.unfinished_downloads
         assert operation.active_downloads
         assert len(retained) == 1
         assert retained[0].outcome is operation.active_downloads[0].outcome
-        close_observations.append(retained[0])
-        close(borrow)
+        handoff_observations.append(retained[0])
+        handoff(borrow)
 
-    monkeypatch.setattr(OperationBorrow, "close", observe_close)
+    monkeypatch.setattr(OperationBorrow, "handoff_unresolved", observe_handoff)
     try:
         with pytest.raises(KeyboardInterrupt) as raised:
             operation.download(
@@ -355,8 +355,8 @@ def test_exceptional_outcome_is_retained_before_borrow_closes(
         assert raised.value is control
         fact = raised.value.__cause__
         assert isinstance(fact, FileDownloadControlFact)
-        assert close_observations[0].outcome is fact.outcome
-        assert close_observations[0].carrier is carrier
+        assert handoff_observations[0].outcome is fact.outcome
+        assert handoff_observations[0].carrier is carrier
         assert operation.active_downloads == ()
         with pytest.raises(StateError):
             owner.close()

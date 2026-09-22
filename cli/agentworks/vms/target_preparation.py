@@ -18,6 +18,7 @@ from agentworks.execution._vm_guest_identity import (
 )
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 from agentworks.execution.carrier import Dispatch
+from agentworks.operations import release_borrow_after_custody
 from agentworks.vms.identity import validate_vm_instance_marker
 from agentworks.vms.target_identity import compose_managed_vm_target_identity
 
@@ -183,7 +184,7 @@ def prepare_managed_vm_target(
             _record_deadline(state, deadline)
             raise control from VMTargetPreparationControlFact(state.finish())
     finally:
-        borrow.close()
+        release_borrow_after_custody(borrow)
 
 
 def _failed(

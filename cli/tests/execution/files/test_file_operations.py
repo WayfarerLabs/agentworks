@@ -749,7 +749,7 @@ def test_escaping_carrier_control_retains_safe_private_facts(
     assert "canary" not in repr(fact) and "canary" not in repr(fact.outcome)
     with pytest.raises(StateError):
         owner.close()
-    borrow.close()
+    borrow.handoff_unresolved()
     with pytest.raises(StateError):
         owner.close()
 

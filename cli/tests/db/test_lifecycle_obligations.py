@@ -137,6 +137,79 @@ def test_payload_publication_uses_cas_and_idempotent_retry(db: Database) -> None
         )
 
 
+def test_owner_allows_delayed_possible_effect_identity_publication_while_closing(db: Database) -> None:
+    owner = OperationOwner.acquire(db.operations, _scope(), "vm-reinitialize")
+    obligation = owner.register_lifecycle_obligation("platform-hold", payload_version=1, payload=b"prepared")
+    obligation.mark_possible_effect()
+
+    with pytest.raises(StateError):
+        owner.close()
+
+    obligation.publish_payload(
+        expected_revision=obligation.payload_revision,
+        payload_version=2,
+        payload=b"delayed-identity",
+    )
+    obligation.resolve()
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+def test_borrow_reuses_one_generic_carrier_obligation_across_many_attempts(db: Database) -> None:
+    owner = OperationOwner.acquire(db.operations, _scope(), "vm-reinitialize")
+    borrow = owner.borrow()
+
+    for _ in range(MAX_LIFECYCLE_OBLIGATIONS + 1):
+        attempt = borrow.begin_attempt()
+        attempt.settle()
+
+    obligations = db.operations.list_lifecycle_obligations(owner.ownership)
+    assert len(obligations) == 1
+    assert obligations[0].obligation_kind == "carrier-dispatch"
+    assert obligations[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+
+    borrow.close()
+    assert db.operations.list_lifecycle_obligations(owner.ownership)[0].state is LifecycleObligationState.RESOLVED
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+def test_borrow_close_refuses_until_its_outstanding_attempt_is_settled(db: Database) -> None:
+    owner = OperationOwner.acquire(db.operations, _scope(), "vm-reinitialize")
+    borrow = owner.borrow()
+    attempt = borrow.begin_attempt()
+
+    with pytest.raises(StateError):
+        borrow.close()
+
+    assert borrow.has_outstanding_attempt
+    attempt.settle()
+    borrow.close()
+    assert db.operations.list_lifecycle_obligations(owner.ownership)[0].state is LifecycleObligationState.RESOLVED
+
+
+def test_borrow_handoff_retains_its_possible_effect_for_recovery(db: Database) -> None:
+    owner = OperationOwner.acquire(db.operations, _scope(), "vm-reinitialize")
+    empty_borrow = owner.borrow()
+    with pytest.raises(StateError):
+        empty_borrow.handoff_unresolved()
+    empty_borrow.close()
+
+    borrow = owner.borrow()
+    attempt = borrow.begin_attempt()
+    borrow.handoff_unresolved()
+
+    obligations = db.operations.list_lifecycle_obligations(owner.ownership)
+    assert len(obligations) == 1
+    assert obligations[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+    with pytest.raises(StateError):
+        attempt.settle()
+    with pytest.raises(StateError):
+        owner.borrow()
+
+
 def test_first_possible_effect_atomically_arms_claim_and_registered_can_resolve(db: Database) -> None:
     ownership = db.operations.claim(_scope(), "vm-reinitialize")
     no_effect = _registered(db, ownership, "prepared-route")

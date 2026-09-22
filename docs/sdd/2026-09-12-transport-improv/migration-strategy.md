@@ -85,9 +85,10 @@ and settle the owner only after every obligation is discharged. Individual lifec
 release the owner, and opaque legacy success is not a no-further-effects witness. This requirement
 does not retrofit or migrate legacy callers.
 
-The private owner now models that distinction directly. Each effect first registers one lifecycle
-obligation, then marks it possible before dispatch; sequential target, file and execution work
-borrow the same owner and settle only their own obligations. Core seals the ledger after the
+The private owner now models that distinction directly. Each independently recoverable adapter
+effect first registers one lifecycle obligation, then marks it possible before dispatch. Sequential
+carrier attempts under one borrow instead share one generic `carrier-dispatch` obligation, which
+resolves only when the borrow closes without an outstanding attempt. Core seals the ledger after the
 complete activation/workflow/teardown aggregate can create no more effects, then calls
 `record_effects_resolved()` only after every obligation has typed quiescence evidence. `close()`
 abandons only an empty never-admitted reservation or releases an explicitly resolved claim; it does

@@ -84,8 +84,11 @@ class Database:
         assert timeout is None or read_only, "timeout only applies to the read-only path"
         self._read_only = read_only
         self._operation_lock = threading.RLock()
+        self._operation_connection: sqlite3.Connection | None = None
+        self._closed = False
         self._read_tx_active = False
         self._tx_depth = 0
+        self._transaction_thread_id: int | None = None
         self._use_lock: sqlite3.Connection | None = None
         db_path = (path or _db.DB_PATH).resolve()
         self.path = db_path
@@ -149,7 +152,7 @@ class Database:
             raise BusyStateError()
         writable_connection: sqlite3.Connection | None = None
         try:
-            writable_connection = sqlite3.connect(str(db_path), check_same_thread=False)
+            writable_connection = sqlite3.connect(str(db_path))
             self._conn = writable_connection
             self._conn.row_factory = sqlite3.Row
             self._conn.execute("PRAGMA foreign_keys = ON")
@@ -166,6 +169,11 @@ class Database:
 
     def close(self) -> None:
         try:
+            with self._operation_lock:
+                if self._operation_connection is not None:
+                    self._operation_connection.close()
+                    self._operation_connection = None
+                self._closed = True
             self._conn.close()
         finally:
             use_lock = self._use_lock
@@ -187,6 +195,10 @@ class Database:
 
             raise StateError("a write transaction requires a writable database", entity_kind="database")
         if self._tx_depth > 0:
+            if self._transaction_thread_id != threading.get_ident():
+                from agentworks.errors import StateError
+
+                raise StateError("a database transaction belongs to another thread", entity_kind="database")
             self._tx_depth += 1
             try:
                 yield
@@ -194,6 +206,7 @@ class Database:
                 self._tx_depth -= 1
             return
         self._tx_depth = 1
+        self._transaction_thread_id = threading.get_ident()
         try:
             with self._conn:
                 if not self._conn.in_transaction:
@@ -204,6 +217,7 @@ class Database:
                 yield
         finally:
             self._tx_depth = 0
+            self._transaction_thread_id = None
 
     @contextmanager
     def read_transaction(self) -> Iterator[None]:
@@ -258,6 +272,31 @@ class Database:
         from agentworks.db.operations import OperationRepository
 
         return OperationRepository(self)
+
+    def _operation_connection_for_repository(self) -> sqlite3.Connection:
+        """Return the separately serialized connection for operation state.
+
+        Ordinary database methods retain their thread-affine connection and
+        transaction boundary. Operation coordination uses this one connection
+        behind ``_operation_lock`` so its short durable transitions cannot
+        join an unrelated transaction on the legacy facade.
+        """
+        with self._operation_lock:
+            if self._closed:
+                from agentworks.errors import StateError
+
+                raise StateError("state database is closed", entity_kind="database")
+            if self._operation_connection is None:
+                if self._read_only:
+                    uri = f"{self.path.as_uri()}?mode=ro"
+                    connection = sqlite3.connect(uri, uri=True, check_same_thread=False)
+                else:
+                    connection = sqlite3.connect(str(self.path), check_same_thread=False)
+                    connection.execute("PRAGMA journal_mode = WAL")
+                connection.row_factory = sqlite3.Row
+                connection.execute("PRAGMA foreign_keys = ON")
+                self._operation_connection = connection
+            return self._operation_connection
 
     @staticmethod
     def check_schema(path: Path | None = None) -> tuple[bool, int, int]:

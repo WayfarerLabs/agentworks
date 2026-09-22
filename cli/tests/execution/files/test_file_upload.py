@@ -457,7 +457,7 @@ def test_real_helper_create_streams_exact_bytes_once(
         database.close()
 
 
-def test_owner_registers_one_obligation_before_each_real_carrier_execute(
+def test_owner_arms_one_borrow_obligation_before_real_carrier_execution(
     tmp_path: Path,
     plan: IdentityPlan,
     monkeypatch: pytest.MonkeyPatch,
@@ -484,7 +484,7 @@ def test_owner_registers_one_obligation_before_each_real_carrier_execute(
 
         assert outcome.status is FileUploadStatus.COMPLETE
         assert carrier.calls == 5
-        assert marks == 5
+        assert marks == 1
         borrow.close()
         owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()

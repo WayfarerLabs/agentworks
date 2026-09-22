@@ -746,7 +746,7 @@ def test_abnormal_chunk_wrapper_exit_hands_no_bytes_and_stops_followons(
         assert outcome.pending_remote_effects and outcome.requires_owner_retention
         with pytest.raises(StateError):
             operation_owner.close()
-        borrow.close()
+        borrow.handoff_unresolved()
         with pytest.raises(StateError):
             operation_owner.close()
     finally:
@@ -849,7 +849,7 @@ def test_interrupted_dispatch_exports_pending_effect_facts_and_preserves_borrow(
         assert fact.outcome.requires_owner_retention
         with pytest.raises(StateError):
             operation_owner.borrow()
-        borrow.close()
+        borrow.handoff_unresolved()
         with pytest.raises(StateError):
             operation_owner.close()
     finally:

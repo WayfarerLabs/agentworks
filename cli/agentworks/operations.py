@@ -253,8 +253,8 @@ class OperationOwner:
         self._released = True
         self._transition_uncertain = False
 
-    def _register_borrowed_attempt_locked(self) -> PersistedLifecycleObligation:
-        """Register the generic helper admission under its active borrow."""
+    def _register_carrier_dispatch_locked(self) -> PersistedLifecycleObligation:
+        """Register the one generic carrier effect for an active borrow."""
         if self._obligations_sealed:
             raise StateError(
                 "operation lifecycle obligations are sealed",
@@ -305,7 +305,14 @@ class LifecycleObligation:
         """CAS-publish adapter identity while this effect remains possible."""
         owner = self._owner
         with owner._guard:  # noqa: SLF001
-            owner._require_dispatch_admission_locked()  # noqa: SLF001
+            if owner._transition_uncertain:  # noqa: SLF001
+                owner._reconcile_transition_locked()  # noqa: SLF001
+            if owner._released:  # noqa: SLF001
+                raise StateError(
+                    "operation ownership is already released",
+                    entity_kind=owner._ownership.scope.resource_kind,  # noqa: SLF001
+                    entity_name=owner._ownership.scope.resource_name,  # noqa: SLF001
+                )
             self._obligation = owner._repository.publish_lifecycle_obligation_payload(  # noqa: SLF001
                 owner._ownership,  # noqa: SLF001
                 self.obligation_id,
@@ -338,6 +345,7 @@ class OperationBorrow:
     """One identity-bound serial borrow from an :class:`OperationOwner`."""
 
     _owner: OperationOwner
+    _carrier_obligation: PersistedLifecycleObligation | None = field(default=None, init=False)
     _closed: bool = field(default=False, init=False)
 
     @property
@@ -374,21 +382,57 @@ class OperationBorrow:
                     entity_kind=self.ownership.scope.resource_kind,
                     entity_name=self.ownership.scope.resource_name,
                 )
-            obligation = owner._register_borrowed_attempt_locked()  # noqa: SLF001
-            attempt = OperationAttempt(self, obligation)
+            if self._carrier_obligation is None:
+                obligation = owner._register_carrier_dispatch_locked()  # noqa: SLF001
+                self._carrier_obligation = obligation
+                attempt = OperationAttempt(self)
+                owner._outstanding_attempt = attempt  # noqa: SLF001
+                owner._repository.mark_lifecycle_obligation_possible_effect(  # noqa: SLF001
+                    self.ownership,
+                    obligation.obligation_id,
+                )
+                owner._durable_possible_dispatch = True  # noqa: SLF001
+                return attempt
+            attempt = OperationAttempt(self)
             owner._outstanding_attempt = attempt  # noqa: SLF001
-            owner._repository.mark_lifecycle_obligation_possible_effect(  # noqa: SLF001
-                self.ownership,
-                obligation.obligation_id,
-            )
-            owner._durable_possible_dispatch = True  # noqa: SLF001
             return attempt
 
     def close(self) -> None:
-        """Relinquish this borrow without releasing the durable owner."""
+        """Complete this borrow after all of its attempts are settled."""
         owner = self._owner
         with owner._guard:  # noqa: SLF001
             self._require_active_locked()
+            if owner._outstanding_attempt is not None:  # noqa: SLF001
+                raise StateError(
+                    "operation borrow has an outstanding attempt",
+                    entity_kind=self.ownership.scope.resource_kind,
+                    entity_name=self.ownership.scope.resource_name,
+                )
+            if self._carrier_obligation is not None:
+                owner._repository.resolve_lifecycle_obligation(  # noqa: SLF001
+                    self.ownership,
+                    self._carrier_obligation.obligation_id,
+                )
+            self._closed = True
+            owner._active_borrow = None  # noqa: SLF001
+
+    def handoff_unresolved(self) -> None:
+        """Terminally retain this borrow's outstanding effect for recovery.
+
+        The handoff only relinquishes in-memory borrow authority. It leaves
+        both the outstanding attempt and its generic carrier obligation
+        unresolved, so the owner remains durably blocked from new work.
+        """
+        owner = self._owner
+        with owner._guard:  # noqa: SLF001
+            self._require_active_locked()
+            attempt = owner._outstanding_attempt  # noqa: SLF001
+            if attempt is None or attempt._borrow is not self:  # noqa: SLF001
+                raise StateError(
+                    "operation borrow has no outstanding attempt to hand off",
+                    entity_kind=self.ownership.scope.resource_kind,
+                    entity_name=self.ownership.scope.resource_name,
+                )
             self._closed = True
             owner._active_borrow = None  # noqa: SLF001
 
@@ -406,7 +450,6 @@ class OperationAttempt:
     """The sole outstanding attempt originated by one serial borrow."""
 
     _borrow: OperationBorrow
-    _obligation: PersistedLifecycleObligation
     _settled: bool = field(default=False, init=False)
 
     def settle(self) -> None:
@@ -421,9 +464,13 @@ class OperationAttempt:
                     entity_kind=borrow.ownership.scope.resource_kind,
                     entity_name=borrow.ownership.scope.resource_name,
                 )
-            owner._repository.resolve_lifecycle_obligation(  # noqa: SLF001
-                borrow.ownership,
-                self._obligation.obligation_id,
-            )
             self._settled = True
             owner._outstanding_attempt = None  # noqa: SLF001
+
+
+def release_borrow_after_custody(borrow: OperationBorrow) -> None:
+    """Complete a settled borrow or explicitly retain its unresolved custody."""
+    if borrow.has_outstanding_attempt:
+        borrow.handoff_unresolved()
+    else:
+        borrow.close()

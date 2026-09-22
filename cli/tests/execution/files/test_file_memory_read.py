@@ -140,6 +140,7 @@ def test_real_linux_read_returns_only_complete_verified_data(
         assert not outcome.download.requires_owner_retention
         assert not tuple(scratch.iterdir())
         assert repr(content) not in repr(outcome)
+        operation_owner.seal_lifecycle_obligations()
         operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
@@ -163,6 +164,7 @@ def test_real_linux_absence_returns_no_data(
         assert outcome.data is None
         assert not outcome.download.requires_owner_retention
         assert not tuple(scratch.iterdir())
+        operation_owner.seal_lifecycle_obligations()
         operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
@@ -188,6 +190,7 @@ def test_real_linux_caller_bound_refusal_exposes_no_partial_data(
         assert outcome.data is None
         assert not outcome.download.requires_owner_retention
         assert not tuple(scratch.iterdir())
+        operation_owner.seal_lifecycle_obligations()
         operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
@@ -449,6 +452,7 @@ def test_complete_byte_allocation_failure_releases_borrow_after_cleanup(
         assert operation.unfinished_downloads == ()
         assert sink.data == bytearray()
         assert not tuple(scratch.iterdir())
+        operation_owner.seal_lifecycle_obligations()
         operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:

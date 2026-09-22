@@ -20,7 +20,7 @@ from agentworks.execution._runtime_prerequisite import (
     RuntimeSelection,
 )
 from agentworks.execution.carrier import Deadline, Dispatch
-from agentworks.operations import OperationOwner
+from agentworks.operations import OperationOwner, release_borrow_after_custody
 
 if TYPE_CHECKING:
     from agentworks.execution._helper_identity import IdentityExpectation
@@ -286,7 +286,7 @@ def prepare_target_identity(
                 state.fail(TargetIdentityFailure.DEADLINE)
             raise control from TargetIdentityControlFact(state.finish())
     finally:
-        borrow.close()
+        release_borrow_after_custody(borrow)
 
 
 def _validate_inputs(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -150,11 +151,7 @@ def _validate_operation_kind(operation_kind: str) -> None:
 
 
 def _validate_obligation_id(obligation_id: str) -> None:
-    if (
-        not isinstance(obligation_id, str)
-        or len(obligation_id) != 32
-        or _IDENTIFIER.fullmatch(obligation_id) is None
-    ):
+    if not isinstance(obligation_id, str) or len(obligation_id) != 32 or _IDENTIFIER.fullmatch(obligation_id) is None:
         raise ValueError("obligation_id must be a 32-character lowercase hexadecimal identifier")
 
 
@@ -202,7 +199,7 @@ class OperationRepository:
 
     def __init__(self, database: Database) -> None:
         self._database = database
-        self._connection = database._conn  # noqa: SLF001
+        self._connection = database._operation_connection_for_repository()  # noqa: SLF001
         self._connection_lock = database._operation_lock  # noqa: SLF001
 
     def claim(self, scope: OperationScope, operation_kind: str) -> OperationOwnership:
@@ -334,8 +331,7 @@ class OperationRepository:
                 assert cursor.rowcount == 1
             if claim.state is OperationClaimState.RESERVED:
                 cursor = self._connection.execute(
-                    "UPDATE operation_owners SET state = ?, updated_at = ? "
-                    "WHERE operation_id = ? AND state = ?",
+                    "UPDATE operation_owners SET state = ?, updated_at = ? WHERE operation_id = ? AND state = ?",
                     (
                         OperationClaimState.POSSIBLE_DISPATCH,
                         now,
@@ -395,9 +391,6 @@ class OperationRepository:
                 ),
             )
             if cursor.rowcount != 1:
-                current = self._load_obligation(ownership, obligation_id)
-                if current.payload_version == payload_version and current.payload == payload:
-                    return current
                 raise StateError(
                     "lifecycle obligation payload changed concurrently",
                     entity_kind=ownership.scope.resource_kind,
@@ -481,11 +474,18 @@ class OperationRepository:
                 )
             if claim.state is OperationClaimState.RESOLVED:
                 return claim
-            return self._transition_in_transaction(
-                ownership,
-                expected=claim.state,
-                target=OperationClaimState.RESOLVED,
+            cursor = self._connection.execute(
+                "UPDATE operation_owners SET state = ?, updated_at = ? WHERE operation_id = ? AND state = ?",
+                (
+                    OperationClaimState.RESOLVED,
+                    _utc_now(),
+                    ownership.operation_id,
+                    claim.state,
+                ),
             )
+            if cursor.rowcount != 1:
+                self._raise_stale_or_invalid_state(ownership, claim.state)
+            return self._require_owned_claim(ownership)
 
     def abandon_reserved(self, ownership: OperationOwnership) -> None:
         """Release a claim only while core knows dispatch was never possible."""
@@ -514,47 +514,16 @@ class OperationRepository:
                     entity_kind=ownership.scope.resource_kind,
                     entity_name=ownership.scope.resource_name,
                 )
-            self._connection.execute(
-                "DELETE FROM lifecycle_obligations WHERE operation_id = ? AND state = ?",
-                (ownership.operation_id, LifecycleObligationState.RESOLVED),
-            )
             self._delete_in_transaction(ownership, expected=OperationClaimState.RESOLVED)
-
-    def _transition_in_transaction(
-        self,
-        ownership: OperationOwnership,
-        *,
-        expected: OperationClaimState,
-        target: OperationClaimState,
-        updated_at: str | None = None,
-    ) -> OperationClaim:
-        cursor = self._connection.execute(
-                "UPDATE operation_owners SET state = ?, updated_at = ? "
-                "WHERE operation_id = ? AND state = ?",
-                (
-                    target,
-                    updated_at or _utc_now(),
-                    ownership.operation_id,
-                    expected,
-                ),
-            )
-        if cursor.rowcount != 1:
-            self._raise_stale_or_invalid_state(ownership, expected)
-        claim = self._require_owned_claim(ownership)
-        return claim
-
-    def _delete(self, ownership: OperationOwnership, *, expected: OperationClaimState) -> None:
-        with self._standalone_transaction():
-            self._delete_in_transaction(ownership, expected=expected)
 
     def _delete_in_transaction(self, ownership: OperationOwnership, *, expected: OperationClaimState) -> None:
         cursor = self._connection.execute(
-                "DELETE FROM operation_owners WHERE operation_id = ? AND state = ?",
-                (
-                    ownership.operation_id,
-                    expected,
-                ),
-            )
+            "DELETE FROM operation_owners WHERE operation_id = ? AND state = ?",
+            (
+                ownership.operation_id,
+                expected,
+            ),
+        )
         if cursor.rowcount != 1:
             self._raise_stale_or_invalid_state(ownership, expected)
 
@@ -621,7 +590,9 @@ class OperationRepository:
         with self._connection_lock:
             if self._database._read_only:  # noqa: SLF001
                 raise StateError("operation claims require a writable database", entity_kind="database")
-            if self._database._tx_depth or self._connection.in_transaction:  # noqa: SLF001
+            if (  # noqa: SLF001
+                self._database._tx_depth and self._database._transaction_thread_id == threading.get_ident()
+            ) or self._connection.in_transaction:
                 raise StateError(
                     "operation claim mutations cannot join another database transaction",
                     entity_kind="database",
@@ -631,13 +602,9 @@ class OperationRepository:
                 # SQLite's write slot before that read so concurrent owners
                 # serialize instead of one retaining a stale snapshot and
                 # receiving SQLITE_BUSY_SNAPSHOT after another commits.
-                self._database._tx_depth = 1  # noqa: SLF001
-                try:
-                    with self._connection:
-                        self._connection.execute("BEGIN IMMEDIATE")
-                        yield
-                finally:
-                    self._database._tx_depth = 0  # noqa: SLF001
+                with self._connection:
+                    self._connection.execute("BEGIN IMMEDIATE")
+                    yield
             except sqlite3.DatabaseError as error:
                 from agentworks.db.backup import _is_busy
                 from agentworks.errors import BusyStateError
