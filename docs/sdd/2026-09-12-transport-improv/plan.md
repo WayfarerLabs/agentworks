@@ -1723,6 +1723,24 @@ exercised. Hosted validation remains pending, and this is still a draft implemen
 without a public review/test/merge signal. All three authorized public feedback/fix rounds remain
 available.
 
+All three private lanes accept the durable file-call custody groundwork at `693e9e48` without
+outstanding findings. Each logical file call now uses one adapter-owned lifecycle row for dispatch
+admission and retained recovery facts. Initial admission reserves the maximum encoded growth of its
+typed recovery state, and JSON publishes each child token and attempt on its parent row before that
+child dispatches. Review corrections prevent local encoding failure, owner closure before durable
+registration and oversized retained facts from stranding unrecorded custody. A typed refusal
+distinguishes the proved pre-registration case from registration-started or commit-unknown failure;
+the latter cases and cleanup failure retain custody conservatively. Payloads remain canonical,
+bounded and free of file content, JSON content, credentials, streams and replay material.
+
+The focused selection passes 95 tests, the combined file/operation/lifecycle selection passes 1,320
+tests, and the full non-integration suite passes 12,875 tests with 21 skips. Ruff/format, mypy
+across 1,090 sources, file lint, locked-SDD and Rulesync gates pass. No live infrastructure was
+exercised. The broader checkbox remains open: production recovery takeover and actual process-loss
+proof around before/after-commit registration, response and final handoff are not delivered by this
+private checkpoint. It adds no RunContext surface, production factory or #377 hierarchy, and raises
+no public review/test/merge signal.
+
 ### Buffered execution result checkpoint
 
 - [x] Implement safe immutable application result values, honest wait/exit/signal precision and one
