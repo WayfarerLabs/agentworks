@@ -10,8 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.db import Database, OperationResourceKind, OperationScope
+from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import ConflictError
+from agentworks.execution._file_obligation import decode_file_call_obligation
 from agentworks.execution._file_operation import FileOperation
 from agentworks.execution._file_publication import Create, Match
 from agentworks.execution._file_result_transfer import reduce_file_upload
@@ -29,6 +30,7 @@ from tests.execution.carriers.ssh.test_file_delivery import (
     _ObservedSSHCarrier,
 )
 from tests.execution.files._file_upload_support import BytesSource, new_metadata
+from tests.execution.files._target_support import target_for_owner
 
 pytestmark = [
     pytest.mark.integration,
@@ -101,7 +103,8 @@ def test_file_operation_upload_conditions_and_cleanup_over_real_ssh(
         OperationScope(OperationResourceKind.VM, "ssh-file-operation-vm"),
         "ssh-file-upload",
     )
-    operation = FileOperation(owner)
+    managed_target = target_for_owner(owner)
+    operation = FileOperation(owner, managed_target)
     carrier = _ObservedSSHCarrier(local_sshd)
     created_content = bytes(range(256)) + b"\x00\xffcreated-over-ssh\r\n"
     updated_content = bytes(reversed(range(256))) + b"\xff\x00updated-over-ssh\n"
@@ -170,8 +173,19 @@ def test_file_operation_upload_conditions_and_cleanup_over_real_ssh(
                 "must-not-replace-destination",
             )
         outcomes = (created, matched, duplicate, stale)
+        obligations = database.operations.list_lifecycle_obligations(owner.ownership)
+        assert len(obligations) == len(outcomes)
+        payloads = [decode_file_call_obligation(obligation.payload) for obligation in obligations]
+        assert {payload.token for payload in payloads} == {outcome.token for outcome in outcomes}
+        for obligation, payload in zip(obligations, payloads, strict=True):
+            assert obligation.obligation_kind == "file-call"
+            assert obligation.state is LifecycleObligationState.RESOLVED
+            assert payload.target == managed_target
+            assert payload.root == str(root)
+            assert payload.relative_path == _DESTINATION
         for canary in ("created-over-ssh", "updated-over-ssh", "must-not-replace-destination"):
             assert canary not in repr(outcomes)
+            assert all(canary.encode() not in obligation.payload for obligation in obligations)
 
         owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
