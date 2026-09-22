@@ -6,9 +6,10 @@ import re
 import secrets
 
 from agentworks.errors import ValidationError
+from agentworks.execution._vm_guest_identity_protocol import VM_INSTANCE_MARKER_PATH
 
-VM_INSTANCE_MARKER_PATH = "/var/lib/agentworks/instance-id"
-"""Protected guest file holding the core-generated VM instance marker."""
+__all__ = ["VM_INSTANCE_MARKER_PATH", "new_vm_instance_marker", "validate_vm_instance_marker"]
+
 
 _VM_INSTANCE_MARKER_RE = re.compile(r"[0-9a-f]{32}\Z")
 

@@ -228,10 +228,15 @@ boot, unit, workload, shell, profile, owner or protocol facts fail closed.
 The target name is a core resource identity for binding and diagnostics, not authority on its own.
 Its `v1:<sha256>` incarnation fingerprint must bind the provider-owned locator with a
 core-provisioned or explicitly adopted random instance marker. The current boot UUID is a separate
-fence. Production composition and existing-VM adoption are not implemented here; ordinary work must
-not silently create an adoption marker. This kernel also supplies no lease, output retention,
-application observation, cleanup, stop, disposal, carrier wiring, public job reference or RunContext
-surface.
+fence. The private VM codec/composer now frames the exact provider locator bytes with the persisted
+marker and composes this identity only when the private guest probe reports the same marker. The
+probe makes one bounded, no-replay helper attempt, reads only the fixed marker and Linux boot-ID
+paths, and refuses unsafe marker parents or leaves. An unavailable locator, a legacy NULL marker or
+a mismatched guest marker fails closed, and ordinary composition never creates or adopts a marker.
+This is a private checkpoint only: no production/platform wiring, explicit adoption workflow,
+locator-unavailable alternative or public RunContext claim is enabled. This kernel also supplies no
+lease, output retention, application observation, cleanup, stop, disposal, carrier wiring, public
+job reference or RunContext surface.
 
 ## Input accounting
 

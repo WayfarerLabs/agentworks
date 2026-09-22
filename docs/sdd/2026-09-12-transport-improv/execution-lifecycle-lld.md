@@ -186,13 +186,23 @@ operation does not silently write that marker. `/etc/machine-id` does not replac
 it does not reliably distinguish clones. Production target composition remains blocked until it can
 construct and verify these facts.
 
+The private implementation checkpoint now supplies the version-one VM fingerprint codec, a bounded
+fixed-path Linux guest probe and a pure composer. The probe makes one no-replay carrier attempt,
+admits the pinned runtime, validates the protected root-owned marker path, reads the canonical boot
+UUID and keeps carrier facts separate from the nonce-bound observation. The codec length-prefixes
+the exact provider locator bytes; the composer verifies the persisted marker against the guest
+observation and keeps the boot UUID as a separate target fence. Provider-locator unavailability,
+legacy NULL markers, unsafe guest paths and mismatches refuse without mutation. This does not claim
+production/platform wiring, explicit adoption, a locator-unavailable alternative or a public
+RunContext target; the combined target-identity gate remains open.
+
 New VM creation generates and persists one non-secret marker before provider dispatch. The marker is
 exactly 32 lowercase hexadecimal characters and the shared create bootstrap writes that same value
 to `/var/lib/agentworks/instance-id` as a root-owned `0444` regular file. Bootstrap replaces an
 ordinary template-cloned predecessor but refuses a symlink, non-regular leaf or a leaf with more
 than one hard link. Existing rows remain NULL and existing-VM operations do not write a missing
-marker. This is only creation evidence: explicit legacy adoption, provider locator binding, guest
-marker reads and fingerprint construction remain delivery gates.
+marker. This is only creation evidence: explicit legacy adoption and production provider/guest
+composition remain delivery gates despite the private probe and codec checkpoint above.
 
 Lima is an exception to retained-bootstrap delivery: its `mode: system` provisioner reruns on guest
 restart. Lima therefore excludes marker publication from its retained YAML and streams the fixed
@@ -205,9 +215,9 @@ target root owner and delivery remains a later integration gate.
 third-party implementation could receive and ignore it without establishing managed target identity.
 Vm-platform v2 is a hard cutover that adds only read-only provider-locator observation: one bounded,
 opaque token or explicit unavailable. It does not read guest markers, compose a target fingerprint,
-persist locator state or make managed target identity available. Marker delivery, guest marker
-reads, marker-locator composition and explicit legacy adoption remain later conformance and delivery
-gates.
+persist locator state or make managed target identity available. The private guest probe and
+composer above do not change that platform-hook claim. Production marker delivery and composition,
+explicit legacy adoption and live carrier proof remain conformance and delivery gates.
 
 Reservation commits before dispatch, and possible dispatch commits before calling the one-shot
 launch boundary. An exception or ambiguous result retains possible dispatch and cannot call the
