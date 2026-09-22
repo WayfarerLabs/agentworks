@@ -267,13 +267,14 @@ The version-one production record kinds are:
 and that acknowledgment therefore remains `UNKNOWN`, even if the application may have run. The
 managed supervisor may later supply an exact start fact through the same schema.
 
-The no-staging Linux experiment launches through fixed GNU `/usr/bin/env --` and records the shell's
-wait code. GNU env's reserved launcher codes can help test hypotheses, but cannot form the
+The no-staging Linux shell experiment launches through fixed GNU `/usr/bin/env --` and records the
+shell's wait code. GNU env's reserved launcher codes can help test hypotheses, but cannot form the
 production contract: 125 through 127 collide with legitimate application exits, and shell encodings
 from 128 through 255 cannot distinguish a pre-exec signal from an application exit. A public
 invocation must support every application exit value, including 255, without downgrading a completed
-application to `UNKNOWN`. The direct substrate is therefore blocked until it has a real proved exec
-acknowledgment; no reserved-code subset is an accepted production-completion rule.
+application to `UNKNOWN`. The shell experiment therefore remains non-production; no reserved-code
+subset is an accepted completion rule. The fixed Python helper uses the separately selected
+retrospective rule below.
 
 Even after start is proved, a direct shell wait code does not distinguish explicit exit 143 from
 signal 15. It is represented as `WaitCode(143)`, never `ExitCode(143)` or `Signal(15)`. A managed
@@ -282,26 +283,33 @@ carrier-specific result type.
 
 `FINISHED` is accepted only once, after the required wait and stream-end records, with no subsequent
 record. It is strict terminal evidence that the trusted helper reached that phase, not a
-self-authenticating checksum, and application completion additionally requires the start evidence
-above. Valid application evidence can survive later carrier observation loss, while raw carrier
-completion without it never proves bootstrap or application completion. A missing, duplicate,
-out-of-order, or post-terminal record is a protocol failure. Frames captured before application
-proof are not returned as application stdout/stderr.
+self-authenticating checksum. Application completion additionally requires either proved eager entry
+or the selected retrospective normal-completion evidence below. Valid application evidence can
+survive later carrier observation loss, while raw carrier completion without it never proves
+bootstrap or application completion. A missing, duplicate, out-of-order, or post-terminal record is
+a protocol failure. Frames captured before application proof are not returned as application
+stdout/stderr.
 
-Exact start acknowledgment remains a mechanism gate. The implementation must prove either a
-shell-available close-on-exec channel, a trusted supervisor record where that profile is allowed, or
-a base-image helper with a non-circular delivery story. Readiness cannot install or stage that
-helper. Until one option passes, the direct production path remains blocked rather than reducing
-exit-value coverage or acquiring a synthetic `STARTED` record.
+Exact start acknowledgment remains a mechanism gate for reporting `STARTED`, returning before
+completion, detached launch and signaled-child attribution. A trusted supervisor may supply it where
+that profile is allowed. Readiness cannot install or stage a helper to manufacture it. Buffered
+direct execution does not claim eager start: it may establish only the selected retrospective normal
+completion below, without reducing exit-value coverage or acquiring a synthetic `STARTED` record.
 
-### Retrospective completion candidate
+### Selected retrospective completion
 
-The next bounded Python-helper proof separates evidence of completed execution from an eager launch
-acknowledgment. On the audited CPython 3.11 native fork/exec path, with no pre-exec callback, an
-intact exec-error channel and one reaper, an actual normal wait for the exact child can establish
-entry and completion retrospectively for every exit value from 0 through 255. It does not emit a
-synthetic earlier `STARTED`. This is an implementation candidate, not acceptance of a new result
-reducer or a relaxation of the production gate above.
+The fixed Python-helper path separates evidence of completed execution from an eager launch
+acknowledgment. On the audited CPython 3.11 through 3.14 native fork/exec family, with no pre-exec
+callback, an intact exec-error channel and one reaper, an actual normal wait for the exact child
+establishes entry and completion retrospectively for every exit value from 0 through 255. It does
+not emit a synthetic earlier `STARTED`.
+
+This evidence rule is limited to the inline execution helper. That helper admits it only on CPython
+3.11 through 3.14 and emits a trusted pre-launch runtime refusal outside that range. The shared
+runtime selector and file helpers retain their broader Python 3.11-or-newer prerequisite; this is
+not a global interpreter cap. A future Python minor, alternative implementation or changed launch
+mechanism remains usable only for operations whose proof does not depend on this inference until its
+direct-execution path is separately audited.
 
 The retained [exec-evidence experiment](../../../cli/tests/execution/exec_evidence_probe.py) uses
 public launch controls: `shell=False`, `close_fds=True`, `preexec_fn=None` and
@@ -309,24 +317,25 @@ public launch controls: `shell=False`, `close_fds=True`, `preexec_fn=None` and
 forcing its selection, and child code verifies that the new process owns its session. Both checks
 pass on local CPython 3.12.13 and Debian CPython 3.11.2. The new session is a candidate ownership
 boundary, not descendant containment. The closed cases also cover all 256 exit values, missing wait
-evidence, invalid launch inputs and the counterexamples below on both interpreters. This is bounded
-local evidence, not a production launcher selection or a guarantee about future interpreters. The
-fixture does not implement framing, source/input transfer, application cancellation or carrier
-delivery, and native macOS acceptance remains open.
+evidence, invalid launch inputs and the counterexamples below on both interpreters. Source audit
+covers the released CPython 3.11 through 3.14 launch predicates, while the production helper itself
+supplies framing, source/input transfer and the single-reaper exact-wait path. This does not
+guarantee future interpreters. Application cancellation and native carrier acceptance remain open.
 
 The helper must obtain the actual native wait status. `Popen.wait()` and `poll()` can substitute
 zero when child status is unavailable; neither is sufficient evidence. Ignored `SIGCHLD`, a
 competing reaper, a pre-exec callback, a broken error channel or a different spawn implementation
 invalidates the inference. The proof must isolate those cases and verify the selected interpreter
-path rather than infer it from Python's minimum version. See the
+path rather than infer it from Python's minimum version. The inline-only runtime guard is the closed
+eligibility decision for this initial implementation. See the
 [runtime research](prior-art-research.md#local-mechanism-evidence).
 
 A signaled child without independent entry evidence stays unknown. For scripts, the exact normal
 wait proves completion of the selected interpreter, not entry into the first script-body command.
 Detached launch, early running-state reporting and live application-output promotion retain their
 independent acknowledgment gate. Buffered capture may keep bounded bytes private until completion
-evidence is established. The current shell proof and its wait-code result gain no stronger meaning
-from this candidate.
+evidence is established. The shell experiment and its wait-code result gain no stronger meaning from
+the selected Python-helper rule.
 
 Application stdout and stderr can never inject control records because the bootstrap encodes them
 through dedicated descriptors. Raw account-shell output before bootstrap is not framed application
@@ -775,10 +784,12 @@ different failure is primary. It does not compress those facts into a return cod
 
 `ApplicationState` is `NOT_STARTED`, `STARTED`, `COMPLETED`, or `UNKNOWN`. `NOT_STARTED` needs
 positive evidence, such as local refusal before dispatch or a trusted pre-launch `FAILED` frame.
-`STARTED` needs proved exec acknowledgment. `COMPLETED` needs a terminal transcript plus proved
-start. `UNKNOWN` covers every gap, including `LAUNCHING` alone and every direct wait without the
-required start evidence. `status` exists only for `COMPLETED` and is the honest union
-`WaitCode | ExitCode | Signal`; the direct shell path produces only `WaitCode`.
+`STARTED` needs proved eager exec acknowledgment. `COMPLETED` needs a terminal transcript plus
+either proved eager entry or the selected fixed-helper retrospective normal-completion evidence.
+`UNKNOWN` covers every gap, including `LAUNCHING` alone, a signaled child without independent entry
+evidence and every direct wait outside the selected rule. `status` exists only for `COMPLETED` and
+is the honest union `WaitCode | ExitCode | Signal`; the shell experiment produces only `WaitCode`,
+while the selected inline helper produces exact `ExitCode` for its normal waits.
 
 `ExecutionOutput` contains retained bytes, `complete`, and the shared `Retention` value
 `CAPTURED`/`DELIVERED`/`DISCARDED`/`SUPPRESSED`. Delivered output records acceptance by the

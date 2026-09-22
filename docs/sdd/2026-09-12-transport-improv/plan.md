@@ -1581,12 +1581,11 @@ available.
 - [x] Preserve a valid helper terminal transcript when only later carrier observation is lost, while
       retaining the carrier error. Missing terminal, wire corruption and post-terminal records must
       still prevent trusted terminal evidence.
-- [ ] Settle supported-runtime eligibility for retrospective normal completion, then implement and
-      verify its producer/reducer. The source audit covers CPython 3.11 through 3.14, not arbitrary
-      implementations or future launch mechanisms. The operator has been asked about an explicit
-      initial runtime range; no range restriction or new completion rule is accepted merely by
-      recording this audit. Eager start, signaled-entry ambiguity and native acceptance remain
-      separate gates.
+- [ ] Implement and verify the selected retrospective normal-completion producer/reducer.
+      Eligibility is inline-only CPython 3.11 through 3.14, the range covered by the source and
+      mechanism audit; the shared file-helper prerequisite remains Python 3.11 or newer. Outside the
+      selected range, inline execution refuses before `LAUNCHING` rather than inventing stronger
+      evidence. Eager start, signaled-entry ambiguity and native acceptance remain separate gates.
 
 All three private lanes accept code pin `8ceb899a` with no material findings. Review corrected
 acceptance of output/status dataclass extensions that added diagnostic fields to default result
