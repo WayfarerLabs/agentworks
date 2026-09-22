@@ -83,6 +83,120 @@ def test_fresh_schema_has_claim_and_lifecycle_obligation_shape(tmp_path: Path) -
     ]
 
 
+def test_migration_backfills_generation_from_stable_operation_id(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    build_schema(path, 42)
+    operation_id = "a" * 32
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "INSERT INTO operation_owners (operation_id, operation_kind, state, claimed_at, updated_at) "
+        "VALUES (?, 'vm-reinitialize', 'reserved', '2026-09-22T00:00:00Z', '2026-09-22T00:00:00Z')",
+        (operation_id,),
+    )
+    connection.execute(
+        "INSERT INTO operation_claims (resource_kind, resource_name, operation_id) VALUES ('vm', 'backfill', ?)",
+        (operation_id,),
+    )
+    connection.commit()
+    connection.close()
+
+    database = Database(path)
+    try:
+        claim = database.operations.inspect(_scope("backfill"))
+        assert claim is not None
+        assert claim.ownership.operation_id == operation_id
+        assert claim.ownership.generation_id == operation_id
+    finally:
+        database.close()
+
+
+def test_malformed_persisted_generation_fails_closed(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    database = Database(path)
+    ownership = database.operations.claim(_scope(), "vm-reinitialize")
+    database.close()
+
+    connection = sqlite3.connect(path)
+    connection.execute("PRAGMA ignore_check_constraints = ON")
+    connection.execute(
+        "UPDATE operation_owners SET generation_id = 'wrong' WHERE operation_id = ?", (ownership.operation_id,)
+    )
+    connection.commit()
+    connection.close()
+
+    reopened = Database(path)
+    try:
+        with pytest.raises(StateError) as raised:
+            reopened.operations.inspect(_scope())
+        assert raised.value.entity_kind == "database"
+    finally:
+        reopened.close()
+
+
+def test_same_generation_recovery_receipt_fails_closed(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    database = Database(path)
+    ownership = database.operations.claim(_scope(), "vm-reinitialize")
+    database.close()
+
+    connection = sqlite3.connect(path)
+    connection.execute("PRAGMA ignore_check_constraints = ON")
+    connection.execute(
+        "UPDATE operation_owners SET recovery_predecessor_generation_id = generation_id WHERE operation_id = ?",
+        (ownership.operation_id,),
+    )
+    connection.commit()
+    connection.close()
+
+    reopened = Database(path)
+    try:
+        with pytest.raises(StateError) as raised:
+            reopened.operations.inspect(_scope())
+        assert raised.value.entity_kind == "database"
+    finally:
+        reopened.close()
+
+
+def test_repository_rebind_requires_a_sealed_recovery_claim(db: Database) -> None:
+    predecessor = db.operations.claim(_scope(), "vm-reinitialize")
+    obligation = db.operations.register_lifecycle_obligation(
+        predecessor,
+        "adapter-dispatch",
+        1,
+        b"prepared",
+        obligation_id="a" * 32,
+    )
+
+    with pytest.raises(StateError):
+        db.operations.rebind_lifecycle_obligation(
+            predecessor,
+            obligation.obligation_id,
+            "adapter-dispatch",
+            1,
+            b"prepared",
+        )
+
+    db.operations.seal_lifecycle_obligations(predecessor)
+    with pytest.raises(StateError):
+        db.operations.rebind_lifecycle_obligation(
+            predecessor,
+            obligation.obligation_id,
+            "adapter-dispatch",
+            1,
+            b"prepared",
+        )
+
+    recovered = db.operations.recover_takeover(predecessor, "b" * 32)
+    rebound = db.operations.rebind_lifecycle_obligation(
+        recovered.ownership,
+        obligation.obligation_id,
+        "adapter-dispatch",
+        1,
+        b"prepared",
+    )
+    assert rebound == db.operations.list_lifecycle_obligations(recovered.ownership)[0]
+
+
 def test_v38_migration_preserves_existing_data_and_adds_empty_claim_store(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
     build_schema(path, 38)
@@ -132,6 +246,43 @@ def test_independent_connections_refuse_an_owned_scope(tmp_path: Path) -> None:
         first.operations.abandon_reserved(ownership)
         replacement = second.operations.claim(_scope(), "vm-delete")
         assert replacement.operation_id != ownership.operation_id
+    finally:
+        second.close()
+        first.close()
+
+
+def test_independent_connections_serialize_different_recovery_generations(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    first = Database(path)
+    second = Database(path)
+    predecessor = first.operations.claim(_scope(), "vm-reinitialize")
+    start = Event()
+    outcomes: list[str] = []
+
+    def recover(database: Database, generation_id: str) -> None:
+        assert start.wait(timeout=10)
+        try:
+            database.operations.recover_takeover(predecessor, generation_id)
+        except StateError:
+            outcomes.append("stale")
+        else:
+            outcomes.append(generation_id)
+
+    threads = [
+        Thread(target=recover, args=(first, "1" * 32)),
+        Thread(target=recover, args=(second, "2" * 32)),
+    ]
+    try:
+        for thread in threads:
+            thread.start()
+        start.set()
+        for thread in threads:
+            thread.join(timeout=10)
+        assert all(not thread.is_alive() for thread in threads)
+        assert sorted(outcomes) in [["1" * 32, "stale"], ["2" * 32, "stale"]]
+        claim = first.operations.inspect(_scope())
+        assert claim is not None
+        assert claim.ownership.generation_id in {"1" * 32, "2" * 32}
     finally:
         second.close()
         first.close()
@@ -403,7 +554,7 @@ def test_backup_and_restore_preserve_retained_operation_claim(tmp_path: Path) ->
 
 def test_manually_reconstructed_stale_ownership_is_fenced(db: Database) -> None:
     current = db.operations.claim(_scope(), "vm-reinitialize")
-    stale = OperationOwnership(current.scope, "0" * 32)
+    stale = OperationOwnership(current.scope, "0" * 32, "1" * 32)
 
     with pytest.raises(StateError):
         db.operations.register_lifecycle_obligation(stale, "platform-hold", 1, b"")

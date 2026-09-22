@@ -249,7 +249,7 @@ def test_sealing_and_every_resolution_are_required_for_whole_operation_release(d
 def test_stale_and_mismatched_owners_cannot_mutate_obligations(db: Database) -> None:
     ownership = db.operations.claim(_scope(), "vm-reinitialize")
     obligation_id = _registered(db, ownership)
-    stale = OperationOwnership(ownership.scope, "0" * 32)
+    stale = OperationOwnership(ownership.scope, "0" * 32, "1" * 32)
 
     with pytest.raises(StateError):
         db.operations.mark_lifecycle_obligation_possible_effect(stale, obligation_id)

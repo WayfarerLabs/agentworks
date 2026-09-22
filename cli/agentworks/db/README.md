@@ -3,12 +3,13 @@
 ## Operation ownership
 
 `Database.operations` reserves coarse VM or platform-host resources for participating operations
-using the same state database. A fresh operation ID identifies an operation root; its current exact
-resource claim is one membership of that root. The lifecycle ledger attaches to the operation root,
-not that membership, so a later hierarchical coordinator can add memberships without moving adapter
-recovery facts. The ID is not a secret or an authentication credential. Claims are committed in
-short standalone transactions, not held-open SQL transactions around network work. Nested command
-transactions cannot acquire or change them.
+using the same state database. A fresh operation ID identifies an operation root; a separate fresh
+generation ID identifies its current owner. Its current exact resource claim is one membership of
+that root. The lifecycle ledger attaches to the operation root, not that membership, so a later
+hierarchical coordinator can add memberships without moving adapter recovery facts. The ID is not a
+secret or an authentication credential. Claims are committed in short standalone transactions, not
+held-open SQL transactions around network work. Nested command transactions cannot acquire or change
+them.
 
 Core registers each independent lifecycle obligation before its effect can be admitted. A row has a
 fresh ID, bounded lower-kebab kind, positive adapter payload version, and at most 8,192 bytes of
@@ -22,13 +23,16 @@ obligation is resolved by typed adapter evidence and no owner work remains, can 
 operation resolution. Final release removes those resolved rows and the exact claim in one short
 transaction. A reserved claim with no ledger rows may be abandoned; rows cannot be discarded through
 that path. The repository records core's conclusions, it does not establish remote quiescence. Every
-transition matches the claim's ID and prior state, so a delayed database update or release cannot
-affect a subsequent owner.
+transition matches both the claim's operation and generation IDs plus prior state, so a delayed
+database update or release cannot affect a subsequent owner. Explicit recovery can atomically rotate
+the generation from one exact predecessor, seal the unchanged ledger, and retain that predecessor
+generation with the requested generation as an exact interrupted-reply retry receipt. It does not
+establish remote quiescence.
 
 Closing the database, process death and elapsed time do not delete claims. Inspection reports their
-bounded metadata without command arguments, environment or file contents. There is no lease expiry,
-automatic takeover or coordination across independent databases. Backup preserves claims and their
-ledger rows; restoring one does not establish that target state matches the snapshot.
+bounded metadata without command arguments, environment or file contents. There is no automatic
+takeover, lease expiry or coordination across independent databases. Backup preserves claims and
+their ledger rows; restoring one does not establish that target state matches the snapshot.
 
 This persistence primitive is not yet connected to production operation admission or RunContext. The
 caller composition and recovery paths must be implemented before it can protect file workflows.

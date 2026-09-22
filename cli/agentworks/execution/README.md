@@ -663,6 +663,12 @@ teardown are quiescent. Explicit close stops admission and releases only a never
 or an explicitly resolved claim; it does not infer remote quiescence from local return or from the
 absence of an open child attempt.
 
+Recovery may construct a new owner only by rotating the persisted generation from an exact
+predecessor. That atomically seals the stable operation ledger and restores persisted reserved,
+possible-dispatch, or resolved state without inferring remote quiescence. A recovery adapter may
+rebind its one exact existing obligation identity; it cannot add a generic or adapter obligation to
+the sealed ledger.
+
 `_file_operations.py` uses the caller's active borrow for stat, inventory, conditional removal and
 metadata composition. Metadata name lookup and mutation share one borrow and deadline; successful
 lookup and normal helper termination are required before mutation. Candidate observations are

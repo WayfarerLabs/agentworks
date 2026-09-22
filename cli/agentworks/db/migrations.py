@@ -940,6 +940,95 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
             PRIMARY KEY (operation_id, obligation_id)
         );
     """,
+    43: """
+        CREATE TABLE operation_owners_new (
+            operation_id TEXT PRIMARY KEY
+                CHECK (
+                    length(operation_id) = 32
+                    AND operation_id NOT GLOB '*[^0-9a-f]*'
+                ),
+            generation_id TEXT NOT NULL
+                CHECK (
+                    length(generation_id) = 32
+                    AND generation_id NOT GLOB '*[^0-9a-f]*'
+                ),
+            recovery_predecessor_generation_id TEXT
+                CHECK (
+                    recovery_predecessor_generation_id IS NULL
+                    OR (
+                        length(recovery_predecessor_generation_id) = 32
+                        AND recovery_predecessor_generation_id NOT GLOB '*[^0-9a-f]*'
+                    )
+                ),
+            operation_kind TEXT NOT NULL
+                CHECK (typeof(operation_kind) = 'text' AND length(operation_kind) BETWEEN 1 AND 64),
+            state TEXT NOT NULL
+                CHECK (state IN ('reserved', 'possible-dispatch', 'resolved')),
+            claimed_at TEXT NOT NULL CHECK (length(claimed_at) = 20),
+            updated_at TEXT NOT NULL CHECK (length(updated_at) = 20),
+            obligations_sealed_at TEXT
+                CHECK (obligations_sealed_at IS NULL OR length(obligations_sealed_at) = 20),
+            CHECK (
+                recovery_predecessor_generation_id IS NULL
+                OR recovery_predecessor_generation_id != generation_id
+            )
+        );
+
+        INSERT INTO operation_owners_new
+            (operation_id, generation_id, operation_kind, state, claimed_at, updated_at, obligations_sealed_at)
+        SELECT operation_id, operation_id, operation_kind, state, claimed_at, updated_at, obligations_sealed_at
+        FROM operation_owners;
+
+        CREATE TABLE operation_claims_new (
+            resource_kind TEXT NOT NULL
+                CHECK (resource_kind IN ('vm', 'platform-host')),
+            resource_name TEXT NOT NULL
+                CHECK (typeof(resource_name) = 'text' AND length(resource_name) BETWEEN 1 AND 255),
+            operation_id TEXT NOT NULL
+                REFERENCES operation_owners_new(operation_id) ON DELETE CASCADE,
+            PRIMARY KEY (resource_kind, resource_name)
+        );
+
+        INSERT INTO operation_claims_new (resource_kind, resource_name, operation_id)
+        SELECT resource_kind, resource_name, operation_id FROM operation_claims;
+
+        CREATE TABLE lifecycle_obligations_new (
+            operation_id TEXT NOT NULL
+                REFERENCES operation_owners_new(operation_id) ON DELETE CASCADE,
+            obligation_id TEXT NOT NULL UNIQUE
+                CHECK (
+                    length(obligation_id) = 32
+                    AND obligation_id NOT GLOB '*[^0-9a-f]*'
+                ),
+            obligation_kind TEXT NOT NULL
+                CHECK (typeof(obligation_kind) = 'text' AND length(obligation_kind) BETWEEN 1 AND 64),
+            state TEXT NOT NULL
+                CHECK (state IN ('registered', 'possible-effect', 'resolved')),
+            payload_version INTEGER NOT NULL
+                CHECK (typeof(payload_version) = 'integer' AND payload_version BETWEEN 1 AND 2147483647),
+            payload BLOB NOT NULL
+                CHECK (typeof(payload) = 'blob' AND length(payload) <= 8192),
+            payload_revision INTEGER NOT NULL DEFAULT 0
+                CHECK (typeof(payload_revision) = 'integer' AND payload_revision >= 0),
+            registered_at TEXT NOT NULL CHECK (length(registered_at) = 20),
+            updated_at TEXT NOT NULL CHECK (length(updated_at) = 20),
+            PRIMARY KEY (operation_id, obligation_id)
+        );
+
+        INSERT INTO lifecycle_obligations_new
+            (operation_id, obligation_id, obligation_kind, state, payload_version, payload, payload_revision,
+             registered_at, updated_at)
+        SELECT operation_id, obligation_id, obligation_kind, state, payload_version, payload, payload_revision,
+               registered_at, updated_at
+        FROM lifecycle_obligations;
+
+        DROP TABLE lifecycle_obligations;
+        DROP TABLE operation_claims;
+        DROP TABLE operation_owners;
+        ALTER TABLE operation_owners_new RENAME TO operation_owners;
+        ALTER TABLE operation_claims_new RENAME TO operation_claims;
+        ALTER TABLE lifecycle_obligations_new RENAME TO lifecycle_obligations;
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -1131,6 +1220,7 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
             "updated_at",
         ),
     },
+    43: {"operation_owners": ("generation_id", "recovery_predecessor_generation_id")},
 }
 
 _SCHEMA_SENTINEL_REMOVED_TABLES: dict[int, tuple[str, ...]] = {

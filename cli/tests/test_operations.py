@@ -13,6 +13,7 @@ from agentworks.db import (
     Database,
     LifecycleObligationState,
     OperationClaimState,
+    OperationOwnership,
     OperationResourceKind,
     OperationScope,
 )
@@ -87,6 +88,161 @@ def test_owner_claim_conflicts_across_connections_before_borrow(tmp_path: Path) 
         first.close()
 
 
+def test_recovery_rotates_only_generation_and_preserves_the_sealed_ledger(db: Database) -> None:
+    predecessor = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    obligation = predecessor.register_lifecycle_obligation(
+        "adapter-dispatch",
+        payload_version=1,
+        payload=b"prepared",
+        obligation_id="a" * 32,
+    )
+    obligation.mark_possible_effect()
+    obligation.publish_payload(expected_revision=0, payload_version=2, payload=b"published")
+    before = db.operations.list_lifecycle_obligations(predecessor.ownership)[0]
+
+    recovered = OperationOwner.recover(db.operations, predecessor.ownership, "b" * 32)
+    claim = db.operations.inspect(_scope())
+    after = db.operations.list_lifecycle_obligations(recovered.ownership)[0]
+
+    assert claim is not None
+    assert recovered.ownership.operation_id == predecessor.ownership.operation_id
+    assert recovered.ownership.generation_id == "b" * 32
+    assert claim.obligations_sealed_at is not None
+    assert (
+        after.obligation_id,
+        after.obligation_kind,
+        after.state,
+        after.payload_version,
+        after.payload,
+        after.payload_revision,
+        after.registered_at,
+        after.updated_at,
+    ) == (
+        before.obligation_id,
+        before.obligation_kind,
+        before.state,
+        before.payload_version,
+        before.payload,
+        before.payload_revision,
+        before.registered_at,
+        before.updated_at,
+    )
+
+    retry = OperationOwner.recover(db.operations, predecessor.ownership, "b" * 32)
+    assert retry.ownership == recovered.ownership
+    wrong_predecessor = OperationOwnership(
+        predecessor.ownership.scope,
+        predecessor.ownership.operation_id,
+        "0" * 32,
+    )
+    with pytest.raises(StateError):
+        OperationOwner.recover(db.operations, wrong_predecessor, "b" * 32)
+    with pytest.raises(StateError):
+        OperationOwner.recover(db.operations, predecessor.ownership, "c" * 32)
+
+    rebound = recovered.rebind_lifecycle_obligation(
+        "a" * 32, "adapter-dispatch", payload_version=2, payload=b"published"
+    )
+    assert rebound.obligation_id == "a" * 32
+    with pytest.raises(StateError):
+        recovered.register_lifecycle_obligation("new-adapter", payload_version=1, payload=b"")
+    with pytest.raises(StateError):
+        recovered.record_effects_resolved()
+    rebound.resolve()
+    recovered.record_effects_resolved()
+    recovered.close()
+
+
+def test_recovery_fences_every_predecessor_repository_transition(db: Database) -> None:
+    predecessor = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    obligation = predecessor.register_lifecycle_obligation("adapter-dispatch", payload_version=1, payload=b"")
+    obligation.mark_possible_effect()
+    obligation.resolve()
+    predecessor.seal_lifecycle_obligations()
+    predecessor.record_effects_resolved()
+    recovered = OperationOwner.recover(db.operations, predecessor.ownership, "d" * 32)
+
+    with pytest.raises(StateError):
+        predecessor.register_lifecycle_obligation("new-adapter", payload_version=1, payload=b"")
+    with pytest.raises(StateError):
+        obligation.mark_possible_effect()
+    with pytest.raises(StateError):
+        obligation.publish_payload(expected_revision=0, payload_version=1, payload=b"")
+    with pytest.raises(StateError):
+        obligation.resolve()
+    with pytest.raises(StateError):
+        predecessor.seal_lifecycle_obligations()
+    with pytest.raises(StateError):
+        predecessor.record_effects_resolved()
+    with pytest.raises(StateError):
+        predecessor.close()
+
+    recovered.close()
+    assert db.operations.inspect(_scope()) is None
+
+
+def test_recovery_reserved_claim_requires_explicit_sealed_resolution(db: Database) -> None:
+    predecessor = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    recovered = OperationOwner.recover(db.operations, predecessor.ownership, "e" * 32)
+
+    with pytest.raises(StateError):
+        recovered.close()
+    recovered.record_effects_resolved()
+    recovered.close()
+    assert db.operations.inspect(_scope()) is None
+
+
+def test_recovery_resolved_claim_can_release(db: Database) -> None:
+    predecessor = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    predecessor.seal_lifecycle_obligations()
+    predecessor.record_effects_resolved()
+
+    recovered = OperationOwner.recover(db.operations, predecessor.ownership, "f" * 32)
+    recovered.close()
+    assert db.operations.inspect(_scope()) is None
+
+
+def test_recovery_refuses_ordinary_borrow_but_rebinds_exact_supplied_obligation(db: Database) -> None:
+    predecessor = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    borrow = predecessor.borrow()
+    obligation = borrow.install_dispatch_obligation(
+        "c" * 32,
+        "adapter-dispatch",
+        payload_version=1,
+        payload=b"prepared",
+    )
+    attempt = borrow.begin_attempt()
+    attempt.settle()
+    borrow.handoff_retained_effect()
+
+    recovered = OperationOwner.recover(db.operations, predecessor.ownership, "d" * 32)
+    with pytest.raises(StateError):
+        recovered.borrow()
+
+    rebound = recovered.rebind_lifecycle_obligation(
+        obligation.obligation_id,
+        "adapter-dispatch",
+        payload_version=1,
+        payload=b"prepared",
+    )
+    rebound.resolve()
+    recovered.record_effects_resolved()
+    recovered.close()
+
+
+def test_ordinary_owner_cannot_rebind_an_obligation_even_after_sealing(db: Database) -> None:
+    owner = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+
+    with pytest.raises(StateError):
+        owner.rebind_lifecycle_obligation("a" * 32, "adapter-dispatch", payload_version=1, payload=b"prepared")
+
+    owner.seal_lifecycle_obligations()
+    with pytest.raises(StateError):
+        owner.rebind_lifecycle_obligation("a" * 32, "adapter-dispatch", payload_version=1, payload=b"prepared")
+    owner.record_effects_resolved()
+    owner.close()
+
+
 def test_shared_owner_refuses_overlapping_borrows_without_waiting(db: Database) -> None:
     owner = OperationOwner.acquire(db.operations, _scope(), "file-upload")
     first = owner.borrow()
@@ -101,7 +257,7 @@ def test_shared_owner_refuses_overlapping_borrows_without_waiting(db: Database) 
     assert db.operations.inspect(_scope()) is None
 
 
-def test_one_borrow_arms_its_generic_obligation_once(
+def test_each_borrow_attempt_revalidates_its_generic_obligation(
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -125,12 +281,25 @@ def test_one_borrow_arms_its_generic_obligation_once(
     second = borrow.begin_attempt()
     second.settle()
 
-    assert calls == 1
+    assert calls == 2
     borrow.close()
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
     assert db.operations.inspect(_scope()) is None
+
+
+def test_takeover_fences_a_later_attempt_from_an_already_armed_borrow(db: Database) -> None:
+    predecessor = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    borrow = predecessor.borrow()
+    first = borrow.begin_attempt()
+    first.settle()
+
+    OperationOwner.recover(db.operations, predecessor.ownership, "a" * 32)
+
+    with pytest.raises(StateError):
+        borrow.begin_attempt()
+    assert borrow.has_outstanding_attempt
 
 
 def test_closing_stops_new_dispatch_and_requires_later_explicit_close(db: Database) -> None:
@@ -568,6 +737,33 @@ def test_interrupted_release_accepts_a_replacement_fence_without_deleting_it(
     claim = repository.inspect(_scope())
     assert claim is not None and claim.ownership == replacement.ownership
     replacement.close()
+
+
+def test_interrupted_release_does_not_treat_same_operation_takeover_as_success(
+    db: Database,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = db.operations
+    owner = OperationOwner.acquire(repository, _scope(), "file-upload")
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    recovered: OperationOwner | None = None
+
+    def take_over_then_interrupt(ownership):
+        nonlocal recovered
+        recovered = OperationOwner.recover(repository, ownership, "b" * 32)
+        raise KeyboardInterrupt
+
+    original = repository.release_resolved
+    monkeypatch.setattr(repository, "release_resolved", take_over_then_interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        owner.close()
+
+    with pytest.raises(StateError):
+        owner.close()
+    assert recovered is not None
+    monkeypatch.setattr(repository, "release_resolved", original)
+    recovered.close()
 
 
 def test_close_abandons_a_reserved_owner(db: Database) -> None:
