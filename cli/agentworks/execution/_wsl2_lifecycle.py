@@ -1,19 +1,16 @@
 """Private WSL2 guest-anchor lifecycle candidate.
 
-This module reports independent local and guest observations. Closing a Windows
-Job Object, observing ``wsl.exe`` exit, stdout EOF, and a helper EXITING record
-do not establish that the Linux guest anchor is absent. Only an independent
-exact-identity observer may report that fact.
+Host-client, Job Object, helper, and guest observations are deliberately kept
+separate. Neither local cleanup nor a helper receipt establishes that a Linux
+guest anchor is absent. Only an independent exact-identity observer may report
+that fact.
 """
 
 from __future__ import annotations
 
 import re
 import secrets
-import time
-from collections.abc import Callable
-from contextlib import suppress
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
@@ -43,36 +40,39 @@ _HELPER_SOURCE = (
 )
 
 
-class JobAssignment(StrEnum):
-    """Caller-visible outcome of post-spawn Job Object assignment.
-
-    ``ASSIGNED_AFTER_SPAWN`` deliberately does not claim that controller death
-    in the preceding spawn-to-assignment window could not orphan the guest.
-    """
-
-    NOT_AVAILABLE = "not_available"
-    ASSIGNED_AFTER_SPAWN = "assigned_after_spawn"
-    FAILED = "failed"
-
-
 class HostClientStatus(StrEnum):
-    """Host-client exit observation, distinct from guest-anchor observation."""
+    """What the native owner observed about its WSL client process."""
 
-    NOT_OBSERVED = "not_observed"
+    NOT_CREATED = "not_created"
+    ACTIVE = "active"
     EXITED = "exited"
     UNKNOWN = "unknown"
 
 
-class HostClientSettlement(StrEnum):
-    """Whether this object retains a possibly live host-client capability."""
+class JobAssignment(StrEnum):
+    """What the native owner observed while assigning its Job Object.
 
-    ACTIVE = "active"
-    EXIT_CONFIRMED = "exit_confirmed"
-    UNCERTAIN = "uncertain"
+    ``ASSIGNED_AFTER_SPAWN`` records successful post-spawn assignment. It does
+    not claim that controller death before assignment could not orphan a guest.
+    """
+
+    NOT_CREATED = "not_created"
+    ASSIGNED_AFTER_SPAWN = "assigned_after_spawn"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
+
+
+class JobHandleSettlement(StrEnum):
+    """Whether the Job Object handle has been exactly settled locally."""
+
+    NOT_CREATED = "not_created"
+    OPEN = "open"
+    CLOSED = "closed"
+    UNKNOWN = "unknown"
 
 
 class HelperExitReceipt(StrEnum):
-    """Bounded helper receipt after controller EOF, not absence evidence."""
+    """Bounded helper receipt after EOF, not guest-absence evidence."""
 
     NOT_OBSERVED = "not_observed"
     RECEIVED = "received"
@@ -88,8 +88,25 @@ class GuestAnchorPresence(StrEnum):
 
 
 @dataclass(frozen=True)
+class LocalResourceSnapshot:
+    """Immutable native-owner facts for local process and Job Object resources."""
+
+    host_client_status: HostClientStatus
+    host_client_exit_status: int | None
+    job_assignment: JobAssignment
+    job_handle_settlement: JobHandleSettlement
+
+    @property
+    def settled(self) -> bool:
+        """Whether both local resources are exactly settled or never created."""
+        return self.host_client_status in {HostClientStatus.NOT_CREATED, HostClientStatus.EXITED} and (
+            self.job_handle_settlement in {JobHandleSettlement.NOT_CREATED, JobHandleSettlement.CLOSED}
+        )
+
+
+@dataclass(frozen=True)
 class GuestAnchorIdentity:
-    """Guest PID and Linux start-time identity parsed from an exact READY line."""
+    """Guest PID and Linux start-time identity from an exact READY record."""
 
     pid: int
     start_time: int
@@ -97,23 +114,22 @@ class GuestAnchorIdentity:
 
 @dataclass(frozen=True)
 class WSL2AnchorEvidence:
-    """Separate facts observed while starting or releasing one guest anchor."""
+    """Current independent local, helper, and guest observations."""
 
-    identity: GuestAnchorIdentity
-    job_assignment: JobAssignment
-    host_client_status: HostClientStatus = HostClientStatus.NOT_OBSERVED
-    host_client_exit_status: int | None = None
-    host_client_settlement: HostClientSettlement = HostClientSettlement.ACTIVE
+    local: LocalResourceSnapshot
+    identity: GuestAnchorIdentity | None = None
     helper_exit_receipt: HelperExitReceipt = HelperExitReceipt.NOT_OBSERVED
     guest_anchor_presence: GuestAnchorPresence = GuestAnchorPresence.UNKNOWN
 
 
 class OwnedHostClient(Protocol):
-    """Pre-created owner that retains host cleanup across spawn interruption.
+    """Inert native owner that retains every local capability through failure.
 
-    ``read_stdout_line`` returns one complete binary record terminated by a
-    newline, EOF as ``b""``, or a record exceeding the requested bound. Native
-    framing is deliberately left to a later adapter proof.
+    Construction performs no native work. ``spawn_owned`` must publish any host
+    process and Job Object handle into this object before an interruption can
+    escape. ``read_stdout_line`` returns one complete bounded binary line, EOF
+    as ``b""``, or a line exceeding the supplied bound. ``settle`` attempts all
+    owned local cleanup before raising and keeps retryable snapshot state.
     """
 
     def spawn_owned(self, argv: tuple[str, ...], deadline: Deadline) -> None: ...
@@ -124,30 +140,15 @@ class OwnedHostClient(Protocol):
 
     def wait(self, deadline: Deadline) -> int | None: ...
 
-    def terminate(self, deadline: Deadline) -> None: ...
+    def snapshot(self) -> LocalResourceSnapshot: ...
 
-
-class JobObject(Protocol):
-    """Injected Job Object operations, each bounded by the supplied deadline."""
-
-    def assign(self, owner: OwnedHostClient, deadline: Deadline) -> None: ...
-
-    def close(self, deadline: Deadline) -> None: ...
+    def settle(self, deadline: Deadline) -> LocalResourceSnapshot: ...
 
 
 class GuestAnchorObserver(Protocol):
-    """Externally proved observer for precisely one guest PID/start-time pair."""
+    """Externally proved observer for one precise guest PID/start-time pair."""
 
     def observe(self, identity: GuestAnchorIdentity, deadline: Deadline) -> GuestAnchorPresence: ...
-
-
-HostOwnerFactory = Callable[[], OwnedHostClient]
-JobFactory = Callable[[Deadline], JobObject]
-
-
-def _cleanup_deadline() -> Deadline:
-    """Allocate the one fixed post-operation cleanup allowance."""
-    return Deadline(time.monotonic() + _CLEANUP_SECONDS)
 
 
 def _ready_identity(receipt: object, nonce: str) -> GuestAnchorIdentity:
@@ -178,207 +179,137 @@ def _exit_receipt(receipt: object, nonce: str) -> HelperExitReceipt:
     )
 
 
-def _note(exception: BaseException, detail: str) -> None:
-    exception.add_note(f"WSL2 guest-anchor cleanup: {detail}")
+def _note(primary: BaseException, detail: str) -> None:
+    primary.add_note(f"WSL2 guest-anchor cleanup: {detail}")
 
 
-def _force_cleanup(
-    owner: OwnedHostClient | None,
-    job: JobObject | None,
-    evidence: WSL2AnchorEvidence | None,
-) -> tuple[WSL2AnchorEvidence | None, bool]:
-    """Spend one fresh allowance forcing and observing locally owned resources."""
-    cleanup = _cleanup_deadline()
-    status: int | None = None
-    if owner is not None:
-        with suppress(BaseException):
-            owner.terminate(cleanup)
-        try:
-            observed = owner.wait(cleanup)
-        except BaseException:
-            observed = None
-        if type(observed) is int:
-            status = observed
-    if job is not None:
-        with suppress(BaseException):
-            job.close(cleanup)
-    if evidence is None:
-        return None, owner is None or status is not None
-    if status is not None:
-        return (
-            replace(
-                evidence,
-                host_client_status=HostClientStatus.EXITED,
-                host_client_exit_status=status,
-                host_client_settlement=HostClientSettlement.EXIT_CONFIRMED,
-            ),
-            True,
-        )
-    return (
-        replace(
-            evidence,
-            host_client_status=HostClientStatus.UNKNOWN,
-            host_client_exit_status=None,
-            host_client_settlement=HostClientSettlement.UNCERTAIN,
-        ),
-        False,
-    )
+class WSL2GuestAnchorOwner:
+    """Caller-owned lifecycle around one inert native host-client owner.
 
-
-class WSL2GuestAnchor:
-    """One cooperative helper that retains host cleanup until exact local exit."""
-
-    def __init__(
-        self,
-        *,
-        owner: OwnedHostClient,
-        job: JobObject | None,
-        observer: GuestAnchorObserver | None,
-        nonce: str,
-        evidence: WSL2AnchorEvidence,
-    ) -> None:
-        self._owner = owner
-        self._job = job
-        self._observer = observer
-        self._nonce = nonce
-        self._evidence = evidence
-        self._settled = False
-
-    @property
-    def evidence(self) -> WSL2AnchorEvidence:
-        """Return the latest immutable, bounded observation record."""
-        return self._evidence
-
-    def release(self, deadline: Deadline) -> WSL2AnchorEvidence:
-        """Request EOF, then retain cleanup capability until host exit is exact."""
-        if self._settled:
-            return self._evidence
-        try:
-            self._release(deadline)
-        except BaseException as error:
-            evidence, settled = _force_cleanup(self._owner, self._job, self._evidence)
-            self._evidence = evidence or self._evidence
-            if not settled:
-                _note(error, "host-client settlement is uncertain")
-            else:
-                self._settled = True
-            raise
-        if self._evidence.host_client_settlement == HostClientSettlement.EXIT_CONFIRMED:
-            self._settled = True
-            self._observe(deadline)
-        return self._evidence
-
-    def _release(self, deadline: Deadline) -> None:
-        if deadline.expired:
-            evidence, _ = _force_cleanup(self._owner, self._job, self._evidence)
-            self._evidence = evidence or self._evidence
-            return
-        try:
-            self._owner.close_stdin()
-        except Exception:
-            evidence, _ = _force_cleanup(self._owner, self._job, self._evidence)
-            self._evidence = evidence or self._evidence
-            return
-        if deadline.expired:
-            evidence, _ = _force_cleanup(self._owner, self._job, self._evidence)
-            self._evidence = evidence or self._evidence
-            return
-        try:
-            receipt = self._owner.read_stdout_line(_MAX_RECEIPT_BYTES + 1, deadline)
-        except Exception:
-            receipt = None
-        if receipt is not None:
-            self._evidence = replace(self._evidence, helper_exit_receipt=_exit_receipt(receipt, self._nonce))
-        if deadline.expired:
-            evidence, _ = _force_cleanup(self._owner, self._job, self._evidence)
-            self._evidence = evidence or self._evidence
-            return
-        try:
-            status = self._owner.wait(deadline)
-        except Exception:
-            status = None
-        if type(status) is int:
-            if self._job is not None:
-                with suppress(BaseException):
-                    self._job.close(_cleanup_deadline() if deadline.expired else deadline)
-            self._evidence = replace(
-                self._evidence,
-                host_client_status=HostClientStatus.EXITED,
-                host_client_exit_status=status,
-                host_client_settlement=HostClientSettlement.EXIT_CONFIRMED,
-            )
-            return
-        evidence, _ = _force_cleanup(self._owner, self._job, self._evidence)
-        self._evidence = evidence or self._evidence
-
-    def _observe(self, deadline: Deadline) -> None:
-        if self._observer is None or deadline.expired:
-            return
-        try:
-            presence = self._observer.observe(self._evidence.identity, deadline)
-        except Exception:
-            return
-        if type(presence) is GuestAnchorPresence:
-            self._evidence = replace(self._evidence, guest_anchor_presence=presence)
-
-
-class WSL2GuestAnchorLauncher:
-    """Build one literal WSL2 Python helper invocation through injected boundaries."""
+    The caller constructs this object before dispatch and retains it after every
+    start or release failure. This module intentionally supplies no native
+    Windows adapter and does not claim live WSL proof.
+    """
 
     def __init__(
         self,
         connection: WSL2Connection,
+        native: OwnedHostClient,
         *,
-        owner_factory: HostOwnerFactory,
-        job_factory: JobFactory,
         observer: GuestAnchorObserver | None = None,
     ) -> None:
         self._connection = connection
-        self._owner_factory = owner_factory
-        self._job_factory = job_factory
+        self._native = native
         self._observer = observer
+        self._local = native.snapshot()
+        self._identity: GuestAnchorIdentity | None = None
+        self._nonce: str | None = None
+        self._helper_exit_receipt = HelperExitReceipt.NOT_OBSERVED
+        self._guest_anchor_presence = GuestAnchorPresence.UNKNOWN
+        self._start_attempted = False
 
-    def start(self, deadline: Deadline) -> WSL2GuestAnchor:
-        """Create an owner, dispatch once, and require an exact READY record."""
+    @property
+    def evidence(self) -> WSL2AnchorEvidence:
+        """Return the current immutable observation record without new I/O."""
+        return WSL2AnchorEvidence(
+            local=self._local,
+            identity=self._identity,
+            helper_exit_receipt=self._helper_exit_receipt,
+            guest_anchor_presence=self._guest_anchor_presence,
+        )
+
+    def start(self, deadline: Deadline) -> WSL2AnchorEvidence:
+        """Dispatch one helper while retaining this object through every outcome."""
+        if self._start_attempted:
+            raise ValidationError("WSL2 guest anchor was already started")
         if deadline.expired:
             raise ValidationError("WSL2 anchor start deadline has expired")
-        job: JobObject | None = None
-        assignment = JobAssignment.NOT_AVAILABLE
-        owner: OwnedHostClient | None = None
+        self._nonce = secrets.token_hex(16)
+        self._start_attempted = True
         try:
-            try:
-                job = self._job_factory(deadline)
-            except Exception:
-                job = None
+            self._native.spawn_owned(self._argv(self._nonce), deadline)
+            self._refresh()
             if deadline.expired:
                 raise ValidationError("WSL2 anchor start deadline has expired")
-            owner = self._owner_factory()
+            receipt = self._native.read_stdout_line(_MAX_RECEIPT_BYTES + 1, deadline)
+            identity = _ready_identity(receipt, self._nonce)
+            self._identity = identity
+            self._refresh()
             if deadline.expired:
                 raise ValidationError("WSL2 anchor start deadline has expired")
-            nonce = secrets.token_hex(16)
-            owner.spawn_owned(self._argv(nonce), deadline)
-            if deadline.expired:
-                raise ValidationError("WSL2 anchor start deadline has expired")
-            if job is not None:
-                try:
-                    job.assign(owner, deadline)
-                except Exception:
-                    assignment = JobAssignment.FAILED
-                except BaseException as error:
-                    _note(error, "job assignment state is uncertain")
-                    raise
-                else:
-                    assignment = JobAssignment.ASSIGNED_AFTER_SPAWN
-            if deadline.expired:
-                raise ValidationError("WSL2 anchor start deadline has expired")
-            identity = _ready_identity(owner.read_stdout_line(_MAX_RECEIPT_BYTES + 1, deadline), nonce)
         except BaseException as error:
-            _, settled = _force_cleanup(owner, job, None)
-            if owner is not None and not settled:
-                _note(error, "host-client settlement is uncertain")
+            self._settle_after_failure(error)
             raise
-        evidence = WSL2AnchorEvidence(identity=identity, job_assignment=assignment)
-        return WSL2GuestAnchor(owner=owner, job=job, observer=self._observer, nonce=nonce, evidence=evidence)
+        return self.evidence
+
+    def release(self, deadline: Deadline) -> WSL2AnchorEvidence:
+        """Observe cooperative EOF, settle local handles, then retry guest proof."""
+        try:
+            if not self._local.settled:
+                self._cooperative_release(deadline)
+                self._settle()
+            self._observe_guest(deadline)
+        except BaseException as error:
+            self._settle_after_failure(error)
+            raise
+        return self.evidence
+
+    def settle(self) -> WSL2AnchorEvidence:
+        """Spend a fresh local cleanup allowance without a guest observation."""
+        self._settle()
+        return self.evidence
+
+    def _cooperative_release(self, deadline: Deadline) -> None:
+        if deadline.expired:
+            return
+        try:
+            self._native.close_stdin()
+        except Exception:
+            return
+        if deadline.expired:
+            return
+        try:
+            receipt = self._native.read_stdout_line(_MAX_RECEIPT_BYTES + 1, deadline)
+        except Exception:
+            receipt = None
+        if receipt is not None and self._nonce is not None:
+            self._helper_exit_receipt = _exit_receipt(receipt, self._nonce)
+        if deadline.expired:
+            return
+        try:
+            self._native.wait(deadline)
+        except Exception:
+            return
+        self._refresh()
+
+    def _settle(self) -> None:
+        self._local = self._native.settle(Deadline.after(_CLEANUP_SECONDS))
+
+    def _settle_after_failure(self, primary: BaseException) -> None:
+        try:
+            self._settle()
+        except BaseException:
+            _note(primary, "native settlement raised")
+            try:
+                self._refresh()
+            except BaseException:
+                _note(primary, "native snapshot is unavailable")
+
+    def _refresh(self) -> None:
+        self._local = self._native.snapshot()
+
+    def _observe_guest(self, deadline: Deadline) -> None:
+        if (
+            not self._local.settled
+            or self._identity is None
+            or self._observer is None
+            or self._guest_anchor_presence == GuestAnchorPresence.ABSENT_CONFIRMED
+            or deadline.expired
+        ):
+            return
+        presence = self._observer.observe(self._identity, deadline)
+        if type(presence) is GuestAnchorPresence:
+            self._guest_anchor_presence = presence
 
     def _argv(self, nonce: str) -> tuple[str, ...]:
         return (
