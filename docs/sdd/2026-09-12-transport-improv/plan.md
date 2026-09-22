@@ -1245,6 +1245,25 @@ newer release, and retry PVE 9. Native asymmetric stream failure and `waitpid` f
 remain unmeasured; independent launch, terminal mode, reconnect-capable jobs and production
 composition remain under the broader unchecked gates above.
 
+The second native round composed transport `ae1ce293` with SSH `b57b45df`; composed head `73cdc437`
+had CLI tree `77a52a47`, which SSH later adopted unchanged. It directly exercised SSH on
+Bookworm/systemd 252 and Trixie/systemd 257, PVE 8 QGA on Bookworm, and PVE 9 QGA on Trixie.
+Immediate-exit, delayed-exit, partial-reader and full-reader cases all retained terminal lifecycle
+completion independently from their input fact. Four failed identity launches per cell left no
+failed unit, collected unit or workload cgroup, while successful and exit-23 runs retained their
+wait, stream and empty-boundary evidence. The round also re-proved target identity and groups,
+pre-payload cgroup placement, detached-descendant cleanup, binary streams, boundary-forgery
+resistance, interrupted observation without replay, self-cleanup and no staging. The composed
+non-integration suite passed 12,708 tests with 13 skips and every static, documentation, rulesync
+and website gate passed. Provider, guest unit, cgroup, process and scratch residue were
+independently zero before teardown.
+
+This closes the PVE 9 coverage cell and verifies both first-round defects. It does not complete the
+unchecked lifecycle or production-composition gates. Native asymmetric stdout-only collection
+failure and `waitpid` fault injection remain unmeasured, as do terminal mode, reconnect-capable
+jobs, production RunContext composition, migration and cutover. The public feedback/fix round closed
+cleanly at this pin; no further head change was requested by its test or complexity evidence.
+
 - [ ] SSH effort builds `execution/carriers/ssh/` and its connection/trust migration. Transport
       builds common execution, scoped context delivery, files/jobs and other adapters, and applies
       SSH policy in platform-host/Lima/provisioning paths. Test reusable host composition separately
