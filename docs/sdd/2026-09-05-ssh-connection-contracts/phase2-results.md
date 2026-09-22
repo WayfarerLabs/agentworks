@@ -343,6 +343,51 @@ with 14 skips** in 185.60 seconds. Ruff/format, mypy (1,093 sources), file lint 
 checks pass. This test-only follow-up leaves runtime code and the previously validated Rulesync,
 typer and website surfaces unchanged; hosted validation records the new head separately.
 
+Hosted [run 35698219630](https://github.com/WayfarerLabs/agentworks/actions/runs/35698219630)
+subsequently passes every required check at `3cf322f93`, including the corrected Windows fixture.
+This closes that hosted-test gate without identifying the earlier address-in-use cause or proving
+native installed-OpenSSH acceptance.
+
+## Joint Windows/WSL2 mechanism proof
+
+The
+[complete live report](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-5774494551)
+combines transport `f13f48e55c632d33c405de9210ff658ddc627612` with SSH
+`3cf322f93a35f1352fdc6abcb9a7bfc3a9a8e9a7` at composed head
+`3dde458aaf0715feea05ab3b01a191601eac2674`. SSH rebases cleanly onto that transport checkpoint at
+`8a9ad5f7142b697c566acd55648d466742da5392`: all 68 carried commits are patch-equivalent and the CLI
+tree exactly matches the tester's `11c7413e2f58c77f253f9e0fc86a20cb0a9ade72`. The subsequent SSH
+evidence and dependency-pin updates change only these SDD records.
+
+The workstation is Windows Server 2022 build `10.0.20348.5622`, with Python 3.13.15. The platform is
+WSL2 2.7.14.0 with kernel 6.18.33.2-2, Ubuntu 24.04, systemd 255 and guest `/usr/bin/python3`, bound
+to distribution `Ubuntu` and user `root`. Real buffered WSL delivery preserves all 13 literal argv
+vectors, binary streams, separate sensitive finite stdin and EOF, bounded retained output and
+pre-dispatch refusal. Measured exit/signal collisions confirm the conservative completion policy:
+only zero produces typed completion; nonzero local status remains observation evidence.
+
+The tester composes the native Windows client owner and guest-anchor owner against real `wsl.exe`.
+An independent observer confirms the nonce-bound exact guest PID/start-time identity before and
+after ordinary release. Abruptly killing only the controller, without a process-tree kill or
+settlement, also removes its WSL client and the exact guest anchor. Unrelated guest and Windows work
+survives. Repeated startup is refused and repeated release is idempotent. Independent process, guest
+and distribution observations find no anchor residue; the tester removes its artifacts and
+deallocates its bed. Distribution lifetime is recorded separately from anchor ownership.
+
+The composed gates pass **12,979 non-integration tests with 21 skips**, Ruff/format, mypy (1,098
+sources), file lint, locked-SDD and Rulesync checks, website Python and Node tests, and
+deterministic double builds for both site bases. These are the tester's results on the identical CLI
+tree; the rebase itself is a source-equivalence check. Earlier SSH private reviews retain their
+recorded pins, and transport reports clean project, complexity and correctness/security reviews at
+its checkpoint. No SSH runtime or fixture correction is required by this report.
+
+This establishes the WSL mechanism on the named Windows workstation and guest. SSH and QGA live
+cells were not repeated, macOS remains uncovered, and the report does not prove Windows OpenSSH,
+terminal restoration, production factories, RunContext accessors, platform holds, permissions or
+exact recovery wiring. The full Phase 2 acceptance gates remain open. This dependency adoption
+consumes no SSH public feedback/fix round and leaves #832 draft without a checkpoint or ready
+signal.
+
 ## Managed-process fix integration
 
 Transport's
