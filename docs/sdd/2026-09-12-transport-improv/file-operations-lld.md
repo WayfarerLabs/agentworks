@@ -754,15 +754,16 @@ themselves.
 
 The concrete core owner permits one active serial borrower and one outstanding attempt. By default,
 a borrower registers and arms one generic `carrier-dispatch` obligation before its first dispatch,
-then records each unresolved attempt in memory. A protocol adapter may instead install one
-adapter-owned dispatch obligation before that first attempt. The supplied row takes the generic
-row's place for every exchange under that borrow; it does not accompany a second generic row. Later
-exchanges re-arm only the in-memory attempt state within the same durable obligation. File work uses
-one supplied `file-call` row for one logical public call, including every observation and nested
-publication exchange in one JSON update. The file workflow records returned effects, references and
-cleanup debt before acknowledging no further effects; only the current borrow can settle its
-outstanding attempt. The coordinator treats the adapter payload as opaque and does not interpret
-carrier reports or file protocols.
+then records each unresolved attempt in memory. Every later dispatch validates the current ownership
+generation against that same already-possible row before returning attempt permission; it neither
+creates another row nor treats the earlier arm as a permanent database fence. A protocol adapter may
+instead install one adapter-owned dispatch obligation before that first attempt. The supplied row
+takes the generic row's place for every exchange under that borrow; it does not accompany a second
+generic row. File work uses one supplied `file-call` row for one logical public call, including
+every observation and nested publication exchange in one JSON update. The file workflow records
+returned effects, references and cleanup debt before acknowledging no further effects; only the
+current borrow can settle its outstanding attempt. The coordinator treats the adapter payload as
+opaque and does not interpret carrier reports or file protocols.
 
 The caller chooses and retains the obligation identifier before registration. Repeating registration
 after an interruption is idempotent only for the exact same operation, identifier, kind, payload

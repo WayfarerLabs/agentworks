@@ -88,7 +88,9 @@ does not retrofit or migrate legacy callers.
 The private owner now models that distinction directly. Each independently recoverable adapter
 effect first registers one lifecycle obligation, then marks it possible before dispatch. Sequential
 carrier attempts under one borrow instead share one generic `carrier-dispatch` obligation, which
-resolves only when the borrow closes without an outstanding attempt. Core seals the ledger after the
+resolves only when the borrow closes without an outstanding attempt. The first transition arms that
+row and the coarse claim; every later carrier attempt revalidates the current ownership generation
+against the same row before dispatch permission is returned. Core seals the ledger after the
 complete activation/workflow/teardown aggregate can create no more effects, then calls
 `record_effects_resolved()` only after every obligation has typed quiescence evidence. `close()`
 abandons only an empty never-admitted reservation or releases an explicitly resolved claim; it does

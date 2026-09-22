@@ -272,12 +272,13 @@ An adapter may replace its opaque payload with exact recovery identity while the
 no-effect result can resolve an obligation that never created a runtime identity.
 
 Registration refuses after the ledger is sealed. The first `possible-effect` transition also arms
-the coarse claim in the same short transaction; later obligations advance independently. Once the
-workflow cannot create more effects, core seals the ledger. Whole-operation resolution requires a
-sealed ledger, every registered obligation in `resolved`, and no active borrow, outstanding attempt
-or retained in-memory cleanup custody. Final release deletes the resolved obligations and releases
-the exact claim atomically. No automatic expiry, generic retry runner, dependency graph or
-force-release belongs in this layer.
+the coarse claim in the same short transaction; each later dispatch revalidates the current owner
+generation against its already-possible obligation before permission returns. Later obligations
+advance independently. Once the workflow cannot create more effects, core seals the ledger.
+Whole-operation resolution requires a sealed ledger, every registered obligation in `resolved`, and
+no active borrow, outstanding attempt or retained in-memory cleanup custody. Final release deletes
+the resolved obligations and releases the exact claim atomically. No automatic expiry, generic retry
+runner, dependency graph or force-release belongs in this layer.
 
 Recovery must be fenced from a delayed original controller before it mutates an old obligation. The
 logical operation keeps its stable random operation identifier, while each database owner carries a
@@ -288,6 +289,12 @@ ledger atomically. An exact retry with the same predecessor and requested genera
 including after commit without reply; a different generation or delayed predecessor update is stale.
 Obligations remain attached to the stable operation identifier, so takeover neither copies nor moves
 adapter state to a different owner.
+
+Takeover also creates a restricted recovery owner, not ordinary dispatch authority. It may rebind an
+exact persisted row, publish recovery identity for an effect that was already possible, or resolve a
+row with typed evidence. It cannot borrow the ordinary dispatch path, treat registration retry as
+rebind, or transition a previously `registered` row to `possible-effect`. Any future recovery probe
+or cleanup dispatch requires its own adapter-owned admission contract and remote-drain proof.
 
 That database fence prevents further cooperating submissions but does not establish remote
 quiescence. For every obligation already in `possible-effect`, the adapter must then prove both that
