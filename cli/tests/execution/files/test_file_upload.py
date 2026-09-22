@@ -470,12 +470,11 @@ def test_owner_arms_one_borrow_obligation_before_real_carrier_execution(
     owner = OperationOwner.acquire(repository, scope, "file-upload")
     borrow = owner.borrow()
     carrier = ClaimInspectingCarrier(database, owner.ownership.scope)
-    marks = 0
+    marks: list[str] = []
     original = repository.mark_lifecycle_obligation_possible_effect
 
     def mark_possible_effect(ownership, obligation_id):
-        nonlocal marks
-        marks += 1
+        marks.append(obligation_id)
         return original(ownership, obligation_id)
 
     monkeypatch.setattr(repository, "mark_lifecycle_obligation_possible_effect", mark_possible_effect)
@@ -484,7 +483,9 @@ def test_owner_arms_one_borrow_obligation_before_real_carrier_execution(
 
         assert outcome.status is FileUploadStatus.COMPLETE
         assert carrier.calls == 5
-        assert marks == 1
+        obligations = repository.list_lifecycle_obligations(owner.ownership)
+        assert len(obligations) == 1
+        assert marks == [obligations[0].obligation_id] * carrier.calls
         borrow.close()
         owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()

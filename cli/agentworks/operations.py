@@ -11,6 +11,7 @@ from agentworks.db.operations import (
     LifecycleObligation as PersistedLifecycleObligation,
 )
 from agentworks.db.operations import (
+    LifecycleObligationState,
     OperationClaimState,
     OperationOwnership,
     OperationScope,
@@ -358,6 +359,12 @@ class LifecycleObligation:
         """Commit admission before the owning adapter begins its effect."""
         owner = self._owner
         with owner._guard:  # noqa: SLF001
+            if owner._recovery_owner and self._obligation.state is LifecycleObligationState.REGISTERED:
+                raise StateError(
+                    "recovery ownership cannot admit a registered lifecycle obligation",
+                    entity_kind=owner._ownership.scope.resource_kind,  # noqa: SLF001
+                    entity_name=owner._ownership.scope.resource_name,  # noqa: SLF001
+                )
             owner._require_dispatch_admission_locked()  # noqa: SLF001
             owner._transition_uncertain = True  # noqa: SLF001
             self._obligation = owner._repository.mark_lifecycle_obligation_possible_effect(  # noqa: SLF001

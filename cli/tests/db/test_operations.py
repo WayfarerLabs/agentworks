@@ -110,6 +110,56 @@ def test_migration_backfills_generation_from_stable_operation_id(tmp_path: Path)
         database.close()
 
 
+def test_generation_migration_preserves_obligations_and_foreign_key_cascades(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    build_schema(path, 42)
+    operation_id = "b" * 32
+    obligation_id = "c" * 32
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "INSERT INTO operation_owners (operation_id, operation_kind, state, claimed_at, updated_at) "
+        "VALUES (?, 'vm-reinitialize', 'reserved', '2026-09-22T00:00:00Z', '2026-09-22T00:00:00Z')",
+        (operation_id,),
+    )
+    connection.execute(
+        "INSERT INTO operation_claims (resource_kind, resource_name, operation_id) VALUES ('vm', 'preserved', ?)",
+        (operation_id,),
+    )
+    connection.execute(
+        "INSERT INTO lifecycle_obligations "
+        "(operation_id, obligation_id, obligation_kind, state, payload_version, payload, payload_revision, "
+        "registered_at, updated_at) VALUES (?, ?, 'adapter-dispatch', 'registered', 2, ?, 3, "
+        "'2026-09-22T00:00:00Z', '2026-09-22T00:00:01Z')",
+        (operation_id, obligation_id, b"preserved"),
+    )
+    connection.commit()
+    connection.close()
+
+    database = Database(path)
+    try:
+        claim = database.operations.inspect(_scope("preserved"))
+        assert claim is not None
+        obligation = database.operations.list_lifecycle_obligations(claim.ownership)[0]
+        assert (obligation.payload, obligation.payload_revision, obligation.registered_at, obligation.updated_at) == (
+            b"preserved",
+            3,
+            "2026-09-22T00:00:00Z",
+            "2026-09-22T00:00:01Z",
+        )
+        assert database._conn.execute("PRAGMA foreign_key_check").fetchall() == []  # noqa: SLF001
+        database.operations.resolve_lifecycle_obligation(claim.ownership, obligation.obligation_id)
+        database.operations.seal_lifecycle_obligations(claim.ownership)
+        database.operations.record_effects_resolved(claim.ownership)
+        database.operations.release_resolved(claim.ownership)
+    finally:
+        database.close()
+
+    connection = sqlite3.connect(path)
+    assert connection.execute("SELECT COUNT(*) FROM operation_claims").fetchone() == (0,)
+    assert connection.execute("SELECT COUNT(*) FROM lifecycle_obligations").fetchone() == (0,)
+    connection.close()
+
+
 def test_malformed_persisted_generation_fails_closed(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
     database = Database(path)
@@ -152,6 +202,28 @@ def test_same_generation_recovery_receipt_fails_closed(tmp_path: Path) -> None:
     try:
         with pytest.raises(StateError) as raised:
             reopened.operations.inspect(_scope())
+        assert raised.value.entity_kind == "database"
+    finally:
+        reopened.close()
+
+
+def test_recovery_retry_fails_closed_when_its_receipt_is_unsealed(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    database = Database(path)
+    predecessor = database.operations.claim(_scope(), "vm-reinitialize")
+    database.operations.recover_takeover(predecessor, "b" * 32)
+    database.close()
+
+    connection = sqlite3.connect(path)
+    connection.execute("PRAGMA ignore_check_constraints = ON")
+    connection.execute("UPDATE operation_owners SET obligations_sealed_at = NULL")
+    connection.commit()
+    connection.close()
+
+    reopened = Database(path)
+    try:
+        with pytest.raises(StateError) as raised:
+            reopened.operations.recover_takeover(predecessor, "b" * 32)
         assert raised.value.entity_kind == "database"
     finally:
         reopened.close()

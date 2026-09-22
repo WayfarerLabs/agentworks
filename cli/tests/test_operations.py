@@ -144,11 +144,50 @@ def test_recovery_rotates_only_generation_and_preserves_the_sealed_ledger(db: Da
         "a" * 32, "adapter-dispatch", payload_version=2, payload=b"published"
     )
     assert rebound.obligation_id == "a" * 32
+    rebound.publish_payload(
+        expected_revision=rebound.payload_revision,
+        payload_version=3,
+        payload=b"recovery-published",
+    )
     with pytest.raises(StateError):
         recovered.register_lifecycle_obligation("new-adapter", payload_version=1, payload=b"")
     with pytest.raises(StateError):
         recovered.record_effects_resolved()
     rebound.resolve()
+    recovered.record_effects_resolved()
+    recovered.close()
+
+
+def test_recovery_cannot_admit_registered_obligations_or_reregister_them(db: Database) -> None:
+    predecessor = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    obligation = predecessor.register_lifecycle_obligation(
+        "adapter-dispatch",
+        payload_version=1,
+        payload=b"prepared",
+        obligation_id="7" * 32,
+    )
+    recovered = OperationOwner.recover(db.operations, predecessor.ownership, "8" * 32)
+    rebound = recovered.rebind_lifecycle_obligation(
+        obligation.obligation_id,
+        "adapter-dispatch",
+        payload_version=1,
+        payload=b"prepared",
+    )
+
+    with pytest.raises(StateError):
+        rebound.mark_possible_effect()
+    with pytest.raises(StateError):
+        db.operations.mark_lifecycle_obligation_possible_effect(recovered.ownership, obligation.obligation_id)
+    with pytest.raises(StateError):
+        db.operations.register_lifecycle_obligation(
+            recovered.ownership,
+            "adapter-dispatch",
+            1,
+            b"prepared",
+            obligation_id=obligation.obligation_id,
+        )
+
+    db.operations.resolve_lifecycle_obligation(recovered.ownership, obligation.obligation_id)
     recovered.record_effects_resolved()
     recovered.close()
 

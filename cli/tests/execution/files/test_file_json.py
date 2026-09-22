@@ -916,11 +916,10 @@ def test_read_and_upload_share_one_borrow_durable_obligation(
     database = Database(tmp_path / "state.db")
     repository = database.operations
     original = repository.mark_lifecycle_obligation_possible_effect
-    marks = 0
+    marks: list[str] = []
 
     def record_mark(ownership, obligation_id):
-        nonlocal marks
-        marks += 1
+        marks.append(obligation_id)
         return original(ownership, obligation_id)
 
     monkeypatch.setattr(repository, "mark_lifecycle_obligation_possible_effect", record_mark)
@@ -934,7 +933,10 @@ def test_read_and_upload_share_one_borrow_durable_obligation(
         outcome = _update(borrow, root, plan, b'{"source":true}', "merge-overwrite")
 
         assert outcome.status is FileJsonStatus.COMPLETE
-        assert outcome.publication_attempts == 1 and marks == 1
+        obligations = repository.list_lifecycle_obligations(owner.ownership)
+        assert len(obligations) == 1
+        assert outcome.publication_attempts == 1
+        assert marks == [obligations[0].obligation_id] * 5
         borrow.close()
         owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()

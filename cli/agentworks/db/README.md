@@ -27,7 +27,8 @@ transition matches both the claim's operation and generation IDs plus prior stat
 database update or release cannot affect a subsequent owner. Explicit recovery can atomically rotate
 the generation from one exact predecessor, seal the unchanged ledger, and retain that predecessor
 generation with the requested generation as an exact interrupted-reply retry receipt. It does not
-establish remote quiescence.
+establish remote quiescence. Recovery can rebind and reconcile an exact persisted obligation, but it
+cannot generically register or admit a previously registered effect.
 
 Closing the database, process death and elapsed time do not delete claims. Inspection reports their
 bounded metadata without command arguments, environment or file contents. There is no automatic

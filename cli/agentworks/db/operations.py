@@ -388,6 +388,12 @@ class OperationRepository:
         now = _utc_now()
         with self._standalone_transaction():
             claim = self._require_owned_claim(ownership)
+            if self._is_recovery_ownership(ownership):
+                raise StateError(
+                    "recovery ownership must rebind an exact persisted lifecycle obligation",
+                    entity_kind=ownership.scope.resource_kind,
+                    entity_name=ownership.scope.resource_name,
+                )
             existing = self._connection.execute(
                 "SELECT * FROM lifecycle_obligations WHERE operation_id = ? AND obligation_id = ?",
                 (ownership.operation_id, obligation_id),
@@ -455,19 +461,22 @@ class OperationRepository:
                     entity_kind=ownership.scope.resource_kind,
                     entity_name=ownership.scope.resource_name,
                 )
+            if obligation.state is LifecycleObligationState.REGISTERED and self._is_recovery_ownership(ownership):
+                raise StateError(
+                    "recovery ownership cannot admit a registered lifecycle obligation",
+                    entity_kind=ownership.scope.resource_kind,
+                    entity_name=ownership.scope.resource_name,
+                )
             if obligation.state is LifecycleObligationState.REGISTERED:
                 cursor = self._connection.execute(
                     "UPDATE lifecycle_obligations SET state = ?, updated_at = ? "
-                    "WHERE operation_id = ? AND obligation_id = ? AND state = ? "
-                    "AND EXISTS (SELECT 1 FROM operation_owners WHERE operation_id = ? AND generation_id = ?)",
+                    "WHERE operation_id = ? AND obligation_id = ? AND state = ?",
                     (
                         LifecycleObligationState.POSSIBLE_EFFECT,
                         now,
                         ownership.operation_id,
                         obligation_id,
                         LifecycleObligationState.REGISTERED,
-                        ownership.operation_id,
-                        ownership.generation_id,
                     ),
                 )
                 assert cursor.rowcount == 1
@@ -523,8 +532,7 @@ class OperationRepository:
             cursor = self._connection.execute(
                 "UPDATE lifecycle_obligations "
                 "SET payload_version = ?, payload = ?, payload_revision = payload_revision + 1, updated_at = ? "
-                "WHERE operation_id = ? AND obligation_id = ? AND state IN (?, ?) AND payload_revision = ? "
-                "AND EXISTS (SELECT 1 FROM operation_owners WHERE operation_id = ? AND generation_id = ?)",
+                "WHERE operation_id = ? AND obligation_id = ? AND state IN (?, ?) AND payload_revision = ?",
                 (
                     payload_version,
                     payload,
@@ -534,8 +542,6 @@ class OperationRepository:
                     LifecycleObligationState.REGISTERED,
                     LifecycleObligationState.POSSIBLE_EFFECT,
                     expected_revision,
-                    ownership.operation_id,
-                    ownership.generation_id,
                 ),
             )
             if cursor.rowcount != 1:
@@ -561,8 +567,7 @@ class OperationRepository:
                 return obligation
             cursor = self._connection.execute(
                 "UPDATE lifecycle_obligations SET state = ?, updated_at = ? "
-                "WHERE operation_id = ? AND obligation_id = ? AND state IN (?, ?) "
-                "AND EXISTS (SELECT 1 FROM operation_owners WHERE operation_id = ? AND generation_id = ?)",
+                "WHERE operation_id = ? AND obligation_id = ? AND state IN (?, ?)",
                 (
                     LifecycleObligationState.RESOLVED,
                     now,
@@ -570,8 +575,6 @@ class OperationRepository:
                     obligation_id,
                     LifecycleObligationState.REGISTERED,
                     LifecycleObligationState.POSSIBLE_EFFECT,
-                    ownership.operation_id,
-                    ownership.generation_id,
                 ),
             )
             if cursor.rowcount != 1:
@@ -714,6 +717,17 @@ class OperationRepository:
             )
         return self._decode_obligation(row, ownership)
 
+    def _is_recovery_ownership(self, ownership: OperationOwnership) -> bool:
+        row = self._connection.execute(
+            "SELECT recovery_predecessor_generation_id FROM operation_owners "
+            "WHERE operation_id = ? AND generation_id = ?",
+            (ownership.operation_id, ownership.generation_id),
+        ).fetchone()
+        if row is None:
+            self._raise_stale_or_invalid_state(ownership, None)
+        assert row is not None
+        return row["recovery_predecessor_generation_id"] is not None
+
     def _raise_stale_or_invalid_state(
         self,
         ownership: OperationOwnership,
@@ -790,7 +804,7 @@ class OperationRepository:
             prior_generation = row["recovery_predecessor_generation_id"]
             if prior_generation is not None:
                 _validate_generation_id(prior_generation)
-                if prior_generation == ownership.generation_id:
+                if prior_generation == ownership.generation_id or sealed_at is None:
                     raise ValueError
         except (KeyError, TypeError, ValueError):
             raise StateError(
