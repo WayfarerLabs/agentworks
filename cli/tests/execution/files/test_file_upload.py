@@ -457,7 +457,7 @@ def test_real_helper_create_streams_exact_bytes_once(
         database.close()
 
 
-def test_owner_arms_one_borrow_obligation_before_real_carrier_execution(
+def test_owner_reuses_one_borrow_obligation_and_revalidates_before_every_carrier_attempt(
     tmp_path: Path,
     plan: IdentityPlan,
     monkeypatch: pytest.MonkeyPatch,

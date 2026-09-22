@@ -177,7 +177,17 @@ def test_recovery_cannot_admit_registered_obligations_or_reregister_them(db: Dat
     with pytest.raises(StateError):
         rebound.mark_possible_effect()
     with pytest.raises(StateError):
+        rebound.publish_payload(expected_revision=0, payload_version=1, payload=b"recovery-published")
+    with pytest.raises(StateError):
         db.operations.mark_lifecycle_obligation_possible_effect(recovered.ownership, obligation.obligation_id)
+    with pytest.raises(StateError):
+        db.operations.publish_lifecycle_obligation_payload(
+            recovered.ownership,
+            obligation.obligation_id,
+            expected_revision=0,
+            payload_version=1,
+            payload=b"recovery-published",
+        )
     with pytest.raises(StateError):
         db.operations.register_lifecycle_obligation(
             recovered.ownership,

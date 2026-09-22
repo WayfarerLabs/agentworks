@@ -28,7 +28,8 @@ database update or release cannot affect a subsequent owner. Explicit recovery c
 the generation from one exact predecessor, seal the unchanged ledger, and retain that predecessor
 generation with the requested generation as an exact interrupted-reply retry receipt. It does not
 establish remote quiescence. Recovery can rebind and reconcile an exact persisted obligation, but it
-cannot generically register or admit a previously registered effect.
+cannot generically register or admit a previously registered effect. It can publish recovery
+identity only for a persisted `possible-effect` obligation.
 
 Closing the database, process death and elapsed time do not delete claims. Inspection reports their
 bounded metadata without command arguments, environment or file contents. There is no automatic

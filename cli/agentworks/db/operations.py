@@ -527,6 +527,12 @@ class OperationRepository:
                     entity_kind=ownership.scope.resource_kind,
                     entity_name=ownership.scope.resource_name,
                 )
+            if obligation.state is LifecycleObligationState.REGISTERED and self._is_recovery_ownership(ownership):
+                raise StateError(
+                    "recovery ownership cannot publish a registered lifecycle obligation",
+                    entity_kind=ownership.scope.resource_kind,
+                    entity_name=ownership.scope.resource_name,
+                )
             if obligation.payload_version == payload_version and obligation.payload == payload:
                 return obligation
             cursor = self._connection.execute(

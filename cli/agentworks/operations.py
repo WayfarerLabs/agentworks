@@ -378,6 +378,12 @@ class LifecycleObligation:
         """CAS-publish adapter identity while this effect remains possible."""
         owner = self._owner
         with owner._guard:  # noqa: SLF001
+            if owner._recovery_owner and self._obligation.state is LifecycleObligationState.REGISTERED:
+                raise StateError(
+                    "recovery ownership cannot publish a registered lifecycle obligation",
+                    entity_kind=owner._ownership.scope.resource_kind,  # noqa: SLF001
+                    entity_name=owner._ownership.scope.resource_name,  # noqa: SLF001
+                )
             if owner._transition_uncertain:  # noqa: SLF001
                 owner._reconcile_transition_locked()  # noqa: SLF001
             if owner._released:  # noqa: SLF001

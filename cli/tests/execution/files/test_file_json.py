@@ -905,7 +905,7 @@ def test_whole_json_call_holds_borrow_against_sibling_upload(
         database.close()
 
 
-def test_read_and_upload_share_one_borrow_durable_obligation(
+def test_read_and_upload_reuse_one_durable_obligation_and_revalidate_before_every_attempt(
     tmp_path: Path,
     plan: IdentityPlan,
     monkeypatch: pytest.MonkeyPatch,
