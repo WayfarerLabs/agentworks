@@ -23,6 +23,7 @@ from agentworks.capabilities.vm_platform.base import ProvisionRequest, Provision
 from agentworks.capabilities.vm_platform.bootstrap_script import (
     REBOOT_SENTINEL_PATH,
     generate_bootstrap_script,
+    generate_instance_marker_installer,
     parse_bootstrap_output,
 )
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
@@ -385,7 +386,9 @@ class LimaPlatform(VMPlatform):
             provisioning_packages=PROVISIONING_PACKAGES,
             tailscale_auth_key=None,
             hostname=request.hostname,
-            instance_marker=request.instance_marker,
+            # Lima retains and reruns mode: system provisioners on restart.
+            # Marker installation is creation-only below, never retained YAML.
+            instance_marker=None,
             swap=swap,
         )
 
@@ -414,6 +417,9 @@ class LimaPlatform(VMPlatform):
                 self._create_local(instance_name, rendered)
 
             output.detail(f"Lima VM '{instance_name}' created.")
+
+            output.detail("Installing VM instance marker...")
+            self._install_instance_marker(instance_name, request.instance_marker)
 
             tailscale_ip = None
             output.detail("Joining Tailscale...")
@@ -461,6 +467,14 @@ class LimaPlatform(VMPlatform):
             native_transport=transport,
             platform_metadata={"instance_name": instance_name},
             tailscale_ip=tailscale_ip,
+        )
+
+    def _install_instance_marker(self, instance_name: str, instance_marker: str) -> None:
+        """Install one VM marker through Lima's creation-only stdin boundary."""
+        installer = generate_instance_marker_installer(instance_marker=instance_marker)
+        self._run_lima(
+            f"limactl shell {instance_name} sudo -n /bin/bash -s",
+            input_text=installer,
         )
 
     def _join_tailscale_ephemerally(self, instance_name: str, auth_key: str) -> None:

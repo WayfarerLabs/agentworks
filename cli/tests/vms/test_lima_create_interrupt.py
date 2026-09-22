@@ -290,6 +290,17 @@ def test_interrupt_during_post_start_steps_cleans_up_too(
     assert _deletes(ran) == ["limactl delete --force myvm"]
 
 
+def test_marker_install_failure_cleans_up_created_instance(monkeypatch: pytest.MonkeyPatch) -> None:
+    failure = SSHError("marker install failed")
+    ran = _wire(monkeypatch, errors={"/bin/bash -s": failure})
+
+    with pytest.raises(SSHError) as caught:
+        LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
+
+    assert caught.value is failure
+    assert _deletes(ran) == ["limactl delete --force myvm"]
+
+
 def test_interrupt_during_ephemeral_tailscale_join_cleans_up_and_does_not_render_key(
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,

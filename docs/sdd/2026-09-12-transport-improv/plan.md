@@ -1209,6 +1209,11 @@ connection and trust only. Before broader lifecycle implementation, complete the
       regular leaf and refuses symlinks, non-regular leaves and multiply-linked leaves. Explicit
       adoption, provider locator binding, guest marker reads and target-fingerprint composition
       remain later gates.
+- [x] Keep Lima marker delivery creation-only: its retained `mode: system` bootstrap omits the
+      marker, while create streams the fixed installer through `limactl shell` after create/start
+      and inside rollback. Later Lima start/restart never installs or repairs it. Isolated installer
+      tests prove conservative leaf handling and mode changes; live platform proof of target root
+      ownership and delivery remains a later integration gate.
 - [ ] Introduce the vm-platform v2 locator-and-marker observation hook before managed target
       composition supports third-party platforms. `ProvisionRequest.instance_marker` is receive-side
       additive for v1, so an old external platform may ignore it and is not eligible to establish a

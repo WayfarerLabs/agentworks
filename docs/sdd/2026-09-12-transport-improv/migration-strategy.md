@@ -102,6 +102,11 @@ it and therefore cannot establish a managed target identity merely by accepting 
 planned v2 locator-and-marker observation contract, not this migration, makes marker delivery and
 guest marker reads a conformance requirement.
 
+Lima retains its system bootstrap and reruns it on restart, so its marker is not part of retained
+provider YAML. Its create operation delivers the fixed installer once after create/start and rolls
+the instance back if that delivery fails. Live validation of the resulting root-owned guest file is
+still required before target identity depends on it.
+
 ### Remaining-native-platform inventory, 2026-09-21
 
 The read-only inventory at `bf819094` covers Lima, AWS EC2, Azure VM and GCP GCE. The cloud native

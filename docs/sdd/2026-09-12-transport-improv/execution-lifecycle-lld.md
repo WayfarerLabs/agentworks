@@ -194,6 +194,13 @@ than one hard link. Existing rows remain NULL and existing-VM operations do not 
 marker. This is only creation evidence: explicit legacy adoption, provider locator binding, guest
 marker reads and fingerprint construction remain delivery gates.
 
+Lima is an exception to retained-bootstrap delivery: its `mode: system` provisioner reruns on guest
+restart. Lima therefore excludes marker publication from its retained YAML and streams the fixed
+installer once through `limactl shell ... sudo -n /bin/bash -s` after create/start, inside create
+rollback. Later Lima start/restart operations do not install or repair a marker. Isolated
+user-namespace tests prove the installer guards and resulting modes, but live platform proof of the
+target root owner and delivery remains a later integration gate.
+
 `ProvisionRequest.instance_marker` is receive-side additive to the v1 platform contract: existing
 third-party v1 implementations can receive and ignore it, so they do not thereby establish managed
 target identity. Bundled create paths install the marker as described above. The future v2

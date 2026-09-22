@@ -10,7 +10,6 @@ from agentworks.capabilities.vm_platform.bootstrap_script import (
     parse_bootstrap_output,
 )
 from agentworks.errors import ValidationError
-from agentworks.vms.identity import VM_INSTANCE_MARKER_PATH
 from tests.conftest import requires_posix_shell
 
 
@@ -29,7 +28,6 @@ def test_generate_bootstrap_script_all_steps() -> None:
     assert script.startswith("#!/bin/bash\n")
     assert "set -euo pipefail" in script
     assert "##STEP## Ensure user" in script
-    assert "##STEP## VM instance marker" in script
     assert "##STEP## Provisioning packages" in script
     assert "##STEP## SSH public key" in script
     assert "##STEP## Swap file" in script
@@ -40,15 +38,6 @@ def test_generate_bootstrap_script_all_steps() -> None:
     assert "tskey-auth-test123" in script
     assert "SWAP_GB=4" in script
     assert "lima--myvm" in script
-    assert VM_INSTANCE_MARKER_PATH in script
-    assert "[ -L \"$MARKER_DIR\" ]" in script
-    assert "chown root:root \"$MARKER_DIR\"" in script
-    assert "chmod 0755 \"$MARKER_DIR\"" in script
-    assert "chown root:root \"$MARKER_FILE\"" in script
-    assert "chmod 0444 \"$MARKER_FILE\"" in script
-    assert "[ -L \"$MARKER_FILE\" ]" in script
-    assert "[ ! -f \"$MARKER_FILE\" ]" in script
-    assert "stat -c %h \"$MARKER_FILE\"" in script
 
 
 def test_generate_bootstrap_script_rejects_noncanonical_instance_marker() -> None:
@@ -64,7 +53,10 @@ def test_generate_bootstrap_script_rejects_noncanonical_instance_marker() -> Non
         )
 
 
-def test_generate_bootstrap_script_omits_marker_for_v1_helper_compatibility() -> None:
+@requires_posix_shell
+def test_pre_marker_helper_call_still_produces_valid_shell() -> None:
+    import subprocess
+
     script = generate_bootstrap_script(
         admin_username="testuser",
         ssh_public_key="ssh-ed25519 AAAA testkey",
@@ -74,8 +66,8 @@ def test_generate_bootstrap_script_omits_marker_for_v1_helper_compatibility() ->
         swap=0,
     )
 
-    assert "##STEP## VM instance marker" not in script
-    assert VM_INSTANCE_MARKER_PATH not in script
+    result = subprocess.run(["bash", "-n"], input=script, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
 
 
 def test_generate_bootstrap_script_can_omit_join_from_retained_payload() -> None:

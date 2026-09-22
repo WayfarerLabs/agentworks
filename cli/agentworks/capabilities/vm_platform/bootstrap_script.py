@@ -250,7 +250,7 @@ else
 fi
 """
 
-_INSTANCE_MARKER_STEP_TEMPLATE = """\\
+_INSTANCE_MARKER_INSTALLER_TEMPLATE = """\\
 # -- Step 1c: VM instance marker --
 # This marker belongs to the VM record, not to a template. A clone therefore
 # receives the marker generated for this create rather than inheriting its
@@ -293,6 +293,23 @@ echo "##SUCCESS## VM instance marker installed"
 """
 
 
+def generate_instance_marker_installer(*, instance_marker: str) -> str:
+    """Render the fixed-path, creation-only VM marker installer."""
+    return _render_instance_marker_installer(
+        instance_marker=instance_marker,
+        marker_path=VM_INSTANCE_MARKER_PATH,
+    )
+
+
+def _render_instance_marker_installer(*, instance_marker: str, marker_path: str) -> str:
+    """Render a marker installer for the fixed production path or an isolated test path."""
+    instance_marker = validate_vm_instance_marker(instance_marker)
+    return _INSTANCE_MARKER_INSTALLER_TEMPLATE.format(
+        instance_marker=shlex.quote(instance_marker),
+        instance_marker_path=shlex.quote(marker_path),
+    )
+
+
 def generate_bootstrap_script(
     *,
     admin_username: str,
@@ -323,11 +340,7 @@ def generate_bootstrap_script(
     """
     instance_marker_step = ""
     if instance_marker is not None:
-        instance_marker = validate_vm_instance_marker(instance_marker)
-        instance_marker_step = _INSTANCE_MARKER_STEP_TEMPLATE.format(
-            instance_marker=shlex.quote(instance_marker),
-            instance_marker_path=shlex.quote(VM_INSTANCE_MARKER_PATH),
-        )
+        instance_marker_step = generate_instance_marker_installer(instance_marker=instance_marker)
     if tailscale_auth_key is not None:
         from agentworks.secrets.line_safety import (
             LineOrientedSecretUse,
