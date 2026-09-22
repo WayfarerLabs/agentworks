@@ -210,6 +210,29 @@ transient unit's identity/delegation behavior, `systemd-run` stderr behavior, cg
 semantics, and cleanup of a real detached descendant. `waitpid` failure paths remain native-proof
 gaps rather than claimed unit-test evidence.
 
+`_managed_runs.py` is the private durable launch-identity kernel that the production supervisor can
+later consume. It reserves a fresh 32-character run ID and its derived `agw-managed-<id>.service`
+name before dispatch, commits `possible-dispatch` before invoking a supplied one-shot boundary, and
+never invokes that boundary again for the run. A later exact target receipt can confirm launch. A
+carrier-proved `NOT_SENT` result closes as not launched only when paired with a typed absence
+observation for the same run, unit, target incarnation, boot, protected receipt namespace and
+protocol. Exceptions, missing observations and contradictions retain possible dispatch.
+
+The `execution_runs` row stores bounded non-secret identity and lifecycle facts, not source, argv,
+stdin, environment, output, credentials, provider objects or mutable remote paths. The requested
+shell kind is separate from its canonical resolved executable identity, so user-default selection is
+not collapsed into `sh` or `bash`. Launch, application, cleanup and disposal facts remain separate;
+this slice changes only launch evidence, while disposal begins retained. Malformed rows and stale or
+mismatched target, boot, unit, workload, shell, profile, owner or protocol facts fail closed.
+
+The target name is a core resource identity for binding and diagnostics, not authority on its own.
+Its `v1:<sha256>` incarnation fingerprint must bind the provider-owned locator with a
+core-provisioned or explicitly adopted random instance marker. The current boot UUID is a separate
+fence. Production composition and existing-VM adoption are not implemented here; ordinary work must
+not silently create an adoption marker. This kernel also supplies no lease, output retention,
+application observation, cleanup, stop, disposal, carrier wiring, public job reference or RunContext
+surface.
+
 ## Input accounting
 
 The 262,144-byte preparation bound applies to the complete encoded envelope, not raw application

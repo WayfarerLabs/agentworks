@@ -168,6 +168,36 @@ disposal or replacement. Stale boot/run/unit/PID observations cannot target repl
 partitions and non-terminating kernel tasks remain incomplete. Resource owners set output/record
 retention and abandoned-job cleanup.
 
+### Private durable launch checkpoint
+
+The first persistence slice records one `execution_runs` row before launch and remains private and
+non-production. Its canonical 32-character run ID derives one stable `agw-managed-<run-id>.service`
+name. The row stores only bounded non-secret target, incarnation, boot, workload identity, shell
+identity, MANAGED profile revision, owner/lifetime, receipt protocol and timestamps. It has separate
+launch, application, cleanup and disposal fields rather than a global status. This slice transitions
+only launch evidence; disposal begins retained, and no application or cleanup producer exists yet.
+
+Target identity is structured as a core resource kind/name, a versioned incarnation fingerprint and
+a separate boot UUID. The core name supports binding and diagnostics but is not authority. The
+incarnation fingerprint must bind the provider-owned locator plus a core-provisioned or explicitly
+adopted random instance marker. Existing VMs require an explicit adoption workflow; an ordinary
+operation does not silently write that marker. `/etc/machine-id` does not replace the marker because
+it does not reliably distinguish clones. Production target composition remains blocked until it can
+construct and verify these facts.
+
+Reservation commits before dispatch, and possible dispatch commits before calling the one-shot
+launch boundary. An exception or ambiguous result retains possible dispatch and cannot call the
+boundary again. Reconciliation accepts an exact receipt only when run, unit, target incarnation,
+boot, workload, resolved shell, profile, owner/lifetime, namespace and protocol all match. A
+carrier-proved `NOT_SENT` observation establishes non-launch only with a typed exact absence
+observation from that same protected target receipt namespace. Mismatch, contradiction and malformed
+persisted state fail closed without launching or stopping work.
+
+This checkpoint does not wire `systemd.py`, carriers, platform factories, public `ExecutionAccess`,
+`JobRef` or RunContext. It does not implement OPERATION liveness, leases, application/output
+evidence, stop/cleanup, retention, disposal, session adoption or production recovery. Those remain
+the proof gates below.
+
 ## Session containment and #770 reconciliation
 
 This effort owns the unified implementation rather than splitting cgroup launch/stop between two

@@ -792,6 +792,88 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
             PRIMARY KEY (resource_kind, resource_name)
         );
     """,
+    # -- Private durable identity and launch reconciliation for one managed -
+    # -- execution. Payloads and output remain target-owned; the database ---
+    # -- records only bounded, non-secret identity and lifecycle facts. -----
+    40: """
+        CREATE TABLE execution_runs (
+            run_id TEXT PRIMARY KEY
+                CHECK (
+                    length(run_id) = 32
+                    AND run_id NOT GLOB '*[^0-9a-f]*'
+                ),
+            unit_name TEXT NOT NULL UNIQUE
+                CHECK (unit_name = 'agw-managed-' || run_id || '.service'),
+            target_kind TEXT NOT NULL
+                CHECK (target_kind IN ('vm', 'platform-host')),
+            target_name TEXT NOT NULL
+                CHECK (length(target_name) BETWEEN 1 AND 255),
+            target_incarnation TEXT NOT NULL
+                CHECK (length(target_incarnation) BETWEEN 1 AND 255),
+            target_boot_id TEXT NOT NULL
+                CHECK (length(target_boot_id) BETWEEN 1 AND 255),
+            workload_euid INTEGER NOT NULL
+                CHECK (typeof(workload_euid) = 'integer' AND workload_euid BETWEEN 0 AND 4294967295),
+            workload_egid INTEGER NOT NULL
+                CHECK (typeof(workload_egid) = 'integer' AND workload_egid BETWEEN 0 AND 4294967295),
+            workload_groups TEXT NOT NULL
+                CHECK (length(workload_groups) BETWEEN 1 AND 720895),
+            requested_shell TEXT NOT NULL
+                CHECK (requested_shell IN ('none', 'sh', 'bash', 'user_default')),
+            resolved_shell TEXT
+                CHECK (
+                    resolved_shell IS NULL
+                    OR (length(resolved_shell) BETWEEN 2 AND 255 AND substr(resolved_shell, 1, 1) = '/')
+                ),
+            shell_login INTEGER NOT NULL CHECK (shell_login IN (0, 1)),
+            shell_interactive INTEGER NOT NULL CHECK (shell_interactive IN (0, 1)),
+            managed_profile_revision INTEGER NOT NULL
+                CHECK (typeof(managed_profile_revision) = 'integer' AND managed_profile_revision > 0),
+            owner_kind TEXT NOT NULL
+                CHECK (owner_kind IN ('operation', 'resource')),
+            owner_id TEXT NOT NULL
+                CHECK (length(owner_id) BETWEEN 1 AND 255),
+            lifetime TEXT NOT NULL
+                CHECK (lifetime IN ('operation', 'independent')),
+            receipt_namespace TEXT NOT NULL
+                CHECK (length(receipt_namespace) BETWEEN 1 AND 64),
+            receipt_protocol_version INTEGER NOT NULL
+                CHECK (typeof(receipt_protocol_version) = 'integer' AND receipt_protocol_version > 0),
+            launch_state TEXT NOT NULL
+                CHECK (launch_state IN ('reserved', 'possible-dispatch', 'receipt-confirmed', 'not-launched')),
+            application_state TEXT NOT NULL
+                CHECK (application_state IN ('unobserved', 'started', 'completed')),
+            cleanup_state TEXT NOT NULL
+                CHECK (cleanup_state IN ('unobserved', 'required', 'complete', 'incomplete')),
+            disposal_state TEXT NOT NULL
+                CHECK (disposal_state IN ('retained', 'disposed')),
+            created_at TEXT NOT NULL CHECK (length(created_at) = 20),
+            updated_at TEXT NOT NULL CHECK (length(updated_at) = 20),
+            possible_dispatch_at TEXT CHECK (possible_dispatch_at IS NULL OR length(possible_dispatch_at) = 20),
+            launch_reconciled_at TEXT CHECK (launch_reconciled_at IS NULL OR length(launch_reconciled_at) = 20),
+            CHECK (
+                (lifetime = 'operation' AND owner_kind = 'operation')
+                OR (lifetime = 'independent' AND owner_kind = 'resource')
+            ),
+            CHECK (
+                (requested_shell = 'none' AND resolved_shell IS NULL AND shell_login = 0 AND shell_interactive = 0)
+                OR (requested_shell != 'none' AND resolved_shell IS NOT NULL)
+            ),
+            CHECK (
+                (launch_state = 'reserved' AND possible_dispatch_at IS NULL AND launch_reconciled_at IS NULL)
+                OR (
+                    launch_state = 'possible-dispatch'
+                    AND possible_dispatch_at IS NOT NULL
+                    AND launch_reconciled_at IS NULL
+                )
+                OR (
+                    launch_state IN ('receipt-confirmed', 'not-launched')
+                    AND possible_dispatch_at IS NOT NULL
+                    AND launch_reconciled_at IS NOT NULL
+                )
+            )
+        );
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -931,6 +1013,37 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
             "state",
             "claimed_at",
             "updated_at",
+        )
+    },
+    40: {
+        "execution_runs": (
+            "run_id",
+            "unit_name",
+            "target_kind",
+            "target_name",
+            "target_incarnation",
+            "target_boot_id",
+            "workload_euid",
+            "workload_egid",
+            "workload_groups",
+            "requested_shell",
+            "resolved_shell",
+            "shell_login",
+            "shell_interactive",
+            "managed_profile_revision",
+            "owner_kind",
+            "owner_id",
+            "lifetime",
+            "receipt_namespace",
+            "receipt_protocol_version",
+            "launch_state",
+            "application_state",
+            "cleanup_state",
+            "disposal_state",
+            "created_at",
+            "updated_at",
+            "possible_dispatch_at",
+            "launch_reconciled_at",
         )
     },
 }
