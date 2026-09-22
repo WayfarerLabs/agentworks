@@ -284,6 +284,25 @@ This is Linux loopback evidence for private upload/publication composition. It n
 production FileAccess nor closes terminal, RunContext, creation binding, full file-workflow or
 native Windows/macOS acceptance.
 
+## Explicit whole-operation resolution
+
+Transport checkpoint `c4d9e54d667a0c9bdb0915f21a828e02e8eec77e` separates child-attempt
+settlement from whole-operation resolution. SSH rebases cleanly onto it at `58292ba3`.
+The installed-OpenSSH upload proof reproduces refusal at `owner.close()` after all four
+uploads finish: child settlement alone no longer releases the durable claim.
+
+The proof now records whole-operation effects resolved only after verifying all four outcomes,
+empty active/unfinished custody, no cleanup debt, no pending remote effects or coordination
+uncertainty, and absence of every exact scratch object. These uploads are the entire operation;
+there is no activation, route or power hold to settle. A failing assertion closes the fixture
+database without asserting resolution or automatically releasing the claim. SSH runtime code is
+unchanged, and production orchestration remains transport-owned.
+
+The adapted proof passes over installed Linux OpenSSH in 4.32 seconds. Independent cleanup
+inspection finds no matching fixture process and only the intended destination in each upload
+directory; both before/after fixture directories and credentials are removed. This is local
+private-composition evidence, not production lifecycle or native Windows/macOS acceptance.
+
 ## Managed-process fix integration
 
 Transport's
