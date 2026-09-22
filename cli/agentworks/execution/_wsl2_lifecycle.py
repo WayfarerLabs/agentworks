@@ -129,10 +129,12 @@ class OwnedHostClient(Protocol):
     """Inert native owner that retains every local capability through failure.
 
     Construction performs no native work. ``spawn_owned`` must publish any host
-    process and Job Object handle into this object before an interruption can
-    escape. ``read_stdout_line`` returns one complete bounded binary line, EOF
-    as ``b""``, or a line exceeding the supplied bound. ``settle`` attempts all
-    owned local cleanup before raising and keeps retryable snapshot state.
+    process and Job Object handle into this object before reporting creation.
+    Native work runs in the retained owner so a supported main-thread caller
+    interruption cannot discard it. ``read_stdout_line`` returns one complete
+    bounded binary line, EOF as ``b""``, or a line exceeding the supplied bound.
+    ``settle`` requests bounded owned-resource cleanup and preserves retryable
+    snapshot state through caller interruption.
     """
 
     def spawn_owned(self, argv: tuple[str, ...], deadline: Deadline) -> None: ...
@@ -190,8 +192,8 @@ class WSL2GuestAnchorOwner:
     """Caller-owned lifecycle around one inert native host-client owner.
 
     The caller constructs this object before dispatch and retains it after every
-    start or release failure. This module intentionally supplies no native
-    Windows adapter and does not claim live WSL proof.
+    start or release failure. The native Windows adapter lives separately and
+    does not establish live WSL proof.
     """
 
     def __init__(
