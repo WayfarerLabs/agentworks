@@ -18,7 +18,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from agentworks.capabilities.base import Capability, idempotent_op
-from agentworks.errors import ProvisioningError, StateError
+from agentworks.errors import LimitExceededError, ProvisioningError, StateError, ValidationError
+from agentworks.execution.carrier import Deadline
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -29,8 +30,67 @@ if TYPE_CHECKING:
     from agentworks.db import VMRow, VMStatus
     from agentworks.debian import DebianRelease
     from agentworks.execution.binding import NativeExecutionBinding
-    from agentworks.execution.carrier import Deadline
     from agentworks.transports import ExecTransport
+
+
+MAX_PROVIDER_LOCATOR_BYTES = 4096
+"""Largest UTF-8 provider locator token accepted at the platform boundary."""
+
+
+@dataclass(frozen=True)
+class ProviderLocator:
+    """Opaque, provider-owned locator for one live VM.
+
+    This validates plugin-provided data at the platform boundary. Core may
+    compare or bind this token, but never parses or normalizes it.
+    """
+
+    token: str
+
+    def __post_init__(self) -> None:
+        if type(self.token) is not str or not self.token or "\0" in self.token:
+            raise ValidationError("Provider locator token must be a non-empty non-NUL string")
+        try:
+            encoded = self.token.encode("utf-8")
+        except UnicodeEncodeError as error:
+            raise ValidationError("Provider locator token must be UTF-8 encodable") from error
+        if len(encoded) > MAX_PROVIDER_LOCATOR_BYTES:
+            raise ValidationError(f"Provider locator token must be at most {MAX_PROVIDER_LOCATOR_BYTES} UTF-8 bytes")
+
+
+@dataclass(frozen=True)
+class ProviderLocatorUnavailable:
+    """A platform deliberately cannot provide a provider locator.
+
+    This is not target-presence evidence. A platform may return it without a
+    provider lookup; an attempted lookup instead raises its typed absence or
+    provider failure.
+    """
+
+
+ProviderLocatorObservation = ProviderLocator | ProviderLocatorUnavailable
+"""One provider-locator observation, or an explicit platform inability."""
+
+
+def provider_locator_remaining(deadline: Deadline, *, vm_name: str) -> float:
+    """Return the positive remaining bounded locator-observation budget.
+
+    SDK and socket timeouts should use this as their best-effort timeout, but
+    cannot preempt every provider call. Call again after provider I/O so a
+    late result is rejected rather than returned as timely.
+    """
+
+    if type(deadline) is not Deadline or deadline.expires_at is None:
+        raise ValidationError("Provider locator observation requires a finite Deadline")
+    remaining = deadline.remaining()
+    assert remaining is not None
+    if remaining <= 0:
+        raise LimitExceededError(
+            f"Provider locator observation deadline expired for VM '{vm_name}'",
+            entity_kind="vm",
+            entity_name=vm_name,
+        )
+    return remaining
 
 
 class BootstrapProgress(Protocol):
@@ -351,6 +411,30 @@ class VMPlatform(Capability):
         ``config`` carries OPERATOR settings (azure needs
         ``config.operator.ssh_private_key`` for the public-IP path),
         distinct from the bound ``platform_config``.
+        """
+
+    @abstractmethod
+    def observe_provider_locator(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        deadline: Deadline,
+    ) -> ProviderLocatorObservation:
+        """Read this VM's opaque provider locator, or declare it unavailable.
+
+        This is read-only and does not establish guest identity. Return
+        :class:`ProviderLocatorUnavailable` only when this platform
+        deliberately cannot observe a locator, possibly without a provider
+        lookup. Once an implementation attempts observation, confirmed target
+        absence and provider failures must raise their existing typed errors,
+        never become ``Unavailable``.
+
+        ``deadline`` is one finite caller-owned observation budget. Call
+        :func:`provider_locator_remaining` before provider I/O to derive a
+        best-effort SDK or socket timeout, and again before returning to reject
+        a late result. Such timeouts are not magical preemption of a provider
+        call.
         """
 
     def resolve_native_execution_binding(

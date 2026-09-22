@@ -19,7 +19,13 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 from pydantic import Field
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.base import (
+    ProviderLocatorObservation,
+    ProviderLocatorUnavailable,
+    ProvisionRequest,
+    ProvisionResult,
+    VMPlatform,
+)
 from agentworks.capabilities.vm_platform.bootstrap_script import (
     REBOOT_SENTINEL_PATH,
     generate_bootstrap_script,
@@ -46,6 +52,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution.carrier import Deadline
     from agentworks.resources.graph import Readiness
     from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
@@ -166,7 +173,7 @@ class LimaConfig(AgwModel):
 class LimaPlatform(VMPlatform):
     """Runs VMs via limactl, locally or on a remote host over SSH."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "lima"
     description: ClassVar[str] = "Lima VMs (local, or on a remote host via SSH)"
     config_model: ClassVar[type[LimaConfig]] = LimaConfig
@@ -814,6 +821,17 @@ class LimaPlatform(VMPlatform):
         # ctx is unused: limactl (local or over the placement host SSH hop)
         # needs no backend credential.
         return self._transport_for(self._instance_name(vm))
+
+    def observe_provider_locator(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        deadline: Deadline,
+    ) -> ProviderLocatorObservation:
+        """Lima names lack a provider namespace stable across placements."""
+        del vm, ctx, deadline
+        return ProviderLocatorUnavailable()
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         instance_name = self._instance_name(vm)

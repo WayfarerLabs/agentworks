@@ -4,10 +4,18 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import re
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.base import (
+    ProviderLocator,
+    ProviderLocatorObservation,
+    ProvisionRequest,
+    ProvisionResult,
+    VMPlatform,
+    provider_locator_remaining,
+)
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES, generate_cloud_init
 from agentworks.capabilities.vm_platform.debian_release import (
@@ -63,6 +71,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution.carrier import Deadline
     from agentworks.transports import Transport
 
 
@@ -79,7 +88,7 @@ class AzureVMPlatform(VMPlatform):
     one specific Azure service, and other Azure services could plausibly
     back platforms of their own someday."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "azure-vm"
     description: ClassVar[str] = "Azure Virtual Machines (subscription + resource group)"
     config_model: ClassVar[type[AzureVMConfig]] = AzureVMConfig
@@ -789,6 +798,52 @@ class AzureVMPlatform(VMPlatform):
         _rg, name, _cfg = _parse_resource_id(resource_id)
         return name
 
+    def observe_provider_locator(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        deadline: Deadline,
+    ) -> ProviderLocatorObservation:
+        """Read the persisted ARM resource once and require its exact identity."""
+        resource_id = _resource_id(vm)
+        resource_group, vm_name, config = _parse_locator_resource_id(resource_id, vm_name=vm.name)
+        remaining = provider_locator_remaining(deadline, vm_name=vm.name)
+        compute = self._compute_client(config, ctx)
+        try:
+            observed = compute.virtual_machines.get(
+                resource_group,
+                vm_name,
+                timeout=remaining,
+                connection_timeout=remaining,
+                read_timeout=remaining,
+                retry_total=0,
+                retry_connect=0,
+                retry_read=0,
+                retry_status=0,
+            )
+        except Exception as exc:
+            from azure.core.exceptions import ResourceNotFoundError
+
+            if isinstance(exc, ResourceNotFoundError):
+                raise NotFoundError(
+                    f"Azure VM '{vm_name}' no longer exists",
+                    entity_kind="vm",
+                    entity_name=vm.name,
+                ) from exc
+            raise wrap_azure_error(exc) from exc
+        observed_id = getattr(observed, "id", None)
+        if not isinstance(observed_id, str) or observed_id != resource_id:
+            raise StateError(
+                f"Azure VM '{vm.name}' no longer has its persisted resource identity",
+                entity_kind="vm",
+                entity_name=vm.name,
+                hint="do not target the same-name Azure VM; restore the persisted resource identity before retrying",
+            )
+        _parse_locator_resource_id(observed_id, vm_name=vm.name)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        return ProviderLocator(f"azure-vm:{observed_id}")
+
     def native_transport(
         self,
         vm: VMRow,
@@ -947,6 +1002,33 @@ class _MinimalAzureConfig:
 
     def __init__(self, subscription_id: str) -> None:
         self.subscription_id = subscription_id
+
+
+_LOCATOR_RESOURCE_ID = re.compile(
+    r"^/subscriptions/([A-Za-z0-9._()-]+)/resourceGroups/([A-Za-z0-9._()-]+)/"
+    r"providers/Microsoft\.Compute/virtualMachines/([A-Za-z0-9._()-]+)$"
+)
+
+
+def _parse_locator_resource_id(resource_id: str, *, vm_name: str) -> tuple[str, str, _MinimalAzureConfig]:
+    """Parse one complete, delimiter-safe Azure VM resource identifier."""
+    if not isinstance(resource_id, str) or not resource_id.isascii():
+        raise StateError(
+            f"VM '{vm_name}' has an invalid Azure resource ID",
+            entity_kind="vm",
+            entity_name=vm_name,
+            hint="restore the persisted complete Azure VM resource ID before retrying",
+        )
+    match = _LOCATOR_RESOURCE_ID.fullmatch(resource_id)
+    if match is None:
+        raise StateError(
+            f"VM '{vm_name}' has an invalid Azure resource ID",
+            entity_kind="vm",
+            entity_name=vm_name,
+            hint="restore the persisted complete Azure VM resource ID before retrying",
+        )
+    subscription_id, resource_group, instance_name = match.groups()
+    return resource_group, instance_name, _MinimalAzureConfig(subscription_id)
 
 
 def _parse_resource_id(resource_id: str) -> tuple[str, str, _MinimalAzureConfig]:

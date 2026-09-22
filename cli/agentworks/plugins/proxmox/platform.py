@@ -13,7 +13,13 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self
 from pydantic import Field, model_validator
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.base import (
+    ProviderLocatorObservation,
+    ProviderLocatorUnavailable,
+    ProvisionRequest,
+    ProvisionResult,
+    VMPlatform,
+)
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
@@ -134,7 +140,7 @@ class ProxmoxConfig(AgwModel):
 class ProxmoxPlatform(VMPlatform):
     """Runs VMs on a Proxmox VE cluster."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "proxmox"
     description: ClassVar[str] = "Proxmox VE cluster VMs (clone + cloud-init)"
     config_model: ClassVar[type[ProxmoxConfig]] = ProxmoxConfig
@@ -548,6 +554,17 @@ class ProxmoxPlatform(VMPlatform):
             vmid=self._vmid(vm),
             admin_username=vm.admin_username,
         )
+
+    def observe_provider_locator(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        deadline: Deadline,
+    ) -> ProviderLocatorObservation:
+        """PVE exposes no stable cluster namespace for an opaque locator."""
+        del vm, ctx, deadline
+        return ProviderLocatorUnavailable()
 
     def resolve_native_execution_binding(
         self,

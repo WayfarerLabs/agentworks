@@ -1214,10 +1214,22 @@ connection and trust only. Before broader lifecycle implementation, complete the
       and inside rollback. Later Lima start/restart never installs or repairs it. Isolated installer
       tests prove conservative leaf handling and mode changes; live platform proof of target root
       ownership and delivery remains a later integration gate.
-- [ ] Introduce the vm-platform v2 locator-and-marker observation hook before managed target
-      composition supports third-party platforms. `ProvisionRequest.instance_marker` is receive-side
-      additive for v1, so an old external platform may ignore it and is not eligible to establish a
-      managed target identity until v2 proves delivery and guest marker reads.
+- [x] Introduce and prove the vm-platform v2 provider-locator observation hook before managed target
+      composition supports third-party platforms. The hook returns one bounded opaque provider token
+      or explicit unavailable, never provider fields, persistence or marker evidence. It is a hard
+      contract cutover. The reviewed dispositions are: AWS EC2 returns its account, region and live
+      instance ID; Azure VM returns its exact live ARM resource ID; GCP GCE returns project, zone
+      and numeric instance ID; WSL2 returns the Windows machine GUID, current-user SID and exact WSL
+      registration GUID. Those positive SDK/process observations derive deadline-aware best-effort
+      timeouts and reject a successful late result, but do not claim hard preemption of provider
+      I/O. Lima is unavailable because its reusable instance name/path lacks a stable placement-host
+      namespace and incarnation; Proxmox is unavailable because its VMID/node lacks a stable cluster
+      namespace. Those unavailable results are honest checkpoint outputs, not permission to ship a
+      critical or recovery operation without identity: production cutover must establish the
+      required namespace or alternative proof, or prove the operation does not require this locator.
+      No operation silently downgrades. `ProvisionRequest.instance_marker` remains creation
+      evidence; guest marker observation, marker-locator composition and third-party managed target
+      identity are later gates.
 - [ ] Complete and prove Linux supervisor launch through SSH and native QGA: protected identity,
       secret/source delivery, privilege changes, foreground wait, independent launch, output
       retention and terminal evidence. No workload code runs before boundary entry.

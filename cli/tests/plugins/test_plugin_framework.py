@@ -14,6 +14,7 @@ now derives its enumeration from the descriptor table.
 from __future__ import annotations
 
 import ast
+from abc import abstractmethod
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal, cast
@@ -176,7 +177,7 @@ class _NotAPlatform:
     nothing of the vm-platform contract. This is the class the old
     ``isinstance(impl, type)`` gate and ``cast`` waved through."""
 
-    contract_version = 1
+    contract_version = 2
     name = "not-a-platform"
     description = "has the metadata and none of the contract"
 
@@ -188,7 +189,7 @@ class _PlatformWithoutAConfigModel(ConformingVMPlatform):
 
     name = "no-config-model-platform"
     description = "declares no config model"
-    contract_version = 1
+    contract_version = 2
     config_model = None  # type: ignore[assignment]
 
 
@@ -208,7 +209,7 @@ class _NoNativeConfig(AgwModel):
 class _PlatformWithoutNativeTransport(VMPlatform):
     """Implements every operation except required native execution."""
 
-    contract_version = 1
+    contract_version = 2
     name = "no-native-platform"
     description = "omits native execution"
     config_model = _NoNativeConfig
@@ -229,6 +230,20 @@ class _PlatformWithoutNativeTransport(VMPlatform):
         raise NotImplementedError
 
     def display_backend_name(self, vm: Any) -> str:
+        raise NotImplementedError
+
+    def observe_provider_locator(self, vm: Any, ctx: Any, *, deadline: Any) -> Any:
+        raise NotImplementedError
+
+
+class _PlatformWithoutProviderLocator(ConformingVMPlatform):
+    """Implements the v1 operations but omits v2 locator observation."""
+
+    name = "no-provider-locator-platform"
+    description = "omits provider locator observation"
+
+    @abstractmethod
+    def observe_provider_locator(self, vm: Any, ctx: Any, *, deadline: Any) -> Any:
         raise NotImplementedError
 
 
@@ -269,7 +284,7 @@ class _BackendWithoutTtySupport:
 class _PlatformOnAnUnsupportedContract(ConformingVMPlatform):
     name = "unsupported-contract-platform"
     description = "declares a contract this build does not support"
-    contract_version = 2
+    contract_version = 1
 
 
 class _HarnessOnAnUnsupportedContract(ConformingHarnessIntegration):
@@ -453,6 +468,7 @@ class _HarnessOfferingAnUnsafeMergeContract(ConformingHarnessIntegration):
         ("vm-platform", _NotAPlatform, "does not derive from VMPlatform"),
         ("vm-platform", _AbstractPlatform, "it is abstract"),
         ("vm-platform", _PlatformWithoutNativeTransport, "it is abstract"),
+        ("vm-platform", _PlatformWithoutProviderLocator, "it is abstract"),
         ("vm-platform", _PlatformWithoutADescription, "'description' class attribute"),
         ("secret-backend", _BackendMissingItsOperations, "does not derive from SecretBackend"),
         ("secret-backend", _BackendWithoutTtySupport, "does not derive from SecretBackend"),
@@ -466,6 +482,7 @@ class _HarnessOfferingAnUnsafeMergeContract(ConformingHarnessIntegration):
         "wrong-base",
         "abstract",
         "missing-native-transport",
+        "missing-provider-locator",
         "missing-metadata",
         "missing-operations",
         "missing-attribute",
@@ -490,6 +507,10 @@ def test_rejects_a_non_conforming_impl_naming_the_plugin(kind: str, impl: type, 
 
 def test_native_transport_is_the_only_missing_platform_operation() -> None:
     assert _PlatformWithoutNativeTransport.__abstractmethods__ == frozenset({"native_transport"})
+
+
+def test_provider_locator_observation_is_a_required_platform_operation() -> None:
+    assert _PlatformWithoutProviderLocator.__abstractmethods__ == frozenset({"observe_provider_locator"})
 
 
 @pytest.mark.parametrize(

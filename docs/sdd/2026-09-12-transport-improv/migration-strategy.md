@@ -97,10 +97,11 @@ guarantee. Claims coordinate participating operations in one state database; whe
 target or no-further-effects evidence it needs, it must report that gap rather than reinterpret a
 name, timestamp or claim row as proof.
 
-The marker field is receive-side additive for vm-platform v1. A third-party v1 platform may ignore
-it and therefore cannot establish a managed target identity merely by accepting the request. The
-planned v2 locator-and-marker observation contract, not this migration, makes marker delivery and
-guest marker reads a conformance requirement.
+The marker field was receive-side additive for vm-platform v1. A third-party v1 platform could
+ignore it and therefore could not establish managed target identity merely by accepting the request.
+Vm-platform v2 is a hard cutover that adds only read-only opaque provider-locator observation. It
+does not make marker delivery, guest marker reads or marker-locator composition a conformance claim;
+those remain later target-identity gates.
 
 Lima retains its system bootstrap and reruns it on restart, so its marker is not part of retained
 provider YAML. Its create operation delivers the fixed installer once after create/start and rolls

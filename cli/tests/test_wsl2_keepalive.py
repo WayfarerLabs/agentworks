@@ -316,7 +316,7 @@ def test_base_platform_vm_active_is_nullcontext() -> None:
     class _Stub(VMPlatform):
         name = "stub"
         description = "stub"
-        contract_version = 1
+        contract_version = 2
         config_model = _StubConfig
 
         def create(self, request: Any, ctx: Any) -> Any:
@@ -338,6 +338,9 @@ def test_base_platform_vm_active_is_nullcontext() -> None:
             raise NotImplementedError
 
         def native_transport(self, vm: Any, ctx: Any, *, config: Any = None) -> Any:
+            raise NotImplementedError
+
+        def observe_provider_locator(self, vm: Any, ctx: Any, *, deadline: Any) -> Any:
             raise NotImplementedError
 
     # Patch Popen at the wsl2 module level; the base default must NOT touch it.

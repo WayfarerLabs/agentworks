@@ -201,11 +201,13 @@ rollback. Later Lima start/restart operations do not install or repair a marker.
 user-namespace tests prove the installer guards and resulting modes, but live platform proof of the
 target root owner and delivery remains a later integration gate.
 
-`ProvisionRequest.instance_marker` is receive-side additive to the v1 platform contract: existing
-third-party v1 implementations can receive and ignore it, so they do not thereby establish managed
-target identity. Bundled create paths install the marker as described above. The future v2
-locator-and-marker observation hook must make marker delivery and guest marker reads a conformance
-gate before managed target composition supports third-party platforms.
+`ProvisionRequest.instance_marker` was receive-side additive to the v1 platform contract, so an old
+third-party implementation could receive and ignore it without establishing managed target identity.
+Vm-platform v2 is a hard cutover that adds only read-only provider-locator observation: one bounded,
+opaque token or explicit unavailable. It does not read guest markers, compose a target fingerprint,
+persist locator state or make managed target identity available. Marker delivery, guest marker
+reads, marker-locator composition and explicit legacy adoption remain later conformance and delivery
+gates.
 
 Reservation commits before dispatch, and possible dispatch commits before calling the one-shot
 launch boundary. An exception or ambiguous result retains possible dispatch and cannot call the

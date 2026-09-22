@@ -199,11 +199,11 @@ class ExampleCloudConfig(AgwModel):
 class ExampleCloudPlatform(VMPlatform):
     name: ClassVar[str] = "example-cloud"
     description: ClassVar[str] = "Example Cloud VMs (region-scoped)"
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     config_model: ClassVar[type[AgwModel]] = ExampleCloudConfig
 ```
 
-For vm-platform contract version 1, `create()` receives a concrete core-selected Debian release, a
+For vm-platform contract version 2, `create()` receives a concrete core-selected Debian release, a
 required Tailscale auth key, and a value-free bootstrap-progress sink in `ProvisionRequest`. The
 platform resolves the release through a local artifact map before mutation, with no default or
 fallback. It must finish the Tailscale join and return a transport through which core probes
@@ -212,6 +212,16 @@ missing code-owned map entry says that Agentworks is out of date; an operator-ow
 names the exact vm-site field. A successful result may omit the Tailscale IP only when join
 succeeded but IP discovery did not; the manager then performs IP-only rediscovery and Tailscale SSH
 verification.
+
+Version 2 also requires `observe_provider_locator(vm, ctx, *, deadline)`. It is a read-only provider
+observation returning an opaque `ProviderLocator` token, or empty `ProviderLocatorUnavailable` only
+when the platform deliberately cannot observe one. `Unavailable` does not prove that the target
+exists. Once provider observation begins, confirmed target absence and provider failures raise typed
+errors. A finite caller-owned `Deadline` covers the whole lookup: use `provider_locator_remaining`
+before provider I/O to set best-effort SDK or socket timeouts and again before return to reject a
+late result. This is not provider-call preemption. Core never parses or normalizes locator tokens,
+and this hook neither reads a guest marker nor constructs target identity. Contract versions are
+exact and have no adapter, so v1 implementations must migrate to v2 before they can register.
 
 An operator-owned release catalog also overrides the pure `validate_create_release(release)` hook.
 Core calls it with the concrete selection before resolving secrets or running authenticated platform
