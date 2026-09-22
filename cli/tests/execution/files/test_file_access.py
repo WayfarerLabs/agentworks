@@ -107,6 +107,103 @@ class NoDispatchCarrier:
         return CarrierReport(dispatch=Dispatch.NOT_SENT)
 
 
+class FirstDispatchCarrier(NoDispatchCarrier):
+    def __init__(self) -> None:
+        super().__init__()
+        self._inner = LocalCarrier()
+
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.invocations.append(invocation)
+        if len(self.invocations) == 1:
+            return self._inner.execute(invocation, io=io, deadline=deadline)
+        return CarrierReport(dispatch=Dispatch.NOT_SENT)
+
+
+class RecordingUploadSource:
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+        self._offset = 0
+        self.calls = 0
+        self.limits: list[int] = []
+        self.closed = False
+
+    def read(self, maximum: int, /) -> bytes:
+        self.calls += 1
+        self.limits.append(maximum)
+        if self._offset == len(self._data):
+            return b""
+        end = min(self._offset + maximum, len(self._data))
+        data = self._data[self._offset : end]
+        self._offset = end
+        return data
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class FailingUploadSource:
+    def __init__(self, failure: BaseException) -> None:
+        self.failure = failure
+        self.calls = 0
+        self.closed = False
+
+    def read(self, maximum: int, /) -> bytes:
+        del maximum
+        self.calls += 1
+        raise self.failure
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class StallingUploadSource:
+    def __init__(self, value: object = None) -> None:
+        self.value = value
+        self.calls = 0
+        self.closed = False
+
+    def read(self, maximum: int, /) -> object:
+        del maximum
+        self.calls += 1
+        return self.value
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class TemporaryThenDataSource:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.closed = False
+
+    def read(self, maximum: int, /) -> bytes | None:
+        del maximum
+        self.calls += 1
+        if self.calls == 1:
+            return None
+        return b"x" if self.calls == 2 else b""
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class ExcessUploadSource:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.closed = False
+
+    def read(self, maximum: int, /) -> bytes:
+        self.calls += 1
+        return b"x" * (maximum + 1)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class InvalidUploadSource:
+    read = "not-callable"
+
+
 @pytest.fixture
 def plan() -> IdentityPlan:
     gid = os.getegid()
@@ -192,6 +289,234 @@ def test_real_bound_methods_preserve_exact_public_values(
     assert current is not None
     removed = access.remove(target, expected_kind=FileKind.REGULAR, expected=current.revision)
     assert removed.change is Change.CHANGED and removed.revision is None
+
+
+def test_upload_uses_bounded_caller_owned_source_and_exact_eof_probe(
+    bound_access: tuple[FileAccess, Path, OperationOwner, Database], metadata: NewMetadata
+) -> None:
+    access, root, _owner, _database = bound_access
+    source = RecordingUploadSource(b"streamed")
+
+    result = access.upload(
+        PurePosixPath(root / "streamed"),
+        source,
+        size=8,
+        condition=Create(),
+        create_metadata=metadata,
+    )
+
+    assert result.change is Change.CHANGED
+    assert access.read_file(PurePosixPath(root / "streamed"), max_bytes=32).data == b"streamed"  # type: ignore[union-attr]
+    assert source.calls >= 2
+    assert source.limits[-1] == 1
+    assert all(0 < limit <= 12 * 1_024 for limit in source.limits)
+    assert not source.closed
+
+
+@pytest.mark.parametrize(
+    ("source", "size", "expected_reason"),
+    [
+        (RecordingUploadSource(b"short"), 6, "source_contract"),
+        (StallingUploadSource("wrong-type"), 1, "source_contract"),
+        (ExcessUploadSource(), 1, "source_contract"),
+        (FailingUploadSource(RuntimeError("source-secret")), 1, "source"),
+    ],
+    ids=["early-eof", "nonbytes", "excess", "source-exception"],
+)
+def test_upload_reduces_source_failures_without_closing_source(
+    bound_access: tuple[FileAccess, Path, OperationOwner, Database],
+    metadata: NewMetadata,
+    source: RecordingUploadSource | StallingUploadSource | ExcessUploadSource | FailingUploadSource,
+    size: int,
+    expected_reason: str,
+) -> None:
+    access, root, _owner, _database = bound_access
+
+    with pytest.raises(ExternalError) as raised:
+        access.upload(
+            PurePosixPath(root / "failed"),
+            source,  # type: ignore[arg-type]
+            size=size,
+            condition=Create(),
+            create_metadata=metadata,
+        )
+
+    assert raised.value.details is not None
+    assert raised.value.details.reason.value == expected_reason
+    assert not source.closed
+
+
+def test_upload_deadline_rejection_precedes_source_read_and_does_not_close_source(
+    tmp_path: Path, plan: IdentityPlan, metadata: NewMetadata
+) -> None:
+    root = tmp_path / "approved"
+    root.mkdir()
+    database = Database(tmp_path / "state.db")
+    owner = OperationOwner.acquire(
+        database.operations,
+        OperationScope(OperationResourceKind.VM, "file-access-upload-deadline"),
+        "file-access",
+    )
+    source = StallingUploadSource()
+    access = FileAccess(
+        FileOperation(owner),
+        LocalCarrier(),
+        trusted_root=PurePosixPath(root),
+        runtime_selection=runtime_selection(sys.executable),
+        ordinary_plan=plan,
+        elevated_plan=plan,
+        entity_kind="file",
+        entity_name="configuration",
+        deadline=lambda: Deadline.after(0),
+    )
+    try:
+        with pytest.raises(ExternalError) as raised:
+            access.upload(
+                PurePosixPath(root / "stalled"),
+                source,
+                size=1,
+                condition=Create(),
+                create_metadata=metadata,
+            )
+        assert raised.value.details is not None
+        assert raised.value.details.reason.value == "deadline"
+        assert source.calls == 0
+        assert not source.closed
+    finally:
+        owner.close()
+        database.close()
+
+
+def test_upload_retries_temporary_none_without_closing_source(
+    bound_access: tuple[FileAccess, Path, OperationOwner, Database], metadata: NewMetadata
+) -> None:
+    access, root, _owner, _database = bound_access
+    source = TemporaryThenDataSource()
+
+    result = access.upload(
+        PurePosixPath(root / "temporary"),
+        source,
+        size=1,
+        condition=Create(),
+        create_metadata=metadata,
+    )
+
+    assert result.change is Change.CHANGED
+    assert source.calls >= 3
+    assert not source.closed
+
+
+def test_upload_validation_rejects_before_source_read_or_dispatch(
+    tmp_path: Path, plan: IdentityPlan, metadata: NewMetadata
+) -> None:
+    root = tmp_path / "approved"
+    root.mkdir()
+    database = Database(tmp_path / "state.db")
+    owner = OperationOwner.acquire(
+        database.operations,
+        OperationScope(OperationResourceKind.VM, "file-access-upload-validation"),
+        "file-access",
+    )
+    carrier = NoDispatchCarrier()
+    source = RecordingUploadSource(b"secret")
+    access = FileAccess(
+        FileOperation(owner),
+        carrier,
+        trusted_root=PurePosixPath(root),
+        runtime_selection=runtime_selection(sys.executable),
+        ordinary_plan=plan,
+        elevated_plan=plan,
+        entity_kind="file",
+        entity_name="configuration",
+        deadline=lambda: Deadline.after(30),
+    )
+    try:
+        with pytest.raises(ValidationError):
+            access.upload(
+                PurePosixPath(root / "../outside"),
+                source,
+                size=6,
+                condition=Create(),
+                create_metadata=metadata,
+            )
+        assert source.calls == 0
+        assert carrier.invocations == []
+
+        with pytest.raises(ValidationError):
+            access.upload(
+                PurePosixPath(root / "target"),
+                InvalidUploadSource(),  # type: ignore[arg-type]
+                size=6,
+                condition=Create(),
+                create_metadata=metadata,
+            )
+        assert source.calls == 0
+        assert carrier.invocations == []
+    finally:
+        owner.close()
+        database.close()
+
+
+def test_upload_sudo_selects_bound_elevated_plan_before_dispatch(
+    tmp_path: Path, plan: IdentityPlan, metadata: NewMetadata
+) -> None:
+    root = tmp_path / "approved"
+    root.mkdir()
+    database = Database(tmp_path / "state.db")
+    owner = OperationOwner.acquire(
+        database.operations,
+        OperationScope(OperationResourceKind.VM, "file-access-upload-plan"),
+        "file-access",
+    )
+    carrier = FirstDispatchCarrier()
+    elevated = IdentityPlan(IdentityExpectation(0, 0, (0,)), IdentityMode.SUDO_ROOT)
+    access = FileAccess(
+        FileOperation(owner),
+        carrier,
+        trusted_root=PurePosixPath(root),
+        runtime_selection=runtime_selection(sys.executable),
+        ordinary_plan=plan,
+        elevated_plan=elevated,
+        entity_kind="file",
+        entity_name="configuration",
+        deadline=lambda: Deadline.after(30),
+    )
+    source = RecordingUploadSource(b"x")
+    try:
+        with pytest.raises(ExternalError):
+            access.upload(
+                PurePosixPath(root / "target"),
+                source,
+                size=1,
+                condition=Create(),
+                create_metadata=metadata,
+                sudo=True,
+            )
+        assert any(invocation.argv[0] == "/usr/bin/sudo" for invocation in carrier.invocations)
+        assert source.calls == 0
+        assert not source.closed
+    finally:
+        owner.close()
+        database.close()
+
+
+def test_upload_does_not_close_source_when_keyboard_interrupt_escapes(
+    bound_access: tuple[FileAccess, Path, OperationOwner, Database], metadata: NewMetadata
+) -> None:
+    access, root, _owner, _database = bound_access
+    source = FailingUploadSource(KeyboardInterrupt())
+
+    with pytest.raises(KeyboardInterrupt):
+        access.upload(
+            PurePosixPath(root / "interrupted"),
+            source,
+            size=1,
+            condition=Create(),
+            create_metadata=metadata,
+        )
+
+    assert source.calls > 0
+    assert not source.closed
 
 
 def test_paths_are_exactly_confined_and_root_is_refused(

@@ -55,13 +55,16 @@ remote effects or active permission grants.
 `access.py` composes a bound `FileAccess` from an already-acquired `FileOperation`, one carrier,
 trusted root, selected runtime, ordinary identity plan, optional elevated plan, safe logical
 diagnostic identity, and a composition-owned deadline factory. It provides bounded reads, stat,
-inventory, byte-value publication, JSON updates, directory convergence, metadata convergence and
-conditional removal through the retained private custody and result reducers. `sudo=True` selects
-only the already bound elevated plan and refuses before source validation or dispatch when absent.
-Every target is a normalized absolute POSIX path confined to the trusted root; the service rejects
-the filesystem root because the helper requires a nonempty leaf. It has no public upload source,
-download, directory transfer, production factory or RunContext accessor. This bound assembly does
-not activate recipient grants or the core allowlist during coexistence.
+inventory, finite byte-value publication, caller-owned streaming upload, JSON updates, directory
+convergence, metadata convergence and conditional removal through the retained private custody and
+result reducers. `UploadSource.read` receives a positive request no larger than the private stage
+chunk bound; `None` is retried under the original deadline, `b""` is EOF, and `FileAccess` never
+closes, seeks or retains the source. Exact uploads consume the declared size and perform one-byte
+excess detection. `sudo=True` selects only the already bound elevated plan and refuses before source
+validation or dispatch when absent. Every target is a normalized absolute POSIX path confined to the
+trusted root; the service rejects the filesystem root because the helper requires a nonempty leaf.
+It has no public download, directory transfer, production factory or RunContext accessor. This bound
+assembly does not activate recipient grants or the core allowlist during coexistence.
 
 The bootstrap waits for source and stdin producers as well as output encoders. Unexpected producer
 failure invalidates delivery even if the command exits zero. Intentional early input closure is

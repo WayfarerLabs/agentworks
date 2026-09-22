@@ -8,7 +8,7 @@ import stat
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from agentworks.errors import ValidationError
 
@@ -59,12 +59,19 @@ __all__ = [
     "ReadResult",
     "Replace",
     "Revision",
+    "UploadSource",
     "WriteCondition",
 ]
 
 
 type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
 type JsonObject = dict[str, JsonValue]
+
+
+class UploadSource(Protocol):
+    """Borrowed nonblocking source for one finite file upload."""
+
+    def read(self, maximum: int, /) -> bytes | None: ...
 
 
 class FileKind(StrEnum):
