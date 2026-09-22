@@ -366,6 +366,45 @@ def test_recovery_dispatch_uncertain_handoff_retains_owner_and_effect(db: Databa
     assert persisted[0].state is LifecycleObligationState.POSSIBLE_EFFECT
 
 
+def test_recovery_dispatch_blocks_rebound_payload_publication_while_active_or_retained(db: Database) -> None:
+    predecessor = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    obligation = predecessor.register_lifecycle_obligation(
+        "file-call",
+        payload_version=1,
+        payload=b"prepared",
+        obligation_id="c" * 32,
+    )
+    obligation.mark_possible_effect()
+    recovered = OperationOwner.recover(db.operations, predecessor.ownership, "d" * 32)
+    bound = recovered.rebind_possible_effect_lifecycle_obligation(
+        obligation.obligation_id,
+        "file-call",
+        payload_version=1,
+        payload=b"prepared",
+        payload_revision=0,
+    )
+    stale = recovered.rebind_lifecycle_obligation(
+        obligation.obligation_id,
+        "file-call",
+        payload_version=1,
+        payload=b"prepared",
+    )
+    dispatch = bound.open_dispatch()
+
+    with pytest.raises(StateError):
+        stale.publish_payload(expected_revision=0, payload_version=2, payload=b"competing")
+
+    dispatch.begin_attempt()
+    with pytest.raises(StateError):
+        stale.publish_payload(expected_revision=0, payload_version=2, payload=b"competing")
+
+    dispatch.handoff_unresolved()
+    with pytest.raises(StateError):
+        stale.publish_payload(expected_revision=0, payload_version=2, payload=b"competing")
+
+    assert db.operations.list_lifecycle_obligations(recovered.ownership)[0].payload == b"prepared"
+
+
 def test_recovery_dispatch_refuses_nonpossible_rows_and_changed_exact_identity(db: Database) -> None:
     predecessor = OperationOwner.acquire(db.operations, _scope(), "file-upload")
     registered = predecessor.register_lifecycle_obligation(

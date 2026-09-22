@@ -433,6 +433,15 @@ class LifecycleObligation:
                     entity_kind=owner._ownership.scope.resource_kind,  # noqa: SLF001
                     entity_name=owner._ownership.scope.resource_name,  # noqa: SLF001
                 )
+            if owner._active_recovery_dispatch is not None or isinstance(  # noqa: SLF001
+                owner._outstanding_attempt,
+                RecoveryAttempt,  # noqa: SLF001
+            ):
+                raise StateError(
+                    "recovery dispatch prevents lifecycle payload publication",
+                    entity_kind=owner._ownership.scope.resource_kind,  # noqa: SLF001
+                    entity_name=owner._ownership.scope.resource_name,  # noqa: SLF001
+                )
             self._obligation = owner._repository.publish_lifecycle_obligation_payload(  # noqa: SLF001
                 owner._ownership,  # noqa: SLF001
                 self.obligation_id,
@@ -502,7 +511,6 @@ class RecoveryDispatch:
 
     _owner: OperationOwner
     _obligation: PersistedLifecycleObligation
-    _attempt: RecoveryAttempt | None = field(default=None, init=False)
     _closed: bool = field(default=False, init=False)
 
     @property
@@ -514,7 +522,7 @@ class RecoveryDispatch:
         owner = self._owner
         with owner._guard:  # noqa: SLF001
             self._require_active_locked()
-            if self._attempt is not None or owner._outstanding_attempt is not None:  # noqa: SLF001
+            if owner._outstanding_attempt is not None:  # noqa: SLF001
                 raise StateError(
                     "recovery dispatch already has an outstanding attempt",
                     entity_kind=self.ownership.scope.resource_kind,
@@ -532,7 +540,6 @@ class RecoveryDispatch:
                 self._obligation.payload_revision,
             )
             attempt = RecoveryAttempt(self)
-            self._attempt = attempt
             owner._outstanding_attempt = attempt  # noqa: SLF001
             return attempt
 
@@ -541,7 +548,7 @@ class RecoveryDispatch:
         owner = self._owner
         with owner._guard:  # noqa: SLF001
             self._require_active_locked()
-            if self._attempt is not None or owner._outstanding_attempt is not None:  # noqa: SLF001
+            if owner._outstanding_attempt is not None:  # noqa: SLF001
                 raise StateError(
                     "recovery dispatch has an outstanding attempt",
                     entity_kind=self.ownership.scope.resource_kind,
@@ -550,12 +557,30 @@ class RecoveryDispatch:
             owner._active_recovery_dispatch = None  # noqa: SLF001
             self._closed = True
 
+    def _abort_unreturned_attempt(self) -> None:
+        """Close after begin fails before its recovery attempt reaches the caller."""
+        owner = self._owner
+        with owner._guard:  # noqa: SLF001
+            self._require_active_locked()
+            attempt = owner._outstanding_attempt  # noqa: SLF001
+            if attempt is not None:
+                if not isinstance(attempt, RecoveryAttempt) or attempt._dispatch is not self:  # noqa: SLF001
+                    raise StateError(
+                        "recovery dispatch has another outstanding attempt",
+                        entity_kind=self.ownership.scope.resource_kind,
+                        entity_name=self.ownership.scope.resource_name,
+                    )
+                owner._outstanding_attempt = None  # noqa: SLF001
+            owner._active_recovery_dispatch = None  # noqa: SLF001
+            self._closed = True
+
     def handoff_unresolved(self) -> None:
         """Relinquish local custody while retaining an uncertain effect."""
         owner = self._owner
         with owner._guard:  # noqa: SLF001
             self._require_active_locked()
-            if self._attempt is None or owner._outstanding_attempt is not self._attempt:  # noqa: SLF001
+            attempt = owner._outstanding_attempt  # noqa: SLF001
+            if not isinstance(attempt, RecoveryAttempt) or attempt._dispatch is not self:  # noqa: SLF001
                 raise StateError(
                     "recovery dispatch has no outstanding attempt to retain",
                     entity_kind=self.ownership.scope.resource_kind,
@@ -585,13 +610,12 @@ class RecoveryAttempt:
         owner = dispatch._owner  # noqa: SLF001
         with owner._guard:  # noqa: SLF001
             dispatch._require_active_locked()  # noqa: SLF001
-            if dispatch._attempt is not self or owner._outstanding_attempt is not self:  # noqa: SLF001
+            if owner._outstanding_attempt is not self:  # noqa: SLF001
                 raise StateError(
                     "recovery attempt is no longer outstanding",
                     entity_kind=dispatch.ownership.scope.resource_kind,
                     entity_name=dispatch.ownership.scope.resource_name,
                 )
-            dispatch._attempt = None  # noqa: SLF001
             owner._outstanding_attempt = None  # noqa: SLF001
 
 

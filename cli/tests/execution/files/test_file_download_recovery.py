@@ -42,7 +42,7 @@ from agentworks.execution.carrier import (
     PreparedInvocation,
 )
 from agentworks.operations import LifecycleObligation as OwnerLifecycleObligation
-from agentworks.operations import OperationOwner
+from agentworks.operations import OperationOwner, RecoveryDispatch
 from tests.execution.files._file_snapshot_support import LocalCarrier, fixture_source, install_fixture_bundle
 from tests.execution.files._runtime_support import runtime_selection
 
@@ -792,6 +792,129 @@ def test_stale_recovery_dispatch_never_calls_the_carrier_and_allows_current_rebi
                 (_LocalHelperDrainRecord("current-snapshot", exited=True),),
             ),
         )
+    finally:
+        database.close()
+
+
+def test_interrupted_recovery_attempt_before_return_releases_current_custody(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "source-root"
+    root.mkdir()
+    database = Database(tmp_path / "state.db")
+    target = _target()
+    plan = _plan()
+    owner, call, persisted = _possible_download(database, root, target, plan)
+    try:
+        recovered = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+        recovery = FileDownloadRecovery.open(
+            recovered,
+            target,
+            persisted,
+            _local_drain_evidence(
+                recovered.ownership,
+                persisted,
+                call,
+                (_LocalHelperDrainRecord("initial-snapshot", exited=True),),
+            ),
+        )
+        original = RecoveryDispatch.begin_attempt
+
+        def begin_then_interrupt(self):
+            original(self)
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(RecoveryDispatch, "begin_attempt", begin_then_interrupt)
+        carrier = LocalCarrier()
+        with pytest.raises(KeyboardInterrupt):
+            recovery.reconcile(carrier, deadline=Deadline.after(30))
+        assert carrier.calls == 0
+
+        monkeypatch.setattr(RecoveryDispatch, "begin_attempt", original)
+        recovered.rebind_lifecycle_obligation(
+            persisted.obligation_id,
+            "file-call",
+            payload_version=persisted.payload_version,
+            payload=persisted.payload,
+        )
+        current = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
+        FileDownloadRecovery.open(
+            recovered,
+            target,
+            current,
+            _local_drain_evidence(
+                recovered.ownership,
+                current,
+                call,
+                (_LocalHelperDrainRecord("reused-snapshot", exited=True),),
+            ),
+        )
+    finally:
+        database.close()
+
+
+def test_recovery_dispatch_refuses_competing_payload_before_carrier_entry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "source-root"
+    root.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    scratch.chmod(0o1777)
+    install_fixture_bundle(monkeypatch, scratch)
+    database = Database(tmp_path / "state.db")
+    target = _target()
+    plan = _plan()
+    owner, call, persisted = _possible_download(database, root, target, plan)
+    try:
+        recovered = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+        recovery = FileDownloadRecovery.open(
+            recovered,
+            target,
+            persisted,
+            _local_drain_evidence(
+                recovered.ownership,
+                persisted,
+                call,
+                (_LocalHelperDrainRecord("initial-snapshot", exited=True),),
+            ),
+        )
+        stale = recovered.rebind_lifecycle_obligation(
+            persisted.obligation_id,
+            "file-call",
+            payload_version=persisted.payload_version,
+            payload=persisted.payload,
+        )
+        original_begin = RecoveryDispatch.begin_attempt
+
+        def begin_then_publish_competing_payload(self):
+            attempt = original_begin(self)
+            with pytest.raises(StateError):
+                stale.publish_payload(
+                    expected_revision=persisted.payload_revision,
+                    payload_version=persisted.payload_version,
+                    payload=encode_file_call_obligation(replace(call, token=b"c" * 16)),
+                )
+            return attempt
+
+        monkeypatch.setattr(RecoveryDispatch, "begin_attempt", begin_then_publish_competing_payload)
+        carrier = LocalCarrier()
+        seen_rows: list[LifecycleObligation] = []
+        original_execute = carrier.execute
+
+        def execute(invocation, *, io, deadline):
+            seen_rows.append(database.operations.list_lifecycle_obligations(recovered.ownership)[0])
+            return original_execute(invocation, io=io, deadline=deadline)
+
+        monkeypatch.setattr(carrier, "execute", execute)
+        recovery.reconcile(carrier, deadline=Deadline.after(30))
+
+        admitted = replace(persisted, ownership=recovered.ownership)
+        assert carrier.calls == 1
+        assert seen_rows == [admitted]
+        assert database.operations.list_lifecycle_obligations(recovered.ownership)[0] == admitted
     finally:
         database.close()
 

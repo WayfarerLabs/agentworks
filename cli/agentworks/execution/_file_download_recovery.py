@@ -158,13 +158,12 @@ class FileDownloadRecovery:
         )
 
     def _dispatch(self, action: Callable[[], FileSnapshotCandidateResult]) -> FileSnapshotCandidateResult:
-        self._reconcile_pending_cleanup_debt()
         dispatch = self._bound.open_dispatch()
         try:
             attempt = dispatch.begin_attempt()
         except BaseException:
             with suppress(BaseException):
-                dispatch.close()
+                dispatch._abort_unreturned_attempt()  # noqa: SLF001
             raise
         try:
             result = action()
