@@ -26,8 +26,9 @@ broad-build or production-cutover gate is completed by those measurements.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
-The [0.19.0 migration inventory](migration-strategy.md) is the current baseline. `NativeFiles` is
-retired, while useful domain behavior and evidence are preserved through direct RunContext access.
+The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
+retires `NativeFiles`, while preserving useful domain behavior and evidence through direct
+RunContext access. Production callers still use `NativeFiles` until their migration batch lands.
 
 The operator directs publication of this reviewed baseline to `main` before the proof. Publication
 gives both efforts a common design reference; it does not pass the proof, complete an LLD or freeze
@@ -1736,6 +1737,12 @@ one all-callers cutover. PR #830 publishes this design only. The following imple
 the new surface; migration and removal follow in their own PRs. Permissions are groundwork until
 removal: do not enforce new recipient grants or the successor core file ceiling, or rely on their
 isolation, in coexistence releases. Operational safety and selected profile guarantees still apply.
+
+The first checkbox below describes this section's delivery outcome, not the next construction step.
+Complete target identity, execution/jobs, FileAccess, platform composition and whole-workflow
+validation first through private composition seams. Only then expose the two passive RunContext
+accessors as one complete additive surface. An accessor-only or run-only target is not an acceptable
+intermediate public API.
 
 - [ ] Add `admin_execution_target()` and `agent_execution_target()` to the existing RunContext,
       returning the new target without changing legacy accessors or callers. Use permanent names, no
