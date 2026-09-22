@@ -30,11 +30,11 @@ def _require_rootless_linux_namespace() -> None:
         pytest.skip("marker installer behavior test requires an unprivileged user namespace")
 
 
-def _install(marker_path: Path) -> subprocess.CompletedProcess[str]:
+def _install(marker_path: Path, *, prefix: str = "") -> subprocess.CompletedProcess[str]:
     script = _render_instance_marker_installer(instance_marker=_MARKER, marker_path=str(marker_path))
     return subprocess.run(
         ["unshare", "--user", "--map-root-user", "--mount", "/bin/bash", "-s"],
-        input=script,
+        input=prefix + script,
         text=True,
         capture_output=True,
         check=False,
@@ -99,6 +99,20 @@ def test_installer_refuses_unsafe_marker_leaf(tmp_path: Path, kind: str) -> None
         assert marker_path.is_dir()
     else:
         assert marker_path.is_symlink()
+
+
+def test_installer_refuses_unobserved_link_count_without_modifying_alias(tmp_path: Path) -> None:
+    marker_path = tmp_path / "agentworks" / "instance-id"
+    marker_path.parent.mkdir()
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"outside")
+    os.link(outside, marker_path)
+
+    result = _install(marker_path, prefix="stat() { return 1; }\n")
+
+    assert result.returncode != 0
+    assert outside.read_bytes() == b"outside"
+    assert marker_path.read_bytes() == b"outside"
 
 
 @pytest.mark.parametrize("kind", ("symlink", "file"))

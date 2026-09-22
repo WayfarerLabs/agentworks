@@ -283,7 +283,11 @@ if [ -e "$MARKER_FILE" ]; then
         echo "##ERROR## VM instance marker path is not a regular file"
         exit 1
     fi
-    if [ "$(stat -c %h "$MARKER_FILE")" -ne 1 ]; then
+    LINK_COUNT="$(stat -c %h "$MARKER_FILE")" || {{
+        echo "##ERROR## could not inspect VM instance marker link count"
+        exit 1
+    }}
+    if [ "$LINK_COUNT" != 1 ]; then
         echo "##ERROR## VM instance marker path has multiple links"
         exit 1
     fi
