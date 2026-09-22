@@ -251,6 +251,8 @@ fi
 """
 
 _INSTANCE_MARKER_INSTALLER_TEMPLATE = """\\
+set -euo pipefail
+
 # -- Step 1c: VM instance marker --
 # This marker belongs to the VM record, not to a template. A clone therefore
 # receives the marker generated for this create rather than inheriting its
@@ -333,10 +335,9 @@ def generate_bootstrap_script(
     system default, free to disagree with the first. It did: this
     parameter defaulted to 0 while ``ResolvedVMTemplate.swap`` is 4.
 
-    ``instance_marker`` is optional only for compatibility with a v1 external
-    platform that already calls this shared helper. Core and bundled platforms
-    always supply it. Omitting it emits no marker step and cannot establish
-    managed target identity.
+    ``instance_marker=None`` omits installation for Lima's retained YAML and
+    for compatibility with a v1 external platform that already calls this
+    shared helper. Such a path cannot establish managed target identity.
     """
     instance_marker_step = ""
     if instance_marker is not None:

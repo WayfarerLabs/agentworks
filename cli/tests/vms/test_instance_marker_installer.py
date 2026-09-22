@@ -66,6 +66,12 @@ def test_installer_creates_missing_parent_and_marker_leaf(tmp_path: Path) -> Non
     assert stat.S_IMODE(marker_path.parent.stat().st_mode) == 0o755
 
 
+def test_installer_fails_when_the_fixed_parent_cannot_be_created() -> None:
+    result = _install(Path("/proc/agentworks-instance-marker-test/instance-id"))
+
+    assert result.returncode != 0
+
+
 @pytest.mark.parametrize("kind", ("symlink", "hardlink", "fifo", "directory"))
 def test_installer_refuses_unsafe_marker_leaf(tmp_path: Path, kind: str) -> None:
     marker_path = tmp_path / "agentworks" / "instance-id"
