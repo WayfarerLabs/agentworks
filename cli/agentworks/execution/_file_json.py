@@ -50,6 +50,8 @@ from agentworks.execution.carrier import Deadline, Dispatch, Failure
 from agentworks.operations import OperationBorrow
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.execution._file_object_protocol import FileObjectFailureControl
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution.carrier import Carrier
@@ -314,6 +316,10 @@ class _PreparedJsonUpdate:
     state: _State
     workflow: _JsonWorkflow
 
+    def set_child_upload_callback(self, callback: Callable[[_PreparedUpload, int], None]) -> None:
+        """Set the core custody checkpoint before each child dispatch."""
+        self.workflow.set_child_upload_callback(callback)
+
     def run(self) -> FileJsonOutcome:
         try:
             return self.workflow.run()
@@ -342,6 +348,11 @@ class _JsonWorkflow:
         self._inputs = inputs
         self._deadline = deadline
         self._state = state
+        self._child_upload_callback: Callable[[_PreparedUpload, int], None] | None = None
+
+    def set_child_upload_callback(self, callback: Callable[[_PreparedUpload, int], None]) -> None:
+        """Set the core-owned callback run after child attachment."""
+        self._child_upload_callback = callback
 
     @property
     def deadline(self) -> Deadline:
@@ -577,6 +588,9 @@ class _JsonWorkflow:
             inputs=(binding, condition, self._inputs.create_metadata),
         )
         self._state.active_upload = upload
+        callback = self._child_upload_callback
+        if callback is not None:
+            callback(upload, self._state.publication_attempts)
         outcome = upload.run()
         self._state.capture_upload(outcome)
         return outcome
