@@ -31,6 +31,23 @@ plugin initialization in a test is not proof of that independence.
 This refresh supplements the release-behavior baseline below. It does not mark any consumer migrated
 or establish the new lifecycle/file guarantees.
 
+### Additive implementation checkpoint, 2026-09-22
+
+The dated inventory above describes the state immediately after #830, not the current candidate. The
+independent package now contains private buffered execution, runtime admission, account selection,
+bounded file operations, operation ownership, managed-run identity, VM incarnation identity, native
+carrier candidates and WSL host-client ownership. The WSL carrier and host-client mechanisms have
+passed their scoped live Windows/WSL2 proof. These components still do not compose a complete
+`ExecutionTarget`, expose either new RunContext accessor, or serve a production consumer.
+
+The WSL native-binding resolver is passive and has no production caller. Existing platform create,
+activation, recovery, provisioning and cleanup paths still use the legacy transport and keepalive
+surfaces. The next implementation checkpoints therefore remain private composition work: bind safe
+execution diagnostics, aggregate whole-operation lifecycle evidence, complete file-operation
+custody, and replace platform-specific legacy ownership only where the new mechanism and its full
+lifetime have been proved. Public target and RunContext delivery follows those gates as one complete
+additive surface, not as an accessor-only or run-only intermediate API.
+
 ### Owned-boundary integration inventory, 2026-09-21
 
 The read-only audit at `faf99365` locates admission before effects without moving legacy commands
