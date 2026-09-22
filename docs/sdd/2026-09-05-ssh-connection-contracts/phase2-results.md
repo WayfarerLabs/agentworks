@@ -324,7 +324,7 @@ Linux Python 3.12/3.13/3.14 and the static/repository/website gates, but Windows
 the synthetic partial-listener test at its final rebind with WinError 10048. Exact child-exit and
 pipe-closure assertions already passed. The log does not distinguish another port owner from
 socket-closing latency, both permitted by Microsoft's
-[Winsock error definition](https://learn.microsoft.com/en-us/windows/win32/winsock/windows-sockets-error-codes-2).
+[Windows socket error definition](https://learn.microsoft.com/en-us/windows/win32/winsock/windows-sockets-error-codes-2).
 It does not establish a production process leak.
 
 The fixture previously released a parent-selected ephemeral port before the child bound it and
@@ -335,6 +335,13 @@ exact child/pipe cleanup. Default socket rebinding retries only address-in-use f
 second; other errors fail immediately, and a persistent holder still fails. No address-reuse option
 or production cleanup relaxation is introduced. Native Windows acceptance still requires its own
 evidence; the corrected hosted test must pass before this increment is considered green.
+
+Project, complexity and correctness/security reviews are clean at `c1b7ebaa1`. The 49 focused
+forwarding tests pass, and the independent correctness reviewer repeats the corrected case in 0.79
+seconds with its scratch directory removed. The combined non-integration suite passes **12,945 tests
+with 14 skips** in 185.60 seconds. Ruff/format, mypy (1,093 sources), file lint and locked-SDD
+checks pass. This test-only follow-up leaves runtime code and the previously validated Rulesync,
+typer and website surfaces unchanged; hosted validation records the new head separately.
 
 ## Managed-process fix integration
 
