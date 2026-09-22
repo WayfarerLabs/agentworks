@@ -52,12 +52,12 @@ class HostClientStatus(StrEnum):
 class JobAssignment(StrEnum):
     """What the native owner observed while assigning its Job Object.
 
-    ``ASSIGNED_AFTER_SPAWN`` records successful post-spawn assignment. It does
-    not claim that controller death before assignment could not orphan a guest.
+    ``ASSIGNED_AT_CREATION`` means successful ``CreateProcessW`` returned with
+    the Job Object in its extended startup attribute list.
     """
 
     NOT_CREATED = "not_created"
-    ASSIGNED_AFTER_SPAWN = "assigned_after_spawn"
+    ASSIGNED_AT_CREATION = "assigned_at_creation"
     FAILED = "failed"
     UNKNOWN = "unknown"
 

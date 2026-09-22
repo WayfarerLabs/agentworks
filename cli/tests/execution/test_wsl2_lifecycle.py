@@ -50,7 +50,7 @@ class FakeNative:
     spawn_state: LocalResourceSnapshot = field(
         default_factory=lambda: local(
             HostClientStatus.ACTIVE,
-            assignment=JobAssignment.ASSIGNED_AFTER_SPAWN,
+            assignment=JobAssignment.ASSIGNED_AT_CREATION,
             job=HandleSettlement.OPEN,
         )
     )
@@ -160,7 +160,7 @@ def test_literal_helper_argv_and_start_evidence(monkeypatch: pytest.MonkeyPatch)
     assert native.argv[7:12] == ("-I", "-S", "-B", "-c", _HELPER_SOURCE)
     assert native.argv[12] == "a" * 32
     assert evidence.identity == GuestAnchorIdentity(137, 8192)
-    assert evidence.local.job_assignment == JobAssignment.ASSIGNED_AFTER_SPAWN
+    assert evidence.local.job_assignment == JobAssignment.ASSIGNED_AT_CREATION
 
 
 def _bounded_line(selector: selectors.BaseSelector, stream: IO[bytes]) -> bytes:
@@ -216,25 +216,25 @@ def test_helper_protocol_runs_under_local_python_and_waits_for_eof() -> None:
 
 
 def test_snapshot_requires_both_host_and_job_settlement() -> None:
-    assert not local(HostClientStatus.EXITED, 0, JobAssignment.ASSIGNED_AFTER_SPAWN, HandleSettlement.OPEN).settled
+    assert not local(HostClientStatus.EXITED, 0, JobAssignment.ASSIGNED_AT_CREATION, HandleSettlement.OPEN).settled
     assert not local(
         HostClientStatus.ACTIVE,
         None,
-        JobAssignment.ASSIGNED_AFTER_SPAWN,
+        JobAssignment.ASSIGNED_AT_CREATION,
         HandleSettlement.CLOSED,
         HandleSettlement.CLOSED,
     ).settled
     assert not local(
         HostClientStatus.EXITED,
         0,
-        JobAssignment.ASSIGNED_AFTER_SPAWN,
+        JobAssignment.ASSIGNED_AT_CREATION,
         HandleSettlement.CLOSED,
         HandleSettlement.OPEN,
     ).settled
     assert local(
         HostClientStatus.EXITED,
         0,
-        JobAssignment.ASSIGNED_AFTER_SPAWN,
+        JobAssignment.ASSIGNED_AT_CREATION,
         HandleSettlement.CLOSED,
         HandleSettlement.CLOSED,
     ).settled
@@ -246,14 +246,14 @@ def test_job_handle_uncertainty_prevents_settlement_and_retries(monkeypatch: pyt
     uncertain = local(
         HostClientStatus.EXITED,
         0,
-        JobAssignment.ASSIGNED_AFTER_SPAWN,
+        JobAssignment.ASSIGNED_AT_CREATION,
         HandleSettlement.UNKNOWN,
         HandleSettlement.CLOSED,
     )
     settled = local(
         HostClientStatus.EXITED,
         0,
-        JobAssignment.ASSIGNED_AFTER_SPAWN,
+        JobAssignment.ASSIGNED_AT_CREATION,
         HandleSettlement.CLOSED,
         HandleSettlement.CLOSED,
     )
@@ -274,7 +274,7 @@ def test_host_handle_uncertainty_prevents_settlement_and_retries(monkeypatch: py
     uncertain = local(
         HostClientStatus.EXITED,
         0,
-        JobAssignment.ASSIGNED_AFTER_SPAWN,
+        JobAssignment.ASSIGNED_AT_CREATION,
         HandleSettlement.CLOSED,
         HandleSettlement.OPEN,
     )
@@ -296,7 +296,7 @@ def test_local_settlement_and_helper_receipt_do_not_prove_guest_absence(monkeypa
     settled = local(
         HostClientStatus.EXITED,
         0,
-        JobAssignment.ASSIGNED_AFTER_SPAWN,
+        JobAssignment.ASSIGNED_AT_CREATION,
         HandleSettlement.CLOSED,
         HandleSettlement.CLOSED,
     )
@@ -316,7 +316,7 @@ def test_release_retries_guest_observer_after_local_settlement(monkeypatch: pyte
     settled = local(
         HostClientStatus.EXITED,
         0,
-        JobAssignment.ASSIGNED_AFTER_SPAWN,
+        JobAssignment.ASSIGNED_AT_CREATION,
         HandleSettlement.CLOSED,
         HandleSettlement.CLOSED,
     )
@@ -416,7 +416,7 @@ def test_interruption_after_ready_publication_retains_owner(monkeypatch: pytest.
     settled = local(
         HostClientStatus.EXITED,
         0,
-        JobAssignment.ASSIGNED_AFTER_SPAWN,
+        JobAssignment.ASSIGNED_AT_CREATION,
         HandleSettlement.CLOSED,
         HandleSettlement.CLOSED,
     )
@@ -435,7 +435,7 @@ def test_late_ready_is_rejected_and_cleaned(monkeypatch: pytest.MonkeyPatch) -> 
     settled = local(
         HostClientStatus.EXITED,
         0,
-        JobAssignment.ASSIGNED_AFTER_SPAWN,
+        JobAssignment.ASSIGNED_AT_CREATION,
         HandleSettlement.CLOSED,
         HandleSettlement.CLOSED,
     )
@@ -465,7 +465,7 @@ def test_expired_operation_deadline_gets_one_fresh_bounded_cleanup_allowance(
     settled = local(
         HostClientStatus.EXITED,
         0,
-        JobAssignment.ASSIGNED_AFTER_SPAWN,
+        JobAssignment.ASSIGNED_AT_CREATION,
         HandleSettlement.CLOSED,
         HandleSettlement.CLOSED,
     )
@@ -487,7 +487,7 @@ def test_release_preserves_control_interruption_after_bounded_settlement(monkeyp
     settled = local(
         HostClientStatus.EXITED,
         0,
-        JobAssignment.ASSIGNED_AFTER_SPAWN,
+        JobAssignment.ASSIGNED_AT_CREATION,
         HandleSettlement.CLOSED,
         HandleSettlement.CLOSED,
     )
@@ -523,7 +523,7 @@ def test_direct_settle_refreshes_evidence_before_reraising_interruption(monkeypa
     settled = local(
         HostClientStatus.EXITED,
         0,
-        JobAssignment.ASSIGNED_AFTER_SPAWN,
+        JobAssignment.ASSIGNED_AT_CREATION,
         HandleSettlement.CLOSED,
         HandleSettlement.CLOSED,
     )
