@@ -78,6 +78,20 @@ trusted root; the service rejects the filesystem root because the helper require
 It has no public download, directory transfer, production factory or RunContext accessor. This bound
 assembly does not activate recipient grants or the core allowlist during coexistence.
 
+## File-call custody
+
+`FileOperation` requires a `ManagedTargetIdentity` that exactly matches its `OperationOwner` VM or
+platform-host scope. Each logical public file call installs one adapter-owned `file-call` lifecycle
+obligation, replacing the generic carrier row rather than adding a second row. Upload and download
+bind their scratch token in the initial payload. JSON uses one parent row without a token, then
+publishes the child token and bounded attempt before nested upload dispatch.
+
+Retained recovery facts and cleanup debt are published before the borrow is handed off; a clean,
+quiescent row resolves. Payloads carry lifecycle evidence only. They exclude file or JSON content,
+credentials, commands, routes and connection objects. This is private, additive groundwork. It does
+not claim production orchestration, recovery takeover, RunContext adoption, permission enforcement
+or the future #377 lock hierarchy.
+
 The bootstrap waits for source and stdin producers as well as output encoders. Unexpected producer
 failure invalidates delivery even if the command exits zero. Intentional early input closure is
 allowed; GNU env's `--default-signal=PIPE` ensures its SIGPIPE outcome is observable.
