@@ -823,13 +823,15 @@ The minimal error addition is one `CheckedExecutionError(ExternalError)` with a 
 The result's structured facts, rather than a growing exception subclass matrix, distinguish known
 guest failure from uncertainty and incomplete output. The lead approves this base after inspecting
 the CLI's external-error handler and ordinary traceback logging: the exception message is safe fixed
-prose and the result contains no raw provider exception. `ExecutionResult.check()` returns the same
-instance when `ok`, otherwise raises this error with implicit exception-context rendering
-suppressed. The target's `check=True` path delegates to that method; `check=False` returns the
-result unchanged. Python may retain an active caller exception as implicit context; suppression
-prevents its ordinary traceback rendering, not object retention. Renderers use safe result fields
-for detail, never output bytes by default. These result values do not supply evidence: producer and
-reducer acceptance remain separate implementation gates.
+prose and the result contains no raw provider exception. `ExecutionResult.check()` is an
+intentionally context-free convenience: it returns the same instance when `ok`, otherwise raises
+this error with implicit exception-context rendering suppressed. The target's `check=True` path
+instead uses the contextual checker or its private reducer seam, which provides a safe logical
+target identity and only a privately proved phase refinement. `check=False` returns the result
+unchanged. Python may retain an active caller exception as implicit context; suppression prevents
+its ordinary traceback rendering, not object retention. Renderers use safe result fields for detail,
+never output bytes by default. These result values do not supply evidence: producer and reducer
+acceptance remain separate implementation gates.
 
 ## Reuse by supervisor and file helpers
 

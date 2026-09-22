@@ -10,7 +10,6 @@ import pytest
 from agentworks.errors import ExternalError, ValidationError
 from agentworks.execution.carrier import Dispatch, Retention
 from agentworks.execution.diagnostics import (
-    ExecutionDiagnostic,
     ExecutionFailureReason,
     ExecutionPhase,
     check_execution_result,
@@ -199,12 +198,11 @@ def test_check_carries_the_same_immutable_safe_result_without_rendering_context(
     assert context_canary not in rendered
 
 
-def test_diagnostic_check_binds_safe_target_and_application_status_to_the_same_result() -> None:
+def test_contextual_check_binds_safe_target_and_application_status_to_the_same_result() -> None:
     result = _result(status=ExitCode(1))
-    diagnostic = ExecutionDiagnostic.from_result(result, entity_kind="vm", entity_name="test-vm")
 
     with pytest.raises(CheckedExecutionError) as caught:
-        diagnostic.check()
+        check_execution_result(result, entity_kind="vm", entity_name="test-vm")
 
     error = caught.value
     assert error.result is result
@@ -229,25 +227,36 @@ def test_diagnostic_check_binds_safe_target_and_application_status_to_the_same_r
         (ExecutionFailure.CLEANUP, ExecutionPhase.CLEANUP, ExecutionFailureReason.CLEANUP),
     ],
 )
-def test_result_diagnostics_keep_only_failure_phase_precision(
+def test_contextual_check_keeps_only_result_established_failure_phase_precision(
     failure: ExecutionFailure,
     phase: ExecutionPhase,
     reason: ExecutionFailureReason,
 ) -> None:
-    diagnostic = ExecutionDiagnostic.from_result(_result(failure=failure), entity_kind="vm", entity_name="test-vm")
+    with pytest.raises(CheckedExecutionError) as caught:
+        check_execution_result(_result(failure=failure), entity_kind="vm", entity_name="test-vm")
 
-    assert diagnostic.phase is phase
-    assert diagnostic.reason is reason
+    assert caught.value.details is not None
+    assert caught.value.details.phase is phase
+    assert caught.value.details.reason is reason
 
 
-def test_result_diagnostic_does_not_infer_phase_from_deadline_or_incomplete_ownership() -> None:
-    deadline = ExecutionDiagnostic.from_result(_result(deadline_exceeded=True), entity_kind="vm", entity_name="test-vm")
-    incomplete = ExecutionDiagnostic.from_result(
-        _result(owned_cleanup_confirmed=False), entity_kind="vm", entity_name="test-vm"
-    )
+@pytest.mark.parametrize(
+    ("result", "reason"),
+    [
+        (_result(deadline_exceeded=True), ExecutionFailureReason.DEADLINE),
+        (_result(owned_cleanup_confirmed=False), ExecutionFailureReason.INCOMPLETE),
+    ],
+)
+def test_contextual_check_does_not_infer_phase_from_deadline_or_incomplete_ownership(
+    result: ExecutionResult,
+    reason: ExecutionFailureReason,
+) -> None:
+    with pytest.raises(CheckedExecutionError) as caught:
+        check_execution_result(result, entity_kind="vm", entity_name="test-vm")
 
-    assert (deadline.phase, deadline.reason) == (ExecutionPhase.UNKNOWN, ExecutionFailureReason.DEADLINE)
-    assert (incomplete.phase, incomplete.reason) == (ExecutionPhase.UNKNOWN, ExecutionFailureReason.INCOMPLETE)
+    assert caught.value.details is not None
+    assert caught.value.details.phase is ExecutionPhase.UNKNOWN
+    assert caught.value.details.reason is reason
 
 
 @pytest.mark.parametrize(
@@ -262,40 +271,35 @@ def test_result_diagnostic_does_not_infer_phase_from_deadline_or_incomplete_owne
         {"entity_name": "vm-caf\u00e9"},
         {"entity_name": ""},
         {"phase": "application"},
-        {"reason": "application_status"},
+        {"phase": ExecutionPhase.UNKNOWN},
     ],
 )
-def test_execution_diagnostic_refuses_untyped_or_incomplete_context(changes: dict[str, object]) -> None:
+def test_contextual_check_refuses_untyped_or_unsafe_context(changes: dict[str, object]) -> None:
     values: dict[str, object] = {
-        "result": _result(status=ExitCode(1)),
         "entity_kind": "vm",
         "entity_name": "test-vm",
-        "phase": ExecutionPhase.APPLICATION,
-        "reason": ExecutionFailureReason.APPLICATION_STATUS,
     }
     values.update(changes)
 
     with pytest.raises(ValidationError):
-        ExecutionDiagnostic(**values)  # type: ignore[arg-type]
+        check_execution_result(_result(status=ExitCode(1)), **values)  # type: ignore[arg-type]
 
 
-def test_execution_diagnostic_refuses_success_and_reason_that_disagrees_with_its_result() -> None:
+def test_contextual_check_refuses_phase_that_disagrees_with_result_evidence() -> None:
     success = _result()
-    failed = _result(status=ExitCode(1))
 
     with pytest.raises(ValidationError):
-        ExecutionDiagnostic.from_result(success, entity_kind="vm", entity_name="test-vm")
+        check_execution_result(success, entity_kind="vm", entity_name="test-vm", phase=ExecutionPhase.APPLICATION)
     with pytest.raises(ValidationError):
-        ExecutionDiagnostic(
-            failed,
-            "vm",
-            "test-vm",
-            ExecutionPhase.APPLICATION,
-            ExecutionFailureReason.OUTPUT,
+        check_execution_result(
+            _result(status=ExitCode(1)),
+            entity_kind="vm",
+            entity_name="test-vm",
+            phase=ExecutionPhase.DELIVERY,
         )
 
 
-def test_check_execution_result_returns_success_without_constructing_a_diagnostic() -> None:
+def test_check_execution_result_returns_the_exact_successful_result() -> None:
     result = _result()
 
     assert check_execution_result(result, entity_kind="vm", entity_name="test-vm") is result
@@ -315,18 +319,16 @@ def test_check_execution_result_validates_context_that_would_become_public_on_fa
         )
 
 
-def test_explicit_diagnostic_can_preserve_stronger_core_phase_evidence() -> None:
+def test_contextual_check_can_preserve_stronger_private_phase_evidence() -> None:
     result = _result(failure=ExecutionFailure.INPUT)
-    diagnostic = ExecutionDiagnostic(
-        result,
-        "vm",
-        "test-vm",
-        ExecutionPhase.DELIVERY,
-        ExecutionFailureReason.INPUT,
-    )
 
     with pytest.raises(CheckedExecutionError) as caught:
-        diagnostic.check()
+        check_execution_result(
+            result,
+            entity_kind="vm",
+            entity_name="test-vm",
+            phase=ExecutionPhase.DELIVERY,
+        )
 
     assert caught.value.details is not None
     assert caught.value.details.phase is ExecutionPhase.DELIVERY

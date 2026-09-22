@@ -6,7 +6,6 @@ Carrier, account, command, payload, and output facts do not belong here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from enum import StrEnum
 
 from agentworks.errors import ErrorDetails, ValidationError
@@ -41,69 +40,6 @@ class ExecutionFailureReason(StrEnum):
     INCOMPLETE = "incomplete"
 
 
-@dataclass(frozen=True, slots=True)
-class ExecutionDiagnostic:
-    """Safe core-composed context for checking one execution result.
-
-    ``entity_kind`` and ``entity_name`` are a core-supplied logical target
-    identity. They are not carrier, account, command, path, or provider
-    values. Callers with stronger private evidence may choose a more precise
-    phase than :meth:`from_result`; facts not preserved by ``ExecutionResult``
-    use ``UNKNOWN`` rather than being reconstructed from carrier outcomes.
-    """
-
-    result: ExecutionResult
-    entity_kind: str
-    entity_name: str
-    phase: ExecutionPhase
-    reason: ExecutionFailureReason
-
-    def __post_init__(self) -> None:
-        """Validate values crossing the diagnostic composition boundary."""
-        if type(self.result) is not ExecutionResult:
-            raise ValidationError("Execution diagnostics require an exact execution result")
-        validate_logical_entity_value(self.entity_kind, "kind", subject="Execution diagnostics")
-        validate_logical_entity_value(self.entity_name, "name", subject="Execution diagnostics")
-        if type(self.phase) is not ExecutionPhase:
-            raise ValidationError("Execution diagnostics require a supported phase")
-        if type(self.reason) is not ExecutionFailureReason:
-            raise ValidationError("Execution diagnostics require a supported failure reason")
-        expected_phase, expected_reason = _result_diagnostic(self.result)
-        if self.result.ok or self.reason is not expected_reason:
-            raise ValidationError("Execution diagnostics require an unsuccessful matching result")
-        if expected_phase is not ExecutionPhase.UNKNOWN and self.phase is not expected_phase:
-            raise ValidationError("Execution diagnostics cannot replace established result phase")
-
-    @classmethod
-    def from_result(
-        cls,
-        result: ExecutionResult,
-        *,
-        entity_kind: str,
-        entity_name: str,
-        phase: ExecutionPhase | None = None,
-    ) -> ExecutionDiagnostic:
-        """Project result facts without recovering discarded private evidence."""
-        if type(result) is not ExecutionResult:
-            raise ValidationError("Execution diagnostics require an exact execution result")
-        default_phase, reason = _result_diagnostic(result)
-        return cls(result, entity_kind, entity_name, default_phase if phase is None else phase, reason)
-
-    @property
-    def details(self) -> ErrorDetails:
-        """Return the standard closed diagnostic facts for this context."""
-        return ErrorDetails(self.phase, self.reason)
-
-    def check(self) -> ExecutionResult:
-        """Raise the checked error carrying this unsuccessful result."""
-        raise CheckedExecutionError(
-            self.result,
-            entity_kind=self.entity_kind,
-            entity_name=self.entity_name,
-            details=self.details,
-        ) from None
-
-
 def check_execution_result(
     result: ExecutionResult,
     *,
@@ -111,7 +47,11 @@ def check_execution_result(
     entity_name: str,
     phase: ExecutionPhase | None = None,
 ) -> ExecutionResult:
-    """Check one result with core-composed safe target context."""
+    """Check one result with safe core target context and optional phase refinement.
+
+    A supplied phase is private evidence that may refine only a result whose
+    public phase is unknown. This keeps result-derived reasons authoritative.
+    """
     if type(result) is not ExecutionResult:
         raise ValidationError("Execution diagnostics require an exact execution result")
     validate_logical_entity_value(entity_kind, "kind", subject="Execution diagnostics")
@@ -122,12 +62,17 @@ def check_execution_result(
         if phase is not None:
             raise ValidationError("Successful execution does not have a diagnostic phase")
         return result
-    return ExecutionDiagnostic.from_result(
+    result_phase, reason = _result_diagnostic(result)
+    if phase is not None:
+        if result_phase is not ExecutionPhase.UNKNOWN or phase is ExecutionPhase.UNKNOWN:
+            raise ValidationError("Execution diagnostics require a stronger unknown-phase refinement")
+        result_phase = phase
+    raise CheckedExecutionError(
         result,
         entity_kind=entity_kind,
         entity_name=entity_name,
-        phase=phase,
-    ).check()
+        details=ErrorDetails(result_phase, reason),
+    ) from None
 
 
 def _result_diagnostic(result: ExecutionResult) -> tuple[ExecutionPhase, ExecutionFailureReason]:

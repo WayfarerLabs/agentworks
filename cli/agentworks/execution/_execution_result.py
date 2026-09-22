@@ -9,7 +9,7 @@ from agentworks.execution._inline_observer import ObservationError, StreamObserv
 from agentworks.execution._inline_request import OutputMode
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
 from agentworks.execution.carrier import Dispatch, Failure, Retention
-from agentworks.execution.diagnostics import ExecutionDiagnostic, ExecutionPhase
+from agentworks.execution.diagnostics import ExecutionPhase, check_execution_result
 from agentworks.execution.result import (
     ApplicationState,
     ExecutionFailure,
@@ -66,18 +66,12 @@ def check_owned_inline_result(
 ) -> ExecutionResult:
     """Reduce once, returning success or raising a bound checked-result error."""
     result = reduce_owned_inline_result(outcome)
-    if result.ok:
-        return result
-    diagnostic = ExecutionDiagnostic.from_result(result, entity_kind=entity_kind, entity_name=entity_name)
-    phase = _inline_diagnostic_phase(outcome, result, fallback=diagnostic.phase)
-    if phase is diagnostic.phase:
-        return diagnostic.check()
-    return ExecutionDiagnostic.from_result(
+    return check_execution_result(
         result,
         entity_kind=entity_kind,
         entity_name=entity_name,
-        phase=phase,
-    ).check()
+        phase=_inline_phase_refinement(outcome, result),
+    )
 
 
 def _status(observation: InlineObservation | None, completed: bool) -> ExitCode | None:
@@ -167,19 +161,17 @@ def _failure(candidate: InlineCandidateResult, completed: bool) -> ExecutionFail
     return None
 
 
-def _inline_diagnostic_phase(
+def _inline_phase_refinement(
     outcome: OwnedInlineOutcome,
     result: ExecutionResult,
-    *,
-    fallback: ExecutionPhase,
-) -> ExecutionPhase:
+) -> ExecutionPhase | None:
     """Retain trusted helper observation phase without reclassifying carrier facts."""
     candidate = outcome.candidate
     if candidate is None or result.failure is None:
-        return fallback
+        return None
     observation = candidate.observation
     if observation is None:
-        return fallback
+        return None
     if observation.error is not None:
         return ExecutionPhase.OBSERVATION
     if observation.failure is not None and observation.failure.phase is FailurePhase.OBSERVE:
@@ -188,7 +180,7 @@ def _inline_diagnostic_phase(
         streams = (observation.stdout, observation.stderr)
         if any(stream is None or not stream.complete or stream.truncated for stream in streams):
             return ExecutionPhase.OBSERVATION
-    return fallback
+    return None
 
 
 def _runtime_refused(candidate: InlineCandidateResult) -> bool:
