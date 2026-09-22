@@ -14,7 +14,6 @@ now derives its enumeration from the descriptor table.
 from __future__ import annotations
 
 import ast
-from abc import abstractmethod
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal, cast
@@ -206,6 +205,10 @@ class _NoNativeConfig(AgwModel):
     name: Literal["no-native-platform"]
 
 
+class _NoProviderLocatorConfig(AgwModel):
+    name: Literal["no-provider-locator-platform"]
+
+
 class _PlatformWithoutNativeTransport(VMPlatform):
     """Implements every operation except required native execution."""
 
@@ -236,14 +239,33 @@ class _PlatformWithoutNativeTransport(VMPlatform):
         raise NotImplementedError
 
 
-class _PlatformWithoutProviderLocator(ConformingVMPlatform):
+class _PlatformWithoutProviderLocator(VMPlatform):
     """Implements the v1 operations but omits v2 locator observation."""
 
+    contract_version = 2
     name = "no-provider-locator-platform"
     description = "omits provider locator observation"
+    config_model = _NoProviderLocatorConfig
 
-    @abstractmethod
-    def observe_provider_locator(self, vm: Any, ctx: Any, *, deadline: Any) -> Any:
+    def create(self, request: Any, ctx: Any) -> Any:
+        raise NotImplementedError
+
+    def start(self, vm: Any, ctx: Any) -> None:
+        raise NotImplementedError
+
+    def stop(self, vm: Any, ctx: Any) -> None:
+        raise NotImplementedError
+
+    def delete(self, vm: Any, ctx: Any) -> None:
+        raise NotImplementedError
+
+    def status(self, vm: Any, ctx: Any) -> Any:
+        raise NotImplementedError
+
+    def display_backend_name(self, vm: Any) -> str:
+        raise NotImplementedError
+
+    def native_transport(self, vm: Any, ctx: Any, *, config: Any = None) -> Any:
         raise NotImplementedError
 
 

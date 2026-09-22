@@ -712,8 +712,9 @@ class EC2Platform(VMPlatform):
 
         from botocore.config import Config
 
+        session = self._get_session(ctx)
         try:
-            ec2 = self._get_session(ctx).client(
+            ec2 = session.client(
                 "ec2",
                 region_name=region,
                 config=Config(
@@ -736,7 +737,8 @@ class EC2Platform(VMPlatform):
                     ) from exc
                 raise wrap_ec2_error(exc) from exc
         finally:
-            ec2.close()
+            with contextlib.suppress(Exception):
+                ec2.close()
 
         owner_id = self._locator_owner_id(result, instance_id, vm)
         if owner_id != account_id:

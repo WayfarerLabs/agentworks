@@ -588,40 +588,45 @@ class GCEPlatform(VMPlatform):
         deadline: Deadline,
     ) -> ProviderLocatorObservation:
         """Read one owned GCE incarnation and return its provider namespace."""
-        identity = _VMIdentity.from_row(vm)
-        self._validate_locator_identity(identity, vm_name=vm.name)
+        metadata = vm.platform_metadata
+        project_id = metadata.get("project_id")
+        zone = metadata.get("zone")
+        instance_name = metadata.get("instance_name")
+        instance_id = metadata.get("instance_id")
+        if (
+            not isinstance(project_id, str)
+            or _GCE_LOCATOR_COMPONENT.fullmatch(project_id) is None
+            or not isinstance(zone, str)
+            or _GCE_LOCATOR_COMPONENT.fullmatch(zone) is None
+            or not isinstance(instance_name, str)
+            or _GCE_LOCATOR_COMPONENT.fullmatch(instance_name) is None
+            or not isinstance(instance_id, str)
+            or provider_resource_id(instance_id) != instance_id
+        ):
+            raise StateError(
+                f"VM '{vm.name}' has invalid GCE provider identity metadata",
+                entity_kind="vm",
+                entity_name=vm.name,
+                hint="restore the persisted GCE project, zone, and instance identities before retrying",
+            )
         remaining = provider_locator_remaining(deadline, vm_name=vm.name)
         instances = self._clients.client("instances", ctx)
         current = read_owned_instance(
             instances,
-            project_id=identity.project_id,
-            zone=identity.zone,
-            instance_name=identity.instance_name,
-            resource_id=identity.instance_id,
+            project_id=project_id,
+            zone=zone,
+            instance_name=instance_name,
+            resource_id=instance_id,
             timeout=remaining,
         )
         if current is None:
             raise NotFoundError(
-                f"GCE instance '{identity.instance_name}' no longer exists",
+                f"GCE instance '{instance_name}' no longer exists",
                 entity_kind="vm",
                 entity_name=vm.name,
             )
         provider_locator_remaining(deadline, vm_name=vm.name)
-        return ProviderLocator(f"gcp-gce:{identity.project_id}:{identity.zone}:{identity.instance_id}")
-
-    @staticmethod
-    def _validate_locator_identity(identity: _VMIdentity, *, vm_name: str) -> None:
-        if (
-            _GCE_LOCATOR_COMPONENT.fullmatch(identity.project_id) is None
-            or _GCE_LOCATOR_COMPONENT.fullmatch(identity.zone) is None
-            or provider_resource_id(identity.instance_id) != identity.instance_id
-        ):
-            raise StateError(
-                f"VM '{vm_name}' has invalid GCE provider identity metadata",
-                entity_kind="vm",
-                entity_name=vm_name,
-                hint="restore the persisted GCE project, zone, and instance identities before retrying",
-            )
+        return ProviderLocator(f"gcp-gce:{project_id}:{zone}:{instance_id}")
 
     def native_transport(
         self,

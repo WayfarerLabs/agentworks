@@ -840,7 +840,6 @@ class AzureVMPlatform(VMPlatform):
                 entity_name=vm.name,
                 hint="do not target the same-name Azure VM; restore the persisted resource identity before retrying",
             )
-        _parse_locator_resource_id(observed_id, vm_name=vm.name)
         provider_locator_remaining(deadline, vm_name=vm.name)
         return ProviderLocator(f"azure-vm:{observed_id}")
 
@@ -1005,14 +1004,14 @@ class _MinimalAzureConfig:
 
 
 _LOCATOR_RESOURCE_ID = re.compile(
-    r"^/subscriptions/([A-Za-z0-9._()-]+)/resourceGroups/([A-Za-z0-9._()-]+)/"
-    r"providers/Microsoft\.Compute/virtualMachines/([A-Za-z0-9._()-]+)$"
+    r"^/subscriptions/([^/\x00]+)/resourceGroups/([^/\x00]+)/"
+    r"providers/Microsoft\.Compute/virtualMachines/([^/\x00]+)$"
 )
 
 
 def _parse_locator_resource_id(resource_id: str, *, vm_name: str) -> tuple[str, str, _MinimalAzureConfig]:
     """Parse one complete, delimiter-safe Azure VM resource identifier."""
-    if not isinstance(resource_id, str) or not resource_id.isascii():
+    if not isinstance(resource_id, str):
         raise StateError(
             f"VM '{vm_name}' has an invalid Azure resource ID",
             entity_kind="vm",
