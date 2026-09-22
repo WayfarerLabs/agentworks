@@ -129,6 +129,16 @@ associated pending acceptance gates are superseded by this ruling.
       including handler restoration and repeated interruption, without implicitly changing legacy
       provisioning rollback or treating forced process termination as successful cleanup.
 
+The lifecycle-ledger checkpoint is privately accepted at `3f06c91c`. Project, complexity and
+correctness review corrected a per-dispatch row budget that would have limited ordinary uploads,
+isolated operation transactions from the legacy database connection, preserved late recovery
+identity publication while closing, and fenced interrupted admission, close and unresolved custody
+handoff. Final reviewers found no remaining material issue after 47 to 50 injected interruption
+boundaries. The complete non-integration suite passes 12,819 tests with 21 skips; Ruff, mypy (1,087
+sources), file lint, rulesync and locked-SDD checks pass. This evidence accepts the private
+primitive, not production orchestration, recovery takeover, RunContext exposure or the #377
+follow-up.
+
 The first implementation increment is privately reviewed at `063cd0bc` by the project, complexity
 and generic correctness lanes. It removes the lock/setup stack and supplies `Database.operations`,
 not production operation coordination. Admission through core orchestration, nested RunContext and
