@@ -173,6 +173,7 @@ def test_file_operation_upload_conditions_and_cleanup_over_real_ssh(
         for canary in ("created-over-ssh", "updated-over-ssh", "must-not-replace-destination"):
             assert canary not in repr(outcomes)
 
+        owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
         assert database.operations.inspect(owner.ownership.scope) is None
