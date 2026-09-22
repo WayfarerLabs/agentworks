@@ -35,12 +35,23 @@ output semantics, no recorded failure or expired deadline, and confirmed owned c
 returns that same result or raises `CheckedExecutionError` carrying it; neither path invents a
 scalar return code or copies provider exception text into result fields or the error message.
 
-`files.py` defines frozen public file values without a FileAccess service. Opaque versioned
-revisions preserve the observed object identity, metadata and optional content digest. Their
-4,096-byte token bound limits metadata encoding, not file size. Public metadata must agree with its
-revision; a read result also verifies its bytes against the revision's size and digest. Payloads and
-tokens stay out of diagnostic representations. Directory limits and explicit publication conditions
-are values, not evidence of remote effects or active permission grants.
+`files.py` defines frozen public file values. Opaque versioned revisions preserve the observed
+object identity, metadata and optional content digest. Their 4,096-byte token bound limits metadata
+encoding, not file size. Public metadata must agree with its revision; a read result also verifies
+its bytes against the revision's size and digest. Payloads and tokens stay out of diagnostic
+representations. Directory limits and explicit publication conditions are values, not evidence of
+remote effects or active permission grants.
+
+`access.py` composes a bound `FileAccess` from an already-acquired `FileOperation`, one carrier,
+trusted root, selected runtime, ordinary identity plan, optional elevated plan, safe logical
+diagnostic identity, and a composition-owned deadline factory. It provides bounded reads, stat,
+inventory, byte-value publication, JSON updates, directory convergence, metadata convergence and
+conditional removal through the retained private custody and result reducers. `sudo=True` selects
+only the already bound elevated plan and refuses before source validation or dispatch when absent.
+Every target is a normalized absolute POSIX path confined to the trusted root; the service rejects
+the filesystem root because the helper requires a nonempty leaf. It has no public upload source,
+download, directory transfer, production factory or RunContext accessor. This bound assembly does
+not activate recipient grants or the core allowlist during coexistence.
 
 The bootstrap waits for source and stdin producers as well as output encoders. Unexpected producer
 failure invalidates delivery even if the command exits zero. Intentional early input closure is
