@@ -62,17 +62,8 @@ class JobAssignment(StrEnum):
     UNKNOWN = "unknown"
 
 
-class JobHandleSettlement(StrEnum):
-    """Whether the Job Object handle has been exactly settled locally."""
-
-    NOT_CREATED = "not_created"
-    OPEN = "open"
-    CLOSED = "closed"
-    UNKNOWN = "unknown"
-
-
-class HostHandleSettlement(StrEnum):
-    """Whether the WSL client process and pipe handles are settled locally."""
+class HandleSettlement(StrEnum):
+    """Whether one native handle set has been exactly settled locally."""
 
     NOT_CREATED = "not_created"
     OPEN = "open"
@@ -103,16 +94,16 @@ class LocalResourceSnapshot:
     host_client_status: HostClientStatus
     host_client_exit_status: int | None
     job_assignment: JobAssignment
-    job_handle_settlement: JobHandleSettlement
-    host_handle_settlement: HostHandleSettlement
+    job_handle_settlement: HandleSettlement
+    host_handle_settlement: HandleSettlement
 
     @property
     def settled(self) -> bool:
         """Whether both local resources are exactly settled or never created."""
         return (
             self.host_client_status in {HostClientStatus.NOT_CREATED, HostClientStatus.EXITED}
-            and self.host_handle_settlement in {HostHandleSettlement.NOT_CREATED, HostHandleSettlement.CLOSED}
-            and self.job_handle_settlement in {JobHandleSettlement.NOT_CREATED, JobHandleSettlement.CLOSED}
+            and self.host_handle_settlement in {HandleSettlement.NOT_CREATED, HandleSettlement.CLOSED}
+            and self.job_handle_settlement in {HandleSettlement.NOT_CREATED, HandleSettlement.CLOSED}
         )
 
 
@@ -242,8 +233,8 @@ class WSL2GuestAnchorOwner:
             HostClientStatus.UNKNOWN,
             None,
             JobAssignment.UNKNOWN,
-            JobHandleSettlement.UNKNOWN,
-            HostHandleSettlement.UNKNOWN,
+            HandleSettlement.UNKNOWN,
+            HandleSettlement.UNKNOWN,
         )
         try:
             self._native.spawn_owned(self._argv(self._nonce), deadline)

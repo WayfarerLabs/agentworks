@@ -20,11 +20,10 @@ from agentworks.execution._wsl2_lifecycle import (
     _HELPER_SOURCE,
     GuestAnchorIdentity,
     GuestAnchorPresence,
+    HandleSettlement,
     HelperExitReceipt,
     HostClientStatus,
-    HostHandleSettlement,
     JobAssignment,
-    JobHandleSettlement,
     LocalResourceSnapshot,
     WSL2GuestAnchorOwner,
 )
@@ -36,13 +35,11 @@ def local(
     host: HostClientStatus = HostClientStatus.NOT_CREATED,
     exit_status: int | None = None,
     assignment: JobAssignment = JobAssignment.NOT_CREATED,
-    job: JobHandleSettlement = JobHandleSettlement.NOT_CREATED,
-    handles: HostHandleSettlement | None = None,
+    job: HandleSettlement = HandleSettlement.NOT_CREATED,
+    handles: HandleSettlement | None = None,
 ) -> LocalResourceSnapshot:
     if handles is None:
-        handles = (
-            HostHandleSettlement.NOT_CREATED if host == HostClientStatus.NOT_CREATED else HostHandleSettlement.OPEN
-        )
+        handles = HandleSettlement.NOT_CREATED if host == HostClientStatus.NOT_CREATED else HandleSettlement.OPEN
     return LocalResourceSnapshot(host, exit_status, assignment, job, handles)
 
 
@@ -54,7 +51,7 @@ class FakeNative:
         default_factory=lambda: local(
             HostClientStatus.ACTIVE,
             assignment=JobAssignment.ASSIGNED_AFTER_SPAWN,
-            job=JobHandleSettlement.OPEN,
+            job=HandleSettlement.OPEN,
         )
     )
     settle_results: list[LocalResourceSnapshot | BaseException] = field(default_factory=list)
@@ -219,27 +216,27 @@ def test_helper_protocol_runs_under_local_python_and_waits_for_eof() -> None:
 
 
 def test_snapshot_requires_both_host_and_job_settlement() -> None:
-    assert not local(HostClientStatus.EXITED, 0, JobAssignment.ASSIGNED_AFTER_SPAWN, JobHandleSettlement.OPEN).settled
+    assert not local(HostClientStatus.EXITED, 0, JobAssignment.ASSIGNED_AFTER_SPAWN, HandleSettlement.OPEN).settled
     assert not local(
         HostClientStatus.ACTIVE,
         None,
         JobAssignment.ASSIGNED_AFTER_SPAWN,
-        JobHandleSettlement.CLOSED,
-        HostHandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
     ).settled
     assert not local(
         HostClientStatus.EXITED,
         0,
         JobAssignment.ASSIGNED_AFTER_SPAWN,
-        JobHandleSettlement.CLOSED,
-        HostHandleSettlement.OPEN,
+        HandleSettlement.CLOSED,
+        HandleSettlement.OPEN,
     ).settled
     assert local(
         HostClientStatus.EXITED,
         0,
         JobAssignment.ASSIGNED_AFTER_SPAWN,
-        JobHandleSettlement.CLOSED,
-        HostHandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
     ).settled
     assert local().settled
 
@@ -250,15 +247,15 @@ def test_job_handle_uncertainty_prevents_settlement_and_retries(monkeypatch: pyt
         HostClientStatus.EXITED,
         0,
         JobAssignment.ASSIGNED_AFTER_SPAWN,
-        JobHandleSettlement.UNKNOWN,
-        HostHandleSettlement.CLOSED,
+        HandleSettlement.UNKNOWN,
+        HandleSettlement.CLOSED,
     )
     settled = local(
         HostClientStatus.EXITED,
         0,
         JobAssignment.ASSIGNED_AFTER_SPAWN,
-        JobHandleSettlement.CLOSED,
-        HostHandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
     )
     native = FakeNative([ready(), b"EXITING " + b"a" * 32 + b"\n"], settle_results=[uncertain, settled])
     subject = owner(native)
@@ -278,10 +275,10 @@ def test_host_handle_uncertainty_prevents_settlement_and_retries(monkeypatch: py
         HostClientStatus.EXITED,
         0,
         JobAssignment.ASSIGNED_AFTER_SPAWN,
-        JobHandleSettlement.CLOSED,
-        HostHandleSettlement.OPEN,
+        HandleSettlement.CLOSED,
+        HandleSettlement.OPEN,
     )
-    settled = replace(uncertain, host_handle_settlement=HostHandleSettlement.CLOSED)
+    settled = replace(uncertain, host_handle_settlement=HandleSettlement.CLOSED)
     native = FakeNative([ready(), b""], settle_results=[uncertain, settled])
     subject = owner(native)
     subject.start(Deadline.after(1))
@@ -300,8 +297,8 @@ def test_local_settlement_and_helper_receipt_do_not_prove_guest_absence(monkeypa
         HostClientStatus.EXITED,
         0,
         JobAssignment.ASSIGNED_AFTER_SPAWN,
-        JobHandleSettlement.CLOSED,
-        HostHandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
     )
     native = FakeNative([ready(), b"EXITING " + b"a" * 32 + b"\n"], settle_results=[settled])
     subject = owner(native)
@@ -320,8 +317,8 @@ def test_release_retries_guest_observer_after_local_settlement(monkeypatch: pyte
         HostClientStatus.EXITED,
         0,
         JobAssignment.ASSIGNED_AFTER_SPAWN,
-        JobHandleSettlement.CLOSED,
-        HostHandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
     )
     native = FakeNative([ready(), b""], settle_results=[settled])
     observer = FakeObserver([GuestAnchorPresence.PRESENT, GuestAnchorPresence.ABSENT_CONFIRMED])
@@ -342,13 +339,13 @@ def test_release_retries_guest_observer_after_local_settlement(monkeypatch: pyte
 )
 def test_invalid_ready_retains_retryable_owner_and_settles(monkeypatch: pytest.MonkeyPatch, receipt: bytes) -> None:
     token(monkeypatch)
-    uncertain = local(HostClientStatus.UNKNOWN, None, JobAssignment.UNKNOWN, JobHandleSettlement.OPEN)
+    uncertain = local(HostClientStatus.UNKNOWN, None, JobAssignment.UNKNOWN, HandleSettlement.OPEN)
     settled = local(
         HostClientStatus.EXITED,
         0,
         JobAssignment.FAILED,
-        JobHandleSettlement.CLOSED,
-        HostHandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
     )
     native = FakeNative([receipt], settle_results=[uncertain, settled])
     subject = owner(native)
@@ -365,13 +362,13 @@ def test_invalid_ready_retains_retryable_owner_and_settles(monkeypatch: pytest.M
 def test_spawn_interruption_preserves_original_and_owner_can_retry_settlement(monkeypatch: pytest.MonkeyPatch) -> None:
     token(monkeypatch)
     interrupted = KeyboardInterrupt()
-    uncertain = local(HostClientStatus.UNKNOWN, None, JobAssignment.UNKNOWN, JobHandleSettlement.OPEN)
+    uncertain = local(HostClientStatus.UNKNOWN, None, JobAssignment.UNKNOWN, HandleSettlement.OPEN)
     settled = local(
         HostClientStatus.EXITED,
         0,
         JobAssignment.UNKNOWN,
-        JobHandleSettlement.CLOSED,
-        HostHandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
     )
     native = FakeNative([], spawn_interrupt=interrupted, settle_results=[uncertain, settled])
     subject = owner(native)
@@ -393,8 +390,8 @@ def test_lost_spawn_cleanup_and_snapshot_never_reuses_predispatch_settlement(
         HostClientStatus.EXITED,
         0,
         JobAssignment.UNKNOWN,
-        JobHandleSettlement.CLOSED,
-        HostHandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
     )
     native = FakeNative(
         [],
@@ -420,8 +417,8 @@ def test_interruption_after_ready_publication_retains_owner(monkeypatch: pytest.
         HostClientStatus.EXITED,
         0,
         JobAssignment.ASSIGNED_AFTER_SPAWN,
-        JobHandleSettlement.CLOSED,
-        HostHandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
     )
     native = FakeNative([ready()], settle_results=[settled], snapshot_interrupt_at=3)
     subject = owner(native)
@@ -439,8 +436,8 @@ def test_late_ready_is_rejected_and_cleaned(monkeypatch: pytest.MonkeyPatch) -> 
         HostClientStatus.EXITED,
         0,
         JobAssignment.ASSIGNED_AFTER_SPAWN,
-        JobHandleSettlement.CLOSED,
-        HostHandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
     )
     native = FakeNative([ready()], settle_results=[settled])
     subject = owner(native)
@@ -469,8 +466,8 @@ def test_expired_operation_deadline_gets_one_fresh_bounded_cleanup_allowance(
         HostClientStatus.EXITED,
         0,
         JobAssignment.ASSIGNED_AFTER_SPAWN,
-        JobHandleSettlement.CLOSED,
-        HostHandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
     )
     native = FakeNative([ready()], settle_results=[settled])
     subject = owner(native)
@@ -481,7 +478,7 @@ def test_expired_operation_deadline_gets_one_fresh_bounded_cleanup_allowance(
     assert evidence.local.settled
     assert len(native.settle_deadlines) == 1
     remaining = native.settle_deadlines[0].remaining()
-    assert remaining is not None and 0 < remaining <= lifecycle._CLEANUP_SECONDS
+    assert remaining is not None and 0 < remaining <= 0.5
 
 
 def test_release_preserves_control_interruption_after_bounded_settlement(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -491,8 +488,8 @@ def test_release_preserves_control_interruption_after_bounded_settlement(monkeyp
         HostClientStatus.EXITED,
         0,
         JobAssignment.ASSIGNED_AFTER_SPAWN,
-        JobHandleSettlement.CLOSED,
-        HostHandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
     )
     native = FakeNative([ready()], close_interrupt=interrupted, settle_results=[settled])
     subject = owner(native)
@@ -527,8 +524,8 @@ def test_direct_settle_refreshes_evidence_before_reraising_interruption(monkeypa
         HostClientStatus.EXITED,
         0,
         JobAssignment.ASSIGNED_AFTER_SPAWN,
-        JobHandleSettlement.CLOSED,
-        HostHandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
     )
     native = FakeNative([ready()], settle_results=[interrupted])
     subject = owner(native)
@@ -548,8 +545,8 @@ def test_close_failure_does_not_claim_eof_before_local_settlement(monkeypatch: p
         HostClientStatus.EXITED,
         0,
         JobAssignment.FAILED,
-        JobHandleSettlement.CLOSED,
-        HostHandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
     )
     native = FakeNative([ready()], close_fails_without_eof=True, settle_results=[settled])
     subject = owner(native)
