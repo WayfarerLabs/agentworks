@@ -57,7 +57,7 @@ from agentworks.execution._file_upload import (
     _PreparedUpload,
 )
 from agentworks.execution._managed_runs import ManagedTargetIdentity
-from agentworks.operations import LifecycleObligation, release_borrow_after_custody
+from agentworks.operations import LifecycleObligation, _PreRegistrationClosingRefusal, release_borrow_after_custody
 
 if TYPE_CHECKING:
     from agentworks.execution._file_inventory_exchange import FileInventoryCandidateResult
@@ -277,7 +277,7 @@ class FileOperation:
         except BaseException:
             borrow.close()
             raise
-        self._install(active, admission)
+        self._install(active, admission, self._active_downloads)
 
         try:
             outcome = prepared.run()
@@ -336,7 +336,7 @@ class FileOperation:
         except BaseException:
             borrow.close()
             raise
-        self._install(active, admission)
+        self._install(active, admission, self._active_uploads)
 
         try:
             outcome = prepared.run()
@@ -399,7 +399,7 @@ class FileOperation:
         except BaseException:
             borrow.close()
             raise
-        self._install(active, admission)
+        self._install(active, admission, self._active_json_updates)
         prepared.set_child_upload_callback(lambda child, attempt: self._publish_json_child(active, child, attempt))
 
         try:
@@ -450,7 +450,7 @@ class FileOperation:
         except BaseException:
             borrow.close()
             raise
-        self._install(active, admission)
+        self._install(active, admission, self._active_stats)
         try:
             outcome = prepared.run()
         except BaseException as control:
@@ -506,7 +506,7 @@ class FileOperation:
         except BaseException:
             borrow.close()
             raise
-        self._install(active, admission)
+        self._install(active, admission, self._active_inventories)
         try:
             outcome = prepared.run()
         except BaseException as control:
@@ -560,7 +560,7 @@ class FileOperation:
         except BaseException:
             borrow.close()
             raise
-        self._install(active, admission)
+        self._install(active, admission, self._active_removals)
         try:
             outcome = prepared.run()
         except BaseException as control:
@@ -617,7 +617,7 @@ class FileOperation:
         except BaseException:
             borrow.close()
             raise
-        self._install(active, admission)
+        self._install(active, admission, self._active_metadata)
         try:
             outcome = prepared.run()
         except BaseException as control:
@@ -674,7 +674,7 @@ class FileOperation:
         except BaseException:
             borrow.close()
             raise
-        self._install(active, admission)
+        self._install(active, admission, self._active_metadata)
         try:
             outcome = prepared.run()
         except BaseException as control:
@@ -694,13 +694,19 @@ class FileOperation:
         self,
         active: _ActiveFileCall[BindingT, PreparedT, OutcomeT],
         admission: _FileCallAdmission,
+        active_records: dict[int, _ActiveFileCall[BindingT, PreparedT, OutcomeT]],
     ) -> None:
-        active.obligation = active.borrow.install_dispatch_obligation(
-            admission.obligation_id,
-            "file-call",
-            payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
-            payload=admission.payload,
-        )
+        try:
+            active.obligation = active.borrow.install_dispatch_obligation(
+                admission.obligation_id,
+                "file-call",
+                payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+                payload=admission.payload,
+            )
+        except _PreRegistrationClosingRefusal:
+            active.borrow.close()
+            active_records.pop(id(active))
+            raise
 
     def _prepare_admission(
         self,

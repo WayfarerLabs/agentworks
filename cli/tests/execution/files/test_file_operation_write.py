@@ -365,7 +365,7 @@ def test_json_replaces_its_tokenless_file_call_payload_before_child_dispatch(
         database.close()
 
 
-def test_interrupted_install_keeps_the_attached_upload_and_owner_borrow(
+def test_registration_started_interruption_keeps_the_attached_upload_and_owner_borrow(
     tmp_path: Path,
     root: Path,
     plan: IdentityPlan,
@@ -375,8 +375,23 @@ def test_interrupted_install_keeps_the_attached_upload_and_owner_borrow(
     owner = _owner(database)
     operation = FileOperation(owner, target_for_owner(owner))
 
-    def interrupt_install(*args: object, **kwargs: object) -> LifecycleObligation:
-        del args, kwargs
+    install = OperationBorrow.install_dispatch_obligation
+
+    def interrupt_install(
+        borrow: OperationBorrow,
+        obligation_id: str,
+        obligation_kind: str,
+        *,
+        payload_version: int,
+        payload: bytes,
+    ) -> LifecycleObligation:
+        install(
+            borrow,
+            obligation_id,
+            obligation_kind,
+            payload_version=payload_version,
+            payload=payload,
+        )
         raise KeyboardInterrupt
 
     monkeypatch.setattr(OperationBorrow, "install_dispatch_obligation", interrupt_install)
@@ -385,8 +400,98 @@ def test_interrupted_install_keeps_the_attached_upload_and_owner_borrow(
             _upload(operation, root, plan, BytesSource(b"interrupted"))
 
         assert len(operation.active_uploads) == 1
+        assert len(database.operations.list_lifecycle_obligations(owner.ownership)) == 1
         with pytest.raises(StateError):
             owner.borrow()
+    finally:
+        database.close()
+
+
+def test_close_requested_before_install_releases_unregistered_active_upload(
+    tmp_path: Path,
+    root: Path,
+    plan: IdentityPlan,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    operation = FileOperation(owner, target_for_owner(owner))
+    carrier = LocalCarrier()
+    install = OperationBorrow.install_dispatch_obligation
+
+    def close_before_install(
+        borrow: OperationBorrow,
+        obligation_id: str,
+        obligation_kind: str,
+        *,
+        payload_version: int,
+        payload: bytes,
+    ) -> LifecycleObligation:
+        with pytest.raises(StateError):
+            owner.close()
+        return install(
+            borrow,
+            obligation_id,
+            obligation_kind,
+            payload_version=payload_version,
+            payload=payload,
+        )
+
+    monkeypatch.setattr(OperationBorrow, "install_dispatch_obligation", close_before_install)
+    try:
+        with pytest.raises(StateError):
+            _upload(operation, root, plan, BytesSource(b"unregistered"), carrier=carrier)
+
+        assert carrier.calls == 0
+        assert operation.active_uploads == ()
+        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        owner.close()
+        assert database.operations.inspect(owner.ownership.scope) is None
+    finally:
+        database.close()
+
+
+def test_failed_pre_registration_cleanup_keeps_the_active_upload(
+    tmp_path: Path,
+    root: Path,
+    plan: IdentityPlan,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = Database(tmp_path / "state.db")
+    owner = _owner(database)
+    operation = FileOperation(owner, target_for_owner(owner))
+    install = OperationBorrow.install_dispatch_obligation
+
+    def close_before_install(
+        borrow: OperationBorrow,
+        obligation_id: str,
+        obligation_kind: str,
+        *,
+        payload_version: int,
+        payload: bytes,
+    ) -> LifecycleObligation:
+        with pytest.raises(StateError):
+            owner.close()
+        return install(
+            borrow,
+            obligation_id,
+            obligation_kind,
+            payload_version=payload_version,
+            payload=payload,
+        )
+
+    def fail_close(borrow: OperationBorrow) -> None:
+        del borrow
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(OperationBorrow, "install_dispatch_obligation", close_before_install)
+    monkeypatch.setattr(OperationBorrow, "close", fail_close)
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            _upload(operation, root, plan, BytesSource(b"unreleased"))
+
+        assert len(operation.active_uploads) == 1
+        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
     finally:
         database.close()
 

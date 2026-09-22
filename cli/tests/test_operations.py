@@ -17,7 +17,13 @@ from agentworks.db import (
     OperationScope,
 )
 from agentworks.errors import StateError
-from agentworks.operations import LifecycleObligation, OperationBorrow, OperationOwner, release_borrow_after_custody
+from agentworks.operations import (
+    LifecycleObligation,
+    OperationBorrow,
+    OperationOwner,
+    _PreRegistrationClosingRefusal,
+    release_borrow_after_custody,
+)
 
 pytestmark = pytest.mark.windows
 
@@ -593,6 +599,26 @@ def test_supplied_dispatch_obligation_replaces_carrier_row_across_attempts(db: D
 
     borrow.close()
     assert db.operations.list_lifecycle_obligations(owner.ownership)[0].state is LifecycleObligationState.RESOLVED
+
+
+def test_close_requested_before_supplied_install_proves_no_registration_started(db: Database) -> None:
+    owner = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    borrow = owner.borrow()
+    with pytest.raises(StateError):
+        owner.close()
+
+    with pytest.raises(_PreRegistrationClosingRefusal):
+        borrow.install_dispatch_obligation(
+            "9" * 32,
+            "adapter-dispatch",
+            payload_version=1,
+            payload=b"prepared",
+        )
+
+    assert db.operations.list_lifecycle_obligations(owner.ownership) == ()
+    borrow.close()
+    owner.close()
+    assert db.operations.inspect(_scope()) is None
 
 
 @pytest.mark.parametrize("committed", [False, True], ids=["before-commit", "after-commit"])

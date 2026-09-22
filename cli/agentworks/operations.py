@@ -21,6 +21,10 @@ if TYPE_CHECKING:
     from agentworks.db.operations import OperationRepository
 
 
+class _PreRegistrationClosingRefusal(StateError):
+    """A close request prevented a dispatch registration before it began."""
+
+
 class OperationOwner:
     """Own one coarse database claim and lend its serial-use boundary.
 
@@ -387,6 +391,17 @@ class OperationBorrow:
             self._require_active_locked()
             if owner._transition_uncertain:  # noqa: SLF001
                 owner._reconcile_transition_locked()  # noqa: SLF001
+            if (
+                (self._closing or owner._close_requested)  # noqa: SLF001
+                and self._supplied_dispatch is None
+                and self._dispatch_obligation is None
+                and self._dispatch_obligation_id is None
+            ):
+                raise _PreRegistrationClosingRefusal(
+                    "operation borrow is closing",
+                    entity_kind=self.ownership.scope.resource_kind,
+                    entity_name=self.ownership.scope.resource_name,
+                )
             if self._closing or owner._close_requested:  # noqa: SLF001
                 raise StateError(
                     "operation borrow is closing",

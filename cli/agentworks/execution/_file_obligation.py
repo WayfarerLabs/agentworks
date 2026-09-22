@@ -71,7 +71,8 @@ class FileCallUncertainty(StrEnum):
 
 
 # The maximum expansions from an initial payload to its retained recovery
-# identity. Typed maximum-object and exact-boundary tests prove these values.
+# identity: 814 download, 1150 upload, 1205 JSON, 50 for each single call.
+# Typed maximum-object and exact-boundary tests prove these values.
 _FILE_CALL_RECOVERY_HEADROOM_BYTES = {
     FileCallFamily.DOWNLOAD: 814,
     FileCallFamily.UPLOAD: 1150,
@@ -463,7 +464,7 @@ def _decode_publication_debt(
 
 def _scratch_context(family: FileCallFamily, plan: IdentityPlan) -> ScratchReceiptContext:
     operation = ScratchOperation.SNAPSHOT if family is FileCallFamily.DOWNLOAD else ScratchOperation.STAGE
-    return ScratchReceiptContext(operation, _validate_identity_plan(plan))
+    return ScratchReceiptContext(operation, plan.expected)
 
 
 def _validate_scratch_reference(reference: object, token: bytes, context: ScratchReceiptContext) -> None:

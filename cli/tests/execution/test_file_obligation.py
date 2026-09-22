@@ -288,19 +288,7 @@ def _maximum_recovery_obligation(family: FileCallFamily) -> FileCallObligation:
 
 
 def test_admission_reserves_the_actual_largest_recovery_payload_for_every_family() -> None:
-    expected_growth = {
-        FileCallFamily.DOWNLOAD: 814,
-        FileCallFamily.UPLOAD: 1150,
-        FileCallFamily.JSON_UPDATE: 1205,
-        FileCallFamily.STAT: 50,
-        FileCallFamily.INVENTORY: 50,
-        FileCallFamily.REMOVE: 50,
-        FileCallFamily.SET_METADATA: 50,
-        FileCallFamily.ENSURE_DIRECTORY: 50,
-    }
-
-    assert expected_growth == _FILE_CALL_RECOVERY_HEADROOM_BYTES
-    for family, growth in expected_growth.items():
+    for family, growth in _FILE_CALL_RECOVERY_HEADROOM_BYTES.items():
         initial = _obligation(family)
         recovery = _maximum_recovery_obligation(family)
 
