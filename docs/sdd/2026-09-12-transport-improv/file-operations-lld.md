@@ -836,8 +836,11 @@ The generic database retains only the immediate takeover predecessor. It does no
 generation lineage or accept caller-supplied generation lists as proof. The adapter instead proves
 the stronger obligation-wide fact from its concrete dispatch substrate. The local checkpoint uses an
 external test-owned helper journal to observe every helper associated with the exact token across
-spawned controller loss. If that coverage cannot be reconstructed, or any helper remains live, the
-adapter refuses dispatch and retains the claim.
+spawned controller loss. The journal records and flushes expected dispatch before execution and
+actual token, request nonce, operation, PID and Linux process start time before helper work. Missing
+or unmatched records, unreadable identity, a matching live process or a zombie all retain the claim;
+only a missing PID or changed start time proves that recorded helper identity is gone. If complete
+coverage cannot be reconstructed, the adapter refuses dispatch and retains the claim.
 
 Reconciliation can discover exact `ScratchCleanupDebt` that was not published before the controller
 died. The adapter must compare-and-swap that debt into the existing `possible-effect` payload,
