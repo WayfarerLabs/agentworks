@@ -256,7 +256,7 @@ def test_interruption_after_spawn_preserves_original_exception_and_attempts_clea
     assert raised.value.__notes__
 
 
-def test_interruption_before_spawn_preserves_original_exception_without_cleanup_capability() -> None:
+def test_interruption_before_spawn_preserves_exception_and_closes_unused_job() -> None:
     interrupted = KeyboardInterrupt()
     host = FakeHost(interrupt=interrupted)
     jobs = FakeJobs()
@@ -266,7 +266,7 @@ def test_interruption_before_spawn_preserves_original_exception_without_cleanup_
         subject.start(Deadline.after(1))
 
     assert raised.value is interrupted
-    assert jobs.job is not None and not jobs.job.closed
+    assert jobs.job is not None and jobs.job.closed
 
 
 def test_interruption_during_assignment_is_uncertain_and_preserves_original_exception() -> None:

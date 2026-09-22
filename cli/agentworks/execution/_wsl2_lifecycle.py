@@ -349,10 +349,9 @@ class WSL2GuestAnchorLauncher:
                     evidence = replace(evidence, job_assignment=JobAssignment.ASSIGNED)
             identity = _ready_identity(process.read_stdout(_MAX_RECEIPT_BYTES + 1, deadline), nonce)
         except BaseException as error:
-            if process is not None:
-                if evidence.job_assignment == JobAssignment.UNCERTAIN:
-                    _note(error, "job assignment state is uncertain")
-                self._cleanup_failed_start(process, job, deadline, error)
+            if process is not None and evidence.job_assignment == JobAssignment.UNCERTAIN:
+                _note(error, "job assignment state is uncertain")
+            self._cleanup_failed_start(process, job, deadline, error)
             raise
         evidence = replace(evidence, identity=identity, helper_readiness=HelperReadiness.READY)
         return WSL2GuestAnchor(process=process, job=job, observer=self._observer, nonce=nonce, evidence=evidence)
@@ -382,17 +381,18 @@ class WSL2GuestAnchorLauncher:
 
     @staticmethod
     def _cleanup_failed_start(
-        process: HostClient, job: JobObject | None, deadline: Deadline, error: BaseException
+        process: HostClient | None, job: JobObject | None, deadline: Deadline, error: BaseException
     ) -> None:
         cleanup_failed = False
-        try:
-            process.terminate(deadline)
-        except BaseException:
-            cleanup_failed = True
-        try:
-            process.wait(deadline)
-        except BaseException:
-            cleanup_failed = True
+        if process is not None:
+            try:
+                process.terminate(deadline)
+            except BaseException:
+                cleanup_failed = True
+            try:
+                process.wait(deadline)
+            except BaseException:
+                cleanup_failed = True
         if job is not None:
             try:
                 job.close(deadline)
