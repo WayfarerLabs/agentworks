@@ -764,11 +764,11 @@ cleanup debt before acknowledging no further effects; only the current borrow ca
 outstanding attempt. The coordinator treats the adapter payload as opaque and does not interpret
 carrier reports or file protocols.
 
-The caller chooses and retains the obligation identifier before registration. Repeating
-registration after an interruption is idempotent only for the exact same operation, identifier,
-kind, payload version and payload. A conflicting reuse refuses. This closes the commit-without-reply
-window without introducing a workflow transaction or allowing the caller to infer that a failed
-database call rolled back.
+The caller chooses and retains the obligation identifier before registration. Repeating registration
+after an interruption is idempotent only for the exact same operation, identifier, kind, payload
+version and payload. A conflicting reuse refuses. This closes the commit-without-reply window
+without introducing a workflow transaction or allowing the caller to infer that a failed database
+call rolled back.
 
 Validate caller publication options with the canonical protocol schema before staging or consuming
 input. Local preparation can still reject a complete encoded request, for example when identity,
@@ -806,10 +806,10 @@ The version-one `file-call` payload is lifecycle evidence, not a serialized work
 form binds the exact managed target kind, name, incarnation fingerprint and boot UUID; the confined
 trusted root and normalized relative path; the closed file-operation family; the exact helper
 identity plan and runtime selection; and the fresh scratch token for upload or download. File
-composition receives the managed target identity from activation-owned composition and verifies
-that its logical resource matches the enclosing operation scope. Recovery may compose a fresh
-authorized route to that exact target; it never persists a connection object, route, credential or
-provider secret.
+composition receives the managed target identity from activation-owned composition and verifies that
+its logical resource matches the enclosing operation scope. Recovery may compose a fresh authorized
+route to that exact target; it never persists a connection object, route, credential or provider
+secret.
 
 JSON owns one parent `file-call` row. Before any nested upload can dispatch, it publishes that
 child's fresh token and attempt number into the same row. A retry may replace those fields only
@@ -818,8 +818,8 @@ child row or persist the source document, existing document, transformed value, 
 material. Upload and download outcomes may publish exact scratch references, cleanup debt and
 publication cleanup receipts. Clean quiescent calls may resolve without persisting their application
 result. Any pending remote effect, coordination uncertainty, ownership uncertainty or cleanup debt
-must be published before in-memory custody is released, and leaves the row in `possible-effect`.
-The payload never contains file bytes, JSON values, source or sink objects, raw helper responses,
+must be published before in-memory custody is released, and leaves the row in `possible-effect`. The
+payload never contains file bytes, JSON values, source or sink objects, raw helper responses,
 commands, credentials or unrestricted paths.
 
 The private download, upload and JSON custody slice attaches validated prepared workflows to
