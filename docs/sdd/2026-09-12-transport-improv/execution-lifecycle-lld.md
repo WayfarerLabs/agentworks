@@ -373,9 +373,11 @@ that claim.
 The portable implementation and tests establish this orchestration shape and execute the helper
 protocol on local Linux procfs. Hosted synthetic Windows tests separately exercise creation-time Job
 membership, restricted handle inheritance, bounded pipe observation, retryable exact settlement and
-controller hard-death cleanup. That host proof does not exercise a live WSL distribution, establish
-acknowledged guest-anchor absence, or wire a production platform hold. Those remain requirements of
-the WSL2 proof gate below.
+controller hard-death cleanup. The subsequent live Tier 2 Windows/WSL2 proof drives the same owner
+against real `wsl.exe` and establishes exact acknowledged guest-anchor absence after ordinary
+release and controller hard death while unrelated work survives. It also confirms literal argument,
+binary stream, finite input, EOF, bounded observation and conservative nonzero-status behavior. That
+proof does not wire the production platform hold, recovery factory, target identity or RunContext.
 
 ## Delivery sequence and proof criteria
 

@@ -1266,12 +1266,12 @@ connection and trust only. Before broader lifecycle implementation, complete the
       stop and rollback for the supported drivers. A foreground anchor is an option to justify for a
       concrete workflow, not a required replacement for Lima's runtime. Do not treat numeric PID
       records as authority to kill unrelated host work.
-- [ ] Prove WSL2 host-client and guest-anchor cleanup independently before wiring a production
+- [x] Prove WSL2 host-client and guest-anchor cleanup independently before wiring a production
       platform hold. A Windows Job Object or observed `wsl.exe` exit proves only host-client
       cleanup. The candidate must obtain a guest-ready acknowledgment, retain an exact guest process
       identity, request cooperative exit, and verify that identity is absent after ordinary release
-      and controller hard death while unrelated guest work survives. Until that live WSL2 evidence
-      exists, report release unconfirmed rather than inferring guest cleanup.
+      and controller hard death while unrelated guest work survives. Production platform-hold and
+      recovery composition remain separate gates.
 
 The private WSL2 ownership candidate is implemented through `a1bb1034`. The caller owns an inert
 lifecycle object before `start`; one native owner retains the WSL client, process/pipe handles and
@@ -1285,8 +1285,20 @@ cleanup and abrupt controller death without invoking WSL. Hosted Windows 2025 wi
 passes all 496 selected cases with 39 skips at `dca96813` in
 [run 35710387854](https://github.com/WayfarerLabs/agentworks/actions/runs/35710387854). That
 establishes the synthetic host-client cases, including abrupt controller death while unrelated work
-survives. No live WSL2 distribution exercised this candidate, so exact guest-anchor absence,
-platform-hold integration and the checkbox above remain open.
+survives.
+
+The live Tier 2 Windows/WSL2 round at transport `f13f48e5`, composed with SSH `3cf322f9`, closes the
+guest-anchor proof above. Windows Server 2022 with WSL 2.7.14.0 drove Ubuntu 24.04 under the bound
+root account. Real `wsl.exe` preserved all 13 tricky literal arguments, binary stdout/stderr, finite
+NUL input and EOF; bounded output and sensitive-input suppression also held. The measured nonzero
+statuses confirmed that WSL cannot distinguish normal exit from the same numeric signal, so the
+carrier correctly retains those values as observation failures rather than typed completion.
+Ordinary release and forced controller death both removed the acknowledged exact guest PID/start
+identity, independently observed through another `wsl.exe` process, while unrelated guest and
+Windows work survived. The Windows client, guest anchor and helper residue were zero before the bed
+was torn down. The composed non-integration suite passed 12,979 tests with 21 skips and every
+static, documentation, Rulesync and website gate passed. This evidence does not wire the production
+WSL platform hold, recovery factory, target identity or RunContext surface; those remain open.
 
 The durable launch checkpoint is privately accepted at `ead879ce`. Project, complexity and
 independent correctness reviews are clean. Review removed the dormant application, cleanup and

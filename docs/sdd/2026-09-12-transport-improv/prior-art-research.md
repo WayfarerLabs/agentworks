@@ -1082,7 +1082,9 @@ an explicit reader owner, bounded retained bytes and retryable settlement.
 A synthetic Windows test can establish client Job membership, descendant cleanup, restricted handle
 inheritance and local handle settlement. It cannot establish that `wsl.exe` carried EOF correctly
 into a guest, that an acknowledged Linux PID/start-time identity disappeared, that unrelated guest
-work survived, or that the WSL platform hold behaved correctly. Those remain live WSL2 proof gates.
+work survived, or that the WSL platform hold behaved correctly. The later Tier 2 Windows/WSL2 round
+establishes the first three properties against a real distribution. Production platform-hold and
+recovery composition remain unproved.
 
 ## Windows-local download publication
 

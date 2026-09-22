@@ -200,9 +200,10 @@ Object state are not guest-absence evidence. Only an injected exact PID/start-ti
 report absence, and it can be retried after local settlement. Portable tests execute this helper on
 local Linux procfs and exercise lifecycle failure orderings. Hosted synthetic Windows tests exercise
 Job membership, handle confinement, deadlines, settlement and controller hard death without invoking
-`wsl.exe`. That is host-client evidence, not live WSL evidence. There is no production composition
-yet; live WSL argument and pipe behavior, exact guest cleanup and platform-hold integration remain
-open proof gates.
+`wsl.exe`. A separate live Tier 2 Windows/WSL2 proof establishes literal argument and byte-stream
+behavior plus exact guest-anchor absence after ordinary release and controller hard death, while
+unrelated guest and Windows work survive. There is no production composition yet; platform-hold,
+recovery-factory, target-identity and RunContext integration remain open gates.
 
 ## Observation and guest lifetime
 
