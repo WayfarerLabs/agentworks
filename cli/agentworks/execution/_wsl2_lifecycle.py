@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 _CLEANUP_SECONDS = 0.5
 _MAX_RECEIPT_BYTES = 512
 _READY = re.compile(r"READY ([0-9a-f]{32}) ([1-9][0-9]*) ([0-9]+)\n")
-_EXITING = re.compile(r"(?:STOPPING|EXITING) ([0-9a-f]{32})\n")
+_EXITING = re.compile(r"EXITING ([0-9a-f]{32})\n")
 
 # Python 3.11 syntax only. The proc start time is field 22, after the final
 # right parenthesis because a process name may itself contain parentheses.
@@ -71,6 +71,15 @@ class JobHandleSettlement(StrEnum):
     UNKNOWN = "unknown"
 
 
+class HostHandleSettlement(StrEnum):
+    """Whether the WSL client process and pipe handles are settled locally."""
+
+    NOT_CREATED = "not_created"
+    OPEN = "open"
+    CLOSED = "closed"
+    UNKNOWN = "unknown"
+
+
 class HelperExitReceipt(StrEnum):
     """Bounded helper receipt after EOF, not guest-absence evidence."""
 
@@ -95,12 +104,15 @@ class LocalResourceSnapshot:
     host_client_exit_status: int | None
     job_assignment: JobAssignment
     job_handle_settlement: JobHandleSettlement
+    host_handle_settlement: HostHandleSettlement
 
     @property
     def settled(self) -> bool:
         """Whether both local resources are exactly settled or never created."""
-        return self.host_client_status in {HostClientStatus.NOT_CREATED, HostClientStatus.EXITED} and (
-            self.job_handle_settlement in {JobHandleSettlement.NOT_CREATED, JobHandleSettlement.CLOSED}
+        return (
+            self.host_client_status in {HostClientStatus.NOT_CREATED, HostClientStatus.EXITED}
+            and self.host_handle_settlement in {HostHandleSettlement.NOT_CREATED, HostHandleSettlement.CLOSED}
+            and self.job_handle_settlement in {JobHandleSettlement.NOT_CREATED, JobHandleSettlement.CLOSED}
         )
 
 
@@ -226,6 +238,13 @@ class WSL2GuestAnchorOwner:
             raise ValidationError("WSL2 anchor start deadline has expired")
         self._nonce = secrets.token_hex(16)
         self._start_attempted = True
+        self._local = LocalResourceSnapshot(
+            HostClientStatus.UNKNOWN,
+            None,
+            JobAssignment.UNKNOWN,
+            JobHandleSettlement.UNKNOWN,
+            HostHandleSettlement.UNKNOWN,
+        )
         try:
             self._native.spawn_owned(self._argv(self._nonce), deadline)
             self._refresh()
@@ -244,18 +263,23 @@ class WSL2GuestAnchorOwner:
 
     def release(self, deadline: Deadline) -> WSL2AnchorEvidence:
         """Observe cooperative EOF, settle local handles, then retry guest proof."""
-        try:
-            if not self._local.settled:
+        if not self._local.settled:
+            try:
                 self._cooperative_release(deadline)
-                self._settle()
-            self._observe_guest(deadline)
-        except BaseException as error:
-            self._settle_after_failure(error)
-            raise
+            except BaseException as error:
+                self._settle_after_failure(error)
+                raise
+            self._settle_once()
+        self._observe_guest(deadline)
         return self.evidence
 
     def settle(self) -> WSL2AnchorEvidence:
         """Spend a fresh local cleanup allowance without a guest observation."""
+        self._settle_once()
+        return self.evidence
+
+    def _settle_once(self) -> None:
+        """Attempt one allowance and refresh facts before propagating interruption."""
         try:
             self._settle()
         except BaseException as error:
@@ -264,7 +288,6 @@ class WSL2GuestAnchorOwner:
             except BaseException:
                 _note(error, "native snapshot is unavailable")
             raise
-        return self.evidence
 
     def _cooperative_release(self, deadline: Deadline) -> None:
         if deadline.expired:
