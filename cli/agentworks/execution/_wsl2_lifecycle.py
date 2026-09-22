@@ -256,7 +256,14 @@ class WSL2GuestAnchorOwner:
 
     def settle(self) -> WSL2AnchorEvidence:
         """Spend a fresh local cleanup allowance without a guest observation."""
-        self._settle()
+        try:
+            self._settle()
+        except BaseException as error:
+            try:
+                self._refresh()
+            except BaseException:
+                _note(error, "native snapshot is unavailable")
+            raise
         return self.evidence
 
     def _cooperative_release(self, deadline: Deadline) -> None:
@@ -294,6 +301,8 @@ class WSL2GuestAnchorOwner:
                 self._refresh()
             except BaseException:
                 _note(primary, "native snapshot is unavailable")
+        if not self._local.settled:
+            _note(primary, "local settlement remains uncertain")
 
     def _refresh(self) -> None:
         self._local = self._native.snapshot()

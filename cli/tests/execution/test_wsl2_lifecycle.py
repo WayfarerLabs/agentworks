@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import selectors
 import subprocess
 import sys
@@ -162,8 +163,17 @@ def test_literal_helper_argv_and_start_evidence(monkeypatch: pytest.MonkeyPatch)
 def _bounded_line(selector: selectors.BaseSelector, stream: IO[bytes]) -> bytes:
     selector.register(stream, selectors.EVENT_READ)
     try:
-        assert selector.select(timeout=2)
-        return stream.readline(513)
+        expires_at = time.monotonic() + 2
+        received = bytearray()
+        while len(received) < 513 and not received.endswith(b"\n"):
+            remaining = expires_at - time.monotonic()
+            assert remaining > 0
+            assert selector.select(timeout=remaining)
+            chunk = os.read(stream.fileno(), 513 - len(received))
+            if not chunk:
+                break
+            received.extend(chunk)
+        return bytes(received)
     finally:
         selector.unregister(stream)
 
@@ -268,11 +278,12 @@ def test_invalid_ready_retains_retryable_owner_and_settles(monkeypatch: pytest.M
     native = FakeNative([receipt], settle_results=[uncertain, settled])
     subject = owner(native)
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as raised:
         subject.start(Deadline.after(1))
 
     assert subject.evidence.identity is None
     assert not subject.evidence.local.settled
+    assert raised.value.__notes__
     assert subject.settle().local.settled
 
 
@@ -350,6 +361,22 @@ def test_normal_release_reraises_native_settlement_interruption(monkeypatch: pyt
 
     with pytest.raises(KeyboardInterrupt) as raised:
         subject.release(Deadline.after(1))
+
+    assert raised.value is interrupted
+    assert subject.evidence.local.settled
+
+
+def test_direct_settle_refreshes_evidence_before_reraising_interruption(monkeypatch: pytest.MonkeyPatch) -> None:
+    token(monkeypatch)
+    interrupted = KeyboardInterrupt()
+    settled = local(HostClientStatus.EXITED, 0, JobAssignment.ASSIGNED_AFTER_SPAWN, JobHandleSettlement.CLOSED)
+    native = FakeNative([ready()], settle_results=[interrupted])
+    subject = owner(native)
+    subject.start(Deadline.after(1))
+    native.local_state = settled
+
+    with pytest.raises(KeyboardInterrupt) as raised:
+        subject.settle()
 
     assert raised.value is interrupted
     assert subject.evidence.local.settled
