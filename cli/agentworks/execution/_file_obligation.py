@@ -37,7 +37,8 @@ from agentworks.execution._scratch_wire import (
 
 FILE_CALL_OBLIGATION_PAYLOAD_VERSION = 1
 _TOKEN_BYTES = 16
-_MAX_ATTEMPT = (1 << 31) - 1
+_MAX_JSON_ATTEMPTS = 8
+_MAX_PATH_BYTES = 4_096
 _LOWER_HEX = frozenset("0123456789abcdef")
 _BASE_FIELDS = frozenset({"family", "identity", "path", "root", "runtime", "target", "uncertainty", "version"})
 _OPTIONAL_FIELDS = frozenset({"attempt", "publication_cleanup_debt", "scratch", "token"})
@@ -63,7 +64,8 @@ class FileCallFamily(StrEnum):
 class FileCallUncertainty(StrEnum):
     """Recovery facts that remain unproved after a file-call attempt."""
 
-    DISPATCH = "dispatch"
+    PENDING_REMOTE_EFFECT = "pending-remote-effect"
+    COORDINATION_UNCERTAINTY = "coordination-uncertainty"
     SCRATCH_OWNERSHIP = "scratch-ownership"
     PUBLICATION_OWNERSHIP = "publication-ownership"
 
@@ -165,7 +167,12 @@ def _validate_obligation(obligation: FileCallObligation) -> None:
             raise FileCallObligationCodecError
         return
 
-    if not scratch_family or not _valid_token(obligation.token) or not _valid_attempt(obligation.attempt):
+    if not scratch_family or not _valid_token(obligation.token):
+        raise FileCallObligationCodecError
+    if obligation.family is FileCallFamily.JSON_UPDATE:
+        if not _valid_attempt(obligation.attempt):
+            raise FileCallObligationCodecError
+    elif obligation.attempt is not None:
         raise FileCallObligationCodecError
     token = bytes(obligation.token)
     context = _scratch_context(obligation.family, obligation.identity_plan)
@@ -196,8 +203,9 @@ def _encode_obligation(obligation: FileCallObligation) -> dict[str, object]:
         "version": FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
     }
     if obligation.token is not None:
-        value["attempt"] = obligation.attempt
         value["token"] = obligation.token.hex()
+    if obligation.attempt is not None:
+        value["attempt"] = obligation.attempt
     scratch: dict[str, object] = {}
     if obligation.scratch_reference is not None:
         scratch["reference"] = encode_scratch_reference(obligation.scratch_reference)
@@ -353,10 +361,10 @@ def _validate_path(path: object, *, root: bool) -> None:
     if type(path) is not str:
         raise FileCallObligationCodecError
     try:
-        path.encode("utf-8")
+        encoded = path.encode("utf-8")
     except UnicodeEncodeError:
         raise FileCallObligationCodecError from None
-    if not (normalized_root(path) if root else normalized_relative_path(path)):
+    if len(encoded) > _MAX_PATH_BYTES or not (normalized_root(path) if root else normalized_relative_path(path)):
         raise FileCallObligationCodecError
 
 
@@ -375,12 +383,11 @@ def _decode_uncertainty(value: object) -> frozenset[FileCallUncertainty]:
 def _decode_attempt(value: dict[str, object]) -> tuple[bytes | None, int | None]:
     token_present = "token" in value
     attempt_present = "attempt" in value
-    if token_present != attempt_present:
+    if attempt_present and not token_present:
         raise FileCallObligationCodecError
     if not token_present:
         return None, None
     token_value = value["token"]
-    attempt = value["attempt"]
     if (
         type(token_value) is not str
         or len(token_value) != _TOKEN_BYTES * 2
@@ -388,6 +395,9 @@ def _decode_attempt(value: dict[str, object]) -> tuple[bytes | None, int | None]
     ):
         raise FileCallObligationCodecError
     token = bytes.fromhex(token_value)
+    if not attempt_present:
+        return token, None
+    attempt = value["attempt"]
     if not _valid_attempt(attempt):
         raise FileCallObligationCodecError
     assert type(attempt) is int
@@ -473,4 +483,4 @@ def _valid_token(token: object) -> bool:
 
 
 def _valid_attempt(attempt: object) -> bool:
-    return type(attempt) is int and 1 <= attempt <= _MAX_ATTEMPT
+    return type(attempt) is int and 1 <= attempt <= _MAX_JSON_ATTEMPTS

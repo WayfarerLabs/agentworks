@@ -93,7 +93,7 @@ def _obligation(family: FileCallFamily, *, token: bytes | None = None) -> FileCa
         identity_plan=_PLAN,
         runtime_selection=_RUNTIME,
         token=selected_token,
-        attempt=1 if selected_token is not None else None,
+        attempt=None,
     )
 
 
@@ -152,7 +152,13 @@ def test_scratch_and_publication_cleanup_debts_round_trip_with_their_exact_refer
         scratch_reference=reference,
         scratch_cleanup_debt=_cleanup_debt(),
         publication_cleanup_debt=publication_debt,
-        uncertainty=frozenset({FileCallUncertainty.DISPATCH, FileCallUncertainty.PUBLICATION_OWNERSHIP}),
+        uncertainty=frozenset(
+            {
+                FileCallUncertainty.PENDING_REMOTE_EFFECT,
+                FileCallUncertainty.COORDINATION_UNCERTAINTY,
+                FileCallUncertainty.PUBLICATION_OWNERSHIP,
+            }
+        ),
     )
 
     decoded = decode_file_call_obligation(encode_file_call_obligation(obligation))
@@ -180,16 +186,37 @@ def test_json_preparation_omits_a_child_identity_and_child_state_retains_one() -
     assert decode_file_call_obligation(encode_file_call_obligation(child)) == child
 
 
-def test_envelope_bound_accepts_a_maximal_path_and_refuses_an_over_bound_payload() -> None:
+def test_envelope_bound_accepts_8192_bytes_within_each_path_bound_and_refuses_8193() -> None:
     baseline = _obligation(FileCallFamily.STAT)
-    fixed_size = len(encode_file_call_obligation(replace(baseline, relative_path="a")))
-    accepted = replace(baseline, relative_path="a" * (MAX_LIFECYCLE_PAYLOAD_BYTES - fixed_size + 1))
+    root = "/" + "a" * 4_095
+    fixed_size = len(encode_file_call_obligation(replace(baseline, root=root, relative_path="a")))
+    accepted = replace(
+        baseline,
+        root=root,
+        relative_path="a" * (MAX_LIFECYCLE_PAYLOAD_BYTES - fixed_size + 1),
+    )
 
     encoded = encode_file_call_obligation(accepted)
 
+    assert len(accepted.root.encode()) <= 4_096
+    assert len(accepted.relative_path.encode()) <= 4_096
     assert len(encoded) == MAX_LIFECYCLE_PAYLOAD_BYTES
     with pytest.raises(FileCallObligationCodecError):
         encode_file_call_obligation(replace(accepted, relative_path=accepted.relative_path + "a"))
+
+
+def test_upload_and_download_tokens_do_not_carry_json_attempt_identity() -> None:
+    for family in (FileCallFamily.UPLOAD, FileCallFamily.DOWNLOAD):
+        encoded = encode_file_call_obligation(_obligation(family))
+
+        assert "attempt" not in json.loads(encoded)
+        with pytest.raises(FileCallObligationCodecError):
+            replace(_obligation(family), attempt=1)
+
+
+def test_json_attempt_is_bounded_to_eight() -> None:
+    with pytest.raises(FileCallObligationCodecError):
+        replace(_obligation(FileCallFamily.JSON_UPDATE), token=_TOKEN, attempt=9)
 
 
 @pytest.mark.parametrize(
