@@ -634,11 +634,15 @@ The private hold now constructs the guest anchor from its exact WSL2 connection 
 owner that captures the already-running controller PID and creation time in native Windows ticks
 before registration. The controller is not the new `wsl.exe` child. It validates exact VM scope,
 finite deadline and payload fields before native observation, then registers one obligation, marks
-possible effect, dispatches once and immediately CAS-publishes READY identity. Registration, mark
-and publication uncertainty retain the caller-owned hold without replay. Ordinary release may
-resolve an ambiguous post-READY publication after local settlement and independent exact absence; it
-never resolves on `EXITING`, client exit, Job settlement or missing guest identity alone. Recovery
-discovery and controller-absence proof are separate unfinished obligations.
+possible effect, dispatches once and immediately CAS-publishes READY identity, even when startup
+then raises. The hold serializes start and release so a pre-dispatch snapshot cannot resolve an
+in-progress startup. It accepts only bare `wsl` or `wsl.exe` case-insensitively, resolved by the
+native owner through the trusted Windows system directory, rather than persisting an executable
+path. Registration, mark and publication uncertainty retain the caller-owned hold without replay.
+Ordinary release may resolve an ambiguous post-READY publication after local settlement and
+independent exact absence; it never resolves on `EXITING`, client exit, Job settlement or missing
+guest identity alone. Recovery discovery and controller-absence proof are separate unfinished
+obligations.
 
 This checkpoint does not wire `systemd.py`, carriers, platform factories, public `ExecutionAccess`,
 `JobRef` or RunContext. It does not implement OPERATION liveness, leases, application/output

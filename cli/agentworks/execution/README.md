@@ -276,10 +276,14 @@ versioned canonical ASCII payload containing a domain-separated SHA-256 digest o
 provider locator, validated instance marker, exact distribution and user, fresh nonce, and the
 already-running Windows controller PID plus creation time in native Windows ticks. It marks possible
 effect before dispatch and publishes the acknowledged boot/PID/start identity as soon as `READY`
-arrives. The caller retains the hold through failures and interruptions. Ordinary release resolves
-only after exact local never-creation or after local settlement and independently confirmed absence
-of the acknowledged guest identity. It does not close the outer owner or keep a borrow across the
-hold lifetime. A production observer, crash recovery factory, activation, platform wiring, target
+arrives, including when startup raises after retaining that identity. The hold serializes its start
+and release transitions so a pre-dispatch snapshot cannot discharge an active startup. This private
+path accepts only bare `wsl` or `wsl.exe` (case-insensitively), which the native owner resolves
+through the trusted Windows system directory; the executable is not recovery payload data. The
+caller retains the hold through failures and interruptions. Ordinary release resolves only after
+exact local never-creation or after local settlement and independently confirmed absence of the
+acknowledged guest identity. It does not close the outer owner or keep a borrow across the hold
+lifetime. A production observer, crash recovery factory, activation, platform wiring, target
 identity and RunContext integration remain open gates.
 
 ## Observation and guest lifetime

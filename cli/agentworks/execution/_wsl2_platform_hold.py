@@ -6,6 +6,7 @@ import hashlib
 import json
 import secrets
 from dataclasses import dataclass, replace
+from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES, OperationResourceKind
@@ -130,31 +131,11 @@ def decode_hold_payload(data: bytes) -> WSL2HoldPayload:
     if type(data) is not bytes or len(data) > MAX_LIFECYCLE_PAYLOAD_BYTES:
         raise ValidationError("WSL2 hold payload is invalid")
 
-    def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError("duplicate field")
-            result[key] = value
-        return result
-
     try:
-        value = json.loads(data.decode("ascii"), object_pairs_hook=unique)
+        value = json.loads(data.decode("ascii"))
         if type(value) is not dict or type(value.get("version")) is not int or value["version"] != PAYLOAD_VERSION:
             raise ValueError("invalid version")
-        base = {
-            "controller_creation_ticks",
-            "controller_pid",
-            "distribution",
-            "instance_marker",
-            "locator_sha256",
-            "nonce",
-            "user",
-            "version",
-        }
         guest_fields = {"guest_boot_id", "guest_pid", "guest_start_time"}
-        if set(value) not in (base, base | guest_fields):
-            raise ValueError("invalid fields")
         guest = (
             GuestAnchorIdentity(value["guest_boot_id"], value["guest_pid"], value["guest_start_time"])
             if guest_fields <= set(value)
@@ -196,6 +177,7 @@ class WSL2PlatformHold:
         self._connection = connection
         self._native = native
         self._anchor = WSL2GuestAnchorOwner(connection, native, observer=observer)
+        self._transition_lock = Lock()
         self._obligation: LifecycleObligation | None = None
         self._payload: WSL2HoldPayload | None = None
         self._attempted = False
@@ -219,6 +201,10 @@ class WSL2PlatformHold:
 
     def start(self, deadline: Deadline) -> WSL2AnchorEvidence:
         """Register, commit possible effect, dispatch once, and publish READY."""
+        with self._transition_lock:
+            return self._start_locked(deadline)
+
+    def _start_locked(self, deadline: Deadline) -> WSL2AnchorEvidence:
         if self._attempted:
             raise ValidationError("WSL2 platform hold was already started")
         if (
@@ -234,6 +220,7 @@ class WSL2PlatformHold:
             not _valid_instance_marker(self._marker)
             or not _literal(self._connection.distribution)
             or not _literal(self._connection.user)
+            or self._connection.wsl_executable.casefold() not in {"wsl", "wsl.exe"}
         ):
             raise ValidationError("WSL2 hold preparation is invalid")
         if (
@@ -260,19 +247,38 @@ class WSL2PlatformHold:
         )
         self._registration_uncertain = False
         self._obligation.mark_possible_effect()
-        evidence = self._anchor.start(deadline, nonce=payload.nonce)
-        if evidence.identity is not None:
-            published = replace(payload, guest=evidence.identity)
-            self._payload = published
-            self._obligation.publish_payload(
-                expected_revision=self._obligation.payload_revision,
-                payload_version=PAYLOAD_VERSION,
-                payload=encode_hold_payload(published),
-            )
+        try:
+            evidence = self._anchor.start(deadline, nonce=payload.nonce)
+        except BaseException as primary:
+            try:
+                self._publish_ready_identity()
+            except BaseException:
+                primary.add_note("WSL2 hold READY identity publication is uncertain")
+            raise
+        self._publish_ready_identity()
         return evidence
+
+    def _publish_ready_identity(self) -> None:
+        identity = self._anchor.evidence.identity
+        if identity is None:
+            return
+        payload = self._payload
+        obligation = self._obligation
+        assert payload is not None and obligation is not None
+        published = replace(payload, guest=identity)
+        self._payload = published
+        obligation.publish_payload(
+            expected_revision=obligation.payload_revision,
+            payload_version=PAYLOAD_VERSION,
+            payload=encode_hold_payload(published),
+        )
 
     def release(self, deadline: Deadline) -> WSL2AnchorEvidence:
         """Resolve only no-client creation or settled, exact guest absence."""
+        with self._transition_lock:
+            return self._release_locked(deadline)
+
+    def _release_locked(self, deadline: Deadline) -> WSL2AnchorEvidence:
         if not self._attempted:
             raise ValidationError("WSL2 platform hold was not started")
         if type(deadline) is not Deadline or deadline.expires_at is None:
