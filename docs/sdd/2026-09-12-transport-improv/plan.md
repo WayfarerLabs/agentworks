@@ -1334,29 +1334,36 @@ connection and trust only. Before broader lifecycle implementation, complete the
       mutable stop document, `execution_runs` stop state, generic admission lock, direct
       systemd-stop claim, disposal/retention policy or public composition. Hermetic proof does not
       establish live systemd/cgroup, current target-marker/boot or SSH/QGA behavior.
-- [ ] Implement and privately prove exact terminal disposal with a boot-local retry tombstone.
-      Require the exact launch, boundary emptiness and both closed stream ends before publishing
-      `disposal` by hard-linking the validated immutable launch and syncing the directory. Validate
-      capture spools structurally before deletion; their bytes, lengths and digests do not authorize
-      release. Validate recognized crash stages by fixed name, owner, type, mode and link shape
-      rather than content. First tighten controller ordering so it settles optional wait before
-      boundary publication; both stream ends may remain later and independent, but the complete
-      disposal predicate permits no later controller fact publication. Prove the late-wait race and
-      simultaneous exact receipt retries, including a delayed retry that must not create a new stage
-      after receipt-only success. After durable commitment, remove only validated fixed run
-      artifacts and recognized private stages through the held directory descriptor, sync and report
-      disposed only when the one-link receipt is the sole survivor. Exact retries resume partial
-      cleanup; missing launch plus receipt proves nothing; strange entries and mismatched receipts
-      authorize no deletion. Make target publishers refuse an observed receipt, while leaving
-      distinct-operation serialization to the core operation claim rather than adding a file lock.
-      Add no automatic retention interval, forced release, generic deletion API, mutable status or
-      database disposal field. Hermetic proof does not establish production ownership, current
-      target/boot rereads or live SSH/QGA behavior.
+- [x] Implement and privately prove exact terminal disposal with a boot-local retry tombstone
+      through `08c9029b51a3b3e460756f358f8387b9ccd8f180`. Require the exact launch, boundary
+      emptiness and both closed stream ends before publishing `disposal` by hard-linking the
+      validated immutable launch and syncing the directory. Validate capture spools structurally
+      before deletion; their bytes, lengths and digests do not authorize release. Validate
+      recognized crash stages by fixed name, owner, type, mode and link shape rather than content.
+      First tighten controller ordering so it settles optional wait before boundary publication;
+      both stream ends may remain later and independent, but the complete disposal predicate permits
+      no later controller fact publication. Prove the late-wait race and simultaneous exact receipt
+      retries, including a delayed retry that must not create a new stage after receipt-only
+      success. After durable commitment, remove only validated fixed run artifacts and recognized
+      private stages through the held directory descriptor, sync and report disposed only when the
+      one-link receipt is the sole survivor. Exact retries resume partial cleanup; missing launch
+      plus receipt proves nothing; strange entries and mismatched receipts authorize no deletion.
+      Make target publishers refuse an observed receipt, while leaving distinct-operation
+      serialization to the core operation claim rather than adding a file lock. Add no automatic
+      retention interval, forced release, generic deletion API, mutable status or database disposal
+      field. The 407 managed-execution tests, Ruff, formatting, mypy across 252 execution sources,
+      the full file-lint suite and diff check pass. Host exchange proof covers pure preflight,
+      deadline refusal, helper and carrier uncertainty, malformed or stale receipts, complete
+      disposed/not-ready results and suppression of the launch receipt from representation.
+      Filesystem proof covers symlinks, directories, FIFOs, unsafe modes, unexplained hard links,
+      mismatched receipts, partial cleanup and simultaneous exact retries. Hermetic proof does not
+      establish production ownership, current target/boot rereads or live SSH/QGA behavior.
 - [ ] Add the fixed carrier-neutral `start`, `observe`, closed `read-output`, `stop` and `dispose`
-      exchange over the target store. Revalidate the exact target/run/unit/launch digest on every
-      later action, never replay start after possible dispatch, and expose no arbitrary command,
-      unit, path or property control. Prove the same exchange through SSH and QGA before public
-      factory, job or RunContext exposure.
+      exchange over the target store. The private hermetic exchange now implements all five
+      operations, revalidates the exact target/run/unit/launch digest on every later action, never
+      replays start after possible dispatch and exposes no arbitrary command, unit, path or property
+      control. This item remains open until the same exchange is proved through SSH and QGA before
+      public factory, job or RunContext exposure.
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared
       create bootstrap. Migration 41 leaves legacy rows NULL; ordinary existing-VM operations never
