@@ -38,7 +38,7 @@ class Boundary:
         return self.killed
 
 
-def _launch(*, shell: str | None = None, login: bool = False) -> bytes:
+def _launch(*, shell: str | None = None, resolved_shell: str | None = None, login: bool = False) -> bytes:
     groups = sorted(set(os.getgroups()) | {os.getegid()})
     return wire.encode_fact(
         {
@@ -55,7 +55,7 @@ def _launch(*, shell: str | None = None, login: bool = False) -> bytes:
             "workload": {"euid": os.geteuid(), "egid": os.getegid(), "groups": groups},
             "shell": {
                 "requested": shell,
-                "resolved_executable": {"sh": "/bin/sh", "bash": "/bin/bash"}.get(shell),
+                "resolved_executable": resolved_shell or {"sh": "/bin/sh", "bash": "/bin/bash"}.get(shell),
                 "login": login,
                 "interactive": False,
             },
@@ -85,14 +85,16 @@ def _execute(
     source: bytes = b"",
     stdin: bytes = b"",
     shell: str | None = None,
+    resolved_shell: str | None = None,
     login: bool = False,
     output_mode: str = "capture",
     limit: int | None = 1024,
+    environment: tuple[tuple[str, str], ...] = (),
 ) -> tuple[ManagedJobStore, Boundary]:
     store = _store(tmp_path)
-    launch = _launch(shell=shell, login=login)
+    launch = _launch(shell=shell, resolved_shell=resolved_shell, login=login)
     store.publish_request(
-        request_wire.ManagedJobRequest(launch, kind, argv, None, output_mode, limit, (), source, stdin)
+        request_wire.ManagedJobRequest(launch, kind, argv, None, output_mode, limit, environment, source, stdin)
     )
     boundary = Boundary()
 
@@ -172,6 +174,16 @@ def test_signal_wait_fact(tmp_path: Path) -> None:
     store.close()
 
 
+def test_literal_command_uses_explicit_request_path(tmp_path: Path) -> None:
+    store, _ = _execute(
+        tmp_path,
+        argv=("printf", "path-search"),
+        environment=(("PATH", "/usr/bin:/bin"),),
+    )
+    assert store.read_capture(Stream.STDOUT, _launch()) == b"path-search"
+    store.close()
+
+
 def test_incomplete_request_refuses_before_fork(tmp_path: Path) -> None:
     store = _store(tmp_path)
     store.publish_request_asset(RequestAsset.LAUNCH, _launch())
@@ -191,8 +203,18 @@ def test_held_stream_leaves_unknown_after_cleanup_bound(tmp_path: Path, monkeypa
     store.close()
 
 
-@pytest.mark.parametrize(("shell", "login"), [("sh", False), ("sh", True), ("bash", False), ("bash", True)])
-def test_script_source_is_separate_from_stdin(tmp_path: Path, shell: str, login: bool) -> None:
+@pytest.mark.parametrize(
+    ("shell", "resolved_shell", "login"),
+    [
+        ("sh", "/bin/sh", False),
+        ("sh", "/bin/sh", True),
+        ("bash", "/bin/bash", False),
+        ("bash", "/bin/bash", True),
+        ("user_default", "/usr/bin/sh", False),
+        ("user_default", "/usr/bin/bash", False),
+    ],
+)
+def test_script_source_is_separate_from_stdin(tmp_path: Path, shell: str, resolved_shell: str, login: bool) -> None:
     store, _ = _execute(
         tmp_path,
         kind="script",
@@ -200,9 +222,16 @@ def test_script_source_is_separate_from_stdin(tmp_path: Path, shell: str, login:
         source=b"printf 'script:'; cat",
         stdin=b"\x00binary\xff",
         shell=shell,
+        resolved_shell=resolved_shell,
         login=login,
     )
-    assert store.read_capture(Stream.STDOUT, _launch(shell=shell, login=login)) == b"script:\x00binary\xff"
+    assert (
+        store.read_capture(
+            Stream.STDOUT,
+            _launch(shell=shell, resolved_shell=resolved_shell, login=login),
+        )
+        == b"script:\x00binary\xff"
+    )
     store.close()
 
 

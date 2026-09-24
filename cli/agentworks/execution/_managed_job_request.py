@@ -30,6 +30,7 @@ MAX_ENVIRONMENT_ENTRIES = 256
 _NAME = re.compile(r"[A-Za-z_][A-Za-z_0-9]*\Z")
 _RUN = re.compile(r"[0-9a-f]{32}\Z")
 _RESERVED_ENV = frozenset({"BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "BASH_XTRACEFD"})
+_USER_SHELLS = frozenset({"/bin/sh", "/usr/bin/sh", "/bin/bash", "/usr/bin/bash"})
 _ASSETS = ("request-launch", "request-control", "request-environment", "request-source", "request-stdin")
 
 
@@ -180,7 +181,14 @@ def encode_request(request: ManagedJobRequest) -> dict[str, bytes]:
     ):
         raise RequestError("script and shell mismatch")
     else:
-        _path(shell["resolved_executable"])
+        resolved = _path(shell["resolved_executable"])
+        requested = shell["requested"]
+        if (
+            (requested == "sh" and resolved != "/bin/sh")
+            or (requested == "bash" and resolved != "/bin/bash")
+            or (requested == "user_default" and resolved not in _USER_SHELLS)
+        ):
+            raise RequestError("unsupported resolved shell")
     cwd = None if request.cwd is None else _path(request.cwd)
     if type(request.output_mode) is not str or request.output_mode not in (
         "capture",

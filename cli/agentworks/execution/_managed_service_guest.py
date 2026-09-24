@@ -33,6 +33,8 @@ _CGROUP_ROOT = "/sys/fs/cgroup"
 _CGROUP_SELF = "/proc/self/cgroup"
 _CLEANUP_SECONDS = 5.0
 _EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
+_SH_PATHS = frozenset({"/bin/sh", "/usr/bin/sh"})
+_BASH_PATHS = frozenset({"/bin/bash", "/usr/bin/bash"})
 
 
 class ControllerError(ValueError):
@@ -63,10 +65,18 @@ class _Cgroup:
         if not os.path.isdir(parent) or not os.access(parent, os.W_OK | os.X_OK):
             raise ControllerError("service cgroup is not delegated")
         self.path = parent + "/agw-workload-" + run_id
-        os.mkdir(self.path)
-        for name in ("cgroup.procs", "cgroup.events", "cgroup.kill"):
-            if not os.path.isfile(self.path + "/" + name):
-                raise ControllerError("incomplete workload cgroup")
+        created = False
+        try:
+            os.mkdir(self.path)
+            created = True
+            for name in ("cgroup.procs", "cgroup.events", "cgroup.kill"):
+                if not os.path.isfile(self.path + "/" + name):
+                    raise ControllerError("incomplete workload cgroup")
+        except BaseException:
+            if created:
+                with suppress(OSError):
+                    os.rmdir(self.path)
+            raise
 
     def place(self, pid: int) -> None:
         with open(self.path + "/cgroup.procs", "wb", buffering=0) as stream:
@@ -153,7 +163,9 @@ def _child(
         if request.kind == "command":
             executable = request.argv[0]
             argv = list(request.argv)
+            search_path = True
         else:
+            search_path = False
             source_fd = os.memfd_create("agw-managed-source", 0)
             source = memoryview(request.source)
             while source:
@@ -161,21 +173,26 @@ def _child(
             os.lseek(source_fd, 0, os.SEEK_SET)
             executable = cast("str", shell["resolved_executable"])
             source_path = f"/proc/self/fd/{source_fd}"
-            requested = shell["requested"]
+            resolved = cast("str", shell["resolved_executable"])
             login = shell["login"]
-            if requested == "bash":
+            if resolved in _BASH_PATHS:
                 argv = (
                     [executable, "--login", source_path]
                     if login
                     else [executable, "--noprofile", "--norc", source_path]
                 )
-            else:
+            elif resolved in _SH_PATHS:
                 name = os.path.basename(executable)
                 argv = ["-" + name if login else executable, source_path]
+            else:
+                raise ControllerError("unsupported resolved shell")
         environment = dict(request.environment)
         os.write(ready, b"1")
         _gate(released)
-        os.execve(executable, argv, environment)
+        if search_path:
+            os.execvpe(executable, argv, environment)
+        else:
+            os.execve(executable, argv, environment)
     except BaseException:
         os._exit(126)
 
