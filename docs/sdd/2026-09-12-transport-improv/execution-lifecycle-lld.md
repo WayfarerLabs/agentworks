@@ -636,10 +636,11 @@ before registration. The controller is not the new `wsl.exe` child. It validates
 finite deadline and payload fields before native observation, then registers one obligation, marks
 possible effect, dispatches once and immediately CAS-publishes READY identity, even when startup
 then raises. The hold serializes start and release so a pre-dispatch snapshot cannot resolve an
-in-progress startup. It accepts only bare `wsl` or `wsl.exe` case-insensitively, resolved by the
-native owner through the trusted Windows system directory, rather than persisting an executable
-path. Registration, mark and publication uncertainty retain the caller-owned hold without replay.
-Ordinary release may resolve an ambiguous post-READY publication after local settlement and
+in-progress startup. A caller's finite deadline also bounds entry to either transition; a timeout
+leaves the obligation unresolved. It accepts only bare `wsl` or `wsl.exe` case-insensitively,
+resolved by the native owner through the trusted Windows system directory, rather than persisting an
+executable path. Registration, mark and publication uncertainty retain the caller-owned hold without
+replay. Ordinary release may resolve an ambiguous post-READY publication after local settlement and
 independent exact absence; it never resolves on `EXITING`, client exit, Job settlement or missing
 guest identity alone. Recovery discovery and controller-absence proof are separate unfinished
 obligations.
@@ -752,20 +753,20 @@ external exception injection into the raw owner thread is not a supported cancel
 The portable interface does not make those native facts true merely by naming the obligation.
 
 `start` dispatches one literal, no-shell Python helper and accepts only its nonce-bound `READY`
-record with the guest PID and Linux process start time. The caller retains the lifecycle object if
-dispatch, readiness, handoff or local cleanup is interrupted, so cleanup can be retried without
-replay. The operation deadline bounds dispatch and receipt observation. Local settlement instead
-gets one fresh 0.5-second allowance per explicit attempt and returns immutable facts for client
-exit, client-handle closure, Job assignment and Job-handle closure. Settlement is complete only when
-the client is known never-created or exited and both handle sets are known never-created or closed.
-Missing observations remain unknown and cannot reuse a pre-dispatch settled snapshot.
+record with the guest boot UUID, PID and Linux `/proc` start time. The caller retains the lifecycle
+object if dispatch, readiness, handoff or local cleanup is interrupted, so cleanup can be retried
+without replay. The operation deadline bounds dispatch and receipt observation. Local settlement
+instead gets one fresh 0.5-second allowance per explicit attempt and returns immutable facts for
+client exit, client-handle closure, Job assignment and Job-handle closure. Settlement is complete
+only when the client is known never-created or exited and both handle sets are known never-created
+or closed. Missing observations remain unknown and cannot reuse a pre-dispatch settled snapshot.
 
 `release` first requests cooperative EOF and observes the helper and client under the caller's
 deadline, then invokes local settlement. A later call may retry unresolved local cleanup or repeat
 the independent exact-identity guest observation after local resources have settled. Neither an
 `EXITING` helper record, client exit, closed client handles, successful Job assignment nor closed
-Job handle proves the guest anchor is absent. Only the exact guest PID/start-time observer may make
-that claim.
+Job handle proves the guest anchor is absent. Only the exact guest boot UUID/PID/start-time observer
+may make that claim.
 
 The portable implementation and tests establish this orchestration shape and execute the helper
 protocol on local Linux procfs. Hosted synthetic Windows tests separately exercise creation-time Job

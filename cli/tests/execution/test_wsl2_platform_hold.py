@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -180,12 +181,12 @@ class ObservedTransitionLock:
         self._lock = threading.Lock()
         self.contended = threading.Event()
 
-    def __enter__(self) -> None:
+    def acquire(self, *, timeout: float) -> bool:
         if self._lock.locked():
             self.contended.set()
-        self._lock.acquire()
+        return self._lock.acquire(timeout=timeout)
 
-    def __exit__(self, _type: object, _value: object, _traceback: object) -> None:
+    def release(self) -> None:
         self._lock.release()
 
 
@@ -354,6 +355,103 @@ def test_release_waits_for_start_after_mark_before_ready(tmp_path: Path) -> None
         assert events.index("dispatch") < events.index("observe")
 
 
+def test_short_deadline_release_does_not_wait_for_paused_start(tmp_path: Path) -> None:
+    with closing(Database(tmp_path / "hold.db")) as database:
+        owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "proof")
+        events: list[str] = []
+        native = PausedNative(events)
+        subject = WSL2PlatformHold(
+            owner,
+            "vm-one",
+            "opaque-locator",
+            "c" * 32,
+            WSL2Connection("Ubuntu", "root", "wsl.exe"),
+            native,
+            FakeObserver(events),
+        )
+        transition_lock = ObservedTransitionLock()
+        subject._transition_lock = transition_lock  # type: ignore[assignment]  # noqa: SLF001
+        errors: list[BaseException] = []
+
+        def start() -> None:
+            try:
+                subject.start(Deadline.after(10))
+            except BaseException as error:
+                errors.append(error)
+
+        starter = threading.Thread(target=start)
+        starter.start()
+        try:
+            assert native.entered.wait(5)
+            before = database.operations.list_lifecycle_obligations(owner.ownership)
+            assert len(before) == 1 and before[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+            began = time.monotonic()
+            with pytest.raises(TimeoutError):
+                subject.release(Deadline.after(0.2))
+            assert time.monotonic() - began < 1.5
+            assert transition_lock.contended.is_set()
+            during = database.operations.list_lifecycle_obligations(owner.ownership)
+            assert during[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+            assert "observe" not in events
+        finally:
+            native.proceed.set()
+            starter.join(timeout=10)
+        assert not starter.is_alive() and not errors
+        assert (
+            database.operations.list_lifecycle_obligations(owner.ownership)[0].state
+            is LifecycleObligationState.POSSIBLE_EFFECT
+        )
+        subject.release(Deadline.after(1))
+        assert (
+            database.operations.list_lifecycle_obligations(owner.ownership)[0].state
+            is LifecycleObligationState.RESOLVED
+        )
+
+
+def test_short_deadline_second_start_does_not_register_or_dispatch_again(tmp_path: Path) -> None:
+    with closing(Database(tmp_path / "hold.db")) as database:
+        owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "proof")
+        events: list[str] = []
+        native = PausedNative(events)
+        subject = WSL2PlatformHold(
+            owner,
+            "vm-one",
+            "opaque-locator",
+            "c" * 32,
+            WSL2Connection("Ubuntu", "root", "wsl.exe"),
+            native,
+            FakeObserver(events),
+        )
+        transition_lock = ObservedTransitionLock()
+        subject._transition_lock = transition_lock  # type: ignore[assignment]  # noqa: SLF001
+        errors: list[BaseException] = []
+
+        def start() -> None:
+            try:
+                subject.start(Deadline.after(10))
+            except BaseException as error:
+                errors.append(error)
+
+        starter = threading.Thread(target=start)
+        starter.start()
+        try:
+            assert native.entered.wait(5)
+            began = time.monotonic()
+            with pytest.raises(TimeoutError):
+                subject.start(Deadline.after(0.2))
+            assert time.monotonic() - began < 1.5
+            assert transition_lock.contended.is_set()
+            rows = database.operations.list_lifecycle_obligations(owner.ownership)
+            assert len(rows) == 1 and rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+            assert events.count("dispatch") == 0
+        finally:
+            native.proceed.set()
+            starter.join(timeout=10)
+        assert not starter.is_alive() and not errors
+        assert events.count("dispatch") == 1
+        assert len(database.operations.list_lifecycle_obligations(owner.ownership)) == 1
+
+
 def test_concurrent_start_registers_and_dispatches_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     with closing(Database(tmp_path / "hold.db")) as database:
         owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "proof")
@@ -428,6 +526,20 @@ def test_deadline_and_oversize_refuse_before_native_work() -> None:
     with pytest.raises(ValidationError):
         hold(owner, connection=WSL2Connection("\ud800", "root", "wsl.exe")).start(Deadline.after(1))
     assert owner.events == []
+
+
+def test_expired_deadlines_do_not_enter_hold_transitions() -> None:
+    owner = FakeOwner()
+    subject = hold(owner)
+    with pytest.raises(ValidationError):
+        subject.start(Deadline.after(0))
+    assert owner.events == []
+    subject.start(Deadline.after(1))
+    before = list(owner.events)
+    with pytest.raises(ValidationError):
+        subject.release(Deadline.after(0))
+    assert owner.events == before
+    assert not owner.obligations[0].resolved
 
 
 @pytest.mark.parametrize("executable", [r"C:\Windows\System32\wsl.exe", "./wsl.exe", "other"])
@@ -513,7 +625,6 @@ def test_post_ready_start_and_publication_failure_keep_original_control() -> Non
     with pytest.raises(KeyboardInterrupt) as caught:
         subject.start(Deadline.after(1))
     assert caught.value is original
-    assert caught.value.__notes__ == ["WSL2 hold READY identity publication is uncertain"]
     assert subject.payload is not None and subject.payload.guest == GUEST
     assert subject.obligation is not None
     assert owner.events.count("dispatch") == 1

@@ -6,7 +6,7 @@ import hashlib
 import json
 import secrets
 from dataclasses import dataclass, replace
-from threading import Lock
+from threading import TIMEOUT_MAX, Lock
 from typing import TYPE_CHECKING, Any
 
 from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES, OperationResourceKind
@@ -201,8 +201,30 @@ class WSL2PlatformHold:
 
     def start(self, deadline: Deadline) -> WSL2AnchorEvidence:
         """Register, commit possible effect, dispatch once, and publish READY."""
-        with self._transition_lock:
+        self._acquire_transition(deadline, "start")
+        try:
             return self._start_locked(deadline)
+        finally:
+            self._transition_lock.release()
+
+    def _acquire_transition(self, deadline: Deadline, action: str) -> None:
+        """Bound one whole hold transition by its caller's finite deadline."""
+        if type(deadline) is not Deadline or deadline.expires_at is None:
+            raise ValidationError(f"WSL2 hold {action} requires a finite deadline")
+        first_attempt = True
+        while True:
+            remaining = deadline.remaining()
+            assert remaining is not None
+            if remaining <= 0:
+                if first_attempt:
+                    raise ValidationError(f"WSL2 hold {action} deadline has expired")
+                raise TimeoutError(f"WSL2 hold {action} deadline expired waiting for transition")
+            if self._transition_lock.acquire(timeout=min(remaining, TIMEOUT_MAX)):
+                if deadline.expired:
+                    self._transition_lock.release()
+                    raise TimeoutError(f"WSL2 hold {action} deadline expired waiting for transition")
+                return
+            first_attempt = False
 
     def _start_locked(self, deadline: Deadline) -> WSL2AnchorEvidence:
         if self._attempted:
@@ -275,14 +297,19 @@ class WSL2PlatformHold:
 
     def release(self, deadline: Deadline) -> WSL2AnchorEvidence:
         """Resolve only no-client creation or settled, exact guest absence."""
-        with self._transition_lock:
+        self._acquire_transition(deadline, "release")
+        try:
             return self._release_locked(deadline)
+        finally:
+            self._transition_lock.release()
 
     def _release_locked(self, deadline: Deadline) -> WSL2AnchorEvidence:
         if not self._attempted:
             raise ValidationError("WSL2 platform hold was not started")
         if type(deadline) is not Deadline or deadline.expires_at is None:
             raise ValidationError("WSL2 hold release requires a finite deadline")
+        if deadline.expired:
+            raise ValidationError("WSL2 hold release deadline has expired")
         evidence = self._anchor.release(deadline)
         never_created = evidence.local.settled and evidence.local.host_client_status is HostClientStatus.NOT_CREATED
         guest_absent = (
