@@ -200,7 +200,7 @@ def test_prelaunch_reap_uses_bounded_nonblocking_wait(monkeypatch: pytest.Monkey
         options.append(option)
         return 0, 0
 
-    monkeypatch.setattr(guest.os, "waitpid", unreaped)
+    monkeypatch.setattr(os, "waitpid", unreaped)
     monkeypatch.setattr(guest, "_PRELAUNCH_REAP_SECONDS", 0.0)
     guest._reap_prelaunch(12345)
     assert options == [os.WNOHANG]
@@ -271,7 +271,7 @@ def test_wait_status_before_exec_pipe_eof_still_publishes_normal_exit(
     exec_r, exec_w = os.pipe()
     os.close(input_r)
     os.close(exec_w)
-    monkeypatch.setattr(guest.os, "waitpid", lambda pid, option: (pid, 7 << 8))
+    monkeypatch.setattr(os, "waitpid", lambda pid, option: (pid, 7 << 8))
     request = request_wire.ManagedJobRequest(_launch(), "command", ("/bin/true",), None, "discard", None, (), b"", b"")
     try:
         guest._observe(RUN, "a" * 64, request, store, boundary, 12345, input_w, exec_r, [])
