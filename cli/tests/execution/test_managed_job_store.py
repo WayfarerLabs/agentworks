@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from agentworks.execution import _managed_job_store as job_store
 from agentworks.execution import _managed_job_wire as wire
 from agentworks.execution._managed_job_store import FactName, ManagedJobStore, StoreError, Stream
 
@@ -281,7 +282,7 @@ def test_closed_capture_requires_end_and_binding(store: ManagedJobStore) -> None
     assert prefix.length == 3
 
 
-@pytest.mark.parametrize("mutation", ["none", "length", "digest", "oversize", "mode", "missing", "symlink", "hardlink"])
+@pytest.mark.parametrize("mutation", ["none", "length", "digest", "mode", "missing", "symlink", "hardlink"])
 def test_closed_capture_checks_exact_spool(store: ManagedJobStore, tmp_path: Path, mutation: str) -> None:
     launch = _launch()
     store.publish_fact(FactName.LAUNCH, launch)
@@ -289,17 +290,13 @@ def test_closed_capture_checks_exact_spool(store: ManagedJobStore, tmp_path: Pat
     end = _end(
         launch,
         data=b"abc",
-        length=(
-            wire.MAX_CAPTURE_PREFIX_BYTES_V1 + 1 if mutation == "oversize" else 4 if mutation == "length" else None
-        ),
+        length=4 if mutation == "length" else None,
         digest="a" * 64 if mutation == "digest" else None,
     )
     store.publish_fact(FactName.STDOUT_END, end)
     path = _run_path(store, tmp_path) / "stdout"
     if mutation == "mode":
         os.chmod(path, 0o644)
-    elif mutation == "oversize":
-        os.truncate(path, wire.MAX_CAPTURE_PREFIX_BYTES_V1 + 1)
     elif mutation == "missing":
         path.unlink()
     elif mutation == "symlink":
@@ -312,6 +309,30 @@ def test_closed_capture_checks_exact_spool(store: ManagedJobStore, tmp_path: Pat
     else:
         with pytest.raises(StoreError):
             store.read_capture(Stream.STDOUT, launch)
+
+
+def test_oversize_capture_refuses_before_reading(
+    store: ManagedJobStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    launch = _launch()
+    store.publish_fact(FactName.LAUNCH, launch)
+    store.capture_prefix(Stream.STDOUT, 3, (b"abc",))
+    store.publish_fact(
+        FactName.STDOUT_END,
+        _end(launch, data=b"abc", length=wire.MAX_CAPTURE_PREFIX_BYTES_V1 + 1),
+    )
+    os.truncate(_run_path(store, tmp_path) / "stdout", wire.MAX_CAPTURE_PREFIX_BYTES_V1 + 1)
+
+    original_read_all = job_store._read_all
+
+    def refuse_spool_read(fd: int, bound: int) -> bytes:
+        if bound > wire.MAX_MANAGED_JOB_FACT_BYTES:
+            raise AssertionError("oversize capture must refuse before reading the spool")
+        return original_read_all(fd, bound)
+
+    monkeypatch.setattr(job_store, "_read_all", refuse_spool_read)
+    with pytest.raises(StoreError):
+        store.read_capture(Stream.STDOUT, launch)
 
 
 @pytest.mark.parametrize("disposition", ["discarded", "sensitivity-suppressed"])

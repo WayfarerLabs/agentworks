@@ -206,13 +206,15 @@ arbitrary service properties as authority. The resolved executable in shell iden
 bounded path inherited from `ManagedRunSpec`: normalized absolute POSIX syntax, ASCII code points
 0x20 through 0x7e and at most 255 UTF-8 bytes.
 
-The future target-side store uses a protected boot-local directory for each run. Its launch, wait,
+The private target-side store uses a protected boot-local directory for each run. Its launch, wait,
 stdout-end, stderr-end and boundary-empty facts are each created once and immutable. Bounded stdout
 and stderr capture spools are written by the target-side owner, then closed before their
 corresponding end facts are published. Discard and sensitivity suppression publish no spool. Fact
 creation uses atomic create-once publication; an existing fact is read and compared rather than
-overwritten. No shared mutable state file or file-level lock is part of this protocol. The store,
-its permissions, producer ordering and crash recovery remain to be implemented and proved.
+overwritten. No shared mutable state file or file-level lock is part of this protocol. The portable
+store, its permissions, closed-output validation and exact-source Python 3.11 execution are now
+implemented and proved in isolation. Target-controller producer ordering, crash recovery and live
+destination behavior remain open.
 
 The stream fact is self-describing. The first consuming service must persist and compare the
 requested output policy before treating its disposition as fulfillment; this checkpoint adds no

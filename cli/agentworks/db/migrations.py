@@ -995,10 +995,14 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
         ALTER TABLE execution_runs ADD COLUMN output_capture_prefix_bytes INTEGER
             CHECK (
                 (output_mode IS NULL AND output_capture_prefix_bytes IS NULL)
-                OR (output_mode = 'capture' AND typeof(output_capture_prefix_bytes) = 'integer'
-                    AND output_capture_prefix_bytes BETWEEN 0 AND 16777216)
-                OR (output_mode IN ('discard', 'sensitivity-suppressed')
-                    AND output_capture_prefix_bytes IS NULL)
+                OR (output_mode IS NOT NULL
+                    AND (
+                        (output_mode = 'capture' AND typeof(output_capture_prefix_bytes) = 'integer'
+                            AND output_capture_prefix_bytes BETWEEN 0 AND 16777216)
+                        OR (output_mode IN ('discard', 'sensitivity-suppressed')
+                            AND output_capture_prefix_bytes IS NULL)
+                    )
+                )
             );
     """,
 }

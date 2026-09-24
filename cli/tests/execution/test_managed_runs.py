@@ -245,6 +245,7 @@ def test_stale_output_policy_refuses_transition(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("mode", "limit"),
     [
+        (None, 1),
         ("capture", None),
         ("capture", -1),
         ("capture", MAX_CAPTURE_PREFIX_BYTES_V1 + 1),
@@ -254,7 +255,7 @@ def test_stale_output_policy_refuses_transition(tmp_path: Path) -> None:
         ("unknown", None),
     ],
 )
-def test_database_rejects_invalid_output_policy(tmp_path: Path, mode: str, limit: object) -> None:
+def test_database_rejects_invalid_output_policy(tmp_path: Path, mode: object, limit: object) -> None:
     database = Database(tmp_path / "state.db")
     _reserve(database)
     with pytest.raises(sqlite3.IntegrityError):
