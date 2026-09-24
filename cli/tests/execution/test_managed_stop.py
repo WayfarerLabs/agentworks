@@ -338,6 +338,14 @@ def test_exchange_accepted_terminated_budget_and_validator() -> None:
     assert 1 <= pending.budget <= 1000
 
 
+def test_huge_finite_deadline_still_dispatches_with_capped_budget() -> None:
+    launch = _launch()
+    carrier = Carrier(lambda request: _records(request.nonce, ManagedStopResult((FactName.LAUNCH,)), (launch,)))
+    candidate = _exchange(carrier, deadline=Deadline.after(1e308))
+    assert candidate.observation is not None and candidate.observation.state is ManagedStopState.ACCEPTED
+    assert carrier.calls == 1 and carrier.budget == MAX_OBSERVATION_MS
+
+
 def test_exchange_preserves_unknown_on_complete_helper_failure() -> None:
     failed = Carrier(
         lambda request: b"".join(
