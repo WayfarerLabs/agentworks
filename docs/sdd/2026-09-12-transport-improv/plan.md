@@ -1693,6 +1693,11 @@ directories. There is no single maximum shared by all harness integrations. Curr
 publication iterates files and checkpoints each confirmed change; mapping those calls one-for-one to
 retained lifecycle rows would exhaust the 128-row bound for a supported large package.
 
+The [serial package candidate](file-operations-lld.md#serial-package-capacity-candidate) uses one
+row for the current child across preflight and mutation. It is not an implemented batch API or
+recovery proof: `FileOperation` still closes a separate row per call and lacks a post-child
+application-checkpoint gate, so the capacity checkbox remains open.
+
 - [ ] Resolve the public filesystem-root edge before claiming complete path coverage: the current
       nonempty parent/leaf helper contract cannot address `/` itself. The operator has been asked
       whether to exclude root targets initially or support read-only root stat/inventory. Keep

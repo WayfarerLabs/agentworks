@@ -823,6 +823,25 @@ must be published before in-memory custody is released, and leaves the row in `p
 payload never contains file bytes, JSON values, source or sink objects, raw helper responses,
 commands, credentials or unrestricted paths.
 
+### Serial package capacity candidate
+
+Directory and artifact-package workflows need a separate logical batch call rather than a loop that
+registers one row for every member under the same operation. This includes preflight observation and
+reads, publication, retirement and cleanup: per-member preflight rows alone can exhaust the ledger
+before a write begins. The current 128-row bound counts resolved rows too, while supported captures
+can contain 4,096 files. The candidate batch design retains one serial borrow and one adapter-owned
+row, with only the current child's bounded recovery identity in the payload. Admit a distinct child
+before its effect; do not advance until its remote effect and cleanup are settled and the
+application's per-file ownership checkpoint has completed durably. Advance by expected-revision
+payload replacement, reconciling a lost reply against that same child and revision. On takeover,
+recover only the retained child and stop; do not infer the remaining package plan or replay content
+from the row. Keep completed ownership in the application checkpoint, not a growing row payload.
+This requires an actual post-child checkpoint gate in core file custody and a package-aware recovery
+adapter; neither exists yet. A second peer that duplicates `FileOperation` admission and capture
+would not satisfy the intended shared boundary merely by reusing the generic borrow. Preserve the
+current bounds and exact retry semantics until this is proved at the largest supported package size
+and interruption boundaries.
+
 ### DOWNLOAD recovery dispatch
 
 The first process-loss recovery vertical is deliberately narrower than ordinary file execution. A
