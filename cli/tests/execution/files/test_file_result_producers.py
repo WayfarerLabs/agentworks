@@ -55,7 +55,11 @@ class _ReturnedReportCarrier:
     def features(self):
         return self._carrier.features
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self._carrier.validate(invocation, io=io)
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         report = self._carrier.execute(invocation, io=io, deadline=deadline)
         if self.calls == self._expiry_call:

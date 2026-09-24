@@ -85,7 +85,11 @@ class NthInterruptCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self._inner.validate(invocation, io=io)
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         if self.calls == self._call:
             raise self._control
@@ -100,7 +104,11 @@ class MissingCompletionCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self._inner.validate(invocation, io=io)
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         return replace(self._inner.execute(invocation, io=io, deadline=deadline), completion=None)
 
 
@@ -114,7 +122,11 @@ class OutputFailureCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self._inner.validate(invocation, io=io)
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         report = self._inner.execute(invocation, io=io, deadline=deadline)
         return replace(
@@ -135,7 +147,11 @@ class ReentrantCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self._inner.validate(invocation, io=io)
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         if self.calls == 0:
             with pytest.raises(StateError):
                 self._callback(deadline)
@@ -155,7 +171,11 @@ class ObligationInspectingCarrier:
     def features(self) -> ChannelFeatures:
         return self._inner.features
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self._inner.validate(invocation, io=io)
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         rows = self._database.operations.list_lifecycle_obligations(self._owner.ownership)
         assert len(rows) == 1
         assert rows[0].obligation_kind == "file-call"
@@ -174,7 +194,11 @@ class ClosingLostCarrier:
     def features(self) -> ChannelFeatures:
         return self._inner.features
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self._inner.validate(invocation, io=io)
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         if self.calls == self._lost_call:
             with pytest.raises(StateError):

@@ -83,6 +83,9 @@ class AfterCallCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self._carrier.validate(invocation, io=io)
+
     def execute(
         self,
         invocation: PreparedInvocation,
@@ -90,6 +93,7 @@ class AfterCallCarrier:
         io: CarrierIO,
         deadline: Deadline,
     ) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         report = self._carrier.execute(invocation, io=io, deadline=deadline)
         self.after_call(self.calls, deadline)
@@ -105,6 +109,9 @@ class InterruptingCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        del invocation, io
+
     def execute(
         self,
         invocation: PreparedInvocation,
@@ -112,6 +119,7 @@ class InterruptingCarrier:
         io: CarrierIO,
         deadline: Deadline,
     ) -> CarrierReport:
+        self.validate(invocation, io=io)
         del invocation, io
         self.calls += 1
         if self.expire_deadline:
@@ -128,6 +136,9 @@ class ExpiredMissingCompletionCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self._carrier.validate(invocation, io=io)
+
     def execute(
         self,
         invocation: PreparedInvocation,
@@ -135,6 +146,7 @@ class ExpiredMissingCompletionCarrier:
         io: CarrierIO,
         deadline: Deadline,
     ) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         report = self._carrier.execute(invocation, io=io, deadline=deadline)
         object.__setattr__(deadline, "expires_at", 0.0)
@@ -151,6 +163,9 @@ class ConflictThenDeadlineCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self._carrier.validate(invocation, io=io)
+
     def execute(
         self,
         invocation: PreparedInvocation,
@@ -158,6 +173,7 @@ class ConflictThenDeadlineCarrier:
         io: CarrierIO,
         deadline: Deadline,
     ) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         report = self._carrier.execute(invocation, io=io, deadline=deadline)
         if self.calls == 1:

@@ -213,7 +213,11 @@ class _ClosedFailureCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        del invocation, io
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         del deadline
         if self.admit_runtime:
             assert isinstance(io.output, SinkOutput)

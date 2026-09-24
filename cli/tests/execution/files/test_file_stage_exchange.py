@@ -133,7 +133,11 @@ class TranscriptCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        del invocation, io
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         del deadline
         self.calls += 1
         self.invocation = invocation
@@ -789,7 +793,11 @@ def test_control_interruption_propagates_with_operation_specific_uncertainty(
         def features(self) -> ChannelFeatures:
             return ChannelFeatures()
 
+        def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+            del invocation, io
+
         def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+            self.validate(invocation, io=io)
             del invocation, io, deadline
             raise KeyboardInterrupt
 

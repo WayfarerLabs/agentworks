@@ -45,7 +45,11 @@ class InterruptingCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        del invocation, io
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         del invocation, io, deadline
         self.calls += 1
         raise self.control
@@ -62,7 +66,11 @@ class ReentrantCarrier:
     def features(self) -> ChannelFeatures:
         return self.inner.features
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self.inner.validate(invocation, io=io)
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         if self.calls == 0:
             with pytest.raises(StateError):
                 self.callback(deadline)

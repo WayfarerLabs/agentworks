@@ -186,6 +186,7 @@ class _DiscardSink:
 
 class _LostStdoutCarrier(LocalCarrier):
     def execute(self, invocation, *, io, deadline):
+        self.validate(invocation, io=io)
         assert isinstance(io.output, SinkOutput)
         hidden = CarrierIO(
             input=io.input,

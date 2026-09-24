@@ -162,7 +162,11 @@ class NonzeroCallCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation, *, io) -> None:
+        self._carrier.validate(invocation, io=io)
+
     def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         report = self._carrier.execute(invocation, io=io, deadline=deadline)
         if self.calls == self._nonzero_call:
@@ -180,7 +184,11 @@ class MissingCompletionCallCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation, *, io) -> None:
+        self._carrier.validate(invocation, io=io)
+
     def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         report = self._carrier.execute(invocation, io=io, deadline=deadline)
         if self.calls == self._incomplete_call:
@@ -198,7 +206,11 @@ class ExpiringCallCarrier:
     def features(self) -> ChannelFeatures:
         return self._carrier.features
 
+    def validate(self, invocation, *, io) -> None:
+        self._carrier.validate(invocation, io=io)
+
     def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         report = self._carrier.execute(invocation, io=io, deadline=deadline)
         if self.calls == self._expiry_call:
@@ -216,7 +228,11 @@ class CarrierFailuresOnCalls:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation, *, io) -> None:
+        self._carrier.validate(invocation, io=io)
+
     def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         report = self._carrier.execute(invocation, io=io, deadline=deadline)
         failure = self._failures.get(self.calls)
@@ -233,7 +249,11 @@ class RaisingCallCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation, *, io) -> None:
+        self._carrier.validate(invocation, io=io)
+
     def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         if self.calls == self._raising_call:
             raise RuntimeError("carrier-secret-canary")
@@ -247,7 +267,11 @@ class DeadlineInterruptingCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation, *, io) -> None:
+        del invocation, io
+
     def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         del invocation, io
         self.calls += 1
         object.__setattr__(deadline, "expires_at", 0.0)
@@ -265,7 +289,11 @@ class RuntimeRefusalOnCallCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation, *, io) -> None:
+        self._carrier.validate(invocation, io=io)
+
     def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         if self.calls != self._refusal_call:
             return self._carrier.execute(invocation, io=io, deadline=deadline)
@@ -293,7 +321,11 @@ class LostThenRuntimeRefusalCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation, *, io) -> None:
+        self._carrier.validate(invocation, io=io)
+
     def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         if self.calls == 1:
             return self._carrier.execute(invocation, io=io, deadline=deadline)
@@ -324,7 +356,11 @@ class ClosedFailureOnCallCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation, *, io) -> None:
+        self._carrier.validate(invocation, io=io)
+
     def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         if self.calls != self._failure_call:
             return self._carrier.execute(invocation, io=io, deadline=deadline)
@@ -349,7 +385,11 @@ class ClaimInspectingCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation, *, io) -> None:
+        self._carrier.validate(invocation, io=io)
+
     def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         claim = self._database.operations.inspect(self._scope)
         assert claim is not None and claim.state is OperationClaimState.POSSIBLE_DISPATCH
         self.calls += 1
@@ -368,7 +408,11 @@ class RestorePublicationBundleCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation, *, io) -> None:
+        self._carrier.validate(invocation, io=io)
+
     def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         report = self._carrier.execute(invocation, io=io, deadline=deadline)
         if self.calls == self._restore_after_call:

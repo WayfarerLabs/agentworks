@@ -337,7 +337,11 @@ class TranscriptCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        del invocation, io
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         del deadline
         self.calls += 1
         assert isinstance(io.input, FiniteInput)
@@ -599,7 +603,11 @@ def test_control_interruption_propagates_with_safe_remove_uncertainty(
         def features(self) -> ChannelFeatures:
             return ChannelFeatures()
 
+        def validate(self, invocation: object, *, io: CarrierIO) -> None:
+            del invocation, io
+
         def execute(self, invocation: object, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+            self.validate(invocation, io=io)
             del invocation, io, deadline
             raise control
 

@@ -101,6 +101,7 @@ class _JournalCarrier(LocalCarrier):
         self._operation = operation
 
     def execute(self, invocation: PreparedInvocation, *, io, deadline):
+        self.validate(invocation, io=io)
         marker = invocation.argv.index("agentworks-runtime-prerequisite")
         _append_journal(
             self._journal_path,
@@ -135,6 +136,8 @@ class _CrashAfterHelperCarrier(_JournalCarrier):
 
 class _CrashAfterActualCarrier(_RecordedExitCarrier):
     def execute(self, invocation: PreparedInvocation, *, io, deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
+
         def crash_after_actual() -> None:
             deadline_at = time.monotonic() + 20
             while time.monotonic() < deadline_at:
@@ -987,6 +990,7 @@ def test_recovery_dispatch_refuses_competing_payload_before_carrier_entry(
         original_execute = carrier.execute
 
         def execute(invocation, *, io, deadline):
+            carrier.validate(invocation, io=io)
             seen_rows.append(database.operations.list_lifecycle_obligations(recovered.ownership)[0])
             return original_execute(invocation, io=io, deadline=deadline)
 
