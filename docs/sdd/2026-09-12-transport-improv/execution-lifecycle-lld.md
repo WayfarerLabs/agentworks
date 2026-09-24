@@ -282,9 +282,9 @@ signaled death leave `wait` unknown because close-on-exec EOF cannot distinguish
 immediately before exec from one delivered to the application. Draining continues concurrently so a
 descendant that inherited a stream cannot delay the cleanup decision. Each stream-end fact publishes
 only after that pipe reaches EOF and its spool is closed. Independently, cleanup uses `cgroup.kill`
-and waits for `cgroup.events` to report `populated 0` before publishing `boundary-empty`. A task stuck
-in uninterruptible sleep can prevent that proof indefinitely; the controller stops waiting at its
-bound and leaves boundary state unknown rather than fabricating emptiness. Cleanup or controller
+and waits for `cgroup.events` to report `populated 0` before publishing `boundary-empty`. A task
+stuck in uninterruptible sleep can prevent that proof indefinitely; the controller stops waiting at
+its bound and leaves boundary state unknown rather than fabricating emptiness. Cleanup or controller
 failure may likewise leave a stream-end fact unknown even when other terminal facts are present.
 
 `KillMode=control-group` is a manager-owned fallback if the controller dies, but it cannot publish

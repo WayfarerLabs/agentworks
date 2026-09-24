@@ -343,9 +343,10 @@ each payload's byte length and SHA-256. Environment has a separate canonical enc
 stdin retain their exact bytes. Control is capped at 32 KiB, environment at 64 KiB, and source and
 stdin at 16 MiB each. The store accepts identical bytes on retry and refuses conflicting or unsafe
 leaves. A partial set is not a consumable request; no absent request asset proves launch or absence
-of launch. The request codec validates the complete canonical launch fact and requires an independent
-resource owner, a noninteractive shell, and a supported command or script shape before use. These
-request bytes are never bundle source, systemd arguments, environment, or journal content.
+of launch. The request codec validates the complete canonical launch fact and requires an
+independent resource owner, a non-interactive shell, and a supported command or script shape before
+use. These request bytes are never bundle source, systemd arguments, environment, or journal
+content.
 
 `_managed_service_guest.py` is the fixed Python 3.11 Linux service main for the first independent
 managed slice. It accepts only the derived run ID, reads the complete protected request, and checks
@@ -354,11 +355,12 @@ workload cgroup, then sets and verifies the requested identity, working director
 The service main publishes launch, sends `READY=1` over `NOTIFY_SOCKET`, and only then releases the
 child to execute caller code. It drains finite stdin and both output streams while observing the
 exact main child. Wait, stream-end, and boundary-empty facts each publish only after their separate
-evidence is available. Capture spools keep only the requested prefix and close before stream-end;
-discard and sensitivity suppression create no spool. Cleanup stops after a fixed bound, leaving
-unproved facts absent. `_managed_service_bundle.py` packages exact source without embedding request
-values. This controller does not provide a host service builder, carrier exchange, or live systemd
-validation.
+evidence is available. A close-on-exec status pipe permits wait publication only after proved
+application entry and normal exit; setup failure and signaled death leave wait unknown. Capture
+spools keep only the requested prefix and close before stream-end; discard and sensitivity
+suppression create no spool. Cleanup stops after a fixed bound, leaving unproved facts absent.
+`_managed_service_bundle.py` packages exact source without embedding request values. This controller
+does not provide a host service builder, carrier exchange, or live systemd validation.
 
 ## Input accounting
 
