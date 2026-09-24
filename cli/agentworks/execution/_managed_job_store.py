@@ -60,6 +60,45 @@ class CapturedPrefix:
     disposition: CaptureDisposition
 
 
+class CaptureWriter:
+    """One private, bounded spool. Finish syncs and closes before an end fact."""
+
+    def __init__(self, directory: int, fd: int, limit: int) -> None:
+        self._directory = directory
+        self._fd = fd
+        self._limit = limit
+        self._digest = hashlib.sha256()
+        self._length = 0
+        self._omitted = False
+
+    def write(self, chunk: bytes) -> None:
+        if type(chunk) is not bytes or self._fd < 0:
+            raise StoreError("invalid capture chunk")
+        prefix = chunk[: self._limit - self._length]
+        if prefix:
+            _write_all(self._fd, prefix)
+            self._digest.update(prefix)
+            self._length += len(prefix)
+        self._omitted |= len(prefix) != len(chunk)
+
+    def finish(self) -> CapturedPrefix:
+        if self._fd < 0:
+            raise StoreError("capture already closed")
+        os.fsync(self._fd)
+        self.close()
+        return CapturedPrefix(
+            self._length,
+            self._digest.hexdigest(),
+            CaptureDisposition.TRUNCATED if self._omitted else CaptureDisposition.COMPLETE,
+        )
+
+    def close(self) -> None:
+        if self._fd >= 0:
+            os.close(self._fd)
+            self._fd = -1
+            os.close(self._directory)
+
+
 _RUN_ID = re.compile(r"[0-9a-f]{32}\Z")
 _REQUEST_STAGE = re.compile(r"\.request-stage-[0-9a-f]{32}\Z")
 _DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
@@ -424,6 +463,26 @@ class ManagedJobStore:
             )
         finally:
             os.close(directory)
+
+    def open_capture(self, stream: Stream, limit: int) -> CaptureWriter:
+        """Create a single protected spool for event-driven target capture."""
+        if type(stream) is not Stream or type(limit) is not int or not 0 <= limit <= wire.MAX_CAPTURE_PREFIX_BYTES_V1:
+            raise StoreError("invalid capture request")
+        directory = self._run_dir(create=True)
+        assert directory is not None
+        try:
+            fd = os.open(stream.value, _CREATE_FLAGS, 0o600, dir_fd=directory)
+            try:
+                os.fchmod(fd, 0o600)
+                _safe_stat(fd, 0o600, self._owner_uid, links=(1,))
+            except BaseException:
+                os.close(fd)
+                raise
+            os.fsync(directory)
+            return CaptureWriter(directory, fd, limit)
+        except BaseException:
+            os.close(directory)
+            raise
 
     def read_capture(self, stream: Stream, expected_launch: bytes) -> bytes | None:
         if type(stream) is not Stream or type(expected_launch) is not bytes:

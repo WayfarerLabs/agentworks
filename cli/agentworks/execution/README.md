@@ -347,6 +347,19 @@ of launch. The request codec validates the complete canonical launch fact and re
 resource owner, a noninteractive shell, and a supported command or script shape before use. These
 request bytes are never bundle source, systemd arguments, environment, or journal content.
 
+`_managed_service_guest.py` is the fixed Python 3.11 Linux service main for the first independent
+managed slice. It accepts only the derived run ID, reads the complete protected request, and checks
+root service identity and a delegated unified cgroup. Its child waits for placement in a dedicated
+workload cgroup, then sets and verifies the requested identity, working directory, and descriptors.
+The service main publishes launch, sends `READY=1` over `NOTIFY_SOCKET`, and only then releases the
+child to execute caller code. It drains finite stdin and both output streams while observing the
+exact main child. Wait, stream-end, and boundary-empty facts each publish only after their separate
+evidence is available. Capture spools keep only the requested prefix and close before stream-end;
+discard and sensitivity suppression create no spool. Cleanup stops after a fixed bound, leaving
+unproved facts absent. `_managed_service_bundle.py` packages exact source without embedding request
+values. This controller does not provide a host service builder, carrier exchange, or live systemd
+validation.
+
 ## Input accounting
 
 The 262,144-byte preparation bound applies to the complete encoded envelope, not raw application
