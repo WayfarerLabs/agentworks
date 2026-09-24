@@ -589,6 +589,25 @@ native binding, genuine creation/publication integration, shared cleanup interru
 supported-platform acceptance remain open. This dependency integration is not an SSH public feedback
 round or a ready signal.
 
+## WSL hold-probe composition checkpoint
+
+The
+[complete Tier 2 report](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-5822948740)
+locally composes transport `333b17bc84f03588aebdf9bb0cb8201de80462c8` with SSH
+`922893b4d492c622ff1cfcaa22f656c0708e4d2a` at merge head `29f3979e` and CLI tree `aa5d3de1`. The
+combined non-integration suite passes **13,746 tests with 24 skips**; Ruff check/format and mypy
+across 1,149 sources pass. The transport-only tree also passes its full local pipeline. This is a
+tester-built composition, not a rebase or native SSH acceptance at a new #832 head; the WSL probe is
+byte-identical in both trees.
+
+The official Windows/WSL2 probe result is `UNKNOWN`: its cold-open deadline expires before the
+measured refusal, and its selected Ubuntu/Debian path is a symlink that the UNC share cannot open. A
+separately labeled, one-line path correction let the probe's existing retention cases run and showed
+a single handle retaining an already-running distro for 180 seconds, with release after close or
+holder death and no unrelated-distro impact. Transport owns those probe corrections and the
+still-unproved strict dispatch-drain gate. The report reran no native SSH or Proxmox QGA cells; it
+does not close SSH terminal, platform binding, RunContext or supported-workstation acceptance.
+
 ## Remaining integration and acceptance
 
 Earlier integration `fefc2b9e` uses transport `f3339f3d3cccace129be58711dc7eeb30ec66dc2`, which adds
