@@ -1,14 +1,13 @@
 # Buffered transport proof checks
 
 `wsl_unc_hold_probe.py` is a native Windows experiment for an existing disposable WSL2 distro. It
-requires the distro to be stopped, an exact matching `--target` and `--confirm-target`, and explicit
-idle, hold, poll, open, release, late, race-kill and total-budget seconds plus a race attempt count.
-Set hold seconds to at least three times the configured WSL idle timeout. Supply `--unrelated` only
-for a second installed distro whose running state the probe may observe. The probe opens only
-`/etc/os-release` through both WSL UNC aliases, starts the target with fixed `/bin/true` for
-retention cases, and terminates only the confirmed target. It emits JSON Lines; `PASS` and `FAIL`
-describe the bounded observation named by each case. The final strict dispatch drain conclusion
-stays `UNKNOWN` after negative race trials.
+requires the distro to be stopped, an exact matching `--target` and `--confirm-target`, its actual
+`--idle-seconds`, and a total `--budget-seconds`. Supply `--unrelated` only for a second installed
+distro that is already running. The probe derives a hold duration of three idle timeouts and opens
+only `/etc/os-release` through both WSL UNC aliases. It first measures whether the target stops
+without an open handle, then measures retention and release. It uses fixed `/bin/true` for starts
+and terminates only the confirmed target. JSON Lines report bounded observations and cleanup; the
+final strict dispatch drain conclusion is always `UNKNOWN`.
 
 Run local checks from `cli/`:
 
