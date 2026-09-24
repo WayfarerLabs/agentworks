@@ -856,7 +856,9 @@ def test_interrupted_recovery_attempt_before_return_releases_current_custody(
         database.close()
 
 
-def test_interruption_after_attempt_return_retains_uncertain_custody(tmp_path: Path) -> None:
+def test_interruption_after_attempt_return_retains_uncertain_custody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = tmp_path / "source-root"
     root.mkdir()
     database = Database(tmp_path / "state.db")
@@ -877,6 +879,15 @@ def test_interruption_after_attempt_return_retains_uncertain_custody(tmp_path: P
         )
         attempt_returned = False
         interrupted = False
+        handoffs = 0
+        original_handoff = RecoveryDispatch.handoff_unresolved
+
+        def record_handoff(dispatch: RecoveryDispatch) -> None:
+            nonlocal handoffs
+            original_handoff(dispatch)
+            handoffs += 1
+
+        monkeypatch.setattr(RecoveryDispatch, "handoff_unresolved", record_handoff)
 
         def interrupt_after_begin(frame: FrameType, event: str, arg: object) -> Any:
             del arg
@@ -897,6 +908,7 @@ def test_interruption_after_attempt_return_retains_uncertain_custody(tmp_path: P
             sys.settrace(None)
         assert interrupted
         assert carrier.calls == 0
+        assert handoffs == 1
         with pytest.raises(StateError):
             recovered.rebind_lifecycle_obligation(
                 persisted.obligation_id,
