@@ -101,7 +101,7 @@ application-start claim. Literal commands receive no application shell and execu
 ## Identity and elevation
 
 An execution target binds a workload account and a carrier delivery account. Neither is caller
-selectable. Preparation chooses one of three private identity plans:
+selectable. Each invocation uses one of three private identity plans:
 
 | Delivery and request                | Private plan                                                                                                 |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------ |
@@ -120,7 +120,7 @@ argv; workload source, paths, environment and stdin may not. If `setpriv` availa
 behavior cannot be established on every bootstrap image, the implementation must select and prove a
 different shared launcher before QGA demotion is enabled. It may not leave an ordinary call as root.
 
-One private identity plan binds the transition and expected UID/GID/groups for both execution and
+Each private identity plan binds the transition and expected UID/GID/groups for both execution and
 file helpers. The manifest carries the expectation, not a request to select privileges. A root-sudo
 plan requires a root expectation, and a demotion plan requires a non-root expectation; invalid
 combinations refuse before delivery. The destination verifies identity before accessing workload
@@ -153,26 +153,32 @@ remain independent choices.
 
 ### Owned target identity preparation
 
-Core prepares one requested identity before constructing a passive execution or file view. Its
-inputs are the carrier, delivery account, bound workload account, explicit ordinary/root choice,
-runtime selection, deadline and already-acquired operation owner. These are composition inputs, not
-public request fields or a new permission grant. Canonical admin and agent targets normally use
-separate direct-login routes; native provisioning and recovery prepare the admin target.
+Core prepares a mandatory ordinary identity plan and, when composition explicitly includes
+elevation, an optional elevated plan before constructing a passive execution or file view. Its
+inputs are the carrier, delivery account, bound workload account, elevation-inclusion choice,
+runtime selection, deadline and already-acquired operation owner. These are private composition
+inputs, not public request fields or enforcement of the future permission model. Canonical admin and
+agent targets normally use separate direct-login routes; native provisioning and recovery prepare
+the admin target.
 
-The composer resolves delivery and workload accounts, and the root account when elevation needs it,
-through the fixed account helper under one serial borrow. Identical account names reuse only that
+The composer resolves delivery and workload accounts and must produce the ordinary plan before it
+considers elevation. An unsupported ordinary transition fails without a root lookup. When elevation
+is included and non-root delivery requires sudo, the same preparation resolves root through the
+fixed account helper under the same serial borrow. Identical account names reuse only that
 preparation's observation; there is no persistent account cache. Every exchange uses the same
-deadline and arms the owner immediately before actual carrier dispatch. A plan requires resolved
-account observations, independent normal helper termination, and remaining preparation budget.
-Incomplete observation, abnormal completion or uncertainty never supplies a usable plan. Record the
-observations and deadline facts separately from whether preparation succeeded.
+deadline and arms the owner immediately before actual carrier dispatch. Prepared status requires a
+usable ordinary plan and successful completion of every included elevation lookup. A failed or
+uncertain elevated lookup may retain the already-derived ordinary plan as evidence, but the overall
+preparation is not `PREPARED` and no access view may be constructed from it. Incomplete observation,
+abnormal completion or uncertainty never supplies a usable plan. Record the observations and
+deadline facts separately from whether preparation succeeded.
 
-Ordinary execution selects direct entry when delivery already uses the bound identity, or exact
-demotion when delivery has UID zero and the workload does not. Root execution selects direct entry
-from root delivery or fixed sudo entry from the bound non-root workload identity. Non-root delivery
-through a different workload identity is refused by this initial composer, never silently elevated
-or treated as direct. Account lookup is not proof that sudo or demotion will succeed; the final
-helper still verifies its actual identity before accessing workload data.
+The ordinary plan selects direct entry when delivery already uses the bound identity, or exact
+demotion when delivery has UID zero and the workload does not. An included elevated plan selects
+direct entry from root delivery or fixed sudo entry from the bound non-root workload identity.
+Non-root delivery through a different workload identity is refused by this initial composer, never
+silently elevated or treated as direct. Account lookup is not proof that sudo or demotion will
+succeed; the final helper still verifies its actual identity before accessing workload data.
 
 The existing carrier admission adapter is shared by account preparation and file workflows. It owns
 dispatch and termination evidence only; callers own their protocol facts. A lookup without
@@ -183,7 +189,7 @@ activates a route, retries a lookup, launches a workload or constructs a legacy 
 The sessions/console migration must separately disposition the existing admin-owned multi-console
 pane that enters an agent account with sudo. It is a real cross-user consumer, not a reason to infer
 agent authority for every native admin target. This remains required migration work; the initial
-three-plan composer does not claim to have migrated it.
+three-mode composer does not claim to have migrated it.
 
 ### Sudo bootstrap
 
