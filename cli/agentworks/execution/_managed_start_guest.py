@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, cast
 from ._file_wire import FileRecordKind, FileRecordWriter
 from ._helper_identity import matches_current_identity
 from ._managed_job_store import FactName, ManagedJobStore, RequestAsset, StoreError
-from ._managed_service_source import FIXED_SOURCE
+from ._managed_service_bundle import FIXED_SOURCE
 from ._managed_start_protocol import (
     MAX_REQUEST_BYTES,
     ManagedStartError,

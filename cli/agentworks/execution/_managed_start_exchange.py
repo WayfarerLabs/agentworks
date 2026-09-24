@@ -14,7 +14,6 @@ from ._file_wire import FileRecord, FileRecordKind, FileRecordReader, FileWireEr
 from ._helper_launcher import IdentityPlan
 from ._managed_job_protocol import ManagedJobFactError, encode_managed_job_fact
 from ._managed_job_store import FactName
-from ._managed_observation_protocol import ManagedObservationError, checked_fact
 from ._managed_runs import (
     ManagedLaunchObservation,
     ManagedLaunchState,
@@ -94,7 +93,6 @@ class ManagedStartAttempt:
 
 @dataclass(frozen=True, slots=True, repr=False)
 class _PreparedAttempt:
-    nonce: str
     invocation: PreparedInvocation
     io: CarrierIO
     collector: _Collector
@@ -124,7 +122,6 @@ class _Collector:
         self.failed = False
         self.terminal = False
         self.issue: ManagedStartIssue | None = None
-        self.records = 0
 
     def _invalidate(self, issue: ManagedStartIssue) -> None:
         if self.issue is None:
@@ -137,10 +134,6 @@ class _Collector:
 
     def accept(self, record: FileRecord) -> None:
         if self.issue is not None:
-            return
-        self.records += 1
-        if self.records > 3:
-            self._invalidate(ManagedStartIssue.CONTENT)
             return
         if self.terminal:
             self._invalidate(ManagedStartIssue.POST_TERMINAL)
@@ -161,9 +154,7 @@ class _Collector:
             if self.launch is not None:
                 self._invalidate(ManagedStartIssue.ORDER)
                 return
-            try:
-                checked_fact(FactName.LAUNCH, record.body, self.expected_launch)
-            except ManagedObservationError:
+            if record.body != self.expected_launch:
                 self._invalidate(ManagedStartIssue.CONTENT)
                 return
             self.launch = record.body
@@ -246,12 +237,13 @@ def _prepare_attempt(
         raise ValidationError("Managed start requires a Linux root helper")
     if deadline.expired:
         raise ValidationError("Managed start deadline has expired")
+    if type(request) is not request_wire.ManagedJobRequest:
+        raise ValidationError("Invalid managed start request")
     try:
         expected_launch = encode_managed_job_fact(
             ManagedRunReceipt(reserved.identity, reserved.identity.unit_name, reserved.spec)
         )
-        assets = request_wire.encode_request(request)
-        if assets["request-launch"] != expected_launch:
+        if request.launch != expected_launch:
             raise ValidationError("Managed start request does not match reservation")
         policy = reserved.output_policy
         if request.output_mode != policy.mode.value or request.capture_prefix_bytes != policy.capture_prefix_bytes:
@@ -274,7 +266,7 @@ def _prepare_attempt(
         sensitive=True,
     )
     carrier.validate(invocation, io=io)
-    return _PreparedAttempt(nonce, invocation, io, collector, reader, runtime, stderr, expected_launch)
+    return _PreparedAttempt(invocation, io, collector, reader, runtime, stderr, expected_launch)
 
 
 def _exchange(carrier: Carrier, prepared: _PreparedAttempt, deadline: Deadline) -> ManagedStartCandidate:

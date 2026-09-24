@@ -178,7 +178,6 @@ class ProxmoxCarrier:
         return body
 
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-        self.validate(invocation, io=io)
         body = self._request_body(invocation, io)
         if deadline.expired:
             return _incomplete(Dispatch.NOT_SENT, io, Failure.DEADLINE)

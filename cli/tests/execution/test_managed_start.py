@@ -331,7 +331,18 @@ def test_start_keeps_ack_separate_from_exact_receipt(
 
 @pytest.mark.parametrize(
     "fault",
-    ["not-sent", "unknown", "lost", "nonzero", "stderr", "incomplete", "extra", "wrong-launch", "missing-terminal"],
+    [
+        "not-sent",
+        "unknown",
+        "lost",
+        "nonzero",
+        "stderr",
+        "incomplete",
+        "extra",
+        "repeat-data",
+        "wrong-launch",
+        "missing-terminal",
+    ],
 )
 def test_carrier_fault_never_promotes_launch(
     reserved: tuple[ManagedRunRepository, ManagedRunRecord], fault: str
@@ -345,6 +356,18 @@ def test_carrier_fault_never_promotes_launch(
         )
         if fault == "extra":
             return data + b"noise\n"
+        if fault == "repeat-data":
+            return b"".join(
+                encode_file_record(request.nonce, FileRecord(index, kind, body))
+                for index, (kind, body) in enumerate(
+                    (
+                        (FileRecordKind.RESULT, encode_result(ManagedStartResult(0, None, (FactName.LAUNCH,)))),
+                        (FileRecordKind.DATA, launch),
+                        (FileRecordKind.DATA, launch),
+                        (FileRecordKind.FINISHED, b""),
+                    )
+                )
+            )
         if fault == "missing-terminal":
             return data.rsplit(b"AGWF1", 1)[0]
         return data
@@ -398,6 +421,25 @@ def test_preflight_refuses_without_mutating_reservation(
         )
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
     assert carrier.calls == 0
+
+
+def test_preflight_refuses_bogus_request_type_before_reservation_mutation(
+    reserved: tuple[ManagedRunRepository, ManagedRunRecord],
+) -> None:
+    repository, record = reserved
+    carrier = ScriptedCarrier(lambda _request: b"")
+    with pytest.raises(ValidationError):
+        start_managed_run(
+            repository,
+            record,
+            carrier,
+            request=object(),  # type: ignore[arg-type]
+            plan=IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
+            deadline=Deadline.after(10),
+            runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+        )
+    assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
+    assert carrier.validations == carrier.calls == 0
 
 
 def test_proxmox_structural_refusal_precedes_possible_dispatch(

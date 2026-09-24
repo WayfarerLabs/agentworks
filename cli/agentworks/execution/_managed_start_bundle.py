@@ -17,7 +17,7 @@ _MODULES = (
 )
 _PACKAGE = files(__package__)
 _SOURCES = tuple((name, _PACKAGE.joinpath(f"{name}.py").read_text(encoding="utf-8")) for name in _MODULES)
-_SOURCES += (("_managed_service_source", f"FIXED_SOURCE = {SERVICE_SOURCE!r}\n"),)
+_SOURCES += (("_managed_service_bundle", f"FIXED_SOURCE = {SERVICE_SOURCE!r}\n"),)
 _SOURCES += (("_managed_start_guest", _PACKAGE.joinpath("_managed_start_guest.py").read_text(encoding="utf-8")),)
 
 FIXED_BUNDLE = _build_file_helper_bundle("_agw_managed_start", _SOURCES, "_managed_start_guest")

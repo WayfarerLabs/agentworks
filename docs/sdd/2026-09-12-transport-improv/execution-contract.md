@@ -263,6 +263,13 @@ carrier-specific detached API.
 class Carrier(Protocol):
     features: ChannelFeatures
 
+    def validate(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+    ) -> None: ...
+
     def execute(
         self,
         invocation: PreparedInvocation,
@@ -271,6 +278,13 @@ class Carrier(Protocol):
         deadline: Deadline,
     ) -> CarrierReport: ...
 ```
+
+`validate` is a pure structural preflight for one fully prepared invocation. It can reject only
+deterministic local incompatibility, including unsupported I/O shapes and a carrier's direct
+envelope bound. It performs no discovery, credential lookup, process or network I/O, durable
+attempt, or other effect. `execute` repeats the same structural checks before effects and remains
+the sole delivery primitive. Deadline observation is call-time handling; readiness, credentials,
+connectivity, and actual delivery remain with execution.
 
 This is a private adapter-author seam, not a plugin alternative to `ExecutionTarget`. A platform
 plugin can implement it but ordinary capability consumers cannot use it to bypass bound policy.
