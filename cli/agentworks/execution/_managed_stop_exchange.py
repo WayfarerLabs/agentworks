@@ -203,9 +203,10 @@ def stop_managed_run(
         raise ValidationError("Managed stop requires a Linux root helper and deadline")
     try:
         remaining = deadline.remaining()
-        budget = (
-            MAX_OBSERVATION_MS if remaining is None else min(MAX_OBSERVATION_MS, max(1, math.ceil(remaining * 1000)))
-        )
+        if remaining is None or remaining >= MAX_OBSERVATION_MS / 1000:
+            budget = MAX_OBSERVATION_MS
+        else:
+            budget = max(1, math.ceil(remaining * 1000))
         request = ManagedStopRequest(secrets.token_hex(16), expected_launch, plan.expected, budget)
         request_data = encode_request(request)
         argv, candidates, shim = build_runtime_identity_helper_argv(
