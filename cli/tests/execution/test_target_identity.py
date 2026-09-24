@@ -369,17 +369,21 @@ def test_elevated_lookup_failure_keeps_ordinary_evidence_without_prepared_status
 @pytest.mark.parametrize("include_elevated", [None, 0, "yes", object()])
 def test_untyped_elevation_choice_is_refused_before_borrow(
     owned: tuple[Database, OperationOwner],
+    monkeypatch: pytest.MonkeyPatch,
     include_elevated: object,
 ) -> None:
     _, owner = owned
     carrier = SyntheticCarrier({"worker": _WORKER})
 
+    def unexpected_borrow() -> None:
+        pytest.fail("invalid elevation choice borrowed the owner")
+
+    monkeypatch.setattr(owner, "borrow", unexpected_borrow)
+
     with pytest.raises(ValidationError):
         _prepare(owner, carrier, include_elevated=include_elevated)  # type: ignore[arg-type]
 
     assert carrier.calls == []
-    borrow = owner.borrow()
-    borrow.close()
     owner.close()
 
 
