@@ -188,10 +188,13 @@ The [implementation progress record](phase2-results.md) pins the completed indep
 local validation separately from the remaining shared integration and platform acceptance.
 
 Shared subprocess adoption introduces an implementation dependency on transport #833. Current
-integration uses `bdaffc1388fff85ac05683f83648125faf2d7aea`; completed records retain the pins they
+integration uses `f937cac098c43e81e9bea2e5daa6f9520ae4ca96`, including the shared structural
+preflight contract and private managed-start caller; completed records retain the pins they
 validated. The
+[structural preflight integration](phase2-results.md#structural-preflight-integration) records the
+combined SSH result. The
 [private-access dependency update](phase2-results.md#private-access-and-paired-plan-dependency-update)
-records the latest rebased SSH head and its scope. The preceding
+records an earlier rebased SSH head and its scope. The preceding
 [recovery-dispatch dependency update](phase2-results.md#recovery-dispatch-dependency-update) retains
 its measured composition. The
 [file-custody adoption](phase2-results.md#durable-file-call-custody-adoption) records the
@@ -199,8 +202,8 @@ managed-target binding and durable obligations in the SSH upload proof. The earl
 [joint Windows/WSL2 report](phase2-results.md#joint-windowswsl2-mechanism-proof) retains its
 measured composition and mechanism scope. #832 stacks on transport's implementation branch;
 transport lands first. Buffered adapter validation does not close the shared launch-interruption
-gate, live I/O, terminal preparation or additive RunContext delivery. Terminal/PTY work is
-proceeding in parallel in the transport lane, as confirmed by the operator.
+gate, live I/O native acceptance, terminal preparation or additive RunContext delivery. Terminal/PTY
+work is proceeding in parallel in the transport lane, as confirmed by the operator.
 
 ### Complete the carrier and migration
 
