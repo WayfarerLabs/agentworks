@@ -46,7 +46,11 @@ class LocalCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        pass
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         self.deadlines.append(deadline)
         result = run_process(list(invocation.argv), io=io, deadline=deadline)
@@ -69,6 +73,7 @@ class LocalCarrier:
 
 class UnknownCarrier(LocalCarrier):
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         del invocation, io
         self.calls += 1
         self.deadlines.append(deadline)

@@ -29,7 +29,11 @@ class _LocalOracle:
 
     features = ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        pass
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         result = subprocess.run(
             invocation.argv,
             input=io.input.data if isinstance(io.input, FiniteInput) else b"",
@@ -71,7 +75,11 @@ def test_harness_rejects_success_without_guest_stream_evidence() -> None:
     class EmptySuccess:
         features = ChannelFeatures()
 
+        def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+            pass
+
         def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+            self.validate(invocation, io=io)
             return CarrierReport(Dispatch.SENT, completion=ExitStatus(code=0))
 
     with pytest.raises(AssertionError):
@@ -84,6 +92,7 @@ def test_harness_rejects_suppression_without_sensitive_payload_execution() -> No
         bypassed = False
 
         def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+            self.validate(invocation, io=io)
             if io.sensitive:
                 self.bypassed = True
                 invocation = PreparedInvocation(("/bin/sh", "-c", "/bin/cat >/dev/null; exit 0"))

@@ -469,6 +469,7 @@ def test_unexpected_carrier_exception_propagates_after_possible_dispatch(
 
     class BrokenCarrier(ScriptedCarrier):
         def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+            self.validate(invocation, io=io)
             self.calls += 1
             raise RuntimeError("unexpected carrier failure")
 

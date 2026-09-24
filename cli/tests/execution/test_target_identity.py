@@ -82,7 +82,11 @@ class SyntheticCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        pass
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         assert isinstance(io.input, FiniteInput)
         assert isinstance(io.output, SinkOutput)
         request = json.loads(io.input.data)
@@ -137,7 +141,11 @@ class LocalCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        pass
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         result = run_process(list(invocation.argv), io=io, deadline=deadline)
         completion = None
@@ -167,6 +175,7 @@ class RaisingCarrier(SyntheticCarrier):
         self.control = control
 
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         del invocation, io, deadline
         raise self.control
 

@@ -77,7 +77,11 @@ class TranscriptCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        pass
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         del deadline
         self.calls += 1
         self.io = io
@@ -97,6 +101,7 @@ class TranscriptCarrier:
 
 class RaisingCarrier(TranscriptCarrier):
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         del invocation, deadline
         self.calls += 1
         self.io = io

@@ -114,7 +114,11 @@ class TranscriptCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        pass
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         del deadline
         self.calls += 1
         self.io = io
@@ -137,6 +141,7 @@ class TranscriptCarrier:
 
 class ReplyCarrier(TranscriptCarrier):
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         nonce = _nonce(invocation)
         self.transcript = encode_account_identity(nonce, IdentityExpectation(1001, 1002, (1002, 1003)))
         return super().execute(invocation, io=io, deadline=deadline)
@@ -144,12 +149,14 @@ class ReplyCarrier(TranscriptCarrier):
 
 class RefusalCarrier(TranscriptCarrier):
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.transcript = encode_account_failure(_nonce(invocation), AccountFailure.MISSING)
         return super().execute(invocation, io=io, deadline=deadline)
 
 
 class ReflectedCarrier(TranscriptCarrier):
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.transcript = json.dumps(
             {
                 "account": "workload",
@@ -166,12 +173,14 @@ class ReflectedCarrier(TranscriptCarrier):
 
 class OwnershipReplyCarrier(TranscriptCarrier):
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.transcript = encode_file_ownership_success(_nonce(invocation), FileOwnership(1001, 2003))
         return super().execute(invocation, io=io, deadline=deadline)
 
 
 class OwnershipRefusalCarrier(TranscriptCarrier):
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.transcript = encode_file_ownership_failure(
             _nonce(invocation),
             FileOwnershipFailure.MISSING_GROUP,
@@ -181,12 +190,14 @@ class OwnershipRefusalCarrier(TranscriptCarrier):
 
 class WrongNonceOwnershipCarrier(TranscriptCarrier):
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.transcript = encode_file_ownership_success("f" * 32, FileOwnership(1001, 2003))
         return super().execute(invocation, io=io, deadline=deadline)
 
 
 class RaisingCarrier(TranscriptCarrier):
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         del invocation, deadline
         self.calls += 1
         self.io = io
@@ -206,7 +217,11 @@ class LocalCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        pass
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         self.io = io
         self.invocation = invocation
@@ -634,6 +649,7 @@ def test_unavailable_interpreter_never_yields_file_ownership() -> None:
 def test_complete_runtime_refusal_survives_input_failure_without_operation_observation() -> None:
     class RuntimeRefusalCarrier(TranscriptCarrier):
         def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+            self.validate(invocation, io=io)
             self.transcript = f"AGW_RUNTIME_1:{_nonce(invocation)}:missing:-\n".encode("ascii")
             return super().execute(invocation, io=io, deadline=deadline)
 

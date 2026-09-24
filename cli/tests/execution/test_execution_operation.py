@@ -57,6 +57,7 @@ class RecordingCarrier:
         self.validations += 1
 
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         del invocation, io
         self.calls += 1
         if self.deadlines is not None:

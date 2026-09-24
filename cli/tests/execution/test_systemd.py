@@ -210,7 +210,11 @@ class SystemdFake:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        pass
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         del deadline
         argv = invocation.argv
         self.calls.append(argv)
@@ -488,6 +492,7 @@ def test_prerequisite_requires_root_v252_and_cgroup_v2() -> None:
 
     class Older(SystemdFake):
         def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+            self.validate(invocation, io=io)
             if invocation.argv == ("/usr/bin/systemd-run", "--version"):
                 return _report(b"systemd 251\n")
             return super().execute(invocation, io=io, deadline=deadline)
@@ -496,6 +501,7 @@ def test_prerequisite_requires_root_v252_and_cgroup_v2() -> None:
 
     class Newer(SystemdFake):
         def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+            self.validate(invocation, io=io)
             if invocation.argv == ("/usr/bin/systemd-run", "--version"):
                 return _report(b"systemd 253\n")
             return super().execute(invocation, io=io, deadline=deadline)
@@ -504,6 +510,7 @@ def test_prerequisite_requires_root_v252_and_cgroup_v2() -> None:
 
     class Unprivileged(SystemdFake):
         def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+            self.validate(invocation, io=io)
             if invocation.argv[:5] == ("/usr/bin/python3", "-I", "-S", "-B", "-c"):
                 return _report(b"AGW_MANAGED_CONTROL_1:unavailable\n")
             return super().execute(invocation, io=io, deadline=deadline)
