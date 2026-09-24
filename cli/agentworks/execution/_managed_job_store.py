@@ -39,6 +39,10 @@ class RequestAsset(StrEnum):
     STDIN = "request-stdin"
 
 
+class StopAsset(StrEnum):
+    REQUEST = "request-stop"
+
+
 class Stream(StrEnum):
     STDOUT = "stdout"
     STDERR = "stderr"
@@ -322,13 +326,13 @@ class ManagedJobStore:
         self._checked_fact(name, data)
         self._publish_immutable(name, data)
 
-    def _publish_immutable(self, name: FactName | RequestAsset, data: bytes) -> None:
+    def _publish_immutable(self, name: FactName | RequestAsset | StopAsset, data: bytes) -> None:
         """Publish one fixed validated leaf with byte-exact reconciliation."""
         directory = self._run_dir(create=True)
         assert directory is not None
         stage = (".fact-stage-" if isinstance(name, FactName) else ".request-stage-") + uuid4().hex
         try:
-            existing = self.read_fact(name) if isinstance(name, FactName) else self.read_request_asset(name)
+            existing = self._read_immutable(name)
             if existing is not None:
                 if existing != data:
                     raise StoreError("conflicting store object")
@@ -345,7 +349,7 @@ class ManagedJobStore:
                 os.link(stage, name.value, src_dir_fd=directory, dst_dir_fd=directory, follow_symlinks=False)
                 os.fsync(directory)
             except FileExistsError:
-                existing = self.read_fact(name) if isinstance(name, FactName) else self.read_request_asset(name)
+                existing = self._read_immutable(name)
                 if existing != data:
                     raise StoreError("conflicting store object") from None
             finally:
@@ -353,6 +357,38 @@ class ManagedJobStore:
                 os.fsync(directory)
         finally:
             os.close(directory)
+
+    def _read_immutable(self, name: FactName | RequestAsset | StopAsset) -> bytes | None:
+        if isinstance(name, FactName):
+            return self.read_fact(name)
+        if isinstance(name, RequestAsset):
+            return self.read_request_asset(name)
+        return b"" if self.read_stop_request() else None
+
+    def read_stop_request(self) -> bool:
+        """Read only the separate fixed empty stop-intent leaf."""
+        directory = self._run_dir(create=False)
+        if directory is None:
+            return False
+        try:
+            fd = _open_request_leaf(directory, StopAsset.REQUEST.value, self._owner_uid)
+            if fd is None:
+                return False
+            try:
+                if _read_all(fd, 0) != b"":
+                    raise StoreError("nonempty stop request")
+                return True
+            finally:
+                os.close(fd)
+        finally:
+            os.close(directory)
+
+    def publish_stop_request(self, expected_launch: bytes) -> None:
+        """Publish durable intent only for the exact immutable launch fact."""
+        self._checked_fact(FactName.LAUNCH, expected_launch)
+        if self.read_fact(FactName.LAUNCH) != expected_launch:
+            raise StoreError("launch binding mismatch")
+        self._publish_immutable(StopAsset.REQUEST, b"")
 
     def read_request_asset(self, name: RequestAsset) -> bytes | None:
         """Read one protected fixed leaf without treating absence as evidence."""
