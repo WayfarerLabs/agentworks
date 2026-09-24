@@ -10,6 +10,7 @@ import hashlib
 import os
 import re
 import stat
+import sys
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -51,9 +52,9 @@ class CapturedPrefix:
 
 
 _RUN_ID = re.compile(r"[0-9a-f]{32}\Z")
-_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
-_READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
-_CREATE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+_DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+_READ_FLAGS = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
+_CREATE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
 _KIND = {
     FactName.LAUNCH: "launch",
     FactName.WAIT: "wait",
@@ -116,6 +117,8 @@ class ManagedJobStore:
         _owner_uid: int = 0,
         _anchor_fd: int | None = None,
     ) -> None:
+        if sys.platform != "linux":
+            raise StoreError("managed job store requires Linux")
         if type(run_id) is not str or _RUN_ID.fullmatch(run_id) is None:
             raise StoreError("invalid run identity")
         if type(_owner_uid) is not int or _owner_uid < 0:
@@ -331,7 +334,8 @@ class ManagedJobStore:
                 raise StoreError("missing capture spool")
             try:
                 length = fact["retained_bytes"]
-                assert type(length) is int
+                if type(length) is not int or length > wire.MAX_CAPTURE_PREFIX_BYTES_V1:
+                    raise StoreError("capture spool exceeds bound")
                 if os.fstat(fd).st_size != length:
                     raise StoreError("capture spool mismatch")
                 data = _read_all(fd, length)

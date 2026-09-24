@@ -1265,11 +1265,11 @@ connection and trust only. Before broader lifecycle implementation, complete the
       bundle parity covers launch, both wait outcomes, all four stream dispositions and
       boundary-empty facts. The target producer/service, requested-policy persistence, protected
       store, cgroup/systemd launch, carrier proof and live validation remain open.
-- [ ] Persist the first consuming service's requested output policy beside the managed-run
+- [x] Persist the first consuming service's requested output policy beside the managed-run
       reservation without changing the version-one launch receipt. Store capture, discard or
       sensitivity suppression plus the capture ceiling; validate old/private rows and malformed
       database values fail closed. Keep application bytes and secrets out of the database.
-- [ ] Implement the Python 3.11-compatible protected target store under
+- [x] Implement the Python 3.11-compatible protected target store under
       `/run/agentworks/managed-runs-v1`: root-only fixed assets, bounded capture spools and
       same-directory create-once fact publication. Prove partial stages are never facts, existing
       canonical facts reconcile idempotently, conflicts refuse, closed-output reads require the
@@ -1278,10 +1278,11 @@ connection and trust only. Before broader lifecycle implementation, complete the
 - [ ] Build the first fixed target controller bundle for Linux `MANAGED` plus `INDEPENDENT`. Use one
       root transient notify service and a delegated child workload cgroup; place the gated child,
       apply and verify its exact groups/GID/UID, publish launch and readiness, then release caller
-      code. Concurrently drain both streams, publish exact wait/stream facts, kill remaining
-      descendants and publish boundary-empty only after `populated 0`. Preserve unknown facts on
-      controller death, uninterruptible tasks and every unproved cleanup path. Refuse `OPERATION`,
-      live streams, terminal I/O and arbitrary systemd properties before dispatch.
+      code. Concurrently drain both streams and wait for the main child. On main exit publish wait
+      and start descendant cleanup while draining continues; publish each stream end only after EOF,
+      and publish boundary-empty only after `populated 0`. Preserve unknown facts on controller
+      death, uninterruptible tasks and every unproved cleanup path. Refuse `OPERATION`, live
+      streams, terminal I/O and arbitrary systemd properties before dispatch.
 - [ ] Add the fixed carrier-neutral `start`, `observe`, closed `read-output`, `stop` and `dispose`
       exchange over the target store. Revalidate the exact target/run/unit/launch digest on every
       later action, never replay start after possible dispatch, and expose no arbitrary command,

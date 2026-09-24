@@ -199,11 +199,10 @@ def test_missing_persisted_column_fails_closed(tmp_path: Path) -> None:
     database.close()
 
 
-def test_policy_insert_failure_rolls_back_run_reservation(tmp_path: Path) -> None:
+def test_reservation_insert_failure_leaves_no_partial_run(tmp_path: Path) -> None:
     database = Database(tmp_path / "state.db")
     database._conn.execute(
-        "CREATE TRIGGER refuse_policy_insert BEFORE INSERT ON execution_run_output_policies "
-        "BEGIN SELECT RAISE(ABORT, 'blocked'); END"
+        "CREATE TRIGGER refuse_run_insert BEFORE INSERT ON execution_runs BEGIN SELECT RAISE(ABORT, 'blocked'); END"
     )
     database._conn.commit()
     with pytest.raises(StateError):
@@ -215,7 +214,7 @@ def test_policy_insert_failure_rolls_back_run_reservation(tmp_path: Path) -> Non
 def test_missing_or_malformed_policy_refuses_inspection_and_transition(tmp_path: Path) -> None:
     database = Database(tmp_path / "state.db")
     repository, reserved = _reserve(database)
-    database._conn.execute("DELETE FROM execution_run_output_policies")
+    database._conn.execute("UPDATE execution_runs SET output_mode = NULL, output_capture_prefix_bytes = NULL")
     database._conn.commit()
     with pytest.raises(StateError):
         repository.inspect(_RUN_ID)
@@ -223,7 +222,8 @@ def test_missing_or_malformed_policy_refuses_inspection_and_transition(tmp_path:
         repository.mark_possible_dispatch(reserved)
     database._conn.execute("PRAGMA ignore_check_constraints = ON")
     database._conn.execute(
-        "INSERT INTO execution_run_output_policies VALUES (?, ?, ?)", (_RUN_ID.run_id, "capture", "invalid")
+        "UPDATE execution_runs SET output_mode = ?, output_capture_prefix_bytes = ? WHERE run_id = ?",
+        ("capture", "invalid", _RUN_ID.run_id),
     )
     database._conn.commit()
     with pytest.raises(StateError):
@@ -259,21 +259,9 @@ def test_database_rejects_invalid_output_policy(tmp_path: Path, mode: str, limit
     _reserve(database)
     with pytest.raises(sqlite3.IntegrityError):
         database._conn.execute(
-            "UPDATE execution_run_output_policies SET mode = ?, capture_prefix_bytes = ?",
+            "UPDATE execution_runs SET output_mode = ?, output_capture_prefix_bytes = ?",
             (mode, limit),
         )
-    database.close()
-
-
-def test_policy_is_unique_and_cascades_with_run(tmp_path: Path) -> None:
-    database = Database(tmp_path / "state.db")
-    _reserve(database)
-    with pytest.raises(sqlite3.IntegrityError):
-        database._conn.execute(
-            "INSERT INTO execution_run_output_policies VALUES (?, 'discard', NULL)", (_RUN_ID.run_id,)
-        )
-    database._conn.execute("DELETE FROM execution_runs WHERE run_id = ?", (_RUN_ID.run_id,))
-    assert database._conn.execute("SELECT COUNT(*) FROM execution_run_output_policies").fetchone()[0] == 0
     database.close()
 
 

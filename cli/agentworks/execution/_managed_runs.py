@@ -333,13 +333,10 @@ class ManagedRunRepository:
                 "run_id, target_kind, target_name, target_incarnation, target_boot_id, "
                 "workload_euid, workload_egid, workload_groups, requested_shell, resolved_shell, "
                 "shell_login, shell_interactive, managed_profile_revision, owner_kind, owner_id, lifetime, "
-                "receipt_namespace, receipt_protocol_version, launch_state, created_at, updated_at"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                _insert_values(identity, spec, now),
-            )
-            self._connection.execute(
-                "INSERT INTO execution_run_output_policies (run_id, mode, capture_prefix_bytes) VALUES (?, ?, ?)",
-                (identity.run_id, output_policy.mode, output_policy.capture_prefix_bytes),
+                "receipt_namespace, receipt_protocol_version, output_mode, output_capture_prefix_bytes, "
+                "launch_state, created_at, updated_at"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                _insert_values(identity, spec, output_policy, now),
             )
             return self._require_record(identity)
 
@@ -446,13 +443,7 @@ class ManagedRunRepository:
             raise StateError("managed run reservation identity is stale", entity_kind="execution-run")
 
     def _select(self, identity: ManagedRunIdentity) -> sqlite3.Row | None:
-        row = self._connection.execute(
-            "SELECT execution_runs.*, execution_run_output_policies.mode AS output_mode, "
-            "execution_run_output_policies.capture_prefix_bytes AS output_capture_prefix_bytes "
-            "FROM execution_runs LEFT JOIN execution_run_output_policies "
-            "ON execution_run_output_policies.run_id = execution_runs.run_id WHERE execution_runs.run_id = ?",
-            (identity.run_id,),
-        ).fetchone()
+        row = self._connection.execute("SELECT * FROM execution_runs WHERE run_id = ?", (identity.run_id,)).fetchone()
         return cast("sqlite3.Row | None", row)
 
     def _require_record(self, identity: ManagedRunIdentity) -> ManagedRunRecord:
@@ -569,7 +560,12 @@ def launch_managed_run(
     return repository.reconcile(possible, observation)
 
 
-def _insert_values(identity: ManagedRunIdentity, spec: ManagedRunSpec, now: str) -> tuple[object, ...]:
+def _insert_values(
+    identity: ManagedRunIdentity,
+    spec: ManagedRunSpec,
+    output_policy: ManagedOutputPolicy,
+    now: str,
+) -> tuple[object, ...]:
     requested_shell = "none" if spec.shell.requested is None else spec.shell.requested.value
     return (
         identity.run_id,
@@ -590,6 +586,8 @@ def _insert_values(identity: ManagedRunIdentity, spec: ManagedRunSpec, now: str)
         spec.lifetime,
         spec.receipt_namespace,
         spec.receipt_protocol_version,
+        output_policy.mode,
+        output_policy.capture_prefix_bytes,
         ManagedLaunchState.RESERVED,
         now,
         now,

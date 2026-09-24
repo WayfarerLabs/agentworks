@@ -986,18 +986,20 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
         ALTER TABLE operation_owners_new RENAME TO operation_owners;
     """,
     44: """
-        CREATE TABLE execution_run_output_policies (
-            run_id TEXT PRIMARY KEY NOT NULL
-                REFERENCES execution_runs(run_id) ON DELETE CASCADE,
-            mode TEXT NOT NULL
-                CHECK (typeof(mode) = 'text' AND mode IN ('capture', 'discard', 'sensitivity-suppressed')),
-            capture_prefix_bytes INTEGER
-                CHECK (
-                    (mode = 'capture' AND typeof(capture_prefix_bytes) = 'integer'
-                        AND capture_prefix_bytes BETWEEN 0 AND 16777216)
-                    OR (mode IN ('discard', 'sensitivity-suppressed') AND capture_prefix_bytes IS NULL)
-                )
-        );
+        ALTER TABLE execution_runs ADD COLUMN output_mode TEXT
+            CHECK (
+                output_mode IS NULL
+                OR (typeof(output_mode) = 'text'
+                    AND output_mode IN ('capture', 'discard', 'sensitivity-suppressed'))
+            );
+        ALTER TABLE execution_runs ADD COLUMN output_capture_prefix_bytes INTEGER
+            CHECK (
+                (output_mode IS NULL AND output_capture_prefix_bytes IS NULL)
+                OR (output_mode = 'capture' AND typeof(output_capture_prefix_bytes) = 'integer'
+                    AND output_capture_prefix_bytes BETWEEN 0 AND 16777216)
+                OR (output_mode IN ('discard', 'sensitivity-suppressed')
+                    AND output_capture_prefix_bytes IS NULL)
+            );
     """,
 }
 
@@ -1191,7 +1193,7 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
         ),
     },
     43: {"operation_owners": ("generation_id", "recovery_predecessor_generation_id")},
-    44: {"execution_run_output_policies": ("run_id", "mode", "capture_prefix_bytes")},
+    44: {"execution_runs": ("output_mode", "output_capture_prefix_bytes")},
 }
 
 _SCHEMA_SENTINEL_REMOVED_TABLES: dict[int, tuple[str, ...]] = {
@@ -1279,7 +1281,6 @@ _FOREIGN_KEY_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[ForeignKeySentinel, .
         "operation_claims": (("operation_owners", "operation_id", "operation_id", _NO_ACTION, "CASCADE"),),
         "lifecycle_obligations": (("operation_owners", "operation_id", "operation_id", _NO_ACTION, "CASCADE"),),
     },
-    44: {"execution_run_output_policies": (("execution_runs", "run_id", "run_id", _NO_ACTION, "CASCADE"),)},
 }
 
 _FOREIGN_KEY_SENTINEL_REMOVALS: dict[int, dict[str, tuple[ForeignKeySentinel, ...]]] = {

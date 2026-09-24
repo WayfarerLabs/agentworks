@@ -221,8 +221,9 @@ schema as a Python 3.11-compatible stdlib module that reuses the portable `_help
 validator. The host typed adapter delegates encoding, decoding and launch digest to it. Exact-source
 bundle tests prove byte round trips under Python 3.11 when installed. The target producer/service
 still needs to bundle those sources verbatim and prove them in its own launch and observation paths.
-Requested-policy persistence, protected store, cgroup/systemd launch, carrier proof and live
-validation remain open.
+The first consumer now persists requested output policy and the protected-store checkpoint below
+uses the same portable codec. Target controller production, cgroup/systemd launch, carrier proof and
+live validation remain open.
 
 ### First private managed service
 
@@ -252,13 +253,12 @@ Readers do not return capture bytes until the matching validated end fact exists
 has closed output rather than a provisional cursor protocol.
 
 The database persists the requested output disposition and, for capture, the per-stream byte ceiling
-in one `execution_run_output_policies` row keyed to the run reservation. Reservation writes both
-rows in one transaction; inspection refuses a missing or malformed policy instead of inventing one
-for an older private row. These are host request facts, not launch-receipt identity, so they do not
-revise the version-one fact schema. Later observation accepts a stream-end fact only when its
-disposition and retained length fulfill that persisted request. The initial default is a one-MiB
-prefix per stream; implementation may admit a larger bounded caller request only under one explicit
-versioned core ceiling. Truncation remains success of collection with incomplete output, not
+in two nullable columns on the run reservation. Reservation writes one complete row; inspection
+refuses a missing or malformed policy instead of inventing one for an older private row. These are
+host request facts, not launch-receipt identity, so they do not revise the version-one fact schema.
+Later observation accepts a stream-end fact only when its disposition and retained length fulfill
+that persisted request. The initial default is a one-MiB prefix per stream and the version-one core
+ceiling is 16 MiB per stream. Truncation remains success of collection with incomplete output, not
 complete capture.
 
 The service is one transient system service per run. The fixed launch uses `systemd-run --system`
@@ -273,12 +273,15 @@ caller-controlled shell startup or payload can run.
 After placement and identity are proved, the controller publishes `launch`, sends `READY=1`, then
 releases the child gate. This ordering makes normal `systemd-run` return a launch acknowledgment
 without tying job lifetime or byte streams to the delivery connection. The controller concurrently
-drains both workload pipes to the selected bounded prefix or to discard, waits for the exact main
-child, publishes the wait and closed-stream facts, then performs bounded descendant cleanup. It uses
-`cgroup.kill` and waits for `cgroup.events` to report `populated 0` before publishing
-`boundary-empty`. A task stuck in uninterruptible sleep can prevent that proof indefinitely; the
-controller stops waiting at its bound and leaves boundary state unknown rather than fabricating
-emptiness.
+drains both workload pipes to the selected bounded prefix or to discard and waits for the exact main
+child. Main-child exit publishes the wait fact and starts bounded descendant cleanup immediately;
+draining continues concurrently so a descendant that inherited a stream cannot delay the cleanup
+decision. Each stream-end fact publishes only after that pipe reaches EOF and its spool is closed.
+Independently, cleanup uses `cgroup.kill` and waits for `cgroup.events` to report `populated 0`
+before publishing `boundary-empty`. A task stuck in uninterruptible sleep can prevent that proof
+indefinitely; the controller stops waiting at its bound and leaves boundary state unknown rather
+than fabricating emptiness. Cleanup or controller failure may likewise leave a stream-end fact
+unknown even when other terminal facts are present.
 
 `KillMode=control-group` is a manager-owned fallback if the controller dies, but it cannot publish
 positive facts after that death. Therefore an abrupt controller exit leaves any unrecorded wait,

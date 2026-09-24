@@ -15,6 +15,8 @@ import pytest
 from agentworks.execution import _managed_job_wire as wire
 from agentworks.execution._managed_job_store import FactName, ManagedJobStore, StoreError, Stream
 
+pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="managed job store requires Linux")
+
 RUN = "1" * 32
 OTHER_RUN = "2" * 32
 SOURCE = Path(__file__).parents[2] / "agentworks" / "execution"
@@ -279,7 +281,7 @@ def test_closed_capture_requires_end_and_binding(store: ManagedJobStore) -> None
     assert prefix.length == 3
 
 
-@pytest.mark.parametrize("mutation", ["none", "length", "digest", "mode", "missing", "symlink", "hardlink"])
+@pytest.mark.parametrize("mutation", ["none", "length", "digest", "oversize", "mode", "missing", "symlink", "hardlink"])
 def test_closed_capture_checks_exact_spool(store: ManagedJobStore, tmp_path: Path, mutation: str) -> None:
     launch = _launch()
     store.publish_fact(FactName.LAUNCH, launch)
@@ -287,13 +289,17 @@ def test_closed_capture_checks_exact_spool(store: ManagedJobStore, tmp_path: Pat
     end = _end(
         launch,
         data=b"abc",
-        length=4 if mutation == "length" else None,
+        length=(
+            wire.MAX_CAPTURE_PREFIX_BYTES_V1 + 1 if mutation == "oversize" else 4 if mutation == "length" else None
+        ),
         digest="a" * 64 if mutation == "digest" else None,
     )
     store.publish_fact(FactName.STDOUT_END, end)
     path = _run_path(store, tmp_path) / "stdout"
     if mutation == "mode":
         os.chmod(path, 0o644)
+    elif mutation == "oversize":
+        os.truncate(path, wire.MAX_CAPTURE_PREFIX_BYTES_V1 + 1)
     elif mutation == "missing":
         path.unlink()
     elif mutation == "symlink":

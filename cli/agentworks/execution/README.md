@@ -286,18 +286,17 @@ observation for the same run, unit, target incarnation, boot, protected receipt 
 protocol. Exceptions, missing observations and contradictions retain possible dispatch.
 
 The `execution_runs` row stores bounded non-secret identity and launch evidence, not source, argv,
-stdin, environment, output bytes, credentials, provider objects or mutable remote paths. A separate
-`execution_run_output_policies` row records the requested handling for both streams: capture with
-one per-stream prefix limit, discard, or sensitivity suppression. Capture defaults to 1 MiB per
-stream at the caller, may request zero, and is bounded by the version-one 16 MiB core ceiling.
-Reservation requires an explicit effective policy and writes both rows atomically. Inspection and
-state transitions refuse runs whose policy is missing or malformed; older private rows receive no
-inferred policy. The policy is a host request fact and does not change version-one launch receipts.
-The requested shell kind is separate from its canonical resolved executable identity, so
-user-default selection is not collapsed into `sh` or `bash`. Application, cleanup and disposal
-evidence remain later gates, to be added only with their producers and consumers. Malformed rows and
-stale or mismatched target, boot, unit, workload, shell, profile, owner or protocol facts fail
-closed.
+stdin, environment, output bytes, credentials, provider objects or mutable remote paths. Two
+nullable columns on that row record the requested handling for both streams: capture with one
+per-stream prefix limit, discard, or sensitivity suppression. Capture defaults to 1 MiB per stream
+at the caller, may request zero, and is bounded by the version-one 16 MiB core ceiling. Reservation
+requires an explicit effective policy and writes the complete row atomically. Inspection and state
+transitions refuse runs whose policy is missing or malformed; older private rows receive no inferred
+policy. The policy is a host request fact and does not change version-one launch receipts. The
+requested shell kind is separate from its canonical resolved executable identity, so user-default
+selection is not collapsed into `sh` or `bash`. Application, cleanup and disposal evidence remain
+later gates, to be added only with their producers and consumers. Malformed rows and stale or
+mismatched target, boot, unit, workload, shell, profile, owner or protocol facts fail closed.
 
 The target name is a core resource identity for binding and diagnostics, not authority on its own.
 Its `v1:<sha256>` incarnation fingerprint must bind the provider-owned locator with a
@@ -324,13 +323,17 @@ capture, intentional discard or sensitivity suppression. Only capture has a spoo
 closes it. Discard and suppression retain zero bytes with the empty SHA-256. An absent fact says
 nothing. The codec validates untrusted bytes and contains no output bytes or application input. It
 does not write a store, launch or observe a workload, or make jobs available. The intended store is
-a protected boot-local per-run directory of immutable create-once facts and bounded output spools.
-The first service slice is limited to independent lifetime until operation-owner liveness and
-cleanup are proved. Later fixed start, observe, read-output, stop and dispose operations must work
-over both SSH and QGA. The first consuming service must persist and compare requested output policy;
-this self-describing fact alone does not prove policy fulfillment. The target producer/service has
-not yet bundled the portable sources. Requested-policy persistence, the protected store,
-cgroup/systemd launch, carrier proof and live validation remain open.
+now implemented by the Python 3.11-compatible `_managed_job_store.py`: a root-owned boot-local
+per-run directory with immutable create-once facts and bounded output spools. It refuses unsafe
+directories and leaves, publishes a fact only after a synced same-directory stage, and returns
+capture bytes only after the matching launch-bound stream-end fact closes and authenticates the
+spool. Exact-source tests bundle the wire and store together under Python 3.11. The host reservation
+also persists the requested output policy, but a later observer must still compare that request to
+the stream disposition; self-describing facts alone do not prove policy fulfillment. The first
+service slice is limited to independent lifetime until operation-owner liveness and cleanup are
+proved. Later fixed start, observe, read-output, stop and dispose operations must work over both SSH
+and QGA. The target controller, cgroup/systemd launch, carrier proof and live validation remain
+open.
 
 ## Input accounting
 
