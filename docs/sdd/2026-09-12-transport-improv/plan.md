@@ -1808,6 +1808,13 @@ binding may be presented as SSH, QGA or native production evidence.
       mechanism audit; the shared file-helper prerequisite remains Python 3.11 or newer. Outside the
       selected range, inline execution refuses before `LAUNCHING` rather than inventing stronger
       evidence. Eager start, signaled-entry ambiguity and native acceptance remain separate gates.
+- [x] Bind the existing owner, inline producer and contextual reducer behind one private
+      `ExecutionAccess.run` increment. Define the intended caller values for explicit protection,
+      lifetime, finite input and bounded capture/discard now, while supporting only DIRECT plus
+      OPERATION on the Linux inline helper. Refuse MANAGED, INDEPENDENT, non-Linux runtime,
+      unsupported startup, unavailable elevation, invalid values and expired deadlines before owner
+      custody or dispatch. Keep this class internal and unexported; it neither completes the
+      unchecked target/reducer checkbox above nor permits a run-only public RunContext target.
 
 All three private lanes accept code pin `8ceb899a` with no material findings. Review corrected
 acceptance of output/status dataclass extensions that added diagnostic fields to default result
@@ -1833,6 +1840,14 @@ tests plus real `ExecutionOperation` to local-carrier probes for success, exit 2
 sensitive-output suppression and overflow. Hosted Linux 3.12 through 3.14, Windows 3.13, static,
 documentation and website checks pass. This evidence does not close eager-start, signaled-entry,
 native-platform or public-composition gates.
+
+The private DIRECT access checkpoint composes those mechanics without exposing RunContext. Local
+tests exercise literal command and explicit-script execution, binary input, exit 0 and 255,
+discard/suppression, checked diagnostics, exact deadline propagation, pre-dispatch refusals,
+uncertain owner retention and fresh-process retirement-module independence. Preparation now occurs
+once before borrowing the owner, so invalid requests do not transiently acquire child custody. This
+is not MANAGED execution, a job API, live/terminal I/O, native-platform acceptance or complete
+target composition.
 
 ## 5. Add the complete new RunContext surface
 

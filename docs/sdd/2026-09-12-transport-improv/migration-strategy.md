@@ -40,10 +40,16 @@ carrier candidates and WSL host-client ownership. The WSL carrier and host-clien
 passed their scoped live Windows/WSL2 proof. These components still do not compose a complete
 `ExecutionTarget`, expose either new RunContext accessor, or serve a production consumer.
 
+A later private increment binds the DIRECT foreground subset behind `ExecutionAccess.run`: explicit
+DIRECT profile, operation lifetime, finite input, bounded capture/discard, identity-plan selection,
+one deadline and contextual checked-result reduction. Unsupported MANAGED, independent and non-Linux
+combinations refuse before dispatch. The class remains internal and incomplete as a target surface;
+it has no jobs, live/terminal I/O, target wrapper, platform factory or RunContext consumer.
+
 The WSL native-binding resolver is passive and has no production caller. Existing platform create,
 activation, recovery, provisioning and cleanup paths still use the legacy transport and keepalive
-surfaces. The next implementation checkpoints therefore remain private composition work: bind safe
-execution diagnostics, aggregate whole-operation lifecycle evidence, complete file-operation
+surfaces. The next implementation checkpoints therefore remain private composition work: deliver the
+shared managed-job lifecycle, aggregate whole-operation lifecycle evidence, complete file-operation
 custody, and replace platform-specific legacy ownership only where the new mechanism and its full
 lifetime have been proved. Public target and RunContext delivery follows those gates as one complete
 additive surface, not as an accessor-only or run-only intermediate API.
