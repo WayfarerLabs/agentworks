@@ -111,7 +111,6 @@ def start_owned_managed_run(
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
     attempt: ManagedStartAttempt | None = None
     registration_started = False
-    installed = False
     retained = False
     try:
         registration_started = True
@@ -121,11 +120,6 @@ def start_owned_managed_run(
             payload_version=MANAGED_START_PAYLOAD_VERSION,
             payload=payload,
         )
-        installed = True
-
-        def arm() -> None:
-            borrow.arm_dispatch_obligation()
-
         attempt = start_managed_run(
             repository,
             reserved,
@@ -134,7 +128,7 @@ def start_owned_managed_run(
             plan=plan,
             deadline=deadline,
             runtime_selection=runtime_selection,
-            before_possible_dispatch=arm,
+            before_possible_dispatch=borrow.arm_dispatch_obligation,
         )
         operation.settle(attempt.candidate.dispatch, attempt.candidate.carrier_completion)
         confirmed = (
@@ -157,7 +151,7 @@ def start_owned_managed_run(
         raise
     except BaseException as control:
         armed_effect = borrow.dispatch_obligation_may_be_armed
-        registration_uncertain = registration_started and not (installed or borrow.has_installed_dispatch_obligation)
+        registration_uncertain = registration_started and not borrow.has_installed_dispatch_obligation
         retained = armed_effect or operation.requires_owner_retention or registration_uncertain
         release_failed = False
         try:

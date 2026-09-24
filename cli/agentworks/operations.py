@@ -829,12 +829,12 @@ class OperationBorrow:
             owner._outstanding_attempt = attempt  # noqa: SLF001
             obligation = self._dispatch_obligation
             assert obligation is not None
+            self._dispatch_armed = True
             owner._transition_uncertain = True  # noqa: SLF001
             owner._repository.mark_lifecycle_obligation_possible_effect(  # noqa: SLF001
                 self.ownership,
                 obligation.obligation_id,
             )
-            self._dispatch_armed = True
             owner._durable_possible_dispatch = True  # noqa: SLF001
             owner._transition_uncertain = False  # noqa: SLF001
             return attempt

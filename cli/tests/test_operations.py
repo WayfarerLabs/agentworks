@@ -770,6 +770,34 @@ def test_interrupted_first_durable_mark_never_returns_dispatch_permission(
         owner.borrow()
 
 
+def test_commit_then_interrupt_begin_attempt_reports_maybe_armed_obligation(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = db.operations
+    owner = OperationOwner.acquire(repository, _scope(), "file-upload")
+    borrow = owner.borrow()
+    obligation_id = "d" * 32
+    borrow.install_dispatch_obligation(obligation_id, "adapter-dispatch", payload_version=1, payload=b"prepared")
+    original = repository.mark_lifecycle_obligation_possible_effect
+
+    def commit_then_interrupt(ownership: OperationOwnership, identifier: str) -> None:
+        original(ownership, identifier)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(repository, "mark_lifecycle_obligation_possible_effect", commit_then_interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        borrow.begin_attempt()
+    assert borrow.dispatch_obligation_may_be_armed
+    assert borrow.has_outstanding_attempt
+    rows = repository.list_lifecycle_obligations(owner.ownership)
+    assert len(rows) == 1
+    assert rows[0].obligation_id == obligation_id
+    assert rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+    borrow.handoff_unresolved()
+    with pytest.raises(StateError):
+        owner.close()
+
+
 def test_interrupted_registration_before_attempt_retries_with_durable_admission(
     db: Database,
     monkeypatch: pytest.MonkeyPatch,
