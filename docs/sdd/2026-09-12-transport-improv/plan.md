@@ -1469,6 +1469,30 @@ was torn down. The composed non-integration suite passed 12,979 tests with 21 sk
 static, documentation, Rulesync and website gate passed. This evidence does not wire the production
 WSL platform hold, recovery factory, target identity or RunContext surface; those remain open.
 
+The next native Windows/WSL2 experiment at transport `333b17bc` examined whether a read-only WSL UNC
+file handle could hold a running distribution without a guest command. The
+[full integration report](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-5822948740)
+covers Windows Server 2022 build 20348.5622, WSL 2.7.14.0, a fresh Ubuntu 24.04 target, an
+independent running control distribution, and complete tester cleanup. The official probe result is
+`UNKNOWN`: its 30-second cold-open cap could not observe the measured 80-second `\\wsl$` refusal,
+and its `/etc/os-release` path was a symlink that the WSL share could not open. The tester
+separately sampled the stopped target throughout the cold open: `\\wsl$` refused after 80 seconds
+without starting it; `\\wsl.localhost` refused after 40 seconds, also without starting it. With the
+target already running, a supplementary run used the regular `/usr/lib/os-release` file and the
+probe's otherwise unchanged cases. Against a 15.75-second no-handle distribution lifetime, one and
+two handles each retained it for 180 seconds; it stopped after normal close, last-holder close, and
+abrupt holder death, while force-termination stopped the exact target and the unrelated control
+survived. The 60-second utility-VM idle time was distinct from the roughly 15.6-second target
+distribution idle time, especially with the unrelated distribution running.
+
+This is bounded hold-feasibility evidence, not an official probe pass or a dispatch-drain proof.
+Private review also demonstrated a false-positive cold case: the probe observed distribution state
+only after the open attempt and holder close, so a distribution that started and stopped during that
+interval could yield `PASS`. The disposable probe and its dedicated tests were removed rather than
+expanded into a second process-observation framework; their executable source remains at `333b17bc`
+in Git history. The production WSL hold adoption, exact guest observation, dispatch drain, recovery
+factory and live acceptance checkbox above remain open.
+
 The durable launch checkpoint is privately accepted at `ead879ce`. Project, complexity and
 independent correctness reviews are clean. Review removed the dormant application, cleanup and
 disposal fields, the redundant stored unit name and a forwarding service object; the final schema
