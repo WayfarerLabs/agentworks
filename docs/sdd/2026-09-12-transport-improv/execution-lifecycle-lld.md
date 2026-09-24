@@ -295,10 +295,12 @@ signaled death leave `wait` unknown because close-on-exec EOF cannot distinguish
 immediately before exec from one delivered to the application. Draining continues concurrently so a
 descendant that inherited a stream cannot delay the cleanup decision. Each stream-end fact publishes
 only after that pipe reaches EOF and its spool is closed. Independently, cleanup uses `cgroup.kill`
-and waits for `cgroup.events` to report `populated 0` before publishing `boundary-empty`. A task
-stuck in uninterruptible sleep can prevent that proof indefinitely; the controller stops waiting at
-its bound and leaves boundary state unknown rather than fabricating emptiness. Cleanup or controller
-failure may likewise leave a stream-end fact unknown even when other terminal facts are present.
+and waits for `cgroup.events` to report `populated 0` before publishing `boundary-empty`. An error
+while requesting `cgroup.kill` does not invalidate a later positive empty-boundary observation. A
+task stuck in uninterruptible sleep can prevent that proof indefinitely; the controller stops
+waiting at its bound and leaves boundary state unknown rather than fabricating emptiness. Cleanup or
+controller failure may likewise leave a stream-end fact unknown even when other terminal facts are
+present.
 
 `KillMode=control-group` is a manager-owned fallback if the controller dies, but it cannot publish
 positive facts after that death. Therefore an abrupt controller exit leaves any unrecorded wait,
@@ -311,7 +313,10 @@ fixed root helper revalidates the exact immutable launch, publishes `request-sto
 observes only within a finite guest-local bound. Helper acceptance proves the request leaf was
 durably published, not that the controller consumed it or that the workload ended. A shorter carrier
 deadline can lose the response without canceling the durable request, and an unbounded carrier
-deadline does not make the target helper wait forever. Exact retry is safe and never replays start.
+deadline does not make the target helper wait forever. A complete helper failure after dispatch
+remains unknown because publication can become visible before a later sync or cleanup error. Once
+publication returns successfully, a later invalid or unreadable boundary fact preserves accepted
+intent and only withholds termination proof. Exact retry is safe and never replays start.
 
 The controller polls the request before releasing its one already-admitted child and while observing
 that child. First observation closes finite stdin and sends `SIGTERM` only to the exact main child
