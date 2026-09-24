@@ -1,7 +1,7 @@
 """Canonical v1 managed-job facts shared by host and future target producer.
 
-This standalone Python 3.11 module accepts only primitive fact objects. It has
-no access to the application payload, the filesystem, or a service runtime.
+This Python 3.11 module accepts only primitive fact objects and shares the
+portable identity validator. It has no filesystem or service runtime behavior.
 """
 
 from __future__ import annotations
@@ -11,6 +11,8 @@ import json
 import re
 from typing import cast
 from uuid import UUID
+
+from ._helper_identity import decode_identity
 
 MAX_MANAGED_JOB_FACT_BYTES = 4096
 VERSION = 1
@@ -44,7 +46,7 @@ class ManagedJobWireError(ValueError):
 
 
 def _object(value: object, fields: frozenset[str]) -> dict[str, object]:
-    if type(value) is not dict or set(value) != fields:
+    if type(value) is not dict or any(type(key) is not str for key in value) or set(value) != fields:
         raise ManagedJobWireError("invalid managed-job fact fields")
     return value
 
@@ -57,10 +59,13 @@ def _identity_text(value: object) -> bool:
     return type(value) is str and _SAFE_IDENTITY.fullmatch(value) is not None and len(value) <= 255
 
 
-def _shell_path(value: object) -> bool:
-    if type(value) is not str or value == "/" or not value.startswith("/") or not value.isprintable():
+def canonical_shell_path(value: object) -> bool:
+    """Check a normalized POSIX path with version-stable control exclusions."""
+    if type(value) is not str or value == "/" or not value.startswith("/"):
         return False
     if any(part in ("", ".", "..") for part in value.split("/")[1:]):
+        return False
+    if any(ord(char) < 0x20 or 0x7F <= ord(char) <= 0x9F for char in value):
         return False
     try:
         return len(value.encode("utf-8")) <= 255
@@ -75,7 +80,11 @@ def _validate_launch(value: dict[str, object]) -> None:
     shell = _object(value["shell"], frozenset({"requested", "resolved_executable", "login", "interactive"}))
     owner = _object(value["owner"], frozenset({"kind", "owner_id"}))
 
-    if target["kind"] not in ("vm", "platform-host") or not _identity_text(target["name"]):
+    if (
+        type(target["kind"]) is not str
+        or target["kind"] not in ("vm", "platform-host")
+        or not _identity_text(target["name"])
+    ):
         raise ManagedJobWireError("invalid target identity")
     if type(target["incarnation"]) is not str or _INCARNATION.fullmatch(target["incarnation"]) is None:
         raise ManagedJobWireError("invalid target incarnation")
@@ -86,18 +95,10 @@ def _validate_launch(value: dict[str, object]) -> None:
     except (ValueError, AttributeError):
         raise ManagedJobWireError("invalid target boot identity") from None
 
-    groups = workload["groups"]
-    if (
-        not _integer(workload["euid"], 2**32 - 1)
-        or not _integer(workload["egid"], 2**32 - 1)
-        or type(groups) is not list
-        or not groups
-        or len(groups) > 65_536
-        or any(not _integer(group, 2**32 - 1) for group in groups)
-        or groups != sorted(set(groups))
-        or workload["egid"] not in groups
-    ):
-        raise ManagedJobWireError("invalid workload identity")
+    try:
+        decode_identity(workload)
+    except ValueError:
+        raise ManagedJobWireError("invalid workload identity") from None
 
     requested = shell["requested"]
     if type(shell["login"]) is not bool or type(shell["interactive"]) is not bool:
@@ -105,12 +106,20 @@ def _validate_launch(value: dict[str, object]) -> None:
     if requested is None:
         if shell["resolved_executable"] is not None or shell["login"] or shell["interactive"]:
             raise ManagedJobWireError("invalid literal-command shell identity")
-    elif requested not in ("sh", "bash", "user_default") or not _shell_path(shell["resolved_executable"]):
+    elif (
+        type(requested) is not str
+        or requested not in ("sh", "bash", "user_default")
+        or not canonical_shell_path(shell["resolved_executable"])
+    ):
         raise ManagedJobWireError("invalid shell identity")
 
     owner_kind = owner["kind"]
     lifetime = value["lifetime"]
-    if (owner_kind, lifetime) not in (("operation", "operation"), ("resource", "independent")):
+    if (
+        type(owner_kind) is not str
+        or type(lifetime) is not str
+        or (owner_kind, lifetime) not in (("operation", "operation"), ("resource", "independent"))
+    ):
         raise ManagedJobWireError("invalid owner lifetime")
     owner_id = owner["owner_id"]
     if owner_kind == "operation":
@@ -121,6 +130,7 @@ def _validate_launch(value: dict[str, object]) -> None:
     if (
         type(value["profile_revision"]) is not int
         or value["profile_revision"] != 1
+        or type(value["receipt_namespace"]) is not str
         or value["receipt_namespace"] != "agentworks-managed-runs-v1"
         or type(value["receipt_protocol_version"]) is not int
         or value["receipt_protocol_version"] != 1
@@ -164,10 +174,12 @@ def _validate_fact(value: object) -> dict[str, object]:
         retained_hash = value["retained_sha256"]
         disposition = value["disposition"]
         if (
-            value["stream"] not in ("stdout", "stderr")
+            type(value["stream"]) is not str
+            or value["stream"] not in ("stdout", "stderr")
             or not _integer(length, 2**63 - 1)
             or type(retained_hash) is not str
             or _HASH.fullmatch(retained_hash) is None
+            or type(disposition) is not str
             or disposition not in ("complete-capture", "truncated-capture", "discarded", "sensitivity-suppressed")
             or (length == 0 and retained_hash != _EMPTY_HASH)
             or (disposition in ("discarded", "sensitivity-suppressed") and length != 0)
@@ -209,6 +221,6 @@ def decode_fact(data: bytes) -> dict[str, object]:
 
 def launch_sha256(value: dict[str, object]) -> str:
     """Digest a validated canonical primitive launch fact."""
-    if type(value) is not dict or value.get("kind") != "launch":
+    if type(value) is not dict or type(value.get("kind")) is not str or value["kind"] != "launch":
         raise ManagedJobWireError("expected launch fact")
     return hashlib.sha256(encode_fact(value)).hexdigest()

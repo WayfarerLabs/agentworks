@@ -391,3 +391,28 @@ def test_concurrent_exact_reconciliation_is_idempotent(tmp_path: Path) -> None:
 def test_resolved_shell_identity_requires_canonical_safe_absolute_path(path: str) -> None:
     with pytest.raises(ValidationError):
         ManagedShellIdentity(Shell.SH, path)
+
+
+def test_managed_run_string_boundaries_require_exact_str() -> None:
+    class StringSubclass(str):
+        pass
+
+    with pytest.raises(ValidationError):
+        ManagedRunIdentity(StringSubclass("1" * 32))
+    for name, incarnation, boot_id in (
+        (StringSubclass("vm-one"), _INCARNATION, _BOOT_ID),
+        ("vm-one", StringSubclass(_INCARNATION), _BOOT_ID),
+        ("vm-one", _INCARNATION, StringSubclass(_BOOT_ID)),
+    ):
+        with pytest.raises(ValidationError):
+            ManagedTargetIdentity(ManagedTargetKind.VM, name, incarnation, boot_id)
+    with pytest.raises(ValidationError):
+        ManagedShellIdentity(Shell.SH, StringSubclass("/bin/sh"))
+    with pytest.raises(ValidationError):
+        ManagedRunOwner(ManagedRunOwnerKind.OPERATION, StringSubclass(_OPERATION_ID))
+    with pytest.raises(ValidationError):
+        ManagedRunOwner(ManagedRunOwnerKind.RESOURCE, StringSubclass("session-7"))
+    with pytest.raises(ValidationError):
+        replace(_spec(), receipt_namespace=StringSubclass(MANAGED_RECEIPT_NAMESPACE))
+    with pytest.raises(ValidationError):
+        ManagedRunReceipt(_RUN_ID, StringSubclass(_RUN_ID.unit_name), _spec())

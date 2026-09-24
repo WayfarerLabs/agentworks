@@ -215,11 +215,12 @@ its permissions, producer ordering and crash recovery remain to be implemented a
 The stream fact is self-describing. The first consuming service must persist and compare the
 requested output policy before treating its disposition as fulfillment; this checkpoint adds no
 unused database field or migration. `_managed_job_wire.py` now owns the complete canonical byte
-schema as a standalone Python 3.11-compatible stdlib module. The host typed adapter delegates
-encoding, decoding and launch digest to it. Exact-source subprocess tests prove byte round trips
-under Python 3.11 when installed. The target producer/service still needs to bundle that source
-verbatim and prove it in its own launch and observation paths. Requested-policy persistence,
-protected store, cgroup/systemd launch, carrier proof and live validation remain open.
+schema as a Python 3.11-compatible stdlib module that reuses the portable `_helper_identity.py`
+validator. The host typed adapter delegates encoding, decoding and launch digest to it. Exact-source
+bundle tests prove byte round trips under Python 3.11 when installed. The target producer/service
+still needs to bundle those sources verbatim and prove them in its own launch and observation paths.
+Requested-policy persistence, protected store, cgroup/systemd launch, carrier proof and live
+validation remain open.
 
 The first private end-to-end managed-job slice may enable only `INDEPENDENT`, whose target-owned
 evidence survives observer loss. `OPERATION` must refuse before dispatch until target-side owner

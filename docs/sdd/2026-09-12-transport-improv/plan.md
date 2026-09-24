@@ -1260,11 +1260,11 @@ connection and trust only. Before broader lifecycle implementation, complete the
       independent lifetime. Store, target service, operation lease/cleanup, requested-policy
       persistence/comparison, target-producer parity, carrier proof, public jobs and live lifecycle
       validation remain open.
-- [x] Extract the canonical managed-job v1 byte schema into one standalone Python 3.11 stdlib module
-      and route the host typed adapter through it. Exact-source subprocess parity covers launch,
-      both wait outcomes, all four stream dispositions and boundary-empty facts. The target
-      producer/service, requested-policy persistence, protected store, cgroup/systemd launch,
-      carrier proof and live validation remain open.
+- [x] Extract the canonical managed-job v1 byte schema into one Python 3.11 stdlib module that
+      reuses the portable identity helper, and route the host typed adapter through it. Exact-source
+      bundle parity covers launch, both wait outcomes, all four stream dispositions and
+      boundary-empty facts. The target producer/service, requested-policy persistence, protected
+      store, cgroup/systemd launch, carrier proof and live validation remain open.
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared
       create bootstrap. Migration 41 leaves legacy rows NULL; ordinary existing-VM operations never

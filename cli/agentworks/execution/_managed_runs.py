@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING, Never, Protocol, cast
 from uuid import UUID
 
 from agentworks.errors import BusyStateError, StateError, ValidationError
-from agentworks.execution._file_paths import normalized_root
 from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._managed_job_wire import canonical_shell_path
 from agentworks.execution.carrier import Dispatch
 from agentworks.execution.models import Shell
 
@@ -78,7 +78,7 @@ class ManagedRunIdentity:
     run_id: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.run_id, str) or _RUN_ID.fullmatch(self.run_id) is None:
+        if type(self.run_id) is not str or _RUN_ID.fullmatch(self.run_id) is None:
             raise ValidationError("Managed run identity must be 32 lowercase hexadecimal characters")
 
     @classmethod
@@ -109,9 +109,9 @@ class ManagedTargetIdentity:
         if not isinstance(self.kind, ManagedTargetKind):
             raise ValidationError("Managed target kind is invalid")
         _validate_identity_text(self.name, "target name")
-        if not isinstance(self.incarnation, str) or _INCARNATION.fullmatch(self.incarnation) is None:
+        if type(self.incarnation) is not str or _INCARNATION.fullmatch(self.incarnation) is None:
             raise ValidationError("Target incarnation must use the versioned fingerprint codec")
-        if not isinstance(self.boot_id, str):
+        if type(self.boot_id) is not str:
             raise ValidationError("Target boot identity is invalid")
         try:
             parsed_boot_id = UUID(self.boot_id)
@@ -139,21 +139,8 @@ class ManagedShellIdentity:
             if self.resolved_executable is not None or self.login or self.interactive:
                 raise ValidationError("Literal command launch cannot carry shell startup identity")
             return
-        if not isinstance(self.resolved_executable, str):
-            raise ValidationError("Managed script launch requires an exact resolved shell executable")
-        try:
-            encoded = self.resolved_executable.encode("utf-8")
-        except UnicodeEncodeError:
-            encoded = b""
-        if (
-            self.resolved_executable == "/"
-            or not normalized_root(self.resolved_executable)
-            or not self.resolved_executable.isprintable()
-            or not encoded
-        ):
+        if not canonical_shell_path(self.resolved_executable):
             raise ValidationError("Resolved shell executable must be a canonical absolute POSIX path")
-        if len(encoded) > 255:
-            raise ValidationError("Resolved shell executable exceeds the identity bound")
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,7 +154,7 @@ class ManagedRunOwner:
         if not isinstance(self.kind, ManagedRunOwnerKind):
             raise ValidationError("Managed run owner kind is invalid")
         if self.kind is ManagedRunOwnerKind.OPERATION:
-            if not isinstance(self.owner_id, str) or _RUN_ID.fullmatch(self.owner_id) is None:
+            if type(self.owner_id) is not str or _RUN_ID.fullmatch(self.owner_id) is None:
                 raise ValidationError("Operation-owned managed runs require an exact operation identity")
         else:
             _validate_identity_text(self.owner_id, "managed run resource owner")
@@ -203,7 +190,7 @@ class ManagedRunSpec:
             raise ValidationError("Managed run lifetime does not match its owner kind")
         if type(self.managed_profile_revision) is not int or self.managed_profile_revision != MANAGED_PROFILE_REVISION:
             raise ValidationError("Managed run profile revision is unsupported")
-        if self.receipt_namespace != MANAGED_RECEIPT_NAMESPACE:
+        if type(self.receipt_namespace) is not str or self.receipt_namespace != MANAGED_RECEIPT_NAMESPACE:
             raise ValidationError("Managed run receipt namespace is unsupported")
         if (
             type(self.receipt_protocol_version) is not int
@@ -255,7 +242,7 @@ class ManagedRunReceiptAbsent:
             raise ValidationError("Managed receipt absence identity is invalid")
         if not isinstance(self.target, ManagedTargetIdentity):
             raise ValidationError("Managed receipt absence requires an exact target identity")
-        if self.receipt_namespace != MANAGED_RECEIPT_NAMESPACE:
+        if type(self.receipt_namespace) is not str or self.receipt_namespace != MANAGED_RECEIPT_NAMESPACE:
             raise ValidationError("Managed receipt absence namespace is unsupported")
         if self.receipt_protocol_version != MANAGED_RECEIPT_PROTOCOL_VERSION:
             raise ValidationError("Managed receipt absence protocol is unsupported")
@@ -563,7 +550,7 @@ def _validate_expected_record(record: object) -> None:
 
 
 def _validate_identity_text(value: object, label: str) -> None:
-    if not isinstance(value, str) or _SAFE_IDENTITY.fullmatch(value) is None or len(value.encode("utf-8")) > 255:
+    if type(value) is not str or _SAFE_IDENTITY.fullmatch(value) is None or len(value.encode("utf-8")) > 255:
         raise ValidationError(f"{label.capitalize()} is invalid")
 
 
@@ -604,7 +591,7 @@ def _decode_groups(value: object) -> tuple[int, ...]:
 
 def _is_managed_unit_name(value: object) -> bool:
     return (
-        isinstance(value, str)
+        type(value) is str
         and value.startswith(_UNIT_PREFIX)
         and value.endswith(".service")
         and _RUN_ID.fullmatch(value[len(_UNIT_PREFIX) : -len(".service")]) is not None

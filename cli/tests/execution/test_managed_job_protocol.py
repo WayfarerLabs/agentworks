@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.execution import _managed_job_wire as wire
+from agentworks.execution._helper_bundle import build_helper_modules
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._managed_job_protocol import (
     MAX_MANAGED_JOB_FACT_BYTES,
@@ -38,8 +39,6 @@ from agentworks.execution._managed_runs import (
     ManagedTargetKind,
 )
 from agentworks.execution.models import Shell
-
-WIRE_PATH = Path(__file__).parents[2] / "agentworks" / "execution" / "_managed_job_wire.py"
 
 
 def _receipt() -> ManagedRunReceipt:
@@ -252,30 +251,89 @@ def test_cross_run_binding_fails() -> None:
     assert not fact_matches_receipt(fact, receipt)
 
 
+def test_typed_fact_constructors_refuse_invalid_evidence() -> None:
+    receipt = _receipt()
+    digest = managed_launch_receipt_sha256(receipt)
+    with pytest.raises(ManagedJobFactError):
+        WorkloadWaitFact(receipt.identity, receipt.unit_name, digest, exit_code=0, signal=9)
+    with pytest.raises(ManagedJobFactError):
+        StreamEndFact(
+            receipt.identity,
+            receipt.unit_name,
+            digest,
+            StreamName.STDOUT,
+            1,
+            hashlib.sha256(b"x").hexdigest(),
+            StreamDisposition.DISCARDED,
+        )
+    with pytest.raises(ManagedJobFactError):
+        BoundaryEmptyFact(receipt.identity, "agw-managed-" + "2" * 32 + ".service", digest)
+
+
+@pytest.mark.parametrize(
+    ("fact_index", "field_path"),
+    [
+        (0, ("kind",)),
+        (0, ("target", "kind")),
+        (0, ("shell", "requested")),
+        (0, ("owner", "kind")),
+        (0, ("lifetime",)),
+        (0, ("receipt_namespace",)),
+        (3, ("stream",)),
+        (3, ("disposition",)),
+    ],
+)
+def test_wire_rejects_equal_str_subclasses(fact_index: int, field_path: tuple[str, ...]) -> None:
+    class StringSubclass(str):
+        pass
+
+    value = json.loads(encode_managed_job_fact(_facts()[fact_index]))
+    parent = value
+    for field in field_path[:-1]:
+        parent = parent[field]
+    field = field_path[-1]
+    parent[field] = StringSubclass(parent[field])
+    with pytest.raises(wire.ManagedJobWireError):
+        wire.encode_fact(value)
+
+
+def test_wire_rejects_str_subclass_field_name() -> None:
+    class StringSubclass(str):
+        pass
+
+    value = wire.decode_fact(encode_managed_job_fact(_facts()[5]))
+    value[StringSubclass("kind")] = value.pop("kind")
+    with pytest.raises(wire.ManagedJobWireError):
+        wire.encode_fact(value)
+
+
 @pytest.mark.parametrize("interpreter", [Path(sys.executable), Path("/usr/bin/python3.11")])
 def test_exact_portable_source_roundtrips_every_fact(interpreter: Path) -> None:
     if not interpreter.is_file():
         pytest.skip("Python 3.11 compatibility interpreter is unavailable")
-    encoded = [encode_managed_job_fact(fact) for fact in _facts()]
-    script = """
-import hashlib
-import importlib.util
+    new_unicode_receipt = replace(
+        _receipt(), spec=replace(_receipt().spec, shell=ManagedShellIdentity(Shell.SH, "/bin/\U0001fae8"))
+    )
+    encoded = [encode_managed_job_fact(fact) for fact in (*_facts(), new_unicode_receipt)]
+    script = (
+        build_helper_modules("_agw_managed_job", ("_helper_identity", "_managed_job_wire"))
+        + """
 import json
 import sys
 
-spec = importlib.util.spec_from_file_location("_standalone_managed_job_wire", sys.argv[1])
-assert spec is not None and spec.loader is not None
-module = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = module
-spec.loader.exec_module(module)
+module = sys.modules["_agw_managed_job._managed_job_wire"]
 assert "agentworks" not in sys.modules
 facts = [bytes.fromhex(item) for item in json.load(sys.stdin)]
 results = [module.encode_fact(module.decode_fact(item)).hex() for item in facts]
 digest = module.launch_sha256(module.decode_fact(facts[0]))
-print(json.dumps({"facts": results, "digest": digest, "agentworks_loaded": "agentworks" in sys.modules}))
+print(json.dumps({"facts": results, "digest": digest,
+    "new_unicode_path": module.canonical_shell_path("/bin/\U0001fae8"),
+    "control_path": module.canonical_shell_path("/bin/\\x80"),
+    "agentworks_loaded": "agentworks" in sys.modules}))
 """
+    )
     result = subprocess.run(
-        [str(interpreter), "-I", "-S", "-B", "-c", script, str(WIRE_PATH)],
+        [str(interpreter), "-I", "-S", "-B", "-c", script],
         input=json.dumps([item.hex() for item in encoded]).encode(),
         capture_output=True,
         check=True,
@@ -285,6 +343,8 @@ print(json.dumps({"facts": results, "digest": digest, "agentworks_loaded": "agen
     assert json.loads(result.stdout) == {
         "facts": [item.hex() for item in encoded],
         "digest": managed_launch_receipt_sha256(_receipt()),
+        "new_unicode_path": True,
+        "control_path": False,
         "agentworks_loaded": False,
     }
 
