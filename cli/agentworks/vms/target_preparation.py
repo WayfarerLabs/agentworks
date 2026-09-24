@@ -2,31 +2,33 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from agentworks.capabilities.vm_platform.base import ProviderLocatorUnavailable
+from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLocatorUnavailable
 from agentworks.db import OperationResourceKind
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
-from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
+from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState, RuntimeSelection
 from agentworks.execution._vm_guest_identity import (
     VMGuestIdentityObservationResult,
     VMGuestIdentityObservationState,
     observe_vm_guest_identity,
 )
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
-from agentworks.execution.carrier import Dispatch
+from agentworks.execution.binding import NativeExecutionBinding
+from agentworks.execution.carrier import ChannelFeatures, Dispatch
 from agentworks.operations import release_borrow_after_custody
 from agentworks.vms.identity import validate_vm_instance_marker
 from agentworks.vms.target_identity import compose_managed_vm_target_identity
 
 if TYPE_CHECKING:
-    from agentworks.capabilities.vm_platform.base import ProviderLocatorObservation
+    from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.vm_platform.base import ProviderLocatorObservation, VMPlatform
+    from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.execution._managed_runs import ManagedTargetIdentity
-    from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Deadline
     from agentworks.operations import OperationOwner
 
@@ -66,6 +68,18 @@ class VMTargetPreparation:
     pending_remote_effects: bool = False
     coordination_uncertain: bool = False
     requires_owner_retention: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SelectedPlatformVMTargetPreparation:
+    """Selected platform facts, with a passive binding only on success."""
+
+    preparation: VMTargetPreparation
+    binding: NativeExecutionBinding | None = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if (self.preparation.status is VMTargetPreparationStatus.PREPARED) != (self.binding is not None):
+            raise ValidationError("Prepared platform target requires exactly one native binding")
 
 
 class VMTargetPreparationControlFact(Exception):
@@ -110,6 +124,53 @@ class _State:
         )
 
 
+def prepare_managed_vm_target_from_platform(
+    vm: VMRow,
+    platform: VMPlatform,
+    ctx: RunContext,
+    *,
+    deadline: Deadline,
+    owner: OperationOwner,
+    config: Config | None = None,
+) -> SelectedPlatformVMTargetPreparation:
+    """Compose a selected VM target from one bound platform under existing custody.
+
+    Platform observations are plugin results. Validate their shapes before they
+    reach the guest preparer; this function owns no activation or outer owner.
+    """
+    _validate_operation_boundary(vm, deadline, owner)
+    if platform.site_name != vm.site:
+        raise ValidationError("Managed VM target preparation requires the VM's bound platform")
+    preflight = _preflight_marker_and_deadline(vm, deadline)
+    if preflight is not None:
+        return SelectedPlatformVMTargetPreparation(preflight, None)
+
+    locator = platform.observe_provider_locator(vm, ctx, deadline=deadline)
+    if deadline.expired:
+        return SelectedPlatformVMTargetPreparation(
+            _failed(VMTargetPreparationFailure.DEADLINE, deadline_exceeded=True), None
+        )
+    if type(locator) is ProviderLocatorUnavailable:
+        return SelectedPlatformVMTargetPreparation(_failed(VMTargetPreparationFailure.LOCATOR_UNAVAILABLE), None)
+    if type(locator) is not ProviderLocator:
+        raise ValidationError("VM platform returned an invalid provider locator observation")
+    token = getattr(locator, "token", None)
+    if type(token) is not str:
+        raise ValidationError("VM platform returned an invalid provider locator token")
+    locator = ProviderLocator(token)
+
+    binding = platform.resolve_native_execution_binding(vm, ctx, deadline=deadline, config=config)
+    if deadline.expired:
+        return SelectedPlatformVMTargetPreparation(
+            _failed(VMTargetPreparationFailure.DEADLINE, deadline_exceeded=True), None
+        )
+    binding = _validated_native_binding(binding)
+    preparation = prepare_managed_vm_target(vm, locator, binding, deadline=deadline, owner=owner)
+    return SelectedPlatformVMTargetPreparation(
+        preparation, binding if preparation.status is VMTargetPreparationStatus.PREPARED else None
+    )
+
+
 def prepare_managed_vm_target(
     vm: VMRow,
     locator: ProviderLocatorObservation,
@@ -127,11 +188,9 @@ def prepare_managed_vm_target(
     _validate_operation_boundary(vm, deadline, owner)
     if type(locator) is ProviderLocatorUnavailable:
         return _failed(VMTargetPreparationFailure.LOCATOR_UNAVAILABLE)
-    if vm.instance_marker is None:
-        return _failed(VMTargetPreparationFailure.MARKER_MISSING)
-    validate_vm_instance_marker(vm.instance_marker)
-    if deadline.expired:
-        return _failed(VMTargetPreparationFailure.DEADLINE, deadline_exceeded=True)
+    preflight = _preflight_marker_and_deadline(vm, deadline)
+    if preflight is not None:
+        return preflight
 
     borrow = owner.borrow()
     operation = BorrowedFixedHelperCarrier(binding.carrier, borrow)
@@ -210,6 +269,15 @@ def _record_deadline(state: _State, deadline: Deadline) -> bool:
     return True
 
 
+def _preflight_marker_and_deadline(vm: VMRow, deadline: Deadline) -> VMTargetPreparation | None:
+    if vm.instance_marker is None:
+        return _failed(VMTargetPreparationFailure.MARKER_MISSING)
+    validate_vm_instance_marker(vm.instance_marker)
+    if deadline.expired:
+        return _failed(VMTargetPreparationFailure.DEADLINE, deadline_exceeded=True)
+    return None
+
+
 def _validate_operation_boundary(
     vm: VMRow,
     deadline: Deadline,
@@ -220,3 +288,25 @@ def _validate_operation_boundary(
     scope = owner.ownership.scope
     if scope.resource_kind is not OperationResourceKind.VM or scope.resource_name != vm.name:
         raise ValidationError("Managed VM target preparation requires ownership of the exact VM")
+
+
+def _validated_native_binding(binding: object) -> NativeExecutionBinding:
+    """Reconstruct plugin binding facts before any guest attempt or borrow."""
+    if type(binding) is not NativeExecutionBinding:
+        raise ValidationError("VM platform returned an invalid native execution binding")
+    selection = getattr(binding, "runtime_selection", None)
+    if type(selection) is not RuntimeSelection:
+        raise ValidationError("VM platform returned an invalid native runtime selection")
+    try:
+        selection = RuntimeSelection(selection.target_os, selection.explicit_path)
+        validated = NativeExecutionBinding(binding.carrier, binding.delivery_account, selection)
+    except AttributeError as error:
+        raise ValidationError("VM platform returned an incomplete native execution binding") from error
+    carrier = validated.carrier
+    if (
+        not callable(getattr(carrier, "validate", None))
+        or not callable(getattr(carrier, "execute", None))
+        or type(getattr(carrier, "features", None)) is not ChannelFeatures
+    ):
+        raise ValidationError("VM platform returned an invalid native execution carrier")
+    return validated

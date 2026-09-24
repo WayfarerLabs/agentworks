@@ -446,11 +446,19 @@ malformed evidence before borrowing, makes one serialized helper attempt, record
 before settlement and retains the operation after uncertain dispatch or control flow. Normal helper
 completion may settle that attempt while preparation still rejects an invalid observation, runtime
 refusal, carrier failure or identity mismatch. The helper neither acquires nor closes the outer
-owner and performs no activation, route selection, platform lookup, adoption or persistence.
-Production composition therefore still needs an owner acquired before activation plus typed
-whole-span lifecycle and cleanup evidence; legacy lifecycle returns cannot close that gate. Future
-hierarchical admission replaces exact-VM equality with a core-owned coverage decision rather than a
-target-local ancestry guess.
+owner and performs no activation, route selection, adoption or persistence. A second private seam
+accepts the selected VM, its bound platform and existing run context, then validates owner, marker
+and deadline before platform I/O. It observes the provider locator and resolves the native binding
+under the same finite deadline, validates plugin-returned shapes, and rejects late results before
+the next stage or guest dispatch. An unavailable locator retains its typed refusal without binding
+resolution. WSL2 can currently supply both positive facts; Proxmox returns locator unavailable,
+while SSH-backed cloud and Lima bindings remain later work. These are hermetic composition facts,
+not live carrier proof. The selected-platform result retains the validated passive binding only when
+preparation succeeds, so later private composition can use the same delivery facts without resolving
+them again. Production composition therefore still needs an owner acquired before activation plus
+typed whole-span lifecycle and cleanup evidence; legacy lifecycle returns cannot close that gate.
+Future hierarchical admission replaces exact-VM equality with a core-owned coverage decision rather
+than a target-local ancestry guess.
 
 New VM creation generates and persists one non-secret marker before provider dispatch. The marker is
 exactly 32 lowercase hexadecimal characters and the shared create bootstrap writes that same value

@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+from unittest.mock import Mock
 
 import pytest
 
-from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLocatorUnavailable
+from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLocatorUnavailable, VMPlatform
 from agentworks.db import Database, OperationClaimState, OperationResourceKind, OperationScope, VMRow
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+from agentworks.execution._vm_guest_identity import VMGuestIdentityObservationResult, observe_vm_guest_identity
 from agentworks.execution._vm_guest_identity_protocol import (
     VMGuestIdentity,
     VMGuestIdentityFailure,
@@ -20,6 +22,7 @@ from agentworks.execution._vm_guest_identity_protocol import (
 from agentworks.execution.binding import NativeExecutionBinding
 from agentworks.execution.carrier import (
     CapturedOutput,
+    Carrier,
     CarrierIO,
     CarrierReport,
     ChannelFeatures,
@@ -32,11 +35,15 @@ from agentworks.execution.carrier import (
     SinkOutput,
 )
 from agentworks.operations import OperationOwner
+from agentworks.vms.target_identity import compose_managed_vm_target_identity
 from agentworks.vms.target_preparation import (
+    SelectedPlatformVMTargetPreparation,
+    VMTargetPreparation,
     VMTargetPreparationControlFact,
     VMTargetPreparationFailure,
     VMTargetPreparationStatus,
     prepare_managed_vm_target,
+    prepare_managed_vm_target_from_platform,
 )
 
 if TYPE_CHECKING:
@@ -155,6 +162,28 @@ def _prepare(
         _binding(carrier),
         deadline=deadline or Deadline.after(10),
         owner=owner,
+    )
+
+
+def _platform(carrier: TranscriptCarrier) -> Mock:
+    platform = Mock(spec=VMPlatform)
+    platform.site_name = "local"
+    platform.observe_provider_locator.return_value = ProviderLocator("opaque")
+    platform.resolve_native_execution_binding.return_value = _binding(carrier)
+    return platform
+
+
+def _compose(
+    owner: OperationOwner,
+    platform: Mock,
+    *,
+    vm: VMRow | None = None,
+    deadline: Deadline | None = None,
+    ctx: object = None,
+    config: object = None,
+):
+    return prepare_managed_vm_target_from_platform(
+        vm or _vm(), platform, ctx, deadline=deadline or Deadline.after(10), owner=owner, config=config
     )
 
 
@@ -489,3 +518,268 @@ def test_rejects_unbounded_deadline_before_borrow_or_dispatch(
     assert claim is not None
     assert claim.state is OperationClaimState.RESERVED
     owner.close()
+
+
+@pytest.mark.parametrize("reason", ["wrong_owner", "missing_marker", "malformed_marker", "expired"])
+def test_platform_preflight_refuses_before_any_io_or_borrow(
+    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch, reason: str
+) -> None:
+    database, owner = owned
+    carrier = TranscriptCarrier(_success_payload())
+    platform = _platform(carrier)
+    vm = _vm(marker=None if reason == "missing_marker" else "invalid" if reason == "malformed_marker" else _MARKER)
+    deadline = Deadline.after(0 if reason == "expired" else 10)
+    selected_owner = owner
+    if reason == "wrong_owner":
+        selected_owner = OperationOwner.acquire(
+            database.operations, OperationScope(OperationResourceKind.VM, "other"), "target-preparation"
+        )
+    borrow = Mock(wraps=OperationOwner.borrow)
+    monkeypatch.setattr(OperationOwner, "borrow", borrow)
+    try:
+        if reason in {"wrong_owner", "malformed_marker"}:
+            with pytest.raises(ValidationError):
+                _compose(selected_owner, platform, vm=vm, deadline=deadline)
+        else:
+            result = _compose(selected_owner, platform, vm=vm, deadline=deadline)
+            assert result.preparation.failure is (
+                VMTargetPreparationFailure.DEADLINE
+                if reason == "expired"
+                else VMTargetPreparationFailure.MARKER_MISSING
+            )
+            assert result.binding is None
+        platform.observe_provider_locator.assert_not_called()
+        platform.resolve_native_execution_binding.assert_not_called()
+        assert carrier.calls == 0
+        borrow.assert_not_called()
+    finally:
+        if selected_owner is not owner:
+            selected_owner.close()
+        owner.close()
+
+
+def test_platform_locator_unavailable_skips_binding_and_borrow(
+    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, owner = owned
+    monkeypatch.setattr(OperationOwner, "borrow", lambda self: pytest.fail("unexpected borrow"))
+    carrier = TranscriptCarrier(_success_payload())
+    platform = _platform(carrier)
+    platform.observe_provider_locator.return_value = ProviderLocatorUnavailable()
+
+    result = _compose(owner, platform)
+
+    assert result.preparation.failure is VMTargetPreparationFailure.LOCATOR_UNAVAILABLE
+    assert result.binding is None
+    platform.resolve_native_execution_binding.assert_not_called()
+    assert carrier.calls == 0
+    owner.close()
+
+
+@pytest.mark.parametrize("bad_locator", [None, object(), "opaque", object.__new__(ProviderLocator)])
+def test_invalid_platform_locator_shape_refuses_before_binding(
+    owned: tuple[Database, OperationOwner], bad_locator: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, owner = owned
+    monkeypatch.setattr(OperationOwner, "borrow", lambda self: pytest.fail("unexpected borrow"))
+    platform = _platform(TranscriptCarrier(_success_payload()))
+    platform.observe_provider_locator.return_value = bad_locator
+    with pytest.raises(ValidationError):
+        _compose(owner, platform)
+    platform.resolve_native_execution_binding.assert_not_called()
+    owner.close()
+
+
+def test_forged_locator_and_binding_are_revalidated_at_plugin_boundary(
+    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, owner = owned
+    monkeypatch.setattr(OperationOwner, "borrow", lambda self: pytest.fail("unexpected borrow"))
+    carrier = TranscriptCarrier(_success_payload())
+    platform = _platform(carrier)
+    locator = ProviderLocator("opaque")
+    object.__setattr__(locator, "token", "")
+    platform.observe_provider_locator.return_value = locator
+    with pytest.raises(ValidationError):
+        _compose(owner, platform)
+    platform.resolve_native_execution_binding.assert_not_called()
+
+    platform.observe_provider_locator.return_value = ProviderLocator("opaque")
+    binding = _binding(carrier)
+    object.__setattr__(binding, "delivery_account", "")
+    platform.resolve_native_execution_binding.return_value = binding
+    with pytest.raises(ValidationError):
+        _compose(owner, platform)
+
+    runtime = _runtime()
+    object.__setattr__(runtime, "explicit_path", "relative")
+    platform.resolve_native_execution_binding.return_value = NativeExecutionBinding(carrier, "admin", runtime)
+    with pytest.raises(ValidationError):
+        _compose(owner, platform)
+    assert carrier.calls == 0
+    owner.close()
+
+
+@pytest.mark.parametrize("bad_binding", [None, object(), "binding", object.__new__(NativeExecutionBinding)])
+def test_invalid_platform_binding_shape_refuses_before_guest(
+    owned: tuple[Database, OperationOwner], bad_binding: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, owner = owned
+    monkeypatch.setattr(OperationOwner, "borrow", lambda self: pytest.fail("unexpected borrow"))
+    carrier = TranscriptCarrier(_success_payload())
+    platform = _platform(carrier)
+    platform.resolve_native_execution_binding.return_value = bad_binding
+    with pytest.raises(ValidationError):
+        _compose(owner, platform)
+    assert carrier.calls == 0
+    owner.close()
+
+
+def test_invalid_plugin_carrier_refuses_before_borrow(
+    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, owner = owned
+    monkeypatch.setattr(OperationOwner, "borrow", lambda self: pytest.fail("unexpected borrow"))
+    platform = _platform(TranscriptCarrier(_success_payload()))
+    platform.resolve_native_execution_binding.return_value = NativeExecutionBinding(object(), "admin", _runtime())
+    with pytest.raises(ValidationError):
+        _compose(owner, platform)
+    owner.close()
+
+
+def test_selected_platform_must_be_bound_to_vm_site(owned: tuple[Database, OperationOwner]) -> None:
+    _, owner = owned
+    platform = _platform(TranscriptCarrier(_success_payload()))
+    platform.site_name = "other"
+    with pytest.raises(ValidationError):
+        _compose(owner, platform)
+    platform.observe_provider_locator.assert_not_called()
+    owner.close()
+
+
+@pytest.mark.parametrize("stage", ["locator", "binding"])
+def test_platform_exception_does_not_borrow(
+    owned: tuple[Database, OperationOwner], stage: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, owner = owned
+    carrier = TranscriptCarrier(_success_payload())
+    platform = _platform(carrier)
+    getattr(
+        platform, "observe_provider_locator" if stage == "locator" else "resolve_native_execution_binding"
+    ).side_effect = ControlStop()
+    borrow = Mock(wraps=OperationOwner.borrow)
+    monkeypatch.setattr(OperationOwner, "borrow", borrow)
+    with pytest.raises(ControlStop):
+        _compose(owner, platform)
+    borrow.assert_not_called()
+    assert carrier.calls == 0
+    owner.close()
+
+
+@pytest.mark.parametrize("stage", ["locator", "binding"])
+def test_platform_late_result_refuses_before_next_stage(
+    owned: tuple[Database, OperationOwner], stage: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, owner = owned
+    monkeypatch.setattr(OperationOwner, "borrow", lambda self: pytest.fail("unexpected borrow"))
+    carrier = TranscriptCarrier(_success_payload())
+    platform = _platform(carrier)
+    deadline = Deadline.after(10)
+
+    def expire(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        object.__setattr__(deadline, "expires_at", 0.0)
+        return ProviderLocator("opaque") if stage == "locator" else _binding(carrier)
+
+    getattr(
+        platform, "observe_provider_locator" if stage == "locator" else "resolve_native_execution_binding"
+    ).side_effect = expire
+    result = _compose(owner, platform, deadline=deadline)
+    assert result.preparation.failure is VMTargetPreparationFailure.DEADLINE
+    assert result.preparation.deadline_exceeded
+    assert result.binding is None
+    if stage == "locator":
+        platform.resolve_native_execution_binding.assert_not_called()
+    assert carrier.calls == 0
+    owner.close()
+
+
+def test_platform_composition_passes_exact_inputs_and_leaves_outer_owner_open(
+    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, owner = owned
+    carrier = TranscriptCarrier(_success_payload(), deadlines=[])
+    platform = _platform(carrier)
+    ctx = object()
+    config = object()
+    deadline = Deadline.after(10)
+    borrow_count = 0
+    probe_selection: RuntimeSelection | None = None
+    probe_carrier: Carrier | None = None
+    original_borrow = OperationOwner.borrow
+
+    def borrow(self: OperationOwner):
+        nonlocal borrow_count
+        borrow_count += 1
+        return original_borrow(self)
+
+    def probe(
+        selected_carrier: Carrier, *, runtime_selection: RuntimeSelection, deadline: Deadline
+    ) -> VMGuestIdentityObservationResult:
+        nonlocal probe_selection, probe_carrier
+        probe_selection = runtime_selection
+        probe_carrier = selected_carrier
+        return observe_vm_guest_identity(selected_carrier, runtime_selection=runtime_selection, deadline=deadline)
+
+    monkeypatch.setattr(OperationOwner, "borrow", borrow)
+    monkeypatch.setattr("agentworks.vms.target_preparation.observe_vm_guest_identity", probe)
+    result = _compose(owner, platform, ctx=ctx, config=config, deadline=deadline)
+
+    assert result.preparation.status is VMTargetPreparationStatus.PREPARED
+    assert result.preparation.target == compose_managed_vm_target_identity(
+        _vm(), ProviderLocator("opaque"), VMGuestIdentity(_MARKER, _BOOT_ID)
+    )
+    assert result.binding is not None
+    assert result.binding.carrier is carrier
+    assert result.binding.delivery_account == "admin"
+    assert result.binding.runtime_selection == _runtime()
+    assert result.binding.runtime_selection is probe_selection
+    assert probe_carrier is not None
+    assert result.binding is not platform.resolve_native_execution_binding.return_value
+    assert "binding" not in repr(result)
+    assert carrier.calls == 1
+    assert carrier.deadlines == [deadline]
+    assert borrow_count == 1
+    platform.observe_provider_locator.assert_called_once_with(_vm(), ctx, deadline=deadline)
+    platform.resolve_native_execution_binding.assert_called_once_with(_vm(), ctx, deadline=deadline, config=config)
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+@pytest.mark.parametrize("report", [CarrierReport(Dispatch.NOT_SENT), CarrierReport(Dispatch.UNKNOWN)])
+def test_selected_platform_drops_binding_on_failed_or_uncertain_guest_attempt(
+    owned: tuple[Database, OperationOwner], report: CarrierReport
+) -> None:
+    _, owner = owned
+    platform = _platform(TranscriptCarrier(_success_payload(), report))
+
+    result = _compose(owner, platform)
+
+    assert result.preparation.status is not VMTargetPreparationStatus.PREPARED
+    assert result.binding is None
+    if not result.preparation.requires_owner_retention:
+        owner.seal_lifecycle_obligations()
+        owner.record_effects_resolved()
+        owner.close()
+
+
+def test_selected_platform_result_rejects_binding_status_mismatch() -> None:
+    failed = VMTargetPreparation(VMTargetPreparationStatus.FAILED, None, None)
+    prepared = VMTargetPreparation(VMTargetPreparationStatus.PREPARED, None, None)
+    binding = _binding(TranscriptCarrier())
+
+    with pytest.raises(ValidationError):
+        SelectedPlatformVMTargetPreparation(failed, binding)
+    with pytest.raises(ValidationError):
+        SelectedPlatformVMTargetPreparation(prepared, None)

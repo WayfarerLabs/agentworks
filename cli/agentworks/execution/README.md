@@ -332,10 +332,21 @@ marker and composes this identity only when the private guest probe reports the 
 probe makes one bounded, no-replay helper attempt, reads only the fixed marker and Linux boot-ID
 paths, and refuses unsafe marker parents or leaves. An unavailable locator, a legacy NULL marker or
 a mismatched guest marker fails closed, and ordinary composition never creates or adopts a marker.
-This is a private checkpoint only: no production/platform wiring, explicit adoption workflow,
+This is a private checkpoint only: no production wiring, explicit adoption workflow,
 locator-unavailable alternative or public RunContext claim is enabled. This kernel also supplies no
-lease, output retention, application observation, cleanup, stop, disposal, carrier wiring, public
-job reference or RunContext surface.
+lease, output retention, application observation, cleanup, stop, disposal, production carrier
+wiring, public job reference or RunContext surface.
+
+`vms/target_preparation.py` also has a private selected-platform entry point. Given an existing
+exact-VM owner, bound platform, run context and finite deadline, it refuses static prerequisites
+before I/O, observes the locator, then resolves a native binding only for a valid positive locator.
+It validates plugin results and rechecks the same deadline between stages before the existing guest
+preparer borrows once. WSL2 currently has both hooks needed for a positive path; Proxmox returns
+locator unavailable, and SSH-backed cloud and Lima bindings remain future work. This seam has
+hermetic coverage only. Its selected-platform result carries the validated passive native binding
+alongside successful preparation; failed and uncertain results carry no binding. Production
+activation, hold, route and teardown, live WSL/SSH/QGA proof, recovery drain, adoption and public
+RunContext composition remain open.
 
 `_managed_job_wire.py` owns the Python 3.11, stdlib-only canonical version-one byte schema for
 private managed-job facts and reuses the portable `_helper_identity.py` validator. The host
