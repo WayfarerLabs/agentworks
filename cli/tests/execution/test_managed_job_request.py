@@ -189,6 +189,28 @@ def test_fixed_store_partial_idempotence_and_conflict(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux protected store")
+def test_fixed_store_reconciles_private_stage_link_window(tmp_path: Path) -> None:
+    os.chmod(tmp_path, 0o700)
+    fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        with ManagedJobStore(RUN, _namespace="managed-runs-v1", _owner_uid=os.getuid(), _anchor_fd=fd) as store:
+            request = _request()
+            store.publish_request(request)
+            path = tmp_path / "managed-runs-v1" / RUN / RequestAsset.STDIN.value
+            stage = path.with_name(".request-stage-" + "a" * 32)
+            os.link(path, stage)
+
+            assert path.stat().st_nlink == 2
+            assert store.read_request_asset(RequestAsset.STDIN) == request.stdin
+            store.publish_request_asset(RequestAsset.STDIN, request.stdin)
+
+            stage.unlink()
+            assert store.read_request_asset(RequestAsset.STDIN) == request.stdin
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux protected store")
 @pytest.mark.parametrize("strange", ["symlink", "hardlink", "directory", "fifo", "mode"])
 def test_fixed_store_refuses_unsafe_leaf(tmp_path: Path, strange: str) -> None:
     os.chmod(tmp_path, 0o700)

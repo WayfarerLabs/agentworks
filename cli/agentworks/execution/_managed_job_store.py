@@ -61,6 +61,7 @@ class CapturedPrefix:
 
 
 _RUN_ID = re.compile(r"[0-9a-f]{32}\Z")
+_REQUEST_STAGE = re.compile(r"\.request-stage-[0-9a-f]{32}\Z")
 _DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
 _READ_FLAGS = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
 _CREATE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
@@ -101,6 +102,37 @@ def _open_leaf(directory: int, name: str, mode: int, owner: int, *, links: tuple
         os.close(fd)
         raise
     return fd
+
+
+def _open_request_leaf(directory: int, name: str, owner: int) -> int | None:
+    """Accept only a final leaf or its one private publication-stage link."""
+    fd = _open_leaf(directory, name, 0o400, owner, links=(1, 2))
+    if fd is None or os.fstat(fd).st_nlink == 1:
+        return fd
+    final = os.fstat(fd)
+    stage_matches = 0
+    try:
+        for candidate in os.listdir(directory):
+            if _REQUEST_STAGE.fullmatch(candidate) is None:
+                continue
+            try:
+                stage = _open_leaf(directory, candidate, 0o400, owner, links=(2,))
+            except StoreError:
+                continue
+            if stage is None:
+                continue
+            try:
+                observed = os.fstat(stage)
+                if (observed.st_dev, observed.st_ino) == (final.st_dev, final.st_ino):
+                    stage_matches += 1
+            finally:
+                os.close(stage)
+        if stage_matches != 1 and os.fstat(fd).st_nlink != 1:
+            raise StoreError("unsafe request asset link")
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
 
 
 def _read_all(fd: int, bound: int) -> bytes:
@@ -291,7 +323,7 @@ class ManagedJobStore:
         if directory is None:
             return None
         try:
-            fd = _open_leaf(directory, name.value, 0o400, self._owner_uid, links=(1,))
+            fd = _open_request_leaf(directory, name.value, self._owner_uid)
             if fd is None:
                 return None
             try:
