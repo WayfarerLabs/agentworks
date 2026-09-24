@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import gc
 import os
 import subprocess
 import sys
@@ -110,7 +111,7 @@ def test_pinned_identity(ticks: int, wait: int, expected: ControllerPresence) ->
     [
         ([7, IDENTITY.pid, 9], ControllerPresence.UNKNOWN),
         ([7, 9], ControllerPresence.ABSENT_CONFIRMED),
-        ([], ControllerPresence.ABSENT_CONFIRMED),
+        ([], ControllerPresence.UNKNOWN),
     ],
 )
 def test_failed_open_requires_complete_snapshot(pids: list[int], expected: ControllerPresence) -> None:
@@ -238,3 +239,53 @@ def test_native_child_live_then_exited_without_touching_unrelated_process() -> N
         if unrelated.stdin is not None:
             unrelated.stdin.close()
         unrelated.wait(timeout=3)
+
+
+@pytest.mark.windows
+@pytest.mark.skipif(os.name != "nt", reason="requires native Windows process APIs")
+def test_native_toolhelp_fallback_observes_live_and_exited_pids(monkeypatch: pytest.MonkeyPatch) -> None:
+    api = WindowsApi()
+    native_open = api.open_process_for_observation
+
+    def snapshot_pids() -> set[int]:
+        snapshot = api.snapshot_processes()
+        try:
+            pids: set[int] = set()
+            pid = api.first_snapshot_pid(snapshot)
+            while pid is not None:
+                pids.add(pid)
+                pid = api.next_snapshot_pid(snapshot)
+            assert api.ctypes.get_last_error() == api.ERROR_NO_MORE_FILES
+            return pids
+        finally:
+            api.close_handle(snapshot)
+
+    live = ControllerIdentity(*api.current_controller_identity())
+    assert live.pid == os.getpid()
+    assert live.pid in snapshot_pids()
+
+    def exited_child_identity() -> ControllerIdentity:
+        with subprocess.Popen(
+            [sys.executable, "-I", "-S", "-c", "import sys; sys.stdin.buffer.read()"], stdin=subprocess.PIPE
+        ) as child:
+            handle = native_open(child.pid)
+            try:
+                identity = ControllerIdentity(child.pid, api.process_creation_ticks(handle))
+            finally:
+                api.close_handle(handle)
+            assert child.stdin is not None
+            child.stdin.close()
+            child.wait(timeout=3)
+            return identity
+
+    exited = exited_child_identity()
+    gc.collect()  # Release Popen's process handle before the absence snapshot.
+    assert exited.pid not in snapshot_pids()
+
+    def denied_open(_pid: int) -> int:
+        raise PermissionError("forced OpenProcess failure")
+
+    monkeypatch.setattr(api, "open_process_for_observation", denied_open)
+    observer = WindowsControllerObserver(api_factory=lambda: api)
+    assert observer.observe(live, Deadline.after(2)) == ControllerPresence.UNKNOWN
+    assert observer.observe(exited, Deadline.after(2)) == ControllerPresence.ABSENT_CONFIRMED

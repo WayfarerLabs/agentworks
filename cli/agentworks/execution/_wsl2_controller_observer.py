@@ -99,10 +99,13 @@ class WindowsControllerObserver:
         try:
             if not deadline.expired:
                 current = api.first_snapshot_pid(snapshot)
+                saw_process = False
                 while not deadline.expired:
                     if current is None:
-                        result = ControllerPresence.ABSENT_CONFIRMED
+                        if saw_process:
+                            result = ControllerPresence.ABSENT_CONFIRMED
                         break
+                    saw_process = True
                     if current == pid:
                         break
                     current = api.next_snapshot_pid(snapshot)
