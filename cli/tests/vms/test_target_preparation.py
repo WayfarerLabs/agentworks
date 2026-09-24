@@ -905,8 +905,8 @@ def test_second_locator_detects_cooperative_replacement_before_or_during_probe(
     owner.close()
 
 
-@pytest.mark.parametrize("confirmation", ["unavailable", "malformed", "late"])
-def test_second_locator_refuses_unavailable_malformed_or_late_result(
+@pytest.mark.parametrize("confirmation", ["unavailable", "malformed", "exception", "late"])
+def test_second_locator_refuses_unavailable_invalid_exceptional_or_late_result(
     owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch, confirmation: str
 ) -> None:
     _, owner = owned
@@ -924,19 +924,32 @@ def test_second_locator_refuses_unavailable_malformed_or_late_result(
             return ProviderLocator("opaque")
         if confirmation == "unavailable":
             return ProviderLocatorUnavailable()
+        if confirmation == "exception":
+            raise ControlStop()
         return "malformed"
 
     platform.observe_provider_locator.side_effect = observe
     if confirmation == "malformed":
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValidationError) as malformed_raised:
             _compose(owner, platform, deadline=deadline)
+        fact = malformed_raised.value.__cause__
+        assert isinstance(fact, VMTargetPreparationControlFact)
+        assert fact.preparation.failure is VMTargetPreparationFailure.LOCATOR_UNCONFIRMED
+        assert fact.preparation.target is None
+    elif confirmation == "exception":
+        with pytest.raises(ControlStop) as exception_raised:
+            _compose(owner, platform, deadline=deadline)
+        fact = exception_raised.value.__cause__
+        assert isinstance(fact, VMTargetPreparationControlFact)
+        assert fact.preparation.failure is VMTargetPreparationFailure.LOCATOR_UNCONFIRMED
+        assert fact.preparation.target is None
     else:
         result = _compose(owner, platform, deadline=deadline)
         assert result.preparation.status is VMTargetPreparationStatus.FAILED
         assert result.preparation.failure is (
             VMTargetPreparationFailure.DEADLINE
             if confirmation == "late"
-            else VMTargetPreparationFailure.LOCATOR_CHANGED
+            else VMTargetPreparationFailure.LOCATOR_UNCONFIRMED
         )
         assert result.preparation.guest_result is not None
         assert result.preparation.target is None
@@ -1014,7 +1027,7 @@ def test_confirmation_error_and_release_error_preserve_guest_and_control_chain(
     assert fact.preparation.status is VMTargetPreparationStatus.UNCERTAIN
     assert fact.preparation.target is None
     assert fact.preparation.guest_result is not None
-    assert fact.preparation.failure is VMTargetPreparationFailure.LOCATOR_CHANGED
+    assert fact.preparation.failure is VMTargetPreparationFailure.LOCATOR_UNCONFIRMED
     assert fact.preparation.coordination_uncertain
     assert fact.preparation.requires_owner_retention
     original = fact.__cause__

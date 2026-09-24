@@ -45,6 +45,7 @@ class VMTargetPreparationFailure(StrEnum):
     """Closed non-payload reason a VM target was not prepared."""
 
     LOCATOR_UNAVAILABLE = "locator_unavailable"
+    LOCATOR_UNCONFIRMED = "locator_unconfirmed"
     LOCATOR_CHANGED = "locator_changed"
     MARKER_MISSING = "marker_missing"
     DEADLINE = "deadline"
@@ -216,14 +217,16 @@ def _prepare_selected_platform_with_borrow(
             )
         if type(confirmation) is ProviderLocatorUnavailable:
             return SelectedPlatformVMTargetPreparation(
-                _failed_after_guest(preparation, VMTargetPreparationFailure.LOCATOR_CHANGED), None
+                _failed_after_guest(preparation, VMTargetPreparationFailure.LOCATOR_UNCONFIRMED), None
             )
         confirmation = _validated_provider_locator(confirmation)
     except BaseException as control:
         deadline_exceeded = deadline.expired
         fact = _failed_after_guest(
             preparation,
-            VMTargetPreparationFailure.DEADLINE if deadline_exceeded else VMTargetPreparationFailure.LOCATOR_CHANGED,
+            VMTargetPreparationFailure.DEADLINE
+            if deadline_exceeded
+            else VMTargetPreparationFailure.LOCATOR_UNCONFIRMED,
             deadline_exceeded=deadline_exceeded,
         )
         raise control from VMTargetPreparationControlFact(fact)
