@@ -332,7 +332,7 @@ also persists the requested output policy, but a later observer must still compa
 the stream disposition; self-describing facts alone do not prove policy fulfillment. The first
 service slice is limited to independent lifetime until operation-owner liveness and cleanup are
 proved. Later fixed start, observe, read-output, stop and dispose operations must work over both SSH
-and QGA. The target controller, cgroup/systemd launch, carrier proof and live validation remain
+and QGA. Transient-service launch, the carrier exchange, carrier proof and live validation remain
 open.
 
 `_managed_job_request.py` defines the separate private request assets for that independent slice.

@@ -1275,11 +1275,21 @@ connection and trust only. Before broader lifecycle implementation, complete the
       canonical facts reconcile idempotently, conflicts refuse, closed-output reads require the
       matching stream-end fact and strange filesystem objects fail closed. Add no file lock, mutable
       shared status document, arbitrary path surface or automatic expiry.
-- [ ] Build the first fixed target controller bundle for Linux `MANAGED` plus `INDEPENDENT`. Use one
-      root transient notify service and a delegated child workload cgroup; place the gated child,
-      apply and verify its exact groups/GID/UID, publish launch and readiness, then release caller
-      code. Concurrently drain both streams and wait for the main child. On main termination start
-      descendant cleanup while draining continues. Publish wait only for close-on-exec-proved
+- [x] Implement and privately prove the exact-source Python 3.11 target-controller core for Linux
+      `MANAGED` plus `INDEPENDENT`. It consumes the fixed request, requires root and the exact
+      derived delegated service-cgroup membership, gates one child through placement and verified
+      groups/GID/UID, normalizes its signal state, publishes launch before readiness, and then
+      handles finite input, bounded capture/discard, normal-wait evidence and independently bounded
+      cleanup facts. Pre-exec failure, every signaled death and unproved cleanup remain unknown. At
+      `c0b5ba4c`, project, complexity and independent correctness lanes are clean; exact-source
+      Python 3.11 probes and 113 focused reviewer tests pass. This checkpoint does not construct or
+      launch the transient service, prove a live cgroup or identity transition, expose a carrier
+      exchange, or establish production target evidence.
+- [ ] Complete the first fixed target controller service for Linux `MANAGED` plus `INDEPENDENT`. Use
+      one root transient notify service and a delegated child workload cgroup; place the gated
+      child, apply and verify its exact groups/GID/UID, publish launch and readiness, then release
+      caller code. Concurrently drain both streams and wait for the main child. On main termination
+      start descendant cleanup while draining continues. Publish wait only for close-on-exec-proved
       application entry followed by normal exit; preserve exit 126 and leave setup/exec failure or
       any signaled death unknown in this slice. Publish each stream end only after EOF, and publish
       boundary-empty only after `populated 0`. Preserve unknown facts on controller death,

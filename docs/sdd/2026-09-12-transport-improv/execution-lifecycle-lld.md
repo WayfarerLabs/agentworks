@@ -213,8 +213,9 @@ corresponding end facts are published. Discard and sensitivity suppression publi
 creation uses atomic create-once publication; an existing fact is read and compared rather than
 overwritten. No shared mutable state file or file-level lock is part of this protocol. The portable
 store, its permissions, closed-output validation and exact-source Python 3.11 execution are now
-implemented and proved in isolation. Target-controller producer ordering, crash recovery and live
-destination behavior remain open.
+implemented and proved in isolation. The target controller's request, launch gate, normal-wait,
+stream-end and cleanup ordering are also implemented hermetically. Transient-service launch, host
+exchange, crash recovery and live destination behavior remain open.
 
 The stream fact is self-describing. Managed-run reservation now persists the requested output policy
 atomically alongside run identity. A future consuming service must compare that policy to each
