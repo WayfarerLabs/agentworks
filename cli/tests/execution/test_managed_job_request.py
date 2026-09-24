@@ -167,12 +167,14 @@ def test_control_mismatch_refuses(change: dict[str, object]) -> None:
         ("output", {"mode": "capture", "prefix_bytes": request_wire.MAX_CAPTURE_PREFIX_BYTES + 1}),
         ("output", {"mode": "discard", "prefix_bytes": 1}),
         ("environment", {"bytes": True, "sha256": "a" * 64}),
+        ("environment", {"bytes": 0, "sha256": hashlib.sha256(b"").hexdigest()}),
         ("environment", {"bytes": request_wire.MAX_ENVIRONMENT_BYTES + 1, "sha256": "a" * 64}),
         ("source", {"bytes": -1, "sha256": "a" * 64}),
         ("source", {"bytes": request_wire.MAX_SOURCE_BYTES + 1, "sha256": "a" * 64}),
         ("source", {"bytes": 1, "sha256": hashlib.sha256(b"x").hexdigest()}),
         ("stdin", {"bytes": request_wire.MAX_STDIN_BYTES + 1, "sha256": "a" * 64}),
         ("stdin", {"bytes": 0, "sha256": "A" * 64}),
+        ("stdin", {"bytes": 0, "sha256": "a" * 64}),
         ("stdin", {"bytes": 0, "sha256": "a" * 63}),
         ("stdin", {"bytes": 0, "sha256": "a" * 64, "extra": 1}),
     ],
@@ -192,6 +194,23 @@ def test_standalone_control_accepts_valid_script_shape() -> None:
     control["argv"] = ["/bin/sh"]
     with pytest.raises(request_wire.RequestError):
         request_wire.decode_control(request_wire._json(control))  # noqa: SLF001
+
+
+def test_script_zero_source_metadata_requires_empty_hash() -> None:
+    assets = request_wire.encode_request(_request(kind="script", source=b""))
+    control = request_wire.decode_control(assets["request-control"])
+    control["source"] = {"bytes": 0, "sha256": "a" * 64}
+    with pytest.raises(request_wire.RequestError):
+        request_wire.decode_control(request_wire._json(control))  # noqa: SLF001
+
+
+def test_valid_empty_source_and_stdin_metadata_round_trip() -> None:
+    request = replace(_request(), stdin=b"")
+    assets = request_wire.encode_request(request)
+    control = request_wire.decode_control(assets["request-control"])
+    empty = {"bytes": 0, "sha256": hashlib.sha256(b"").hexdigest()}
+    assert control["source"] == empty and control["stdin"] == empty
+    assert request_wire.decode_request(assets) == request
 
 
 @pytest.mark.parametrize("python", [sys.executable, "/usr/bin/python3.11"])

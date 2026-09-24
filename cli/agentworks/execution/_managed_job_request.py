@@ -30,6 +30,7 @@ MAX_ENVIRONMENT_ENTRIES = 256
 _NAME = re.compile(r"[A-Za-z_][A-Za-z_0-9]*\Z")
 _RUN = re.compile(r"[0-9a-f]{32}\Z")
 _HASH = re.compile(r"[0-9a-f]{64}\Z")
+_EMPTY_HASH = hashlib.sha256(b"").hexdigest()
 _RESERVED_ENV = frozenset({"BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "BASH_XTRACEFD"})
 _USER_SHELLS = frozenset({"/bin/sh", "/usr/bin/sh", "/bin/bash", "/usr/bin/bash"})
 _ASSETS = ("request-launch", "request-control", "request-environment", "request-source", "request-stdin")
@@ -108,7 +109,7 @@ def _output(mode: object, limit: object) -> tuple[str, int | None]:
     return mode, limit
 
 
-def _checked_metadata(value: object, maximum: int) -> None:
+def _checked_metadata(value: object, maximum: int, *, allow_empty: bool) -> None:
     if type(value) is not dict or set(value) != {"bytes", "sha256"}:
         raise RequestError("invalid request metadata")
     length = value["bytes"]
@@ -120,6 +121,8 @@ def _checked_metadata(value: object, maximum: int) -> None:
         or _HASH.fullmatch(digest) is None
     ):
         raise RequestError("invalid request metadata")
+    if length == 0 and (not allow_empty or digest != _EMPTY_HASH):
+        raise RequestError("invalid empty request metadata")
 
 
 def decode_request_launch(data: bytes) -> dict[str, object]:
@@ -163,7 +166,7 @@ def decode_control(data: bytes) -> dict[str, object]:
         ("source", MAX_SOURCE_BYTES),
         ("stdin", MAX_STDIN_BYTES),
     ):
-        _checked_metadata(value[name], maximum)
+        _checked_metadata(value[name], maximum, allow_empty=name != "environment")
     if kind == "command" and value["source"] != _metadata(b""):
         raise RequestError("command source must be empty")
     return value

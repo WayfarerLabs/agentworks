@@ -157,6 +157,7 @@ def test_terminal_disposal_and_exact_retry(tmp_path: Path, wait: bool) -> None:
         "wrong_run_control",
         "invalid_kind_control",
         "invalid_output_control",
+        "wrong_zero_stdin_digest_control",
         "malformed_environment",
         "oversize_source",
         "oversize_stdin",
@@ -179,7 +180,13 @@ def test_malformed_fixed_request_final_refuses_before_deletion(tmp_path: Path, v
         elif variant in ("conflicting_launch", "malformed_launch"):
             leaf = directory / RequestAsset.LAUNCH.value
             data = _launch("other") if variant == "conflicting_launch" else b"invalid"
-        elif variant in ("malformed_control", "wrong_run_control", "invalid_kind_control", "invalid_output_control"):
+        elif variant in (
+            "malformed_control",
+            "wrong_run_control",
+            "invalid_kind_control",
+            "invalid_output_control",
+            "wrong_zero_stdin_digest_control",
+        ):
             leaf = directory / RequestAsset.CONTROL.value
             if variant == "malformed_control":
                 data = b"invalid"
@@ -194,8 +201,10 @@ def test_malformed_fixed_request_final_refuses_before_deletion(tmp_path: Path, v
                     control["run_id"] = "b" * 32
                 elif variant == "invalid_kind_control":
                     control["kind"] = 123
-                else:
+                elif variant == "invalid_output_control":
                     control["output"] = {"mode": "capture", "prefix_bytes": True}
+                else:
+                    control["stdin"] = {"bytes": 0, "sha256": "a" * 64}
                 data = json.dumps(control, sort_keys=True, separators=(",", ":")).encode("ascii")
         elif variant == "malformed_environment":
             leaf, data = directory / RequestAsset.ENVIRONMENT.value, b"invalid"
