@@ -316,7 +316,7 @@ def test_release_waits_for_start_after_mark_before_ready(tmp_path: Path) -> None
             FakeObserver(events),
         )
         transition_lock = ObservedTransitionLock()
-        subject._transition_lock = transition_lock  # noqa: SLF001
+        subject._transition_lock = transition_lock  # type: ignore[assignment]  # noqa: SLF001
         errors: list[BaseException] = []
 
         def start() -> None:
@@ -369,7 +369,7 @@ def test_concurrent_start_registers_and_dispatches_once(tmp_path: Path, monkeypa
             FakeObserver(events),
         )
         transition_lock = ObservedTransitionLock()
-        subject._transition_lock = transition_lock  # noqa: SLF001
+        subject._transition_lock = transition_lock  # type: ignore[assignment]  # noqa: SLF001
         digest_entered = threading.Event()
         digest_continue = threading.Event()
         original_digest = hold_module.locator_digest
