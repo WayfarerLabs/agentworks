@@ -98,16 +98,20 @@ associated pending acceptance gates are superseded by this ruling.
       obligation. Keep one stable logical operation identifier and rotate a separate caller-chosen
       random generation identifier, atomically sealing the ledger. Make exact retry after commit
       without reply idempotent while a different recovery generation and every predecessor mutation
-      fail stale. The takeover neither moves obligation rows nor proves that an admitted request is
-      drained or remote work has stopped. For every admitted obligation, prove that no earlier
-      dispatch can still arrive and that existing effects are quiescent, using carrier-proved
-      non-dispatch plus exact absence, an operation-specific remote fence, or equally strong
-      synchronous-substrate evidence. Otherwise retain the obligation and report incomplete
-      recovery. For WSL2, persist its opaque provider locator, expected VM marker, distribution and
-      account plus exact Windows controller identity before dispatch, publish exact guest
-      boot/PID/start-time after `READY`, and give each `vm_active()` lifetime an independent
-      obligation. Replace the legacy hold only after nested lifetimes, delayed delivery, every crash
-      window, controller/locator/marker/boot mismatch and production recovery pass live validation.
+      fail stale. Exact retries within one local database/controller share one live recovery owner
+      and serial guard after durable validation; they cannot create guard aliases around an admitted
+      dispatch. A handled failure before an admitted attempt returns aborts only that in-memory
+      custody, while a failure after return retains uncertainty. The takeover neither moves
+      obligation rows nor proves that an admitted request is drained or remote work has stopped. For
+      every admitted obligation, prove that no earlier dispatch can still arrive and that existing
+      effects are quiescent, using carrier-proved non-dispatch plus exact absence, an
+      operation-specific remote fence, or equally strong synchronous-substrate evidence. Otherwise
+      retain the obligation and report incomplete recovery. For WSL2, persist its opaque provider
+      locator, expected VM marker, distribution and account plus exact Windows controller identity
+      before dispatch, publish exact guest boot/PID/start-time after `READY`, and give each
+      `vm_active()` lifetime an independent obligation. Replace the legacy hold only after nested
+      lifetimes, delayed delivery, every crash window, controller/locator/marker/boot mismatch and
+      production recovery pass live validation.
 - [ ] Select shared platform-host resource keys before enabling their admission. Canonical VM names
       are available before create dispatch; site names and authored SSH routes are not canonical
       host identities. Do not silently treat different aliases or users as independent hosts.

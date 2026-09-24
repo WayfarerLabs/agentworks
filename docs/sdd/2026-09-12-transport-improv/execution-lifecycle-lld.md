@@ -290,6 +290,14 @@ including after commit without reply; a different generation or delayed predeces
 Obligations remain attached to the stable operation identifier, so takeover neither copies nor moves
 adapter state to a different owner.
 
+Within one local database/controller, exact takeover retries also resolve to one live recovery-owner
+object and therefore one serial-use guard. Each retry validates the durable claim before consulting
+that weak in-process canonical owner, so a referenced object cannot revive released or stale
+ownership. Repository wrappers backed by that controller share the identity; separate `Database`
+instances and independent controllers do not. Do not add a durable "dispatch active" bit to bridge
+that excluded case: a crashed controller would leave another recovery protocol whose safe clearing
+still requires adapter drain evidence.
+
 Takeover also creates a restricted recovery owner, not ordinary dispatch authority. It may rebind an
 exact persisted row, publish recovery identity for an effect that was already possible, or resolve a
 row with typed evidence. It cannot borrow the ordinary dispatch path, treat registration retry as
@@ -305,6 +313,13 @@ an active or uncertain recovery attempt excludes another recovery dispatch, obli
 and owner finalization. Settling and closing it release only in-memory dispatch custody. They never
 register an obligation, mark an effect possible, publish payload, resolve the obligation or infer
 whole-operation quiescence.
+
+The adapter keeps recovery dispatch admission, concrete action and terminal classification in one
+handled control-flow region. If attempt admission mutates custody but does not return an attempt,
+the adapter aborts that unreturned in-memory attempt. Once it has received the attempt, an exception
+before terminal classification conservatively hands the attempt off unresolved. This closes handled
+exception gaps without claiming signal-atomic Python bookkeeping or implementing general
+cancellation.
 
 Concrete drain evidence and its producer remain adapter-owned. The generic operation coordinator
 validates exact ownership and row custody; it does not learn carrier process identities, helper

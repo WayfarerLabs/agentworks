@@ -669,6 +669,14 @@ possible-dispatch, or resolved state without inferring remote quiescence. A reco
 rebind its one exact existing obligation identity; it cannot add a generic or adapter obligation to
 the sealed ledger.
 
+Exact retries through repository wrappers on one local `Database` first revalidate the durable
+takeover, then reuse one weakly held live recovery owner and serial guard. A retry therefore cannot
+publish or finalize around another alias's admitted dispatch. Separate `Database` instances and
+independent controllers do not share that in-memory guard. Recovery actions handle admission through
+terminal classification as one region: an attempt that did not return is aborted locally, while an
+exception after the attempt returns keeps the effect unresolved. This is conservative
+handled-exception behavior, not a claim of signal-atomic cancellation.
+
 `_file_operations.py` uses the caller's active borrow for stat, inventory, conditional removal and
 metadata composition. Metadata name lookup and mutation share one borrow and deadline; successful
 lookup and normal helper termination are required before mutation. Candidate observations are

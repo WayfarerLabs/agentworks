@@ -857,6 +857,13 @@ uncertainty, response loss or an uncertain cleanup attempt leaves the row `possi
 Recovery of recovery repeats the full obligation-wide drain proof rather than trusting the most
 recent controller's absence.
 
+An exact takeover retry through repository wrappers belonging to the same local database/controller
+reuses the live recovery owner and its guard. It cannot create an alias that publishes, resolves or
+finalizes around an admitted dispatch. Every retry still checks the durable claim first, and a weak
+canonical owner may be reconstructed from persisted facts after no handle retains it. Separate
+controllers remain outside this initial in-memory serialization guarantee and still require the full
+generation takeover plus adapter drain proof.
+
 The local proof uses a spawned controller, a real SQLite file and the bundled synchronous helper. It
 must independently observe helper termination, and it must refuse recovery while a launched helper
 survives controller death. Crash windows cover helper completion before identity publication, debt
