@@ -295,12 +295,16 @@ signaled death leave `wait` unknown because close-on-exec EOF cannot distinguish
 immediately before exec from one delivered to the application. Draining continues concurrently so a
 descendant that inherited a stream cannot delay the cleanup decision. Each stream-end fact publishes
 only after that pipe reaches EOF and its spool is closed. Independently, cleanup uses `cgroup.kill`
-and waits for `cgroup.events` to report `populated 0` before publishing `boundary-empty`. An error
-while requesting `cgroup.kill` does not invalidate a later positive empty-boundary observation. A
-task stuck in uninterruptible sleep can prevent that proof indefinitely; the controller stops
-waiting at its bound and leaves boundary state unknown rather than fabricating emptiness. Cleanup or
-controller failure may likewise leave a stream-end fact unknown even when other terminal facts are
-present.
+and waits for `cgroup.events` to report `populated 0` before publishing `boundary-empty`. Before
+that publication, the controller must have reaped the main child, settled the close-on-exec status
+pipe and published `wait` when the proved outcome permits it. Stream ends remain independent and may
+publish later. Thus boundary emptiness alone does not claim complete output, while boundary
+emptiness plus both stream ends leaves no controller fact publication that can begin afterward. An
+error while requesting `cgroup.kill` does not invalidate a later positive empty-boundary
+observation. A task stuck in uninterruptible sleep can prevent that proof indefinitely; the
+controller stops waiting at its bound and leaves boundary state unknown rather than fabricating
+emptiness. Cleanup or controller failure may likewise leave a stream-end fact unknown even when
+other terminal facts are present.
 
 `KillMode=control-group` is a manager-owned fallback if the controller dies, but it cannot publish
 positive facts after that death. Therefore an abrupt controller exit leaves any unrecorded wait,
@@ -347,9 +351,13 @@ leave it unknown. Missing terminal evidence reports not ready without deleting a
 malformed or strangely linked directory entries refuse before release commitment.
 
 Crash-safe retry keeps one minimal boot-local tombstone rather than trying to prove deletion from
-absence. The helper publishes one root-owned mode-`0400` immutable `disposal` leaf containing the
-exact canonical launch and syncs the run directory before any deletion. It then validates and
-unlinks only the fixed request assets, facts, stop intent, capture spools and recognized private
+absence. The helper creates the root-owned mode-`0400` immutable `disposal` leaf by hard-linking the
+already validated immutable `launch` leaf, then syncs the run directory before any deletion. It does
+not create a new receipt stage. Concurrent exact retries either link that same launch inode or
+validate the existing receipt, so a delayed retry cannot create residue after receipt-only success.
+The cleanup path explicitly accounts for the temporary two-link receipt/launch topology and a
+possible third internal fact-stage link, then requires a one-link receipt for success. It validates
+and unlinks only the fixed request assets, facts, stop intent, capture spools and recognized private
 publication stages through the held directory descriptor, syncs again and verifies that only the
 matching disposal leaf remains. It never accepts a caller path, recursive-delete choice or file
 list. Success means all retained application artifacts are gone and only that exact-launch receipt
