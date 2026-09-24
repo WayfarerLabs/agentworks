@@ -1481,7 +1481,7 @@ without starting it; `\\wsl.localhost` refused after 40 seconds, also without st
 target already running, a supplementary run used the regular `/usr/lib/os-release` file and the
 probe's otherwise unchanged cases. Against a 15.75-second no-handle distribution lifetime, one
 handle retained it for 180 seconds; a second case closed the first of two handles, then the
-remaining handle retained it for another 180 seconds. It stopped after normal close, last-holder
+remaining handle retained it on its own for 180 seconds. It stopped after normal close, last-holder
 close, and abrupt holder death, while force-termination stopped the exact target and the unrelated
 control survived. The 60-second utility-VM idle time was distinct from the roughly 15.6-second
 target distribution idle time, especially with the unrelated distribution running.
@@ -1490,8 +1490,8 @@ This is bounded hold-feasibility evidence, not an official probe pass or a dispa
 local synthetic review case also demonstrated a false-positive cold result: the probe observed
 distribution state only after the open attempt and holder close, so a distribution that started and
 stopped during that interval could yield `PASS`. The disposable probe and its dedicated tests were
-removed rather than expanded into a second process-observation framework; their executable source
-remains at `333b17bc` in Git history. The production WSL hold adoption, exact guest observation,
+removed rather than expanded into a second process-observation framework; the full integration
+report preserves the observation record. The production WSL hold adoption, exact guest observation,
 dispatch drain, recovery factory and live acceptance checkbox above remain open.
 
 The durable launch checkpoint is privately accepted at `ead879ce`. Project, complexity and
@@ -1686,6 +1686,13 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       obligation, including the current maximum supported package, or introduce an explicit lower
       product limit before production adoption. Per-file public calls must not make a supported
       artifact package fail only because its owning command accumulated resolved rows.
+
+The 2026-09-24 inventory found a generic capture ceiling of 4,096 regular-file members in
+`package_sources.py`, while Codex native inventory separately caps 512 entries including implied
+directories. There is no single maximum shared by all harness integrations. Current artifact
+publication iterates files and checkpoints each confirmed change; mapping those calls one-for-one to
+retained lifecycle rows would exhaust the 128-row bound for a supported large package.
+
 - [ ] Resolve the public filesystem-root edge before claiming complete path coverage: the current
       nonempty parent/leaf helper contract cannot address `/` itself. The operator has been asked
       whether to exclude root targets initially or support read-only root stat/inventory. Keep
@@ -1784,6 +1791,13 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       dispatch, independently observe local helper termination and refuse while a helper survives
       controller loss. Treat this local spawned-process proof as substrate evidence only, not SSH,
       QGA or native production acceptance.
+
+The 2026-09-24 local DOWNLOAD proof now originates its spawned-controller crash cases through
+`FileOperation.download()` rather than fabricating a possible-effect row. A test-only carrier reads
+the installed row before dispatch; expected and actual helper journal records must match its
+persisted token in every recovery generation. The tests retain completed-helper cleanup and
+surviving-helper refusal. The test-only journal does not prove native SSH/QGA dispatch drain.
+
 - [ ] Use the owned snapshot/chunk download for general in-memory reads, preserving caller byte
       bounds independently of QGA's single-response capacity. Keep the no-staging readiness read
       separately bound before dispatch; prove its complete encoded response fits the selected route.
