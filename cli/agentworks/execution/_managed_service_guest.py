@@ -32,6 +32,7 @@ _RUN = re.compile(r"[0-9a-f]{32}\Z")
 _CGROUP_ROOT = "/sys/fs/cgroup"
 _CGROUP_SELF = "/proc/self/cgroup"
 _CLEANUP_SECONDS = 5.0
+_STOP_GRACE_SECONDS = 2.0
 _PRELAUNCH_REAP_SECONDS = 0.25
 _EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 _SH_PATHS = frozenset({"/bin/sh", "/usr/bin/sh"})
@@ -291,7 +292,11 @@ def _serve(
             states.append(_StreamState(stream, fd, writer))
         store.publish_fact(FactName.LAUNCH, request.launch)
         notify()
-        os.write(release_w, b"1")
+        if store.read_stop_request():
+            _close(release_w)
+            release_w = -1
+        else:
+            os.write(release_w, b"1")
         launched = True
         _observe(run_id, digest, request, store, boundary, pid, input_w, exec_r, states)
     finally:
@@ -325,6 +330,7 @@ def _observe(
         os.set_blocking(state.fd, False)
         selector.register(state.fd, selectors.EVENT_READ, state)
     offset = 0
+    input_open = bool(request.stdin)
     if request.stdin:
         os.set_blocking(input_fd, False)
         selector.register(input_fd, selectors.EVENT_WRITE, None)
@@ -335,23 +341,46 @@ def _observe(
     exec_failed = False
     wait_published = False
     deadline: float | None = None
+    stop_deadline: float | None = None
     boundary_done = False
+    cleanup_ok = True
     try:
         while True:
             if status is None:
                 waited, candidate = os.waitpid(pid, os.WNOHANG)
                 if waited == pid:
                     status = candidate
-                    deadline = time.monotonic() + _CLEANUP_SECONDS
-                    with suppress(OSError):
-                        boundary.kill()
+                    if deadline is None:
+                        deadline = time.monotonic() + _CLEANUP_SECONDS
+                        try:
+                            boundary.kill()
+                        except OSError:
+                            cleanup_ok = False
+            if stop_deadline is None and store.read_stop_request():
+                if input_open:
+                    if input_fd in selector.get_map():
+                        selector.unregister(input_fd)
+                    _close(input_fd)
+                    input_open = False
+                if status is None:
+                    with suppress(ProcessLookupError):
+                        os.kill(pid, signal.SIGTERM)
+                    stop_deadline = time.monotonic() + _STOP_GRACE_SECONDS
+                else:
+                    stop_deadline = time.monotonic()
+            if status is None and stop_deadline is not None and deadline is None and time.monotonic() >= stop_deadline:
+                try:
+                    boundary.kill()
+                except OSError:
+                    cleanup_ok = False
+                deadline = time.monotonic() + _CLEANUP_SECONDS
             if status is not None and exec_result is True and os.WIFEXITED(status) and not wait_published:
                 store.publish_fact(
                     FactName.WAIT,
                     _fact(run_id, digest, "wait", exit_code=os.WEXITSTATUS(status), signal=None),
                 )
                 wait_published = True
-            if status is not None and not boundary_done:
+            if deadline is not None and cleanup_ok and not boundary_done:
                 try:
                     empty = boundary.empty()
                 except OSError:
@@ -363,7 +392,8 @@ def _observe(
                 return
             if deadline is not None and time.monotonic() >= deadline:
                 return
-            timeout = 0.05 if status is None else min(0.05, max(0.0, cast("float", deadline) - time.monotonic()))
+            next_deadline = deadline if deadline is not None else stop_deadline
+            timeout = 0.05 if next_deadline is None else min(0.05, max(0.0, next_deadline - time.monotonic()))
             for key, _ in selector.select(timeout):
                 if key.data == "exec":
                     chunk = os.read(exec_fd, 4096)
@@ -381,6 +411,7 @@ def _observe(
                     if offset == len(request.stdin):
                         selector.unregister(input_fd)
                         _close(input_fd)
+                        input_open = False
                 else:
                     state = cast("_StreamState", key.data)
                     chunk = os.read(state.fd, 65536)

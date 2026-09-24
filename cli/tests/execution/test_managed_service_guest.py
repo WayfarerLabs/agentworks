@@ -8,6 +8,9 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
+import time
+from contextlib import suppress
 from pathlib import Path
 
 import pytest
@@ -154,6 +157,174 @@ def test_literal_binary_io_and_exact_status(tmp_path: Path) -> None:
     assert store.read_capture(Stream.STDERR, _launch()) == b"\xff"
     wait = wire.decode_fact(store.read_fact(FactName.WAIT))  # type: ignore[arg-type]
     assert wait["exit_code"] == 255
+    store.close()
+
+
+def test_stop_before_gate_release_owns_child_without_entry(tmp_path: Path) -> None:
+    marker = tmp_path / "entered"
+    store = _store(tmp_path)
+    launch = _launch()
+    store.publish_request(
+        request_wire.ManagedJobRequest(
+            launch,
+            "command",
+            ("/bin/sh", "-c", f"printf entered > {marker}"),
+            None,
+            "discard",
+            None,
+            (),
+            b"",
+            b"",
+        )
+    )
+    boundary = Boundary()
+
+    def notify() -> None:
+        store.publish_stop_request(launch)
+
+    assert (
+        guest.run(RUN, _store=store, _boundary=boundary, _notify=notify, _identity_check=False, _apply_identity=False)
+        == 0
+    )
+    assert not marker.exists()
+    assert boundary.killed
+    assert store.read_fact(FactName.BOUNDARY_EMPTY) is not None
+    assert store.read_fact(FactName.WAIT) is None
+    store.close()
+
+
+def test_stop_term_aware_anchor_drains_and_preserves_wait(tmp_path: Path) -> None:
+    marker = tmp_path / "entered"
+    store = _store(tmp_path)
+    launch = _launch()
+    store.publish_request(
+        request_wire.ManagedJobRequest(
+            launch,
+            "command",
+            (
+                "/bin/sh",
+                "-c",
+                f"trap 'printf stopped; exit 7' TERM; printf entered > {marker}; while :; do sleep 0.05; done",
+            ),
+            None,
+            "capture",
+            100,
+            (),
+            b"",
+            b"",
+        )
+    )
+    boundary = Boundary()
+    publisher: threading.Thread | None = None
+
+    def notify() -> None:
+        nonlocal publisher
+
+        def request_stop() -> None:
+            until = time.monotonic() + 2
+            while not marker.exists() and time.monotonic() < until:
+                time.sleep(0.005)
+            store.publish_stop_request(launch)
+
+        publisher = threading.Thread(target=request_stop, daemon=True)
+        publisher.start()
+
+    assert (
+        guest.run(RUN, _store=store, _boundary=boundary, _notify=notify, _identity_check=False, _apply_identity=False)
+        == 0
+    )
+    assert publisher is not None
+    publisher.join(timeout=2)
+    assert not publisher.is_alive()
+    assert marker.exists()
+    assert store.read_capture(Stream.STDOUT, launch) == b"stopped"
+    wait = wire.decode_fact(store.read_fact(FactName.WAIT))  # type: ignore[arg-type]
+    assert wait["exit_code"] == 7
+    assert store.read_fact(FactName.BOUNDARY_EMPTY) is not None
+    store.close()
+
+
+def test_stop_ignoring_anchor_escalates_without_extending_grace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker = tmp_path / "entered"
+    store = _store(tmp_path)
+    launch = _launch()
+    store.publish_request(
+        request_wire.ManagedJobRequest(
+            launch,
+            "command",
+            ("/bin/sh", "-c", f"trap '' TERM; printf entered > {marker}; while :; do :; done"),
+            None,
+            "discard",
+            None,
+            (),
+            b"",
+            b"",
+        )
+    )
+
+    class KillingBoundary(Boundary):
+        def __init__(self) -> None:
+            super().__init__()
+            self.pid: int | None = None
+            self.kill_at: float | None = None
+            self.kill_count = 0
+
+        def place(self, pid: int) -> None:
+            super().place(pid)
+            self.pid = pid
+
+        def kill(self) -> None:
+            super().kill()
+            self.kill_at = time.monotonic()
+            self.kill_count += 1
+            assert self.pid is not None
+            with suppress(ProcessLookupError):
+                os.kill(self.pid, signal.SIGKILL)
+
+    boundary = KillingBoundary()
+    monkeypatch.setattr(guest, "_STOP_GRACE_SECONDS", 0.12)
+    published_at: list[float] = []
+    finished = threading.Event()
+    publisher: threading.Thread | None = None
+
+    def notify() -> None:
+        nonlocal publisher
+
+        def request_stop() -> None:
+            until = time.monotonic() + 2
+            while not marker.exists() and time.monotonic() < until:
+                time.sleep(0.005)
+            store.publish_stop_request(launch)
+            published_at.append(time.monotonic())
+            for _ in range(5):
+                store.publish_stop_request(launch)
+                time.sleep(0.02)
+            if not finished.wait(1) and boundary.pid is not None:
+                with suppress(ProcessLookupError):
+                    os.kill(boundary.pid, signal.SIGKILL)
+
+        publisher = threading.Thread(target=request_stop, daemon=True)
+        publisher.start()
+
+    try:
+        assert (
+            guest.run(
+                RUN, _store=store, _boundary=boundary, _notify=notify, _identity_check=False, _apply_identity=False
+            )
+            == 0
+        )
+    finally:
+        finished.set()
+        if publisher is not None:
+            publisher.join(timeout=2)
+    assert publisher is not None and not publisher.is_alive()
+    assert marker.exists() and boundary.kill_at is not None
+    assert published_at and boundary.kill_at - published_at[0] < 0.9
+    assert boundary.kill_count == 1
+    assert store.read_fact(FactName.WAIT) is None
+    assert store.read_fact(FactName.BOUNDARY_EMPTY) is not None
     store.close()
 
 

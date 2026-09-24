@@ -338,31 +338,31 @@ fact commits the retained length and digest and one closed disposition: complete
 capture, intentional discard or sensitivity suppression. Only capture has a spool; its end fact
 closes it. Discard and suppression retain zero bytes with the empty SHA-256. An absent fact says
 nothing. The codec validates untrusted bytes and contains no output bytes or application input. It
-does not write a store, launch or observe a workload, or make jobs available. The intended store is
-now implemented by the Python 3.11-compatible `_managed_job_store.py`: a root-owned boot-local
-per-run directory with immutable create-once facts and bounded output spools. It refuses unsafe
-directories and leaves, publishes a fact only after a synced same-directory stage, and returns
-capture bytes only after the matching launch-bound stream-end fact closes and authenticates the
-spool. Exact-source tests bundle the wire and store together under Python 3.11. The host reservation
-also persists the requested output policy, but a later observer must still compare that request to
-the stream disposition; self-describing facts alone do not prove policy fulfillment. The first
-service slice is limited to independent lifetime until operation-owner liveness and cleanup are
-proved. Later fixed start, observe, read-output, stop and dispose operations must work over both SSH
-and QGA. Transient-service launch, start/stop/dispose exchange, production carrier wiring and live
-validation remain open.
+does not write a store, launch or observe a workload, or make jobs available. The store is
+implemented by the Python 3.11-compatible `_managed_job_store.py`: a root-owned boot-local per-run
+directory with immutable create-once facts and bounded output spools. It refuses unsafe directories
+and leaves, publishes a fact only after a synced same-directory stage, and returns capture bytes
+only after the matching launch-bound stream-end fact closes and authenticates the spool.
+Exact-source tests bundle the wire and store together under Python 3.11. The host reservation also
+persists the requested output policy, but a later observer must still compare that request to the
+stream disposition; self-describing facts alone do not prove policy fulfillment. The first service
+slice is limited to independent lifetime until operation-owner liveness and cleanup are proved.
+Private fixed start, observe, closed read-output and stop exchanges exist. Disposal, production
+carrier wiring, live target evidence and SSH/QGA proof remain open.
 
 `_managed_job_request.py` defines the separate private request assets for that independent slice.
 The five fixed root-owned, mode-0400 leaves are `request-launch`, `request-control`,
 `request-environment`, `request-source` and `request-stdin`. Control is canonical ASCII JSON binding
 the run, command or script shape, literal command arguments, working directory, output policy, and
 each payload's byte length and SHA-256. Environment has a separate canonical encoding; source and
-stdin retain their exact bytes. Control is capped at 32 KiB, environment at 64 KiB, and source and
-stdin at 16 MiB each. The store accepts identical bytes on retry and refuses conflicting or unsafe
-leaves. A partial set is not a consumable request; no absent request asset proves launch or absence
-of launch. The request codec validates the complete canonical launch fact and requires an
-independent resource owner, a non-interactive shell, and a supported command or script shape before
-use. These request bytes are never bundle source, systemd arguments, environment, or journal
-content.
+stdin retain their exact bytes. The separate `request-stop` leaf is empty, root-owned and mode 0400.
+It records durable stop intent and is neither a request asset nor a terminal fact. Control is capped
+at 32 KiB, environment at 64 KiB, and source and stdin at 16 MiB each. The store accepts identical
+bytes on retry and refuses conflicting or unsafe leaves. A partial set is not a consumable request;
+no absent request asset proves launch or absence of launch. The request codec validates the complete
+canonical launch fact and requires an independent resource owner, a non-interactive shell, and a
+supported command or script shape before use. These request bytes are never bundle source, systemd
+arguments, environment, or journal content.
 
 `_managed_service_guest.py` is the fixed Python 3.11 Linux service main for the first independent
 managed slice. It accepts only the derived run ID, reads the complete protected request, and checks
@@ -370,15 +370,17 @@ root service identity and membership in the exact derived delegated service cgro
 for placement in a dedicated workload cgroup, then sets and verifies the requested identity, working
 directory, and descriptors. Immediately before exec it restores the standard payload signal state
 rather than inheriting the Python controller's blocked mask or ignored pipe signals. The service
-main publishes launch, sends `READY=1` over `NOTIFY_SOCKET`, and only then releases the child to
-execute caller code. It drains finite stdin and both output streams while observing the exact main
-child. Wait, stream-end, and boundary-empty facts each publish only after their separate evidence is
-available. A close-on-exec status pipe permits wait publication only after proved application entry
-and normal exit; setup failure and signaled death leave wait unknown. Capture spools keep only the
-requested prefix and close before stream-end; discard and sensitivity suppression create no spool.
-Cleanup stops after a fixed bound, leaving unproved facts absent. `_managed_service_bundle.py`
-packages exact source without embedding request values. This controller does not provide a host
-service builder or live systemd validation.
+main publishes launch, sends `READY=1` over `NOTIFY_SOCKET`, and then checks stop intent before
+releasing the child to execute caller code. It keeps polling that intent while draining finite stdin
+and both output streams and observing the exact main child. A stop closes stdin and sends SIGTERM to
+that child. Its first observation starts a fixed grace interval that repeated reads do not extend.
+Main-child exit, or grace expiry while it remains alive, starts the existing cgroup cleanup. Wait,
+stream-end, and boundary-empty facts each publish only after their separate evidence is available. A
+close-on-exec status pipe permits wait publication only after proved application entry and normal
+exit; setup failure and signaled death leave wait unknown. Capture spools keep only the requested
+prefix and close before stream-end; discard and sensitivity suppression create no spool. Cleanup
+stops after a fixed bound, leaving unproved facts absent. `_managed_service_bundle.py` packages
+exact source without embedding request values. This controller has no live systemd proof.
 
 `_managed_observation_exchange.py` supplies private fixed `observe` and closed `read-output`
 attempts over the same carrier interface. Its Python 3.11 target helper reads only the protected
@@ -386,8 +388,17 @@ store for an exact expected launch, run, derived unit, target incarnation and bo
 returns only present fixed facts; absent facts remain unknown. Output bytes require the matching
 validated stream-end and closed capture spool. The host admits facts and bytes only after complete
 runtime, identity, record, stream and helper completion evidence. The request has no arbitrary path,
-unit, command, property, fact name or environment selector. This slice does not launch, stop or
-dispose a run, reread the live instance marker or boot, or establish production target evidence.
+unit, command, property, fact name or environment selector. This slice does not reread the live
+instance marker or boot or establish production target evidence.
+
+`_managed_stop_exchange.py` supplies the separate private stop attempt over the same carrier
+interface. Its fixed Python 3.11 Linux root helper revalidates the exact launch, publishes the
+create-once empty stop leaf and polls only the exact boundary-empty fact within a finite capped
+budget. A complete launch-only reply means stop intent is durable but termination is unknown. Only a
+complete, host-validated boundary-empty reply establishes termination. A lost or incomplete carrier
+reply can leave stop intent published. Retrying this helper publishes the same sentinel and never
+launches again. This private path requires an existing launch fact; it offers no prelaunch stop,
+new-admission API, operation-owner lease, disposal, public jobs or live SSH/QGA proof.
 
 ## Input accounting
 
