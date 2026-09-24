@@ -325,9 +325,15 @@ def test_exchange_accepted_terminated_budget_and_validator() -> None:
         ((launch, _boundary(launch)), ManagedStopState.TERMINATED),
     ):
         names = (FactName.LAUNCH,) if len(facts) == 1 else (FactName.LAUNCH, FactName.BOUNDARY_EMPTY)
-        carrier = Carrier(
-            lambda request, names=names, facts=facts: _records(request.nonce, ManagedStopResult(names), facts)
-        )
+
+        def respond(
+            request: ManagedStopRequest,
+            names: tuple[FactName, ...] = names,
+            facts: tuple[bytes, ...] = facts,
+        ) -> bytes:
+            return _records(request.nonce, ManagedStopResult(names), facts)
+
+        carrier = Carrier(respond)
         candidate = _exchange(carrier, deadline=Deadline.after(None))
         assert candidate.observation is not None and candidate.observation.state is state
         assert carrier.budget == MAX_OBSERVATION_MS
