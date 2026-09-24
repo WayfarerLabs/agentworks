@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 from contextlib import suppress
@@ -103,19 +102,14 @@ def _validate_facts(inventory: dict[str, _Leaf], expected: bytes) -> bool:
         raise StoreError("launch binding mismatch")
     if receipt is not None and launch is not None and launch.key != receipt.key:
         raise StoreError("disposal receipt inode mismatch")
-    if launch is None and receipt is None:
-        raise StoreError("missing launch and receipt")
-    digest = hashlib.sha256(expected).hexdigest()
     for name in FactName:
         leaf = inventory.get(name.value)
         if leaf is None:
             continue
         try:
-            fact = checked_fact(name, leaf.data, expected)  # type: ignore[arg-type]
+            checked_fact(name, leaf.data, expected)  # type: ignore[arg-type]
         except ManagedObservationError:
             raise StoreError("invalid terminal fact") from None
-        if name is not FactName.LAUNCH and fact["receipt_sha256"] != digest:
-            raise StoreError("fact launch mismatch")
     return receipt is not None or all(name.value in inventory for name in _TERMINAL)
 
 
@@ -139,7 +133,7 @@ def dispose(store: ManagedJobStore, expected_launch: bytes) -> bool:
             # and this link. The next inventory decides whether its receipt won.
             with suppress(FileExistsError, FileNotFoundError):
                 os.link("launch", "disposal", src_dir_fd=directory, dst_dir_fd=directory, follow_symlinks=False)
-            os.fsync(directory)
+        os.fsync(directory)
         inventory = _inventory(directory, store._owner_uid)
         if not _validate_facts(inventory, expected_launch) or "disposal" not in inventory:
             raise StoreError("disposal commitment changed")

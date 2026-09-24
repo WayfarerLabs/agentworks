@@ -332,6 +332,26 @@ def test_receipt_and_fact_stage_after_launch_removed_resumes(tmp_path: Path) -> 
         assert sorted(p.name for p in directory.iterdir()) == ["disposal"]
 
 
+def test_existing_receipt_requires_directory_sync_before_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with _store(tmp_path) as store:
+        launch = _terminal(store)
+        store.publish_request_asset(RequestAsset.SOURCE, b"payload")
+        directory = tmp_path / "managed" / RUN
+        os.link(directory / "launch", directory / "disposal")
+        before = {leaf.name: leaf.read_bytes() for leaf in directory.iterdir()}
+        assert len(before) > 1
+
+        def failed_sync(fd: int) -> None:
+            raise OSError("injected receipt barrier failure")
+
+        monkeypatch.setattr(os, "fsync", failed_sync)
+        with pytest.raises(OSError):
+            store.dispose(launch)
+        assert {leaf.name: leaf.read_bytes() for leaf in directory.iterdir()} == before
+
+
 def test_missing_launch_and_receipt_never_proves_disposal(tmp_path: Path) -> None:
     with _store(tmp_path) as store:
         launch = _terminal(store)

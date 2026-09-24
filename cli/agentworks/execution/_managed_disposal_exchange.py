@@ -13,7 +13,6 @@ from ._file_wire import FileRecord, FileRecordKind, FileRecordReader, FileWireEr
 from ._helper_launcher import IdentityPlan
 from ._managed_disposal_bundle import FIXED_BUNDLE
 from ._managed_disposal_protocol import DisposalError, DisposalRequest, DisposalResult, decode_result, encode_request
-from ._managed_observation_protocol import ManagedObservationError, checked_launch
 from ._runtime_prerequisite import (
     RuntimePrefixSink,
     RuntimePrerequisiteObservation,
@@ -134,13 +133,12 @@ def dispose_managed_run(
     ):
         raise ValidationError("Managed disposal requires a Linux root helper and deadline")
     try:
-        checked_launch(expected_launch)
         request = DisposalRequest(secrets.token_hex(16), expected_launch, plan.expected)
         request_data = encode_request(request)
         argv, candidates, shim = build_runtime_identity_helper_argv(
             plan, selection=runtime_selection, fixed_source=FIXED_BUNDLE.bootstrap, nonce=request.nonce
         )
-    except (DisposalError, ManagedObservationError, ValueError, TypeError):
+    except (DisposalError, ValueError, TypeError):
         raise ValidationError("Invalid managed disposal request") from None
     collector = _Collector(expected_launch)
     reader = FileRecordReader(request.nonce, collector.accept)

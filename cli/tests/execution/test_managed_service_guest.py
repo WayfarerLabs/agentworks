@@ -469,6 +469,14 @@ def test_wait_status_before_exec_pipe_eof_still_publishes_normal_exit(
 def test_boundary_waits_for_late_exec_status_and_wait(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     store = _store(tmp_path)
     boundary = Boundary()
+    published: list[FactName] = []
+    publish = store.publish_fact
+
+    def record_publication(name: FactName, data: bytes) -> None:
+        publish(name, data)
+        published.append(name)
+
+    monkeypatch.setattr(store, "publish_fact", record_publication)
     input_r, input_w = os.pipe()
     exec_r, exec_w = os.pipe()
     os.close(input_r)
@@ -492,6 +500,7 @@ def test_boundary_waits_for_late_exec_status_and_wait(tmp_path: Path, monkeypatc
         assert not worker.is_alive()
         assert store.read_fact(FactName.WAIT) is not None
         assert store.read_fact(FactName.BOUNDARY_EMPTY) is not None
+        assert published.index(FactName.WAIT) < published.index(FactName.BOUNDARY_EMPTY)
     finally:
         if exec_w >= 0:
             os.close(exec_w)
