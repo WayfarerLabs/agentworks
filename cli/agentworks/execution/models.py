@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from dataclasses import KW_ONLY, dataclass, field
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
+
+if TYPE_CHECKING:
+    import builtins
 
 
 class Shell(Enum):
@@ -14,6 +18,56 @@ class Shell(Enum):
     SH = "sh"
     BASH = "bash"
     USER_DEFAULT = "user_default"
+
+
+class Lifetime(Enum):
+    """How long execution may outlive its initiating operation."""
+
+    OPERATION = "operation"
+    INDEPENDENT = "independent"
+
+
+@dataclass(frozen=True, repr=False)
+class Input:
+    """Finite application input; empty bytes represent explicit EOF."""
+
+    data: builtins.bytes
+    is_sensitive: bool = False
+
+    def __post_init__(self) -> None:
+        if type(self.data) is not bytes or type(self.is_sensitive) is not bool:
+            raise ValidationError("Execution input requires bytes and a sensitivity choice")
+
+    @classmethod
+    def eof(cls) -> Input:
+        return cls(b"")
+
+    @classmethod
+    def bytes(cls, data: builtins.bytes, *, sensitive: bool = False) -> Input:
+        return cls(data, sensitive)
+
+    @classmethod
+    def sensitive(cls, data: builtins.bytes) -> Input:
+        return cls(data, True)
+
+
+@dataclass(frozen=True)
+class Output:
+    """Bounded capture or discarded application output."""
+
+    max_bytes: int | None
+
+    def __post_init__(self) -> None:
+        if self.max_bytes is not None and (type(self.max_bytes) is not int or self.max_bytes < 0):
+            raise ValidationError("Execution capture requires a nonnegative byte bound")
+
+    @classmethod
+    def capture(cls, max_bytes: int = 4_096) -> Output:
+        return cls(max_bytes)
+
+    @classmethod
+    def discard(cls) -> Output:
+        return cls(None)
 
 
 @dataclass(frozen=True)

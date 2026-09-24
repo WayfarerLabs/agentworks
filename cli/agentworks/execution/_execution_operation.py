@@ -98,18 +98,18 @@ class ExecutionOperation:
         sensitive: bool = False,
     ) -> OwnedInlineOutcome:
         """Prepare, dispatch and settle one inline candidate without replay."""
+        prepared = prepare_inline_candidate(
+            request,
+            plan=plan,
+            stdin=stdin,
+            env=env,
+            cwd=cwd,
+            capture_limit=capture_limit,
+            sensitive=sensitive,
+            runtime_selection=runtime_selection,
+        )
         borrow = self._owner.borrow()
         try:
-            prepared = prepare_inline_candidate(
-                request,
-                plan=plan,
-                stdin=stdin,
-                env=env,
-                cwd=cwd,
-                capture_limit=capture_limit,
-                sensitive=sensitive,
-                runtime_selection=runtime_selection,
-            )
             active = _ActiveInlineCall(carrier, borrow, prepared)
         except BaseException:
             borrow.close()

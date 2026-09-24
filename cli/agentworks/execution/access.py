@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Literal, cast
 
@@ -10,6 +11,8 @@ from agentworks.errors import StateError, ValidationError
 
 from . import _file_memory_read
 from ._diagnostic_values import validate_logical_entity_value
+from ._execution_operation import ExecutionOperation
+from ._execution_result import check_owned_inline_result, reduce_owned_inline_result
 from ._file_operation import FileOperation
 from ._file_paths import normalized_relative_path, normalized_root
 from ._file_result import (
@@ -21,7 +24,7 @@ from ._file_result import (
 from ._file_result_transfer import reduce_file_json, reduce_file_memory_read, reduce_file_upload
 from ._helper_launcher import IdentityPlan
 from ._json import serialize_json_source, validate_json_object
-from ._runtime_prerequisite import RuntimeSelection
+from ._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from .carrier import Deadline
 from .files import (
     DirectoryEntry,
@@ -41,17 +44,120 @@ from .files import (
     _private_json_strategy,
     _private_write_condition,
 )
+from .models import Command, Input, Lifetime, Output, Script
+from .profiles import Protection
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from .carrier import Carrier
+    from .result import ExecutionResult
 
 _DEFAULT_JSON_MAX_BYTES = 64 * 1_024
 _DEFAULT_JSON_MAX_DEPTH = 64
 _MAX_UPLOAD_SIZE = (1 << 63) - 1
+_DEFAULT_INPUT = Input.eof()
+_DEFAULT_OUTPUT = Output.capture()
 
 type _JsonFileStrategy = Literal["replace", "merge-overwrite", "merge-preserve", "skip-existing"]
+
+
+class ExecutionAccess:
+    """Private bound view for one foreground DIRECT operation."""
+
+    def __init__(
+        self,
+        operation: ExecutionOperation,
+        carrier: Carrier,
+        *,
+        runtime_selection: RuntimeSelection,
+        ordinary_plan: IdentityPlan,
+        elevated_plan: IdentityPlan | None,
+        entity_kind: str,
+        entity_name: str,
+        deadline: Callable[[], Deadline],
+    ) -> None:
+        if type(operation) is not ExecutionOperation:
+            raise ValidationError("Execution access requires an acquired execution operation")
+        if type(runtime_selection) is not RuntimeSelection:
+            raise ValidationError("Execution access requires an explicit runtime selection")
+        if type(ordinary_plan) is not IdentityPlan or (
+            elevated_plan is not None and type(elevated_plan) is not IdentityPlan
+        ):
+            raise ValidationError("Execution access requires bound identity plans")
+        validate_logical_entity_value(entity_kind, "kind", subject="Execution access")
+        validate_logical_entity_value(entity_name, "name", subject="Execution access")
+        if not callable(deadline):
+            raise ValidationError("Execution access requires a composition-owned deadline policy")
+        self._operation = operation
+        self._carrier = carrier
+        self._runtime_selection = runtime_selection
+        self._ordinary_plan = ordinary_plan
+        self._elevated_plan = elevated_plan
+        self._entity_kind = entity_kind
+        self._entity_name = entity_name
+        self._deadline = deadline
+
+    def run(
+        self,
+        request: Command | Script,
+        *,
+        profile: Protection,
+        lifetime: Lifetime = Lifetime.OPERATION,
+        sudo: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: str | None = None,
+        stdin: Input = _DEFAULT_INPUT,
+        output: Output = _DEFAULT_OUTPUT,
+        sensitive: bool = False,
+        deadline: Deadline | None = None,
+        check: bool = False,
+    ) -> ExecutionResult:
+        """Run one supported inline candidate under existing operation custody."""
+        if type(profile) is not Protection or type(lifetime) is not Lifetime:
+            raise ValidationError("Foreground execution requires explicit profile and lifetime values")
+        if profile is not Protection.DIRECT or lifetime is not Lifetime.OPERATION:
+            raise StateError("Requested execution profile or lifetime is unavailable")
+        if self._runtime_selection.target_os is not RuntimeTargetOS.LINUX:
+            raise StateError("Foreground execution is unavailable on this runtime")
+        if type(request) not in {Command, Script} or (
+            type(request) is Script and (request.login or request.interactive)
+        ):
+            raise ValidationError("Foreground execution requires a noninteractive command or script")
+        if type(stdin) is not Input or type(output) is not Output:
+            raise ValidationError("Foreground execution requires finite input and bounded output")
+        if output.max_bytes is not None and output.max_bytes > 4_096:
+            raise ValidationError("Foreground capture cannot exceed 4096 bytes")
+        if type(sudo) is not bool or type(sensitive) is not bool or type(check) is not bool:
+            raise ValidationError("Foreground execution flags must be booleans")
+        if sudo and self._elevated_plan is None:
+            raise StateError("Execution elevation is unavailable for this bound access")
+        if env is not None and not isinstance(env, Mapping):
+            raise ValidationError("Foreground environment must be a string mapping")
+        if cwd is not None and type(cwd) is not str:
+            raise ValidationError("Foreground working directory must be text")
+        selected_deadline = self._deadline() if deadline is None else deadline
+        if type(selected_deadline) is not Deadline or selected_deadline.expired:
+            raise ValidationError("Foreground execution requires a live deadline")
+        plan = self._elevated_plan if sudo else self._ordinary_plan
+        assert plan is not None
+        effective_sensitive = sensitive or stdin.is_sensitive
+
+        outcome = self._operation.run_inline(
+            self._carrier,
+            request,
+            plan=plan,
+            deadline=selected_deadline,
+            runtime_selection=self._runtime_selection,
+            stdin=stdin.data,
+            env=env,
+            cwd=cwd,
+            capture_limit=output.max_bytes,
+            sensitive=effective_sensitive,
+        )
+        if check:
+            return check_owned_inline_result(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
+        return reduce_owned_inline_result(outcome)
 
 
 class _BytesSource:
