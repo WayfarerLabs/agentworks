@@ -1335,21 +1335,23 @@ connection and trust only. Before broader lifecycle implementation, complete the
       systemd-stop claim, disposal/retention policy or public composition. Hermetic proof does not
       establish live systemd/cgroup, current target-marker/boot or SSH/QGA behavior.
 - [ ] Implement and privately prove exact terminal disposal with a boot-local retry tombstone.
-      Require the exact launch, boundary emptiness, both closed stream ends and their validated
-      capture-spool state before publishing `disposal` by hard-linking the validated immutable
-      launch and syncing the directory. First tighten controller ordering so it settles optional
-      wait before boundary publication; both stream ends may remain later and independent, but the
-      complete disposal predicate permits no later controller fact publication. Prove the late-wait
-      race and simultaneous exact receipt retries, including a delayed retry that must not create a
-      new stage after receipt-only success. After durable commitment, remove only validated fixed
-      run artifacts and recognized private stages through the held directory descriptor, sync and
-      report disposed only when the one-link receipt is the sole survivor. Exact retries resume
-      partial cleanup; missing launch plus receipt proves nothing; strange entries and mismatched
-      receipts authorize no deletion. Make target publishers refuse an observed receipt, while
-      leaving distinct-operation serialization to the core operation claim rather than adding a file
-      lock. Add no automatic retention interval, forced release, generic deletion API, mutable
-      status or database disposal field. Hermetic proof does not establish production ownership,
-      current target/boot rereads or live SSH/QGA behavior.
+      Require the exact launch, boundary emptiness and both closed stream ends before publishing
+      `disposal` by hard-linking the validated immutable launch and syncing the directory. Validate
+      capture spools structurally before deletion; their bytes, lengths and digests do not authorize
+      release. Validate recognized crash stages by fixed name, owner, type, mode and link shape
+      rather than content. First tighten controller ordering so it settles optional wait before
+      boundary publication; both stream ends may remain later and independent, but the complete
+      disposal predicate permits no later controller fact publication. Prove the late-wait race and
+      simultaneous exact receipt retries, including a delayed retry that must not create a new stage
+      after receipt-only success. After durable commitment, remove only validated fixed run
+      artifacts and recognized private stages through the held directory descriptor, sync and report
+      disposed only when the one-link receipt is the sole survivor. Exact retries resume partial
+      cleanup; missing launch plus receipt proves nothing; strange entries and mismatched receipts
+      authorize no deletion. Make target publishers refuse an observed receipt, while leaving
+      distinct-operation serialization to the core operation claim rather than adding a file lock.
+      Add no automatic retention interval, forced release, generic deletion API, mutable status or
+      database disposal field. Hermetic proof does not establish production ownership, current
+      target/boot rereads or live SSH/QGA behavior.
 - [ ] Add the fixed carrier-neutral `start`, `observe`, closed `read-output`, `stop` and `dispose`
       exchange over the target store. Revalidate the exact target/run/unit/launch digest on every
       later action, never replay start after possible dispatch, and expose no arbitrary command,

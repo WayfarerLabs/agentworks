@@ -344,11 +344,15 @@ obligation.
 
 The first `dispose` mechanism is an explicit authorized release of terminal retained artifacts, not
 a retention timer or a synonym for stop. Before committing release, the fixed helper requires the
-byte-exact canonical launch, its launch-bound `boundary-empty`, both launch-bound stream-end facts
-and the capture-spool presence, length and digest those ends require. A `wait` fact is validated
-when present but is not required, because setup failure and signaled application death intentionally
-leave it unknown. Missing terminal evidence reports not ready without deleting anything. Unknown,
-malformed or strangely linked directory entries refuse before release commitment.
+byte-exact canonical launch, its launch-bound `boundary-empty` and both launch-bound stream-end
+facts. A `wait` fact is validated when present but is not required, because setup failure and
+signaled application death intentionally leave it unknown. Capture contents, lengths and digests
+matter when serving output, not when authorizing release: disposal validates only that any fixed
+spool leaf is a regular root-owned mode-`0600` single-link object before unlinking it. Missing
+terminal evidence reports not ready without deleting anything. Unknown names, malformed fixed finals
+and strangely linked objects refuse before release commitment. Recognized private stages may contain
+partial bytes after a crash, so disposal validates their name, owner, type, mode and link shape
+rather than decoding their contents.
 
 Crash-safe retry keeps one minimal boot-local tombstone rather than trying to prove deletion from
 absence. The helper creates the root-owned mode-`0400` immutable `disposal` leaf by hard-linking the
@@ -357,13 +361,14 @@ not create a new receipt stage. Concurrent exact retries either link that same l
 validate the existing receipt, so a delayed retry cannot create residue after receipt-only success.
 The cleanup path explicitly accounts for the temporary two-link receipt/launch topology and a
 possible third internal fact-stage link, then requires a one-link receipt for success. It validates
-and unlinks only the fixed request assets, facts, stop intent, capture spools and recognized private
-publication stages through the held directory descriptor, syncs again and verifies that only the
-matching disposal leaf remains. It never accepts a caller path, recursive-delete choice or file
-list. Success means all retained application artifacts are gone and only that exact-launch receipt
-remains until reboot. A receipt plus remaining known leaves means committed cleanup is incomplete,
-so an exact retry resumes it; a matching receipt alone proves already disposed. Missing launch and
-receipt proves nothing, and a mismatched receipt never authorizes cleanup.
+and unlinks only the structurally safe fixed request assets, facts, stop intent, capture spools and
+recognized private publication stages through the held directory descriptor, syncs again and
+verifies that only the matching disposal leaf remains. It never accepts a caller path,
+recursive-delete choice or file list. Success means all retained application artifacts are gone and
+only that exact-launch receipt remains until reboot. A receipt plus remaining known leaves means
+committed cleanup is incomplete, so an exact retry resumes it; a matching receipt alone proves
+already disposed. Missing launch and receipt proves nothing, and a mismatched receipt never
+authorizes cleanup.
 
 The target store refuses new request, fact, stop or capture publication after it observes the
 disposal receipt. This check is defense in depth, not a target-side concurrency lock: the existing
