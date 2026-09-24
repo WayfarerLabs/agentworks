@@ -1320,6 +1320,15 @@ connection and trust only. Before broader lifecycle implementation, complete the
       guarantee every carrier's smaller direct envelope; large-request staging/fallback, live
       systemd/cgroup and SSH/QGA proof, current target-marker/boot rereads, stop/dispose and public
       composition remain open.
+- [ ] Implement and privately prove the fixed managed-stop request, controller handling and
+      carrier-neutral exchange. Publish one separate protected empty `request-stop` leaf only after
+      exact launch validation; distinguish accepted intent from positive boundary emptiness. Give
+      the exact main child that has not yet been reaped one fixed grace interval, enter the existing
+      whole-cgroup cleanup immediately on anchor exit or grace expiry, and never extend grace on
+      retry. Keep the guest observation finite even for an unbounded caller deadline. Add no process
+      enumeration, mutable stop document, `execution_runs` stop state, generic admission lock,
+      direct systemd-stop claim, disposal/retention policy or public composition. Hermetic proof
+      does not establish live systemd/cgroup, current target-marker/boot or SSH/QGA behavior.
 - [ ] Add the fixed carrier-neutral `start`, `observe`, closed `read-output`, `stop` and `dispose`
       exchange over the target store. Revalidate the exact target/run/unit/launch digest on every
       later action, never replay start after possible dispatch, and expose no arbitrary command,

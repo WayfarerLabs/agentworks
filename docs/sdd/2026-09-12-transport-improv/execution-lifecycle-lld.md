@@ -247,7 +247,11 @@ Request control, script source, environment and finite stdin remain separate fix
 so neither source nor secrets appear in unit arguments, environment metadata, logs or a
 world-readable location. A versioned finite ceiling applies before staging. The service consumes
 each request exactly once and never treats an absent request asset as proof that launch did or did
-not occur.
+not occur. After exact launch validation, `stop` may create one separate root-owned mode-`0400`
+empty `request-stop` leaf. It is durable stop intent, not a sixth initial request asset, a fact or
+termination evidence. Its protected non-reused run directory supplies identity; duplicating the run,
+unit or launch digest in the empty leaf would add no authority. Exact retries accept the same empty
+leaf, while strange or nonempty objects refuse.
 
 Facts publish create-once from a conflict-free stage in the same run directory. The producer writes
 and syncs the complete stage, atomically links it to the fixed final name only if that name is
@@ -300,14 +304,42 @@ stream-end or boundary fact unknown even when systemd later removes every proces
 service reports that uncertainty. A later recovery owner or independently proved post-stop hook may
 strengthen it, but ordinary observation cannot infer completion or emptiness from unit absence.
 
+The first stop mechanism keeps the controller alive long enough to produce that positive evidence. A
+fixed root helper revalidates the exact immutable launch, publishes `request-stop` create-once, then
+observes only within a finite guest-local bound. Helper acceptance proves the request leaf was
+durably published, not that the controller consumed it or that the workload ended. A shorter carrier
+deadline can lose the response without canceling the durable request, and an unbounded carrier
+deadline does not make the target helper wait forever. Exact retry is safe and never replays start.
+
+The controller polls the request before releasing its one already-admitted child and while observing
+that child. First observation closes finite stdin and sends `SIGTERM` only to the exact main child
+that it has not yet reaped. The fixed grace interval lasts only while that anchor remains alive,
+giving it an opportunity to coordinate its descendants. Anchor exit, whether natural or during
+grace, immediately enters the existing whole-boundary cleanup. Grace expiry does the same: invoke
+`cgroup.kill`, continue draining and reaping, and wait within the separate cleanup bound for
+`populated 0`. Repeated request reads do not extend grace. There is no PID enumeration,
+caller-selected grace or second post-anchor lifetime. Only the existing exact `boundary-empty` fact
+proves termination; missing wait or stream-end facts remain independent incompleteness.
+
+Publishing the launch fact commits admission of the initial child even though its final gate release
+follows, so a concurrent stop may prevent or briefly precede payload entry without reopening launch.
+This private generic job admits no later work. Session entry and every future additional-launch path
+must consult the same stop request before admission; that requirement does not justify a generic
+admission-lock protocol before such a producer exists. Stop requires an exact launch fact. A
+possible-dispatch run with no launch fact must reconcile first and remains uncertain. No separate
+`execution_runs` stop state is added: target intent and target boundary evidence are the durable
+truth, while production host coordination later uses the existing operation claim and lifecycle
+obligation.
+
 Carrier-neutral control remains a fixed closed protocol with `start`, `observe`, `read-output`,
 `stop` and `dispose`; it accepts no arbitrary path, unit, command or systemd property. `start` is
 the only operation that can consume staged request assets and is never replayed after possible
 dispatch. Every later operation revalidates target incarnation, boot, run, unit, launch fact and
-launch digest before it obtains authority. `stop` closes further admission, asks the exact owned
-unit to stop and reports boundary proof or uncertainty. `dispose` removes only a terminal exact-run
-store after retention policy permits it. SSH and QGA must deliver these same operations; neither
-owns a second lifecycle implementation.
+launch digest before it obtains authority. `stop` closes further admission by publishing the fixed
+request for the exact owned controller and reports accepted intent, boundary proof or uncertainty.
+It does not equate a helper response, controller death, unit disappearance or systemd cleanup with
+positive emptiness. `dispose` removes only a terminal exact-run store after retention policy permits
+it. SSH and QGA must deliver these same operations; neither owns a second lifecycle implementation.
 
 The first private end-to-end managed-job slice may enable only `INDEPENDENT`, whose target-owned
 evidence survives observer loss. `OPERATION` must refuse before dispatch until target-side owner
