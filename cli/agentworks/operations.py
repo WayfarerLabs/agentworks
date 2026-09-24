@@ -86,9 +86,9 @@ class OperationOwner:
         facts. The caller still establishes every adapter and whole-operation
         no-further-effects fact before resolution or release.
         """
+        claim = repository.recover_takeover(predecessor, generation_id)
+        controller = repository._controller_identity  # noqa: SLF001
         with _recovery_owners_lock:
-            claim = repository.recover_takeover(predecessor, generation_id)
-            controller = repository._controller_identity  # noqa: SLF001
             owners = _recovery_owners.setdefault(controller, weakref.WeakValueDictionary())
             owner = owners.get(claim.ownership)
             if owner is None:

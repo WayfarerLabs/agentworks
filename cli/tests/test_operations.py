@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import gc
 import sys
+import threading
 import weakref
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import FrameType
 from typing import Any
@@ -19,6 +21,7 @@ from agentworks.db import (
     OperationResourceKind,
     OperationScope,
 )
+from agentworks.db.operations import OperationRepository
 from agentworks.errors import StateError
 from agentworks.operations import (
     LifecycleObligation,
@@ -207,6 +210,20 @@ def test_exact_recovery_retry_recreates_unreferenced_owner(db: Database) -> None
     recreated = OperationOwner.recover(db.operations, predecessor.ownership, "b" * 32)
     assert recreated.ownership.generation_id == "b" * 32
     assert recreated is OperationOwner.recover(db.operations, predecessor.ownership, "b" * 32)
+
+
+def test_concurrent_exact_recovery_retries_share_one_live_owner(db: Database) -> None:
+    predecessor = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    repositories = (db.operations, db.operations)
+    ready = threading.Barrier(2)
+
+    def recover(repository: OperationRepository) -> OperationOwner:
+        ready.wait()
+        return OperationOwner.recover(repository, predecessor.ownership, "b" * 32)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first, second = tuple(pool.map(recover, repositories))
+    assert first is second
 
 
 def test_recovery_cannot_admit_registered_obligations_or_reregister_them(db: Database) -> None:
