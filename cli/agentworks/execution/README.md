@@ -343,14 +343,15 @@ before I/O, then holds one operation borrow across locator observation, native b
 and the guest attempt. It resolves a native binding only for a valid positive locator, validates
 plugin results and rechecks the same deadline between stages. A second locator observation after a
 successful guest probe must equal the first before preparation can succeed. This detects ordinary
-cooperative replacement at the preparation linearization point; later use still needs a
-locator-bound platform hold and binding. Malicious or engineered A-B-A host behavior is outside this
-checkpoint's threat scope. Release failure retains a target-suppressed custody fact. WSL2 currently
-has both hooks needed for a positive path; Proxmox returns locator unavailable, and SSH-backed cloud
-and Lima bindings remain future work. This seam has hermetic coverage only. Its selected-platform
-result carries the validated passive native binding alongside successful preparation; failed and
-uncertain results carry no binding. Production activation, hold, route and teardown, live
-WSL/SSH/QGA proof, recovery drain, adoption and public RunContext composition remain open.
+cooperative replacement at the preparation linearization point. Unavailable or invalid confirmation
+is unconfirmed, not evidence of a changed locator; later use still needs a locator-bound platform
+hold and binding. Malicious or engineered A-B-A host behavior is outside this checkpoint's threat
+scope. Release failure retains a target-suppressed custody fact. WSL2 currently has both hooks
+needed for a positive path; Proxmox returns locator unavailable, and SSH-backed cloud and Lima
+bindings remain future work. This seam has hermetic coverage only. Its selected-platform result
+carries the validated passive native binding alongside successful preparation; failed and uncertain
+results carry no binding. Production activation, hold, route and teardown, live WSL/SSH/QGA proof,
+recovery drain, adoption and public RunContext composition remain open.
 
 `_managed_job_wire.py` owns the Python 3.11, stdlib-only canonical version-one byte schema for
 private managed-job facts and reuses the portable `_helper_identity.py` validator. The host
