@@ -454,9 +454,11 @@ and formatting across 1,143 files, mypy across 1,106 sources, file lint, locked-
 checks. Its owned Linux loopback upload proof passes in 4.45 seconds; the fixture database has zero
 owner, claim and obligation rows after release, and host-visible inspection finds no sshd tied to
 the fixture. The exact generated test directories and credentials were removed after verification.
-Hosted SSH checks, private reviews of this combined head and full native integration are still
-pending. This dependency update adds no SSH recovery or native-platform acceptance claim; #832
-remains draft.
+Website validation also passes 160 Python and 103 Node tests, with identical double builds at `/`
+and `/agentworks/`. Independent project, complexity and correctness reviews are clean at
+`d6a998ca5a3f0305f3f97f3e1ae8d9727d6622d0`; they found no integration regression or new SSH
+abstraction. Hosted SSH checks and full native integration are still pending. This dependency update
+adds no SSH recovery or native-platform acceptance claim; #832 remains draft.
 
 ## Durable file-call custody adoption
 
