@@ -13,11 +13,16 @@ import pytest
 from agentworks.db import Database
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._managed_job_protocol import encode_managed_job_fact
 from agentworks.execution._managed_runs import (
+    DEFAULT_CAPTURE_PREFIX_BYTES,
     MANAGED_RECEIPT_NAMESPACE,
     MANAGED_RECEIPT_PROTOCOL_VERSION,
+    MAX_CAPTURE_PREFIX_BYTES_V1,
     ManagedLaunchObservation,
     ManagedLaunchState,
+    ManagedOutputMode,
+    ManagedOutputPolicy,
     ManagedRunIdentity,
     ManagedRunLifetime,
     ManagedRunOwner,
@@ -44,6 +49,34 @@ _RUN_ID = ManagedRunIdentity("1" * 32)
 _OPERATION_ID = "2" * 32
 _INCARNATION = f"v1:{'a' * 64}"
 _BOOT_ID = "00000000-0000-4000-8000-000000000001"
+_OUTPUT_POLICY = ManagedOutputPolicy(ManagedOutputMode.CAPTURE, DEFAULT_CAPTURE_PREFIX_BYTES)
+
+
+@pytest.mark.parametrize("limit", [0, DEFAULT_CAPTURE_PREFIX_BYTES, MAX_CAPTURE_PREFIX_BYTES_V1])
+def test_capture_policy_accepts_bounded_exact_integer(limit: int) -> None:
+    assert ManagedOutputPolicy(ManagedOutputMode.CAPTURE, limit).capture_prefix_bytes == limit
+
+
+@pytest.mark.parametrize("limit", [None, True, -1, MAX_CAPTURE_PREFIX_BYTES_V1 + 1, 1.0, "1"])
+def test_capture_policy_refuses_invalid_limit(limit: object) -> None:
+    with pytest.raises(ValidationError):
+        ManagedOutputPolicy(ManagedOutputMode.CAPTURE, limit)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("mode", [ManagedOutputMode.DISCARD, ManagedOutputMode.SENSITIVITY_SUPPRESSED])
+def test_non_capture_policy_has_no_limit(mode: ManagedOutputMode) -> None:
+    assert ManagedOutputPolicy(mode).capture_prefix_bytes is None
+    with pytest.raises(ValidationError):
+        ManagedOutputPolicy(mode, 0)
+
+
+def test_output_policy_requires_closed_mode_and_explicit_reservation(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError):
+        ManagedOutputPolicy("capture", 0)  # type: ignore[arg-type]
+    database = Database(tmp_path / "state.db")
+    with pytest.raises(TypeError):
+        ManagedRunRepository(database).reserve(_spec())
+    database.close()
 
 
 def _spec(
@@ -61,9 +94,13 @@ def _spec(
     )
 
 
-def _reserve(database: Database, spec: ManagedRunSpec | None = None) -> tuple[ManagedRunRepository, ManagedRunRecord]:
+def _reserve(
+    database: Database,
+    spec: ManagedRunSpec | None = None,
+    output_policy: ManagedOutputPolicy = _OUTPUT_POLICY,
+) -> tuple[ManagedRunRepository, ManagedRunRecord]:
     repository = ManagedRunRepository(database)
-    return repository, repository.reserve(spec or _spec(), identity=_RUN_ID)
+    return repository, repository.reserve(spec or _spec(), output_policy=output_policy, identity=_RUN_ID)
 
 
 def _receipt(
@@ -112,7 +149,25 @@ def test_reservation_persists_exact_nonsecret_identity_across_reopen(tmp_path: P
     assert persisted is not None
     assert persisted.identity.unit_name == f"agw-managed-{_RUN_ID.run_id}.service"
     assert persisted.spec.shell == ManagedShellIdentity(Shell.USER_DEFAULT, "/bin/bash", login=True)
+    assert persisted.output_policy == _OUTPUT_POLICY
     assert persisted.launch_state is ManagedLaunchState.RESERVED
+
+
+@pytest.mark.parametrize(
+    "policy",
+    [
+        ManagedOutputPolicy(ManagedOutputMode.CAPTURE, 0),
+        ManagedOutputPolicy(ManagedOutputMode.CAPTURE, MAX_CAPTURE_PREFIX_BYTES_V1),
+        ManagedOutputPolicy(ManagedOutputMode.DISCARD),
+        ManagedOutputPolicy(ManagedOutputMode.SENSITIVITY_SUPPRESSED),
+    ],
+)
+def test_each_output_policy_roundtrips(tmp_path: Path, policy: ManagedOutputPolicy) -> None:
+    database = Database(tmp_path / "state.db")
+    repository, reserved = _reserve(database, output_policy=policy)
+    assert repository.inspect(_RUN_ID) == reserved
+    assert reserved.output_policy == policy
+    database.close()
 
 
 def test_malformed_persisted_row_fails_closed(tmp_path: Path) -> None:
@@ -144,11 +199,98 @@ def test_missing_persisted_column_fails_closed(tmp_path: Path) -> None:
     database.close()
 
 
+def test_policy_insert_failure_rolls_back_run_reservation(tmp_path: Path) -> None:
+    database = Database(tmp_path / "state.db")
+    database._conn.execute(
+        "CREATE TRIGGER refuse_policy_insert BEFORE INSERT ON execution_run_output_policies "
+        "BEGIN SELECT RAISE(ABORT, 'blocked'); END"
+    )
+    database._conn.commit()
+    with pytest.raises(StateError):
+        _reserve(database)
+    assert database._conn.execute("SELECT COUNT(*) FROM execution_runs").fetchone()[0] == 0
+    database.close()
+
+
+def test_missing_or_malformed_policy_refuses_inspection_and_transition(tmp_path: Path) -> None:
+    database = Database(tmp_path / "state.db")
+    repository, reserved = _reserve(database)
+    database._conn.execute("DELETE FROM execution_run_output_policies")
+    database._conn.commit()
+    with pytest.raises(StateError):
+        repository.inspect(_RUN_ID)
+    with pytest.raises(StateError):
+        repository.mark_possible_dispatch(reserved)
+    database._conn.execute("PRAGMA ignore_check_constraints = ON")
+    database._conn.execute(
+        "INSERT INTO execution_run_output_policies VALUES (?, ?, ?)", (_RUN_ID.run_id, "capture", "invalid")
+    )
+    database._conn.commit()
+    with pytest.raises(StateError):
+        repository.inspect(_RUN_ID)
+    database.close()
+
+
+def test_stale_output_policy_refuses_transition(tmp_path: Path) -> None:
+    database = Database(tmp_path / "state.db")
+    repository, reserved = _reserve(database)
+    with pytest.raises(StateError):
+        repository.mark_possible_dispatch(
+            replace(reserved, output_policy=ManagedOutputPolicy(ManagedOutputMode.DISCARD))
+        )
+    assert repository.inspect(_RUN_ID) == reserved
+    database.close()
+
+
+@pytest.mark.parametrize(
+    ("mode", "limit"),
+    [
+        ("capture", None),
+        ("capture", -1),
+        ("capture", MAX_CAPTURE_PREFIX_BYTES_V1 + 1),
+        ("capture", "invalid"),
+        ("discard", 0),
+        ("sensitivity-suppressed", 0),
+        ("unknown", None),
+    ],
+)
+def test_database_rejects_invalid_output_policy(tmp_path: Path, mode: str, limit: object) -> None:
+    database = Database(tmp_path / "state.db")
+    _reserve(database)
+    with pytest.raises(sqlite3.IntegrityError):
+        database._conn.execute(
+            "UPDATE execution_run_output_policies SET mode = ?, capture_prefix_bytes = ?",
+            (mode, limit),
+        )
+    database.close()
+
+
+def test_policy_is_unique_and_cascades_with_run(tmp_path: Path) -> None:
+    database = Database(tmp_path / "state.db")
+    _reserve(database)
+    with pytest.raises(sqlite3.IntegrityError):
+        database._conn.execute(
+            "INSERT INTO execution_run_output_policies VALUES (?, 'discard', NULL)", (_RUN_ID.run_id,)
+        )
+    database._conn.execute("DELETE FROM execution_runs WHERE run_id = ?", (_RUN_ID.run_id,))
+    assert database._conn.execute("SELECT COUNT(*) FROM execution_run_output_policies").fetchone()[0] == 0
+    database.close()
+
+
+def test_output_policy_does_not_change_v1_receipt_bytes(tmp_path: Path) -> None:
+    database = Database(tmp_path / "state.db")
+    _, capture = _reserve(database)
+    discard = replace(capture, output_policy=ManagedOutputPolicy(ManagedOutputMode.DISCARD))
+    assert encode_managed_job_fact(_receipt(capture)) == encode_managed_job_fact(_receipt(discard))
+    assert b"output_policy" not in encode_managed_job_fact(_receipt(capture))
+    database.close()
+
+
 def test_duplicate_and_stale_reservations_refuse_before_launch(tmp_path: Path) -> None:
     database = Database(tmp_path / "state.db")
     repository, reserved = _reserve(database)
     with pytest.raises(StateError):
-        repository.reserve(_spec(), identity=_RUN_ID)
+        repository.reserve(_spec(), output_policy=_OUTPUT_POLICY, identity=_RUN_ID)
 
     called = False
 

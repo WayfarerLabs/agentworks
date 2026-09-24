@@ -6,6 +6,8 @@ import sqlite3
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+import pytest
+
 from agentworks.db import LATEST_VERSION, Database, open_database_safely, prepare_database_open
 from tests.database_support import build_schema
 
@@ -44,7 +46,7 @@ def test_v39_migration_adds_empty_execution_runs_without_backfilling_sessions(tm
     run_count = database._conn.execute("SELECT COUNT(*) FROM execution_runs").fetchone()[0]
     database.close()
 
-    assert version == LATEST_VERSION == 43
+    assert version == LATEST_VERSION == 44
     assert tuple(session) == (session_uuid, None)
     assert run_count == 0
 
@@ -70,3 +72,19 @@ def test_pre_migration_backup_and_live_upgrade_fabricate_no_run_records(tmp_path
     assert live_run_count == 0
     assert backup_session == (session_uuid, None)
     assert backup_run_table is None
+
+
+def test_output_policy_migration_constraints_and_cascade(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    database = Database(path)
+    connection = database._conn
+    columns = [row[1] for row in connection.execute("PRAGMA table_info(execution_run_output_policies)")]
+    assert columns == ["run_id", "mode", "capture_prefix_bytes"]
+    assert [tuple(row) for row in connection.execute("PRAGMA foreign_key_list(execution_run_output_policies)")] == [
+        (0, 0, "execution_runs", "run_id", "run_id", "NO ACTION", "CASCADE", "NONE")
+    ]
+
+    run_id = "1" * 32
+    with pytest.raises(sqlite3.IntegrityError):
+        connection.execute("INSERT INTO execution_run_output_policies VALUES (?, 'capture', 0)", (run_id,))
+    database.close()

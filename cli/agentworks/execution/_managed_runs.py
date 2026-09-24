@@ -31,6 +31,8 @@ if TYPE_CHECKING:
 MANAGED_PROFILE_REVISION = 1
 MANAGED_RECEIPT_PROTOCOL_VERSION = 1
 MANAGED_RECEIPT_NAMESPACE = "agentworks-managed-runs-v1"
+DEFAULT_CAPTURE_PREFIX_BYTES = 1_048_576
+MAX_CAPTURE_PREFIX_BYTES_V1 = 16_777_216
 
 _UNIT_PREFIX = "agw-managed-"
 _MAX_ID = 2**32 - 1
@@ -69,6 +71,34 @@ class ManagedLaunchState(StrEnum):
     POSSIBLE_DISPATCH = "possible-dispatch"
     RECEIPT_CONFIRMED = "receipt-confirmed"
     NOT_LAUNCHED = "not-launched"
+
+
+class ManagedOutputMode(StrEnum):
+    """Closed requested handling for both managed output streams."""
+
+    CAPTURE = "capture"
+    DISCARD = "discard"
+    SENSITIVITY_SUPPRESSED = "sensitivity-suppressed"
+
+
+@dataclass(frozen=True, slots=True)
+class ManagedOutputPolicy:
+    """Host request fact validated at the repository caller boundary."""
+
+    mode: ManagedOutputMode
+    capture_prefix_bytes: int | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.mode, ManagedOutputMode):
+            raise ValidationError("Managed output mode is invalid")
+        if self.mode is ManagedOutputMode.CAPTURE:
+            if (
+                type(self.capture_prefix_bytes) is not int
+                or not 0 <= self.capture_prefix_bytes <= MAX_CAPTURE_PREFIX_BYTES_V1
+            ):
+                raise ValidationError("Managed capture prefix limit is invalid")
+        elif self.capture_prefix_bytes is not None:
+            raise ValidationError("Managed output without capture cannot have a prefix limit")
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,6 +235,7 @@ class ManagedRunRecord:
 
     identity: ManagedRunIdentity
     spec: ManagedRunSpec
+    output_policy: ManagedOutputPolicy
     launch_state: ManagedLaunchState
     created_at: str
     updated_at: str
@@ -282,11 +313,14 @@ class ManagedRunRepository:
         self,
         spec: ManagedRunSpec,
         *,
+        output_policy: ManagedOutputPolicy,
         identity: ManagedRunIdentity | None = None,
     ) -> ManagedRunRecord:
         """Reserve a fresh run before any launch can be attempted."""
         if not isinstance(spec, ManagedRunSpec):
             raise ValidationError("Managed run reservation requires a validated specification")
+        if not isinstance(output_policy, ManagedOutputPolicy):
+            raise ValidationError("Managed run reservation requires a validated output policy")
         identity = identity or ManagedRunIdentity.fresh()
         if not isinstance(identity, ManagedRunIdentity):
             raise ValidationError("Managed run reservation requires a canonical identity")
@@ -302,6 +336,10 @@ class ManagedRunRepository:
                 "receipt_namespace, receipt_protocol_version, launch_state, created_at, updated_at"
                 ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 _insert_values(identity, spec, now),
+            )
+            self._connection.execute(
+                "INSERT INTO execution_run_output_policies (run_id, mode, capture_prefix_bytes) VALUES (?, ?, ?)",
+                (identity.run_id, output_policy.mode, output_policy.capture_prefix_bytes),
             )
             return self._require_record(identity)
 
@@ -400,12 +438,19 @@ class ManagedRunRepository:
 
     @staticmethod
     def _require_same_spec(expected: ManagedRunRecord, current: ManagedRunRecord) -> None:
-        if expected.identity != current.identity or expected.spec != current.spec:
+        if (
+            expected.identity != current.identity
+            or expected.spec != current.spec
+            or expected.output_policy != current.output_policy
+        ):
             raise StateError("managed run reservation identity is stale", entity_kind="execution-run")
 
     def _select(self, identity: ManagedRunIdentity) -> sqlite3.Row | None:
         row = self._connection.execute(
-            "SELECT * FROM execution_runs WHERE run_id = ?",
+            "SELECT execution_runs.*, execution_run_output_policies.mode AS output_mode, "
+            "execution_run_output_policies.capture_prefix_bytes AS output_capture_prefix_bytes "
+            "FROM execution_runs LEFT JOIN execution_run_output_policies "
+            "ON execution_run_output_policies.run_id = execution_runs.run_id WHERE execution_runs.run_id = ?",
             (identity.run_id,),
         ).fetchone()
         return cast("sqlite3.Row | None", row)
@@ -480,6 +525,9 @@ class ManagedRunRepository:
                 row["receipt_namespace"],
                 row["receipt_protocol_version"],
             )
+            output_policy = ManagedOutputPolicy(
+                ManagedOutputMode(row["output_mode"]), row["output_capture_prefix_bytes"]
+            )
             launch_state = ManagedLaunchState(row["launch_state"])
             created_at = _decode_timestamp(row["created_at"])
             updated_at = _decode_timestamp(row["updated_at"])
@@ -495,6 +543,7 @@ class ManagedRunRepository:
         return ManagedRunRecord(
             identity,
             spec,
+            output_policy,
             launch_state,
             created_at,
             updated_at,
