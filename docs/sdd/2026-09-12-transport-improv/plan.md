@@ -1479,19 +1479,20 @@ and its `/etc/os-release` path was a symlink that the WSL share could not open. 
 separately sampled the stopped target throughout the cold open: `\\wsl$` refused after 80 seconds
 without starting it; `\\wsl.localhost` refused after 40 seconds, also without starting it. With the
 target already running, a supplementary run used the regular `/usr/lib/os-release` file and the
-probe's otherwise unchanged cases. Against a 15.75-second no-handle distribution lifetime, one and
-two handles each retained it for 180 seconds; it stopped after normal close, last-holder close, and
-abrupt holder death, while force-termination stopped the exact target and the unrelated control
-survived. The 60-second utility-VM idle time was distinct from the roughly 15.6-second target
-distribution idle time, especially with the unrelated distribution running.
+probe's otherwise unchanged cases. Against a 15.75-second no-handle distribution lifetime, one
+handle retained it for 180 seconds; a second case closed the first of two handles, then the
+remaining handle retained it for another 180 seconds. It stopped after normal close, last-holder
+close, and abrupt holder death, while force-termination stopped the exact target and the unrelated
+control survived. The 60-second utility-VM idle time was distinct from the roughly 15.6-second
+target distribution idle time, especially with the unrelated distribution running.
 
-This is bounded hold-feasibility evidence, not an official probe pass or a dispatch-drain proof.
-Private review also demonstrated a false-positive cold case: the probe observed distribution state
-only after the open attempt and holder close, so a distribution that started and stopped during that
-interval could yield `PASS`. The disposable probe and its dedicated tests were removed rather than
-expanded into a second process-observation framework; their executable source remains at `333b17bc`
-in Git history. The production WSL hold adoption, exact guest observation, dispatch drain, recovery
-factory and live acceptance checkbox above remain open.
+This is bounded hold-feasibility evidence, not an official probe pass or a dispatch-drain proof. A
+local synthetic review case also demonstrated a false-positive cold result: the probe observed
+distribution state only after the open attempt and holder close, so a distribution that started and
+stopped during that interval could yield `PASS`. The disposable probe and its dedicated tests were
+removed rather than expanded into a second process-observation framework; their executable source
+remains at `333b17bc` in Git history. The production WSL hold adoption, exact guest observation,
+dispatch drain, recovery factory and live acceptance checkbox above remain open.
 
 The durable launch checkpoint is privately accepted at `ead879ce`. Project, complexity and
 independent correctness reviews are clean. Review removed the dormant application, cleanup and
