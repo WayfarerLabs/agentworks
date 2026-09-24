@@ -216,16 +216,15 @@ store, its permissions, closed-output validation and exact-source Python 3.11 ex
 implemented and proved in isolation. Target-controller producer ordering, crash recovery and live
 destination behavior remain open.
 
-The stream fact is self-describing. The first consuming service must persist and compare the
-requested output policy before treating its disposition as fulfillment; this checkpoint adds no
-unused database field or migration. `_managed_job_wire.py` now owns the complete canonical byte
-schema as a Python 3.11-compatible stdlib module that reuses the portable `_helper_identity.py`
-validator. The host typed adapter delegates encoding, decoding and launch digest to it. Exact-source
-bundle tests prove byte round trips under Python 3.11 when installed. The target producer/service
-still needs to bundle those sources verbatim and prove them in its own launch and observation paths.
-The first consumer now persists requested output policy and the protected-store checkpoint below
-uses the same portable codec. Target controller production, cgroup/systemd launch, carrier proof and
-live validation remain open.
+The stream fact is self-describing. Managed-run reservation now persists the requested output policy
+atomically alongside run identity. A future consuming service must compare that policy to each
+stream end before treating its disposition as fulfillment. `_managed_job_wire.py` now owns the
+complete canonical byte schema as a Python 3.11-compatible stdlib module that reuses the portable
+`_helper_identity.py` validator. The host typed adapter delegates encoding, decoding and launch
+digest to it. Exact-source bundle tests prove byte round trips under Python 3.11 when installed. The
+target producer/service still needs to bundle those sources verbatim and prove them in its own
+launch and observation paths. The protected store uses the same portable codec. Target controller
+production, cgroup/systemd launch, carrier proof and live validation remain open.
 
 ### First private managed service
 
