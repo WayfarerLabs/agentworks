@@ -1609,16 +1609,17 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       identity, or expose a production target. Replace exact scope equality with the future
       core-owned hierarchy coverage predicate when #377's admission model lands.
 - [x] Compose a private selected-platform preparation seam under that same owner and deadline.
-      Static owner, platform-site, marker and finite-budget checks precede platform I/O. Observe the
-      provider locator first, preserve typed locator-unavailable refusal, validate plugin results
-      and deadline after each platform call, then delegate one guest attempt through the existing
-      preparer. Return the validated passive binding only with successful preparation. Hermetic
-      tests cover refusal ordering, malformed returns, platform exceptions, late observations, exact
-      input forwarding and one borrowed success. WSL2 is the first current positive locator and
-      native binding pair; Proxmox remains unavailable and SSH-backed cloud/Lima bindings remain for
-      #832 or later. This checkpoint does not activate or hold a VM, open a route, acquire or close
-      the outer owner, reserve a run, establish live WSL/SSH/QGA behavior, supply Proxmox/Lima
-      locator alternatives, prove recovery drain, adopt identity or expose RunContext/public access.
+      Static owner, platform-site, marker and finite-budget checks precede platform I/O. One serial
+      borrow spans locator observation, native binding resolution and the guest attempt. Preserve
+      typed locator-unavailable refusal, validate plugin results and deadline after each platform
+      call, then delegate one guest attempt through the shared preparer. Return the validated
+      passive binding only with successful preparation. Hermetic tests cover refusal ordering,
+      malformed returns, platform exceptions, late observations, exact input forwarding and one
+      borrowed success. WSL2 is the first current positive locator and native binding pair; Proxmox
+      remains unavailable and SSH-backed cloud/Lima bindings remain for #832 or later. This
+      checkpoint does not activate or hold a VM, open a route, acquire or close the outer owner,
+      reserve a run, establish live WSL/SSH/QGA behavior, supply Proxmox/Lima locator alternatives,
+      prove recovery drain, adopt identity or expose RunContext/public access.
 - [ ] Complete the target-identity gate with production/platform composition and live carrier proof.
       No explicit adoption workflow, locator-unavailable alternative or public RunContext claim is
       complete at this checkpoint.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from threading import Event, Thread
 from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
@@ -34,7 +35,7 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
-from agentworks.operations import OperationOwner
+from agentworks.operations import OperationBorrow, OperationOwner, release_borrow_after_custody
 from agentworks.vms.target_identity import compose_managed_vm_target_identity
 from agentworks.vms.target_preparation import (
     SelectedPlatformVMTargetPreparation,
@@ -185,6 +186,25 @@ def _compose(
     return prepare_managed_vm_target_from_platform(
         vm or _vm(), platform, ctx, deadline=deadline or Deadline.after(10), owner=owner, config=config
     )
+
+
+def _watch_custody(monkeypatch: pytest.MonkeyPatch) -> tuple[list[OperationBorrow], list[OperationBorrow]]:
+    borrows: list[OperationBorrow] = []
+    releases: list[OperationBorrow] = []
+    original_borrow = OperationOwner.borrow
+
+    def borrow(self: OperationOwner) -> OperationBorrow:
+        result = original_borrow(self)
+        borrows.append(result)
+        return result
+
+    def release(result: OperationBorrow) -> None:
+        releases.append(result)
+        release_borrow_after_custody(result)
+
+    monkeypatch.setattr(OperationOwner, "borrow", borrow)
+    monkeypatch.setattr("agentworks.vms.target_preparation.release_borrow_after_custody", release)
+    return borrows, releases
 
 
 def _success_payload(marker: str = _MARKER) -> bytes:
@@ -558,11 +578,11 @@ def test_platform_preflight_refuses_before_any_io_or_borrow(
         owner.close()
 
 
-def test_platform_locator_unavailable_skips_binding_and_borrow(
+def test_platform_locator_unavailable_skips_binding_and_releases_borrow(
     owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, owner = owned
-    monkeypatch.setattr(OperationOwner, "borrow", lambda self: pytest.fail("unexpected borrow"))
+    borrows, releases = _watch_custody(monkeypatch)
     carrier = TranscriptCarrier(_success_payload())
     platform = _platform(carrier)
     platform.observe_provider_locator.return_value = ProviderLocatorUnavailable()
@@ -573,6 +593,7 @@ def test_platform_locator_unavailable_skips_binding_and_borrow(
     assert result.binding is None
     platform.resolve_native_execution_binding.assert_not_called()
     assert carrier.calls == 0
+    assert len(borrows) == 1 and releases == borrows
     owner.close()
 
 
@@ -581,12 +602,13 @@ def test_invalid_platform_locator_shape_refuses_before_binding(
     owned: tuple[Database, OperationOwner], bad_locator: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, owner = owned
-    monkeypatch.setattr(OperationOwner, "borrow", lambda self: pytest.fail("unexpected borrow"))
+    borrows, releases = _watch_custody(monkeypatch)
     platform = _platform(TranscriptCarrier(_success_payload()))
     platform.observe_provider_locator.return_value = bad_locator
     with pytest.raises(ValidationError):
         _compose(owner, platform)
     platform.resolve_native_execution_binding.assert_not_called()
+    assert len(borrows) == 1 and releases == borrows
     owner.close()
 
 
@@ -594,7 +616,7 @@ def test_forged_locator_and_binding_are_revalidated_at_plugin_boundary(
     owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, owner = owned
-    monkeypatch.setattr(OperationOwner, "borrow", lambda self: pytest.fail("unexpected borrow"))
+    borrows, releases = _watch_custody(monkeypatch)
     carrier = TranscriptCarrier(_success_payload())
     platform = _platform(carrier)
     locator = ProviderLocator("opaque")
@@ -617,6 +639,7 @@ def test_forged_locator_and_binding_are_revalidated_at_plugin_boundary(
     with pytest.raises(ValidationError):
         _compose(owner, platform)
     assert carrier.calls == 0
+    assert len(borrows) == 3 and releases == borrows
     owner.close()
 
 
@@ -625,25 +648,27 @@ def test_invalid_platform_binding_shape_refuses_before_guest(
     owned: tuple[Database, OperationOwner], bad_binding: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, owner = owned
-    monkeypatch.setattr(OperationOwner, "borrow", lambda self: pytest.fail("unexpected borrow"))
+    borrows, releases = _watch_custody(monkeypatch)
     carrier = TranscriptCarrier(_success_payload())
     platform = _platform(carrier)
     platform.resolve_native_execution_binding.return_value = bad_binding
     with pytest.raises(ValidationError):
         _compose(owner, platform)
     assert carrier.calls == 0
+    assert len(borrows) == 1 and releases == borrows
     owner.close()
 
 
-def test_invalid_plugin_carrier_refuses_before_borrow(
+def test_invalid_plugin_carrier_releases_borrow_before_guest(
     owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, owner = owned
-    monkeypatch.setattr(OperationOwner, "borrow", lambda self: pytest.fail("unexpected borrow"))
+    borrows, releases = _watch_custody(monkeypatch)
     platform = _platform(TranscriptCarrier(_success_payload()))
     platform.resolve_native_execution_binding.return_value = NativeExecutionBinding(object(), "admin", _runtime())
     with pytest.raises(ValidationError):
         _compose(owner, platform)
+    assert len(borrows) == 1 and releases == borrows
     owner.close()
 
 
@@ -658,21 +683,77 @@ def test_selected_platform_must_be_bound_to_vm_site(owned: tuple[Database, Opera
 
 
 @pytest.mark.parametrize("stage", ["locator", "binding"])
-def test_platform_exception_does_not_borrow(
+def test_platform_exception_releases_unused_borrow(
     owned: tuple[Database, OperationOwner], stage: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, owner = owned
+    borrows, releases = _watch_custody(monkeypatch)
     carrier = TranscriptCarrier(_success_payload())
     platform = _platform(carrier)
     getattr(
         platform, "observe_provider_locator" if stage == "locator" else "resolve_native_execution_binding"
     ).side_effect = ControlStop()
-    borrow = Mock(wraps=OperationOwner.borrow)
-    monkeypatch.setattr(OperationOwner, "borrow", borrow)
     with pytest.raises(ControlStop):
         _compose(owner, platform)
-    borrow.assert_not_called()
+    assert len(borrows) == 1 and releases == borrows
     assert carrier.calls == 0
+    owner.close()
+
+
+def test_closed_owner_refuses_before_platform_io(owned: tuple[Database, OperationOwner]) -> None:
+    _, owner = owned
+    owner.close()
+    platform = _platform(TranscriptCarrier(_success_payload()))
+
+    with pytest.raises(StateError):
+        _compose(owner, platform)
+
+    platform.observe_provider_locator.assert_not_called()
+    platform.resolve_native_execution_binding.assert_not_called()
+
+
+def test_owner_closure_during_blocked_locator_refuses_dispatch_and_releases_borrow(
+    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, owner = owned
+    borrows, releases = _watch_custody(monkeypatch)
+    entered = Event()
+    resume = Event()
+    carrier = TranscriptCarrier(_success_payload())
+    platform = _platform(carrier)
+    escaped: list[BaseException] = []
+
+    def blocked_locator(*args: object, **kwargs: object) -> ProviderLocator:
+        del args, kwargs
+        entered.set()
+        assert resume.wait(5)
+        return ProviderLocator("opaque")
+
+    def prepare() -> None:
+        try:
+            _compose(owner, platform)
+        except BaseException as error:
+            escaped.append(error)
+
+    platform.observe_provider_locator.side_effect = blocked_locator
+    worker = Thread(target=prepare)
+    worker.start()
+    try:
+        assert entered.wait(5)
+        with pytest.raises(StateError):
+            owner.close()
+    finally:
+        resume.set()
+        worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert len(escaped) == 1
+    assert isinstance(escaped[0], StateError)
+    fact = escaped[0].__cause__
+    assert isinstance(fact, VMTargetPreparationControlFact)
+    assert not fact.preparation.requires_owner_retention
+    assert carrier.calls == 0
+    assert len(borrows) == 1 and releases == borrows
     owner.close()
 
 
@@ -681,7 +762,7 @@ def test_platform_late_result_refuses_before_next_stage(
     owned: tuple[Database, OperationOwner], stage: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, owner = owned
-    monkeypatch.setattr(OperationOwner, "borrow", lambda self: pytest.fail("unexpected borrow"))
+    borrows, releases = _watch_custody(monkeypatch)
     carrier = TranscriptCarrier(_success_payload())
     platform = _platform(carrier)
     deadline = Deadline.after(10)
@@ -701,6 +782,7 @@ def test_platform_late_result_refuses_before_next_stage(
     if stage == "locator":
         platform.resolve_native_execution_binding.assert_not_called()
     assert carrier.calls == 0
+    assert len(borrows) == 1 and releases == borrows
     owner.close()
 
 
@@ -713,15 +795,9 @@ def test_platform_composition_passes_exact_inputs_and_leaves_outer_owner_open(
     ctx = object()
     config = object()
     deadline = Deadline.after(10)
-    borrow_count = 0
+    borrows, releases = _watch_custody(monkeypatch)
     probe_selection: RuntimeSelection | None = None
     probe_carrier: Carrier | None = None
-    original_borrow = OperationOwner.borrow
-
-    def borrow(self: OperationOwner):
-        nonlocal borrow_count
-        borrow_count += 1
-        return original_borrow(self)
 
     def probe(
         selected_carrier: Carrier, *, runtime_selection: RuntimeSelection, deadline: Deadline
@@ -731,7 +807,6 @@ def test_platform_composition_passes_exact_inputs_and_leaves_outer_owner_open(
         probe_carrier = selected_carrier
         return observe_vm_guest_identity(selected_carrier, runtime_selection=runtime_selection, deadline=deadline)
 
-    monkeypatch.setattr(OperationOwner, "borrow", borrow)
     monkeypatch.setattr("agentworks.vms.target_preparation.observe_vm_guest_identity", probe)
     result = _compose(owner, platform, ctx=ctx, config=config, deadline=deadline)
 
@@ -749,7 +824,7 @@ def test_platform_composition_passes_exact_inputs_and_leaves_outer_owner_open(
     assert "binding" not in repr(result)
     assert carrier.calls == 1
     assert carrier.deadlines == [deadline]
-    assert borrow_count == 1
+    assert len(borrows) == 1 and releases == borrows
     platform.observe_provider_locator.assert_called_once_with(_vm(), ctx, deadline=deadline)
     platform.resolve_native_execution_binding.assert_called_once_with(_vm(), ctx, deadline=deadline, config=config)
     owner.seal_lifecycle_obligations()

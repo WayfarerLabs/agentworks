@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from agentworks.db import VMRow
     from agentworks.execution._managed_runs import ManagedTargetIdentity
     from agentworks.execution.carrier import Deadline
-    from agentworks.operations import OperationOwner
+    from agentworks.operations import OperationBorrow, OperationOwner
 
 
 class VMTargetPreparationStatus(StrEnum):
@@ -135,8 +135,8 @@ def prepare_managed_vm_target_from_platform(
 ) -> SelectedPlatformVMTargetPreparation:
     """Compose a selected VM target from one bound platform under existing custody.
 
-    Platform observations are plugin results. Validate their shapes before they
-    reach the guest preparer; this function owns no activation or outer owner.
+    Platform observations are plugin results. One borrow serializes their
+    resolution with guest preparation; this function owns no outer operation.
     """
     _validate_operation_boundary(vm, deadline, owner)
     if platform.site_name != vm.site:
@@ -145,30 +145,34 @@ def prepare_managed_vm_target_from_platform(
     if preflight is not None:
         return SelectedPlatformVMTargetPreparation(preflight, None)
 
-    locator = platform.observe_provider_locator(vm, ctx, deadline=deadline)
-    if deadline.expired:
-        return SelectedPlatformVMTargetPreparation(
-            _failed(VMTargetPreparationFailure.DEADLINE, deadline_exceeded=True), None
-        )
-    if type(locator) is ProviderLocatorUnavailable:
-        return SelectedPlatformVMTargetPreparation(_failed(VMTargetPreparationFailure.LOCATOR_UNAVAILABLE), None)
-    if type(locator) is not ProviderLocator:
-        raise ValidationError("VM platform returned an invalid provider locator observation")
-    token = getattr(locator, "token", None)
-    if type(token) is not str:
-        raise ValidationError("VM platform returned an invalid provider locator token")
-    locator = ProviderLocator(token)
+    borrow = owner.borrow()
+    try:
+        locator = platform.observe_provider_locator(vm, ctx, deadline=deadline)
+        if deadline.expired:
+            return SelectedPlatformVMTargetPreparation(
+                _failed(VMTargetPreparationFailure.DEADLINE, deadline_exceeded=True), None
+            )
+        if type(locator) is ProviderLocatorUnavailable:
+            return SelectedPlatformVMTargetPreparation(_failed(VMTargetPreparationFailure.LOCATOR_UNAVAILABLE), None)
+        if type(locator) is not ProviderLocator:
+            raise ValidationError("VM platform returned an invalid provider locator observation")
+        try:
+            locator = ProviderLocator(locator.token)
+        except AttributeError as error:
+            raise ValidationError("VM platform returned an incomplete provider locator") from error
 
-    binding = platform.resolve_native_execution_binding(vm, ctx, deadline=deadline, config=config)
-    if deadline.expired:
+        binding = platform.resolve_native_execution_binding(vm, ctx, deadline=deadline, config=config)
+        if deadline.expired:
+            return SelectedPlatformVMTargetPreparation(
+                _failed(VMTargetPreparationFailure.DEADLINE, deadline_exceeded=True), None
+            )
+        binding = _validated_native_binding(binding)
+        preparation = _prepare_managed_vm_target_with_borrow(vm, locator, binding, deadline=deadline, borrow=borrow)
         return SelectedPlatformVMTargetPreparation(
-            _failed(VMTargetPreparationFailure.DEADLINE, deadline_exceeded=True), None
+            preparation, binding if preparation.status is VMTargetPreparationStatus.PREPARED else None
         )
-    binding = _validated_native_binding(binding)
-    preparation = prepare_managed_vm_target(vm, locator, binding, deadline=deadline, owner=owner)
-    return SelectedPlatformVMTargetPreparation(
-        preparation, binding if preparation.status is VMTargetPreparationStatus.PREPARED else None
-    )
+    finally:
+        release_borrow_after_custody(borrow)
 
 
 def prepare_managed_vm_target(
@@ -193,57 +197,69 @@ def prepare_managed_vm_target(
         return preflight
 
     borrow = owner.borrow()
+    try:
+        return _prepare_managed_vm_target_with_borrow(vm, locator, binding, deadline=deadline, borrow=borrow)
+    finally:
+        release_borrow_after_custody(borrow)
+
+
+def _prepare_managed_vm_target_with_borrow(
+    vm: VMRow,
+    locator: ProviderLocatorObservation,
+    binding: NativeExecutionBinding,
+    *,
+    deadline: Deadline,
+    borrow: OperationBorrow,
+) -> VMTargetPreparation:
+    """Run one guest attempt under custody acquired by either entry point."""
     operation = BorrowedFixedHelperCarrier(binding.carrier, borrow)
     state = _State(operation)
     try:
-        try:
-            result = observe_vm_guest_identity(
-                operation,
-                runtime_selection=binding.runtime_selection,
-                deadline=deadline,
+        result = observe_vm_guest_identity(
+            operation,
+            runtime_selection=binding.runtime_selection,
+            deadline=deadline,
+        )
+        state.guest_result = result
+        normal = operation.settle(result.dispatch, result.carrier_completion)
+        if not normal:
+            state.fail(
+                VMTargetPreparationFailure.DISPATCH
+                if result.dispatch is Dispatch.NOT_SENT
+                else VMTargetPreparationFailure.TERMINATION
             )
-            state.guest_result = result
-            normal = operation.settle(result.dispatch, result.carrier_completion)
-            if not normal:
-                state.fail(
-                    VMTargetPreparationFailure.DISPATCH
-                    if result.dispatch is Dispatch.NOT_SENT
-                    else VMTargetPreparationFailure.TERMINATION
-                )
-                _record_deadline(state, deadline)
-                return state.finish()
-            if _record_deadline(state, deadline):
-                return state.finish()
-            if result.carrier_failure is not None:
-                state.fail(VMTargetPreparationFailure.CARRIER)
-                return state.finish()
-            if result.runtime_prerequisite.state is not RuntimePrerequisiteState.READY:
-                state.fail(VMTargetPreparationFailure.RUNTIME_PREREQUISITE)
-                return state.finish()
-            observation = result.observation
-            if observation is None:
-                state.fail(VMTargetPreparationFailure.GUEST_OBSERVATION)
-                return state.finish()
-            if observation.state is VMGuestIdentityObservationState.REFUSED:
-                state.fail(VMTargetPreparationFailure.GUEST_REFUSED)
-                return state.finish()
-            if (
-                observation.state is not VMGuestIdentityObservationState.RESOLVED
-                or type(observation.identity) is not VMGuestIdentity
-            ):
-                state.fail(VMTargetPreparationFailure.GUEST_OBSERVATION)
-                return state.finish()
-            try:
-                state.target = compose_managed_vm_target_identity(vm, locator, observation.identity)
-            except StateError:
-                state.fail(VMTargetPreparationFailure.IDENTITY)
             _record_deadline(state, deadline)
             return state.finish()
-        except BaseException as control:
-            _record_deadline(state, deadline)
-            raise control from VMTargetPreparationControlFact(state.finish())
-    finally:
-        release_borrow_after_custody(borrow)
+        if _record_deadline(state, deadline):
+            return state.finish()
+        if result.carrier_failure is not None:
+            state.fail(VMTargetPreparationFailure.CARRIER)
+            return state.finish()
+        if result.runtime_prerequisite.state is not RuntimePrerequisiteState.READY:
+            state.fail(VMTargetPreparationFailure.RUNTIME_PREREQUISITE)
+            return state.finish()
+        observation = result.observation
+        if observation is None:
+            state.fail(VMTargetPreparationFailure.GUEST_OBSERVATION)
+            return state.finish()
+        if observation.state is VMGuestIdentityObservationState.REFUSED:
+            state.fail(VMTargetPreparationFailure.GUEST_REFUSED)
+            return state.finish()
+        if (
+            observation.state is not VMGuestIdentityObservationState.RESOLVED
+            or type(observation.identity) is not VMGuestIdentity
+        ):
+            state.fail(VMTargetPreparationFailure.GUEST_OBSERVATION)
+            return state.finish()
+        try:
+            state.target = compose_managed_vm_target_identity(vm, locator, observation.identity)
+        except StateError:
+            state.fail(VMTargetPreparationFailure.IDENTITY)
+        _record_deadline(state, deadline)
+        return state.finish()
+    except BaseException as control:
+        _record_deadline(state, deadline)
+        raise control from VMTargetPreparationControlFact(state.finish())
 
 
 def _failed(
@@ -291,7 +307,7 @@ def _validate_operation_boundary(
 
 
 def _validated_native_binding(binding: object) -> NativeExecutionBinding:
-    """Reconstruct plugin binding facts before any guest attempt or borrow."""
+    """Reconstruct plugin binding facts under custody before any guest attempt."""
     if type(binding) is not NativeExecutionBinding:
         raise ValidationError("VM platform returned an invalid native execution binding")
     selection = getattr(binding, "runtime_selection", None)
