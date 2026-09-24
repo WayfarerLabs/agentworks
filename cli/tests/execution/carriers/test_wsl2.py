@@ -21,6 +21,7 @@ from agentworks.execution.carrier import (
     PreparedInvocation,
     Provenance,
     Retention,
+    SinkOutput,
 )
 from agentworks.execution.carriers import wsl2
 from agentworks.execution.carriers._subprocess import ProcessResult
@@ -72,6 +73,26 @@ def test_construction_and_feature_inspection_are_passive(monkeypatch: pytest.Mon
     assert carrier.features == carrier.features
     assert not carrier.features.live_stdio
     assert not carrier.features.terminal
+    pump.assert_not_called()
+
+
+def test_structural_validation_is_pure_and_execute_repeats_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    pump = MagicMock()
+    monkeypatch.setattr(wsl2, "run_process", pump)
+    carrier = WSL2Carrier(connection())
+    invocation = PreparedInvocation(("/prepared/bootstrap",))
+    carrier.validate(invocation, io=CarrierIO())
+    pump.assert_not_called()
+
+    class Sink:
+        def try_write(self, data: memoryview) -> int:
+            return len(data)
+
+    unsupported = CarrierIO(output=SinkOutput(Sink(), Sink(), require_live=True))
+    with pytest.raises(ValidationError):
+        carrier.validate(invocation, io=unsupported)
+    with pytest.raises(ValidationError):
+        carrier.execute(invocation, io=unsupported, deadline=Deadline(None))
     pump.assert_not_called()
 
 

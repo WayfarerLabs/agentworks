@@ -89,7 +89,11 @@ class SyntheticCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        del invocation, io
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         del invocation, io
         self.calls += 1
         if self.control is not None:
@@ -761,6 +765,7 @@ def test_owner_close_during_dispatch_retains_the_interrupted_attempt(
 
     class ClosingCarrier(SyntheticCarrier):
         def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+            self.validate(invocation, io=io)
             del invocation, io, deadline
             self.calls += 1
             owner.close()

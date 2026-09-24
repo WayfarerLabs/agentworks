@@ -46,11 +46,15 @@ class RecordingCarrier:
     control: BaseException | None = None
     before_dispatch: Callable[[], None] | None = None
     calls: int = 0
+    validations: int = 0
     deadlines: list[Deadline] | None = None
 
     @property
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
+
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self.validations += 1
 
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
         del invocation, io
@@ -63,6 +67,22 @@ class RecordingCarrier:
             raise self.control
         assert self.report is not None
         return self.report
+
+
+def test_borrowed_validation_does_not_begin_an_operation_attempt(
+    operation: tuple[Database, OperationOwner, execution_operation.ExecutionOperation],
+) -> None:
+    _, owner, _ = operation
+    borrow = owner.borrow()
+    underlying = RecordingCarrier(CarrierReport(Dispatch.NOT_SENT))
+    carrier = BorrowedFixedHelperCarrier(underlying, borrow)
+    try:
+        carrier.validate(PreparedInvocation(("/bin/true",)), io=CarrierIO())
+        assert underlying.validations == 1
+        assert underlying.calls == 0
+        assert not carrier.has_outstanding_attempt
+    finally:
+        borrow.close()
 
 
 @pytest.fixture

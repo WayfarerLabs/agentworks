@@ -13,7 +13,9 @@ from agentworks.execution.carrier import (
     Dispatch,
     ExitStatus,
     Failure,
+    LiveInput,
     Provenance,
+    SinkOutput,
 )
 from agentworks.execution.carriers._subprocess import run_process
 
@@ -57,8 +59,14 @@ class WSL2Carrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        """Reject only unsupported live I/O without starting a WSL client."""
+        if isinstance(io.input, LiveInput) or isinstance(io.output, SinkOutput) and io.output.require_live:
+            raise ValidationError("WSL2 does not support live standard I/O")
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
         """Spend the original deadline on at most one literal WSL exec attempt."""
+        self.validate(invocation, io=io)
         result = run_process(
             [
                 self._connection.wsl_executable,

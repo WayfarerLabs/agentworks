@@ -66,7 +66,11 @@ class LostCallStdoutCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation, *, io) -> None:
+        self._carrier.validate(invocation, io=io)
+
     def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         if self.calls != self._lost_call:
             return self._carrier.execute(invocation, io=io, deadline=deadline)

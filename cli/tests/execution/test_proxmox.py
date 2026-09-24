@@ -290,6 +290,22 @@ def execute(io: CarrierIO | None = None, deadline: Deadline | None = None):
     )
 
 
+def test_structural_validation_is_pure_and_execute_repeats_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    request = MagicMock()
+    monkeypatch.setattr(_ProxmoxWire, "request", request)
+    carrier = ProxmoxCarrier(connection())
+    invocation = PreparedInvocation(("/bin/true",))
+    valid = CarrierIO(input=FiniteInput(b"armored"))
+    carrier.validate(invocation, io=valid)
+    request.assert_not_called()
+    invalid = CarrierIO(input=FiniteInput(b"\xff"))
+    with pytest.raises(ValidationError):
+        carrier.validate(invocation, io=invalid)
+    with pytest.raises(ValidationError):
+        carrier.execute(invocation, io=invalid, deadline=Deadline(None))
+    request.assert_not_called()
+
+
 @pytest.mark.parametrize("code", [0, 1, 255])
 def test_observed_bootstrap_exit_is_not_a_delivery_failure(wire: MagicMock, code: int) -> None:
     wire.side_effect = [{"pid": 42}, {"exited": 1, "exitcode": code, "out-data": "a\r\n\0", "err-data": "b\n\n"}]

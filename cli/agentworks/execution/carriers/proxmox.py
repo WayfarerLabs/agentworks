@@ -159,7 +159,12 @@ class ProxmoxCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        """Check the exact ASCII request envelope before any provider access."""
+        self._request_body(invocation, io)
+
+    @staticmethod
+    def _request_body(invocation: PreparedInvocation, io: CarrierIO) -> bytes:
         if isinstance(io.input, LiveInput) or isinstance(io.output, SinkOutput) and io.output.require_live:
             raise ValidationError("Proxmox does not support live standard I/O")
         input_data = io.input.data if isinstance(io.input, FiniteInput) else b""
@@ -170,6 +175,11 @@ class ProxmoxCarrier:
         body = json.dumps({"command": invocation.argv, "input-data": input_data.decode("ascii")}).encode("ascii")
         if len(body) > _MAX_REQUEST_BYTES:
             raise ValidationError("Prepared Proxmox request exceeds the supported HTTP body limit")
+        return body
+
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
+        body = self._request_body(invocation, io)
         if deadline.expired:
             return _incomplete(Dispatch.NOT_SENT, io, Failure.DEADLINE)
         try:

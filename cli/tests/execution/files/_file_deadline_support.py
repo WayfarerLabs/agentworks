@@ -75,6 +75,9 @@ class AdmittedTimeoutCarrier:
     def calls(self) -> int:
         return self._carrier.calls
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self._carrier.validate(invocation, io=io)
+
     def execute(
         self,
         invocation: PreparedInvocation,
@@ -82,6 +85,7 @@ class AdmittedTimeoutCarrier:
         io: CarrierIO,
         deadline: Deadline,
     ) -> CarrierReport:
+        self.validate(invocation, io=io)
         if self._startup_delay:
             time.sleep(self._startup_delay)
         assert isinstance(io.output, SinkOutput)

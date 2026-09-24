@@ -58,7 +58,11 @@ class ReentrantCarrier:
     def features(self) -> ChannelFeatures:
         return self._inner.features
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self._inner.validate(invocation, io=io)
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         if self.calls == 1:
             assert self.callback is not None
@@ -75,7 +79,11 @@ class UnsettledCarrier:
     def features(self) -> ChannelFeatures:
         return self._inner.features
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self._inner.validate(invocation, io=io)
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         report = self._inner.execute(invocation, io=io, deadline=deadline)
         return replace(report, completion=ExitStatus(code=1))
 
@@ -89,7 +97,11 @@ class RecordingCarrier:
     def features(self) -> ChannelFeatures:
         return self._inner.features
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self._inner.validate(invocation, io=io)
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.deadlines.append(deadline)
         return self._inner.execute(invocation, io=io, deadline=deadline)
 
@@ -102,7 +114,11 @@ class NoDispatchCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        del invocation, io
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         del io, deadline
         self.invocations.append(invocation)
         return CarrierReport(dispatch=Dispatch.NOT_SENT)
@@ -114,6 +130,7 @@ class FirstDispatchCarrier(NoDispatchCarrier):
         self._inner = LocalCarrier()
 
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.invocations.append(invocation)
         if len(self.invocations) == 1:
             return self._inner.execute(invocation, io=io, deadline=deadline)

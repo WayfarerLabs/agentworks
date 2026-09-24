@@ -11,11 +11,27 @@ provenance, completeness and retention. Completion can belong to an account shel
 before the bootstrap ran; it is not independent proof of bootstrap or application execution. Local
 status alone is not a guest exit. Payload fields have no diagnostic representation.
 
+`Carrier.validate` is a pure structural preflight on the prepared invocation and I/O shape, not a
+delivery attempt. It rejects only deterministic local incompatibility, including a carrier's smaller
+direct-request envelope; `execute` repeats validation before effects. Readiness, credentials,
+connectivity and delivery remain with `execute`. The SSH implementation of this shared method is
+supplied by its separate owner handoff, not by the private managed-start slice.
+
 `Failure.INPUT` records failed or incomplete required input delivery; intentional consumer closure
 is not automatically a failure. `Failure.OUTPUT` records failed output collection, including a
 stream whose EOF cannot be established within the carrier's collection bound. `OUTPUT_LIMIT` is the
 distinct capture-limit outcome. These local failures preserve independently observed completion and
 partial-stream evidence; none establishes guest cancellation or permits replay.
+
+The private managed-start exchange stages only the five fixed protected request assets and invokes
+the exact-source Linux service controller through one transient root systemd service. Its canonical
+request permits bounded binary source and stdin using ASCII base64 framing, but a carrier may reject
+a smaller direct envelope during pure validation. Large-request staging or fallback is still open;
+the protocol's own asset ceiling is not a promise that every carrier can deliver it directly.
+Possible dispatch is recorded durably before the sole carrier effect. An exact launch fact can
+confirm a receipt independently of the systemd client exit, while acknowledgement also requires
+trusted complete helper/carrier evidence and a zero client outcome. This private slice does not
+provide stop/dispose, public jobs, live target-marker rereads or production SSH/QGA proof.
 
 `models.py` defines immutable literal commands and scripts with explicit `Shell.SH`, `Shell.BASH` or
 `Shell.USER_DEFAULT` selection and separate startup flags. It also defines finite `Input`, bounded

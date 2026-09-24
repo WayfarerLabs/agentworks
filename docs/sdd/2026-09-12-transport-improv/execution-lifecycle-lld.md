@@ -215,8 +215,11 @@ overwritten. No shared mutable state file or file-level lock is part of this pro
 store, its permissions, closed-output validation and exact-source Python 3.11 execution are now
 implemented and proved in isolation. The target controller's request, launch gate, normal-wait,
 stream-end and cleanup ordering are also implemented hermetically. Private carrier-neutral `observe`
-and closed `read-output` exchanges are implemented. Transient-service launch,
-`start`/`stop`/`dispose` exchanges, crash recovery and live destination behavior remain open.
+and closed `read-output` exchanges are implemented. A private carrier-neutral `start` exchange now
+stages the five fixed request assets and attempts one transient-service activation, with durable
+possible-dispatch before delivery. `stop`/`dispose`, crash recovery and live destination behavior
+remain open. Hermetic start proof does not establish live systemd/cgroup behavior, current target
+marker or boot rereads, or SSH/QGA production delivery.
 
 The stream fact is self-describing. Managed-run reservation now persists the requested output policy
 atomically alongside run identity. A future consuming service must compare that policy to each
@@ -310,9 +313,11 @@ The first private end-to-end managed-job slice may enable only `INDEPENDENT`, wh
 evidence survives observer loss. `OPERATION` must refuse before dispatch until target-side owner
 liveness or lease, partition behavior and bounded cleanup are proved. This sequences implementation
 without changing the public lifetime contract above. The private helper now exposes fixed `observe`
-and closed `read-output` over the existing carrier interface. `start`, `stop` and `dispose` remain
-unimplemented, as do host reservation/output-policy reduction and live target marker/boot rereads.
-SSH and QGA must each prove the protocol in production before public exposure.
+and closed `read-output` over the existing carrier interface. A private `start` exchange also
+preflights a reserved independent run and its persisted output policy, then uses the existing
+durable possible-dispatch wrapper. `stop` and `dispose` remain unimplemented, as do production host
+reservation/policy reduction and live target marker/boot rereads. SSH and QGA must each prove the
+protocol in production before public exposure.
 
 Target identity is structured as a core resource kind/name, a versioned incarnation fingerprint and
 a separate boot UUID. The core name supports binding and diagnostics but is not authority. The

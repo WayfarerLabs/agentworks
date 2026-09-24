@@ -44,7 +44,12 @@ class BorrowedFixedHelperCarrier:
     def requires_owner_retention(self) -> bool:
         return self.pending_remote_effects or self.coordination_uncertain or self.has_outstanding_attempt
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        """Delegate pure structural validation without borrowing an attempt."""
+        self._carrier.validate(invocation, io=io)
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         try:
             attempt = self._borrow.begin_attempt()
             self.outstanding_attempt = attempt

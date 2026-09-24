@@ -170,7 +170,11 @@ class _CarrierFactInjector:
     def features(self):
         return self.inner.features
 
+    def validate(self, invocation, *, io) -> None:
+        self.inner.validate(invocation, io=io)
+
     def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         selected_io = io
         if self.calls in self.lost_calls:
@@ -658,7 +662,11 @@ class _NonzeroSecondCarrier:
     def features(self):
         return self.inner.features
 
+    def validate(self, invocation, *, io) -> None:
+        self.inner.validate(invocation, io=io)
+
     def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         report = self.inner.execute(invocation, io=io, deadline=deadline)
         if self.calls == 2:
@@ -675,7 +683,11 @@ class _NonzeroCleanupCarrier:
     def features(self):
         return self.inner.features
 
+    def validate(self, invocation, *, io) -> None:
+        self.inner.validate(invocation, io=io)
+
     def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         report = self.inner.execute(invocation, io=io, deadline=deadline)
         if self.calls == 3:
@@ -820,7 +832,11 @@ class _InterruptingCarrier:
     def features(self):
         return LocalCarrier().features
 
+    def validate(self, invocation, *, io) -> None:
+        del invocation, io
+
     def execute(self, invocation, *, io, deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         if self.expire_deadline:
             object.__setattr__(deadline, "expires_at", 0.0)
         raise KeyboardInterrupt("carrier-secret-canary")

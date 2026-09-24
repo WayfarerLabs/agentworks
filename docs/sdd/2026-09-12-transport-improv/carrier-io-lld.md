@@ -15,6 +15,15 @@ types, shared parsing and acceptance vectors. SSH owns its client environment po
 interpretation, call-site adaptation and borrowed-input terminal restoration. Neither lane silently
 changes this boundary. Connection/trust and forwarding work need not wait for these extensions.
 
+`Carrier.validate(invocation, io=...)` is a pure structural preflight for a fully prepared call, not
+a second delivery primitive. It may reject deterministic local incompatibility such as an
+unsupported input/output shape or an oversized provider envelope, but performs no discovery,
+credential lookup, process/network I/O, durable attempt or other effect. `execute` repeats the same
+validation defensively before its effects. Deadline observation remains call-time execution
+handling; readiness, credentials, connectivity and actual delivery may perform effects there. The
+SSH validator is owned by the separate SSH lane; this contract does not authorize a fallback when it
+is absent.
+
 This document selects a candidate for an experiment, not permission to advertise live I/O or enable
 production execution. Any change to the types in `carrier.py` is coordinated with the SSH owner
 before integration. The existing proof's sensitive-output suppression remains intact until the
