@@ -1335,7 +1335,7 @@ connection and trust only. Before broader lifecycle implementation, complete the
       systemd-stop claim, disposal/retention policy or public composition. Hermetic proof does not
       establish live systemd/cgroup, current target-marker/boot or SSH/QGA behavior.
 - [x] Implement and privately prove exact terminal disposal with a boot-local retry tombstone
-      through `564604138492acbb767824b136078e308876dfd0`. Require the exact launch, boundary
+      through `4292a4a8001633045c67c18ab87a3691a081bc39`. Require the exact launch, boundary
       emptiness and both closed stream ends before publishing `disposal` by hard-linking the
       validated immutable launch and syncing the directory. Validate capture spools structurally
       before deletion; their bytes, lengths and digests do not authorize release. Validate
@@ -1351,7 +1351,7 @@ connection and trust only. Before broader lifecycle implementation, complete the
       Make target publishers refuse an observed receipt, while leaving distinct-operation
       serialization to the core operation claim rather than adding a file lock. Add no automatic
       retention interval, forced release, generic deletion API, mutable status or database disposal
-      field. The 446 managed-execution tests, Ruff, formatting, mypy across 252 execution sources,
+      field. The 451 managed-execution tests, Ruff, formatting, mypy across 252 execution sources,
       the full file-lint suite and diff check pass. Host exchange proof covers pure preflight,
       deadline refusal, helper and carrier uncertainty, malformed or stale receipts, complete
       disposed/not-ready results and suppression of the launch receipt from representation.
