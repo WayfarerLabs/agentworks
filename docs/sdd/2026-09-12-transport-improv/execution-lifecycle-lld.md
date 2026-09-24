@@ -642,13 +642,15 @@ resolved by the native owner through the trusted Windows system directory, rathe
 executable path. Registration, mark and publication uncertainty retain the caller-owned hold without
 replay. Ordinary release may resolve an ambiguous post-READY publication after local settlement and
 independent exact absence; it never resolves on `EXITING`, client exit, Job settlement or missing
-guest identity alone. Recovery discovery and controller-absence proof are separate unfinished
-obligations.
+guest identity alone. Recovery discovery and production controller-absence composition remain
+separate unfinished obligations. A private Windows observer now reports exact controller presence,
+confirmed absence or unknown under a finite deadline; it does not establish dispatch drain or guest
+absence.
 
 This checkpoint does not wire `systemd.py`, carriers, platform factories, public `ExecutionAccess`,
 `JobRef` or RunContext. It does not implement OPERATION liveness, leases, application/output
-evidence, stop/cleanup, retention, disposal, the recovery takeover fence, session adoption or
-production recovery. Those remain the proof gates below.
+evidence, stop/cleanup, retention, disposal, adapter-owned recovery drain and quiescence, session
+adoption or production recovery. Those remain the proof gates below.
 
 ## Session containment and #770 reconciliation
 

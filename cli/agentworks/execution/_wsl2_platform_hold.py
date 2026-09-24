@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES, OperationResourceKind
 from agentworks.errors import ValidationError
 from agentworks.execution._vm_guest_identity_protocol import _valid_instance_marker
+from agentworks.execution._wsl2_controller_observer import ControllerIdentity
 from agentworks.execution._wsl2_lifecycle import (
     GuestAnchorIdentity,
     GuestAnchorObserver,
@@ -30,20 +31,6 @@ if TYPE_CHECKING:
 OBLIGATION_KIND = "wsl2-platform-hold"
 PAYLOAD_VERSION = 1
 _MAX_LOCATOR_BYTES = 4096
-
-
-@dataclass(frozen=True, slots=True)
-class ControllerIdentity:
-    """The already-running Windows Agentworks process, not the WSL client."""
-
-    pid: int
-    creation_ticks: int
-
-    def __post_init__(self) -> None:
-        if type(self.pid) is not int or not 0 < self.pid <= 0xFFFFFFFF:
-            raise ValidationError("WSL2 controller PID is invalid")
-        if type(self.creation_ticks) is not int or not 0 < self.creation_ticks <= 0xFFFFFFFFFFFFFFFF:
-            raise ValidationError("WSL2 controller creation time is invalid")
 
 
 @dataclass(frozen=True, slots=True)

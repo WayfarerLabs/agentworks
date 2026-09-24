@@ -13,7 +13,9 @@ class WindowsApi:
     ERROR_INSUFFICIENT_BUFFER = 122
     ERROR_BROKEN_PIPE = 109
     ERROR_INVALID_HANDLE = 6
+    ERROR_NO_MORE_FILES = 18
     WAIT_OBJECT_0 = 0
+    WAIT_TIMEOUT = 258
     WAIT_FAILED = 0xFFFFFFFF
 
     def __init__(self) -> None:
@@ -67,6 +69,20 @@ class WindowsApi:
                 ("dwThreadId", wintypes.DWORD),
             ]
 
+        class ProcessEntry32(ctypes.Structure):
+            _fields_ = [
+                ("dwSize", wintypes.DWORD),
+                ("cntUsage", wintypes.DWORD),
+                ("th32ProcessID", wintypes.DWORD),
+                ("th32DefaultHeapID", ctypes.c_size_t),
+                ("th32ModuleID", wintypes.DWORD),
+                ("cntThreads", wintypes.DWORD),
+                ("th32ParentProcessID", wintypes.DWORD),
+                ("pcPriClassBase", wintypes.LONG),
+                ("dwFlags", wintypes.DWORD),
+                ("szExeFile", wintypes.WCHAR * 260),
+            ]
+
         class BasicLimitInformation(ctypes.Structure):
             _fields_ = [
                 ("PerProcessUserTimeLimit", ctypes.c_int64),
@@ -118,6 +134,7 @@ class WindowsApi:
         self.SecurityAttributes: Any = SecurityAttributes
         self.StartupInfoEx: Any = StartupInfoEx
         self.ProcessInformation: Any = ProcessInformation
+        self.ProcessEntry32: Any = ProcessEntry32
         self.ExtendedLimitInformation: Any = ExtendedLimitInformation
         self.BasicAccountingInformation: Any = BasicAccountingInformation
         self._bind()
@@ -181,6 +198,14 @@ class WindowsApi:
             c.POINTER(w.FILETIME),
         ]
         k.GetProcessTimes.restype = w.BOOL
+        k.OpenProcess.argtypes = [w.DWORD, w.BOOL, w.DWORD]
+        k.OpenProcess.restype = w.HANDLE
+        k.CreateToolhelp32Snapshot.argtypes = [w.DWORD, w.DWORD]
+        k.CreateToolhelp32Snapshot.restype = w.HANDLE
+        k.Process32FirstW.argtypes = [w.HANDLE, c.POINTER(self.ProcessEntry32)]
+        k.Process32FirstW.restype = w.BOOL
+        k.Process32NextW.argtypes = [w.HANDLE, c.POINTER(self.ProcessEntry32)]
+        k.Process32NextW.restype = w.BOOL
 
     def current_controller_identity(self) -> tuple[int, int]:
         """Capture this controller's PID and exact creation FILETIME ticks."""
@@ -190,6 +215,10 @@ class WindowsApi:
             raise self._error("GetCurrentProcessId")
         if not process:
             raise self._error("GetCurrentProcess")
+        return pid, self.process_creation_ticks(process)
+
+    def process_creation_ticks(self, process: int) -> int:
+        """Read exact FILETIME creation ticks from a pinned process handle."""
         created = self.wintypes.FILETIME()
         exited = self.wintypes.FILETIME()
         kernel = self.wintypes.FILETIME()
@@ -205,7 +234,38 @@ class WindowsApi:
         ticks = (int(created.dwHighDateTime) << 32) | int(created.dwLowDateTime)
         if ticks <= 0:
             raise OSError("GetProcessTimes returned an invalid creation time")
-        return pid, ticks
+        return ticks
+
+    def open_process_for_observation(self, pid: int) -> int:
+        """Open read-only query and synchronization access to one PID."""
+        handle = _handle_value(self.kernel.OpenProcess(0x00101000, False, pid))
+        if not handle:
+            raise self._error("OpenProcess")
+        return handle
+
+    def snapshot_processes(self) -> int:
+        """Open one process-list snapshot; the caller closes the returned handle."""
+        handle = _handle_value(self.kernel.CreateToolhelp32Snapshot(0x00000002, 0))
+        if handle == self.invalid_handle:
+            raise self._error("CreateToolhelp32Snapshot")
+        return handle
+
+    def first_snapshot_pid(self, snapshot: int) -> int | None:
+        return self._snapshot_pid(snapshot, first=True)
+
+    def next_snapshot_pid(self, snapshot: int) -> int | None:
+        return self._snapshot_pid(snapshot, first=False)
+
+    def _snapshot_pid(self, snapshot: int, *, first: bool) -> int | None:
+        entry = self.ProcessEntry32()
+        entry.dwSize = self.ctypes.sizeof(entry)
+        self.ctypes.set_last_error(0)
+        method = self.kernel.Process32FirstW if first else self.kernel.Process32NextW
+        if method(snapshot, self.ctypes.byref(entry)):
+            return int(entry.th32ProcessID)
+        if self.ctypes.get_last_error() == self.ERROR_NO_MORE_FILES:
+            return None
+        raise self._error("Process32FirstW" if first else "Process32NextW")
 
     def create_job(self) -> int:
         handle = _handle_value(self.kernel.CreateJobObjectW(None, None))

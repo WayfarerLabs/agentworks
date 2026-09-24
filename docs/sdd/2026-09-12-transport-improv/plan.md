@@ -94,24 +94,21 @@ associated pending acceptance gates are superseded by this ruling.
       when every obligation has typed no-further-effects evidence and no in-memory custody remains.
       Keep managed runs specialized and do not add a workflow engine, scheduler, automatic expiry or
       generic payload interpreter.
-- [ ] Implement and prove a recovery takeover fence before any restarted controller acts on an old
-      obligation. Keep one stable logical operation identifier and rotate a separate caller-chosen
-      random generation identifier, atomically sealing the ledger. Make exact retry after commit
-      without reply idempotent while a different recovery generation and every predecessor mutation
-      fail stale. Exact retries within one local database/controller share one live recovery owner
-      and serial guard after durable validation; they cannot create guard aliases around an admitted
-      dispatch. A handled failure before an admitted attempt returns aborts only that in-memory
-      custody, while a failure after return retains uncertainty. The takeover neither moves
-      obligation rows nor proves that an admitted request is drained or remote work has stopped. For
-      every admitted obligation, prove that no earlier dispatch can still arrive and that existing
-      effects are quiescent, using carrier-proved non-dispatch plus exact absence, an
-      operation-specific remote fence, or equally strong synchronous-substrate evidence. Otherwise
-      retain the obligation and report incomplete recovery. For WSL2, persist its opaque provider
-      locator, expected VM marker, distribution and account plus exact Windows controller identity
-      before dispatch, publish exact guest boot/PID/start-time after `READY`, and give each
-      `vm_active()` lifetime an independent obligation. Replace the legacy hold only after nested
-      lifetimes, delayed delivery, every crash window, controller/locator/marker/boot mismatch and
-      production recovery pass live validation.
+- [ ] Complete and prove recovery after takeover before any restarted controller acts on an old
+      obligation. The generic database takeover kernel already retains one stable logical operation
+      identifier, rotates a separate caller-chosen generation, seals the ledger atomically and
+      fences stale predecessors. Its exact retries share one local recovery owner and serial guard;
+      handled failures retain uncertain dispatch custody. The takeover neither moves obligation rows
+      nor proves that an admitted request is drained or remote work has stopped. For every admitted
+      obligation, prove that no earlier dispatch can still arrive and that existing effects are
+      quiescent, using carrier-proved non-dispatch plus exact absence, an operation-specific remote
+      fence, or equally strong synchronous-substrate evidence. Otherwise retain the obligation and
+      report incomplete recovery. For WSL2, persist a versioned, domain-separated digest of its
+      opaque provider locator, expected VM marker, distribution and account plus exact Windows
+      controller identity before dispatch, publish exact guest boot/PID/start-time after `READY`,
+      and give each `vm_active()` lifetime an independent obligation. Replace the legacy hold only
+      after nested lifetimes, delayed delivery, every crash window, controller/locator/marker/boot
+      mismatch and production recovery pass live validation.
 - [ ] Select shared platform-host resource keys before enabling their admission. Canonical VM names
       are available before create dispatch; site names and authored SSH routes are not canonical
       host identities. Do not silently treat different aliases or users as independent hosts.
@@ -1436,6 +1433,11 @@ connection and trust only. Before broader lifecycle implementation, complete the
       boot-aware READY identity, and resolve ordinary release only on never-creation or settled
       local resources plus independently confirmed exact guest absence. Keep the owner available for
       child borrows during nested holds and retain uncertain coordination for explicit recovery.
+- [x] Implement the private Windows controller observer for one validated persisted PID and creation
+      time in native ticks under a finite deadline. A pinned process handle proves an exact live or
+      exited process, or PID reuse; only a complete process snapshot can prove absence after open
+      failure. Ambiguous API results and deadline expiry stay unknown. This is controller evidence
+      only, without dispatch drain, guest absence, recovery factory or production wiring claims.
 - [ ] Implement production WSL2 hold adoption and recovery: exact preparation discovery after a
       crash, controller-absence and dispatch-drain proof, a production exact guest observer,
       recovery factory, activation and platform wiring, RunContext integration, and live proof.
