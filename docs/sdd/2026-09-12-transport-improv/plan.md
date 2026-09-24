@@ -1321,7 +1321,7 @@ connection and trust only. Before broader lifecycle implementation, complete the
       systemd/cgroup and SSH/QGA proof, current target-marker/boot rereads, stop/dispose and public
       composition remain open.
 - [x] Implement and privately prove the fixed managed-stop request, controller handling and
-      carrier-neutral exchange through `394af6166bbf661f30a2d47cc22c9572d02b25c7`. One separate
+      carrier-neutral exchange through `8b99c784843da6152591afe4508198131000b7a0`. One separate
       protected empty `request-stop` leaf publishes only after exact launch validation; accepted
       intent remains distinct from positive boundary emptiness. The controller gives only its exact
       main child that has not yet been reaped one fixed grace interval, enters the existing
@@ -1329,7 +1329,7 @@ connection and trust only. Before broader lifecycle implementation, complete the
       guest observation remains finite for an unbounded caller deadline. A helper failure remains
       unknown after dispatch because publication may already be visible; post-publication
       observation faults preserve accepted intent, while only validated empty-boundary evidence
-      proves termination. The 105 focused and 357 broader managed-execution tests, Ruff, targeted
+      proves termination. The 106 focused and 357 broader managed-execution tests, Ruff, targeted
       mypy, the full file-lint suite and diff check pass. This slice adds no process enumeration,
       mutable stop document, `execution_runs` stop state, generic admission lock, direct
       systemd-stop claim, disposal/retention policy or public composition. Hermetic proof does not
