@@ -178,6 +178,45 @@ The unit name is derived from the run ID rather than persisted. Application, cle
 evidence are later proof gates, to be added with real producers and consumers rather than dormant
 state fields.
 
+### Private target fact protocol checkpoint
+
+The next private slice defines canonical version-one JSON facts, each at most 4 KiB. A `launch` fact
+encodes the exact realized `ManagedRunReceipt`: run ID and derived unit, target kind/name/
+incarnation/boot, workload UID/GID/groups, requested and resolved shell identity, owner/lifetime,
+profile revision, receipt namespace and receipt protocol. The target-side service must write this
+fact only after the workload boundary is realized. A `wait` fact records exactly one main-process
+exit code or terminating signal. Each `stream-end` fact identifies stdout or stderr, the length and
+SHA-256 of its retained bytes, and whether retention is `complete` or `truncated`. The stream fact
+means its spool is closed and will not grow. Retained bytes are an initial prefix; truncated means
+at least one produced byte was omitted, including when the retained prefix is empty. A
+`boundary-empty` fact is positive evidence for the exact owned workload boundary. These four kinds
+are independent: main-process wait does not imply either stream ended or boundary emptiness, and a
+closed stream does not imply wait or emptiness. A missing fact is unknown, never negative evidence.
+
+Every post-launch fact carries the exact run ID, derived unit and SHA-256 of the canonical launch
+fact. Consumers must compare that binding to the validated launch fact and to the expected
+reservation before granting authority. The digest prevents facts from another launch receipt with
+the same run/unit from being mixed into this record. The wire rejects duplicate, extra and missing
+fields, alternate JSON spellings, contradictory status, unsupported versions and unrecognized
+values. It carries no application input, output bytes, credentials, arbitrary paths, timestamps or
+arbitrary service properties as authority. The resolved executable in shell identity is the one
+bounded path inherited from `ManagedRunSpec`.
+
+The future target-side store uses a protected boot-local directory for each run. Its launch, wait,
+stdout-end, stderr-end and boundary-empty facts are each created once and immutable. Bounded stdout
+and stderr spools are written by the target-side owner, then closed before their corresponding end
+facts are published. Fact creation uses atomic create-once publication; an existing fact is read and
+compared rather than overwritten. No shared mutable state file or file-level lock is part of this
+protocol. The store, its permissions, producer ordering and crash recovery remain to be implemented
+and proved.
+
+The first private end-to-end managed-job slice may enable only `INDEPENDENT`, whose target-owned
+evidence survives observer loss. `OPERATION` must refuse before dispatch until target-side owner
+liveness or lease, partition behavior and bounded cleanup are proved. This sequences implementation
+without changing the public lifetime contract above. A later helper/service will expose only fixed
+start, observe, read-output, stop and dispose operations over the same carrier; SSH and QGA must
+each prove that protocol. This checkpoint implements none of those operations.
+
 Target identity is structured as a core resource kind/name, a versioned incarnation fingerprint and
 a separate boot UUID. The core name supports binding and diagnostics but is not authority. The
 incarnation fingerprint must bind the provider-owned locator plus a core-provisioned or explicitly

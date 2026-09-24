@@ -305,6 +305,18 @@ locator-unavailable alternative or public RunContext claim is enabled. This kern
 lease, output retention, application observation, cleanup, stop, disposal, carrier wiring, public
 job reference or RunContext surface.
 
+`_managed_job_protocol.py` defines private canonical version-one target facts for a future
+persistent job service. A bounded launch fact contains the exact `ManagedRunReceipt`; independent
+wait, stdout/stderr end and positive boundary-empty facts bind the run and derived unit to the
+SHA-256 of that launch fact. A stream-end fact commits the retained prefix length and digest and
+states whether output was complete or truncated. Its spool is closed; an absent fact says nothing.
+The codec validates untrusted bytes and contains no output bytes or application input. It does not
+write a store, launch or observe a workload, or make jobs available. The intended store is a
+protected boot-local per-run directory of immutable create-once facts and bounded output spools. The
+first service slice is limited to independent lifetime until operation-owner liveness and cleanup
+are proved. Later fixed start, observe, read-output, stop and dispose operations must work over both
+SSH and QGA.
+
 ## Input accounting
 
 The 262,144-byte preparation bound applies to the complete encoded envelope, not raw application
