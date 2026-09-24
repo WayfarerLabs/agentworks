@@ -29,7 +29,6 @@ MAX_ENVIRONMENT_ENTRIES = 256
 
 _NAME = re.compile(r"[A-Za-z_][A-Za-z_0-9]*\Z")
 _RUN = re.compile(r"[0-9a-f]{32}\Z")
-_HASH = re.compile(r"[0-9a-f]{64}\Z")
 _RESERVED_ENV = frozenset({"BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "BASH_XTRACEFD"})
 _ASSETS = ("request-launch", "request-control", "request-environment", "request-source", "request-stdin")
 
@@ -235,25 +234,6 @@ def decode_request(assets: dict[str, bytes]) -> ManagedJobRequest:
     output = control["output"]
     if type(output) is not dict or set(output) != {"mode", "prefix_bytes"}:
         raise RequestError("invalid output shape")
-    for name, maximum in (
-        ("request-environment", MAX_ENVIRONMENT_BYTES),
-        ("request-source", MAX_SOURCE_BYTES),
-        ("request-stdin", MAX_STDIN_BYTES),
-    ):
-        data = assets[name]
-        if type(data) is not bytes or len(data) > maximum:
-            raise RequestError("request asset exceeds bound")
-        metadata = control[name.removeprefix("request-")]
-        if (
-            type(metadata) is not dict
-            or set(metadata) != {"bytes", "sha256"}
-            or type(metadata["bytes"]) is not int
-            or metadata["bytes"] != len(data)
-            or type(metadata["sha256"]) is not str
-            or _HASH.fullmatch(metadata["sha256"]) is None
-            or metadata["sha256"] != hashlib.sha256(data).hexdigest()
-        ):
-            raise RequestError("request asset binding mismatch")
     argv = control["argv"]
     if type(argv) is not list:
         raise RequestError("invalid argv")

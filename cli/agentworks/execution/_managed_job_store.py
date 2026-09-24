@@ -285,14 +285,18 @@ class ManagedJobStore:
 
     def publish_fact(self, name: FactName, data: bytes) -> None:
         self._checked_fact(name, data)
+        self._publish_immutable(name, data)
+
+    def _publish_immutable(self, name: FactName | RequestAsset, data: bytes) -> None:
+        """Publish one fixed validated leaf with byte-exact reconciliation."""
         directory = self._run_dir(create=True)
         assert directory is not None
-        stage = ".fact-stage-" + uuid4().hex
+        stage = (".fact-stage-" if isinstance(name, FactName) else ".request-stage-") + uuid4().hex
         try:
-            existing = self.read_fact(name)
+            existing = self.read_fact(name) if isinstance(name, FactName) else self.read_request_asset(name)
             if existing is not None:
                 if existing != data:
-                    raise StoreError("conflicting fact")
+                    raise StoreError("conflicting store object")
                 return
             fd = os.open(stage, _CREATE_FLAGS, 0o400, dir_fd=directory)
             try:
@@ -306,9 +310,9 @@ class ManagedJobStore:
                 os.link(stage, name.value, src_dir_fd=directory, dst_dir_fd=directory, follow_symlinks=False)
                 os.fsync(directory)
             except FileExistsError:
-                existing = self.read_fact(name)
+                existing = self.read_fact(name) if isinstance(name, FactName) else self.read_request_asset(name)
                 if existing != data:
-                    raise StoreError("conflicting fact") from None
+                    raise StoreError("conflicting store object") from None
             finally:
                 os.unlink(stage, dir_fd=directory)
                 os.fsync(directory)
@@ -356,35 +360,7 @@ class ManagedJobStore:
                 request_wire.decode_environment(data)
             except request_wire.RequestError:
                 raise StoreError("invalid request environment") from None
-        directory = self._run_dir(create=True)
-        assert directory is not None
-        stage = ".request-stage-" + uuid4().hex
-        try:
-            existing = self.read_request_asset(name)
-            if existing is not None:
-                if existing != data:
-                    raise StoreError("conflicting request asset")
-                return
-            fd = os.open(stage, _CREATE_FLAGS, 0o400, dir_fd=directory)
-            try:
-                os.fchmod(fd, 0o400)
-                _safe_stat(fd, 0o400, self._owner_uid, links=(1,))
-                _write_all(fd, data)
-                os.fsync(fd)
-            finally:
-                os.close(fd)
-            try:
-                os.link(stage, name.value, src_dir_fd=directory, dst_dir_fd=directory, follow_symlinks=False)
-                os.fsync(directory)
-            except FileExistsError:
-                existing = self.read_request_asset(name)
-                if existing != data:
-                    raise StoreError("conflicting request asset") from None
-            finally:
-                os.unlink(stage, dir_fd=directory)
-                os.fsync(directory)
-        finally:
-            os.close(directory)
+        self._publish_immutable(name, data)
 
     def publish_request(self, request: request_wire.ManagedJobRequest) -> None:
         """Validate the entire request before publishing any asset."""
