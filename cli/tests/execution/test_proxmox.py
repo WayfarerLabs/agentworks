@@ -301,6 +301,10 @@ def test_structural_validation_is_pure_and_execute_repeats_it(monkeypatch: pytes
     invalid = CarrierIO(input=FiniteInput(b"\xff"))
     with pytest.raises(ValidationError):
         carrier.validate(invocation, io=invalid)
+    with pytest.raises(ValidationError):
+        carrier.execute(invocation, io=invalid, deadline=Deadline(None))
+    request.assert_not_called()
+
     original = ProxmoxCarrier._request_body
     calls = 0
 
@@ -310,8 +314,9 @@ def test_structural_validation_is_pure_and_execute_repeats_it(monkeypatch: pytes
         return original(prepared, selected)
 
     monkeypatch.setattr(ProxmoxCarrier, "_request_body", staticmethod(counted))
-    with pytest.raises(ValidationError):
-        carrier.execute(invocation, io=invalid, deadline=Deadline(None))
+    report = carrier.execute(invocation, io=valid, deadline=Deadline.after(0))
+    assert report.dispatch is Dispatch.NOT_SENT
+    assert report.failure is Failure.DEADLINE
     assert calls == 1
     request.assert_not_called()
 
