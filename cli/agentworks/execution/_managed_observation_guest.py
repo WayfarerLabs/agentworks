@@ -7,7 +7,6 @@ import sys
 from dataclasses import dataclass, field
 from typing import cast
 
-from . import _managed_job_wire as wire
 from ._file_wire import MAX_RECORD_BODY_BYTES, FileRecordKind, FileRecordWriter
 from ._helper_identity import matches_current_identity
 from ._managed_job_store import FactName, ManagedJobStore, StoreError
@@ -18,7 +17,6 @@ from ._managed_observation_protocol import (
     ManagedObservationRequest,
     ManagedOperation,
     ManagedResultControl,
-    ManagedResultStatus,
     checked_fact,
     checked_launch,
     decode_request,
@@ -60,26 +58,22 @@ def _prepare(request: ManagedObservationRequest, store: ManagedJobStore) -> _Pre
                 checked_fact(name, data, launch)
                 observed.append((name, data))
         return _PreparedResult(
-            ManagedResultControl(ManagedResultStatus.OBSERVED, tuple(name for name, _ in observed)),
+            ManagedResultControl(tuple(name for name, _ in observed)),
             tuple(data for _, data in observed),
         )
     assert request.stream is not None
     end_name = FactName.STDOUT_END if request.stream.value == "stdout" else FactName.STDERR_END
     end = store.read_fact(end_name)
     if end is None:
-        return _PreparedResult(ManagedResultControl(ManagedResultStatus.UNKNOWN, (FactName.LAUNCH,)), (launch,))
+        return _PreparedResult(ManagedResultControl((FactName.LAUNCH,)), (launch,))
     end_fact = checked_fact(end_name, end, launch)
     output = store.read_capture(request.stream, launch)
     if end_fact["disposition"] in ("discarded", "sensitivity-suppressed"):
-        if output is not None:
-            raise ManagedObservationError("invalid noncapture output")
-        return _PreparedResult(
-            ManagedResultControl(ManagedResultStatus.UNAVAILABLE, (FactName.LAUNCH, end_name)), (launch, end)
-        )
-    if output is None or len(output) > wire.MAX_CAPTURE_PREFIX_BYTES_V1:
+        return _PreparedResult(ManagedResultControl((FactName.LAUNCH, end_name)), (launch, end))
+    if output is None:
         raise ManagedObservationError("invalid closed capture")
     return _PreparedResult(
-        ManagedResultControl(ManagedResultStatus.AVAILABLE, (FactName.LAUNCH, end_name), len(output)),
+        ManagedResultControl((FactName.LAUNCH, end_name)),
         (launch, end),
         output,
     )

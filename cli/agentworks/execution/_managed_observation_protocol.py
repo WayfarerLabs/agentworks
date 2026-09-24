@@ -33,13 +33,6 @@ class ManagedOperation(StrEnum):
     READ_OUTPUT = "read_output"
 
 
-class ManagedResultStatus(StrEnum):
-    OBSERVED = "observed"
-    AVAILABLE = "available"
-    UNAVAILABLE = "unavailable"
-    UNKNOWN = "unknown"
-
-
 @dataclass(frozen=True, slots=True, repr=False)
 class ManagedObservationRequest:
     nonce: str
@@ -51,9 +44,7 @@ class ManagedObservationRequest:
 
 @dataclass(frozen=True, slots=True)
 class ManagedResultControl:
-    status: ManagedResultStatus
     facts: tuple[FactName, ...]
-    output_bytes: int = 0
 
 
 def _json(value: object) -> bytes:
@@ -153,9 +144,7 @@ def encode_result(control: ManagedResultControl) -> bytes:
     data = _json(
         {
             "version": 1,
-            "status": control.status.value,
             "facts": [name.value for name in control.facts],
-            "output_bytes": control.output_bytes,
         }
     )
     decode_result(data)
@@ -164,17 +153,9 @@ def encode_result(control: ManagedResultControl) -> bytes:
 
 def decode_result(data: bytes) -> ManagedResultControl:
     value = _load(data, MAX_CONTROL_BYTES)
-    if (
-        set(value) != {"version", "status", "facts", "output_bytes"}
-        or type(value["version"]) is not int
-        or value["version"] != 1
-    ):
+    if set(value) != {"version", "facts"} or type(value["version"]) is not int or value["version"] != 1:
         raise ManagedObservationError("invalid managed result")
     try:
-        status_value = value["status"]
-        if type(status_value) is not str:
-            raise ValueError
-        status = ManagedResultStatus(status_value)
         names = value["facts"]
         if type(names) is not list:
             raise ValueError
@@ -183,17 +164,9 @@ def decode_result(data: bytes) -> ManagedResultControl:
         facts = tuple(FactName(name) for name in names)
     except (ValueError, TypeError):
         raise ManagedObservationError("invalid managed result") from None
-    length = value["output_bytes"]
-    if (
-        type(length) is not int
-        or not 0 <= length <= wire.MAX_CAPTURE_PREFIX_BYTES_V1
-        or not facts
-        or facts[0] is not FactName.LAUNCH
-        or facts != tuple(name for name in FACT_ORDER if name in facts)
-        or (status is not ManagedResultStatus.AVAILABLE and length != 0)
-    ):
+    if not facts or facts[0] is not FactName.LAUNCH or facts != tuple(name for name in FACT_ORDER if name in facts):
         raise ManagedObservationError("invalid managed result")
-    return ManagedResultControl(status, facts, length)
+    return ManagedResultControl(facts)
 
 
 def checked_fact(name: FactName, data: bytes, expected_launch: bytes) -> dict[str, object]:

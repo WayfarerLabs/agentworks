@@ -19,7 +19,6 @@ from agentworks.execution._managed_observation_protocol import (
     ManagedObservationRequest,
     ManagedOperation,
     ManagedResultControl,
-    ManagedResultStatus,
     encode_request,
 )
 
@@ -88,7 +87,7 @@ def test_exact_source_codec_parity(interpreter: str, tmp_path: Path) -> None:
         "p=sys.modules['_agw_observation_parity._managed_observation_protocol']\n"
         "data=bytes.fromhex(sys.argv[1])\n"
         "assert p.encode_request(p.decode_request(data))==data\n"
-        "result=p.encode_result(p.ManagedResultControl(p.ManagedResultStatus.OBSERVED,"
+        "result=p.encode_result(p.ManagedResultControl("
         "(sys.modules['_agw_observation_parity._managed_job_store'].FactName.LAUNCH,)))\n"
         "assert p.decode_result(result).facts[0].value=='launch'\n"
     )
@@ -115,7 +114,7 @@ def test_guest_writes_bounded_data_records_then_terminal() -> None:
             records.append((kind, body))
 
     prepared = guest._PreparedResult(
-        ManagedResultControl(ManagedResultStatus.AVAILABLE, (FactName.LAUNCH, FactName.STDOUT_END), 5000),
+        ManagedResultControl((FactName.LAUNCH, FactName.STDOUT_END)),
         (_launch(), b"end-fact"),
         b"x" * 5000,
     )

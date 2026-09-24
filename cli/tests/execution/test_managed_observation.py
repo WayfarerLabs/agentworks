@@ -35,7 +35,6 @@ from agentworks.execution._managed_observation_protocol import (
     ManagedObservationRequest,
     ManagedOperation,
     ManagedResultControl,
-    ManagedResultStatus,
     checked_fact,
     decode_request,
     decode_result,
@@ -206,7 +205,6 @@ def test_target_observe_preserves_every_fact_subset(store: ManagedJobStore, mask
         if mask & (1 << index):
             store.publish_fact(name, _fact(name, launch))
     prepared = guest._prepare(_request(), store)
-    assert prepared.control.status is ManagedResultStatus.OBSERVED
     assert prepared.control.facts == tuple(
         name for name in FACT_ORDER if name is FactName.LAUNCH or store.read_fact(name)
     )
@@ -303,7 +301,6 @@ def test_target_read_closed_capture(store: ManagedJobStore, stream: Stream, sour
     name = FactName.STDOUT_END if stream is Stream.STDOUT else FactName.STDERR_END
     store.publish_fact(name, _fact(name, launch, disposition=capture.disposition.value, content=source[:3]))
     prepared = guest._prepare(_request(ManagedOperation.READ_OUTPUT, stream), store)
-    assert prepared.control.status is ManagedResultStatus.AVAILABLE
     assert prepared.control.facts == (FactName.LAUNCH, name)
     assert prepared.output == source[:3]
 
@@ -322,9 +319,6 @@ def test_target_output_unavailable_or_unknown(store: ManagedJobStore, condition:
             guest._prepare(_request(ManagedOperation.READ_OUTPUT, Stream.STDOUT), store)
     else:
         prepared = guest._prepare(_request(ManagedOperation.READ_OUTPUT, Stream.STDOUT), store)
-        assert prepared.control.status is (
-            ManagedResultStatus.UNKNOWN if condition == "absent-end" else ManagedResultStatus.UNAVAILABLE
-        )
         assert prepared.control.facts == (
             (FactName.LAUNCH,) if condition == "absent-end" else (FactName.LAUNCH, FactName.STDOUT_END)
         )
@@ -338,7 +332,7 @@ def test_host_accepts_exact_observation_and_output_with_fixed_invocation(stream:
     carrier = ScriptedCarrier(
         lambda request: _records(
             request.nonce,
-            ManagedResultControl(ManagedResultStatus.OBSERVED, (FactName.LAUNCH, FactName.WAIT)),
+            ManagedResultControl((FactName.LAUNCH, FactName.WAIT)),
             (launch, wait),
         )
     )
@@ -358,7 +352,7 @@ def test_host_accepts_exact_observation_and_output_with_fixed_invocation(stream:
     carrier = ScriptedCarrier(
         lambda request: _records(
             request.nonce,
-            ManagedResultControl(ManagedResultStatus.AVAILABLE, (FactName.LAUNCH, end_name), len(output)),
+            ManagedResultControl((FactName.LAUNCH, end_name)),
             (launch, end),
             output,
         )
@@ -394,7 +388,7 @@ def test_host_never_promotes_bad_or_uncertain_carrier_evidence(fault: str) -> No
     def response(request: ManagedObservationRequest) -> bytes:
         data = _records(
             request.nonce,
-            ManagedResultControl(ManagedResultStatus.OBSERVED, (FactName.LAUNCH, FactName.WAIT)),
+            ManagedResultControl((FactName.LAUNCH, FactName.WAIT)),
             (
                 _launch(target="vm-other") if fault == "wrong-launch" else launch,
                 _fact(FactName.WAIT, _launch(target="vm-other")) if fault == "wrong-end" else wait,
@@ -424,13 +418,14 @@ def test_host_never_promotes_bad_or_uncertain_carrier_evidence(fault: str) -> No
     assert candidate.observation.output is None
 
 
-def test_host_unavailable_requires_no_output_and_exact_end_binding() -> None:
+@pytest.mark.parametrize("disposition", ["discarded", "sensitivity-suppressed"])
+def test_host_unavailable_requires_no_output_and_exact_end_binding(disposition: str) -> None:
     launch = _launch()
-    discarded = _fact(FactName.STDOUT_END, launch, disposition="discarded")
+    discarded = _fact(FactName.STDOUT_END, launch, disposition=disposition)
     carrier = ScriptedCarrier(
         lambda request: _records(
             request.nonce,
-            ManagedResultControl(ManagedResultStatus.UNAVAILABLE, (FactName.LAUNCH, FactName.STDOUT_END)),
+            ManagedResultControl((FactName.LAUNCH, FactName.STDOUT_END)),
             (launch, discarded),
         )
     )
@@ -440,27 +435,27 @@ def test_host_unavailable_requires_no_output_and_exact_end_binding() -> None:
     assert candidate.observation.facts == ((FactName.LAUNCH, launch), (FactName.STDOUT_END, discarded))
     assert candidate.observation.output is None
     pending = ScriptedCarrier(
-        lambda request: _records(
-            request.nonce, ManagedResultControl(ManagedResultStatus.UNKNOWN, (FactName.LAUNCH,)), (launch,)
-        )
+        lambda request: _records(request.nonce, ManagedResultControl((FactName.LAUNCH,)), (launch,))
     )
     candidate = _exchange(pending, stream=Stream.STDOUT)
     assert candidate.observation is not None
     assert candidate.observation.state is ManagedObservationState.UNKNOWN
     assert candidate.observation.facts == ((FactName.LAUNCH, launch),)
-    false_unavailable = ScriptedCarrier(
+    assert candidate.observation.output is None
+    captured_empty = ScriptedCarrier(
         lambda request: _records(
             request.nonce,
-            ManagedResultControl(ManagedResultStatus.UNAVAILABLE, (FactName.LAUNCH, FactName.STDOUT_END)),
+            ManagedResultControl((FactName.LAUNCH, FactName.STDOUT_END)),
             (launch, _fact(FactName.STDOUT_END, launch)),
         )
     )
-    candidate = _exchange(false_unavailable, stream=Stream.STDOUT)
-    assert candidate.observation is not None and candidate.observation.state is ManagedObservationState.INVALID
+    candidate = _exchange(captured_empty, stream=Stream.STDOUT)
+    assert candidate.observation is not None and candidate.observation.state is ManagedObservationState.AVAILABLE
+    assert candidate.observation.output == b""
     bad = ScriptedCarrier(
         lambda request: _records(
             request.nonce,
-            ManagedResultControl(ManagedResultStatus.AVAILABLE, (FactName.LAUNCH, FactName.STDOUT_END), 3),
+            ManagedResultControl((FactName.LAUNCH, FactName.STDOUT_END)),
             (launch, _fact(FactName.STDOUT_END, launch, content=b"abc")),
             b"bad",
         )
@@ -471,27 +466,68 @@ def test_host_unavailable_requires_no_output_and_exact_end_binding() -> None:
     assert candidate.observation.issue is ManagedObservationIssue.CONTENT
 
 
+@pytest.mark.parametrize(
+    ("disposition", "declared", "delivered", "state"),
+    [
+        ("truncated-capture", b"abc", b"abc", ManagedObservationState.AVAILABLE),
+        ("complete-capture", b"abc", b"ab", ManagedObservationState.INCOMPLETE),
+        ("complete-capture", b"abc", b"abcd", ManagedObservationState.INVALID),
+        ("complete-capture", b"abc", b"abd", ManagedObservationState.INVALID),
+        ("discarded", b"", b"x", ManagedObservationState.INVALID),
+    ],
+)
+def test_host_derives_output_state_and_length_from_validated_end(
+    disposition: str, declared: bytes, delivered: bytes, state: ManagedObservationState
+) -> None:
+    launch = _launch()
+    end = _fact(FactName.STDOUT_END, launch, disposition=disposition, content=declared)
+    carrier = ScriptedCarrier(
+        lambda request: _records(
+            request.nonce,
+            ManagedResultControl((FactName.LAUNCH, FactName.STDOUT_END)),
+            (launch, end),
+            delivered,
+        )
+    )
+    candidate = _exchange(carrier, stream=Stream.STDOUT)
+    assert candidate.observation is not None
+    assert candidate.observation.state is state
+    assert candidate.observation.output == (delivered if state is ManagedObservationState.AVAILABLE else None)
+
+
+def test_host_refuses_stream_end_length_beyond_v1_bound() -> None:
+    launch = _launch()
+    end = json.loads(_fact(FactName.STDOUT_END, launch, content=b"x"))
+    end["retained_bytes"] = wire.MAX_CAPTURE_PREFIX_BYTES_V1 + 1
+    oversized = wire.encode_fact(end)
+    carrier = ScriptedCarrier(
+        lambda request: _records(
+            request.nonce,
+            ManagedResultControl((FactName.LAUNCH, FactName.STDOUT_END)),
+            (launch, oversized),
+        )
+    )
+    candidate = _exchange(carrier, stream=Stream.STDOUT)
+    assert candidate.observation is not None
+    assert candidate.observation.state is ManagedObservationState.INVALID
+    assert candidate.observation.output is None
+
+
 def test_result_and_record_bounds() -> None:
-    good = encode_result(ManagedResultControl(ManagedResultStatus.OBSERVED, (FactName.LAUNCH,)))
+    good = encode_result(ManagedResultControl((FactName.LAUNCH,)))
     assert decode_result(good).facts == (FactName.LAUNCH,)
+    assert json.loads(good) == {"facts": ["launch"], "version": 1}
+    for extra in ({"status": "available"}, {"output_bytes": 0}):
+        with pytest.raises(ManagedObservationError):
+            decode_result(json.dumps({**json.loads(good), **extra}, sort_keys=True, separators=(",", ":")).encode())
     with pytest.raises(ManagedObservationError):
         decode_result(good + b" " * MAX_CONTROL_BYTES)
-    with pytest.raises(ManagedObservationError):
-        encode_result(ManagedResultControl(ManagedResultStatus.AVAILABLE, (FactName.LAUNCH,), 16_777_217))
     with pytest.raises(ValueError):
         encode_file_record(NONCE, FileRecord(0, FileRecordKind.DATA, b"x" * 4097))
 
 
 def test_response_record_count_has_a_fixed_bound() -> None:
     collector = _Collector(_request(ManagedOperation.READ_OUTPUT, Stream.STDOUT))
-    control = ManagedResultControl(
-        ManagedResultStatus.AVAILABLE, (FactName.LAUNCH, FactName.STDOUT_END), wire.MAX_CAPTURE_PREFIX_BYTES_V1
-    )
-    collector.accept(FileRecord(0, FileRecordKind.RESULT, encode_result(control)))
-    collector.accept(FileRecord(1, FileRecordKind.DATA, _launch()))
-    collector.accept(FileRecord(2, FileRecordKind.DATA, _fact(FactName.STDOUT_END, _launch())))
-    for index in range(_MAX_RESPONSE_RECORDS):
-        collector.accept(FileRecord(index + 3, FileRecordKind.DATA, b"x"))
-        if collector.issue is not None:
-            break
+    collector.records = _MAX_RESPONSE_RECORDS
+    collector.accept(FileRecord(_MAX_RESPONSE_RECORDS, FileRecordKind.DATA, b"x"))
     assert collector.issue is ManagedObservationIssue.CONTENT

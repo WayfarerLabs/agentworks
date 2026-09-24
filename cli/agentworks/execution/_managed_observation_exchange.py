@@ -20,9 +20,7 @@ from ._managed_observation_protocol import (
     ManagedObservationRequest,
     ManagedOperation,
     ManagedResultControl,
-    ManagedResultStatus,
     checked_fact,
-    checked_launch,
     decode_result,
     encode_request,
 )
@@ -107,6 +105,7 @@ class _Collector:
         self.issue: ManagedObservationIssue | None = None
         self.facts: list[tuple[FactName, bytes]] = []
         self.output = bytearray()
+        self.expected_output_bytes: int | None = None
         self.records = 0
 
     def _invalidate(self, issue: ManagedObservationIssue) -> None:
@@ -118,6 +117,7 @@ class _Collector:
         self.facts.clear()
         self.output.clear()
         self.control = None
+        self.expected_output_bytes = None
 
     def accept(self, record: FileRecord) -> None:
         if self.issue is not None:
@@ -138,19 +138,14 @@ class _Collector:
         if record.kind is FileRecordKind.RESULT and self.control is None and not self.failed:
             try:
                 control = decode_result(record.body)
-                if self.request.operation is ManagedOperation.OBSERVE:
-                    if control.status is not ManagedResultStatus.OBSERVED or control.output_bytes:
-                        raise ManagedObservationError("invalid observe result")
-                elif control.status is ManagedResultStatus.OBSERVED:
-                    raise ManagedObservationError("invalid output result")
-                elif control.status is ManagedResultStatus.UNKNOWN:
-                    if control.facts != (FactName.LAUNCH,):
-                        raise ManagedObservationError("invalid unknown result")
-                elif control.facts != (
-                    FactName.LAUNCH,
-                    FactName.STDOUT_END if self.request.stream is Stream.STDOUT else FactName.STDERR_END,
+                if self.request.operation is ManagedOperation.READ_OUTPUT and control.facts not in (
+                    (FactName.LAUNCH,),
+                    (
+                        FactName.LAUNCH,
+                        FactName.STDOUT_END if self.request.stream is Stream.STDOUT else FactName.STDERR_END,
+                    ),
                 ):
-                    raise ManagedObservationError("invalid capture result")
+                    raise ManagedObservationError("invalid output result")
                 self.control = control
             except ManagedObservationError:
                 self._invalidate(ManagedObservationIssue.CONTROL)
@@ -159,13 +154,27 @@ class _Collector:
             if len(self.facts) < len(self.control.facts):
                 name = self.control.facts[len(self.facts)]
                 try:
-                    checked_fact(name, record.body, self.request.expected_launch)
+                    fact = checked_fact(name, record.body, self.request.expected_launch)
                 except ManagedObservationError:
                     self._invalidate(ManagedObservationIssue.CONTENT)
                     return
                 self.facts.append((name, record.body))
-            elif self.control.status is ManagedResultStatus.AVAILABLE:
-                if not record.body or len(record.body) > self.control.output_bytes - len(self.output):
+                if (
+                    self.request.operation is ManagedOperation.READ_OUTPUT
+                    and name
+                    in (
+                        FactName.STDOUT_END,
+                        FactName.STDERR_END,
+                    )
+                    and fact["disposition"] in ("complete-capture", "truncated-capture")
+                ):
+                    length = fact["retained_bytes"]
+                    if type(length) is not int or length > wire.MAX_CAPTURE_PREFIX_BYTES_V1:
+                        self._invalidate(ManagedObservationIssue.CONTENT)
+                        return
+                    self.expected_output_bytes = length
+            elif self.expected_output_bytes is not None:
+                if not record.body or len(record.body) > self.expected_output_bytes - len(self.output):
                     self._invalidate(ManagedObservationIssue.CONTENT)
                 else:
                     self.output.extend(record.body)
@@ -219,25 +228,25 @@ class _Collector:
             return ManagedObservation(ManagedObservationState.REFUSED)
         assert self.control is not None
         control = self.control
-        if len(self.facts) != len(control.facts) or len(self.output) != control.output_bytes:
+        if len(self.facts) != len(control.facts) or (
+            self.expected_output_bytes is not None and len(self.output) != self.expected_output_bytes
+        ):
             self.abort()
             return ManagedObservation(ManagedObservationState.INCOMPLETE, issue=ManagedObservationIssue.CONTENT)
-        if control.status in (ManagedResultStatus.AVAILABLE, ManagedResultStatus.UNAVAILABLE):
+        state = ManagedObservationState.OBSERVED
+        if self.request.operation is ManagedOperation.READ_OUTPUT:
+            state = ManagedObservationState.UNKNOWN
+        if self.request.operation is ManagedOperation.READ_OUTPUT and len(self.facts) == 2:
             end = checked_fact(self.facts[1][0], self.facts[1][1], self.request.expected_launch)
-            valid_capture = (
-                end["disposition"] in ("complete-capture", "truncated-capture")
-                and end["retained_bytes"] == len(self.output)
-                and end["retained_sha256"] == hashlib.sha256(self.output).hexdigest()
-            )
-            valid_unavailable = end["disposition"] in ("discarded", "sensitivity-suppressed")
-            if (control.status is ManagedResultStatus.AVAILABLE and not valid_capture) or (
-                control.status is ManagedResultStatus.UNAVAILABLE and not valid_unavailable
-            ):
+            if self.expected_output_bytes is None:
+                state = ManagedObservationState.UNAVAILABLE
+            elif end["retained_sha256"] != hashlib.sha256(self.output).hexdigest():
                 self.abort()
                 return ManagedObservation(ManagedObservationState.INVALID, issue=ManagedObservationIssue.CONTENT)
+            else:
+                state = ManagedObservationState.AVAILABLE
         facts = tuple(self.facts)
-        output = bytes(self.output) if control.status is ManagedResultStatus.AVAILABLE else None
-        state = ManagedObservationState(control.status.value)
+        output = bytes(self.output) if state is ManagedObservationState.AVAILABLE else None
         self.abort()
         return ManagedObservation(state, facts, output)
 
@@ -255,7 +264,6 @@ def _exchange(
     if runtime_selection.target_os is not RuntimeTargetOS.LINUX or plan.expected.euid != 0:
         raise ValidationError("Managed observation requires a Linux root helper")
     try:
-        checked_launch(expected_launch)
         request = ManagedObservationRequest(secrets.token_hex(16), operation, expected_launch, plan.expected, stream)
         request_data = encode_request(request)
     except ManagedObservationError:
