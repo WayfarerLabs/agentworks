@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
+import sys
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
+from agentworks.execution import _managed_job_wire as wire
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._managed_job_protocol import (
     MAX_MANAGED_JOB_FACT_BYTES,
@@ -34,6 +38,8 @@ from agentworks.execution._managed_runs import (
     ManagedTargetKind,
 )
 from agentworks.execution.models import Shell
+
+WIRE_PATH = Path(__file__).parents[2] / "agentworks" / "execution" / "_managed_job_wire.py"
 
 
 def _receipt() -> ManagedRunReceipt:
@@ -244,6 +250,60 @@ def test_cross_run_binding_fails() -> None:
     other = ManagedRunIdentity("2" * 32)
     fact = BoundaryEmptyFact(other, other.unit_name, managed_launch_receipt_sha256(receipt))
     assert not fact_matches_receipt(fact, receipt)
+
+
+@pytest.mark.parametrize("interpreter", [Path(sys.executable), Path("/usr/bin/python3.11")])
+def test_exact_portable_source_roundtrips_every_fact(interpreter: Path) -> None:
+    if not interpreter.is_file():
+        pytest.skip("Python 3.11 compatibility interpreter is unavailable")
+    encoded = [encode_managed_job_fact(fact) for fact in _facts()]
+    script = """
+import hashlib
+import importlib.util
+import json
+import sys
+
+spec = importlib.util.spec_from_file_location("_standalone_managed_job_wire", sys.argv[1])
+assert spec is not None and spec.loader is not None
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+assert "agentworks" not in sys.modules
+facts = [bytes.fromhex(item) for item in json.load(sys.stdin)]
+results = [module.encode_fact(module.decode_fact(item)).hex() for item in facts]
+digest = module.launch_sha256(module.decode_fact(facts[0]))
+print(json.dumps({"facts": results, "digest": digest, "agentworks_loaded": "agentworks" in sys.modules}))
+"""
+    result = subprocess.run(
+        [str(interpreter), "-I", "-S", "-B", "-c", script, str(WIRE_PATH)],
+        input=json.dumps([item.hex() for item in encoded]).encode(),
+        capture_output=True,
+        check=True,
+        timeout=10,
+    )
+    assert result.stderr == b""
+    assert json.loads(result.stdout) == {
+        "facts": [item.hex() for item in encoded],
+        "digest": managed_launch_receipt_sha256(_receipt()),
+        "agentworks_loaded": False,
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("name", "bad/name"),
+        ("incarnation", "V1:" + "a" * 64),
+        ("boot_id", "00000000-0000-4000-8000-000000000001 "),
+    ],
+)
+def test_portable_codec_rejects_invalid_nested_target(field: str, replacement: str) -> None:
+    value = wire.decode_fact(encode_managed_job_fact(_receipt()))
+    target = value["target"]
+    assert isinstance(target, dict)
+    target[field] = replacement
+    with pytest.raises(wire.ManagedJobWireError):
+        wire.encode_fact(value)
 
 
 def _wire(value: object) -> bytes:
