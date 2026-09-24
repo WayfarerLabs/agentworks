@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 
+from agentworks.errors import ValidationError
 from agentworks.execution.carrier import (
     Capture,
     CarrierIO,
@@ -90,6 +91,35 @@ def synthetic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def test_inspection_is_passive(synthetic: SyntheticSSH) -> None:
     assert not synthetic.carrier.features.live_stdio
     assert not synthetic.carrier.features.terminal
+    assert synthetic.calls == []
+
+
+def test_validate_does_not_admit_or_probe_connection(synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("validation performed SSH admission or process work")
+
+    monkeypatch.setattr(client, "validate_connection_files", forbidden)
+    monkeypatch.setattr(client, "build_ssh_argv", forbidden)
+    monkeypatch.setattr(client, "run_process", forbidden)
+    synthetic.carrier.validate(PreparedInvocation(("/prepared/bootstrap",)), io=CarrierIO())
+    assert synthetic.calls == []
+
+
+def test_execute_validates_before_connection_or_process_work(
+    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(_invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        raise ValidationError("unsupported static request")
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("validation refusal did not stop SSH work")
+
+    monkeypatch.setattr(synthetic.carrier, "validate", refuse)
+    monkeypatch.setattr(client, "validate_connection_files", forbidden)
+    monkeypatch.setattr(client, "build_ssh_argv", forbidden)
+    monkeypatch.setattr(client, "run_process", forbidden)
+    with pytest.raises(ValidationError, match="unsupported static request"):
+        synthetic.execute()
     assert synthetic.calls == []
 
 
