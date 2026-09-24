@@ -1456,6 +1456,14 @@ uses short explicit IDs, preserving all inputs, assertions and Windows coverage.
 complexity reviews are clean; all 35 identity tests pass locally. All hosted checks pass in run
 `35598300799`, including Windows 3.13 and Linux 3.12/3.13/3.14.
 
+### Paired private target plans, 2026-09-24
+
+- [x] Compose a private ordinary plan and an optional elevated plan in one target identity
+      preparation call. The ordinary path must succeed before elevation is considered. Reuse the
+      same deadline, owner borrow and account observations; look up root only when the caller
+      explicitly includes elevation and non-root delivery requires sudo. Keep production target
+      composition, permissions and native transition acceptance open.
+
 ### Managed VM target identity checkpoint, 2026-09-21
 
 - [x] Implement the private version-one VM incarnation codec and pure managed-target composer. The

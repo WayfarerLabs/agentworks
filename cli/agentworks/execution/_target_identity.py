@@ -1,4 +1,4 @@
-"""Owned preparation of one private target identity plan."""
+"""Owned preparation of private ordinary and optional elevated identity plans."""
 
 from __future__ import annotations
 
@@ -50,7 +50,8 @@ class TargetIdentityPreparation:
     """Closed preparation facts without account names or provider diagnostics."""
 
     status: TargetIdentityStatus
-    plan: IdentityPlan | None
+    ordinary_plan: IdentityPlan | None
+    elevated_plan: IdentityPlan | None
     delivery_result: AccountResolutionResult | None
     workload_result: AccountResolutionResult | None
     root_result: AccountResolutionResult | None
@@ -72,7 +73,8 @@ class TargetIdentityControlFact(Exception):
 @dataclass(slots=True, repr=False)
 class _State:
     operation: BorrowedFixedHelperCarrier
-    plan: IdentityPlan | None = None
+    ordinary_plan: IdentityPlan | None = None
+    elevated_plan: IdentityPlan | None = None
     delivery_result: AccountResolutionResult | None = None
     workload_result: AccountResolutionResult | None = None
     root_result: AccountResolutionResult | None = None
@@ -87,7 +89,7 @@ class _State:
         pending = self.operation.pending_remote_effects
         coordination = self.operation.coordination_uncertain
         retain = self.operation.requires_owner_retention
-        if self.plan is not None and self.failure is None and not retain:
+        if self.ordinary_plan is not None and self.failure is None and not retain:
             status = TargetIdentityStatus.PREPARED
         elif retain:
             status = TargetIdentityStatus.UNCERTAIN
@@ -95,7 +97,8 @@ class _State:
             status = TargetIdentityStatus.FAILED
         return TargetIdentityPreparation(
             status,
-            self.plan,
+            self.ordinary_plan,
+            self.elevated_plan,
             self.delivery_result,
             self.workload_result,
             self.root_result,
@@ -114,7 +117,7 @@ class _Composer:
         *,
         delivery_account: str,
         workload_account: str,
-        elevated: bool,
+        include_elevated: bool,
         runtime_selection: RuntimeSelection,
         deadline: Deadline,
         state: _State,
@@ -122,7 +125,7 @@ class _Composer:
         self._operation = operation
         self._delivery_account = delivery_account
         self._workload_account = workload_account
-        self._elevated = elevated
+        self._include_elevated = include_elevated
         self._runtime_selection = runtime_selection
         self._deadline = deadline
         self._state = state
@@ -138,21 +141,23 @@ class _Composer:
         if self._expired():
             return self._state.finish()
 
-        if not self._elevated:
-            self._state.plan = self._ordinary_plan(delivery, workload)
-        elif delivery.euid == 0:
-            self._state.plan = IdentityPlan(delivery, IdentityMode.DIRECT)
-        elif delivery == workload:
-            root = self._resolve("root", "root")
-            if root is not None and root.euid == 0:
-                self._state.plan = IdentityPlan(root, IdentityMode.SUDO_ROOT)
-            elif root is not None:
-                self._state.fail(TargetIdentityFailure.IDENTITY_PATH)
-        else:
-            self._state.fail(TargetIdentityFailure.IDENTITY_PATH)
+        self._state.ordinary_plan = self._ordinary_plan(delivery, workload)
+        if self._state.ordinary_plan is None:
+            self._expired()
+            return self._state.finish()
+        if self._include_elevated:
+            if delivery.euid == 0:
+                self._state.elevated_plan = IdentityPlan(delivery, IdentityMode.DIRECT)
+            else:
+                root = self._resolve("root", "root")
+                if root is not None and root.euid == 0:
+                    self._state.elevated_plan = IdentityPlan(root, IdentityMode.SUDO_ROOT)
+                elif root is not None:
+                    self._state.fail(TargetIdentityFailure.IDENTITY_PATH)
 
         if self._expired():
-            self._state.plan = None
+            self._state.ordinary_plan = None
+            self._state.elevated_plan = None
         return self._state.finish()
 
     def _ordinary_plan(
@@ -240,16 +245,16 @@ def prepare_target_identity(
     *,
     delivery_account: str,
     workload_account: str,
-    elevated: bool,
+    include_elevated: bool,
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
     owner: OperationOwner,
 ) -> TargetIdentityPreparation:
-    """Prepare one requested fixed-helper identity under one owner borrow."""
+    """Prepare ordinary and explicitly included elevated identity under one borrow."""
     _validate_inputs(
         delivery_account=delivery_account,
         workload_account=workload_account,
-        elevated=elevated,
+        include_elevated=include_elevated,
         runtime_selection=runtime_selection,
         deadline=deadline,
         owner=owner,
@@ -257,6 +262,7 @@ def prepare_target_identity(
     if deadline.expired:
         return TargetIdentityPreparation(
             TargetIdentityStatus.FAILED,
+            None,
             None,
             None,
             None,
@@ -272,7 +278,7 @@ def prepare_target_identity(
         operation,
         delivery_account=delivery_account,
         workload_account=workload_account,
-        elevated=elevated,
+        include_elevated=include_elevated,
         runtime_selection=runtime_selection,
         deadline=deadline,
         state=state,
@@ -293,7 +299,7 @@ def _validate_inputs(
     *,
     delivery_account: str,
     workload_account: str,
-    elevated: bool,
+    include_elevated: bool,
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
     owner: OperationOwner,
@@ -306,8 +312,8 @@ def _validate_inputs(
             valid = False
         if not valid:
             raise ValidationError("Target identity preparation requires valid account names")
-    if type(elevated) is not bool:
-        raise ValidationError("Target identity preparation requires an explicit elevation choice")
+    if type(include_elevated) is not bool:
+        raise ValidationError("Target identity preparation requires an explicit elevation preparation choice")
     if type(runtime_selection) is not RuntimeSelection:
         raise ValidationError("Target identity preparation requires an explicit runtime selection")
     if type(deadline) is not Deadline:

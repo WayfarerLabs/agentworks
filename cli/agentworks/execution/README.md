@@ -387,14 +387,16 @@ sensitive stdin, and the response kind must match this operation. Lookup does no
 execution identity, select elevation or grant permission to apply the resulting metadata.
 
 `_target_identity.prepare_target_identity` privately composes those account observations under one
-already-acquired operation owner. It resolves delivery and workload identities, reusing an identical
-name only within that call, and resolves root only for a requested non-root sudo plan. Every actual
-carrier call is armed through the shared fixed-helper admission adapter and uses the original
-deadline. A plan requires a complete resolved observation, sent dispatch, normal helper exit and
-remaining budget for every lookup. Lookup facts never prove that a later transition will succeed.
+already-acquired operation owner. It always prepares an ordinary plan and prepares an optional
+elevated plan only when `include_elevated` explicitly requests it. It resolves delivery and workload
+identities, reusing an identical name only within that call. Non-root elevation resolves root once;
+ordinary-only preparation never looks up root. Every actual carrier call is armed through the shared
+fixed-helper admission adapter and uses the original deadline. Prepared status requires a valid
+ordinary plan, complete resolved observations, sent dispatch, normal helper exit and remaining
+budget for every required lookup. Lookup facts never prove that a later transition will succeed.
 
 Ordinary preparation uses direct entry only for identical numeric identities and otherwise permits
-only root delivery demotion to a non-root workload. Explicit root preparation uses direct entry for
+only root delivery demotion to a non-root workload. Included elevation adds direct root entry for
 root delivery or non-interactive sudo when the non-root delivery and workload identities match.
 Other cross-identity paths are closed refusals. Results retain each attempted account exchange and
 safe deadline, termination and ownership-retention facts without retaining account names in their

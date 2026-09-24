@@ -72,7 +72,9 @@ class SyntheticCarrier:
     incomplete: set[str] = field(default_factory=set)
     dispatch: Dispatch = Dispatch.SENT
     completion: ExitStatus | None = ExitStatus(code=0)
+    uncertain_on_account: str | None = None
     expire_on_return: bool = False
+    expire_on_account: str | None = None
     calls: list[str] = field(default_factory=list)
     deadlines: list[Deadline] = field(default_factory=list)
 
@@ -113,7 +115,7 @@ class SyntheticCarrier:
                     response = encode_account_identity(nonce, self.identities[account])
                 payload = prefix + response
             io.output.stdout.try_write(memoryview(payload))
-        if self.expire_on_return:
+        if self.expire_on_return or account == self.expire_on_account:
             object.__setattr__(deadline, "expires_at", 0.0)
         streams = CapturedOutput(
             complete=account not in self.incomplete,
@@ -121,7 +123,7 @@ class SyntheticCarrier:
         )
         return CarrierReport(
             self.dispatch,
-            self.completion,
+            None if account == self.uncertain_on_account else self.completion,
             stdout=streams,
             stderr=CapturedOutput(complete=True, retention=Retention.DELIVERED),
         )
@@ -189,7 +191,7 @@ def _prepare(
     *,
     delivery: str = "worker",
     workload: str = "worker",
-    elevated: bool = False,
+    include_elevated: bool = False,
     deadline: Deadline | None = None,
     runtime_path: str = "/usr/bin/python3",
 ):
@@ -197,7 +199,7 @@ def _prepare(
         carrier,
         delivery_account=delivery,
         workload_account=workload,
-        elevated=elevated,
+        include_elevated=include_elevated,
         runtime_selection=_runtime(runtime_path),
         deadline=deadline or Deadline.after(15),
         owner=owner,
@@ -217,8 +219,9 @@ def test_real_fixed_helper_composes_current_direct_identity_under_one_borrow(
     result = _prepare(owner, carrier, delivery=account, workload=account, runtime_path=sys.executable)
 
     assert result.status is TargetIdentityStatus.PREPARED
-    assert result.plan is not None and result.plan.mode is IdentityMode.DIRECT
-    assert result.plan.expected.euid == os.geteuid()
+    assert result.ordinary_plan is not None and result.ordinary_plan.mode is IdentityMode.DIRECT
+    assert result.ordinary_plan.expected.euid == os.geteuid()
+    assert result.elevated_plan is None
     assert result.delivery_result is result.workload_result
     assert carrier.calls == 1
     assert not result.requires_owner_retention
@@ -228,7 +231,7 @@ def test_real_fixed_helper_composes_current_direct_identity_under_one_borrow(
 
 
 @pytest.mark.parametrize(
-    ("carrier", "delivery", "workload", "elevated", "mode", "calls"),
+    ("carrier", "delivery", "workload", "include_elevated", "ordinary_mode", "elevated_mode", "calls"),
     [
         (
             SyntheticCarrier({"delivery": _WORKER, "workload": _WORKER}),
@@ -236,6 +239,7 @@ def test_real_fixed_helper_composes_current_direct_identity_under_one_borrow(
             "workload",
             False,
             IdentityMode.DIRECT,
+            None,
             2,
         ),
         (
@@ -244,35 +248,53 @@ def test_real_fixed_helper_composes_current_direct_identity_under_one_borrow(
             "workload",
             False,
             IdentityMode.DEMOTE,
+            None,
             2,
         ),
+        (SyntheticCarrier({"root": _ROOT}), "root", "root", True, IdentityMode.DIRECT, IdentityMode.DIRECT, 1),
         (
             SyntheticCarrier({"delivery": _ROOT, "workload": _WORKER}),
             "delivery",
             "workload",
             True,
+            IdentityMode.DEMOTE,
             IdentityMode.DIRECT,
             2,
         ),
-        (SyntheticCarrier({"worker": _WORKER, "root": _ROOT}), "worker", "worker", True, IdentityMode.SUDO_ROOT, 2),
+        (
+            SyntheticCarrier({"worker": _WORKER, "root": _ROOT}),
+            "worker",
+            "worker",
+            True,
+            IdentityMode.DIRECT,
+            IdentityMode.SUDO_ROOT,
+            2,
+        ),
     ],
-    ids=["direct-alias", "demote", "direct-root", "sudo-root"],
+    ids=["direct-alias", "demote", "same-root", "root-demote-and-direct", "sudo-root"],
 )
 def test_synthetic_identity_selection(
     owned: tuple[Database, OperationOwner],
     carrier: SyntheticCarrier,
     delivery: str,
     workload: str,
-    elevated: bool,
-    mode: IdentityMode,
+    include_elevated: bool,
+    ordinary_mode: IdentityMode,
+    elevated_mode: IdentityMode | None,
     calls: int,
 ) -> None:
     _, owner = owned
 
-    result = _prepare(owner, carrier, delivery=delivery, workload=workload, elevated=elevated)
+    result = _prepare(owner, carrier, delivery=delivery, workload=workload, include_elevated=include_elevated)
 
     assert result.status is TargetIdentityStatus.PREPARED
-    assert result.plan is not None and result.plan.mode is mode
+    assert result.ordinary_plan is not None and result.ordinary_plan.mode is ordinary_mode
+    assert (result.elevated_plan.mode if result.elevated_plan else None) is elevated_mode
+    if result.elevated_plan is not None and elevated_mode is IdentityMode.SUDO_ROOT:
+        assert result.elevated_plan.expected == _ROOT
+        assert result.root_result is not None
+    else:
+        assert result.root_result is None
     assert len(carrier.calls) == calls
     assert len({id(deadline) for deadline in carrier.deadlines}) == 1
     assert not result.requires_owner_retention
@@ -301,7 +323,68 @@ def test_duplicate_name_reuses_one_observation_only_within_the_call(
 
 
 @pytest.mark.parametrize(
-    ("delivery_identity", "workload_identity", "elevated"),
+    ("carrier", "failure", "retained"),
+    [
+        (SyntheticCarrier({"worker": _WORKER}, missing={"root"}), TargetIdentityFailure.ACCOUNT, False),
+        (SyntheticCarrier({"worker": _WORKER, "root": _OTHER}), TargetIdentityFailure.IDENTITY_PATH, False),
+        (
+            SyntheticCarrier({"worker": _WORKER, "root": _ROOT}, uncertain_on_account="root"),
+            TargetIdentityFailure.TERMINATION,
+            True,
+        ),
+        (
+            SyntheticCarrier({"worker": _WORKER, "root": _ROOT}, expire_on_account="root"),
+            TargetIdentityFailure.DEADLINE,
+            False,
+        ),
+    ],
+    ids=["missing-root", "non-root-observation", "uncertain-root", "expired-root"],
+)
+def test_elevated_lookup_failure_keeps_ordinary_evidence_without_prepared_status(
+    owned: tuple[Database, OperationOwner],
+    carrier: SyntheticCarrier,
+    failure: TargetIdentityFailure,
+    retained: bool,
+) -> None:
+    _, owner = owned
+
+    result = _prepare(owner, carrier, include_elevated=True)
+
+    assert result.status is (TargetIdentityStatus.UNCERTAIN if retained else TargetIdentityStatus.FAILED)
+    assert result.failure is failure
+    assert result.elevated_plan is None
+    assert carrier.calls == ["worker", "root"]
+    assert len({id(deadline) for deadline in carrier.deadlines}) == 1
+    assert result.requires_owner_retention is retained
+    if failure is TargetIdentityFailure.DEADLINE:
+        assert result.ordinary_plan is None and result.deadline_exceeded
+    else:
+        assert result.ordinary_plan is not None and result.ordinary_plan.mode is IdentityMode.DIRECT
+    if not retained:
+        owner.seal_lifecycle_obligations()
+        owner.record_effects_resolved()
+        owner.close()
+
+
+@pytest.mark.parametrize("include_elevated", [None, 0, "yes", object()])
+def test_untyped_elevation_choice_is_refused_before_borrow(
+    owned: tuple[Database, OperationOwner],
+    include_elevated: object,
+) -> None:
+    _, owner = owned
+    carrier = SyntheticCarrier({"worker": _WORKER})
+
+    with pytest.raises(ValidationError):
+        _prepare(owner, carrier, include_elevated=include_elevated)  # type: ignore[arg-type]
+
+    assert carrier.calls == []
+    borrow = owner.borrow()
+    borrow.close()
+    owner.close()
+
+
+@pytest.mark.parametrize(
+    ("delivery_identity", "workload_identity", "include_elevated"),
     [
         (_WORKER, _OTHER, False),
         (_WORKER, _ROOT, False),
@@ -312,16 +395,17 @@ def test_unproved_cross_identity_paths_are_refused_without_root_lookup(
     owned: tuple[Database, OperationOwner],
     delivery_identity: IdentityExpectation,
     workload_identity: IdentityExpectation,
-    elevated: bool,
+    include_elevated: bool,
 ) -> None:
     _, owner = owned
     carrier = SyntheticCarrier({"delivery": delivery_identity, "workload": workload_identity})
 
-    result = _prepare(owner, carrier, delivery="delivery", workload="workload", elevated=elevated)
+    result = _prepare(owner, carrier, delivery="delivery", workload="workload", include_elevated=include_elevated)
 
     assert result.status is TargetIdentityStatus.FAILED
     assert result.failure is TargetIdentityFailure.IDENTITY_PATH
-    assert result.plan is None and carrier.calls == ["delivery", "workload"]
+    assert result.ordinary_plan is None and result.elevated_plan is None
+    assert carrier.calls == ["delivery", "workload"]
     assert not result.requires_owner_retention
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
@@ -375,7 +459,8 @@ def test_late_normal_completion_settles_attempt_but_cannot_produce_plan(
 
     assert result.status is TargetIdentityStatus.FAILED
     assert result.failure is TargetIdentityFailure.DEADLINE and result.deadline_exceeded
-    assert result.plan is None and not result.requires_owner_retention
+    assert result.ordinary_plan is None and result.elevated_plan is None
+    assert not result.requires_owner_retention
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
@@ -405,7 +490,7 @@ def test_closed_lookup_failures_stop_before_the_next_account(
     result = _prepare(owner, carrier, delivery="delivery", workload="workload")
 
     assert result.status is TargetIdentityStatus.FAILED
-    assert result.failure is failure and result.plan is None
+    assert result.failure is failure and result.ordinary_plan is None and result.elevated_plan is None
     assert carrier.calls == ["delivery"] and result.workload_result is None
     assert not result.requires_owner_retention
     owner.seal_lifecycle_obligations()
@@ -434,7 +519,7 @@ def test_abnormal_and_no_send_completion_facts_are_conservative(
 
     result = _prepare(owner, carrier)
 
-    assert result.failure is failure and result.plan is None
+    assert result.failure is failure and result.ordinary_plan is None and result.elevated_plan is None
     assert result.requires_owner_retention is retained
     assert result.pending_remote_effects is retained
     if not retained:
@@ -471,7 +556,8 @@ def test_expiry_crossed_during_abnormal_exchange_preserves_primary_failure(
     result = _prepare(owner, carrier, deadline=Deadline.after(15))
 
     assert result.failure is failure and result.deadline_exceeded
-    assert result.plan is None and result.requires_owner_retention is retained
+    assert result.ordinary_plan is None and result.elevated_plan is None
+    assert result.requires_owner_retention is retained
     assert result.pending_remote_effects is retained
     if not retained:
         owner.seal_lifecycle_obligations()
