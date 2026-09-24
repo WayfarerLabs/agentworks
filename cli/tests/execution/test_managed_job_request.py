@@ -148,6 +148,52 @@ def test_control_mismatch_refuses(change: dict[str, object]) -> None:
         request_wire.decode_request({**assets, "request-control": request_wire._json(control)})  # noqa: SLF001
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("kind", 123),
+        ("kind", "future"),
+        ("argv", "not-a-list"),
+        ("argv", []),
+        ("argv", ["/bin/true"] * (request_wire.MAX_ARGV + 1)),
+        ("argv", ["/bin/true", "\0"]),
+        ("argv", ["/bin/true", "x" * (request_wire.MAX_TEXT_BYTES + 1)]),
+        ("cwd", "relative"),
+        ("cwd", "/a/../b"),
+        ("output", {"mode": "discard"}),
+        ("output", {"mode": "discard", "prefix_bytes": None, "extra": 1}),
+        ("output", {"mode": "terminal", "prefix_bytes": None}),
+        ("output", {"mode": "capture", "prefix_bytes": True}),
+        ("output", {"mode": "capture", "prefix_bytes": request_wire.MAX_CAPTURE_PREFIX_BYTES + 1}),
+        ("output", {"mode": "discard", "prefix_bytes": 1}),
+        ("environment", {"bytes": True, "sha256": "a" * 64}),
+        ("environment", {"bytes": request_wire.MAX_ENVIRONMENT_BYTES + 1, "sha256": "a" * 64}),
+        ("source", {"bytes": -1, "sha256": "a" * 64}),
+        ("source", {"bytes": request_wire.MAX_SOURCE_BYTES + 1, "sha256": "a" * 64}),
+        ("source", {"bytes": 1, "sha256": hashlib.sha256(b"x").hexdigest()}),
+        ("stdin", {"bytes": request_wire.MAX_STDIN_BYTES + 1, "sha256": "a" * 64}),
+        ("stdin", {"bytes": 0, "sha256": "A" * 64}),
+        ("stdin", {"bytes": 0, "sha256": "a" * 63}),
+        ("stdin", {"bytes": 0, "sha256": "a" * 64, "extra": 1}),
+    ],
+)
+def test_standalone_control_rejects_canonical_semantic_fault(field: str, value: object) -> None:
+    assets = request_wire.encode_request(_request())
+    control = request_wire.decode_control(assets["request-control"])
+    control[field] = value
+    with pytest.raises(request_wire.RequestError):
+        request_wire.decode_control(request_wire._json(control))  # noqa: SLF001
+
+
+def test_standalone_control_accepts_valid_script_shape() -> None:
+    assets = request_wire.encode_request(_request(kind="script", source=b"echo ok"))
+    assert request_wire.decode_control(assets["request-control"])["kind"] == "script"
+    control = request_wire.decode_control(assets["request-control"])
+    control["argv"] = ["/bin/sh"]
+    with pytest.raises(request_wire.RequestError):
+        request_wire.decode_control(request_wire._json(control))  # noqa: SLF001
+
+
 @pytest.mark.parametrize("python", [sys.executable, "/usr/bin/python3.11"])
 def test_exact_source_is_portable_without_installed_package(tmp_path: Path, python: str) -> None:
     if not Path(python).exists():
@@ -158,10 +204,12 @@ def test_exact_source_is_portable_without_installed_package(tmp_path: Path, pyth
     source = Path(request_wire.__file__).parent
     for module in ("_managed_job_request", "_managed_job_wire", "_helper_identity"):
         shutil.copyfile(source / f"{module}.py", package / f"{module}.py")
+    control = request_wire.encode_request(_request())["request-control"]
     code = (
         "from portable._managed_job_request import *; "
         "assert decode_environment(encode_environment((('A', 'é'),))) == (('A', 'é'),); "
-        "assert MAX_SOURCE_BYTES == 16777216"
+        "assert MAX_SOURCE_BYTES == 16777216; "
+        f"assert decode_control(bytes.fromhex({control.hex()!r}))['kind'] == 'command'"
     )
     subprocess.run([python, "-I", "-c", f"import sys; sys.path.insert(0, {str(tmp_path)!r}); {code}"], check=True)
 

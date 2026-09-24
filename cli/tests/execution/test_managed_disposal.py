@@ -155,6 +155,8 @@ def test_terminal_disposal_and_exact_retry(tmp_path: Path, wait: bool) -> None:
         "malformed_launch",
         "malformed_control",
         "wrong_run_control",
+        "invalid_kind_control",
+        "invalid_output_control",
         "malformed_environment",
         "oversize_source",
         "oversize_stdin",
@@ -177,7 +179,7 @@ def test_malformed_fixed_request_final_refuses_before_deletion(tmp_path: Path, v
         elif variant in ("conflicting_launch", "malformed_launch"):
             leaf = directory / RequestAsset.LAUNCH.value
             data = _launch("other") if variant == "conflicting_launch" else b"invalid"
-        elif variant in ("malformed_control", "wrong_run_control"):
+        elif variant in ("malformed_control", "wrong_run_control", "invalid_kind_control", "invalid_output_control"):
             leaf = directory / RequestAsset.CONTROL.value
             if variant == "malformed_control":
                 data = b"invalid"
@@ -188,7 +190,12 @@ def test_malformed_fixed_request_final_refuses_before_deletion(tmp_path: Path, v
                     )
                 )[RequestAsset.CONTROL.value]
                 control = json.loads(valid)
-                control["run_id"] = "b" * 32
+                if variant == "wrong_run_control":
+                    control["run_id"] = "b" * 32
+                elif variant == "invalid_kind_control":
+                    control["kind"] = 123
+                else:
+                    control["output"] = {"mode": "capture", "prefix_bytes": True}
                 data = json.dumps(control, sort_keys=True, separators=(",", ":")).encode("ascii")
         elif variant == "malformed_environment":
             leaf, data = directory / RequestAsset.ENVIRONMENT.value, b"invalid"
@@ -210,6 +217,17 @@ def test_partial_binary_request_assets_remain_disposable(tmp_path: Path) -> None
         launch = _terminal(store)
         store.publish_request_asset(RequestAsset.SOURCE, b"\x00\xff\x80")
         store.publish_request_asset(RequestAsset.STDIN, b"\xff\x00")
+        assert store.dispose(launch)
+        assert sorted(item.name for item in (tmp_path / "managed" / RUN).iterdir()) == ["disposal"]
+
+
+def test_valid_partial_control_remains_disposable(tmp_path: Path) -> None:
+    with _store(tmp_path) as store:
+        launch = _terminal(store)
+        control = request_wire.encode_request(
+            request_wire.ManagedJobRequest(launch, "command", ("/bin/true",), None, "discard", None, (), b"", b"")
+        )[RequestAsset.CONTROL.value]
+        store.publish_request_asset(RequestAsset.CONTROL, control)
         assert store.dispose(launch)
         assert sorted(item.name for item in (tmp_path / "managed" / RUN).iterdir()) == ["disposal"]
 

@@ -29,6 +29,7 @@ MAX_ENVIRONMENT_ENTRIES = 256
 
 _NAME = re.compile(r"[A-Za-z_][A-Za-z_0-9]*\Z")
 _RUN = re.compile(r"[0-9a-f]{32}\Z")
+_HASH = re.compile(r"[0-9a-f]{64}\Z")
 _RESERVED_ENV = frozenset({"BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "BASH_XTRACEFD"})
 _USER_SHELLS = frozenset({"/bin/sh", "/usr/bin/sh", "/bin/bash", "/usr/bin/bash"})
 _ASSETS = ("request-launch", "request-control", "request-environment", "request-source", "request-stdin")
@@ -85,6 +86,42 @@ def _path(value: object) -> str:
     return path
 
 
+def _invocation(kind: object, argv: object) -> tuple[str, tuple[str, ...]]:
+    if type(kind) is not str or kind not in ("command", "script") or not isinstance(argv, tuple | list):
+        raise RequestError("invalid invocation kind or argv")
+    if len(argv) > MAX_ARGV:
+        raise RequestError("invalid argv")
+    arguments = tuple(_text(arg, nonempty=index == 0) for index, arg in enumerate(argv))
+    if (kind == "command" and not arguments) or (kind == "script" and arguments):
+        raise RequestError("invocation and argv mismatch")
+    return kind, arguments
+
+
+def _output(mode: object, limit: object) -> tuple[str, int | None]:
+    if type(mode) is not str or mode not in ("capture", "discard", "sensitivity-suppressed"):
+        raise RequestError("invalid output mode")
+    if mode == "capture":
+        if type(limit) is not int or not 0 <= limit <= MAX_CAPTURE_PREFIX_BYTES:
+            raise RequestError("invalid capture ceiling")
+    elif limit is not None:
+        raise RequestError("unexpected capture ceiling")
+    return mode, limit
+
+
+def _checked_metadata(value: object, maximum: int) -> None:
+    if type(value) is not dict or set(value) != {"bytes", "sha256"}:
+        raise RequestError("invalid request metadata")
+    length = value["bytes"]
+    digest = value["sha256"]
+    if (
+        type(length) is not int
+        or not 0 <= length <= maximum
+        or type(digest) is not str
+        or _HASH.fullmatch(digest) is None
+    ):
+        raise RequestError("invalid request metadata")
+
+
 def decode_request_launch(data: bytes) -> dict[str, object]:
     """Validate the complete canonical launch fact and independent owner."""
     try:
@@ -101,7 +138,7 @@ def decode_request_launch(data: bytes) -> dict[str, object]:
 
 
 def decode_control(data: bytes) -> dict[str, object]:
-    """Validate a canonical control leaf before full asset binding."""
+    """Validate one canonical control without assuming sibling bytes exist."""
     value = _decode(data, MAX_CONTROL_BYTES)
     run_id = value.get("run_id")
     if (
@@ -112,6 +149,23 @@ def decode_control(data: bytes) -> dict[str, object]:
         or _RUN.fullmatch(run_id) is None
     ):
         raise RequestError("invalid control identity or fields")
+    if type(value["argv"]) is not list:
+        raise RequestError("invalid control argv")
+    kind, _ = _invocation(value["kind"], value["argv"])
+    if value["cwd"] is not None:
+        _path(value["cwd"])
+    output = value["output"]
+    if type(output) is not dict or set(output) != {"mode", "prefix_bytes"}:
+        raise RequestError("invalid output shape")
+    _output(output["mode"], output["prefix_bytes"])
+    for name, maximum in (
+        ("environment", MAX_ENVIRONMENT_BYTES),
+        ("source", MAX_SOURCE_BYTES),
+        ("stdin", MAX_STDIN_BYTES),
+    ):
+        _checked_metadata(value[name], maximum)
+    if kind == "command" and value["source"] != _metadata(b""):
+        raise RequestError("command source must be empty")
     return value
 
 
@@ -162,23 +216,18 @@ def encode_request(request: ManagedJobRequest) -> dict[str, bytes]:
         raise RequestError("invalid request")
     launch = decode_request_launch(request.launch)
     shell = cast("dict[str, object]", launch["shell"])
-    if request.kind not in ("command", "script") or type(request.kind) is not str:
-        raise RequestError("invalid invocation kind")
-    if type(request.argv) is not tuple or len(request.argv) > MAX_ARGV:
+    if type(request.argv) is not tuple:
         raise RequestError("invalid argv")
-    argv = tuple(_text(arg, nonempty=index == 0) for index, arg in enumerate(request.argv))
-    if request.kind == "command":
-        if (
-            not argv
-            or request.source != b""
-            or shell != {"requested": None, "resolved_executable": None, "login": False, "interactive": False}
-        ):
+    kind, argv = _invocation(request.kind, request.argv)
+    if kind == "command":
+        if request.source != b"" or shell != {
+            "requested": None,
+            "resolved_executable": None,
+            "login": False,
+            "interactive": False,
+        }:
             raise RequestError("command and shell mismatch")
-    elif (
-        argv
-        or shell["requested"] not in ("sh", "bash", "user_default")
-        or not isinstance(shell["resolved_executable"], str)
-    ):
+    elif shell["requested"] not in ("sh", "bash", "user_default") or not isinstance(shell["resolved_executable"], str):
         raise RequestError("script and shell mismatch")
     else:
         resolved = _path(shell["resolved_executable"])
@@ -190,23 +239,12 @@ def encode_request(request: ManagedJobRequest) -> dict[str, bytes]:
         ):
             raise RequestError("unsupported resolved shell")
     cwd = None if request.cwd is None else _path(request.cwd)
-    if type(request.output_mode) is not str or request.output_mode not in (
-        "capture",
-        "discard",
-        "sensitivity-suppressed",
-    ):
-        raise RequestError("invalid output mode")
-    limit = request.capture_prefix_bytes
-    if request.output_mode == "capture":
-        if type(limit) is not int or not 0 <= limit <= MAX_CAPTURE_PREFIX_BYTES:
-            raise RequestError("invalid capture ceiling")
-    elif limit is not None:
-        raise RequestError("unexpected capture ceiling")
+    mode, limit = _output(request.output_mode, request.capture_prefix_bytes)
     environment = encode_environment(request.environment)
     for data, maximum in ((request.source, MAX_SOURCE_BYTES), (request.stdin, MAX_STDIN_BYTES)):
         if type(data) is not bytes or len(data) > maximum:
             raise RequestError("raw request asset exceeds bound")
-    if request.kind == "script":
+    if kind == "script":
         try:
             source_text = request.source.decode("utf-8")
         except UnicodeError:
@@ -217,10 +255,10 @@ def encode_request(request: ManagedJobRequest) -> dict[str, bytes]:
         {
             "version": VERSION,
             "run_id": launch["run_id"],
-            "kind": request.kind,
+            "kind": kind,
             "argv": argv,
             "cwd": cwd,
-            "output": {"mode": request.output_mode, "prefix_bytes": limit},
+            "output": {"mode": mode, "prefix_bytes": limit},
             "environment": _metadata(environment),
             "source": _metadata(request.source),
             "stdin": _metadata(request.stdin),
@@ -239,12 +277,8 @@ def decode_request(assets: dict[str, bytes]) -> ManagedJobRequest:
     control = decode_control(assets["request-control"])
     if control["run_id"] != launch["run_id"]:
         raise RequestError("request identity mismatch")
-    output = control["output"]
-    if type(output) is not dict or set(output) != {"mode", "prefix_bytes"}:
-        raise RequestError("invalid output shape")
-    argv = control["argv"]
-    if type(argv) is not list:
-        raise RequestError("invalid argv")
+    output = cast("dict[str, object]", control["output"])
+    argv = cast("list[str]", control["argv"])
     request = ManagedJobRequest(
         assets["request-launch"],
         cast("str", control["kind"]),
