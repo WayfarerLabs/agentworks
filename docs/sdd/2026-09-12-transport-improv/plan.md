@@ -1295,6 +1295,15 @@ connection and trust only. Before broader lifecycle implementation, complete the
       boundary-empty only after `populated 0`. Preserve unknown facts on controller death,
       uninterruptible tasks and every unproved cleanup path. Refuse `OPERATION`, live streams,
       terminal I/O and arbitrary systemd properties before dispatch.
+- [x] Implement the bounded private carrier-neutral `observe` and closed `read-output` exchanges
+      over the protected store. The exact-source Python 3.11 target helper and host collector bind
+      one canonical launch, return only present fixed facts, and admit output only from a validated
+      stream-end and closed capture spool. Missing end remains unknown; discard and suppression are
+      known unavailable; malformed or incomplete carrier evidence promotes no facts. At
+      `2c742d6f6a0bec08e65b4fc84a9c9c07500ae9e2`, the manifest-only result control removes duplicate
+      status and length claims; 64 focused tests, Ruff and targeted mypy pass. This checkpoint does
+      not implement `start`, `stop` or `dispose`, host reservation/output-policy reduction, live
+      target identity rereads or SSH/QGA production proof.
 - [ ] Add the fixed carrier-neutral `start`, `observe`, closed `read-output`, `stop` and `dispose`
       exchange over the target store. Revalidate the exact target/run/unit/launch digest on every
       later action, never replay start after possible dispatch, and expose no arbitrary command,

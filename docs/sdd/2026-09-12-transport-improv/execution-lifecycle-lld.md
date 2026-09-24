@@ -214,8 +214,9 @@ creation uses atomic create-once publication; an existing fact is read and compa
 overwritten. No shared mutable state file or file-level lock is part of this protocol. The portable
 store, its permissions, closed-output validation and exact-source Python 3.11 execution are now
 implemented and proved in isolation. The target controller's request, launch gate, normal-wait,
-stream-end and cleanup ordering are also implemented hermetically. Transient-service launch, host
-exchange, crash recovery and live destination behavior remain open.
+stream-end and cleanup ordering are also implemented hermetically. Private carrier-neutral `observe`
+and closed `read-output` exchanges are implemented. Transient-service launch,
+`start`/`stop`/`dispose` exchanges, crash recovery and live destination behavior remain open.
 
 The stream fact is self-describing. Managed-run reservation now persists the requested output policy
 atomically alongside run identity. A future consuming service must compare that policy to each
@@ -223,8 +224,8 @@ stream end before treating its disposition as fulfillment. `_managed_job_wire.py
 complete canonical byte schema as a Python 3.11-compatible stdlib module that reuses the portable
 `_helper_identity.py` validator. The host typed adapter delegates encoding, decoding and launch
 digest to it. Exact-source bundle tests prove byte round trips under Python 3.11 when installed. The
-target producer/service still needs to bundle those sources verbatim and prove them in its own
-launch and observation paths. The protected store uses the same portable codec. Target controller
+target controller and private observation helper bundle those sources verbatim. The protected store
+uses the same portable codec. Host reservation/output-policy reduction, target controller
 production, cgroup/systemd launch, carrier proof and live validation remain open.
 
 ### First private managed service
@@ -302,15 +303,16 @@ the only operation that can consume staged request assets and is never replayed 
 dispatch. Every later operation revalidates target incarnation, boot, run, unit, launch fact and
 launch digest before it obtains authority. `stop` closes further admission, asks the exact owned
 unit to stop and reports boundary proof or uncertainty. `dispose` removes only a terminal exact-run
-store after retention policy permits it. SSH and QGA deliver these same operations; neither owns a
-second lifecycle implementation.
+store after retention policy permits it. SSH and QGA must deliver these same operations; neither
+owns a second lifecycle implementation.
 
 The first private end-to-end managed-job slice may enable only `INDEPENDENT`, whose target-owned
 evidence survives observer loss. `OPERATION` must refuse before dispatch until target-side owner
 liveness or lease, partition behavior and bounded cleanup are proved. This sequences implementation
-without changing the public lifetime contract above. A later helper/service will expose only fixed
-start, observe, read-output, stop and dispose operations over the same carrier; SSH and QGA must
-each prove that protocol. This checkpoint implements none of those operations.
+without changing the public lifetime contract above. The private helper now exposes fixed `observe`
+and closed `read-output` over the existing carrier interface. `start`, `stop` and `dispose` remain
+unimplemented, as do host reservation/output-policy reduction and live target marker/boot rereads.
+SSH and QGA must each prove the protocol in production before public exposure.
 
 Target identity is structured as a core resource kind/name, a versioned incarnation fingerprint and
 a separate boot UUID. The core name supports binding and diagnostics but is not authority. The
