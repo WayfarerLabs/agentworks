@@ -33,7 +33,7 @@ from agentworks.execution.profiles import Protection
 from agentworks.execution.result import CheckedExecutionError, ExitCode
 from agentworks.operations import OperationOwner
 
-pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="inline execution requires Linux")
+_LINUX_ONLY = pytest.mark.skipif(sys.platform != "linux", reason="inline execution requires Linux")
 type Bound = tuple[Database, OperationOwner, ExecutionOperation, "LocalCarrier", ExecutionAccess, Deadline]
 
 
@@ -115,6 +115,7 @@ def bound(tmp_path: Path) -> Iterator[Bound]:
 
 
 @pytest.mark.parametrize("status", [0, 255])
+@_LINUX_ONLY
 def test_command_runs_with_exact_default_deadline_and_exit_status(bound: Bound, status: int) -> None:
     _, owner, _, carrier, access, deadline = bound
     result = access.run(Command(("/bin/sh", "-c", f"printf data; exit {status}")), profile=Protection.DIRECT)
@@ -127,6 +128,7 @@ def test_command_runs_with_exact_default_deadline_and_exit_status(bound: Bound, 
     owner.close()
 
 
+@_LINUX_ONLY
 def test_script_binary_stdin_discard_and_sensitive_suppression(
     bound: Bound,
 ) -> None:
@@ -152,6 +154,7 @@ def test_script_binary_stdin_discard_and_sensitive_suppression(
     owner.close()
 
 
+@_LINUX_ONLY
 def test_checked_nonzero_uses_bound_diagnostic_identity(
     bound: Bound,
 ) -> None:
@@ -181,6 +184,7 @@ def test_checked_nonzero_uses_bound_diagnostic_identity(
         {"profile": Protection.DIRECT, "cwd": "relative"},
     ],
 )
+@_LINUX_ONLY
 def test_known_refusals_do_not_borrow_or_dispatch(
     bound: Bound,
     options: dict[str, object],
@@ -196,6 +200,7 @@ def test_known_refusals_do_not_borrow_or_dispatch(
     owner.close()
 
 
+@_LINUX_ONLY
 def test_script_startup_and_non_linux_refuse_before_dispatch(
     bound: Bound,
 ) -> None:
@@ -210,6 +215,7 @@ def test_script_startup_and_non_linux_refuse_before_dispatch(
     owner.close()
 
 
+@_LINUX_ONLY
 def test_uncertain_result_retains_owner(
     bound: Bound,
 ) -> None:
@@ -224,6 +230,7 @@ def test_uncertain_result_retains_owner(
         owner.close()
 
 
+@pytest.mark.windows
 def test_import_does_not_load_retirement_roots() -> None:
     code = """
 import importlib.abc, sys

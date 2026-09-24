@@ -116,8 +116,10 @@ class ExecutionAccess:
         """Run one supported inline candidate under existing operation custody."""
         if type(profile) is not Protection or type(lifetime) is not Lifetime:
             raise ValidationError("Foreground execution requires explicit profile and lifetime values")
-        if profile is not Protection.DIRECT or lifetime is not Lifetime.OPERATION:
-            raise StateError("Requested execution profile or lifetime is unavailable")
+        if profile is Protection.MANAGED:
+            raise StateError("MANAGED execution is unavailable")
+        if lifetime is Lifetime.INDEPENDENT:
+            raise StateError("INDEPENDENT execution lifetime is unavailable")
         if self._runtime_selection.target_os is not RuntimeTargetOS.LINUX:
             raise StateError("Foreground execution is unavailable on this runtime")
         if type(request) not in {Command, Script} or (

@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
+import builtins
 from dataclasses import KW_ONLY, dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
-
-if TYPE_CHECKING:
-    import builtins
 
 
 class Shell(Enum):
@@ -35,7 +32,7 @@ class Input:
     is_sensitive: bool = False
 
     def __post_init__(self) -> None:
-        if type(self.data) is not bytes or type(self.is_sensitive) is not bool:
+        if type(self.data) is not builtins.bytes or type(self.is_sensitive) is not bool:
             raise ValidationError("Execution input requires bytes and a sensitivity choice")
 
     @classmethod
