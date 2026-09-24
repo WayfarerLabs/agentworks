@@ -217,8 +217,10 @@ implemented and proved in isolation. The target controller's request, launch gat
 stream-end and cleanup ordering are also implemented hermetically. Private carrier-neutral `observe`
 and closed `read-output` exchanges are implemented. A private carrier-neutral `start` exchange now
 stages the five fixed request assets and attempts one transient-service activation, with durable
-possible-dispatch before delivery. `stop`/`dispose`, crash recovery and live destination behavior
-remain open. Hermetic start proof does not establish live systemd/cgroup behavior, current target
+possible-dispatch before delivery. Private managed `stop` now durably publishes one fixed request,
+lets the owned controller terminate its main child and boundary, and distinguishes accepted intent
+from positive boundary emptiness. `dispose`, crash recovery and live destination behavior remain
+open. Hermetic start/stop proof does not establish live systemd/cgroup behavior, current target
 marker or boot rereads, or SSH/QGA production delivery.
 
 The stream fact is self-describing. Managed-run reservation now persists the requested output policy
@@ -347,9 +349,12 @@ liveness or lease, partition behavior and bounded cleanup are proved. This seque
 without changing the public lifetime contract above. The private helper now exposes fixed `observe`
 and closed `read-output` over the existing carrier interface. A private `start` exchange also
 preflights a reserved independent run and its persisted output policy, then uses the existing
-durable possible-dispatch wrapper. `stop` and `dispose` remain unimplemented, as do production host
-reservation/policy reduction and live target marker/boot rereads. SSH and QGA must each prove the
-protocol in production before public exposure.
+durable possible-dispatch wrapper. Private `stop` revalidates the exact launch, publishes the empty
+request create-once and waits within a fixed guest-local bound for the existing boundary fact. Its
+controller path closes finite input, gives only the main child that has not yet been reaped one
+fixed `SIGTERM` grace, then uses the existing whole-cgroup cleanup without extending grace on retry.
+`dispose` remains unimplemented, as do production host reservation/policy reduction and live target
+marker/boot rereads. SSH and QGA must each prove the protocol in production before public exposure.
 
 Target identity is structured as a core resource kind/name, a versioned incarnation fingerprint and
 a separate boot UUID. The core name supports binding and diagnostics but is not authority. The

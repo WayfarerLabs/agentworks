@@ -1320,12 +1320,14 @@ connection and trust only. Before broader lifecycle implementation, complete the
       guarantee every carrier's smaller direct envelope; large-request staging/fallback, live
       systemd/cgroup and SSH/QGA proof, current target-marker/boot rereads, stop/dispose and public
       composition remain open.
-- [ ] Implement and privately prove the fixed managed-stop request, controller handling and
-      carrier-neutral exchange. Publish one separate protected empty `request-stop` leaf only after
-      exact launch validation; distinguish accepted intent from positive boundary emptiness. Give
-      the exact main child that has not yet been reaped one fixed grace interval, enter the existing
-      whole-cgroup cleanup immediately on anchor exit or grace expiry, and never extend grace on
-      retry. Keep the guest observation finite even for an unbounded caller deadline. Add no process
+- [x] Implement and privately prove the fixed managed-stop request, controller handling and
+      carrier-neutral exchange at `ce103fdd0af09a6958fee3a803c6c46e86d22d04`. One separate protected
+      empty `request-stop` leaf publishes only after exact launch validation; accepted intent
+      remains distinct from positive boundary emptiness. The controller gives only its exact main
+      child that has not yet been reaped one fixed grace interval, enters the existing whole-cgroup
+      cleanup on anchor exit or grace expiry, and does not extend grace on retry. The guest
+      observation remains finite for an unbounded caller deadline. The 101 focused tests, Ruff,
+      targeted mypy, the full file-lint suite and diff check pass. This slice adds no process
       enumeration, mutable stop document, `execution_runs` stop state, generic admission lock,
       direct systemd-stop claim, disposal/retention policy or public composition. Hermetic proof
       does not establish live systemd/cgroup, current target-marker/boot or SSH/QGA behavior.
