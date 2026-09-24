@@ -1613,7 +1613,11 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       borrow spans locator observation, native binding resolution and the guest attempt. Preserve
       typed locator-unavailable refusal, validate plugin results and deadline after each platform
       call, then delegate one guest attempt through the shared preparer. Return the validated
-      passive binding only with successful preparation. Hermetic tests cover refusal ordering,
+      passive binding only with successful preparation after an equal second locator observation.
+      This detects cooperative replacement at preparation time; production later use still needs a
+      locator-bound platform hold and binding. Malicious or engineered A-B-A host behavior is
+      outside this checkpoint's threat scope. Release failure suppresses target and binding with an
+      uncertain control fact retaining guest evidence. Hermetic tests cover refusal ordering,
       malformed returns, platform exceptions, late observations, exact input forwarding and one
       borrowed success. WSL2 is the first current positive locator and native binding pair; Proxmox
       remains unavailable and SSH-backed cloud/Lima bindings remain for #832 or later. This

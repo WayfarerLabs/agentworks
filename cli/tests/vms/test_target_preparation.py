@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from threading import Event, Thread
 from typing import TYPE_CHECKING
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
 from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLocatorUnavailable, VMPlatform
 from agentworks.db import Database, OperationClaimState, OperationResourceKind, OperationScope, VMRow
+from agentworks.db.operations import OperationRepository
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution._vm_guest_identity import VMGuestIdentityObservationResult, observe_vm_guest_identity
@@ -48,7 +49,7 @@ from agentworks.vms.target_preparation import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
     from pathlib import Path
 
 
@@ -799,6 +800,15 @@ def test_platform_composition_passes_exact_inputs_and_leaves_outer_owner_open(
     probe_selection: RuntimeSelection | None = None
     probe_carrier: Carrier | None = None
 
+    def observe(*args: object, **kwargs: object) -> ProviderLocator:
+        del args, kwargs
+        if platform.observe_provider_locator.call_count == 2:
+            assert len(borrows) == 1
+            assert releases == []
+            with pytest.raises(StateError):
+                owner.borrow()
+        return ProviderLocator("opaque")
+
     def probe(
         selected_carrier: Carrier, *, runtime_selection: RuntimeSelection, deadline: Deadline
     ) -> VMGuestIdentityObservationResult:
@@ -808,6 +818,7 @@ def test_platform_composition_passes_exact_inputs_and_leaves_outer_owner_open(
         return observe_vm_guest_identity(selected_carrier, runtime_selection=runtime_selection, deadline=deadline)
 
     monkeypatch.setattr("agentworks.vms.target_preparation.observe_vm_guest_identity", probe)
+    platform.observe_provider_locator.side_effect = observe
     result = _compose(owner, platform, ctx=ctx, config=config, deadline=deadline)
 
     assert result.preparation.status is VMTargetPreparationStatus.PREPARED
@@ -825,7 +836,8 @@ def test_platform_composition_passes_exact_inputs_and_leaves_outer_owner_open(
     assert carrier.calls == 1
     assert carrier.deadlines == [deadline]
     assert len(borrows) == 1 and releases == borrows
-    platform.observe_provider_locator.assert_called_once_with(_vm(), ctx, deadline=deadline)
+    assert platform.observe_provider_locator.call_count == 2
+    assert platform.observe_provider_locator.call_args_list == [call(_vm(), ctx, deadline=deadline)] * 2
     platform.resolve_native_execution_binding.assert_called_once_with(_vm(), ctx, deadline=deadline, config=config)
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
@@ -843,18 +855,210 @@ def test_selected_platform_drops_binding_on_failed_or_uncertain_guest_attempt(
 
     assert result.preparation.status is not VMTargetPreparationStatus.PREPARED
     assert result.binding is None
+    platform.observe_provider_locator.assert_called_once()
     if not result.preparation.requires_owner_retention:
         owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
 
 
+@pytest.mark.parametrize("replacement_stage", ["binding", "probe"])
+def test_second_locator_detects_cooperative_replacement_before_or_during_probe(
+    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch, replacement_stage: str
+) -> None:
+    _, owner = owned
+    borrows, releases = _watch_custody(monkeypatch)
+    carrier = TranscriptCarrier(_success_payload())
+    platform = _platform(carrier)
+    current = ["first"]
+    platform.observe_provider_locator.side_effect = lambda *args, **kwargs: ProviderLocator(current[0])
+    if replacement_stage == "binding":
+
+        def resolve(*args: object, **kwargs: object) -> NativeExecutionBinding:
+            del args, kwargs
+            current[0] = "second"
+            return _binding(carrier)
+
+        platform.resolve_native_execution_binding.side_effect = resolve
+    else:
+        original_execute = carrier.execute
+
+        def execute(invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+            result = original_execute(invocation, io=io, deadline=deadline)
+            current[0] = "second"
+            return result
+
+        carrier.execute = execute  # type: ignore[method-assign]
+
+    result = _compose(owner, platform)
+
+    assert result.preparation.status is VMTargetPreparationStatus.FAILED
+    assert result.preparation.failure is VMTargetPreparationFailure.LOCATOR_CHANGED
+    assert result.preparation.guest_result is not None
+    assert result.preparation.target is None
+    assert result.binding is None
+    assert platform.observe_provider_locator.call_count == 2
+    assert carrier.calls == 1
+    assert len(borrows) == 1 and releases == borrows
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+@pytest.mark.parametrize("confirmation", ["unavailable", "malformed", "late"])
+def test_second_locator_refuses_unavailable_malformed_or_late_result(
+    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch, confirmation: str
+) -> None:
+    _, owner = owned
+    borrows, releases = _watch_custody(monkeypatch)
+    carrier = TranscriptCarrier(_success_payload())
+    platform = _platform(carrier)
+    deadline = Deadline.after(10)
+
+    def observe(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        if platform.observe_provider_locator.call_count == 1:
+            return ProviderLocator("opaque")
+        if confirmation == "late":
+            object.__setattr__(deadline, "expires_at", 0.0)
+            return ProviderLocator("opaque")
+        if confirmation == "unavailable":
+            return ProviderLocatorUnavailable()
+        return "malformed"
+
+    platform.observe_provider_locator.side_effect = observe
+    if confirmation == "malformed":
+        with pytest.raises(ValidationError):
+            _compose(owner, platform, deadline=deadline)
+    else:
+        result = _compose(owner, platform, deadline=deadline)
+        assert result.preparation.status is VMTargetPreparationStatus.FAILED
+        assert result.preparation.failure is (
+            VMTargetPreparationFailure.DEADLINE
+            if confirmation == "late"
+            else VMTargetPreparationFailure.LOCATOR_CHANGED
+        )
+        assert result.preparation.guest_result is not None
+        assert result.preparation.target is None
+        assert result.binding is None
+        assert result.preparation.deadline_exceeded is (confirmation == "late")
+    assert platform.observe_provider_locator.call_count == 2
+    assert carrier.calls == 1
+    assert len(borrows) == 1 and releases == borrows
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+@pytest.mark.parametrize("selected_platform", [False, True])
+def test_repository_release_failure_suppresses_prepared_target(
+    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch, selected_platform: bool
+) -> None:
+    _, owner = owned
+    borrows, releases = _watch_custody(monkeypatch)
+    carrier = TranscriptCarrier(_success_payload())
+    platform = _platform(carrier)
+    resolution_calls = 0
+
+    def fail_resolution(*args: object, **kwargs: object) -> None:
+        nonlocal resolution_calls
+        del args, kwargs
+        resolution_calls += 1
+        raise StateError("injected obligation resolution failure")
+
+    monkeypatch.setattr(OperationRepository, "resolve_lifecycle_obligation", fail_resolution)
+    with pytest.raises(StateError) as raised:
+        if selected_platform:
+            _compose(owner, platform)
+        else:
+            _prepare(owner, carrier)
+
+    fact = raised.value.__cause__
+    assert isinstance(fact, VMTargetPreparationControlFact)
+    assert fact.preparation.status is VMTargetPreparationStatus.UNCERTAIN
+    assert fact.preparation.target is None
+    assert fact.preparation.guest_result is not None
+    assert fact.preparation.coordination_uncertain
+    assert fact.preparation.requires_owner_retention
+    assert not fact.preparation.pending_remote_effects
+    assert carrier.calls == 1
+    assert resolution_calls == 1
+    assert len(borrows) == 1 and releases == borrows
+    if selected_platform:
+        assert platform.observe_provider_locator.call_count == 2
+    with pytest.raises(StateError):
+        owner.borrow()
+    with pytest.raises(StateError):
+        owner.close()
+
+
+def test_confirmation_error_and_release_error_preserve_guest_and_control_chain(
+    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, owner = owned
+    borrows, releases = _watch_custody(monkeypatch)
+    carrier = TranscriptCarrier(_success_payload())
+    platform = _platform(carrier)
+    platform.observe_provider_locator.side_effect = [ProviderLocator("opaque"), "malformed"]
+
+    def fail_resolution(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise StateError("injected obligation resolution failure")
+
+    monkeypatch.setattr(OperationRepository, "resolve_lifecycle_obligation", fail_resolution)
+    with pytest.raises(StateError) as raised:
+        _compose(owner, platform)
+
+    fact = raised.value.__cause__
+    assert isinstance(fact, VMTargetPreparationControlFact)
+    assert fact.preparation.status is VMTargetPreparationStatus.UNCERTAIN
+    assert fact.preparation.target is None
+    assert fact.preparation.guest_result is not None
+    assert fact.preparation.failure is VMTargetPreparationFailure.LOCATOR_CHANGED
+    assert fact.preparation.coordination_uncertain
+    assert fact.preparation.requires_owner_retention
+    original = fact.__cause__
+    assert isinstance(original, ValidationError)
+    assert isinstance(original.__cause__, VMTargetPreparationControlFact)
+    assert original.__cause__.preparation.guest_result is not None
+    assert original.__cause__.preparation.target is None
+    assert carrier.calls == 1
+    assert len(borrows) == 1 and releases == borrows
+    with pytest.raises(StateError):
+        owner.borrow()
+
+
 def test_selected_platform_result_rejects_binding_status_mismatch() -> None:
     failed = VMTargetPreparation(VMTargetPreparationStatus.FAILED, None, None)
-    prepared = VMTargetPreparation(VMTargetPreparationStatus.PREPARED, None, None)
+    target = compose_managed_vm_target_identity(_vm(), ProviderLocator("opaque"), VMGuestIdentity(_MARKER, _BOOT_ID))
+    prepared = VMTargetPreparation(VMTargetPreparationStatus.PREPARED, target, None)
     binding = _binding(TranscriptCarrier())
 
     with pytest.raises(ValidationError):
         SelectedPlatformVMTargetPreparation(failed, binding)
     with pytest.raises(ValidationError):
         SelectedPlatformVMTargetPreparation(prepared, None)
+
+
+def test_preparation_value_rejects_inconsistent_status_and_retention() -> None:
+    target = compose_managed_vm_target_identity(_vm(), ProviderLocator("opaque"), VMGuestIdentity(_MARKER, _BOOT_ID))
+    prepared = VMTargetPreparation(VMTargetPreparationStatus.PREPARED, target, None)
+    failed = VMTargetPreparation(VMTargetPreparationStatus.FAILED, None, None)
+    uncertain = VMTargetPreparation(VMTargetPreparationStatus.UNCERTAIN, None, None, requires_owner_retention=True)
+
+    invalid_cases: tuple[Callable[[], VMTargetPreparation], ...] = (
+        lambda: replace(prepared, target=None),
+        lambda: replace(prepared, failure=VMTargetPreparationFailure.IDENTITY),
+        lambda: replace(prepared, deadline_exceeded=True),
+        lambda: replace(prepared, pending_remote_effects=True),
+        lambda: replace(prepared, coordination_uncertain=True),
+        lambda: replace(prepared, requires_owner_retention=True),
+        lambda: replace(failed, target=target),
+        lambda: replace(failed, requires_owner_retention=True),
+        lambda: replace(failed, pending_remote_effects=True),
+        lambda: replace(failed, coordination_uncertain=True),
+        lambda: replace(uncertain, requires_owner_retention=False),
+    )
+    for invalid in invalid_cases:
+        with pytest.raises(ValidationError):
+            invalid()

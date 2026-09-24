@@ -450,16 +450,21 @@ owner and performs no activation, route selection, adoption or persistence. A se
 accepts the selected VM, its bound platform and existing run context, then validates owner, marker
 and deadline before platform I/O. One serial borrow spans provider locator observation, native
 binding resolution and the guest attempt. It uses the same finite deadline, validates
-plugin-returned shapes, and rejects late results before the next stage or guest dispatch. An
-unavailable locator retains its typed refusal without binding resolution. WSL2 can currently supply
-both positive facts; Proxmox returns locator unavailable, while SSH-backed cloud and Lima bindings
-remain later work. These are hermetic composition facts, not live carrier proof. The
-selected-platform result retains the validated passive binding only when preparation succeeds, so
-later private composition can use the same delivery facts without resolving them again. Production
-composition therefore still needs an owner acquired before activation plus typed whole-span
-lifecycle and cleanup evidence; legacy lifecycle returns cannot close that gate. Future hierarchical
-admission replaces exact-VM equality with a core-owned coverage decision rather than a target-local
-ancestry guess.
+plugin-returned shapes, and rejects late results before the next stage or guest dispatch. After a
+successful guest probe, a second locator observation under the same borrow must exactly match the
+first before the target and passive binding can escape. This detects ordinary cooperative provider
+replacement at the preparation linearization point. Production later-use authority still needs a
+locator-bound platform hold and binding; malicious or engineered A-B-A host behavior is outside this
+checkpoint's threat scope. A release failure suppresses target and binding and attaches an uncertain
+custody fact with retained guest evidence. An unavailable locator retains its typed refusal without
+binding resolution. WSL2 can currently supply both positive facts; Proxmox returns locator
+unavailable, while SSH-backed cloud and Lima bindings remain later work. These are hermetic
+composition facts, not live carrier proof. The selected-platform result retains the validated
+passive binding only when preparation succeeds, so later private composition can use the same
+delivery facts without resolving them again. Production composition therefore still needs an owner
+acquired before activation plus typed whole-span lifecycle and cleanup evidence; legacy lifecycle
+returns cannot close that gate. Future hierarchical admission replaces exact-VM equality with a
+core-owned coverage decision rather than a target-local ancestry guess.
 
 New VM creation generates and persists one non-secret marker before provider dispatch. The marker is
 exactly 32 lowercase hexadecimal characters and the shared create bootstrap writes that same value
