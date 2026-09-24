@@ -55,6 +55,11 @@ class FailedKillBoundary(Boundary):
         return False
 
 
+class FailedKillButEmptyBoundary(FailedKillBoundary):
+    def empty(self) -> bool:
+        return True
+
+
 class FailedEmptyBoundary(Boundary):
     def __init__(self) -> None:
         super().__init__()
@@ -417,6 +422,13 @@ def test_cleanup_failure_does_not_discard_proved_wait(tmp_path: Path, monkeypatc
     store, _ = _execute(tmp_path, argv=("/bin/true",), boundary=FailedKillBoundary())
     wait = wire.decode_fact(store.read_fact(FactName.WAIT))  # type: ignore[arg-type]
     assert wait["exit_code"] == 0
+    store.close()
+
+
+def test_failed_kill_with_positive_empty_publishes_boundary(tmp_path: Path) -> None:
+    store, boundary = _execute(tmp_path, argv=("/bin/true",), boundary=FailedKillButEmptyBoundary())
+    assert boundary.killed
+    assert store.read_fact(FactName.BOUNDARY_EMPTY) is not None
     store.close()
 
 

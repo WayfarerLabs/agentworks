@@ -375,8 +375,7 @@ class ManagedJobStore:
             if fd is None:
                 return False
             try:
-                if _read_all(fd, 0) != b"":
-                    raise StoreError("nonempty stop request")
+                _read_all(fd, 0)
                 return True
             finally:
                 os.close(fd)

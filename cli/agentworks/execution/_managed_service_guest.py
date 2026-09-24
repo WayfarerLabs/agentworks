@@ -343,7 +343,6 @@ def _observe(
     deadline: float | None = None
     stop_deadline: float | None = None
     boundary_done = False
-    cleanup_ok = True
     try:
         while True:
             if status is None:
@@ -352,10 +351,8 @@ def _observe(
                     status = candidate
                     if deadline is None:
                         deadline = time.monotonic() + _CLEANUP_SECONDS
-                        try:
+                        with suppress(OSError):
                             boundary.kill()
-                        except OSError:
-                            cleanup_ok = False
             if stop_deadline is None and store.read_stop_request():
                 if input_open:
                     if input_fd in selector.get_map():
@@ -369,10 +366,8 @@ def _observe(
                 else:
                     stop_deadline = time.monotonic()
             if status is None and stop_deadline is not None and deadline is None and time.monotonic() >= stop_deadline:
-                try:
+                with suppress(OSError):
                     boundary.kill()
-                except OSError:
-                    cleanup_ok = False
                 deadline = time.monotonic() + _CLEANUP_SECONDS
             if status is not None and exec_result is True and os.WIFEXITED(status) and not wait_published:
                 store.publish_fact(
@@ -380,7 +375,7 @@ def _observe(
                     _fact(run_id, digest, "wait", exit_code=os.WEXITSTATUS(status), signal=None),
                 )
                 wait_published = True
-            if deadline is not None and cleanup_ok and not boundary_done:
+            if deadline is not None and not boundary_done:
                 try:
                     empty = boundary.empty()
                 except OSError:
