@@ -569,6 +569,26 @@ injection remain unmeasured. Terminal delivery, RunContext composition, producti
 and full supported-platform SSH acceptance remain open. Publishing this dependency update does not
 consume an SSH public feedback/fix round or authorize a ready signal.
 
+## Structural preflight integration
+
+Transport #833 at `f937cac098c43e81e9bea2e5daa6f9520ae4ca96` adds the shared pure `Carrier.validate`
+protocol and calls it during private managed-start preparation before durable `possible-dispatch`.
+It includes the SSH-owner-authored buffered validator as cherry-pick `10fb0f0fa`; that version
+refuses live input and sink output because its carrier cannot execute them. SSH #832 rebases onto
+this head at code revision `98fd5f349b917a28d95253849ecfdd66aee636ee`. The final SSH validator
+accepts all current shared I/O shapes without effects, and `execute` calls it before trust
+admission, client probing or process work. Runtime source/sink faults still report `Failure.INPUT`
+and `Failure.OUTPUT`.
+
+On this combined tree, the SSH and managed-start selections pass **323 tests with six skips**. Full
+Ruff check/format covers 1,171 files, mypy passes 1,130 sources, and file lint and locked-SDD checks
+pass. These local tests include structural refusal sequencing and shared managed-start unit
+coverage; they do not execute a managed service through an installed SSH client. #833's exact-head
+hosted matrix is still running at this checkpoint. Terminal delivery, production RunContext and
+native binding, genuine creation/publication integration, shared cleanup interruption and full
+supported-platform acceptance remain open. This dependency integration is not an SSH public feedback
+round or a ready signal.
+
 ## Remaining integration and acceptance
 
 Earlier integration `fefc2b9e` uses transport `f3339f3d3cccace129be58711dc7eeb30ec66dc2`, which adds
