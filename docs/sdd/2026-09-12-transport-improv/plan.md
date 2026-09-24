@@ -1334,6 +1334,17 @@ connection and trust only. Before broader lifecycle implementation, complete the
       mutable stop document, `execution_runs` stop state, generic admission lock, direct
       systemd-stop claim, disposal/retention policy or public composition. Hermetic proof does not
       establish live systemd/cgroup, current target-marker/boot or SSH/QGA behavior.
+- [ ] Implement and privately prove exact terminal disposal with a boot-local retry tombstone.
+      Require the exact launch, boundary emptiness, both closed stream ends and their validated
+      capture-spool state before publishing one immutable `disposal` receipt containing the launch.
+      After that durable commit, remove only validated fixed run artifacts and recognized private
+      stages through the held directory descriptor, sync and report disposed only when the receipt
+      is the sole survivor. Exact retries resume partial cleanup; missing launch plus receipt proves
+      nothing; strange entries and mismatched receipts authorize no deletion. Make target publishers
+      refuse an observed receipt, while leaving distinct-operation serialization to the core
+      operation claim rather than adding a file lock. Add no automatic retention interval, forced
+      release, generic deletion API, mutable status or database disposal field. Hermetic proof does
+      not establish production ownership, current target/boot rereads or live SSH/QGA behavior.
 - [ ] Add the fixed carrier-neutral `start`, `observe`, closed `read-output`, `stop` and `dispose`
       exchange over the target store. Revalidate the exact target/run/unit/launch digest on every
       later action, never replay start after possible dispatch, and expose no arbitrary command,

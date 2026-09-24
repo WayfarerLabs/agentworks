@@ -338,6 +338,34 @@ possible-dispatch run with no launch fact must reconcile first and remains uncer
 truth, while production host coordination later uses the existing operation claim and lifecycle
 obligation.
 
+The first `dispose` mechanism is an explicit authorized release of terminal retained artifacts, not
+a retention timer or a synonym for stop. Before committing release, the fixed helper requires the
+byte-exact canonical launch, its launch-bound `boundary-empty`, both launch-bound stream-end facts
+and the capture-spool presence, length and digest those ends require. A `wait` fact is validated
+when present but is not required, because setup failure and signaled application death intentionally
+leave it unknown. Missing terminal evidence reports not ready without deleting anything. Unknown,
+malformed or strangely linked directory entries refuse before release commitment.
+
+Crash-safe retry keeps one minimal boot-local tombstone rather than trying to prove deletion from
+absence. The helper publishes one root-owned mode-`0400` immutable `disposal` leaf containing the
+exact canonical launch and syncs the run directory before any deletion. It then validates and
+unlinks only the fixed request assets, facts, stop intent, capture spools and recognized private
+publication stages through the held directory descriptor, syncs again and verifies that only the
+matching disposal leaf remains. It never accepts a caller path, recursive-delete choice or file
+list. Success means all retained application artifacts are gone and only that exact-launch receipt
+remains until reboot. A receipt plus remaining known leaves means committed cleanup is incomplete,
+so an exact retry resumes it; a matching receipt alone proves already disposed. Missing launch and
+receipt proves nothing, and a mismatched receipt never authorizes cleanup.
+
+The target store refuses new request, fact, stop or capture publication after it observes the
+disposal receipt. This check is defense in depth, not a target-side concurrency lock: the existing
+core operation claim must serialize distinct start, stop and dispose operations before production
+dispatch, while simultaneous exact dispose retries converge on the same receipt and fixed cleanup.
+No file lock, mutable disposal status, expiry clock, automatic abandoned-run cleanup or database
+retention state is added. A complete helper failure or lost carrier response after dispatch remains
+unknown because the receipt or some deletions may already be durable. A complete `disposed` response
+is accepted only with the matching receipt and final receipt-only inventory.
+
 Carrier-neutral control remains a fixed closed protocol with `start`, `observe`, `read-output`,
 `stop` and `dispose`; it accepts no arbitrary path, unit, command or systemd property. `start` is
 the only operation that can consume staged request assets and is never replayed after possible
