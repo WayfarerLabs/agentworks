@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.db import OperationResourceKind
 from agentworks.errors import ValidationError
-from agentworks.operations import release_borrow_after_custody
+from agentworks.operations import _PreRegistrationClosingRefusal, release_borrow_after_custody
 
 from ._fixed_helper_operation import BorrowedFixedHelperCarrier
 from ._managed_runs import (
@@ -110,7 +110,6 @@ def start_owned_managed_run(
     borrow = owner.borrow()
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
     attempt: ManagedStartAttempt | None = None
-    armed = False
     registration_started = False
     installed = False
     retained = False
@@ -125,8 +124,6 @@ def start_owned_managed_run(
         installed = True
 
         def arm() -> None:
-            nonlocal armed
-            armed = True
             borrow.arm_dispatch_obligation()
 
         attempt = start_managed_run(
@@ -155,21 +152,28 @@ def start_owned_managed_run(
         )
         release_borrow_after_custody(borrow, retain_effect=retained)
         return outcome
+    except _PreRegistrationClosingRefusal:
+        borrow.close()
+        raise
     except BaseException as control:
-        retained = armed or operation.requires_owner_retention or (registration_started and not installed)
+        armed_effect = borrow.dispatch_obligation_may_be_armed
+        registration_uncertain = registration_started and not (installed or borrow.has_installed_dispatch_obligation)
+        retained = armed_effect or operation.requires_owner_retention or registration_uncertain
         release_failed = False
-        if installed:
-            try:
-                release_borrow_after_custody(borrow, retain_effect=retained)
-            except BaseException:
-                release_failed = True
+        try:
+            release_borrow_after_custody(borrow, retain_effect=armed_effect)
+        except BaseException:
+            release_failed = True
         fact = ManagedStartControlFact(
             ManagedStartOutcome(
                 None,
                 attempt.record.launch_state if attempt is not None else None,
                 deadline.expired,
                 operation.pending_remote_effects,
-                operation.coordination_uncertain or operation.has_outstanding_attempt or release_failed,
+                operation.coordination_uncertain
+                or operation.has_outstanding_attempt
+                or registration_uncertain
+                or release_failed,
                 retained or release_failed,
             )
         )

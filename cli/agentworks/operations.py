@@ -658,6 +658,20 @@ class OperationBorrow:
             attempt = owner._outstanding_attempt  # noqa: SLF001
             return isinstance(attempt, OperationAttempt) and attempt._borrow is self  # noqa: SLF001
 
+    @property
+    def dispatch_obligation_may_be_armed(self) -> bool:
+        """Return whether this borrow may have admitted its dispatch obligation."""
+        owner = self._owner
+        with owner._guard:  # noqa: SLF001
+            return self._dispatch_armed
+
+    @property
+    def has_installed_dispatch_obligation(self) -> bool:
+        """Return whether this borrow received its durable obligation row."""
+        owner = self._owner
+        with owner._guard:  # noqa: SLF001
+            return self._dispatch_obligation is not None
+
     def install_dispatch_obligation(
         self,
         obligation_id: str,

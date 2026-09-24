@@ -417,6 +417,11 @@ any other launch state retains core custody, including a code-zero carrier compl
 receipt. This does not resolve the whole operation or establish job termination. Production binding,
 recovery, fresh marker/boot checks for later actions and those actions themselves remain open.
 
+Before arming, a refused registration or owner close releases the unused borrow; an installed but
+unarmed obligation resolves during that release. Once arming may have begun, the borrow retains the
+possible effect even when the database transition reply is lost. The generic borrow records this
+conservative state separately from whether a carrier attempt is outstanding.
+
 Target identity is structured as a core resource kind/name, a versioned incarnation fingerprint and
 a separate boot UUID. The core name supports binding and diagnostics but is not authority. The
 incarnation fingerprint must bind the provider-owned locator plus a core-provisioned or explicitly

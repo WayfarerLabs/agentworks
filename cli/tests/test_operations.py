@@ -1246,9 +1246,14 @@ def test_retained_effect_handoff_requires_an_armed_supplied_obligation(db: Datab
 def test_prearmed_adapter_effect_hands_off_without_carrier_attempt(db: Database) -> None:
     owner = OperationOwner.acquire(db.operations, _scope(), "file-upload")
     borrow = owner.borrow()
+    assert not borrow.has_installed_dispatch_obligation
+    assert not borrow.dispatch_obligation_may_be_armed
     borrow.install_dispatch_obligation("6" * 32, "adapter-dispatch", payload_version=1, payload=b"prepared")
+    assert borrow.has_installed_dispatch_obligation
+    assert not borrow.dispatch_obligation_may_be_armed
 
     borrow.arm_dispatch_obligation()
+    assert borrow.dispatch_obligation_may_be_armed
     release_borrow_after_custody(borrow, retain_effect=True)
 
     row = db.operations.list_lifecycle_obligations(owner.ownership)[0]
@@ -1291,6 +1296,7 @@ def test_interrupted_prearming_allows_conservative_handoff(
     monkeypatch.setattr(repository, "mark_lifecycle_obligation_possible_effect", interrupted)
     with pytest.raises(KeyboardInterrupt):
         borrow.arm_dispatch_obligation()
+    assert borrow.dispatch_obligation_may_be_armed
     release_borrow_after_custody(borrow, retain_effect=True)
 
     rows = db.operations.list_lifecycle_obligations(owner.ownership)

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
-from agentworks.errors import ValidationError
+from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _managed_start_operation as start_operation
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, encode_file_record
 from agentworks.execution._helper_identity import IdentityExpectation
@@ -59,7 +59,7 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
-from agentworks.operations import OperationBorrow, OperationOwner
+from agentworks.operations import OperationBorrow, OperationOwner, _PreRegistrationClosingRefusal
 
 RUN = ManagedRunIdentity("a" * 32)
 OBLIGATION = "b" * 32
@@ -158,6 +158,7 @@ def _start(
     request: ManagedJobRequest | None = None,
     owner: OperationOwner | None = None,
     deadline: Deadline | None = None,
+    obligation_id: str = OBLIGATION,
 ):
     _, repository, record, existing_owner = owned
     return start_owned_managed_run(
@@ -169,7 +170,7 @@ def _start(
         deadline=deadline if deadline is not None else Deadline.after(10),
         runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
         owner=owner if owner is not None else existing_owner,
-        obligation_id=OBLIGATION,
+        obligation_id=obligation_id,
     )
 
 
@@ -212,7 +213,7 @@ def test_wrong_vm_scope_refuses_before_borrow(
     assert carrier.calls == 0
 
 
-def test_interrupted_obligation_registration_keeps_owner(
+def test_interrupted_registration_after_return_resolves_unused_row(
     owned: tuple[Database, ManagedRunRepository, ManagedRunRecord, OperationOwner], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database, repository, _, owner = owned
@@ -227,12 +228,98 @@ def test_interrupted_obligation_registration_keeps_owner(
     with pytest.raises(RuntimeError) as caught:
         _start(owned, carrier)
     assert isinstance(caught.value.__cause__, ManagedStartControlFact)
+    assert not caught.value.__cause__.outcome.requires_owner_retention
+    assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
+    assert database.operations.list_lifecycle_obligations(owner.ownership)[0].state is LifecycleObligationState.RESOLVED
+    assert carrier.calls == 0
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+def test_owner_close_before_registration_releases_unused_borrow(
+    owned: tuple[Database, ManagedRunRepository, ManagedRunRecord, OperationOwner], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database, repository, _, owner = owned
+    carrier = Carrier(lambda request: _records(request, receipt=True))
+    original = OperationBorrow.install_dispatch_obligation
+
+    def close_before_install(self: OperationBorrow, *args: object, **kwargs: object) -> object:
+        with pytest.raises(StateError):
+            owner.close()
+        return original(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(OperationBorrow, "install_dispatch_obligation", close_before_install)
+    with pytest.raises(_PreRegistrationClosingRefusal):
+        _start(owned, carrier)
+    assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
+    assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+    assert carrier.calls == 0
+    owner.close()
+
+
+def test_owner_close_after_registration_before_arming_resolves_unused_row(
+    owned: tuple[Database, ManagedRunRepository, ManagedRunRecord, OperationOwner], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database, repository, _, owner = owned
+    carrier = Carrier(lambda request: _records(request, receipt=True))
+
+    def close_during_preflight(invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        carrier.validations += 1
+        with pytest.raises(StateError):
+            owner.close()
+
+    monkeypatch.setattr(carrier, "validate", close_during_preflight)
+    with pytest.raises(StateError) as caught:
+        _start(owned, carrier)
+    assert isinstance(caught.value.__cause__, ManagedStartControlFact)
+    assert not caught.value.__cause__.outcome.requires_owner_retention
+    assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
+    assert database.operations.list_lifecycle_obligations(owner.ownership)[0].state is LifecycleObligationState.RESOLVED
+    assert carrier.calls == 0
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+def test_invalid_obligation_id_releases_unused_borrow(
+    owned: tuple[Database, ManagedRunRepository, ManagedRunRecord, OperationOwner],
+) -> None:
+    database, repository, _, owner = owned
+    carrier = Carrier(lambda request: _records(request, receipt=True))
+    with pytest.raises(ValueError):
+        _start(owned, carrier, obligation_id="invalid")
+    assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
+    assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+    assert carrier.calls == 0
+    owner.close()
+
+
+def test_commit_uncertain_arming_hands_off_actual_possible_effect(
+    owned: tuple[Database, ManagedRunRepository, ManagedRunRecord, OperationOwner], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database, repository, _, owner = owned
+    carrier = Carrier(lambda request: _records(request, receipt=True))
+    owner_repository = owner._repository  # noqa: SLF001
+    original = owner_repository.mark_lifecycle_obligation_possible_effect
+
+    def commit_then_interrupt(*args: object, **kwargs: object) -> object:
+        original(*args, **kwargs)  # type: ignore[arg-type]
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(owner_repository, "mark_lifecycle_obligation_possible_effect", commit_then_interrupt)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        _start(owned, carrier)
+    assert isinstance(caught.value.__cause__, ManagedStartControlFact)
     assert caught.value.__cause__.outcome.requires_owner_retention
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
     assert (
-        database.operations.list_lifecycle_obligations(owner.ownership)[0].state is LifecycleObligationState.REGISTERED
+        database.operations.list_lifecycle_obligations(owner.ownership)[0].state
+        is LifecycleObligationState.POSSIBLE_EFFECT
     )
     assert carrier.calls == 0
+    with pytest.raises(StateError):
+        owner.close()
 
 
 def test_interrupted_admission_keeps_possible_effect(

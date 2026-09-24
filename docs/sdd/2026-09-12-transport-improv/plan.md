@@ -1369,7 +1369,8 @@ connection and trust only. Before broader lifecycle implementation, complete the
       The version-one `managed-start` obligation persists only the run ID. Preflight precedes
       admission, the run row records possible dispatch before the borrowed carrier starts, and one
       settled attempt with a confirmed receipt resolves only temporary start custody. Missing
-      receipt, uncertain dispatch and interrupted control flow retain the core claim; the resource
+      receipt, uncertain dispatch and interrupted control flow after arming retain the core claim;
+      pre-arming refusal releases the unused borrow and resolves any installed row. The resource
       owner and managed-run row own the continuing job. Production binding, recovery, current
       marker/boot rereads and later job actions remain separate gates.
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the

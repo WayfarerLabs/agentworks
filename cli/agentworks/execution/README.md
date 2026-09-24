@@ -38,7 +38,8 @@ independent start. Its `managed-start` obligation stores only the canonical run 
 start exchange preflights the carrier before the obligation is armed, then marks the managed-run row
 possible before the borrowed carrier attempts dispatch. A settled attempt with a confirmed receipt
 resolves only the start obligation; the resource-owned managed-run row owns the continuing job.
-Missing receipt, uncertain dispatch and interrupted coordination retain core custody. This private
+Missing receipt, uncertain dispatch and interrupted admission after arming retain core custody. An
+interrupted preflight or refused admission resolves an unused registered obligation. This private
 kernel does not acquire or close the outer owner, reserve runs, recover an interrupted launch,
 compose production bindings or perform later job actions.
 
