@@ -308,21 +308,22 @@ job reference or RunContext surface.
 `_managed_job_wire.py` owns the Python 3.11, stdlib-only canonical version-one byte schema for
 private managed-job facts and reuses the portable `_helper_identity.py` validator. The host
 `_managed_job_protocol.py` maps its primitive facts to and from typed values. Exact-source bundle
-tests prove byte round trips under Python 3.11. A bounded launch fact contains the exact
-`ManagedRunReceipt`; independent wait, stdout/stderr end and positive boundary-empty facts bind the
-run and derived unit to the SHA-256 of that launch fact. A stream-end fact commits the retained
-length and digest and one closed disposition: complete capture, truncated capture, intentional
-discard or sensitivity suppression. Only capture has a spool; its end fact closes it. Discard and
-suppression retain zero bytes with the empty SHA-256. An absent fact says nothing. The codec
-validates untrusted bytes and contains no output bytes or application input. It does not write a
-store, launch or observe a workload, or make jobs available. The intended store is a protected
-boot-local per-run directory of immutable create-once facts and bounded output spools. The first
-service slice is limited to independent lifetime until operation-owner liveness and cleanup are
-proved. Later fixed start, observe, read-output, stop and dispose operations must work over both SSH
-and QGA. The first consuming service must persist and compare requested output policy; this
-self-describing fact alone does not prove policy fulfillment. The target producer/service has not
-yet bundled the portable sources. Requested-policy persistence, the protected store, cgroup/systemd
-launch, carrier proof and live validation remain open.
+tests prove byte round trips under Python 3.11. Resolved shell executable paths use ASCII code
+points 0x20 through 0x7e, normalized absolute POSIX syntax and a 255-byte bound. A bounded launch
+fact contains the exact `ManagedRunReceipt`; independent wait, stdout/stderr end and positive
+boundary-empty facts bind the run and derived unit to the SHA-256 of that launch fact. A stream-end
+fact commits the retained length and digest and one closed disposition: complete capture, truncated
+capture, intentional discard or sensitivity suppression. Only capture has a spool; its end fact
+closes it. Discard and suppression retain zero bytes with the empty SHA-256. An absent fact says
+nothing. The codec validates untrusted bytes and contains no output bytes or application input. It
+does not write a store, launch or observe a workload, or make jobs available. The intended store is
+a protected boot-local per-run directory of immutable create-once facts and bounded output spools.
+The first service slice is limited to independent lifetime until operation-owner liveness and
+cleanup are proved. Later fixed start, observe, read-output, stop and dispose operations must work
+over both SSH and QGA. The first consuming service must persist and compare requested output policy;
+this self-describing fact alone does not prove policy fulfillment. The target producer/service has
+not yet bundled the portable sources. Requested-policy persistence, the protected store,
+cgroup/systemd launch, carrier proof and live validation remain open.
 
 ## Input accounting
 

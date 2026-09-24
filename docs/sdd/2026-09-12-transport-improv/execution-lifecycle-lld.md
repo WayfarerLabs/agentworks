@@ -202,7 +202,8 @@ the same run/unit from being mixed into this record. The wire rejects duplicate,
 fields, alternate JSON spellings, contradictory status, unsupported versions and unrecognized
 values. It carries no application input, output bytes, credentials, arbitrary paths, timestamps or
 arbitrary service properties as authority. The resolved executable in shell identity is the one
-bounded path inherited from `ManagedRunSpec`.
+bounded path inherited from `ManagedRunSpec`: normalized absolute POSIX syntax, ASCII code points
+0x20 through 0x7e and at most 255 UTF-8 bytes.
 
 The future target-side store uses a protected boot-local directory for each run. Its launch, wait,
 stdout-end, stderr-end and boundary-empty facts are each created once and immutable. Bounded stdout

@@ -244,7 +244,10 @@ class ManagedRunReceiptAbsent:
             raise ValidationError("Managed receipt absence requires an exact target identity")
         if type(self.receipt_namespace) is not str or self.receipt_namespace != MANAGED_RECEIPT_NAMESPACE:
             raise ValidationError("Managed receipt absence namespace is unsupported")
-        if self.receipt_protocol_version != MANAGED_RECEIPT_PROTOCOL_VERSION:
+        if (
+            type(self.receipt_protocol_version) is not int
+            or self.receipt_protocol_version != MANAGED_RECEIPT_PROTOCOL_VERSION
+        ):
             raise ValidationError("Managed receipt absence protocol is unsupported")
 
 

@@ -311,13 +311,10 @@ def test_wire_rejects_str_subclass_field_name() -> None:
 def test_exact_portable_source_roundtrips_every_fact(interpreter: Path) -> None:
     if not interpreter.is_file():
         pytest.skip("Python 3.11 compatibility interpreter is unavailable")
-    new_unicode_receipt = replace(
-        _receipt(), spec=replace(_receipt().spec, shell=ManagedShellIdentity(Shell.SH, "/bin/\U0001fae8"))
-    )
-    encoded = [encode_managed_job_fact(fact) for fact in (*_facts(), new_unicode_receipt)]
+    encoded = [encode_managed_job_fact(fact) for fact in _facts()]
     script = (
         build_helper_modules("_agw_managed_job", ("_helper_identity", "_managed_job_wire"))
-        + """
+        + r"""
 import json
 import sys
 
@@ -326,9 +323,20 @@ assert "agentworks" not in sys.modules
 facts = [bytes.fromhex(item) for item in json.load(sys.stdin)]
 results = [module.encode_fact(module.decode_fact(item)).hex() for item in facts]
 digest = module.launch_sha256(module.decode_fact(facts[0]))
+paths = ("/bin/sh", "/bin/\U0001fae8", "/bin/\u202e", "/bin/\u2028", "/bin/\x80")
+shell_paths = []
+for path in paths:
+    launch = module.decode_fact(facts[0])
+    launch["shell"]["resolved_executable"] = path
+    try:
+        module.encode_fact(launch)
+    except module.ManagedJobWireError:
+        shell_paths.append(False)
+    else:
+        shell_paths.append(True)
+assert shell_paths == [module.canonical_shell_path(path) for path in paths]
 print(json.dumps({"facts": results, "digest": digest,
-    "new_unicode_path": module.canonical_shell_path("/bin/\U0001fae8"),
-    "control_path": module.canonical_shell_path("/bin/\\x80"),
+    "shell_paths": shell_paths,
     "agentworks_loaded": "agentworks" in sys.modules}))
 """
     )
@@ -343,8 +351,7 @@ print(json.dumps({"facts": results, "digest": digest,
     assert json.loads(result.stdout) == {
         "facts": [item.hex() for item in encoded],
         "digest": managed_launch_receipt_sha256(_receipt()),
-        "new_unicode_path": True,
-        "control_path": False,
+        "shell_paths": [True, False, False, False, False],
         "agentworks_loaded": False,
     }
 

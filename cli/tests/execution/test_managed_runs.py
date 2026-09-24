@@ -387,10 +387,27 @@ def test_concurrent_exact_reconciliation_is_idempotent(tmp_path: Path) -> None:
     check.close()
 
 
-@pytest.mark.parametrize("path", ["/", "/bin/../sh", "/bin//sh", "/bin/sh\n", "bin/sh"])
+@pytest.mark.parametrize(
+    "path", ["/", "/bin/../sh", "/bin//sh", "/bin/sh\n", "bin/sh", "/bin/\U0001fae8", "/bin/\u202e", "/bin/\u2028"]
+)
 def test_resolved_shell_identity_requires_canonical_safe_absolute_path(path: str) -> None:
     with pytest.raises(ValidationError):
         ManagedShellIdentity(Shell.SH, path)
+
+
+@pytest.mark.parametrize("protocol_version", [True, 1.0])
+def test_absence_protocol_version_type_confusion_cannot_reconcile(tmp_path: Path, protocol_version: int) -> None:
+    database = Database(tmp_path / "state.db")
+    repository, reserved = _reserve(database)
+    possible = launch_managed_run(repository, reserved, lambda _record: ManagedLaunchObservation(Dispatch.UNKNOWN))
+    with pytest.raises(ValidationError):
+        repository.reconcile(
+            reserved,
+            ManagedLaunchObservation(Dispatch.NOT_SENT, _absence(possible, receipt_protocol_version=protocol_version)),
+        )
+    persisted = repository.inspect(_RUN_ID)
+    assert persisted is not None and persisted.launch_state is ManagedLaunchState.POSSIBLE_DISPATCH
+    database.close()
 
 
 def test_managed_run_string_boundaries_require_exact_str() -> None:

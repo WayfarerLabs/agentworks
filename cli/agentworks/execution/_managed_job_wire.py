@@ -60,17 +60,14 @@ def _identity_text(value: object) -> bool:
 
 
 def canonical_shell_path(value: object) -> bool:
-    """Check a normalized POSIX path with version-stable control exclusions."""
+    """Check a normalized POSIX path using only visible ASCII code points."""
     if type(value) is not str or value == "/" or not value.startswith("/"):
         return False
     if any(part in ("", ".", "..") for part in value.split("/")[1:]):
         return False
-    if any(ord(char) < 0x20 or 0x7F <= ord(char) <= 0x9F for char in value):
+    if any(not 0x20 <= ord(char) <= 0x7E for char in value):
         return False
-    try:
-        return len(value.encode("utf-8")) <= 255
-    except UnicodeEncodeError:
-        return False
+    return len(value.encode("utf-8")) <= 255
 
 
 def _validate_launch(value: dict[str, object]) -> None:
@@ -95,10 +92,7 @@ def _validate_launch(value: dict[str, object]) -> None:
     except (ValueError, AttributeError):
         raise ManagedJobWireError("invalid target boot identity") from None
 
-    try:
-        decode_identity(workload)
-    except ValueError:
-        raise ManagedJobWireError("invalid workload identity") from None
+    decode_identity(workload)
 
     requested = shell["requested"]
     if type(shell["login"]) is not bool or type(shell["interactive"]) is not bool:
