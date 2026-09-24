@@ -107,8 +107,9 @@ def test_validate_does_not_admit_or_probe_connection(synthetic: SyntheticSSH, mo
     def forbidden(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("validation performed SSH admission or process work")
 
-    monkeypatch.setattr(client, "validate_connection_files", forbidden)
+    monkeypatch.setattr(client, "admit_connection", forbidden)
     monkeypatch.setattr(client, "build_ssh_argv", forbidden)
+    monkeypatch.setattr(client, "check_client_version", forbidden)
     monkeypatch.setattr(client, "run_process", forbidden)
     synthetic.carrier.validate(PreparedInvocation(("/prepared/bootstrap",)), io=CarrierIO())
     assert synthetic.calls == []
@@ -124,8 +125,9 @@ def test_execute_validates_before_connection_or_process_work(
         raise AssertionError("validation refusal did not stop SSH work")
 
     monkeypatch.setattr(synthetic.carrier, "validate", refuse)
-    monkeypatch.setattr(client, "validate_connection_files", forbidden)
+    monkeypatch.setattr(client, "admit_connection", forbidden)
     monkeypatch.setattr(client, "build_ssh_argv", forbidden)
+    monkeypatch.setattr(client, "check_client_version", forbidden)
     monkeypatch.setattr(client, "run_process", forbidden)
     with pytest.raises(ValidationError, match="unsupported static request"):
         synthetic.execute()
