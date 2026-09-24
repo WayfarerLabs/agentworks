@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import weakref
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -19,7 +20,14 @@ from agentworks.db.operations import (
 from agentworks.errors import StateError
 
 if TYPE_CHECKING:
+    from agentworks.db.database import Database
     from agentworks.db.operations import OperationRepository
+
+
+_recovery_owners_lock = threading.Lock()
+_recovery_owners: weakref.WeakKeyDictionary[
+    Database, weakref.WeakValueDictionary[OperationOwnership, OperationOwner]
+] = weakref.WeakKeyDictionary()
 
 
 class _PreRegistrationClosingRefusal(StateError):
@@ -78,13 +86,19 @@ class OperationOwner:
         facts. The caller still establishes every adapter and whole-operation
         no-further-effects fact before resolution or release.
         """
-        claim = repository.recover_takeover(predecessor, generation_id)
-        owner = cls(repository, claim.ownership)
-        owner._recovery_owner = True
-        owner._durable_possible_dispatch = claim.state is not OperationClaimState.RESERVED
-        owner._effects_resolved = claim.state is OperationClaimState.RESOLVED
-        owner._obligations_sealed = claim.obligations_sealed_at is not None
-        return owner
+        with _recovery_owners_lock:
+            claim = repository.recover_takeover(predecessor, generation_id)
+            controller = repository._controller_identity  # noqa: SLF001
+            owners = _recovery_owners.setdefault(controller, weakref.WeakValueDictionary())
+            owner = owners.get(claim.ownership)
+            if owner is None:
+                owner = cls(repository, claim.ownership)
+                owner._recovery_owner = True
+                owner._durable_possible_dispatch = claim.state is not OperationClaimState.RESERVED
+                owner._effects_resolved = claim.state is OperationClaimState.RESOLVED
+                owner._obligations_sealed = claim.obligations_sealed_at is not None
+                owners[claim.ownership] = owner
+            return owner
 
     @property
     def ownership(self) -> OperationOwnership:

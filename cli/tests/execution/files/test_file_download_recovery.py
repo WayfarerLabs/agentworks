@@ -11,6 +11,8 @@ import time
 from collections import Counter
 from dataclasses import replace
 from pathlib import Path
+from types import FrameType
+from typing import Any
 
 import pytest
 
@@ -848,6 +850,74 @@ def test_interrupted_recovery_attempt_before_return_releases_current_custody(
                 current,
                 call,
                 (_LocalHelperDrainRecord("reused-snapshot", exited=True),),
+            ),
+        )
+    finally:
+        database.close()
+
+
+def test_interruption_after_attempt_return_retains_uncertain_custody(tmp_path: Path) -> None:
+    root = tmp_path / "source-root"
+    root.mkdir()
+    database = Database(tmp_path / "state.db")
+    target = _target()
+    owner, call, persisted = _possible_download(database, root, target, _plan())
+    try:
+        recovered = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+        recovery = FileDownloadRecovery.open(
+            recovered,
+            target,
+            persisted,
+            _local_drain_evidence(
+                recovered.ownership,
+                persisted,
+                call,
+                (_LocalHelperDrainRecord("initial-snapshot", exited=True),),
+            ),
+        )
+        attempt_returned = False
+        interrupted = False
+
+        def interrupt_after_begin(frame: FrameType, event: str, arg: object) -> Any:
+            del arg
+            nonlocal attempt_returned, interrupted
+            if event == "return" and frame.f_code is RecoveryDispatch.begin_attempt.__code__:
+                attempt_returned = True
+            elif event == "line" and frame.f_code is FileDownloadRecovery._dispatch.__code__ and attempt_returned:
+                interrupted = True
+                raise KeyboardInterrupt
+            return interrupt_after_begin
+
+        carrier = LocalCarrier()
+        try:
+            sys.settrace(interrupt_after_begin)
+            with pytest.raises(KeyboardInterrupt):
+                recovery.reconcile(carrier, deadline=Deadline.after(30))
+        finally:
+            sys.settrace(None)
+        assert interrupted
+        assert carrier.calls == 0
+        with pytest.raises(StateError):
+            recovered.rebind_lifecycle_obligation(
+                persisted.obligation_id,
+                "file-call",
+                payload_version=persisted.payload_version,
+                payload=persisted.payload,
+            )
+        with pytest.raises(StateError):
+            recovered.close()
+
+        successor = OperationOwner.recover(database.operations, recovered.ownership, "c" * 32)
+        current = database.operations.list_lifecycle_obligations(successor.ownership)[0]
+        FileDownloadRecovery.open(
+            successor,
+            target,
+            current,
+            _local_drain_evidence(
+                successor.ownership,
+                current,
+                call,
+                (_LocalHelperDrainRecord("generation-b-helper", exited=True),),
             ),
         )
     finally:

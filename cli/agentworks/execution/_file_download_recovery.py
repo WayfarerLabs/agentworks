@@ -159,23 +159,23 @@ class FileDownloadRecovery:
 
     def _dispatch(self, action: Callable[[], FileSnapshotCandidateResult]) -> FileSnapshotCandidateResult:
         dispatch = self._bound.open_dispatch()
+        attempt = None
         try:
             attempt = dispatch.begin_attempt()
+            result = action()
+            if _terminated_without_possible_effect(result.dispatch, result.carrier_completion):
+                attempt.settle()
+                dispatch.close()
+            else:
+                dispatch.handoff_unresolved()
+            return result
         except BaseException:
             with suppress(BaseException):
-                dispatch._abort_unreturned_attempt()  # noqa: SLF001
+                if attempt is None:
+                    dispatch._abort_unreturned_attempt()  # noqa: SLF001
+                else:
+                    dispatch.handoff_unresolved()
             raise
-        try:
-            result = action()
-        except BaseException:
-            dispatch.handoff_unresolved()
-            raise
-        if _terminated_without_possible_effect(result.dispatch, result.carrier_completion):
-            attempt.settle()
-            dispatch.close()
-            return result
-        dispatch.handoff_unresolved()
-        return result
 
     def _persist_cleanup_debt(self, debt: ScratchCleanupDebt) -> None:
         """CAS-persist observed debt before any later cleanup dispatch."""

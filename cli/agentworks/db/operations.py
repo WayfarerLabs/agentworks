@@ -211,6 +211,11 @@ class OperationRepository:
         self._connection = database._operation_connection_for_repository()  # noqa: SLF001
         self._connection_lock = database._operation_lock  # noqa: SLF001
 
+    @property
+    def _controller_identity(self) -> Database:
+        """Identify the local controller shared by repository facades."""
+        return self._database
+
     def claim(self, scope: OperationScope, operation_kind: str) -> OperationOwnership:
         """Reserve one unclaimed scope and return its fresh stale-owner fence."""
         _validate_operation_kind(operation_kind)

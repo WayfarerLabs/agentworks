@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import gc
 import sys
+import weakref
 from pathlib import Path
 from types import FrameType
 from typing import Any
@@ -156,6 +158,55 @@ def test_recovery_rotates_only_generation_and_preserves_the_sealed_ledger(db: Da
     rebound.resolve()
     recovered.record_effects_resolved()
     recovered.close()
+
+
+def test_exact_recovery_retry_shares_live_custody_across_repository_facades(db: Database) -> None:
+    predecessor = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    obligation = predecessor.register_lifecycle_obligation(
+        "file-call", payload_version=1, payload=b"prepared", obligation_id="a" * 32
+    )
+    obligation.mark_possible_effect()
+    recovered = OperationOwner.recover(db.operations, predecessor.ownership, "b" * 32)
+    retry = OperationOwner.recover(db.operations, predecessor.ownership, "b" * 32)
+    assert retry is recovered
+
+    bound = recovered.rebind_possible_effect_lifecycle_obligation(
+        obligation.obligation_id,
+        "file-call",
+        payload_version=1,
+        payload=b"prepared",
+        payload_revision=0,
+    )
+    rebound = retry.rebind_lifecycle_obligation(
+        obligation.obligation_id, "file-call", payload_version=1, payload=b"prepared"
+    )
+    dispatch = bound.open_dispatch()
+    dispatch.begin_attempt()
+
+    with pytest.raises(StateError):
+        rebound.publish_payload(expected_revision=0, payload_version=2, payload=b"competing")
+    with pytest.raises(StateError):
+        retry.record_effects_resolved()
+    with pytest.raises(StateError):
+        retry.close()
+
+    dispatch.handoff_unresolved()
+    with pytest.raises(StateError):
+        rebound.publish_payload(expected_revision=0, payload_version=2, payload=b"competing")
+    assert db.operations.list_lifecycle_obligations(recovered.ownership)[0].payload == b"prepared"
+
+
+def test_exact_recovery_retry_recreates_unreferenced_owner(db: Database) -> None:
+    predecessor = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    recovered = OperationOwner.recover(db.operations, predecessor.ownership, "b" * 32)
+    reference = weakref.ref(recovered)
+    del recovered
+    gc.collect()
+    assert reference() is None
+
+    recreated = OperationOwner.recover(db.operations, predecessor.ownership, "b" * 32)
+    assert recreated.ownership.generation_id == "b" * 32
+    assert recreated is OperationOwner.recover(db.operations, predecessor.ownership, "b" * 32)
 
 
 def test_recovery_cannot_admit_registered_obligations_or_reregister_them(db: Database) -> None:
