@@ -37,6 +37,7 @@ from agentworks.execution._managed_runs import (
     ManagedTargetIdentity,
     ManagedTargetKind,
 )
+from agentworks.execution._managed_service_bundle import FIXED_SOURCE
 from agentworks.execution._managed_start_bundle import FIXED_BUNDLE
 from agentworks.execution._managed_start_exchange import ManagedStartState, start_managed_run
 from agentworks.execution._managed_start_protocol import (
@@ -259,7 +260,7 @@ def test_guest_stages_exact_assets_and_invokes_closed_service_argv(
         "--property=TimeoutStartSec=30s",
         "--property=TimeoutStopSec=5s",
     )
-    assert argv[-8:] == ("--", "/usr/bin/python3.11", "-I", "-S", "-B", "-c", guest.FIXED_SOURCE, RUN.run_id)
+    assert argv[-8:] == ("--", "/usr/bin/python3.11", "-I", "-S", "-B", "-c", FIXED_SOURCE, RUN.run_id)
     assert "private-canary" not in repr(argv)
     with pytest.raises(ManagedStartError):
         guest._prepare_start(request, store, python="/usr/bin/python3.11", runner=runner)
@@ -284,7 +285,7 @@ def test_systemd_client_stdio_and_environment_are_fixed(monkeypatch: pytest.Monk
         called.update(kwargs)
         return subprocess.CompletedProcess(argv, 0)
 
-    monkeypatch.setattr(guest.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     assert guest._run_systemd(("/usr/bin/systemd-run",)) == 0
     assert called == {
         "stdin": subprocess.DEVNULL,

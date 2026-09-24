@@ -45,7 +45,11 @@ class InterruptingCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        del invocation, io
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         del invocation, io, deadline
         self.calls += 1
         raise self.control
@@ -69,7 +73,11 @@ class ReentrantCarrier:
     def features(self) -> ChannelFeatures:
         return self.inner.features
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self.inner.validate(invocation, io=io)
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         if self.calls == 0:
             with pytest.raises(StateError):
                 self.operation.download(
@@ -98,7 +106,11 @@ class BlockingCarrier:
     def features(self) -> ChannelFeatures:
         return self.inner.features
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self.inner.validate(invocation, io=io)
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         if self.calls == 0:
             self.entered.set()
             if not self.release.wait(timeout=10):
@@ -118,7 +130,11 @@ class ObligationInspectingCarrier:
     def features(self) -> ChannelFeatures:
         return self._inner.features
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self._inner.validate(invocation, io=io)
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         rows = self._database.operations.list_lifecycle_obligations(self._owner.ownership)
         assert len(rows) == 1
         self.payloads.append(decode_file_call_obligation(rows[0].payload))
@@ -136,7 +152,11 @@ class ClosingLostCarrier:
     def features(self) -> ChannelFeatures:
         return self._inner.features
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self._inner.validate(invocation, io=io)
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self.validate(invocation, io=io)
         self.calls += 1
         if self.calls == self._lost_call:
             with pytest.raises(StateError):
