@@ -135,7 +135,9 @@ def dispose(store: ManagedJobStore, expected_launch: bytes) -> bool:
         if not _validate_facts(inventory, expected_launch):
             return False
         if "disposal" not in inventory:
-            with suppress(FileExistsError):
+            # An exact disposer may commit and remove launch between inventory
+            # and this link. The next inventory decides whether its receipt won.
+            with suppress(FileExistsError, FileNotFoundError):
                 os.link("launch", "disposal", src_dir_fd=directory, dst_dir_fd=directory, follow_symlinks=False)
             os.fsync(directory)
         inventory = _inventory(directory, store._owner_uid)
