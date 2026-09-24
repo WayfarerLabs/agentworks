@@ -1365,6 +1365,13 @@ connection and trust only. Before broader lifecycle implementation, complete the
       replays start after possible dispatch and exposes no arbitrary command, unit, path or property
       control. This item remains open until the same exchange is proved through SSH and QGA before
       public factory, job or RunContext exposure.
+- [x] Add private exact-VM operation custody around one already reserved independent managed start.
+      The version-one `managed-start` obligation persists only the run ID. Preflight precedes
+      admission, the run row records possible dispatch before the borrowed carrier starts, and one
+      settled attempt with a confirmed receipt resolves only temporary start custody. Missing
+      receipt, uncertain dispatch and interrupted control flow retain the core claim; the resource
+      owner and managed-run row own the continuing job. Production binding, recovery, current
+      marker/boot rereads and later job actions remain separate gates.
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared
       create bootstrap. Migration 41 leaves legacy rows NULL; ordinary existing-VM operations never

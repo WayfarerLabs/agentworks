@@ -33,6 +33,15 @@ confirm a receipt independently of the systemd client exit, while acknowledgemen
 trusted complete helper/carrier evidence and a zero client outcome. This private slice does not
 provide stop/dispose, public jobs, live target-marker rereads or production SSH/QGA proof.
 
+`_managed_start_operation.py` adds temporary exact-VM operation custody for one already reserved
+independent start. Its `managed-start` obligation stores only the canonical run ID. The existing
+start exchange preflights the carrier before the obligation is armed, then marks the managed-run row
+possible before the borrowed carrier attempts dispatch. A settled attempt with a confirmed receipt
+resolves only the start obligation; the resource-owned managed-run row owns the continuing job.
+Missing receipt, uncertain dispatch and interrupted coordination retain core custody. This private
+kernel does not acquire or close the outer owner, reserve runs, recover an interrupted launch,
+compose production bindings or perform later job actions.
+
 `models.py` defines immutable literal commands and scripts with explicit `Shell.SH`, `Shell.BASH` or
 `Shell.USER_DEFAULT` selection and separate startup flags. It also defines finite `Input`, bounded
 capture or discard `Output`, and explicit operation or independent `Lifetime` values. `profiles.py`

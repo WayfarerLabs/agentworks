@@ -1243,6 +1243,65 @@ def test_retained_effect_handoff_requires_an_armed_supplied_obligation(db: Datab
     borrow.close()
 
 
+def test_prearmed_adapter_effect_hands_off_without_carrier_attempt(db: Database) -> None:
+    owner = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    borrow = owner.borrow()
+    borrow.install_dispatch_obligation("6" * 32, "adapter-dispatch", payload_version=1, payload=b"prepared")
+
+    borrow.arm_dispatch_obligation()
+    release_borrow_after_custody(borrow, retain_effect=True)
+
+    row = db.operations.list_lifecycle_obligations(owner.ownership)[0]
+    claim = db.operations.inspect(_scope())
+    assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert claim is not None and claim.state is OperationClaimState.POSSIBLE_DISPATCH
+    with pytest.raises(StateError):
+        owner.close()
+
+
+def test_prearmed_adapter_effect_composes_with_later_attempt(db: Database) -> None:
+    owner = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    borrow = owner.borrow()
+    borrow.install_dispatch_obligation("6" * 32, "adapter-dispatch", payload_version=1, payload=b"prepared")
+    borrow.arm_dispatch_obligation()
+
+    attempt = borrow.begin_attempt()
+    attempt.settle()
+    release_borrow_after_custody(borrow, retain_effect=True)
+
+    rows = db.operations.list_lifecycle_obligations(owner.ownership)
+    assert len(rows) == 1 and rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+
+
+@pytest.mark.parametrize("committed", [False, True], ids=["before-commit", "after-commit"])
+def test_interrupted_prearming_allows_conservative_handoff(
+    db: Database, monkeypatch: pytest.MonkeyPatch, *, committed: bool
+) -> None:
+    repository = db.operations
+    owner = OperationOwner.acquire(repository, _scope(), "file-upload")
+    borrow = owner.borrow()
+    borrow.install_dispatch_obligation("6" * 32, "adapter-dispatch", payload_version=1, payload=b"prepared")
+    original = repository.mark_lifecycle_obligation_possible_effect
+
+    def interrupted(*args: Any, **kwargs: Any) -> object:
+        if committed:
+            original(*args, **kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(repository, "mark_lifecycle_obligation_possible_effect", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        borrow.arm_dispatch_obligation()
+    release_borrow_after_custody(borrow, retain_effect=True)
+
+    rows = db.operations.list_lifecycle_obligations(owner.ownership)
+    assert len(rows) == 1
+    assert rows[0].state is (
+        LifecycleObligationState.POSSIBLE_EFFECT if committed else LifecycleObligationState.REGISTERED
+    )
+    with pytest.raises(StateError):
+        owner.close()
+
+
 def test_prepared_supplied_payload_stays_on_the_row_armed_for_dispatch(db: Database) -> None:
     owner = OperationOwner.acquire(db.operations, _scope(), "file-upload")
     borrow = owner.borrow()

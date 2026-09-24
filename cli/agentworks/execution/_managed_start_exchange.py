@@ -42,6 +42,8 @@ from ._runtime_prerequisite import (
 from .carrier import CarrierIO, Deadline, Dispatch, Failure, FiniteInput, PreparedInvocation, Retention, SinkOutput
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .carrier import Carrier, ExitStatus
 
 
@@ -318,9 +320,12 @@ def start_managed_run(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
+    before_possible_dispatch: Callable[[], None] | None = None,
 ) -> ManagedStartAttempt:
     """Commit possible dispatch, attempt once, and reconcile only admitted launch fact."""
     prepared = _prepare_attempt(carrier, reserved, request, plan, deadline, runtime_selection)
+    if before_possible_dispatch is not None:
+        before_possible_dispatch()
     candidate: ManagedStartCandidate | None = None
 
     def boundary(run: ManagedRunRecord) -> ManagedLaunchObservation:

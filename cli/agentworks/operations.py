@@ -729,6 +729,42 @@ class OperationBorrow:
             owner._transition_uncertain = False  # noqa: SLF001
             return LifecycleObligation(owner, self._dispatch_obligation)
 
+    def arm_dispatch_obligation(self) -> None:
+        """Durably admit an installed adapter effect before a later carrier attempt.
+
+        Some adapters must commit their own possible-dispatch row between core
+        admission and the carrier attempt. A lost database reply retains the
+        borrow's handoff authority conservatively; a later attempt rechecks
+        and repeats the idempotent durable admission before dispatch.
+        """
+        owner = self._owner
+        with owner._guard:  # noqa: SLF001
+            self._require_active_locked()
+            if owner._transition_uncertain:  # noqa: SLF001
+                owner._reconcile_transition_locked()  # noqa: SLF001
+            owner._require_dispatch_admission_locked()  # noqa: SLF001
+            if self._closing or self._attempt_started or owner._outstanding_attempt is not None:  # noqa: SLF001
+                raise StateError(
+                    "operation borrow cannot arm an active or closing attempt",
+                    entity_kind=self.ownership.scope.resource_kind,
+                    entity_name=self.ownership.scope.resource_name,
+                )
+            obligation = self._dispatch_obligation
+            if obligation is None or self._supplied_dispatch is None:
+                raise StateError(
+                    "operation borrow has no installed adapter obligation",
+                    entity_kind=self.ownership.scope.resource_kind,
+                    entity_name=self.ownership.scope.resource_name,
+                )
+            self._dispatch_armed = True
+            owner._transition_uncertain = True  # noqa: SLF001
+            owner._repository.mark_lifecycle_obligation_possible_effect(  # noqa: SLF001
+                self.ownership,
+                obligation.obligation_id,
+            )
+            owner._durable_possible_dispatch = True  # noqa: SLF001
+            owner._transition_uncertain = False  # noqa: SLF001
+
     def begin_attempt(self) -> OperationAttempt:
         """Durably arm ownership before returning permission to dispatch.
 

@@ -407,6 +407,16 @@ inventory. The five carrier-neutral operations are therefore implemented hermeti
 host reservation/policy reduction and live target marker/boot rereads remain open. SSH and QGA must
 each prove the protocol in production before public exposure.
 
+The private ownership-backed start kernel accepts one already reserved independent run under an
+already acquired exact-VM `OperationOwner`. Its core `managed-start` obligation holds temporary
+dispatch custody and persists only the run ID. The managed-run row and its resource owner hold the
+continuing independent job. Pure start preflight precedes effect admission; the run row records
+possible dispatch before the borrowed carrier attempts the one launch. Only a settled carrier
+attempt with a durable confirmed receipt permits the start obligation to resolve. After admission,
+any other launch state retains core custody, including a code-zero carrier completion without the
+receipt. This does not resolve the whole operation or establish job termination. Production binding,
+recovery, fresh marker/boot checks for later actions and those actions themselves remain open.
+
 Target identity is structured as a core resource kind/name, a versioned incarnation fingerprint and
 a separate boot UUID. The core name supports binding and diagnostics but is not authority. The
 incarnation fingerprint must bind the provider-owned locator plus a core-provisioned or explicitly
