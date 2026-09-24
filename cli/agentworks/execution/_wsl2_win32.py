@@ -169,6 +169,43 @@ class WindowsApi:
         k.QueryInformationJobObject.restype = w.BOOL
         k.ReadFile.argtypes = [w.HANDLE, w.LPVOID, w.DWORD, c.POINTER(w.DWORD), w.LPVOID]
         k.ReadFile.restype = w.BOOL
+        k.GetCurrentProcess.argtypes = []
+        k.GetCurrentProcess.restype = w.HANDLE
+        k.GetCurrentProcessId.argtypes = []
+        k.GetCurrentProcessId.restype = w.DWORD
+        k.GetProcessTimes.argtypes = [
+            w.HANDLE,
+            c.POINTER(w.FILETIME),
+            c.POINTER(w.FILETIME),
+            c.POINTER(w.FILETIME),
+            c.POINTER(w.FILETIME),
+        ]
+        k.GetProcessTimes.restype = w.BOOL
+
+    def current_controller_identity(self) -> tuple[int, int]:
+        """Capture this controller's PID and exact creation FILETIME ticks."""
+        pid = int(self.kernel.GetCurrentProcessId())
+        process = self.kernel.GetCurrentProcess()
+        if pid <= 0:
+            raise self._error("GetCurrentProcessId")
+        if not process:
+            raise self._error("GetCurrentProcess")
+        created = self.wintypes.FILETIME()
+        exited = self.wintypes.FILETIME()
+        kernel = self.wintypes.FILETIME()
+        user = self.wintypes.FILETIME()
+        if not self.kernel.GetProcessTimes(
+            process,
+            self.ctypes.byref(created),
+            self.ctypes.byref(exited),
+            self.ctypes.byref(kernel),
+            self.ctypes.byref(user),
+        ):
+            raise self._error("GetProcessTimes")
+        ticks = (int(created.dwHighDateTime) << 32) | int(created.dwLowDateTime)
+        if ticks <= 0:
+            raise OSError("GetProcessTimes returned an invalid creation time")
+        return pid, ticks
 
     def create_job(self) -> int:
         handle = _handle_value(self.kernel.CreateJobObjectW(None, None))

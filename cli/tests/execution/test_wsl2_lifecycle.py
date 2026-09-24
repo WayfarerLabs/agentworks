@@ -30,6 +30,8 @@ from agentworks.execution._wsl2_lifecycle import (
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.wsl2 import WSL2Connection
 
+BOOT_ID = "12345678-1234-1234-1234-123456789abc"
+
 
 def local(
     host: HostClientStatus = HostClientStatus.NOT_CREATED,
@@ -130,7 +132,7 @@ def connection() -> WSL2Connection:
 
 
 def ready(nonce: str = "a" * 32) -> bytes:
-    return f"READY {nonce} 137 8192\n".encode()
+    return f"READY {nonce} {BOOT_ID} 137 8192\n".encode()
 
 
 def owner(native: FakeNative, observer: FakeObserver | None = None) -> WSL2GuestAnchorOwner:
@@ -159,7 +161,7 @@ def test_literal_helper_argv_and_start_evidence(monkeypatch: pytest.MonkeyPatch)
     )
     assert native.argv[7:12] == ("-I", "-S", "-B", "-c", _HELPER_SOURCE)
     assert native.argv[12] == "a" * 32
-    assert evidence.identity == GuestAnchorIdentity(137, 8192)
+    assert evidence.identity == GuestAnchorIdentity(BOOT_ID, 137, 8192)
     assert evidence.local.job_assignment == JobAssignment.ASSIGNED_AT_CREATION
 
 
@@ -195,8 +197,9 @@ def test_helper_protocol_runs_under_local_python_and_waits_for_eof() -> None:
         assert process.stdin is not None and process.stdout is not None and process.stderr is not None
         with selectors.DefaultSelector() as selector:
             line = _bounded_line(selector, process.stdout)
-            _, received_nonce, pid_text, start_text = line.decode("ascii").split()
+            _, received_nonce, boot_id, pid_text, start_text = line.decode("ascii").split()
             assert received_nonce == nonce
+            assert boot_id == Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip()
             pid = int(pid_text)
             stat = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
             assert int(stat[stat.rfind(")") + 2 :].split()[19]) == int(start_text)
@@ -330,12 +333,17 @@ def test_release_retries_guest_observer_after_local_settlement(monkeypatch: pyte
 
     assert first.guest_anchor_presence == GuestAnchorPresence.PRESENT
     assert second.guest_anchor_presence == GuestAnchorPresence.ABSENT_CONFIRMED
-    assert observer.seen == [GuestAnchorIdentity(137, 8192), GuestAnchorIdentity(137, 8192)]
+    assert observer.seen == [GuestAnchorIdentity(BOOT_ID, 137, 8192), GuestAnchorIdentity(BOOT_ID, 137, 8192)]
 
 
 @pytest.mark.parametrize(
     "receipt",
-    [b"READY " + b"b" * 32 + b" 137 8192\n", b"READY " + b"a" * 32 + b" nope 8192\n", b"x" * 513],
+    [
+        b"READY " + b"b" * 32 + b" " + BOOT_ID.encode() + b" 137 8192\n",
+        b"READY " + b"a" * 32 + b" " + BOOT_ID.encode() + b" nope 8192\n",
+        b"READY " + b"a" * 32 + b" FFFFFFFF-1234-1234-1234-123456789abc 137 8192\n",
+        b"x" * 513,
+    ],
 )
 def test_invalid_ready_retains_retryable_owner_and_settles(monkeypatch: pytest.MonkeyPatch, receipt: bytes) -> None:
     token(monkeypatch)
@@ -426,7 +434,7 @@ def test_interruption_after_ready_publication_retains_owner(monkeypatch: pytest.
     with pytest.raises(KeyboardInterrupt):
         subject.start(Deadline.after(1))
 
-    assert subject.evidence.identity == GuestAnchorIdentity(137, 8192)
+    assert subject.evidence.identity == GuestAnchorIdentity(BOOT_ID, 137, 8192)
     assert subject.evidence.local.settled
 
 
@@ -454,7 +462,7 @@ def test_late_ready_is_rejected_and_cleaned(monkeypatch: pytest.MonkeyPatch) -> 
     with pytest.raises(ValidationError):
         subject.start(Deadline.after(1))
 
-    assert subject.evidence.identity == GuestAnchorIdentity(137, 8192)
+    assert subject.evidence.identity == GuestAnchorIdentity(BOOT_ID, 137, 8192)
     assert subject.evidence.local.settled
 
 

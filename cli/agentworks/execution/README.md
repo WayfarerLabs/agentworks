@@ -260,16 +260,27 @@ supported main-thread caller interruption retains one cleanup owner, and bounded
 never relies on `PeekNamedPipe` as a deadline primitive. These are host-client ownership mechanics
 only.
 
-The fixed no-shell helper emits a nonce-bound `READY` record containing its Linux PID and process
-start time, waits for controller EOF, then emits `EXITING`. These records, `wsl.exe` exit and Job
-Object state are not guest-absence evidence. Only an injected exact PID/start-time observer may
-report absence, and it can be retried after local settlement. Portable tests execute this helper on
-local Linux procfs and exercise lifecycle failure orderings. Hosted synthetic Windows tests exercise
-Job membership, handle confinement, deadlines, settlement and controller hard death without invoking
-`wsl.exe`. A separate live Tier 2 Windows/WSL2 proof establishes literal argument and byte-stream
-behavior plus exact guest-anchor absence after ordinary release and controller hard death, while
-unrelated guest and Windows work survive. There is no production composition yet; platform-hold,
-recovery-factory, target-identity and RunContext integration remain open gates.
+The fixed no-shell helper emits a nonce-bound `READY` record containing its canonical guest boot
+UUID, Linux PID and process start time, waits for controller EOF, then emits `EXITING`. These
+records, `wsl.exe` exit and Job Object state are not guest-absence evidence. Only an injected exact
+boot/PID/start-time observer may report absence, and it can be retried after local settlement.
+Portable tests execute this helper on local Linux procfs and exercise lifecycle failure orderings.
+Hosted synthetic Windows tests exercise Job membership, handle confinement, deadlines, settlement
+and controller hard death without invoking `wsl.exe`. A separate live Tier 2 Windows/WSL2 proof
+establishes literal argument and byte-stream behavior plus exact guest-anchor absence after ordinary
+release and controller hard death, while unrelated guest and Windows work survive.
+
+`_wsl2_platform_hold.py` privately composes that anchor with one independent `wsl2-platform-hold`
+lifecycle obligation under an already acquired exact-VM operation owner. Before effect it records a
+versioned canonical ASCII payload containing a domain-separated SHA-256 digest of the bounded opaque
+provider locator, validated instance marker, exact distribution and user, fresh nonce, and the
+already-running Windows controller PID plus creation time in native Windows ticks. It marks possible
+effect before dispatch and publishes the acknowledged boot/PID/start identity as soon as `READY`
+arrives. The caller retains the hold through failures and interruptions. Ordinary release resolves
+only after exact local never-creation or after local settlement and independently confirmed absence
+of the acknowledged guest identity. It does not close the outer owner or keep a borrow across the
+hold lifetime. A production observer, crash recovery factory, activation, platform wiring, target
+identity and RunContext integration remain open gates.
 
 ## Observation and guest lifetime
 

@@ -617,18 +617,28 @@ adapter supports that operation. Missing identity publication is not absence. If
 discovery, quiescence or absence cannot be established, the obligation stays `possible-effect` and
 the resource claim remains held.
 
-For a WSL2 platform hold, the adapter payload binds the opaque provider locator, VM instance marker,
-exact distribution, execution user and exact Windows controller process identity. After `READY`, it
-adds the guest boot UUID, PID and Linux process start time; PID/start-time evidence is meaningful
-only within that boot. Host Job settlement and `wsl.exe` exit remain host-client evidence only.
-Recovery must prove the recorded controller process is absent before using the creation-time Job and
-synchronous Windows process-launch facts to establish that no delayed client launch remains, then
-independently observe that the acknowledged guest identity is absent. A changed guest boot proves
-the old guest process cannot survive but does not excuse locator or marker mismatch. Each
-`vm_active()` lifetime registers its own obligation and anchor under the enclosing operation. Do not
-add hidden reference counting or collapse nested holds into one platform process. A recovery adapter
-retains the obligation when dispatch drain, identity, quiescence or absence cannot be established
-safely.
+For a WSL2 platform hold, the adapter payload binds a versioned, domain-separated SHA-256 digest of
+the bounded opaque provider locator, VM instance marker, exact distribution, execution user and
+exact Windows controller process identity. After `READY`, it adds the guest boot UUID, PID and Linux
+process start time; PID/start-time evidence is meaningful only within that boot. Host Job settlement
+and `wsl.exe` exit remain host-client evidence only. Recovery must prove the recorded controller
+process is absent before using the creation-time Job and synchronous Windows process-launch facts to
+establish that no delayed client launch remains, then independently observe that the acknowledged
+guest identity is absent. A changed guest boot proves the old guest process cannot survive but does
+not excuse locator or marker mismatch. Each `vm_active()` lifetime registers its own obligation and
+anchor under the enclosing operation. Do not add hidden reference counting or collapse nested holds
+into one platform process. A recovery adapter retains the obligation when dispatch drain, identity,
+quiescence or absence cannot be established safely.
+
+The private hold now constructs the guest anchor from its exact WSL2 connection and the same native
+owner that captures the already-running controller PID and creation time in native Windows ticks
+before registration. The controller is not the new `wsl.exe` child. It validates exact VM scope,
+finite deadline and payload fields before native observation, then registers one obligation, marks
+possible effect, dispatches once and immediately CAS-publishes READY identity. Registration, mark
+and publication uncertainty retain the caller-owned hold without replay. Ordinary release may
+resolve an ambiguous post-READY publication after local settlement and independent exact absence; it
+never resolves on `EXITING`, client exit, Job settlement or missing guest identity alone. Recovery
+discovery and controller-absence proof are separate unfinished obligations.
 
 This checkpoint does not wire `systemd.py`, carriers, platform factories, public `ExecutionAccess`,
 `JobRef` or RunContext. It does not implement OPERATION liveness, leases, application/output

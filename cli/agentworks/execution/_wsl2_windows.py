@@ -84,6 +84,10 @@ class WindowsWSL2HostClient:
         self._drain_admission = _Admission.WAITING
         self._drain_terminal = False
 
+    def current_controller_identity(self) -> tuple[int, int]:
+        """Capture the current controller, before this owner dispatches its child."""
+        return self._api_factory().current_controller_identity()
+
     def spawn_owned(self, argv: tuple[str, ...], deadline: Deadline) -> None:
         """Admit one literal argv and wait only for its creation result."""
         if not _literal_argv(argv):

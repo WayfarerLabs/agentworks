@@ -15,6 +15,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
 from agentworks.errors import ValidationError
+from agentworks.execution._vm_guest_identity_protocol import _valid_boot_id
 from agentworks.execution.carrier import Deadline
 
 if TYPE_CHECKING:
@@ -22,17 +23,18 @@ if TYPE_CHECKING:
 
 _CLEANUP_SECONDS = 0.5
 _MAX_RECEIPT_BYTES = 512
-_READY = re.compile(r"READY ([0-9a-f]{32}) ([1-9][0-9]*) ([0-9]+)\n")
+_READY = re.compile(r"READY ([0-9a-f]{32}) ([0-9a-f-]{36}) ([1-9][0-9]*) ([0-9]+)\n")
 _EXITING = re.compile(r"EXITING ([0-9a-f]{32})\n")
 
 # Python 3.11 syntax only. The proc start time is field 22, after the final
 # right parenthesis because a process name may itself contain parentheses.
 _HELPER_SOURCE = (
     "import os,sys;"
+    "boot=open('/proc/sys/kernel/random/boot_id',encoding='ascii').read().strip();"
     "record=open('/proc/self/stat',encoding='ascii').read();"
     "tail=record[record.rfind(')')+2:].split();"
     "nonce=sys.argv[1];"
-    "sys.stdout.write('READY {} {} {}\\n'.format(nonce,os.getpid(),tail[19]));"
+    "sys.stdout.write('READY {} {} {} {}\\n'.format(nonce,boot,os.getpid(),tail[19]));"
     "sys.stdout.flush();"
     "sys.stdin.buffer.read();"
     "sys.stdout.write('EXITING {}\\n'.format(nonce));"
@@ -109,10 +111,17 @@ class LocalResourceSnapshot:
 
 @dataclass(frozen=True)
 class GuestAnchorIdentity:
-    """Guest PID and Linux start-time identity from an exact READY record."""
+    """Boot-bound guest PID and Linux start-time identity from exact READY."""
 
+    boot_id: str
     pid: int
     start_time: int
+
+    def __post_init__(self) -> None:
+        if not _valid_boot_id(self.boot_id) or type(self.pid) is not int or self.pid <= 0:
+            raise ValidationError("WSL2 guest anchor identity is invalid")
+        if type(self.start_time) is not int or self.start_time < 0:
+            raise ValidationError("WSL2 guest anchor identity is invalid")
 
 
 @dataclass(frozen=True)
@@ -138,6 +147,8 @@ class OwnedHostClient(Protocol):
     """
 
     def spawn_owned(self, argv: tuple[str, ...], deadline: Deadline) -> None: ...
+
+    def current_controller_identity(self) -> tuple[int, int]: ...
 
     def read_stdout_line(self, limit: int, deadline: Deadline) -> bytes: ...
 
@@ -166,7 +177,7 @@ def _ready_identity(receipt: object, nonce: str) -> GuestAnchorIdentity:
     matched = _READY.fullmatch(text)
     if matched is None or matched.group(1) != nonce:
         raise ValidationError("WSL2 helper readiness record is invalid")
-    return GuestAnchorIdentity(pid=int(matched.group(2)), start_time=int(matched.group(3)))
+    return GuestAnchorIdentity(boot_id=matched.group(2), pid=int(matched.group(3)), start_time=int(matched.group(4)))
 
 
 def _exit_receipt(receipt: object, nonce: str) -> HelperExitReceipt:
@@ -223,13 +234,15 @@ class WSL2GuestAnchorOwner:
             guest_anchor_presence=self._guest_anchor_presence,
         )
 
-    def start(self, deadline: Deadline) -> WSL2AnchorEvidence:
+    def start(self, deadline: Deadline, *, nonce: str | None = None) -> WSL2AnchorEvidence:
         """Dispatch one helper while retaining this object through every outcome."""
         if self._start_attempted:
             raise ValidationError("WSL2 guest anchor was already started")
         if deadline.expired:
             raise ValidationError("WSL2 anchor start deadline has expired")
-        self._nonce = secrets.token_hex(16)
+        if nonce is not None and (type(nonce) is not str or re.fullmatch(r"[0-9a-f]{32}", nonce) is None):
+            raise ValidationError("WSL2 anchor nonce is invalid")
+        self._nonce = secrets.token_hex(16) if nonce is None else nonce
         self._start_attempted = True
         self._local = LocalResourceSnapshot(
             HostClientStatus.UNKNOWN,

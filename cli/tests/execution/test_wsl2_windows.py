@@ -68,6 +68,9 @@ class _FakeApi:
     def create_job(self) -> int:
         return 1
 
+    def current_controller_identity(self) -> tuple[int, int]:
+        return 42, 123456789
+
     def wsl_executable(self) -> str:
         return "/trusted/system/wsl.exe"
 
@@ -147,6 +150,20 @@ class _FakeApi:
 
 def _fake_factory(api: _FakeApi) -> Callable[[], WindowsApi]:
     return lambda: cast(WindowsApi, api)
+
+
+def test_controller_identity_comes_from_the_native_owner() -> None:
+    api = _FakeApi()
+    owner = WindowsWSL2HostClient(api_factory=_fake_factory(api))
+    assert owner.current_controller_identity() == (42, 123456789)
+    assert owner.snapshot().host_client_status == HostClientStatus.NOT_CREATED
+
+
+@_native_windows
+def test_native_controller_creation_identity_is_current_process() -> None:
+    pid, ticks = WindowsApi().current_controller_identity()
+    assert pid == os.getpid()
+    assert ticks > 0
 
 
 def _argv(source: str, *arguments: str) -> tuple[str, ...]:

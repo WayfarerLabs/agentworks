@@ -1430,6 +1430,15 @@ connection and trust only. Before broader lifecycle implementation, complete the
       identity, request cooperative exit, and verify that identity is absent after ordinary release
       and controller hard death while unrelated guest work survives. Production platform-hold and
       recovery composition remain separate gates.
+- [x] Build the private WSL2 platform-hold ledger adapter under an already acquired exact-VM owner.
+      Give each hold its own pre-effect canonical bounded payload and nonce, capture exact Windows
+      controller creation identity, mark possible effect before one guest-anchor dispatch, publish
+      boot-aware READY identity, and resolve ordinary release only on never-creation or settled
+      local resources plus independently confirmed exact guest absence. Keep the owner available for
+      child borrows during nested holds and retain uncertain coordination for explicit recovery.
+- [ ] Implement production WSL2 hold adoption and recovery: exact preparation discovery after a
+      crash, controller-absence and dispatch-drain proof, a production exact guest observer,
+      recovery factory, activation and platform wiring, RunContext integration, and live proof.
 
 The private WSL2 ownership candidate is implemented through `a1bb1034`. The caller owns an inert
 lifecycle object before `start`; one native owner retains the WSL client, process/pipe handles and
