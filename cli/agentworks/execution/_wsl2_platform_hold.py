@@ -203,12 +203,14 @@ class WSL2PlatformHold:
         """Register, commit possible effect, dispatch once, and publish READY."""
         self._acquire_transition(deadline, "start")
         try:
+            if deadline.expired:
+                raise TimeoutError("WSL2 hold start deadline expired waiting for transition")
             return self._start_locked(deadline)
         finally:
             self._transition_lock.release()
 
     def _acquire_transition(self, deadline: Deadline, action: str) -> None:
-        """Bound one whole hold transition by its caller's finite deadline."""
+        """Bound entry to one hold transition by its caller's finite deadline."""
         if type(deadline) is not Deadline or deadline.expires_at is None:
             raise ValidationError(f"WSL2 hold {action} requires a finite deadline")
         first_attempt = True
@@ -220,9 +222,6 @@ class WSL2PlatformHold:
                     raise ValidationError(f"WSL2 hold {action} deadline has expired")
                 raise TimeoutError(f"WSL2 hold {action} deadline expired waiting for transition")
             if self._transition_lock.acquire(timeout=min(remaining, TIMEOUT_MAX)):
-                if deadline.expired:
-                    self._transition_lock.release()
-                    raise TimeoutError(f"WSL2 hold {action} deadline expired waiting for transition")
                 return
             first_attempt = False
 
@@ -299,6 +298,8 @@ class WSL2PlatformHold:
         """Resolve only no-client creation or settled, exact guest absence."""
         self._acquire_transition(deadline, "release")
         try:
+            if deadline.expired:
+                raise TimeoutError("WSL2 hold release deadline expired waiting for transition")
             return self._release_locked(deadline)
         finally:
             self._transition_lock.release()

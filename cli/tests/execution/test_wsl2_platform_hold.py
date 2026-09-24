@@ -542,6 +542,43 @@ def test_expired_deadlines_do_not_enter_hold_transitions() -> None:
     assert not owner.obligations[0].resolved
 
 
+@pytest.mark.parametrize("action", ["start", "release"])
+def test_post_acquire_interrupt_releases_transition_lock(action: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    owner = FakeOwner()
+    subject = hold(owner)
+    if action == "release":
+        subject.start(Deadline.after(1))
+    before = list(owner.events)
+    original_expired = Deadline.expired
+    assert isinstance(original_expired, property) and original_expired.fget is not None
+    injected = False
+
+    def interrupt_once(deadline: Deadline) -> bool:
+        nonlocal injected
+        if not injected:
+            injected = True
+            raise KeyboardInterrupt
+        return original_expired.fget(deadline)
+
+    monkeypatch.setattr(Deadline, "expired", property(interrupt_once))
+    with pytest.raises(KeyboardInterrupt):
+        if action == "start":
+            subject.start(Deadline.after(1))
+        else:
+            subject.release(Deadline.after(1))
+    assert injected
+    assert owner.events == before
+    if action == "start":
+        assert subject.obligation is None
+        subject.start(Deadline.after(1))
+        assert owner.events.count("dispatch") == 1
+        assert len(owner.obligations) == 1
+    else:
+        assert not owner.obligations[0].resolved
+        subject.release(Deadline.after(1))
+        assert owner.obligations[0].resolved
+
+
 @pytest.mark.parametrize("executable", [r"C:\Windows\System32\wsl.exe", "./wsl.exe", "other"])
 def test_hold_refuses_untrusted_wsl_executable_before_native_work(executable: str) -> None:
     owner = FakeOwner()
