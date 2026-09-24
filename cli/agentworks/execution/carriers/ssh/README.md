@@ -96,6 +96,11 @@ paths. The candidate remains after publication as evidence.
 
 ## Delivery and forwarding
 
+`SSHCarrier.validate` accepts every current shared prepared invocation and I/O shape without
+effects. Managed-start composition must call it before committing durable `possible-dispatch`;
+transport owns that shared wiring. Connection-file and trust admission, installed-client probing and
+process work stay in `execute`, which also calls the validator before those effects.
+
 `SSHCarrier.execute` dispatches once. Captured bytes preserve their provenance; client/guest mixed
 stderr is never relabeled as guest stderr. Exit 255 remains ambiguous. Local timeout and process
 cleanup do not prove guest termination or authorize replay. Shared preparation and public outcome
