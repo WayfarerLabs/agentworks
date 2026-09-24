@@ -1305,7 +1305,7 @@ connection and trust only. Before broader lifecycle implementation, complete the
       not implement `start`, `stop` or `dispose`, host reservation/output-policy reduction, live
       target identity rereads or SSH/QGA production proof.
 - [x] Implement the private fixed Linux `MANAGED` plus `INDEPENDENT` start exchange at
-      `0543bbaec4ad5856f91cd92e247f4f2eca6c8b17`. It preflights the exact reserved run, request,
+      `597b192d55808a80757fc672f0cd13a743e17405`. It preflights the exact reserved run, request,
       output policy, identity/runtime and carrier structure before durable possible-dispatch, then
       stages only five protected assets and attempts one closed transient root notify service.
       ASCII-armored canonical request framing preserves binary source/stdin; an exact launch fact
@@ -1313,7 +1313,7 @@ connection and trust only. Before broader lifecycle implementation, complete the
       additionally requires complete trusted helper/carrier evidence and client exit zero. The pure
       `Carrier.validate` seam refuses deterministic direct-envelope incompatibility without an
       attempt and is repeated by `execute`; SSH supplies its implementation in a separate owner
-      handoff. The exact Python 3.11 source proof, 259 focused tests, Ruff, targeted mypy and
+      handoff. The exact Python 3.11 source proof, 261 focused tests, Ruff, targeted mypy and
       documentation gates pass. Protocol asset bounds do not guarantee every carrier's smaller
       direct envelope; large-request staging/fallback, live systemd/cgroup and SSH/QGA proof,
       current target-marker/boot rereads, stop/dispose and public composition remain open.
