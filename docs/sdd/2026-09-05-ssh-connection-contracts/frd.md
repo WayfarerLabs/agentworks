@@ -1,7 +1,7 @@
 # Independent SSH Carrier: Functional Requirements
 
-- Status: Two-phase delivery; PoC and full implementation remain uncompleted
-- Updated: 2026-09-17
+- Status: SSH PoC #796 merged and accepted; full implementation #832 in progress
+- Updated: 2026-09-24
 - Architecture: [hla.md](hla.md)
 - Coordination: [transport design](../2026-09-12-transport-improv/hla.md)
 
@@ -19,13 +19,13 @@ production/plugin cutover followed by physical deletion of the old stack. This s
 [consolidation #740](https://github.com/WayfarerLabs/agentworks/issues/740) through replacement, not
 a preliminary migration of legacy callers.
 
-Delivery under this SDD has two phases: PR #796 carries the entire SSH portion of the joint PoC with
-these artifacts; the second SSH PR carries full implementation and its integration/retirement
-obligations. There is no separate SSH design PR to merge. The current implementation checkpoint
-requests feedback and live validation; it does not claim joint proof completion. Transport is the
-sole owner of the carrier contract and acceptance criteria; SSH contributes implementation and
-feasibility input. The [plan](plan.md) defines phase gates without maintaining a second shared
-contract.
+Initial SSH implementation spans two PRs: #796 carried the entire SSH portion of the accepted joint
+PoC with these artifacts; #832 carries the full independent SSH implementation and its integration
+evidence. There is no separate SSH design PR to merge. #832 is still a draft integration checkpoint,
+without a review or ready signal. Final deletion of old SSH follows a later operator request after
+transport completes migration and its own deletion. Transport is the sole owner of the carrier
+contract and acceptance criteria; SSH contributes implementation and feasibility input. The
+[plan](plan.md) defines phase gates without maintaining a second shared contract.
 
 ## Operator ruling, 2026-09-19
 
