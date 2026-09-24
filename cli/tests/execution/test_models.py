@@ -86,7 +86,7 @@ def test_output_factories_distinguish_capture_and_discard() -> None:
     assert Output.discard().max_bytes is None
 
 
-@pytest.mark.parametrize("bound", [-1, True, 1.5, "3"])
+@pytest.mark.parametrize("bound", [-1, True, False, None, 1.5, "3"])
 def test_output_refuses_invalid_capture_bounds(bound: object) -> None:
     with pytest.raises(ValidationError):
         Output.capture(bound)  # type: ignore[arg-type]

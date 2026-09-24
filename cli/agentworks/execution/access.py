@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Literal, cast
 
@@ -48,7 +47,7 @@ from .models import Command, Input, Lifetime, Output, Script
 from .profiles import Protection
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from .carrier import Carrier
     from .result import ExecutionResult
@@ -122,22 +121,14 @@ class ExecutionAccess:
             raise StateError("INDEPENDENT execution lifetime is unavailable")
         if self._runtime_selection.target_os is not RuntimeTargetOS.LINUX:
             raise StateError("Foreground execution is unavailable on this runtime")
-        if type(request) not in {Command, Script} or (
-            type(request) is Script and (request.login or request.interactive)
-        ):
-            raise ValidationError("Foreground execution requires a noninteractive command or script")
+        if type(request) not in {Command, Script}:
+            raise ValidationError("Foreground execution requires a command or script")
         if type(stdin) is not Input or type(output) is not Output:
             raise ValidationError("Foreground execution requires finite input and bounded output")
-        if output.max_bytes is not None and output.max_bytes > 4_096:
-            raise ValidationError("Foreground capture cannot exceed 4096 bytes")
         if type(sudo) is not bool or type(sensitive) is not bool or type(check) is not bool:
             raise ValidationError("Foreground execution flags must be booleans")
         if sudo and self._elevated_plan is None:
             raise StateError("Execution elevation is unavailable for this bound access")
-        if env is not None and not isinstance(env, Mapping):
-            raise ValidationError("Foreground environment must be a string mapping")
-        if cwd is not None and type(cwd) is not str:
-            raise ValidationError("Foreground working directory must be text")
         selected_deadline = self._deadline() if deadline is None else deadline
         if type(selected_deadline) is not Deadline or selected_deadline.expired:
             raise ValidationError("Foreground execution requires a live deadline")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.db import Database, OperationClaimState, OperationResourceKind, OperationScope
-from agentworks.errors import StateError
+from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _execution_operation as execution_operation
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._helper_identity import IdentityExpectation
@@ -151,6 +152,41 @@ def _run(
     )
 
 
+def test_preparation_expiring_deadline_refuses_before_borrow(
+    operation: tuple[Database, OperationOwner, execution_operation.ExecutionOperation],
+    plan: IdentityPlan,
+    runtime_selection: RuntimeSelection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database, owner, owned = operation
+    prepared = False
+
+    def prepare(*args: object, **kwargs: object) -> object:
+        nonlocal prepared
+        del args, kwargs
+        prepared = True
+        return object()
+
+    def refuse_borrow(self: OperationOwner) -> None:
+        del self
+        pytest.fail("expired preparation borrowed operation ownership")
+
+    monkeypatch.setattr(execution_operation, "prepare_inline_candidate", prepare)
+    monkeypatch.setattr(time, "monotonic", lambda: 2.0 if prepared else 0.0)
+    monkeypatch.setattr(OperationOwner, "borrow", refuse_borrow)
+    carrier = RecordingCarrier()
+
+    with pytest.raises(ValidationError):
+        _run(owned, carrier, plan, runtime_selection, Deadline(1.0))
+
+    assert prepared
+    assert carrier.calls == 0
+    assert owned.active_inline_calls == ()
+    claim = database.operations.inspect(owner.ownership.scope)
+    assert claim is not None and claim.state is OperationClaimState.RESERVED
+    owner.close()
+
+
 def test_arms_durable_attempt_before_single_carrier_dispatch(
     operation: tuple[Database, OperationOwner, execution_operation.ExecutionOperation],
     plan: IdentityPlan,
@@ -256,9 +292,21 @@ def test_carrier_failure_and_expired_deadline_remain_separate_facts(
 ) -> None:
     _, owner, owned = operation
     _patch_candidate_execution(monkeypatch)
-    deadline = Deadline.after(0)
+    expired = False
+
+    def clock() -> float:
+        return 2.0 if expired else 0.0
+
+    def expire_at_dispatch() -> None:
+        nonlocal expired
+        expired = True
+
+    monkeypatch.setattr(time, "monotonic", clock)
+    deadline = Deadline(1.0)
     report = CarrierReport(Dispatch.NOT_SENT, failure=Failure.DEADLINE)
-    outcome = _run(owned, RecordingCarrier(report), plan, runtime_selection, deadline)
+    outcome = _run(
+        owned, RecordingCarrier(report, before_dispatch=expire_at_dispatch), plan, runtime_selection, deadline
+    )
 
     assert outcome.candidate is not None
     assert outcome.candidate.dispatch is Dispatch.NOT_SENT

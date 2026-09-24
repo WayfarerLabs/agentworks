@@ -422,6 +422,11 @@ acknowledgment. Preparation remains single-use and clears the prerequisite parse
 including carrier exceptions. This candidate is not wired to production RunContext and does not yet
 supply staging, terminal I/O or managed lifetime.
 
+The current private inline access captures at most 4,096 bytes per application stream and defaults
+to that limit. This is a checkpoint-local helper bound, not the proposed production caller default
+of 1 MiB per stream or its bounded spooling behavior. Larger output currently fails within this
+private path; the production output contract remains open.
+
 ## Private file-helper delivery
 
 Read, object, metadata, inventory, staging, snapshot and publication exchanges use

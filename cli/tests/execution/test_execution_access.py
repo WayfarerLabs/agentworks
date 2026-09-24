@@ -188,8 +188,15 @@ def test_checked_nonzero_uses_bound_diagnostic_identity(
 def test_known_refusals_do_not_borrow_or_dispatch(
     bound: Bound,
     options: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     database, owner, operation, carrier, access, _ = bound
+
+    def refuse_borrow(self: OperationOwner) -> None:
+        del self
+        pytest.fail("rejected access call borrowed operation ownership")
+
+    monkeypatch.setattr(OperationOwner, "borrow", refuse_borrow)
     with pytest.raises((ValidationError, StateError)):
         access.run(Command(("/bin/true",)), **options)  # type: ignore[arg-type]
     assert carrier.calls == 0

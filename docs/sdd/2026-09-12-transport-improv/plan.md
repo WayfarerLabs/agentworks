@@ -1847,7 +1847,8 @@ discard/suppression, checked diagnostics, exact deadline propagation, pre-dispat
 uncertain owner retention and fresh-process retirement-module independence. Preparation now occurs
 once before borrowing the owner, so invalid requests do not transiently acquire child custody. This
 is not MANAGED execution, a job API, live/terminal I/O, native-platform acceptance or complete
-target composition.
+target composition. Its 4,096-byte per-stream capture default and maximum are private inline
+checkpoint limits, not the proposed production 1 MiB per-stream default or bounded output spooling.
 
 ## 5. Add the complete new RunContext surface
 

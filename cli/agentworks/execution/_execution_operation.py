@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
+from agentworks.errors import ValidationError
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._inline import (
     InlineCandidateResult,
@@ -108,6 +109,8 @@ class ExecutionOperation:
             sensitive=sensitive,
             runtime_selection=runtime_selection,
         )
+        if deadline.expired:
+            raise ValidationError("Inline execution deadline expired during preparation")
         borrow = self._owner.borrow()
         try:
             active = _ActiveInlineCall(carrier, borrow, prepared)

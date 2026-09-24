@@ -60,6 +60,8 @@ class Output:
 
     @classmethod
     def capture(cls, max_bytes: int = 4_096) -> Output:
+        if type(max_bytes) is not int:
+            raise ValidationError("Execution capture requires a nonnegative integer byte bound")
         return cls(max_bytes)
 
     @classmethod
