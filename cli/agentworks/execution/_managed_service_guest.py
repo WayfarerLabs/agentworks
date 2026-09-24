@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import pwd
 import re
 import select
 import selectors
@@ -32,6 +33,7 @@ _RUN = re.compile(r"[0-9a-f]{32}\Z")
 _CGROUP_ROOT = "/sys/fs/cgroup"
 _CGROUP_SELF = "/proc/self/cgroup"
 _CLEANUP_SECONDS = 5.0
+_PRELAUNCH_REAP_SECONDS = 0.25
 _EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 _SH_PATHS = frozenset({"/bin/sh", "/usr/bin/sh"})
 _BASH_PATHS = frozenset({"/bin/bash", "/usr/bin/bash"})
@@ -142,6 +144,7 @@ def _child(
     stdin: int,
     stdout: int,
     stderr: int,
+    exec_status: int,
     apply_identity: bool,
 ) -> None:
     try:
@@ -166,6 +169,13 @@ def _child(
             search_path = True
         else:
             search_path = False
+            if shell["requested"] == "user_default":
+                try:
+                    configured = pwd.getpwuid(expected.euid).pw_shell
+                except (KeyError, OSError):
+                    raise ControllerError("account shell unavailable") from None
+                if configured not in _SH_PATHS | _BASH_PATHS or configured != shell["resolved_executable"]:
+                    raise ControllerError("resolved account shell mismatch")
             source_fd = os.memfd_create("agw-managed-source", 0)
             source = memoryview(request.source)
             while source:
@@ -189,11 +199,14 @@ def _child(
         environment = dict(request.environment)
         os.write(ready, b"1")
         _gate(released)
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
         if search_path:
             os.execvpe(executable, argv, environment)
         else:
             os.execve(executable, argv, environment)
     except BaseException:
+        with suppress(OSError):
+            os.write(exec_status, b"F")
         os._exit(126)
 
 
@@ -202,9 +215,19 @@ class _StreamState:
     stream: Stream
     fd: int
     writer: CaptureWriter | None
-    retained: int = 0
-    digest: str = _EMPTY_SHA256
-    omitted: bool = False
+
+
+def _reap_prelaunch(pid: int) -> None:
+    """Give a killed setup child a short chance to reap without blocking service exit."""
+    deadline = time.monotonic() + _PRELAUNCH_REAP_SECONDS
+    while True:
+        try:
+            waited, _ = os.waitpid(pid, os.WNOHANG)
+        except ChildProcessError:
+            return
+        if waited == pid or time.monotonic() >= deadline:
+            return
+        time.sleep(0.01)
 
 
 def _serve(
@@ -229,13 +252,14 @@ def _serve(
     input_r, input_w = os.pipe()
     output_r, output_w = os.pipe()
     error_r, error_w = os.pipe()
+    exec_r, exec_w = os.pipe2(os.O_CLOEXEC)
     pid = os.fork()
     if pid == 0:
-        for fd in (placed_w, release_w, ready_r, input_w, output_r, error_r):
+        for fd in (placed_w, release_w, ready_r, input_w, output_r, error_r, exec_r):
             _close(fd)
-        _child(request, launch, placed_r, release_r, ready_w, input_r, output_w, error_w, apply_identity)
+        _child(request, launch, placed_r, release_r, ready_w, input_r, output_w, error_w, exec_w, apply_identity)
         os._exit(126)
-    for fd in (placed_r, release_r, ready_w, input_r, output_w, error_w):
+    for fd in (placed_r, release_r, ready_w, input_r, output_w, error_w, exec_w):
         _close(fd)
     launched = False
     writers: list[CaptureWriter] = []
@@ -258,9 +282,9 @@ def _serve(
         notify()
         os.write(release_w, b"1")
         launched = True
-        _observe(run_id, digest, request, store, boundary, pid, input_w, states)
+        _observe(run_id, digest, request, store, boundary, pid, input_w, exec_r, states)
     finally:
-        for fd in (placed_w, release_w, ready_r, input_w, output_r, error_r):
+        for fd in (placed_w, release_w, ready_r, input_w, output_r, error_r, exec_r):
             _close(fd)
         for writer in writers:
             writer.close()
@@ -269,8 +293,7 @@ def _serve(
                 boundary.kill()
             with suppress(ProcessLookupError):
                 os.kill(pid, signal.SIGKILL)
-            with suppress(ChildProcessError):
-                os.waitpid(pid, 0)
+            _reap_prelaunch(pid)
 
 
 def _observe(
@@ -281,9 +304,12 @@ def _observe(
     boundary: _Cgroup,
     pid: int,
     input_fd: int,
+    exec_fd: int,
     states: list[_StreamState],
 ) -> None:
     selector = selectors.DefaultSelector()
+    os.set_blocking(exec_fd, False)
+    selector.register(exec_fd, selectors.EVENT_READ, "exec")
     for state in states:
         os.set_blocking(state.fd, False)
         selector.register(state.fd, selectors.EVENT_READ, state)
@@ -294,6 +320,9 @@ def _observe(
     else:
         _close(input_fd)
     status: int | None = None
+    exec_result: bool | None = None
+    exec_failed = False
+    wait_published = False
     deadline: float | None = None
     boundary_done = False
     try:
@@ -302,14 +331,14 @@ def _observe(
                 waited, candidate = os.waitpid(pid, os.WNOHANG)
                 if waited == pid:
                     status = candidate
-                    fields = (
-                        {"exit_code": os.WEXITSTATUS(status), "signal": None}
-                        if os.WIFEXITED(status)
-                        else {"exit_code": None, "signal": os.WTERMSIG(status)}
-                    )
-                    store.publish_fact(FactName.WAIT, _fact(run_id, digest, "wait", **fields))
                     deadline = time.monotonic() + _CLEANUP_SECONDS
                     boundary.kill()
+            if status is not None and exec_result is True and os.WIFEXITED(status) and not wait_published:
+                store.publish_fact(
+                    FactName.WAIT,
+                    _fact(run_id, digest, "wait", exit_code=os.WEXITSTATUS(status), signal=None),
+                )
+                wait_published = True
             if status is not None and not boundary_done and boundary.empty():
                 store.publish_fact(FactName.BOUNDARY_EMPTY, _fact(run_id, digest, "boundary-empty"))
                 boundary_done = True
@@ -319,7 +348,14 @@ def _observe(
                 return
             timeout = 0.05 if status is None else min(0.05, max(0.0, cast("float", deadline) - time.monotonic()))
             for key, _ in selector.select(timeout):
-                if key.data is None:
+                if key.data == "exec":
+                    chunk = os.read(exec_fd, 4096)
+                    if chunk:
+                        exec_failed = True
+                    else:
+                        selector.unregister(exec_fd)
+                        exec_result = not exec_failed
+                elif key.data is None:
                     chunk = request.stdin[offset : offset + 65536]
                     try:
                         offset += os.write(input_fd, chunk)
@@ -339,9 +375,10 @@ def _observe(
                         _close(state.fd)
                         if state.writer is not None:
                             capture = state.writer.finish()
-                            state.retained, state.digest = capture.length, capture.sha256
+                            retained, digest_bytes = capture.length, capture.sha256
                             disposition = capture.disposition.value
                         else:
+                            retained, digest_bytes = 0, _EMPTY_SHA256
                             disposition = "discarded" if request.output_mode == "discard" else "sensitivity-suppressed"
                         name = FactName.STDOUT_END if state.stream is Stream.STDOUT else FactName.STDERR_END
                         store.publish_fact(
@@ -351,8 +388,8 @@ def _observe(
                                 digest,
                                 "stream-end",
                                 stream=state.stream.value,
-                                retained_bytes=state.retained,
-                                retained_sha256=state.digest,
+                                retained_bytes=retained,
+                                retained_sha256=digest_bytes,
                                 disposition=disposition,
                             ),
                         )

@@ -7,14 +7,14 @@ import os
 import stat
 import subprocess
 import sys
-from collections.abc import Generator, Iterator
+from collections.abc import Generator, Iterable, Iterator
 from pathlib import Path
 
 import pytest
 
 from agentworks.execution import _managed_job_store as job_store
 from agentworks.execution import _managed_job_wire as wire
-from agentworks.execution._managed_job_store import FactName, ManagedJobStore, StoreError, Stream
+from agentworks.execution._managed_job_store import CapturedPrefix, FactName, ManagedJobStore, StoreError, Stream
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="managed job store requires Linux")
 
@@ -87,6 +87,16 @@ def _run_path(store: ManagedJobStore, tmp_path: Path) -> Path:
     return tmp_path / "managed-runs-v1" / store.run_id
 
 
+def _capture_prefix(store: ManagedJobStore, stream: Stream, limit: int, chunks: Iterable[bytes]) -> CapturedPrefix:
+    writer = store.open_capture(stream, limit)
+    try:
+        for chunk in chunks:
+            writer.write(chunk)
+        return writer.finish()
+    finally:
+        writer.close()
+
+
 def test_create_publish_idempotency_and_conflict(store: ManagedJobStore, tmp_path: Path) -> None:
     launch = _launch()
     assert store.read_fact(FactName.LAUNCH) is None
@@ -108,7 +118,7 @@ def test_created_objects_get_exact_modes_under_restrictive_umask(store: ManagedJ
     previous = os.umask(0o777)
     try:
         store.publish_fact(FactName.LAUNCH, _launch())
-        store.capture_prefix(Stream.STDOUT, 1, (b"x",))
+        _capture_prefix(store, Stream.STDOUT, 1, (b"x",))
     finally:
         os.umask(previous)
     path = _run_path(store, tmp_path)
@@ -231,9 +241,9 @@ def test_invalid_namespace_and_exact_input_types_refuse(store: ManagedJobStore, 
     with pytest.raises(StoreError):
         store.read_fact("launch")  # type: ignore[arg-type]
     with pytest.raises(StoreError):
-        store.capture_prefix(Stream.STDOUT, True, ())
+        store.open_capture(Stream.STDOUT, True)
     with pytest.raises(StoreError):
-        store.capture_prefix(Stream.STDOUT, wire.MAX_CAPTURE_PREFIX_BYTES_V1 + 1, ())
+        store.open_capture(Stream.STDOUT, wire.MAX_CAPTURE_PREFIX_BYTES_V1 + 1)
     with pytest.raises(StoreError):
         store.publish_fact(FactName.LAUNCH, bytearray(_launch()))  # type: ignore[arg-type]
 
@@ -258,7 +268,7 @@ def test_bounded_prefix_drains_and_reports(
             seen.append(chunk)
             yield chunk
 
-    result = store.capture_prefix(Stream.STDOUT, limit, source())
+    result = _capture_prefix(store, Stream.STDOUT, limit, source())
     assert seen == list(chunks)
     assert result.length == len(expected)
     assert result.sha256 == hashlib.sha256(expected).hexdigest()
@@ -271,7 +281,7 @@ def test_bounded_prefix_drains_and_reports(
 def test_closed_capture_requires_end_and_binding(store: ManagedJobStore) -> None:
     launch = _launch()
     store.publish_fact(FactName.LAUNCH, launch)
-    prefix = store.capture_prefix(Stream.STDOUT, 3, (b"abcdef",))
+    prefix = _capture_prefix(store, Stream.STDOUT, 3, (b"abcdef",))
     assert store.read_capture(Stream.STDOUT, launch) is None
     wrong = _end(launch, data=b"abc")
     value = wire.decode_fact(wrong)
@@ -286,7 +296,7 @@ def test_closed_capture_requires_end_and_binding(store: ManagedJobStore) -> None
 def test_closed_capture_checks_exact_spool(store: ManagedJobStore, tmp_path: Path, mutation: str) -> None:
     launch = _launch()
     store.publish_fact(FactName.LAUNCH, launch)
-    store.capture_prefix(Stream.STDOUT, 3, (b"abc",))
+    _capture_prefix(store, Stream.STDOUT, 3, (b"abc",))
     end = _end(
         launch,
         data=b"abc",
@@ -316,7 +326,7 @@ def test_oversize_capture_refuses_before_reading(
 ) -> None:
     launch = _launch()
     store.publish_fact(FactName.LAUNCH, launch)
-    store.capture_prefix(Stream.STDOUT, 3, (b"abc",))
+    _capture_prefix(store, Stream.STDOUT, 3, (b"abc",))
     store.publish_fact(
         FactName.STDOUT_END,
         _end(launch, data=b"abc", length=wire.MAX_CAPTURE_PREFIX_BYTES_V1 + 1),

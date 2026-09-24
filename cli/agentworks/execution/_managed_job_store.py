@@ -13,14 +13,10 @@ import stat
 import sys
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from . import _managed_job_request as request_wire
 from . import _managed_job_wire as wire
-
-if TYPE_CHECKING:
-    from collections.abc import Iterable
 
 
 class StoreError(ValueError):
@@ -426,43 +422,6 @@ class ManagedJobStore:
         if request_wire.decode_request_launch(request.launch)["run_id"] != self.run_id:
             raise StoreError("wrong request run identity")
         return request
-
-    def capture_prefix(self, stream: Stream, limit: int, chunks: Iterable[bytes]) -> CapturedPrefix:
-        if type(stream) is not Stream or type(limit) is not int or not 0 <= limit <= wire.MAX_CAPTURE_PREFIX_BYTES_V1:
-            raise StoreError("invalid capture request")
-        directory = self._run_dir(create=True)
-        assert directory is not None
-        digest = hashlib.sha256()
-        retained = 0
-        omitted = False
-        try:
-            try:
-                fd = os.open(stream.value, _CREATE_FLAGS, 0o600, dir_fd=directory)
-            except OSError as exc:
-                raise StoreError("capture spool already exists or is unsafe") from exc
-            try:
-                os.fchmod(fd, 0o600)
-                _safe_stat(fd, 0o600, self._owner_uid, links=(1,))
-                for chunk in chunks:
-                    if type(chunk) is not bytes:
-                        raise StoreError("invalid capture chunk")
-                    prefix = chunk[: limit - retained]
-                    if prefix:
-                        _write_all(fd, prefix)
-                        digest.update(prefix)
-                        retained += len(prefix)
-                    omitted |= len(prefix) != len(chunk)
-                os.fsync(fd)
-            finally:
-                os.close(fd)
-            os.fsync(directory)
-            return CapturedPrefix(
-                retained,
-                digest.hexdigest(),
-                CaptureDisposition.TRUNCATED if omitted else CaptureDisposition.COMPLETE,
-            )
-        finally:
-            os.close(directory)
 
     def open_capture(self, stream: Stream, limit: int) -> CaptureWriter:
         """Create a single protected spool for event-driven target capture."""
