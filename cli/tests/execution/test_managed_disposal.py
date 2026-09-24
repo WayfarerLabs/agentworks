@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -13,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution import _managed_job_request as request_wire
 from agentworks.execution import _managed_job_wire as wire
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, encode_file_record
 from agentworks.execution._helper_bundle import build_helper_modules
@@ -143,6 +145,73 @@ def test_terminal_disposal_and_exact_retry(tmp_path: Path, wait: bool) -> None:
             store.publish_stop_request(launch)
         with pytest.raises(StoreError):
             store.open_capture(Stream.STDOUT, 1)
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "nonempty_stop",
+        "conflicting_launch",
+        "malformed_launch",
+        "malformed_control",
+        "wrong_run_control",
+        "malformed_environment",
+        "oversize_source",
+        "oversize_stdin",
+        "cross_asset_mismatch",
+    ],
+)
+def test_malformed_fixed_request_final_refuses_before_deletion(tmp_path: Path, variant: str) -> None:
+    with _store(tmp_path) as store:
+        launch = _terminal(store)
+        directory = tmp_path / "managed" / RUN
+        if variant == "cross_asset_mismatch":
+            store.publish_request(
+                request_wire.ManagedJobRequest(launch, "command", ("/bin/true",), None, "discard", None, (), b"", b"")
+            )
+            leaf = directory / RequestAsset.SOURCE.value
+            leaf.unlink()
+            data = b"changed"
+        elif variant == "nonempty_stop":
+            leaf, data = directory / "request-stop", b"x"
+        elif variant in ("conflicting_launch", "malformed_launch"):
+            leaf = directory / RequestAsset.LAUNCH.value
+            data = _launch("other") if variant == "conflicting_launch" else b"invalid"
+        elif variant in ("malformed_control", "wrong_run_control"):
+            leaf = directory / RequestAsset.CONTROL.value
+            if variant == "malformed_control":
+                data = b"invalid"
+            else:
+                valid = request_wire.encode_request(
+                    request_wire.ManagedJobRequest(
+                        launch, "command", ("/bin/true",), None, "discard", None, (), b"", b""
+                    )
+                )[RequestAsset.CONTROL.value]
+                control = json.loads(valid)
+                control["run_id"] = "b" * 32
+                data = json.dumps(control, sort_keys=True, separators=(",", ":")).encode("ascii")
+        elif variant == "malformed_environment":
+            leaf, data = directory / RequestAsset.ENVIRONMENT.value, b"invalid"
+        else:
+            name = RequestAsset.SOURCE if variant == "oversize_source" else RequestAsset.STDIN
+            leaf, data = directory / name.value, b"x" * (request_wire.MAX_SOURCE_BYTES + 1)
+        leaf.write_bytes(data)
+        leaf.chmod(0o400)
+        before = {item.name for item in directory.iterdir()}
+        with pytest.raises(StoreError):
+            store.dispose(launch)
+        assert {item.name for item in directory.iterdir()} == before
+        assert (directory / "launch").read_bytes() == launch
+        assert not (directory / "disposal").exists()
+
+
+def test_partial_binary_request_assets_remain_disposable(tmp_path: Path) -> None:
+    with _store(tmp_path) as store:
+        launch = _terminal(store)
+        store.publish_request_asset(RequestAsset.SOURCE, b"\x00\xff\x80")
+        store.publish_request_asset(RequestAsset.STDIN, b"\xff\x00")
+        assert store.dispose(launch)
+        assert sorted(item.name for item in (tmp_path / "managed" / RUN).iterdir()) == ["disposal"]
 
 
 def test_missing_terminal_never_commits(tmp_path: Path) -> None:

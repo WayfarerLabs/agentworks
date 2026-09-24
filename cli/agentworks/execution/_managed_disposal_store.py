@@ -8,8 +8,18 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from . import _managed_job_request as request_wire
 from . import _managed_job_wire as wire
-from ._managed_job_store import FactName, RequestAsset, StopAsset, StoreError, Stream, _open_leaf, _read_all
+from ._managed_job_store import (
+    _REQUEST_BOUNDS,
+    FactName,
+    RequestAsset,
+    StopAsset,
+    StoreError,
+    Stream,
+    _open_leaf,
+    _read_all,
+)
 from ._managed_observation_protocol import ManagedObservationError, checked_fact, checked_launch
 
 if TYPE_CHECKING:
@@ -49,7 +59,14 @@ def _inventory(directory: int, owner: int) -> dict[str, _Leaf]:
             raise StoreError("run object changed during validation")
         try:
             info = os.fstat(fd)
-            data = _read_all(fd, wire.MAX_MANAGED_JOB_FACT_BYTES) if fact or name == "disposal" else None
+            if fact or name == "disposal":
+                data = _read_all(fd, wire.MAX_MANAGED_JOB_FACT_BYTES)
+            elif name == StopAsset.REQUEST.value:
+                data = _read_all(fd, 0)
+            elif request:
+                data = _read_all(fd, _REQUEST_BOUNDS[RequestAsset(name)])
+            else:
+                data = None
             result[name] = _Leaf(name, info.st_dev, info.st_ino, info.st_nlink, data)
         finally:
             os.close(fd)
@@ -113,6 +130,32 @@ def _validate_facts(inventory: dict[str, _Leaf], expected: bytes) -> bool:
     return receipt is not None or all(name.value in inventory for name in _TERMINAL)
 
 
+def _validate_request_finals(inventory: dict[str, _Leaf], expected: bytes, run_id: str) -> None:
+    """Validate present final leaves without requiring a complete request set."""
+    assets: dict[str, bytes] = {}
+    try:
+        for name in RequestAsset:
+            leaf = inventory.get(name.value)
+            if leaf is None:
+                continue
+            assert leaf.data is not None
+            assets[name.value] = leaf.data
+            if name is RequestAsset.LAUNCH:
+                request_wire.decode_request_launch(leaf.data)
+                if leaf.data != expected:
+                    raise StoreError("request launch mismatch")
+            elif name is RequestAsset.CONTROL:
+                control = request_wire.decode_control(leaf.data)
+                if control["run_id"] != run_id:
+                    raise StoreError("request run mismatch")
+            elif name is RequestAsset.ENVIRONMENT:
+                request_wire.decode_environment(leaf.data)
+        if len(assets) == len(RequestAsset):
+            request_wire.decode_request(assets)
+    except request_wire.RequestError:
+        raise StoreError("invalid request final") from None
+
+
 def dispose(store: ManagedJobStore, expected_launch: bytes) -> bool:
     """Commit a hard-link receipt, then remove only prevalidated fixed leaves."""
     try:
@@ -126,6 +169,7 @@ def dispose(store: ManagedJobStore, expected_launch: bytes) -> bool:
         raise StoreError("missing launch and receipt")
     try:
         inventory = _inventory(directory, store._owner_uid)
+        _validate_request_finals(inventory, expected_launch, store.run_id)
         if not _validate_facts(inventory, expected_launch):
             return False
         if "disposal" not in inventory:
@@ -135,6 +179,7 @@ def dispose(store: ManagedJobStore, expected_launch: bytes) -> bool:
                 os.link("launch", "disposal", src_dir_fd=directory, dst_dir_fd=directory, follow_symlinks=False)
         os.fsync(directory)
         inventory = _inventory(directory, store._owner_uid)
+        _validate_request_finals(inventory, expected_launch, store.run_id)
         if not _validate_facts(inventory, expected_launch) or "disposal" not in inventory:
             raise StoreError("disposal commitment changed")
         for name in inventory:
