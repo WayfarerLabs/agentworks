@@ -40,7 +40,6 @@ if TYPE_CHECKING:
 class ManagedStopState(StrEnum):
     ACCEPTED = "accepted"
     TERMINATED = "terminated"
-    REFUSED = "refused"
     INVALID = "invalid"
     INCOMPLETE = "incomplete"
     UNKNOWN = "unknown"
@@ -94,7 +93,6 @@ class _Collector:
         self.failed = False
         self.terminal = False
         self.issue: ManagedStopIssue | None = None
-        self.records = 0
 
     def abort(self) -> None:
         self.control = None
@@ -108,10 +106,7 @@ class _Collector:
     def accept(self, record: FileRecord) -> None:
         if self.issue is not None:
             return
-        self.records += 1
-        if self.records > 4:
-            self._invalidate(ManagedStopIssue.CONTENT)
-        elif self.terminal:
+        if self.terminal:
             self._invalidate(ManagedStopIssue.POST_TERMINAL)
         elif record.kind is FileRecordKind.FAILED and self.control is None and not self.failed:
             if record.body:
@@ -178,7 +173,7 @@ class _Collector:
             )
         if self.failed:
             self.abort()
-            return ManagedStopObservation(ManagedStopState.REFUSED)
+            return ManagedStopObservation(ManagedStopState.UNKNOWN)
         assert self.control is not None
         if len(self.facts) != len(self.control.facts):
             self.abort()

@@ -37,15 +37,22 @@ def _prepare(request: ManagedStopRequest, store: ManagedJobStore) -> tuple[Manag
     if store.run_id != launch["run_id"]:
         raise ManagedStopError("managed store run mismatch")
     store.publish_stop_request(request.expected_launch)
+    accepted = ManagedStopResult((FactName.LAUNCH,)), (request.expected_launch,)
     until = time.monotonic() + request.observation_ms / 1000
     while True:
-        boundary = store.read_fact(FactName.BOUNDARY_EMPTY)
-        if boundary is not None:
-            checked_fact(FactName.BOUNDARY_EMPTY, boundary, request.expected_launch)
-            return ManagedStopResult((FactName.LAUNCH, FactName.BOUNDARY_EMPTY)), (request.expected_launch, boundary)
+        try:
+            boundary = store.read_fact(FactName.BOUNDARY_EMPTY)
+            if boundary is not None:
+                checked_fact(FactName.BOUNDARY_EMPTY, boundary, request.expected_launch)
+                return ManagedStopResult((FactName.LAUNCH, FactName.BOUNDARY_EMPTY)), (
+                    request.expected_launch,
+                    boundary,
+                )
+        except (StoreError, ManagedObservationError, OSError):
+            return accepted
         remaining = until - time.monotonic()
         if remaining <= 0:
-            return ManagedStopResult((FactName.LAUNCH,)), (request.expected_launch,)
+            return accepted
         time.sleep(min(0.05, remaining))
 
 

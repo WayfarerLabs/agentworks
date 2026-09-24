@@ -231,6 +231,37 @@ def test_guest_publishes_before_reply_and_only_empty_establishes_termination(sto
     assert facts == (launch, _boundary(launch))
 
 
+@pytest.mark.parametrize("variant", ["stale", "malformed"])
+def test_guest_keeps_accepted_after_invalid_boundary(store: ManagedJobStore, tmp_path: Path, variant: str) -> None:
+    launch = _launch()
+    store.publish_fact(FactName.LAUNCH, launch)
+    if variant == "stale":
+        store.publish_fact(FactName.BOUNDARY_EMPTY, _boundary(_launch(target="vm-other")))
+    else:
+        leaf = tmp_path / "managed" / RUN / "boundary-empty"
+        leaf.write_bytes(b"malformed")
+        leaf.chmod(0o400)
+    result, facts = guest._prepare(_request(), store)
+    assert store.read_stop_request()
+    assert result.facts == (FactName.LAUNCH,)
+    assert facts == (launch,)
+
+
+def test_publication_failure_may_leave_durable_stop(store: ManagedJobStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    launch = _launch()
+    store.publish_fact(FactName.LAUNCH, launch)
+    publish = store.publish_stop_request
+
+    def fail_after_publication(expected_launch: bytes) -> None:
+        publish(expected_launch)
+        raise OSError("injected post-link failure")
+
+    monkeypatch.setattr(store, "publish_stop_request", fail_after_publication)
+    with pytest.raises(OSError):
+        guest._prepare(_request(), store)
+    assert store.read_stop_request()
+
+
 def test_protocol_bounds_and_exact_source_python311(tmp_path: Path) -> None:
     request = _request(budget=MAX_OBSERVATION_MS)
     encoded = encode_request(request)
@@ -307,15 +338,16 @@ def test_exchange_accepted_terminated_budget_and_validator() -> None:
     assert 1 <= pending.budget <= 1000
 
 
-def test_exchange_distinguishes_complete_refusal_from_malformed_control() -> None:
-    refused = Carrier(
+def test_exchange_preserves_unknown_on_complete_helper_failure() -> None:
+    failed = Carrier(
         lambda request: b"".join(
             encode_file_record(request.nonce, FileRecord(index, kind, b""))
             for index, kind in enumerate((FileRecordKind.FAILED, FileRecordKind.FINISHED))
         )
     )
-    candidate = _exchange(refused)
-    assert candidate.observation is not None and candidate.observation.state is ManagedStopState.REFUSED
+    candidate = _exchange(failed)
+    assert candidate.observation is not None and candidate.observation.state is ManagedStopState.UNKNOWN
+    assert candidate.observation.facts == ()
     malformed = Carrier(
         lambda request: (
             encode_file_record(request.nonce, FileRecord(0, FileRecordKind.RESULT, b"bad"))

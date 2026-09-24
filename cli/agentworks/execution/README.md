@@ -396,9 +396,11 @@ interface. Its fixed Python 3.11 Linux root helper revalidates the exact launch,
 create-once empty stop leaf and polls only the exact boundary-empty fact within a finite capped
 budget. A complete launch-only reply means stop intent is durable but termination is unknown. Only a
 complete, host-validated boundary-empty reply establishes termination. A lost or incomplete carrier
-reply can leave stop intent published. Retrying this helper publishes the same sentinel and never
-launches again. This private path requires an existing launch fact; it offers no prelaunch stop,
-new-admission API, operation-owner lease, disposal, public jobs or live SSH/QGA proof.
+reply, including a complete helper failure, can leave stop intent published. An invalid or
+unreadable boundary fact leaves a successfully published request accepted with termination unknown.
+Retrying this helper publishes the same sentinel and never launches again. This private path
+requires an existing launch fact; it offers no prelaunch stop, new-admission API, operation-owner
+lease, disposal, public jobs or live SSH/QGA proof.
 
 ## Input accounting
 
