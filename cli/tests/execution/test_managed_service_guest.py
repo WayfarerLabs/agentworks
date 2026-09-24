@@ -311,6 +311,17 @@ def test_child_clears_inherited_signal_mask_before_exec(tmp_path: Path) -> None:
     store.close()
 
 
+def test_child_restores_inherited_ignored_signal_before_exec(tmp_path: Path) -> None:
+    previous = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    try:
+        store, _ = _execute(tmp_path, argv=("/bin/sh", "-c", "kill -TERM $$; printf survived"))
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+    assert store.read_fact(FactName.WAIT) is None
+    assert store.read_capture(Stream.STDOUT, _launch()) == b""
+    store.close()
+
+
 def test_literal_command_uses_explicit_request_path(tmp_path: Path) -> None:
     store, _ = _execute(
         tmp_path,

@@ -208,10 +208,8 @@ def _child(
         environment = dict(request.environment)
         os.write(ready, b"1")
         _gate(released)
-        for name in ("SIGPIPE", "SIGXFZ", "SIGXFSZ"):
-            inherited = getattr(signal, name, None)
-            if inherited is not None:
-                signal.signal(inherited, signal.SIG_DFL)
+        for inherited in signal.valid_signals() - {signal.SIGKILL, signal.SIGSTOP}:
+            signal.signal(inherited, signal.SIG_DFL)
         signal.pthread_sigmask(signal.SIG_SETMASK, ())
         if search_path:
             os.execvpe(executable, argv, environment)
