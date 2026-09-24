@@ -1300,7 +1300,7 @@ connection and trust only. Before broader lifecycle implementation, complete the
       one canonical launch, return only present fixed facts, and admit output only from a validated
       stream-end and closed capture spool. Missing end remains unknown; discard and suppression are
       known unavailable; malformed or incomplete carrier evidence promotes no facts. At
-      `2c742d6f6a0bec08e65b4fc84a9c9c07500ae9e2`, the manifest-only result control removes duplicate
+      `4a1209ec079c9510cc671300aebc390a12c0ad25`, the manifest-only result control removes duplicate
       status and length claims; 64 focused tests, Ruff and targeted mypy pass. This checkpoint does
       not implement `start`, `stop` or `dispose`, host reservation/output-policy reduction, live
       target identity rereads or SSH/QGA production proof.
