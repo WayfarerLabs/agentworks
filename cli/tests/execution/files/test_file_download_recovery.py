@@ -30,6 +30,7 @@ from agentworks.execution._file_obligation import (
     decode_file_call_obligation,
     encode_file_call_obligation,
 )
+from agentworks.execution._file_operation import FileOperation
 from agentworks.execution._file_snapshot_exchange import (
     FileSnapshotObservationState,
     snapshot_begin,
@@ -45,6 +46,7 @@ from agentworks.execution.carrier import (
 )
 from agentworks.operations import LifecycleObligation as OwnerLifecycleObligation
 from agentworks.operations import OperationOwner, RecoveryDispatch
+from tests.execution.files._file_download_support import BytesSink
 from tests.execution.files._file_snapshot_support import LocalCarrier, fixture_source, install_fixture_bundle
 from tests.execution.files._runtime_support import runtime_selection
 
@@ -119,7 +121,7 @@ class _RecordedExitCarrier(_JournalCarrier):
     def __init__(self, journal_path: str, token: bytes) -> None:
         super().__init__(journal_path, token, "FileSnapshotBeginRequest")
 
-    def execute(self, invocation: PreparedInvocation, *, io, deadline):
+    def execute(self, invocation: PreparedInvocation, *, io, deadline) -> CarrierReport:
         super().execute(invocation, io=io, deadline=deadline)
         os._exit(91)
 
@@ -155,6 +157,30 @@ class _CrashAfterActualCarrier(_RecordedExitCarrier):
         raise AssertionError("controller should exit while the helper is blocked")
 
 
+class _OriginatingDownloadCarrier(LocalCarrier):
+    """Bind journal expectations to the obligation installed by the real call."""
+
+    def __init__(self, database: Database, journal_path: str, *, blocked: bool) -> None:
+        super().__init__()
+        self._database = database
+        self._journal_path = journal_path
+        self._blocked = blocked
+
+    def execute(self, invocation: PreparedInvocation, *, io, deadline) -> CarrierReport:
+        predecessor = self._database.operations.inspect(OperationScope(OperationResourceKind.VM, "download-vm"))
+        assert predecessor is not None
+        rows = self._database.operations.list_lifecycle_obligations(predecessor.ownership)
+        assert len(rows) == 1 and rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+        call = decode_file_call_obligation(rows[0].payload)
+        assert call.family is FileCallFamily.DOWNLOAD and call.token is not None
+        carrier = (
+            _CrashAfterActualCarrier(self._journal_path, call.token)
+            if self._blocked
+            else _RecordedExitCarrier(self._journal_path, call.token)
+        )
+        return carrier.execute(invocation, io=io, deadline=deadline)
+
+
 def _start_ticks() -> str:
     return _proc_start_ticks(Path("/proc/self/stat").read_text(encoding="ascii"))
 
@@ -179,7 +205,7 @@ def _recorded_helper_is_gone(pid: int, start_ticks: str) -> bool:
     return current_ticks != start_ticks
 
 
-def _drain_records_from_journal(path: Path) -> tuple[_LocalHelperDrainRecord, ...]:
+def _drain_records_from_journal(path: Path, token: bytes | None = None) -> tuple[_LocalHelperDrainRecord, ...]:
     records = [json.loads(line) for line in path.read_text(encoding="ascii").splitlines()]
     expected = [record for record in records if record.get("kind") == "expected"]
     actual = [record for record in records if record.get("kind") == "actual"]
@@ -187,6 +213,8 @@ def _drain_records_from_journal(path: Path) -> tuple[_LocalHelperDrainRecord, ..
     actual_keys = Counter((record.get("nonce"), record.get("operation"), record.get("token")) for record in actual)
     if not expected or expected_keys != actual_keys or any(count != 1 for count in expected_keys.values()):
         raise ValueError("local helper journal has incomplete expected/start coverage")
+    if token is not None and any(record.get("token") != token.hex() for record in records):
+        raise ValueError("local helper journal does not cover the retained DOWNLOAD token")
     result = []
     for record in actual:
         pid = record.get("pid")
@@ -251,18 +279,18 @@ def _crash_controller_after_completed_snapshot(
     database = Database(Path(database_path))
     target = _target()
     plan = _plan()
-    owner, call, _ = _possible_download(database, Path(root_path), target, plan)
-    snapshot_begin(
-        _RecordedExitCarrier(journal_path, call.token or b""),
+    owner = _owner(database)
+    operation = FileOperation(owner, target)
+    operation.download(
+        _OriginatingDownloadCarrier(database, journal_path, blocked=False),
         trusted_root_path=str(root_path),
         relative_path="source",
+        sink=BytesSink(),
         max_bytes=1024,
-        token=call.token or b"",
         plan=plan,
         deadline=Deadline.after(30),
-        runtime_selection=call.runtime_selection,
+        runtime_selection=runtime_selection(sys.executable),
     )
-    del owner
     os._exit(92)
 
 
@@ -283,18 +311,18 @@ def _crash_controller_with_blocked_snapshot(
     database = Database(Path(database_path))
     target = _target()
     plan = _plan()
-    owner, call, _ = _possible_download(database, Path(root_path), target, plan)
-    snapshot_begin(
-        _CrashAfterActualCarrier(journal_path, call.token or b""),
+    owner = _owner(database)
+    operation = FileOperation(owner, target)
+    operation.download(
+        _OriginatingDownloadCarrier(database, journal_path, blocked=True),
         trusted_root_path=str(root_path),
         relative_path="source",
+        sink=BytesSink(),
         max_bytes=1024,
-        token=call.token or b"",
         plan=plan,
         deadline=Deadline.after(30),
-        runtime_selection=call.runtime_selection,
+        runtime_selection=runtime_selection(sys.executable),
     )
-    del owner
     os._exit(95)
 
 
@@ -486,6 +514,9 @@ def test_spawned_controller_loss_after_helper_completion_keeps_download_recovera
         assert predecessor is not None
         persisted = database.operations.list_lifecycle_obligations(predecessor.ownership)[0]
         call = decode_file_call_obligation(persisted.payload)
+        assert persisted.state is LifecycleObligationState.POSSIBLE_EFFECT
+        assert call.family is FileCallFamily.DOWNLOAD and call.token is not None
+        assert len(_drain_records_from_journal(journal_path, call.token)) == len(drain_records)
         recovered = OperationOwner.recover(database.operations, predecessor.ownership, "b" * 32)
         evidence = _local_drain_evidence(
             recovered.ownership,
@@ -533,6 +564,9 @@ def test_spawned_live_helper_blocks_download_recovery_until_it_disappears(tmp_pa
         assert predecessor is not None
         persisted = database.operations.list_lifecycle_obligations(predecessor.ownership)[0]
         call = decode_file_call_obligation(persisted.payload)
+        assert persisted.state is LifecycleObligationState.POSSIBLE_EFFECT
+        assert call.family is FileCallFamily.DOWNLOAD and call.token is not None
+        assert len(_drain_records_from_journal(journal_path, call.token)) == len(drain_records)
         recovered = OperationOwner.recover(database.operations, predecessor.ownership, "b" * 32)
         with pytest.raises(ValueError):
             _local_drain_evidence(recovered.ownership, persisted, call, drain_records)
