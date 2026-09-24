@@ -308,14 +308,18 @@ job reference or RunContext surface.
 `_managed_job_protocol.py` defines private canonical version-one target facts for a future
 persistent job service. A bounded launch fact contains the exact `ManagedRunReceipt`; independent
 wait, stdout/stderr end and positive boundary-empty facts bind the run and derived unit to the
-SHA-256 of that launch fact. A stream-end fact commits the retained prefix length and digest and
-states whether output was complete or truncated. Its spool is closed; an absent fact says nothing.
-The codec validates untrusted bytes and contains no output bytes or application input. It does not
-write a store, launch or observe a workload, or make jobs available. The intended store is a
-protected boot-local per-run directory of immutable create-once facts and bounded output spools. The
-first service slice is limited to independent lifetime until operation-owner liveness and cleanup
-are proved. Later fixed start, observe, read-output, stop and dispose operations must work over both
-SSH and QGA.
+SHA-256 of that launch fact. A stream-end fact commits the retained length and digest and one closed
+disposition: complete capture, truncated capture, intentional discard or sensitivity suppression.
+Only capture has a spool; its end fact closes it. Discard and suppression retain zero bytes with the
+empty SHA-256. An absent fact says nothing. The codec validates untrusted bytes and contains no
+output bytes or application input. It does not write a store, launch or observe a workload, or make
+jobs available. The intended store is a protected boot-local per-run directory of immutable
+create-once facts and bounded output spools. The first service slice is limited to independent
+lifetime until operation-owner liveness and cleanup are proved. Later fixed start, observe,
+read-output, stop and dispose operations must work over both SSH and QGA. The first consuming
+service must persist and compare requested output policy; this self-describing fact alone does not
+prove policy fulfillment. Its target producer needs one Bookworm-Python-3.11-compatible
+definition/source, with exact parity to this host codec proved when it lands.
 
 ## Input accounting
 

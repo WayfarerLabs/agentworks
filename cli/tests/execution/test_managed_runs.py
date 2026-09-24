@@ -312,6 +312,13 @@ def test_absence_target_mismatch_and_receipt_version_mismatch_fail_closed(tmp_pa
     database.close()
 
 
+@pytest.mark.parametrize("field", ["managed_profile_revision", "receipt_protocol_version"])
+@pytest.mark.parametrize("value", [True, 1.0])
+def test_spec_revisions_require_exact_integer_types(field: str, value: object) -> None:
+    with pytest.raises(ValidationError):
+        replace(_spec(), **{field: value})
+
+
 def test_shell_owner_and_lifetime_receipt_mismatch_refuse_without_new_dispatch(tmp_path: Path) -> None:
     database = Database(tmp_path / "state.db")
     repository, reserved = _reserve(database)

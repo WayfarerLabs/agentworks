@@ -186,12 +186,14 @@ incarnation/boot, workload UID/GID/groups, requested and resolved shell identity
 profile revision, receipt namespace and receipt protocol. The target-side service must write this
 fact only after the workload boundary is realized. A `wait` fact records exactly one main-process
 exit code or terminating signal. Each `stream-end` fact identifies stdout or stderr, the length and
-SHA-256 of its retained bytes, and whether retention is `complete` or `truncated`. The stream fact
-means its spool is closed and will not grow. Retained bytes are an initial prefix; truncated means
-at least one produced byte was omitted, including when the retained prefix is empty. A
-`boundary-empty` fact is positive evidence for the exact owned workload boundary. These four kinds
-are independent: main-process wait does not imply either stream ended or boundary emptiness, and a
-closed stream does not imply wait or emptiness. A missing fact is unknown, never negative evidence.
+SHA-256 of retained bytes, and one closed disposition: `complete-capture`, `truncated-capture`,
+`discarded` or `sensitivity-suppressed`. Only capture has a spool, and its end fact means that spool
+is closed and will not grow. Retained capture bytes are an initial prefix; truncated capture means
+at least one produced byte was omitted, including when the retained prefix is empty. Discard and
+sensitivity suppression retain zero bytes and the SHA-256 of empty bytes. A `boundary-empty` fact is
+positive evidence for the exact owned workload boundary. These four kinds are independent:
+main-process wait does not imply either stream ended or boundary emptiness, and a closed stream does
+not imply wait or emptiness. A missing fact is unknown, never negative evidence.
 
 Every post-launch fact carries the exact run ID, derived unit and SHA-256 of the canonical launch
 fact. Consumers must compare that binding to the validated launch fact and to the expected
@@ -204,11 +206,17 @@ bounded path inherited from `ManagedRunSpec`.
 
 The future target-side store uses a protected boot-local directory for each run. Its launch, wait,
 stdout-end, stderr-end and boundary-empty facts are each created once and immutable. Bounded stdout
-and stderr spools are written by the target-side owner, then closed before their corresponding end
-facts are published. Fact creation uses atomic create-once publication; an existing fact is read and
-compared rather than overwritten. No shared mutable state file or file-level lock is part of this
-protocol. The store, its permissions, producer ordering and crash recovery remain to be implemented
-and proved.
+and stderr capture spools are written by the target-side owner, then closed before their
+corresponding end facts are published. Discard and sensitivity suppression publish no spool. Fact
+creation uses atomic create-once publication; an existing fact is read and compared rather than
+overwritten. No shared mutable state file or file-level lock is part of this protocol. The store,
+its permissions, producer ordering and crash recovery remain to be implemented and proved.
+
+The stream fact is self-describing. The first consuming service must persist and compare the
+requested output policy before treating its disposition as fulfillment; this checkpoint adds no
+unused database field or migration. The immediate target service needs one
+Bookworm-Python-3.11-compatible producer definition/source for these facts, with exact parity to
+this host-side codec proved when that producer lands, not a second hand-maintained codec.
 
 The first private end-to-end managed-job slice may enable only `INDEPENDENT`, whose target-owned
 evidence survives observer loss. `OPERATION` must refuse before dispatch until target-side owner

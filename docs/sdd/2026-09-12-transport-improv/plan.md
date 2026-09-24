@@ -1253,11 +1253,13 @@ connection and trust only. Before broader lifecycle implementation, complete the
       wiring, lease, stop/disposal, public job/RunContext surface or session backfill.
 - [x] Define and test the private bounded target-side managed-job fact protocol. Canonical
       version-one launch, main-process wait, separate stdout/stderr end and positive boundary-empty
-      facts carry exact run/unit and launch-receipt digest binding. Closed retention records the
-      retained prefix length, digest and complete/truncated status; missing facts remain unknown.
-      The LLD specifies immutable create-once facts in a protected boot-local per-run directory and
-      sequences the first service slice to independent lifetime. Store, target service, operation
-      lease/cleanup, carrier proof, public jobs and live lifecycle validation remain open.
+      facts carry exact run/unit and launch-receipt digest binding. One closed-stream disposition
+      distinguishes complete/truncated capture, discard and sensitivity suppression, with retained
+      length and digest; missing facts remain unknown. The LLD specifies immutable create-once facts
+      in a protected boot-local per-run directory and sequences the first service slice to
+      independent lifetime. Store, target service, operation lease/cleanup, requested-policy
+      persistence/comparison, target-producer parity, carrier proof, public jobs and live lifecycle
+      validation remain open.
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared
       create bootstrap. Migration 41 leaves legacy rows NULL; ordinary existing-VM operations never

@@ -201,11 +201,14 @@ class ManagedRunSpec:
         )
         if self.owner.kind is not expected_owner:
             raise ValidationError("Managed run lifetime does not match its owner kind")
-        if self.managed_profile_revision != MANAGED_PROFILE_REVISION:
+        if type(self.managed_profile_revision) is not int or self.managed_profile_revision != MANAGED_PROFILE_REVISION:
             raise ValidationError("Managed run profile revision is unsupported")
         if self.receipt_namespace != MANAGED_RECEIPT_NAMESPACE:
             raise ValidationError("Managed run receipt namespace is unsupported")
-        if self.receipt_protocol_version != MANAGED_RECEIPT_PROTOCOL_VERSION:
+        if (
+            type(self.receipt_protocol_version) is not int
+            or self.receipt_protocol_version != MANAGED_RECEIPT_PROTOCOL_VERSION
+        ):
             raise ValidationError("Managed run receipt protocol is unsupported")
 
 

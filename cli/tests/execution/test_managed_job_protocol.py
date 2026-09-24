@@ -13,9 +13,9 @@ from agentworks.execution._managed_job_protocol import (
     MAX_MANAGED_JOB_FACT_BYTES,
     BoundaryEmptyFact,
     ManagedJobFactError,
+    StreamDisposition,
     StreamEndFact,
     StreamName,
-    StreamRetention,
     WorkloadWaitFact,
     decode_managed_job_fact,
     encode_managed_job_fact,
@@ -70,7 +70,7 @@ def _facts() -> tuple[ManagedRunReceipt | WorkloadWaitFact | StreamEndFact | Bou
             StreamName.STDOUT,
             3,
             hashlib.sha256(b"abc").hexdigest(),
-            StreamRetention.COMPLETE,
+            StreamDisposition.COMPLETE_CAPTURE,
         ),
         StreamEndFact(
             receipt.identity,
@@ -79,9 +79,27 @@ def _facts() -> tuple[ManagedRunReceipt | WorkloadWaitFact | StreamEndFact | Bou
             StreamName.STDERR,
             0,
             hashlib.sha256(b"").hexdigest(),
-            StreamRetention.TRUNCATED,
+            StreamDisposition.TRUNCATED_CAPTURE,
         ),
         BoundaryEmptyFact(receipt.identity, receipt.unit_name, digest),
+        StreamEndFact(
+            receipt.identity,
+            receipt.unit_name,
+            digest,
+            StreamName.STDOUT,
+            0,
+            hashlib.sha256(b"").hexdigest(),
+            StreamDisposition.DISCARDED,
+        ),
+        StreamEndFact(
+            receipt.identity,
+            receipt.unit_name,
+            digest,
+            StreamName.STDERR,
+            0,
+            hashlib.sha256(b"").hexdigest(),
+            StreamDisposition.SUPPRESSED,
+        ),
     )
 
 
@@ -95,9 +113,9 @@ def test_each_fact_roundtrips_canonically_within_bound(fact: object) -> None:
 
 
 def test_post_launch_facts_bind_exact_receipt_and_independent_observations() -> None:
-    receipt, wait, _signal, stdout, stderr, empty = _facts()
+    receipt, wait, _signal, stdout, stderr, empty, discarded, suppressed = _facts()
     assert isinstance(receipt, ManagedRunReceipt)
-    for fact in (wait, stdout, stderr, empty):
+    for fact in (wait, stdout, stderr, empty, discarded, suppressed):
         assert fact_matches_receipt(fact, receipt)
         assert not fact_matches_receipt(
             fact, replace(receipt, spec=replace(receipt.spec, shell=ManagedShellIdentity(None, None)))
@@ -106,8 +124,12 @@ def test_post_launch_facts_bind_exact_receipt_and_independent_observations() -> 
     assert isinstance(stdout, StreamEndFact)
     assert isinstance(stderr, StreamEndFact)
     assert isinstance(empty, BoundaryEmptyFact)
-    assert stdout.retention is StreamRetention.COMPLETE
-    assert stderr.retention is StreamRetention.TRUNCATED
+    assert stdout.disposition is StreamDisposition.COMPLETE_CAPTURE
+    assert stderr.disposition is StreamDisposition.TRUNCATED_CAPTURE
+    assert isinstance(discarded, StreamEndFact)
+    assert isinstance(suppressed, StreamEndFact)
+    assert discarded.disposition is StreamDisposition.DISCARDED
+    assert suppressed.disposition is StreamDisposition.SUPPRESSED
     assert wait.exit_code == 0
 
 
@@ -136,13 +158,13 @@ def test_wait_rejects_malformed_or_contradictory_fields(field: str, replacement:
     ("field", "replacement"),
     [
         ("stream", "stdin"),
-        ("retention", "open"),
+        ("disposition", "open"),
         ("retained_bytes", True),
         ("retained_bytes", -1),
         ("retained_sha256", "x" * 64),
     ],
 )
-def test_stream_rejects_invalid_closed_retention(field: str, replacement: object) -> None:
+def test_stream_rejects_invalid_closed_disposition(field: str, replacement: object) -> None:
     value = json.loads(encode_managed_job_fact(_facts()[3]))
     value[field] = replacement
     with pytest.raises(ManagedJobFactError):
@@ -156,7 +178,25 @@ def test_zero_length_stream_requires_empty_digest() -> None:
         decode_managed_job_fact(_wire(value))
 
 
-@pytest.mark.parametrize("change", ["missing", "extra", "duplicate", "noisy", "space", "noncanonical_int", "oversize"])
+@pytest.mark.parametrize("fact_index", [6, 7])
+@pytest.mark.parametrize("field", ["retained_bytes", "retained_sha256"])
+def test_discard_and_suppression_cannot_claim_retained_bytes(fact_index: int, field: str) -> None:
+    value = json.loads(encode_managed_job_fact(_facts()[fact_index]))
+    value[field] = 1 if field == "retained_bytes" else hashlib.sha256(b"x").hexdigest()
+    with pytest.raises(ManagedJobFactError):
+        decode_managed_job_fact(_wire(value))
+
+
+def test_old_ambiguous_retention_field_is_not_accepted() -> None:
+    value = json.loads(encode_managed_job_fact(_facts()[3]))
+    value["retention"] = "complete"
+    with pytest.raises(ManagedJobFactError):
+        decode_managed_job_fact(_wire(value))
+
+
+@pytest.mark.parametrize(
+    "change", ["missing", "extra", "duplicate", "duplicate_same", "noisy", "space", "noncanonical_int", "oversize"]
+)
 def test_wire_rejects_noncanonical_or_boundedness_violation(change: str) -> None:
     encoded = encode_managed_job_fact(_facts()[5])
     value = json.loads(encoded)
@@ -168,6 +208,8 @@ def test_wire_rejects_noncanonical_or_boundedness_violation(change: str) -> None
         candidate = _wire(value)
     elif change == "duplicate":
         candidate = encoded[:-1] + b',"unit":"duplicate"}'
+    elif change == "duplicate_same":
+        candidate = encoded[:-1] + b',"version":1}'
     elif change == "noisy":
         candidate = encoded + b"\nnoise"
     elif change == "space":

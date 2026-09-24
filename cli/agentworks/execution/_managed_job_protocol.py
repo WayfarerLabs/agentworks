@@ -59,9 +59,13 @@ class StreamName(StrEnum):
     STDERR = "stderr"
 
 
-class StreamRetention(StrEnum):
-    COMPLETE = "complete"
-    TRUNCATED = "truncated"
+class StreamDisposition(StrEnum):
+    """Closed stream outcome; only capture outcomes have a retained spool."""
+
+    COMPLETE_CAPTURE = "complete-capture"
+    TRUNCATED_CAPTURE = "truncated-capture"
+    DISCARDED = "discarded"
+    SUPPRESSED = "sensitivity-suppressed"
 
 
 def _identity(run: ManagedRunIdentity, unit: str, receipt_sha256: str) -> None:
@@ -97,7 +101,7 @@ class WorkloadWaitFact:
 
 @dataclass(frozen=True, slots=True)
 class StreamEndFact:
-    """One closed output spool's retained prefix and completeness status."""
+    """One terminal stream with a disposition and retained-byte evidence."""
 
     identity: ManagedRunIdentity
     unit_name: str
@@ -105,18 +109,22 @@ class StreamEndFact:
     stream: StreamName
     retained_bytes: int
     retained_sha256: str
-    retention: StreamRetention
+    disposition: StreamDisposition
 
     def __post_init__(self) -> None:
         _identity(self.identity, self.unit_name, self.receipt_sha256)
-        if type(self.stream) is not StreamName or type(self.retention) is not StreamRetention:
-            raise ManagedJobFactError("invalid stream or retention status")
+        if type(self.stream) is not StreamName or type(self.disposition) is not StreamDisposition:
+            raise ManagedJobFactError("invalid stream or disposition")
         if type(self.retained_bytes) is not int or not 0 <= self.retained_bytes <= 2**63 - 1:
             raise ManagedJobFactError("invalid retained byte length")
         if type(self.retained_sha256) is not str or _HASH.fullmatch(self.retained_sha256) is None:
             raise ManagedJobFactError("invalid retained byte digest")
         if self.retained_bytes == 0 and self.retained_sha256 != _EMPTY_HASH:
-            raise ManagedJobFactError("empty retention has an inconsistent digest")
+            raise ManagedJobFactError("empty retained bytes have an inconsistent digest")
+        if self.disposition in (StreamDisposition.DISCARDED, StreamDisposition.SUPPRESSED) and (
+            self.retained_bytes != 0 or self.retained_sha256 != _EMPTY_HASH
+        ):
+            raise ManagedJobFactError("non-capture stream cannot retain output")
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,19 +144,6 @@ type ManagedJobFact = ManagedRunReceipt | WorkloadWaitFact | StreamEndFact | Bou
 
 def _json_bytes(value: object) -> bytes:
     return json.dumps(value, allow_nan=False, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("ascii")
-
-
-def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError
-        result[key] = value
-    return result
-
-
-def _reject_constant(_value: str) -> None:
-    raise ValueError
 
 
 def _object(value: object, fields: frozenset[str]) -> dict[str, Any]:
@@ -207,7 +202,7 @@ def encode_managed_job_fact(fact: ManagedJobFact) -> bytes:
                     "stream": fact.stream.value,
                     "retained_bytes": fact.retained_bytes,
                     "retained_sha256": fact.retained_sha256,
-                    "retention": fact.retention.value,
+                    "disposition": fact.disposition.value,
                 }
             )
         else:
@@ -270,8 +265,8 @@ def decode_managed_job_fact(data: bytes) -> ManagedJobFact:
     if type(data) is not bytes or len(data) > MAX_MANAGED_JOB_FACT_BYTES:
         raise ManagedJobFactError("invalid managed-job fact bytes")
     try:
-        value = json.loads(data.decode("ascii"), object_pairs_hook=_unique_object, parse_constant=_reject_constant)
-        if type(value) is not dict or _json_bytes(value) != data:
+        value = json.loads(data.decode("ascii"))
+        if type(value) is not dict:
             raise ValueError
         if type(value.get("version")) is not int or value["version"] != _VERSION or type(value.get("kind")) is not str:
             raise ValueError
@@ -287,7 +282,7 @@ def decode_managed_job_fact(data: bytes) -> ManagedJobFact:
                 _object(value, common | {"exit_code", "signal"})
                 fact = WorkloadWaitFact(run, unit, digest, value["exit_code"], value["signal"])
             elif kind == "stream-end":
-                _object(value, common | {"stream", "retained_bytes", "retained_sha256", "retention"})
+                _object(value, common | {"stream", "retained_bytes", "retained_sha256", "disposition"})
                 fact = StreamEndFact(
                     run,
                     unit,
@@ -295,7 +290,7 @@ def decode_managed_job_fact(data: bytes) -> ManagedJobFact:
                     StreamName(value["stream"]),
                     value["retained_bytes"],
                     value["retained_sha256"],
-                    StreamRetention(value["retention"]),
+                    StreamDisposition(value["disposition"]),
                 )
             elif kind == "boundary-empty":
                 _object(value, common)
