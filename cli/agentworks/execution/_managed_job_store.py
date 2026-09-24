@@ -16,6 +16,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from . import _managed_job_request as request_wire
 from . import _managed_job_wire as wire
 
 if TYPE_CHECKING:
@@ -32,6 +33,14 @@ class FactName(StrEnum):
     STDOUT_END = "stdout-end"
     STDERR_END = "stderr-end"
     BOUNDARY_EMPTY = "boundary-empty"
+
+
+class RequestAsset(StrEnum):
+    LAUNCH = "request-launch"
+    CONTROL = "request-control"
+    ENVIRONMENT = "request-environment"
+    SOURCE = "request-source"
+    STDIN = "request-stdin"
 
 
 class Stream(StrEnum):
@@ -61,6 +70,13 @@ _KIND = {
     FactName.STDOUT_END: "stream-end",
     FactName.STDERR_END: "stream-end",
     FactName.BOUNDARY_EMPTY: "boundary-empty",
+}
+_REQUEST_BOUNDS = {
+    RequestAsset.LAUNCH: request_wire.MAX_LAUNCH_BYTES,
+    RequestAsset.CONTROL: request_wire.MAX_CONTROL_BYTES,
+    RequestAsset.ENVIRONMENT: request_wire.MAX_ENVIRONMENT_BYTES,
+    RequestAsset.SOURCE: request_wire.MAX_SOURCE_BYTES,
+    RequestAsset.STDIN: request_wire.MAX_STDIN_BYTES,
 }
 
 
@@ -266,6 +282,103 @@ class ManagedJobStore:
                 os.fsync(directory)
         finally:
             os.close(directory)
+
+    def read_request_asset(self, name: RequestAsset) -> bytes | None:
+        """Read one protected fixed leaf without treating absence as evidence."""
+        if type(name) is not RequestAsset:
+            raise StoreError("invalid request asset name")
+        directory = self._run_dir(create=False)
+        if directory is None:
+            return None
+        try:
+            fd = _open_leaf(directory, name.value, 0o400, self._owner_uid, links=(1,))
+            if fd is None:
+                return None
+            try:
+                return _read_all(fd, _REQUEST_BOUNDS[name])
+            finally:
+                os.close(fd)
+        finally:
+            os.close(directory)
+
+    def publish_request_asset(self, name: RequestAsset, data: bytes) -> None:
+        """Publish a fixed, create-once request leaf with byte-exact reconciliation."""
+        if type(name) is not RequestAsset or type(data) is not bytes or len(data) > _REQUEST_BOUNDS[name]:
+            raise StoreError("invalid request asset")
+        if name is RequestAsset.LAUNCH:
+            try:
+                launch = request_wire.decode_request_launch(data)
+            except request_wire.RequestError:
+                raise StoreError("invalid request launch") from None
+            if launch["run_id"] != self.run_id:
+                raise StoreError("wrong request run identity")
+        elif name is RequestAsset.CONTROL:
+            try:
+                control = request_wire.decode_control(data)
+            except request_wire.RequestError:
+                raise StoreError("invalid request control") from None
+            if control.get("run_id") != self.run_id:
+                raise StoreError("wrong request run identity")
+        elif name is RequestAsset.ENVIRONMENT:
+            try:
+                request_wire.decode_environment(data)
+            except request_wire.RequestError:
+                raise StoreError("invalid request environment") from None
+        directory = self._run_dir(create=True)
+        assert directory is not None
+        stage = ".request-stage-" + uuid4().hex
+        try:
+            existing = self.read_request_asset(name)
+            if existing is not None:
+                if existing != data:
+                    raise StoreError("conflicting request asset")
+                return
+            fd = os.open(stage, _CREATE_FLAGS, 0o400, dir_fd=directory)
+            try:
+                os.fchmod(fd, 0o400)
+                _safe_stat(fd, 0o400, self._owner_uid, links=(1,))
+                _write_all(fd, data)
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            try:
+                os.link(stage, name.value, src_dir_fd=directory, dst_dir_fd=directory, follow_symlinks=False)
+                os.fsync(directory)
+            except FileExistsError:
+                existing = self.read_request_asset(name)
+                if existing != data:
+                    raise StoreError("conflicting request asset") from None
+            finally:
+                os.unlink(stage, dir_fd=directory)
+                os.fsync(directory)
+        finally:
+            os.close(directory)
+
+    def publish_request(self, request: request_wire.ManagedJobRequest) -> None:
+        """Validate the entire request before publishing any asset."""
+        try:
+            assets = request_wire.encode_request(request)
+        except request_wire.RequestError:
+            raise StoreError("invalid managed request") from None
+        if request_wire.decode_request_launch(request.launch)["run_id"] != self.run_id:
+            raise StoreError("wrong request run identity")
+        for name in RequestAsset:
+            self.publish_request_asset(name, assets[name.value])
+
+    def read_request(self) -> request_wire.ManagedJobRequest | None:
+        """Only a complete validated set is consumable; partial sets refuse."""
+        assets = {name.value: self.read_request_asset(name) for name in RequestAsset}
+        if all(value is None for value in assets.values()):
+            return None
+        if any(value is None for value in assets.values()):
+            raise StoreError("incomplete managed request")
+        try:
+            request = request_wire.decode_request(assets)  # type: ignore[arg-type]
+        except request_wire.RequestError:
+            raise StoreError("invalid managed request") from None
+        if request_wire.decode_request_launch(request.launch)["run_id"] != self.run_id:
+            raise StoreError("wrong request run identity")
+        return request
 
     def capture_prefix(self, stream: Stream, limit: int, chunks: Iterable[bytes]) -> CapturedPrefix:
         if type(stream) is not Stream or type(limit) is not int or not 0 <= limit <= wire.MAX_CAPTURE_PREFIX_BYTES_V1:

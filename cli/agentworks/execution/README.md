@@ -335,6 +335,18 @@ proved. Later fixed start, observe, read-output, stop and dispose operations mus
 and QGA. The target controller, cgroup/systemd launch, carrier proof and live validation remain
 open.
 
+`_managed_job_request.py` defines the separate private request assets for that independent slice.
+The five fixed root-owned, mode-0400 leaves are `request-launch`, `request-control`,
+`request-environment`, `request-source` and `request-stdin`. Control is canonical ASCII JSON binding
+the run, command or script shape, literal command arguments, working directory, output policy, and
+each payload's byte length and SHA-256. Environment has a separate canonical encoding; source and
+stdin retain their exact bytes. Control is capped at 32 KiB, environment at 64 KiB, and source and
+stdin at 16 MiB each. The store accepts identical bytes on retry and refuses conflicting or unsafe
+leaves. A partial set is not a consumable request; no absent request asset proves launch or absence
+of launch. The request codec validates the complete canonical launch fact and requires an independent
+resource owner, a noninteractive shell, and a supported command or script shape before use. These
+request bytes are never bundle source, systemd arguments, environment, or journal content.
+
 ## Input accounting
 
 The 262,144-byte preparation bound applies to the complete encoded envelope, not raw application
