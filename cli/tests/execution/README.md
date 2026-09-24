@@ -3,11 +3,11 @@
 `wsl_unc_hold_probe.py` is a native Windows experiment for an existing disposable WSL2 distro. It
 requires the distro to be stopped, an exact matching `--target` and `--confirm-target`, its actual
 `--idle-seconds`, and a total `--budget-seconds`. Supply `--unrelated` only for a second installed
-distro that is already running. The probe derives a hold duration of three idle timeouts and opens
-only `/etc/os-release` through both WSL UNC aliases. It first measures whether the target stops
-without an open handle, then measures retention and release. It uses fixed `/bin/true` for starts
-and terminates only the confirmed target. JSON Lines report bounded observations and cleanup; the
-final strict dispatch drain conclusion is always `UNKNOWN`.
+distro that is already running. The probe selects a hold duration of at least three idle timeouts
+and three times the measured no-handle stop interval. It opens only `/etc/os-release` through both
+WSL UNC aliases, then measures retention and release. It uses fixed `/bin/true` for starts and
+terminates only the confirmed target. JSON Lines report bounded observations and cleanup; the final
+strict dispatch drain conclusion is always `UNKNOWN`.
 
 Run local checks from `cli/`:
 

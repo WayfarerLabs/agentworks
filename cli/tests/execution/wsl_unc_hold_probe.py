@@ -31,7 +31,7 @@ State = Literal["PASS", "FAIL", "UNKNOWN"]
 
 def _distro(value: str) -> str:
     """Validate operator input before it reaches a Windows path or WSL argv."""
-    if _DISTRO.fullmatch(value) is None or value in {".", ".."}:
+    if _DISTRO.fullmatch(value) is None:
         raise ValueError("distro names must be 1-80 safe ASCII characters")
     return value
 
@@ -177,25 +177,38 @@ class WslProbe:
         if status.matched is not True:
             raise ProbeError("target could not be confirmed stopped after exact termination")
 
-    def cleanup(self) -> tuple[bool, bool, bool | None]:
+    def cleanup(self) -> tuple[bool | None, bool, bool | None, KeyboardInterrupt | None, str | None]:
         """Reap holders and report the immediate post-termination target state."""
         holder_error = False
+        interrupted: KeyboardInterrupt | None = None
         for holder in self.holders:
             try:
                 holder.close(self.settings.open_seconds)
+            except KeyboardInterrupt as exc:
+                holder_error = True
+                if interrupted is None:
+                    interrupted = exc
             except (ProbeError, OSError, subprocess.TimeoutExpired):
                 holder_error = True
         self.holders.clear()
-        self._wsl("--terminate", self.settings.target, timeout=self.settings.open_seconds, cleanup=True)
-        result = self._wsl("--list", "--running", "--quiet", timeout=self.settings.open_seconds, cleanup=True)
-        if result.returncode != 0:
-            raise ProbeError(f"final target observation returned {result.returncode}")
+        error: str | None = None
         try:
+            terminated = self._wsl(
+                "--terminate", self.settings.target, timeout=self.settings.open_seconds, cleanup=True
+            )
+            if terminated.returncode != 0:
+                error = f"target termination returned {terminated.returncode}"
+        except ProbeError as exc:
+            error = str(exc)[:240]
+        try:
+            result = self._wsl("--list", "--running", "--quiet", timeout=self.settings.open_seconds, cleanup=True)
+            if result.returncode != 0:
+                raise ProbeError(f"final target observation returned {result.returncode}")
             running = _decode_wsl(result.stdout)
             unrelated = self.settings.unrelated in running if self.settings.unrelated is not None else None
-            return self.settings.target not in running, not holder_error, unrelated
-        except UnicodeError as exc:
-            raise ProbeError("final target observation encoding could not be decoded") from exc
+            return self.settings.target not in running, not holder_error, unrelated, interrupted, error
+        except (ProbeError, UnicodeError) as exc:
+            return None, not holder_error, None, interrupted, error or str(exc)[:240]
 
     def observe(self, distro: str, expected: bool, seconds: float, *, throughout: bool = False) -> Observation:
         start = time.monotonic()
@@ -226,7 +239,6 @@ class Holder:
     """One independent Windows process with one read-only file handle."""
 
     def __init__(self, share: str, target: str) -> None:
-        _unc_path(share, target)
         self.events: queue.SimpleQueue[str] = queue.SimpleQueue()
         self.process = subprocess.Popen(
             [sys.executable, "-I", "-S", "-B", str(Path(__file__).resolve()), "_hold", share, target],
@@ -348,25 +360,25 @@ def _cold(probe: WslProbe, share: str) -> State:
     return state
 
 
-def _baseline(probe: WslProbe) -> State:
+def _baseline(probe: WslProbe) -> Observation:
     probe.start()
     stopped = probe.observe(probe.settings.target, False, probe.settings.release_seconds)
     state: State = "PASS" if stopped.matched is True else "UNKNOWN"
     _emit("baseline_no_handle", state, stopped=stopped.matched, observed_seconds=stopped.elapsed_seconds)
-    return state
+    return stopped
 
 
-def _retention(probe: WslProbe, *, two: bool) -> None:
+def _retention(probe: WslProbe, *, two: bool, seconds: float) -> None:
     case = "two_holders" if two else "hold_and_close"
     probe.start()
     holders = [probe.new_holder("wsl$") for _ in range(2 if two else 1)]
     opened = [holder.opened(probe.remaining(probe.settings.open_seconds)) for holder in holders]
     if not all(value is True for value in opened):
-        _emit(case, "UNKNOWN", opened=opened)
+        _emit(case, "UNKNOWN", opened=opened, selected_hold_seconds=seconds)
         return
     if two:
         holders[0].close(probe.settings.open_seconds)
-    held = probe.observe(probe.settings.target, True, probe.settings.hold_seconds, throughout=True)
+    held = probe.observe(probe.settings.target, True, seconds, throughout=True)
     holders[-1].close(probe.settings.open_seconds)
     released = probe.observe(probe.settings.target, False, probe.settings.release_seconds)
     state: State = (
@@ -375,6 +387,7 @@ def _retention(probe: WslProbe, *, two: bool) -> None:
     _emit(
         case,
         state,
+        selected_hold_seconds=seconds,
         held_past_idle=held.matched,
         hold_observed_seconds=held.elapsed_seconds,
         stopped_after_close=released.matched,
@@ -469,7 +482,7 @@ def main(argv: list[str] | None = None) -> int:
             unrelated=settings.unrelated,
             unrelated_running=unrelated_running,
             idle_seconds=settings.idle_seconds,
-            hold_seconds=settings.hold_seconds,
+            minimum_hold_seconds=settings.hold_seconds,
             poll_seconds=settings.poll_seconds,
             release_seconds=settings.release_seconds,
         )
@@ -486,13 +499,15 @@ def main(argv: list[str] | None = None) -> int:
 
         phase = "baseline_no_handle"
         probe.reset()
-        if _baseline(probe) != "PASS":
+        baseline = _baseline(probe)
+        if baseline.matched is not True:
             _emit("hold_matrix", "UNKNOWN", reason="no-handle baseline did not stop")
             return 0
+        retention_seconds = max(settings.hold_seconds, 3 * baseline.elapsed_seconds)
 
         cases = (
-            ("hold_and_close", lambda runner: _retention(runner, two=False)),
-            ("two_holders", lambda runner: _retention(runner, two=True)),
+            ("hold_and_close", lambda runner: _retention(runner, two=False, seconds=retention_seconds)),
+            ("two_holders", lambda runner: _retention(runner, two=True, seconds=retention_seconds)),
             ("abrupt_holder_death", _abrupt),
             ("forced_terminate", _forced),
         )
@@ -505,14 +520,17 @@ def main(argv: list[str] | None = None) -> int:
         _emit(phase, "UNKNOWN", reason=str(exc)[:240])
         return 2
     finally:
+        cleanup_interrupt: KeyboardInterrupt | None = None
         if target_confirmed_stopped:
             try:
-                stopped, reaped, unrelated_after_cleanup = probe.cleanup()
+                stopped, reaped, unrelated_after_cleanup, cleanup_interrupt, cleanup_error = probe.cleanup()
                 _emit(
                     "cleanup",
-                    "PASS" if stopped and reaped else "UNKNOWN",
+                    "PASS" if stopped is True and reaped and cleanup_error is None else "UNKNOWN",
                     stopped_immediately=stopped,
                     holders_reaped=reaped,
+                    interrupted=cleanup_interrupt is not None,
+                    reason=cleanup_error,
                 )
                 if settings.unrelated is not None:
                     before = probe.unrelated_before_force
@@ -536,6 +554,8 @@ def main(argv: list[str] | None = None) -> int:
                 if settings.unrelated is not None:
                     _emit("unrelated_survival", "UNKNOWN", cleanup_observation=False)
         _emit("conclusion", "UNKNOWN", strict_dispatch_drain="not established by UNC handle observations")
+        if cleanup_interrupt is not None:
+            raise cleanup_interrupt
 
 
 if __name__ == "__main__":

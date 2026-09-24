@@ -163,25 +163,35 @@ def test_failed_reap_never_closes_live_reader_pipe() -> None:
     stdout.close.assert_not_called()
 
 
-def test_cleanup_attempts_exact_target_after_holder_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("failure", "termination_status"),
+    [(probe.ProbeError, 0), (KeyboardInterrupt, 1)],
+)
+def test_cleanup_continues_after_holder_failure(
+    monkeypatch: pytest.MonkeyPatch, failure: type[BaseException], termination_status: int
+) -> None:
     runner = probe.WslProbe(_settings(), "wsl.exe")
 
     class FailedHolder:
         def close(self, _: float) -> None:
-            raise probe.ProbeError("reader unsettled")
+            raise failure()
 
     runner.holders.append(FailedHolder())  # type: ignore[arg-type]
     commands: list[list[str]] = []
 
     def fake_run(argv: list[str], **_: Any) -> subprocess.CompletedProcess[bytes]:
         commands.append(argv)
-        return subprocess.CompletedProcess(argv, 0, stdout=b"")
+        return subprocess.CompletedProcess(argv, termination_status if "--terminate" in argv else 0, stdout=b"")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    stopped, reaped, unrelated = runner.cleanup()
+    stopped, reaped, unrelated, interrupted, error = runner.cleanup()
     assert stopped and not reaped and unrelated is None
-    assert commands[0] == ["wsl.exe", "--terminate", "AgwScratch"]
-    assert commands[1] == ["wsl.exe", "--list", "--running", "--quiet"]
+    assert isinstance(interrupted, KeyboardInterrupt) is (failure is KeyboardInterrupt)
+    assert (error is not None) is (termination_status != 0)
+    assert commands == [
+        ["wsl.exe", "--terminate", "AgwScratch"],
+        ["wsl.exe", "--list", "--running", "--quiet"],
+    ]
 
 
 def test_confirmation_precedes_any_wsl_command(
@@ -218,4 +228,58 @@ def test_running_target_is_not_terminated_by_refused_preflight(
     assert probe.main(_args()) == 2
     records = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert records[0]["state"] == "UNKNOWN"
+    assert records[-1]["case"] == "conclusion"
+
+
+class _MainProbe:
+    def __init__(self, settings: probe.Settings, _: str) -> None:
+        self.settings = settings
+        self.unrelated_before_force = None
+        self.unrelated_after_force = None
+
+    def listed(self, *, running: bool) -> set[str]:
+        assert not running
+        return {self.settings.target}
+
+    def require_stopped(self) -> None:
+        pass
+
+    def reset(self) -> None:
+        pass
+
+    def cleanup(self) -> tuple[bool, bool, None, KeyboardInterrupt | None, str | None]:
+        return True, True, None, None, None
+
+
+def test_retention_window_uses_measured_eight_second_baseline(monkeypatch: pytest.MonkeyPatch) -> None:
+    selected: list[float] = []
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(shutil, "which", lambda _: "wsl.exe")
+    monkeypatch.setattr(probe, "WslProbe", _MainProbe)
+    monkeypatch.setattr(probe, "_cold", lambda *_: "PASS")
+    monkeypatch.setattr(probe, "_baseline", lambda _: probe.Observation(True, 8.0))
+    monkeypatch.setattr(probe, "_retention", lambda _, *, two, seconds: selected.append(seconds))
+    monkeypatch.setattr(probe, "_abrupt", lambda _: None)
+    monkeypatch.setattr(probe, "_forced", lambda _: None)
+    assert probe.main(_args()) == 0
+    assert selected == [24.0, 24.0]
+    assert all(seconds > 8.0 for seconds in selected)
+
+
+def test_main_emits_cleanup_evidence_before_propagating_interrupt(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class InterruptedProbe(_MainProbe):
+        def cleanup(self) -> tuple[bool, bool, None, KeyboardInterrupt, str]:
+            return True, False, None, KeyboardInterrupt(), "target termination returned 1"
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(shutil, "which", lambda _: "wsl.exe")
+    monkeypatch.setattr(probe, "WslProbe", InterruptedProbe)
+    monkeypatch.setattr(probe, "_cold", lambda *_: "FAIL")
+    with pytest.raises(KeyboardInterrupt):
+        probe.main(_args())
+    records = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert records[-2]["case"] == "cleanup" and records[-2]["interrupted"] is True
+    assert records[-2]["state"] == "UNKNOWN"
     assert records[-1]["case"] == "conclusion"
