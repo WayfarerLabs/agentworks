@@ -188,10 +188,12 @@ The [implementation progress record](phase2-results.md) pins the completed indep
 local validation separately from the remaining shared integration and platform acceptance.
 
 Shared subprocess adoption introduces an implementation dependency on transport #833. Current
-integration uses `c92336e96e6a682888dc7b9cb7e1802ab65135d0`; completed records retain the pins they
+integration uses `bdaffc1388fff85ac05683f83648125faf2d7aea`; completed records retain the pins they
 validated. The
-[recovery-dispatch dependency update](phase2-results.md#recovery-dispatch-dependency-update) records
-the latest rebased SSH head and its scope. The
+[private-access dependency update](phase2-results.md#private-access-and-paired-plan-dependency-update)
+records the latest rebased SSH head and its scope. The preceding
+[recovery-dispatch dependency update](phase2-results.md#recovery-dispatch-dependency-update) retains
+its measured composition. The
 [file-custody adoption](phase2-results.md#durable-file-call-custody-adoption) records the
 managed-target binding and durable obligations in the SSH upload proof. The earlier
 [joint Windows/WSL2 report](phase2-results.md#joint-windowswsl2-mechanism-proof) retains its

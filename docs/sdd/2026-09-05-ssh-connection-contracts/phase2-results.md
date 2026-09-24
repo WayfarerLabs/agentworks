@@ -431,6 +431,33 @@ delivery, production RunContext/platform composition, creation/publication bindi
 remaining native acceptance gates stay open. This dependency adaptation consumes no public
 feedback/fix round and keeps #832 draft without a checkpoint or ready signal.
 
+## Private access and paired-plan dependency update
+
+Transport's
+[DIRECT access checkpoint](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-5810118686)
+at `b1ca9c8123d1991a9cbf64790f2edb072516e3cd` adds private, owned foreground access. Its
+[paired-plan checkpoint](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-5810504915)
+at `bdaffc1388fff85ac05683f83648125faf2d7aea` prepares ordinary and optional elevated identity plans
+under one owner and deadline. Neither checkpoint adds a public target, SSH carrier ABI, production
+factory, terminal endpoint or RunContext binding; there is no SSH adapter change to make yet.
+MANAGED jobs, permission enforcement and live destination elevation remain open in transport.
+
+All 75 SSH commits replay cleanly onto both checkpoints. The stable aggregate SSH patch ID is
+unchanged at `5dbf5a2ad18ff1cd39a88a44e9e77222dbcb3671` from the previously reviewed
+`c92336e9`-based head through the new `bdaffc13`-based head `12fe3cab8`. The combined tree on
+`b1ca9c81` passes **13,168 non-integration tests with 22 skips**. An earlier attempt lost its report
+to shared-host disk exhaustion; another had one unrelated two-second Git-credential reconciliation
+timeout, which passed immediately in isolation. The complete isolated rerun is green. Ruff, format,
+mypy across 1,108 sources, file lint, locked-SDD and Rulesync checks pass there.
+
+On `bdaffc13`, the changed target-plan and SSH selection passes **343 tests with 5 skips**; 23
+integration-marked cases are deselected. Ruff and format pass across 1,145 files, and mypy passes
+across 1,108 sources. The owned Linux loopback upload proof passes in 4.29 seconds, with no fixture
+sshd remaining; the exact temporary credentials and test directories were removed. This preserves
+the private file-delivery evidence, not a claim that the new production target or recovery route
+exists. Hosted SSH validation is recorded separately from these local results. #832 remains draft
+without a checkpoint or ready signal, and no public feedback/fix round is consumed.
+
 ## Recovery-dispatch dependency update
 
 Transport's
