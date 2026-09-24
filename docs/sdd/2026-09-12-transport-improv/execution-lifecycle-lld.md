@@ -1,6 +1,7 @@
 # Execution Lifecycle and Protection Profiles
 
-- Status: Proposed design, 2026-09-18; no lifecycle or containment implementation claimed.
+- Status: Proposed design, 2026-09-18; private mechanism and protocol checkpoints do not claim a
+  production lifecycle or containment implementation.
 - Governing direction: FRD operator rulings for [profiles](frd.md#operator-rulings-2026-09-18) and
   [staged permission activation](frd.md#operator-rulings-2026-09-19).
 - Public API: [execution contract](execution-contract.md); delivery: [plan](plan.md).
@@ -222,6 +223,77 @@ bundle tests prove byte round trips under Python 3.11 when installed. The target
 still needs to bundle those sources verbatim and prove them in its own launch and observation paths.
 Requested-policy persistence, protected store, cgroup/systemd launch, carrier proof and live
 validation remain open.
+
+### First private managed service
+
+The first production-shaped service slice is Linux-only, `MANAGED` and `INDEPENDENT`. It does not
+offer `OPERATION`, terminal attachment, live input/output, provisional output reads or a public job
+API. Those combinations refuse before dispatch. This is a sequencing limit, not a weaker public
+contract or an implicit downgrade. The existing no-staging DIRECT readiness path remains separate;
+an independent managed job necessarily hands finite request material to a target-owned service.
+
+The protected boot-local store is `/run/agentworks/managed-runs-v1/<run-id>/`. The namespace and
+each per-run directory are `root:root` mode `0700`. Fixed immutable fact names are `launch`, `wait`,
+`stdout-end`, `stderr-end` and `boundary-empty`, each mode `0400`. Closed capture spools are
+`stdout` and `stderr`, each mode `0600`; discard and sensitivity suppression create no spool.
+Request control, script source, environment and finite stdin remain separate fixed root-only assets
+so neither source nor secrets appear in unit arguments, environment metadata, logs or a
+world-readable location. A versioned finite ceiling applies before staging. The service consumes
+each request exactly once and never treats an absent request asset as proof that launch did or did
+not occur.
+
+Facts publish create-once from a conflict-free stage in the same run directory. The producer writes
+and syncs the complete stage, atomically links it to the fixed final name only if that name is
+absent, syncs the directory and removes the stage. If the final name already exists, it is decoded
+and compared byte-for-byte with the intended canonical fact; equality is an idempotent observation
+and disagreement is a conflict. No overwrite, shared mutable status document or file-level lock is
+part of the protocol. A capture spool is closed and synced before its stream-end fact publishes.
+Readers do not return capture bytes until the matching validated end fact exists, so the first slice
+has closed output rather than a provisional cursor protocol.
+
+The database persists the requested output disposition and, for capture, the per-stream byte ceiling
+in one `execution_run_output_policies` row keyed to the run reservation. Reservation writes both
+rows in one transaction; inspection refuses a missing or malformed policy instead of inventing one
+for an older private row. These are host request facts, not launch-receipt identity, so they do not
+revise the version-one fact schema. Later observation accepts a stream-end fact only when its
+disposition and retained length fulfill that persisted request. The initial default is a one-MiB
+prefix per stream; implementation may admit a larger bounded caller request only under one explicit
+versioned core ceiling. Truncation remains success of collection with incomplete output, not
+complete capture.
+
+The service is one transient system service per run. The fixed launch uses `systemd-run --system`
+with the exact derived unit, notify service type, collection enabled and a closed property set:
+`Delegate=yes`, `NotifyAccess=main`, `ExitType=main`, `KillMode=control-group`, `Restart=no` and
+finite start/stop timeouts. It does not use a scope, `--pipe`, `--wait` or caller-selected unit
+properties. The root service main is the trusted controller, not the workload identity. It resolves
+its delegated cgroup, creates a dedicated workload child cgroup, forks a gated child, moves that
+child into the workload cgroup, applies the exact groups/GID/UID and verifies them before any
+caller-controlled shell startup or payload can run.
+
+After placement and identity are proved, the controller publishes `launch`, sends `READY=1`, then
+releases the child gate. This ordering makes normal `systemd-run` return a launch acknowledgment
+without tying job lifetime or byte streams to the delivery connection. The controller concurrently
+drains both workload pipes to the selected bounded prefix or to discard, waits for the exact main
+child, publishes the wait and closed-stream facts, then performs bounded descendant cleanup. It uses
+`cgroup.kill` and waits for `cgroup.events` to report `populated 0` before publishing
+`boundary-empty`. A task stuck in uninterruptible sleep can prevent that proof indefinitely; the
+controller stops waiting at its bound and leaves boundary state unknown rather than fabricating
+emptiness.
+
+`KillMode=control-group` is a manager-owned fallback if the controller dies, but it cannot publish
+positive facts after that death. Therefore an abrupt controller exit leaves any unrecorded wait,
+stream-end or boundary fact unknown even when systemd later removes every process. The initial
+service reports that uncertainty. A later recovery owner or independently proved post-stop hook may
+strengthen it, but ordinary observation cannot infer completion or emptiness from unit absence.
+
+Carrier-neutral control remains a fixed closed protocol with `start`, `observe`, `read-output`,
+`stop` and `dispose`; it accepts no arbitrary path, unit, command or systemd property. `start` is
+the only operation that can consume staged request assets and is never replayed after possible
+dispatch. Every later operation revalidates target incarnation, boot, run, unit, launch fact and
+launch digest before it obtains authority. `stop` closes further admission, asks the exact owned
+unit to stop and reports boundary proof or uncertainty. `dispose` removes only a terminal exact-run
+store after retention policy permits it. SSH and QGA deliver these same operations; neither owns a
+second lifecycle implementation.
 
 The first private end-to-end managed-job slice may enable only `INDEPENDENT`, whose target-owned
 evidence survives observer loss. `OPERATION` must refuse before dispatch until target-side owner
