@@ -1,15 +1,17 @@
-# Buffered SSH Carrier
+# Independent SSH Carrier
 
-Status: Buffered PoC merged; full implementation is Phase 2, final old SSH deletion is Phase 3.
+Status: Buffered PoC merged. Phase 2 has independent trust maintenance, live byte delivery and owned
+forwarding; terminal delivery and production composition remain open. Final old SSH deletion is
+Phase 3.
 
 ## Boundary
 
 `agentworks.execution.carriers.ssh.SSHCarrier` consumes the actual transport-owned types in
-`execution/carrier.py`. The current transport dependency is pinned once in the
-[proof record](poc-results.md#revisions-and-delivery). Its
-[proof LLD](../2026-09-12-transport-improv/proof-lld.md) describes the candidate buffered subset and
-the shared preparation experiment. This SSH implementation adds no contract types, framing,
-application-shell policy or outcome decoder. Production composition remains Phase 2.
+`execution/carrier.py`. The merged PoC dependency is pinned in the
+[proof record](poc-results.md#revisions-and-delivery); subsequent implementation dependencies and
+their evidence are pinned in the [Phase 2 record](phase2-results.md). Transport owns the carrier
+contract, shared preparation and process lifecycle. This SSH implementation adds no contract types,
+framing, application-shell policy or outcome decoder. Production composition remains Phase 2.
 
 `SSHConnection` is immutable resolved input. Construction and `features` perform no I/O. `execute`
 validates explicit files, checks the selected installed executable, then makes at most one command
@@ -17,23 +19,29 @@ attempt. No failed observation or uncertain dispatch causes replay.
 
 ## Connection policy
 
-The proof takes a literal host, port, POSIX account, native absolute identity and known-host paths,
-optional trust lookup alias, optional revocation file, optional explicit Unix-domain agent socket,
-and executable selection. Existing fixture trust is mandatory and strict. OpenSSH owns file parsing
-and permission enforcement; local checks establish availability, not atomic ownership of later
-opens. The carrier never discovers credentials, enrolls a host, or writes trust.
+The carrier takes a literal host, port, POSIX account, native absolute identity and known-host
+paths, optional trust lookup alias, optional revocation file, optional explicit Unix-domain agent
+socket, and executable selection. Trust is mandatory and strict for existing targets, whether
+supplied as owned files or admitted from a managed bundle. OpenSSH owns file parsing and permission
+enforcement; local checks establish availability, not atomic ownership of later opens. The carrier
+never discovers credentials, enrolls a host, or writes trust. Explicit trust import, refresh and
+creation-only enrollment are separate maintenance operations described in the
+[trust LLD](trust-lld.md) and [enrollment LLD](enrollment-lld.md); production creation-flow binding
+remains open.
 
 Paths containing expansion tokens, control characters or ambiguous ssh_config quoting are refused.
 Spaces are supported with explicit option-value quoting. Native Windows paths are serialized with
-forward slashes. Windows named-pipe agent selection is outside this candidate; default agent use is
-disabled everywhere. These are proof input limits, not completed production migration policy.
+forward slashes. Windows named-pipe agent selection is unsupported; default agent use is disabled
+everywhere. The [configuration LLD](configuration-lld.md) and
+[migration strategy](migration-strategy.md) record the policy conversion and production acceptance
+that remain open.
 
-Every command uses `-F none`, disables PTY allocation, ambient agent selection, sibling certificate
-discovery, password, interactive and host-based authentication, PKCS11/security-key provider
-discovery, proxying, forwarding, multiplexing and local commands. Only the configured identity is
-offered. Known-host lookup uses the supplied store and optional alias; global stores, DNS
-verification and host-key updates are disabled. Installed OpenSSH chooses algorithms. There is no
-arbitrary option dictionary or weaker retry path.
+The current command path uses `-F none` and disables PTY allocation, ambient agent selection,
+sibling certificate discovery, password, interactive and host-based authentication,
+PKCS11/security-key provider discovery, proxying, inherited forwarding, multiplexing and local
+commands. Only the configured identity is offered. Known-host lookup uses the supplied store and
+optional alias; global stores, DNS verification and host-key updates are disabled. Installed OpenSSH
+chooses algorithms. There is no arbitrary option dictionary or weaker retry path.
 
 At the minimum client version, `CertificateFile=none` still loads a literal filename. An explicit
 certificate entry suppresses sibling discovery, so the builder points it beneath the validated
@@ -42,7 +50,7 @@ lookups. This needs no temporary artifact. The rationale follows the
 [OpenSSH 8.5 loading path](https://github.com/openssh/openssh-portable/blob/V_8_5_P1/ssh.c#L2280-L2320)
 and its
 [public-file fallback](https://github.com/openssh/openssh-portable/blob/V_8_5_P1/authfile.c#L263).
-This is deliberate refusal of certificate authentication in the proof.
+This deliberately refuses certificate authentication in the current carrier.
 
 The client floor is OpenSSH 8.5. A bounded `ssh -V` probe accepts the upstream and Windows version
 forms on stderr; unknown, failed or older probes refuse before command dispatch. The probe and
@@ -205,8 +213,8 @@ measured live cells and carried-forward evidence. Transport's
 [acceptance disposition](../2026-09-12-transport-improv/proof-lld.md#joint-buffered-proof-acceptance-2026-09-17)
 accepts the buffered boundary and maps its authoritative matrix to those results.
 
-Full live-stream and terminal ownership, forwarding, production configuration/trust conversion,
-provider-inner policy and complete workstation/platform evidence remain tracked in
+Terminal ownership, production connection/trust composition, provider-inner policy and complete
+workstation/platform evidence remain tracked in
 [Phase 2](plan.md#phase-2-full-ssh-implementation-in-the-second-pr). Transport then leads migration,
 legacy RunContext removal and old transport deletion while SSH waits and addresses issues. Final old
 SSH deletion waits for a later operator request in
