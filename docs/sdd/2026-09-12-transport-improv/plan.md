@@ -1335,7 +1335,7 @@ connection and trust only. Before broader lifecycle implementation, complete the
       systemd-stop claim, disposal/retention policy or public composition. Hermetic proof does not
       establish live systemd/cgroup, current target-marker/boot or SSH/QGA behavior.
 - [x] Implement and privately prove exact terminal disposal with a boot-local retry tombstone
-      through `08c9029b51a3b3e460756f358f8387b9ccd8f180`. Require the exact launch, boundary
+      through `84570753ab8bccf7f7062d663fc41b2bbd4daa28`. Require the exact launch, boundary
       emptiness and both closed stream ends before publishing `disposal` by hard-linking the
       validated immutable launch and syncing the directory. Validate capture spools structurally
       before deletion; their bytes, lengths and digests do not authorize release. Validate
@@ -1351,13 +1351,14 @@ connection and trust only. Before broader lifecycle implementation, complete the
       Make target publishers refuse an observed receipt, while leaving distinct-operation
       serialization to the core operation claim rather than adding a file lock. Add no automatic
       retention interval, forced release, generic deletion API, mutable status or database disposal
-      field. The 407 managed-execution tests, Ruff, formatting, mypy across 252 execution sources,
+      field. The 418 managed-execution tests, Ruff, formatting, mypy across 252 execution sources,
       the full file-lint suite and diff check pass. Host exchange proof covers pure preflight,
       deadline refusal, helper and carrier uncertainty, malformed or stale receipts, complete
       disposed/not-ready results and suppression of the launch receipt from representation.
       Filesystem proof covers symlinks, directories, FIFOs, unsafe modes, unexplained hard links,
-      mismatched receipts, partial cleanup and simultaneous exact retries. Hermetic proof does not
-      establish production ownership, current target/boot rereads or live SSH/QGA behavior.
+      malformed bounded request and stop finals, mismatched receipts, failed receipt durability
+      barriers, partial cleanup and simultaneous exact retries. Hermetic proof does not establish
+      production ownership, current target/boot rereads or live SSH/QGA behavior.
 - [ ] Add the fixed carrier-neutral `start`, `observe`, closed `read-output`, `stop` and `dispose`
       exchange over the target store. The private hermetic exchange now implements all five
       operations, revalidates the exact target/run/unit/launch digest on every later action, never
