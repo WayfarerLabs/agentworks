@@ -300,6 +300,17 @@ def test_child_restores_sigpipe_before_exec(tmp_path: Path) -> None:
     store.close()
 
 
+def test_child_clears_inherited_signal_mask_before_exec(tmp_path: Path) -> None:
+    previous = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+    try:
+        store, _ = _execute(tmp_path, argv=("/bin/sh", "-c", "kill -TERM $$; printf survived"))
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous)
+    assert store.read_fact(FactName.WAIT) is None
+    assert store.read_capture(Stream.STDOUT, _launch()) == b""
+    store.close()
+
+
 def test_literal_command_uses_explicit_request_path(tmp_path: Path) -> None:
     store, _ = _execute(
         tmp_path,
@@ -427,15 +438,31 @@ def test_notify_path_and_abstract(tmp_path: Path) -> None:
         assert listener.recv(64) == b"READY=1"
 
 
-@pytest.mark.parametrize("value", [b"0::/system.slice/test.service\n", b"0::/system.slice/test.service"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        f"0::/system.slice/agw-managed-{RUN}.service\n".encode(),
+        f"0::/system.slice/agw-managed-{RUN}.service".encode(),
+    ],
+)
 def test_cgroup_parser(value: bytes) -> None:
-    assert guest.service_cgroup(value) == "/system.slice/test.service"
+    assert guest.service_cgroup(value, RUN) == f"/system.slice/agw-managed-{RUN}.service"
 
 
-@pytest.mark.parametrize("value", [b"1::/x\n", b"0::/\n", b"0::/x/../y\n", b"0::/x\n0::/y\n"])
-def test_cgroup_parser_refuses(value: bytes) -> None:
+@pytest.mark.parametrize(
+    ("value", "run_id"),
+    [
+        (b"1::/x\n", RUN),
+        (b"0::/\n", RUN),
+        (b"0::/x/../y\n", RUN),
+        (b"0::/x\n0::/y\n", RUN),
+        (b"0::/system.slice/unrelated.service\n", RUN),
+        (f"0::/system.slice/agw-managed-{RUN}.service\n".encode(), "invalid"),
+    ],
+)
+def test_cgroup_parser_refuses(value: bytes, run_id: str) -> None:
     with pytest.raises(guest.ControllerError):
-        guest.service_cgroup(value)
+        guest.service_cgroup(value, run_id)
 
 
 @pytest.mark.parametrize("interpreter", [sys.executable, "/usr/bin/python3.11"])

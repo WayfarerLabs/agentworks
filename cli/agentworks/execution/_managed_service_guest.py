@@ -51,8 +51,10 @@ def _account_shell(uid: int) -> str:
         raise ControllerError("account shell unavailable") from None
 
 
-def service_cgroup(data: bytes) -> str:
-    """Accept exactly one unified cgroup v2 membership with safe components."""
+def service_cgroup(data: bytes, run_id: str) -> str:
+    """Accept the exact derived service's unified cgroup v2 membership."""
+    if type(run_id) is not str or _RUN.fullmatch(run_id) is None:
+        raise ControllerError("invalid run identity")
     lines = data.splitlines()
     if len(lines) != 1 or not lines[0].startswith(b"0::/"):
         raise ControllerError("invalid cgroup membership")
@@ -62,6 +64,8 @@ def service_cgroup(data: bytes) -> str:
         raise ControllerError("invalid cgroup membership") from None
     if path == "/" or any(part in ("", ".", "..") for part in path[1:].split("/")):
         raise ControllerError("invalid cgroup membership")
+    if path.rsplit("/", 1)[-1] != f"agw-managed-{run_id}.service":
+        raise ControllerError("wrong service cgroup")
     return path
 
 
@@ -70,7 +74,7 @@ class _Cgroup:
         if not os.path.exists(f"{_CGROUP_ROOT}/cgroup.controllers"):
             raise ControllerError("unified cgroup unavailable")
         with open(_CGROUP_SELF, "rb") as stream:
-            member = service_cgroup(stream.read(4096))
+            member = service_cgroup(stream.read(4096), run_id)
         parent = _CGROUP_ROOT + member
         if not os.path.isdir(parent) or not os.access(parent, os.W_OK | os.X_OK):
             raise ControllerError("service cgroup is not delegated")
@@ -204,7 +208,11 @@ def _child(
         environment = dict(request.environment)
         os.write(ready, b"1")
         _gate(released)
-        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+        for name in ("SIGPIPE", "SIGXFZ", "SIGXFSZ"):
+            inherited = getattr(signal, name, None)
+            if inherited is not None:
+                signal.signal(inherited, signal.SIG_DFL)
+        signal.pthread_sigmask(signal.SIG_SETMASK, ())
         if search_path:
             os.execvpe(executable, argv, environment)
         else:

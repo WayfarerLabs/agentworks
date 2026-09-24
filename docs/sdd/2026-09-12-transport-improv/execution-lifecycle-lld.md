@@ -267,9 +267,11 @@ with the exact derived unit, notify service type, collection enabled and a close
 `Delegate=yes`, `NotifyAccess=main`, `ExitType=main`, `KillMode=control-group`, `Restart=no` and
 finite start/stop timeouts. It does not use a scope, `--pipe`, `--wait` or caller-selected unit
 properties. The root service main is the trusted controller, not the workload identity. It resolves
-its delegated cgroup, creates a dedicated workload child cgroup, forks a gated child, moves that
-child into the workload cgroup, applies the exact groups/GID/UID and verifies them before any
-caller-controlled shell startup or payload can run.
+its delegated cgroup, verifies that its membership ends in the exact derived transient service unit,
+creates a dedicated workload child cgroup, forks a gated child, moves that child into the workload
+cgroup, applies the exact groups/GID/UID and verifies them before any caller-controlled shell
+startup or payload can run. Immediately before exec, the child restores the standard payload signal
+dispositions and clears the inherited signal mask.
 
 After placement and identity are proved, the controller publishes `launch`, sends `READY=1`, then
 releases the child gate. This ordering makes normal `systemd-run` return a launch acknowledgment
