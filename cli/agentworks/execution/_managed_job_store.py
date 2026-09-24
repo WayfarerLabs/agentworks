@@ -265,7 +265,7 @@ class ManagedJobStore:
             os.close(directory)
 
     def capture_prefix(self, stream: Stream, limit: int, chunks: Iterable[bytes]) -> CapturedPrefix:
-        if type(stream) is not Stream or type(limit) is not int or not 0 <= limit <= 2**63 - 1:
+        if type(stream) is not Stream or type(limit) is not int or not 0 <= limit <= wire.MAX_CAPTURE_PREFIX_BYTES_V1:
             raise StoreError("invalid capture request")
         directory = self._run_dir(create=True)
         assert directory is not None

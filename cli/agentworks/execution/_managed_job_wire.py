@@ -15,6 +15,7 @@ from uuid import UUID
 from ._helper_identity import decode_identity
 
 MAX_MANAGED_JOB_FACT_BYTES = 4096
+MAX_CAPTURE_PREFIX_BYTES_V1 = 16_777_216
 VERSION = 1
 
 _RUN_ID = re.compile(r"[0-9a-f]{32}\Z")

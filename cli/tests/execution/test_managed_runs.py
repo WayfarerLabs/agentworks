@@ -75,7 +75,7 @@ def test_output_policy_requires_closed_mode_and_explicit_reservation(tmp_path: P
         ManagedOutputPolicy("capture", 0)  # type: ignore[arg-type]
     database = Database(tmp_path / "state.db")
     with pytest.raises(TypeError):
-        ManagedRunRepository(database).reserve(_spec())
+        ManagedRunRepository(database).reserve(_spec())  # type: ignore[call-arg]
     database.close()
 
 

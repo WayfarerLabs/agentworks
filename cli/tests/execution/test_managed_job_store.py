@@ -230,6 +230,8 @@ def test_invalid_namespace_and_exact_input_types_refuse(store: ManagedJobStore, 
     with pytest.raises(StoreError):
         store.capture_prefix(Stream.STDOUT, True, ())
     with pytest.raises(StoreError):
+        store.capture_prefix(Stream.STDOUT, wire.MAX_CAPTURE_PREFIX_BYTES_V1 + 1, ())
+    with pytest.raises(StoreError):
         store.publish_fact(FactName.LAUNCH, bytearray(_launch()))  # type: ignore[arg-type]
 
 

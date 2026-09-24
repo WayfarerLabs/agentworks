@@ -18,6 +18,7 @@ from uuid import UUID
 
 from agentworks.errors import BusyStateError, StateError, ValidationError
 from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._managed_job_wire import MAX_CAPTURE_PREFIX_BYTES_V1 as MAX_CAPTURE_PREFIX_BYTES_V1
 from agentworks.execution._managed_job_wire import canonical_shell_path
 from agentworks.execution.carrier import Dispatch
 from agentworks.execution.models import Shell
@@ -32,7 +33,6 @@ MANAGED_PROFILE_REVISION = 1
 MANAGED_RECEIPT_PROTOCOL_VERSION = 1
 MANAGED_RECEIPT_NAMESPACE = "agentworks-managed-runs-v1"
 DEFAULT_CAPTURE_PREFIX_BYTES = 1_048_576
-MAX_CAPTURE_PREFIX_BYTES_V1 = 16_777_216
 
 _UNIT_PREFIX = "agw-managed-"
 _MAX_ID = 2**32 - 1
