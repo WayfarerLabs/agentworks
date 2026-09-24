@@ -1305,7 +1305,7 @@ connection and trust only. Before broader lifecycle implementation, complete the
       not implement `start`, `stop` or `dispose`, host reservation/output-policy reduction, live
       target identity rereads or SSH/QGA production proof.
 - [x] Implement the private fixed Linux `MANAGED` plus `INDEPENDENT` start exchange through combined
-      code checkpoint `50d060fe167f027f3d1a996119f757ccef32f52e`. It preflights the exact reserved
+      code checkpoint `10fb0f0fac34234e1938681885988c6dc816c35e`. It preflights the exact reserved
       run, request, output policy, identity/runtime and carrier structure before durable
       possible-dispatch, then stages only five protected assets and attempts one closed transient
       root notify service. ASCII-armored canonical request framing preserves binary source/stdin; an
@@ -1314,7 +1314,7 @@ connection and trust only. Before broader lifecycle implementation, complete the
       zero. The pure `Carrier.validate` seam refuses deterministic direct-envelope incompatibility
       without an attempt and is repeated by `execute`. Buffered SSH's pure refusal guard is
       owner-authored at `fad2ede68dc75d1af90d26e6e4bc848756da4eab`, integrated as
-      `50d060fe167f027f3d1a996119f757ccef32f52e`; #832's expanded carrier must retain or adapt its
+      `10fb0f0fac34234e1938681885988c6dc816c35e`; #832's expanded carrier must retain or adapt its
       truthful no-op validator. The transport slice's exact Python 3.11 source proof, 261 focused
       tests, Ruff, targeted mypy and documentation gates pass. Protocol asset bounds do not
       guarantee every carrier's smaller direct envelope; large-request staging/fallback, live
