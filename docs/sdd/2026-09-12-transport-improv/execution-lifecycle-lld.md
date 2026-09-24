@@ -275,14 +275,17 @@ After placement and identity are proved, the controller publishes `launch`, send
 releases the child gate. This ordering makes normal `systemd-run` return a launch acknowledgment
 without tying job lifetime or byte streams to the delivery connection. The controller concurrently
 drains both workload pipes to the selected bounded prefix or to discard and waits for the exact main
-child. Main-child exit publishes the wait fact and starts bounded descendant cleanup immediately;
-draining continues concurrently so a descendant that inherited a stream cannot delay the cleanup
-decision. Each stream-end fact publishes only after that pipe reaches EOF and its spool is closed.
-Independently, cleanup uses `cgroup.kill` and waits for `cgroup.events` to report `populated 0`
-before publishing `boundary-empty`. A task stuck in uninterruptible sleep can prevent that proof
-indefinitely; the controller stops waiting at its bound and leaves boundary state unknown rather
-than fabricating emptiness. Cleanup or controller failure may likewise leave a stream-end fact
-unknown even when other terminal facts are present.
+child. Main-child termination starts bounded descendant cleanup immediately. A close-on-exec status
+pipe separately proves successful application entry: the first service publishes `wait` only for a
+proved normal application exit, preserving every exit code including 126. Setup/exec failure and a
+signaled death leave `wait` unknown because close-on-exec EOF cannot distinguish a signal delivered
+immediately before exec from one delivered to the application. Draining continues concurrently so a
+descendant that inherited a stream cannot delay the cleanup decision. Each stream-end fact publishes
+only after that pipe reaches EOF and its spool is closed. Independently, cleanup uses `cgroup.kill`
+and waits for `cgroup.events` to report `populated 0` before publishing `boundary-empty`. A task stuck
+in uninterruptible sleep can prevent that proof indefinitely; the controller stops waiting at its
+bound and leaves boundary state unknown rather than fabricating emptiness. Cleanup or controller
+failure may likewise leave a stream-end fact unknown even when other terminal facts are present.
 
 `KillMode=control-group` is a manager-owned fallback if the controller dies, but it cannot publish
 positive facts after that death. Therefore an abrupt controller exit leaves any unrecorded wait,

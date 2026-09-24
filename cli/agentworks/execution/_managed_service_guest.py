@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import pwd
 import re
 import select
 import selectors
@@ -41,6 +40,15 @@ _BASH_PATHS = frozenset({"/bin/bash", "/usr/bin/bash"})
 
 class ControllerError(ValueError):
     """A fixed service prerequisite or observation failed."""
+
+
+def _account_shell(uid: int) -> str:
+    import pwd
+
+    try:
+        return pwd.getpwuid(uid).pw_shell
+    except (KeyError, OSError):
+        raise ControllerError("account shell unavailable") from None
 
 
 def service_cgroup(data: bytes) -> str:
@@ -170,10 +178,7 @@ def _child(
         else:
             search_path = False
             if shell["requested"] == "user_default":
-                try:
-                    configured = pwd.getpwuid(expected.euid).pw_shell
-                except (KeyError, OSError):
-                    raise ControllerError("account shell unavailable") from None
+                configured = _account_shell(expected.euid)
                 if configured not in _SH_PATHS | _BASH_PATHS or configured != shell["resolved_executable"]:
                     raise ControllerError("resolved account shell mismatch")
             source_fd = os.memfd_create("agw-managed-source", 0)
@@ -332,16 +337,22 @@ def _observe(
                 if waited == pid:
                     status = candidate
                     deadline = time.monotonic() + _CLEANUP_SECONDS
-                    boundary.kill()
+                    with suppress(OSError):
+                        boundary.kill()
             if status is not None and exec_result is True and os.WIFEXITED(status) and not wait_published:
                 store.publish_fact(
                     FactName.WAIT,
                     _fact(run_id, digest, "wait", exit_code=os.WEXITSTATUS(status), signal=None),
                 )
                 wait_published = True
-            if status is not None and not boundary_done and boundary.empty():
-                store.publish_fact(FactName.BOUNDARY_EMPTY, _fact(run_id, digest, "boundary-empty"))
-                boundary_done = True
+            if status is not None and not boundary_done:
+                try:
+                    empty = boundary.empty()
+                except OSError:
+                    empty = False
+                if empty:
+                    store.publish_fact(FactName.BOUNDARY_EMPTY, _fact(run_id, digest, "boundary-empty"))
+                    boundary_done = True
             if status is not None and not selector.get_map() and boundary_done:
                 return
             if deadline is not None and time.monotonic() >= deadline:

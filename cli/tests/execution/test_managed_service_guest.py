@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import os
-import pwd
 import signal
 import socket
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -42,6 +40,27 @@ class Boundary:
 
 class HeldBoundary(Boundary):
     def empty(self) -> bool:
+        return False
+
+
+class FailedKillBoundary(Boundary):
+    def kill(self) -> None:
+        self.killed = True
+        raise OSError("injected cgroup kill failure")
+
+    def empty(self) -> bool:
+        return False
+
+
+class FailedEmptyBoundary(Boundary):
+    def __init__(self) -> None:
+        super().__init__()
+        self.empty_calls = 0
+
+    def empty(self) -> bool:
+        self.empty_calls += 1
+        if self.empty_calls == 1:
+            raise OSError("injected cgroup observation failure")
         return False
 
 
@@ -222,6 +241,27 @@ def test_application_exit_126_is_not_setup_failure(tmp_path: Path) -> None:
     store.close()
 
 
+def test_cleanup_failure_does_not_discard_proved_wait(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(guest, "_CLEANUP_SECONDS", 0.05)
+    store, _ = _execute(tmp_path, argv=("/bin/true",), boundary=FailedKillBoundary())
+    wait = wire.decode_fact(store.read_fact(FactName.WAIT))  # type: ignore[arg-type]
+    assert wait["exit_code"] == 0
+    store.close()
+
+
+def test_cleanup_observation_failure_does_not_discard_independent_facts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(guest, "_CLEANUP_SECONDS", 0.05)
+    store, _ = _execute(tmp_path, argv=("/bin/true",), boundary=FailedEmptyBoundary())
+    wait = wire.decode_fact(store.read_fact(FactName.WAIT))  # type: ignore[arg-type]
+    assert wait["exit_code"] == 0
+    assert store.read_fact(FactName.STDOUT_END) is not None
+    assert store.read_fact(FactName.STDERR_END) is not None
+    assert store.read_fact(FactName.BOUNDARY_EMPTY) is None
+    store.close()
+
+
 def test_wait_status_before_exec_pipe_eof_still_publishes_normal_exit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -304,7 +344,7 @@ def test_script_source_is_separate_from_stdin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str, resolved_shell: str, login: bool
 ) -> None:
     if shell == "user_default":
-        monkeypatch.setattr(pwd, "getpwuid", lambda _uid: SimpleNamespace(pw_shell=resolved_shell))
+        monkeypatch.setattr(guest, "_account_shell", lambda _uid: resolved_shell)
     store, _ = _execute(
         tmp_path,
         kind="script",
@@ -329,7 +369,7 @@ def test_user_default_refuses_stale_or_unsupported_account_shell(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     for configured in ("/bin/bash", "/bin/zsh"):
-        monkeypatch.setattr(pwd, "getpwuid", lambda _uid, path=configured: SimpleNamespace(pw_shell=path))
+        monkeypatch.setattr(guest, "_account_shell", lambda _uid, path=configured: path)
         root = tmp_path / ("stale" if configured == "/bin/bash" else "unsupported")
         root.mkdir()
         store = _store(root)

@@ -1278,11 +1278,13 @@ connection and trust only. Before broader lifecycle implementation, complete the
 - [ ] Build the first fixed target controller bundle for Linux `MANAGED` plus `INDEPENDENT`. Use one
       root transient notify service and a delegated child workload cgroup; place the gated child,
       apply and verify its exact groups/GID/UID, publish launch and readiness, then release caller
-      code. Concurrently drain both streams and wait for the main child. On main exit publish wait
-      and start descendant cleanup while draining continues; publish each stream end only after EOF,
-      and publish boundary-empty only after `populated 0`. Preserve unknown facts on controller
-      death, uninterruptible tasks and every unproved cleanup path. Refuse `OPERATION`, live
-      streams, terminal I/O and arbitrary systemd properties before dispatch.
+      code. Concurrently drain both streams and wait for the main child. On main termination start
+      descendant cleanup while draining continues. Publish wait only for close-on-exec-proved
+      application entry followed by normal exit; preserve exit 126 and leave setup/exec failure or
+      any signaled death unknown in this slice. Publish each stream end only after EOF, and publish
+      boundary-empty only after `populated 0`. Preserve unknown facts on controller death,
+      uninterruptible tasks and every unproved cleanup path. Refuse `OPERATION`, live streams,
+      terminal I/O and arbitrary systemd properties before dispatch.
 - [ ] Add the fixed carrier-neutral `start`, `observe`, closed `read-output`, `stop` and `dispose`
       exchange over the target store. Revalidate the exact target/run/unit/launch digest on every
       later action, never replay start after possible dispatch, and expose no arbitrary command,
