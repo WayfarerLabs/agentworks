@@ -1329,7 +1329,7 @@ connection and trust only. Before broader lifecycle implementation, complete the
       guest observation remains finite for an unbounded caller deadline. A helper failure remains
       unknown after dispatch because publication may already be visible; post-publication
       observation faults preserve accepted intent, while only validated empty-boundary evidence
-      proves termination. The 106 focused and 357 broader managed-execution tests, Ruff, targeted
+      proves termination. The 106 focused and 358 broader managed-execution tests, Ruff, targeted
       mypy, the full file-lint suite and diff check pass. This slice adds no process enumeration,
       mutable stop document, `execution_runs` stop state, generic admission lock, direct
       systemd-stop claim, disposal/retention policy or public composition. Hermetic proof does not
