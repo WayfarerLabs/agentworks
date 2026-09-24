@@ -46,15 +46,18 @@ class SSHCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        """Refuse unsupported shared I/O shapes without connection or process work."""
+        if not isinstance(io.input, EndOfInput | FiniteInput):
+            raise ValidationError("Buffered SSH requires EOF or finite input")
+        if not isinstance(io.output, Capture | Discard):
+            raise ValidationError("Buffered SSH requires captured or discarded output")
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
         """Validate locally, then spend the remaining original budget on one attempt."""
+        self.validate(invocation, io=io)
         if deadline.expired:
             return _not_sent(io, Failure.DEADLINE)
-        # The shared I/O boundary can accept modes this carrier does not support.
-        if not isinstance(io.input, EndOfInput | FiniteInput):
-            return _not_sent(io, Failure.INPUT)
-        if not isinstance(io.output, Capture | Discard):
-            return _not_sent(io, Failure.OUTPUT)
         try:
             validate_connection_files(self._connection)
             argv = build_ssh_argv(self._connection, invocation)
