@@ -466,6 +466,39 @@ def test_wait_status_before_exec_pipe_eof_still_publishes_normal_exit(
     store.close()
 
 
+def test_boundary_waits_for_late_exec_status_and_wait(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = _store(tmp_path)
+    boundary = Boundary()
+    input_r, input_w = os.pipe()
+    exec_r, exec_w = os.pipe()
+    os.close(input_r)
+    monkeypatch.setattr(os, "waitpid", lambda pid, option: (pid, 7 << 8))
+    request = request_wire.ManagedJobRequest(_launch(), "command", ("/bin/true",), None, "discard", None, (), b"", b"")
+    worker = threading.Thread(
+        target=guest._observe,
+        args=(RUN, "a" * 64, request, store, boundary, 12345, input_w, exec_r, []),
+    )
+    worker.start()
+    try:
+        until = time.monotonic() + 1
+        while not boundary.killed and time.monotonic() < until:
+            time.sleep(0.001)
+        assert boundary.killed
+        assert store.read_fact(FactName.BOUNDARY_EMPTY) is None
+        assert store.read_fact(FactName.WAIT) is None
+        os.close(exec_w)
+        exec_w = -1
+        worker.join(2)
+        assert not worker.is_alive()
+        assert store.read_fact(FactName.WAIT) is not None
+        assert store.read_fact(FactName.BOUNDARY_EMPTY) is not None
+    finally:
+        if exec_w >= 0:
+            os.close(exec_w)
+        os.close(exec_r)
+        store.close()
+
+
 def test_missing_executable_leaves_wait_unknown(tmp_path: Path) -> None:
     store, _ = _execute(tmp_path, argv=("/definitely/missing-agw-executable",))
     assert store.read_fact(FactName.WAIT) is None

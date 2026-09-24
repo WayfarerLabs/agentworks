@@ -347,7 +347,7 @@ Exact-source tests bundle the wire and store together under Python 3.11. The hos
 persists the requested output policy, but a later observer must still compare that request to the
 stream disposition; self-describing facts alone do not prove policy fulfillment. The first service
 slice is limited to independent lifetime until operation-owner liveness and cleanup are proved.
-Private fixed start, observe, closed read-output and stop exchanges exist. Disposal, production
+Private fixed start, observe, closed read-output, stop and disposal exchanges exist. Production
 carrier wiring, live target evidence and SSH/QGA proof remain open.
 
 `_managed_job_request.py` defines the separate private request assets for that independent slice.
@@ -374,8 +374,9 @@ main publishes launch, sends `READY=1` over `NOTIFY_SOCKET`, and then checks sto
 releasing the child to execute caller code. It keeps polling that intent while draining finite stdin
 and both output streams and observing the exact main child. A stop closes stdin and sends SIGTERM to
 that child. Its first observation starts a fixed grace interval that repeated reads do not extend.
-Main-child exit, or grace expiry while it remains alive, starts the existing cgroup cleanup. Wait,
-stream-end, and boundary-empty facts each publish only after their separate evidence is available. A
+Main-child exit, or grace expiry while it remains alive, starts the existing cgroup cleanup. The
+controller reaps the main child and settles exec status, including any eligible wait fact, before
+publishing boundary-empty. Stream-end facts remain independent and may publish later. A
 close-on-exec status pipe permits wait publication only after proved application entry and normal
 exit; setup failure and signaled death leave wait unknown. Capture spools keep only the requested
 prefix and close before stream-end; discard and sensitivity suppression create no spool. Cleanup
@@ -400,7 +401,18 @@ reply, including a complete helper failure, can leave stop intent published. An 
 unreadable boundary fact leaves a successfully published request accepted with termination unknown.
 Retrying this helper publishes the same sentinel and never launches again. This private path
 requires an existing launch fact; it offers no prelaunch stop, new-admission API, operation-owner
-lease, disposal, public jobs or live SSH/QGA proof.
+lease, public jobs or live SSH/QGA proof.
+
+`_managed_disposal_exchange.py` supplies a private fixed Linux root disposal attempt. The target
+requires the exact canonical launch, its bound boundary-empty and both stream-end facts. Wait is
+validated if present but is optional. Spool bytes and digest do not authorize deletion; fixed leaves
+and recognized publication stages must have safe structure and link topology. A clean
+missing-terminal result is not ready. The target commits a mode-0400 `disposal` receipt by linking
+the immutable launch and syncing the run directory before removing validated artifacts. A retry
+resumes partial cleanup, and success requires only the exact one-link receipt to remain. Publishers
+refuse an observed receipt. Complete helper failure or incomplete carrier evidence remains uncertain
+because deletion may already have begun. This is boot-local private machinery; operation claim
+serialization, public jobs and live SSH/QGA proof remain open.
 
 ## Input accounting
 

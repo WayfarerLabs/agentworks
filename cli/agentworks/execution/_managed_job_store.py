@@ -74,6 +74,7 @@ class CaptureWriter:
     def write(self, chunk: bytes) -> None:
         if type(chunk) is not bytes or self._fd < 0:
             raise StoreError("invalid capture chunk")
+        _refuse_disposal(self._directory)
         prefix = chunk[: self._limit - self._length]
         if prefix:
             _write_all(self._fd, prefix)
@@ -84,6 +85,7 @@ class CaptureWriter:
     def finish(self) -> CapturedPrefix:
         if self._fd < 0:
             raise StoreError("capture already closed")
+        _refuse_disposal(self._directory)
         os.fsync(self._fd)
         self.close()
         return CapturedPrefix(
@@ -191,6 +193,14 @@ def _write_all(fd: int, data: bytes) -> None:
         if written <= 0:
             raise StoreError("short store write")
         view = view[written:]
+
+
+def _refuse_disposal(directory: int) -> None:
+    try:
+        os.stat("disposal", dir_fd=directory, follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    raise StoreError("run disposal committed")
 
 
 class ManagedJobStore:
@@ -332,6 +342,7 @@ class ManagedJobStore:
         assert directory is not None
         stage = (".fact-stage-" if isinstance(name, FactName) else ".request-stage-") + uuid4().hex
         try:
+            _refuse_disposal(directory)
             existing = self._read_immutable(name)
             if existing is not None:
                 if existing != data:
@@ -346,6 +357,7 @@ class ManagedJobStore:
             finally:
                 os.close(fd)
             try:
+                _refuse_disposal(directory)
                 os.link(stage, name.value, src_dir_fd=directory, dst_dir_fd=directory, follow_symlinks=False)
                 os.fsync(directory)
             except FileExistsError:
@@ -465,6 +477,7 @@ class ManagedJobStore:
         directory = self._run_dir(create=True)
         assert directory is not None
         try:
+            _refuse_disposal(directory)
             fd = os.open(stream.value, _CREATE_FLAGS, 0o600, dir_fd=directory)
             try:
                 os.fchmod(fd, 0o600)
@@ -477,6 +490,12 @@ class ManagedJobStore:
         except BaseException:
             os.close(directory)
             raise
+
+    def dispose(self, expected_launch: bytes) -> bool:
+        """Release one exact terminal run; false means terminal facts are absent."""
+        from ._managed_disposal_store import dispose
+
+        return dispose(self, expected_launch)
 
     def read_capture(self, stream: Stream, expected_launch: bytes) -> bytes | None:
         if type(stream) is not Stream or type(expected_launch) is not bytes:

@@ -375,7 +375,7 @@ def _observe(
                     _fact(run_id, digest, "wait", exit_code=os.WEXITSTATUS(status), signal=None),
                 )
                 wait_published = True
-            if deadline is not None and not boundary_done:
+            if status is not None and exec_result is not None and deadline is not None and not boundary_done:
                 try:
                     empty = boundary.empty()
                 except OSError:
