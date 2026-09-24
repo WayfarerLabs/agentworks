@@ -1,10 +1,11 @@
 # SSH Phase 2 Implementation Progress
 
-- Updated: 2026-09-21
+- Updated: 2026-09-24
 - PR: [#832](https://github.com/WayfarerLabs/agentworks/pull/832), draft
 - Initial evaluated code: `e63a1ec4a8e9d99e89d09d6b162e908d3a4b96d6`
 - Main/contract base: `cea5e8523aac05edfc3a99a940d7cfb4d71fe32f` (#830)
-- State: Byte I/O adoption validated locally; full terminal and production integration remain open
+- State: SSH carrier and private file-custody composition validated locally; terminal and production
+  integration remain open
 
 ## Implemented scope
 
@@ -429,6 +430,33 @@ The prior Windows/WSL2 report applies to its recorded CLI tree, not this newer c
 delivery, production RunContext/platform composition, creation/publication binding, recovery and the
 remaining native acceptance gates stay open. This dependency adaptation consumes no public
 feedback/fix round and keeps #832 draft without a checkpoint or ready signal.
+
+## Recovery-dispatch dependency update
+
+Transport's
+[recovery checkpoint](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-5809553811)
+publishes `c92336e96e6a682888dc7b9cb7e1802ab65135d0`. It adds restricted recovery dispatch and local
+DOWNLOAD snapshot reconciliation behind obligation-wide drain evidence. It does not supply an SSH
+recovery adapter, production operation root, target composition or RunContext binding. The SSH
+upload proof still acquires ordinary ownership through `OperationOwner.acquire()` and does not use
+the new recovery path.
+
+SSH rebases cleanly from transport `e27a466f38d9a257a6c20f4ced4308163851657a` to this checkpoint at
+`9b6a25fc1a74ad77a70ab6ce36aeb9d78596501d`. All 73 carried commits replay without conflict, and the
+stable aggregate patch ID is unchanged at `867f18e9c54303a2b38818f8af1b2ad2e54f7f8a`. The combined
+SSH and recovery selection passes **332 tests with 5 skips**. Transport's hosted checks pass at this
+checkpoint in
+[CI run 35968419961](https://github.com/WayfarerLabs/agentworks/actions/runs/35968419961), including
+Windows, website and the aggregate gate.
+
+The rebased SSH tree passes **13,136 non-integration tests with 22 skips** in 225.35 seconds, Ruff
+and formatting across 1,143 files, mypy across 1,106 sources, file lint, locked-SDD and Rulesync
+checks. Its owned Linux loopback upload proof passes in 4.45 seconds; the fixture database has zero
+owner, claim and obligation rows after release, and host-visible inspection finds no sshd tied to
+the fixture. The exact generated test directories and credentials were removed after verification.
+Hosted SSH checks, private reviews of this combined head and full native integration are still
+pending. This dependency update adds no SSH recovery or native-platform acceptance claim; #832
+remains draft.
 
 ## Durable file-call custody adoption
 
