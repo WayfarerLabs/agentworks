@@ -332,8 +332,8 @@ also persists the requested output policy, but a later observer must still compa
 the stream disposition; self-describing facts alone do not prove policy fulfillment. The first
 service slice is limited to independent lifetime until operation-owner liveness and cleanup are
 proved. Later fixed start, observe, read-output, stop and dispose operations must work over both SSH
-and QGA. Transient-service launch, the carrier exchange, carrier proof and live validation remain
-open.
+and QGA. Transient-service launch, start/stop/dispose exchange, production carrier wiring and live
+validation remain open.
 
 `_managed_job_request.py` defines the separate private request assets for that independent slice.
 The five fixed root-owned, mode-0400 leaves are `request-launch`, `request-control`,
@@ -362,7 +362,16 @@ and normal exit; setup failure and signaled death leave wait unknown. Capture sp
 requested prefix and close before stream-end; discard and sensitivity suppression create no spool.
 Cleanup stops after a fixed bound, leaving unproved facts absent. `_managed_service_bundle.py`
 packages exact source without embedding request values. This controller does not provide a host
-service builder, carrier exchange, or live systemd validation.
+service builder or live systemd validation.
+
+`_managed_observation_exchange.py` supplies private fixed `observe` and closed `read-output`
+attempts over the same carrier interface. Its Python 3.11 target helper reads only the protected
+store for an exact expected launch, run, derived unit, target incarnation and boot identity. It
+returns only present fixed facts; absent facts remain unknown. Output bytes require the matching
+validated stream-end and closed capture spool. The host admits facts and bytes only after complete
+runtime, identity, record, stream and helper completion evidence. The request has no arbitrary path,
+unit, command, property, fact name or environment selector. This slice does not launch, stop or
+dispose a run, reread the live instance marker or boot, or establish production target evidence.
 
 ## Input accounting
 
