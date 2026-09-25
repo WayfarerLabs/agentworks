@@ -260,7 +260,10 @@ adds test-scoped Linux/GCE evidence on the #833 + #832 composition. The
 verifies stable and changed guest-boot identity across real Linux SSH reboots and WSL2 distribution
 restarts. Neither supplies the production composer, public RunContext path, lost-hold recovery,
 terminal delivery or supported-workstation acceptance. The boot-fence recovery gate remains with
-transport.
+transport. The later
+[transport schema-correction report](phase2-results.md#transport-schema-correction-on-the-unchanged-execution-path)
+resolves the database-open collision and records green hosted CI without adding a new SSH runtime
+composition or closing those Phase 2 gates.
 
 ### Integrate and deliver the usable new path
 

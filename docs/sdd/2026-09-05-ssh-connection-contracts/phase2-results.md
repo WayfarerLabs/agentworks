@@ -666,6 +666,29 @@ branch migrations 39 to 41 can open under the consolidated schema without the ex
 Transport owns that disposition. Neither finding is an SSH carrier defect, and the native boot-fence
 result alone does not close Phase 2 acceptance.
 
+## Transport schema correction on the unchanged execution path
+
+The
+[complete round-8 report](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-5826356000)
+tests transport `77063be11399f973195a7e614d0517885f0c5c30`. Its four-commit delta from the round-7
+head changes database open validation, its focused tests and the transport plan; it changes no
+carrier, guest or execution runtime. On the tester's Linux workstation, writable, read-only and CLI
+open paths refused real branch-built databases stamped 39 to 41 without changing their main files or
+WAL and without creating an invalid backup. A copy of the released v38 operator database upgraded to
+the canonical schema and opened successfully. The report is clean and carries forward the round-7
+SSH and WSL2 observations without claiming a new guest or workstation run.
+
+Transport's exact-head non-integration suite passed **13,515 tests with 23 skips**. Its
+[hosted CI](https://github.com/WayfarerLabs/agentworks/actions/runs/36091351948) is green, including
+Linux Python 3.12–3.14, Windows Python 3.13, Website and aggregate `ci-success`; CodeQL also passed.
+This resolves the reported schema collision and the prior hosted Website failure at this transport
+head. A separate
+[saga review](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-5826298893) asks the
+operator to choose whether the guard's branch-specific scope should remain; that transport-owned
+decision may change its later head. SSH #832 has not rebased onto this database-only delta, and the
+earlier composed SSH proof retains its explicit pins. Public RunContext composition, trust
+migration, terminal delivery, lost-hold recovery and full SSH workflow acceptance remain open.
+
 ## Remaining integration and acceptance
 
 Earlier integration `fefc2b9e` uses transport `f3339f3d3cccace129be58711dc7eeb30ec66dc2`, which adds
