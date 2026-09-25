@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import base64
 import bz2
 import hashlib
@@ -58,8 +59,9 @@ def _build_file_helper_bundle(
     entrypoint_module: str,
 ) -> FixedFileHelperBundle:
     """Build fixed delivery from already-selected trusted source modules."""
+    compact_sources = tuple((name, _compact_fixed_source(source)) for name, source in sources)
     prefix = base64.b64encode(
-        bz2.compress(json.dumps(sources, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        bz2.compress(json.dumps(compact_sources, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
     )
     digest = hashlib.sha256(prefix).hexdigest()
     prefix_length = len(prefix)
@@ -81,3 +83,19 @@ def _build_file_helper_bundle(
         f"raise SystemExit(sys.modules[{entrypoint!r}].main(sys.argv[1]))\n"
     )
     return FixedFileHelperBundle(bootstrap, prefix)
+
+
+def _compact_fixed_source(source: str) -> str:
+    """Remove docstrings from trusted fixed helpers before their single delivery."""
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if not node.body or not isinstance(node.body[0], ast.Expr):
+            continue
+        value = node.body[0].value
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            node.body.pop(0)
+            if not node.body and not isinstance(node, ast.Module):
+                node.body.append(ast.Pass())
+    return ast.unparse(ast.fix_missing_locations(tree))

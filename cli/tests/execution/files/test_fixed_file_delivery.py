@@ -16,6 +16,8 @@ from agentworks.execution._file_metadata_bundle import FIXED_BUNDLE as METADATA_
 from agentworks.execution._file_metadata_protocol import parse_file_metadata_failure
 from agentworks.execution._file_object_bundle import FIXED_BUNDLE as OBJECT_BUNDLE
 from agentworks.execution._file_object_protocol import parse_file_object_failure
+from agentworks.execution._file_read_bundle import _MODULE_NAMES as READ_MODULE_NAMES
+from agentworks.execution._file_read_bundle import _PACKAGE as READ_PACKAGE
 from agentworks.execution._file_read_bundle import FIXED_BUNDLE as READ_BUNDLE
 from agentworks.execution._file_read_protocol import parse_file_read_failure
 from agentworks.execution._file_snapshot_bundle import FIXED_BUNDLE as SNAPSHOT_BUNDLE
@@ -23,13 +25,14 @@ from agentworks.execution._file_snapshot_protocol import parse_file_snapshot_fai
 from agentworks.execution._file_stage_bundle import FIXED_BUNDLE as STAGE_BUNDLE
 from agentworks.execution._file_stage_protocol import parse_file_stage_failure
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, FileRecordReader
-from agentworks.execution._helper_bundle import FixedFileHelperBundle
+from agentworks.execution._helper_bundle import FixedFileHelperBundle, _build_file_helper_bundle
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import build_runtime_identity_helper_argv
 from agentworks.execution.carrier import CarrierIO, Deadline, FiniteInput, PreparedInvocation, SinkOutput
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 from agentworks.execution.carriers.ssh.connection import SSHConnection, build_ssh_argv
+from tests.execution.files._fixed_bundle_support import fixture_file_bundle
 from tests.execution.files._runtime_support import runtime_selection
 
 _NONCE = "0" * 32
@@ -41,6 +44,84 @@ _BUNDLES = (
     ("stage", STAGE_BUNDLE),
     ("snapshot", SNAPSHOT_BUNDLE),
 )
+
+
+@pytest.mark.parametrize(
+    "runtime",
+    [Path(sys.executable), Path("/usr/bin/python3.11")],
+    ids=["current", "distribution-3.11"],
+)
+def test_fixed_bundle_keeps_docstring_only_bodies_executable(runtime: Path) -> None:
+    if not runtime.is_file():
+        pytest.skip(f"compatibility interpreter is unavailable: {runtime}")
+    bundle = _build_file_helper_bundle(
+        "_agw_test_docstrings",
+        (
+            (
+                "_entry",
+                '''"""Module documentation."""
+import sys
+
+class DocumentationOnly:
+    """Class documentation."""
+
+def documentation_only():
+    """Function documentation."""
+
+async def async_documentation_only():
+    """Async function documentation."""
+
+def main(nonce):
+    return int(not (
+        sys.modules[__name__].__doc__ is None
+        and DocumentationOnly.__doc__ is None
+        and documentation_only.__doc__ is None
+        and documentation_only() is None
+        and async_documentation_only.__doc__ is None
+    ))
+''',
+            ),
+        ),
+        "_entry",
+    )
+
+    completed = subprocess.run(
+        [str(runtime), "-I", "-S", "-B", "-c", bundle.bootstrap, _NONCE],
+        input=bundle.prefix,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout == completed.stderr == b""
+
+
+@pytest.mark.parametrize(
+    "runtime",
+    [Path(sys.executable), Path("/usr/bin/python3.11")],
+    ids=["current", "distribution-3.11"],
+)
+def test_fixed_bundle_fixture_executes_its_trusted_entrypoint(runtime: Path) -> None:
+    if not runtime.is_file():
+        pytest.skip(f"compatibility interpreter is unavailable: {runtime}")
+    bundle = fixture_file_bundle(
+        READ_PACKAGE,
+        READ_MODULE_NAMES,
+        "_file_read_guest",
+        "guest.main = lambda nonce: 23",
+    )
+
+    completed = subprocess.run(
+        [str(runtime), "-I", "-S", "-B", "-c", bundle.bootstrap, _NONCE],
+        input=bundle.prefix,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert completed.returncode == 23
+    assert completed.stdout == completed.stderr == b""
 
 
 class _Sink:
