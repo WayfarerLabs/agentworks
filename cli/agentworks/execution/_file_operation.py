@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import secrets
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol, cast
 
 from agentworks.errors import ValidationError
@@ -12,8 +12,19 @@ from agentworks.execution._file_download import (
     FileDownloadControlFact,
     FileDownloadOutcome,
     _prepare_download,
+    _prepare_download_from_binding,
     _PreparedDownload,
 )
+from agentworks.execution._file_download import (
+    _validate_inputs as _validate_download_inputs,
+)
+from agentworks.execution._file_effect_gate_exchange import (
+    GateControlMutationUncertain,
+    GateControlObservationState,
+    exchange_file_effect_gate,
+)
+from agentworks.execution._file_effect_gate_protocol import GateControlOperation
+from agentworks.execution._file_gate_setup import FileEffectGateSetup, file_effect_gate_path
 from agentworks.execution._file_json import (
     FileJsonBinding,
     FileJsonControlFact,
@@ -56,7 +67,10 @@ from agentworks.execution._file_upload import (
     _prepare_upload,
     _PreparedUpload,
 )
+from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTargetKind
+from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState, RuntimeTargetOS
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 from agentworks.operations import LifecycleObligation, _PreRegistrationClosingRefusal, release_borrow_after_custody
 
 if TYPE_CHECKING:
@@ -117,7 +131,16 @@ class _FileCallBinding(Protocol):
     def runtime_selection(self) -> RuntimeSelection: ...
 
 
-type _ActiveFileDownload = _ActiveFileCall[FileDownloadBinding, _PreparedDownload, FileDownloadOutcome]
+@dataclass(frozen=True, slots=True, repr=False)
+class _PendingDownloadSetup:
+    setup: FileEffectGateSetup
+    token: bytes
+    operation: BorrowedFixedHelperCarrier
+
+
+type _ActiveFileDownload = _ActiveFileCall[
+    FileDownloadBinding, _PreparedDownload | _PendingDownloadSetup, FileDownloadOutcome
+]
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -251,8 +274,22 @@ class FileOperation:
         deadline: Deadline,
         runtime_selection: RuntimeSelection,
         effect_gate: FileEffectGateBinding | None = None,
+        gate_setup: FileEffectGateSetup | None = None,
     ) -> FileDownloadOutcome:
         """Run and capture one concrete download under a whole-call borrow."""
+        if gate_setup is not None:
+            return self._download_with_gate_setup(
+                carrier,
+                trusted_root_path=trusted_root_path,
+                relative_path=relative_path,
+                sink=sink,
+                max_bytes=max_bytes,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=runtime_selection,
+                gate_setup=gate_setup,
+                effect_gate=effect_gate,
+            )
         if effect_gate is not None and (
             self._target.kind is not ManagedTargetKind.VM or effect_gate.scope_name != self._target.name
         ):
@@ -297,6 +334,119 @@ class FileOperation:
                     raise control from fact
             raise
 
+        self._capture(active, outcome)
+        return outcome
+
+    def _download_with_gate_setup(
+        self,
+        carrier: Carrier,
+        *,
+        trusted_root_path: str,
+        relative_path: str,
+        sink: ByteSink,
+        max_bytes: int,
+        plan: IdentityPlan,
+        deadline: Deadline,
+        runtime_selection: RuntimeSelection,
+        gate_setup: FileEffectGateSetup,
+        effect_gate: FileEffectGateBinding | None,
+    ) -> FileDownloadOutcome:
+        """Attach pending setup, then promote that same row to a bound download."""
+        borrow = self._owner.borrow()
+        try:
+            binding = _validate_download_inputs(
+                trusted_root_path,
+                relative_path,
+                sink,
+                max_bytes,
+                plan,
+                deadline,
+                runtime_selection,
+                borrow,
+                None,
+            )
+            if (
+                type(gate_setup) is not FileEffectGateSetup
+                or effect_gate is not None
+                or self._target.kind is not ManagedTargetKind.VM
+                or runtime_selection.target_os is not RuntimeTargetOS.LINUX
+                or type(gate_setup.guest) is not VMGuestIdentity
+                or gate_setup.path != file_effect_gate_path(self._target, plan.expected.euid, gate_setup.guest)
+            ):
+                raise ValidationError("Download gate setup must match the selected Linux VM and identity")
+            token = secrets.token_bytes(16)
+            operation = BorrowedFixedHelperCarrier(carrier, borrow)
+            admission = self._prepare_admission(FileCallFamily.DOWNLOAD, binding, token=token, gate_setup=gate_setup)
+            pending = _PendingDownloadSetup(gate_setup, token, operation)
+            active: _ActiveFileDownload = _ActiveFileCall(carrier, binding, borrow, pending, admission.obligation_id)
+        except BaseException:
+            borrow.close()
+            raise
+
+        # Keep concrete custody reachable before registration. Registration can
+        # commit despite a lost reply, so only its explicit pre-start refusal
+        # permits _install to close and discard the borrow.
+        try:
+            self._active_downloads[id(active)] = active
+        except BaseException:
+            borrow.close()
+            raise
+        self._install(active, admission, self._active_downloads)
+        # The pending record stays attached on every non-acknowledged setup or
+        # failed publication. In particular, a settled setup attempt is not
+        # evidence that the whole file-call obligation can be resolved.
+        try:
+            result = exchange_file_effect_gate(
+                operation,
+                operation=GateControlOperation.SETUP,
+                path=gate_setup.path,
+                guest=gate_setup.guest,
+                scope_name=self._target.name,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=runtime_selection,
+            )
+            normal = operation.settle(result.dispatch, result.carrier_completion)
+            observed = result.observation
+            if (
+                not normal
+                or result.runtime_prerequisite.state is not RuntimePrerequisiteState.READY
+                or observed is None
+                or observed.state is not GateControlObservationState.RESOLVED
+                or observed.binding is None
+            ):
+                raise GateControlMutationUncertain("file-effect gate setup was not acknowledged")
+            gate = observed.binding
+            if (
+                gate.path != gate_setup.path
+                or gate.guest != gate_setup.guest
+                or gate.scope_name != self._target.name
+                or gate.euid != plan.expected.euid
+            ):
+                raise GateControlMutationUncertain("file-effect gate binding did not match setup")
+            bound = replace(binding, effect_gate=gate)
+            self._publish_retained(
+                active,
+                self._obligation(FileCallFamily.DOWNLOAD, bound, token=token),
+            )
+            prepared = _prepare_download_from_binding(bound, sink, deadline, token, operation)
+            active.binding = bound
+            active.prepared = prepared
+        except BaseException:
+            # A lost publication reply may have committed either row revision;
+            # the attached pending record and owner remain unresolved.
+            raise
+
+        try:
+            outcome = prepared.run()
+        except BaseException as control:
+            fact = control.__cause__
+            if isinstance(fact, FileDownloadControlFact):
+                try:
+                    self._capture(active, fact.outcome)
+                except BaseException:
+                    raise control from fact
+            raise
         self._capture(active, outcome)
         return outcome
 
@@ -721,9 +871,10 @@ class FileOperation:
         binding: _FileCallBinding,
         *,
         token: bytes | None = None,
+        gate_setup: FileEffectGateSetup | None = None,
     ) -> _FileCallAdmission:
         try:
-            payload = encode_file_call_admission(self._obligation(family, binding, token=token))
+            payload = encode_file_call_admission(self._obligation(family, binding, token=token, gate_setup=gate_setup))
         except FileCallObligationCodecError:
             raise ValidationError("File call lifecycle recovery identity is too large or invalid") from None
         return _FileCallAdmission(secrets.token_hex(16), payload)
@@ -760,6 +911,7 @@ class FileOperation:
         scratch_reference: ScratchReference | None = None,
         scratch_cleanup_debt: ScratchCleanupDebt | None = None,
         publication_cleanup_debt: BoundPublicationCleanupDebt | None = None,
+        gate_setup: FileEffectGateSetup | None = None,
     ) -> FileCallObligation:
         return FileCallObligation(
             family=family,
@@ -778,6 +930,7 @@ class FileOperation:
                 if family is FileCallFamily.DOWNLOAD and isinstance(binding, FileDownloadBinding)
                 else None
             ),
+            gate_setup=gate_setup,
             uncertainty=uncertainty,
         )
 
@@ -858,7 +1011,9 @@ class FileOperation:
 
     def _capture(self, active: _ActiveFileDownload, outcome: FileDownloadOutcome) -> None:
         active.outcome = outcome
-        active.prepared.release_sink()
+        prepared = active.prepared
+        assert isinstance(prepared, _PreparedDownload)
+        prepared.release_sink()
         if outcome.requires_owner_retention:
             uncertainty = self._uncertainty(
                 pending_remote_effects=outcome.pending_remote_effects,

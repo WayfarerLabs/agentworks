@@ -267,6 +267,17 @@ def _prepare_download(
     )
     token = secrets.token_bytes(16)
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
+    return _prepare_download_from_binding(binding, sink, deadline, token, operation)
+
+
+def _prepare_download_from_binding(
+    binding: FileDownloadBinding,
+    sink: ByteSink,
+    deadline: Deadline,
+    token: bytes,
+    operation: BorrowedFixedHelperCarrier,
+) -> _PreparedDownload:
+    """Construct the snapshot workflow after core has published its binding."""
     state = _WorkingState(binding, token, operation)
     workflow = _DownloadWorkflow(operation, sink, deadline, state)
     return _PreparedDownload(binding, state, workflow)
