@@ -1931,6 +1931,16 @@ acceptance and the open production effect-fence gates above remain separate.
       Keep the public FileAccess and ownership release gates open until this and the concrete
       recovery handoff are proved.
 
+The reviewed setup design selects one deterministic, epoch-bound path and exclusive creation per
+managed scope/effective identity. A lost setup reply is reconciled by non-creating inspection of the
+complete gate under flock, not by replacing it or trusting the request's guest identity. Setup and
+inspection must independently observe the live guest epoch; only initial setup may retry exclusive
+creation when no durable binding exists. A durable binding instead makes absent or replaced state a
+retained uncertainty. This is a design ruling, not implemented guest setup, inspection,
+selected-carrier dispatch, `/run` provisioning or native acceptance. The first production vertical
+must still sequence setup, durable proposal, confirmed advance and DOWNLOAD dispatch on the same
+`file-call` row, then fence recovery before producing drain evidence.
+
 - [ ] Use the owned snapshot/chunk download for general in-memory reads, preserving caller byte
       bounds independently of QGA's single-response capacity. Keep the no-staging readiness read
       separately bound before dispatch; prove its complete encoded response fits the selected route.

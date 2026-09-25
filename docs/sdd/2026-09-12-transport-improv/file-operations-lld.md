@@ -909,28 +909,42 @@ machine-wide file-object lock, a platform-host administrator prerequisite, or a 
 malicious target-user process. Arbitrary commands, jobs, VM power operations and WSL lifetime holds
 retain their separate recovery obligations.
 
-The smallest candidate uses one stable SQLite gate database per effective helper identity and
-managed target scope, stored on a local filesystem writable by that identity. Linux `flock` on a
-separate open descriptor for that same inode is the **sole effect-coordination lock**; SQLite stores
-the generation in transactions, but its POSIX locks do not span filesystem effects. The record has a
-random gate-instance identifier, a current never-reused generation token and the bound guest
-marker/epoch. The exact gate identity, device/inode and token must be durable in the `file-call`
-obligation before any effect dispatch; the request carries them to the fixed helper. A gate is
-initialized and acknowledged before effect admission. After an admitted effect, an absent, replaced
-or unreadable gate in the same target epoch is uncertainty, never permission to initialize a
-replacement. A new target epoch requires explicit revalidation/adoption and cannot silently inherit
-the old gate. The proposed Linux VM destination selects a core-provisioned, boot-local
+The smallest candidate uses one stable SQLite gate database per effective helper identity, managed
+target scope and verified guest epoch. Core derives one deterministic path under the selected local
+namespace from those facts; every participating route must address that same path. Linux `flock` on
+a separate open descriptor for that same inode is the **sole effect-coordination lock**; SQLite
+stores the generation in transactions, but its POSIX locks do not span filesystem effects. The
+record has a random gate-instance identifier, a current never-reused generation token and the bound
+guest marker/epoch. The exact gate identity, device/inode and token must be durable in the
+`file-call` obligation before any effect dispatch; the request carries them to the fixed helper. A
+gate is initialized and acknowledged before effect admission. After an admitted effect, an absent,
+replaced or unreadable gate in the same target epoch is uncertainty, never permission to initialize
+a replacement. A new target epoch requires explicit revalidation/adoption and cannot silently
+inherit the old gate. The proposed Linux VM destination selects a core-provisioned, boot-local
 `/run/agentworks/file-gates-v1` namespace with separate access for each effective helper identity.
 Setup and initialization precede effect admission; neither happens in the no-write, no-state
-readiness path or as a side effect of an effect request. Guest setup establishes a suitable local
-mount and per-identity permissions; selected-route admission confirms the bound gate instance and
-inode, guest epoch and usable Python `sqlite3` and `flock`. An absent or unsuitable namespace
-refuses effect admission. Common mount visibility across SSH, QGA and WSL routes, and no cleanup
-within an unresolved guest epoch, are separate native acceptance invariants. One selected helper
-cannot prove what the other routes see. Account-home and `/dev/shm` paths are not automatic
-fallbacks: a home may be network-backed, while systemd can remove ordinary-user `/dev/shm` contents
-at logout. The `/run` choice is a Linux guest candidate, not proved WSL2/SSH/QGA mount or
-boot-lifetime behavior and not a macOS host setup requirement.
+readiness path or as a side effect of an effect request. Before exclusive creation, setup
+independently observes the live guest marker/epoch and effective identity, refusing a delayed
+old-epoch request before it creates a file. One `O_EXCL` creation wins for the canonical path. If
+its reply is lost, core performs a non-creating inspection under the same flock. Before any effect
+has been admitted, inspection may adopt only a complete gate whose path, scope, identity and
+independently observed epoch match, recording the discovered instance, generation and inode in the
+durable obligation. Inspection may perform SQLite crash recovery under the flock, but must not
+create a gate or advance its generation. If the path is absent during initial setup, another
+exact-path exclusive creation may race a delayed first request; only the winner can create, and core
+must inspect it before effect admission. If inspection reaches an inode before setup finishes its
+schema, it may retry within the deadline but must not remove or replace that inode. Once an
+unresolved obligation has a durable binding, absent or replaced state is uncertainty, never a reason
+to initialize again.
+
+Guest setup establishes a suitable local mount and per-identity permissions; selected-route
+admission confirms the bound gate instance and inode, guest epoch and usable Python `sqlite3` and
+`flock`. An absent or unsuitable namespace refuses effect admission. Common mount visibility across
+SSH, QGA and WSL routes, and no cleanup within an unresolved guest epoch, are separate native
+acceptance invariants. One selected helper cannot prove what the other routes see. Account-home and
+`/dev/shm` paths are not automatic fallbacks: a home may be network-backed, while systemd can remove
+ordinary-user `/dev/shm` contents at logout. The `/run` choice is a Linux guest candidate, not
+proved WSL2/SSH/QGA mount or boot-lifetime behavior and not a macOS host setup requirement.
 
 The first concrete binding is Linux VM-specific. Target preparation already observes a
 `VMGuestIdentity` containing the raw instance marker, kernel boot ID and PID 1 start time and
