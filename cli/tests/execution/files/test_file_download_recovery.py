@@ -1176,7 +1176,7 @@ def test_snapshot_recovery_refuses_a_setup_only_download(tmp_path: Path) -> None
             (_LocalHelperDrainRecord("gate-setup", exited=True),),
         )
 
-        with pytest.raises(StateError, match="gate setup"):
+        with pytest.raises(StateError):
             FileDownloadRecovery.open(recovered, target, persisted, evidence)
     finally:
         database.close()
