@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
+from weakref import ReferenceType, ref
 
 import pytest
 
@@ -34,7 +35,7 @@ from agentworks.execution._wsl2_platform_hold import (
     encode_hold_payload,
     locator_digest,
 )
-from agentworks.execution._wsl2_platform_hold_recovery import recover_platform_hold
+from agentworks.execution._wsl2_platform_hold_recovery import WSL2PlatformHoldRecovery
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.wsl2 import WSL2Connection
 from agentworks.operations import OperationOwner
@@ -105,6 +106,9 @@ class QueryClient:
     settled: bool = False
     reads: int = 0
     incomplete: bool = False
+    present: bool = False
+    settle_open_count: int = 0
+    settle_calls: int = 0
 
     def current_controller_identity(self) -> tuple[int, int]:
         raise AssertionError("guest query cannot inspect controller identity")
@@ -122,6 +126,8 @@ class QueryClient:
     def read_stdout_line(self, limit: int, deadline: Deadline) -> bytes:
         self.reads += 1
         if self.reads == 1:
+            if self.present:
+                return f"AGW_GQ2 {self.nonce} {self.pid} {BOOT} 4096 found 8192\n".encode()
             return f"AGW_GQ2 {self.nonce} {self.pid} {BOOT} 4096 missing -\n".encode()
         return b"late" if self.incomplete else b""
 
@@ -129,6 +135,9 @@ class QueryClient:
         return 0
 
     def settle(self, deadline: Deadline) -> LocalResourceSnapshot:
+        self.settle_calls += 1
+        if self.settle_calls <= self.settle_open_count:
+            return OPEN
         self.settled = True
         return SETTLED
 
@@ -155,16 +164,16 @@ def _recover(
         owner = OperationOwner.recover(database.operations, predecessor, generation)
         row = database.operations.list_lifecycle_obligations(owner.ownership)[0]
         observer = WSL2GuestObserver(CONNECTION, client_factory=lambda: query) if query is not None else None
-        return recover_platform_hold(
+        recovery = WSL2PlatformHoldRecovery(
             owner,
             row,
             locator="opaque-locator",
             instance_marker="c" * 32,
             connection=CONNECTION,
-            deadline=Deadline.after(2),
             controller_observer=controller,
             guest_observer=observer,
         )
+        return recovery.recover(Deadline.after(2))
 
 
 def test_ready_recovery_resolves_only_after_exact_settled_absence(tmp_path: Path) -> None:
@@ -255,22 +264,21 @@ def test_registered_takeover_resolves_and_mismatch_refuses(tmp_path: Path) -> No
         owner = OperationOwner.recover(database.operations, predecessor, "d" * 32)
         row = database.operations.list_lifecycle_obligations(owner.ownership)[0]
         with pytest.raises(StateError):
-            recover_platform_hold(
+            WSL2PlatformHoldRecovery(
                 owner,
                 row,
                 locator="wrong",
                 instance_marker="c" * 32,
                 connection=CONNECTION,
-                deadline=Deadline.after(2),
             )
-        assert recover_platform_hold(
+        recovery = WSL2PlatformHoldRecovery(
             owner,
             row,
             locator="opaque-locator",
             instance_marker="c" * 32,
             connection=CONNECTION,
-            deadline=Deadline.after(2),
         )
+        assert recovery.recover(Deadline.after(2))
         assert (
             database.operations.list_lifecycle_obligations(owner.ownership)[0].state
             is LifecycleObligationState.RESOLVED
@@ -361,3 +369,70 @@ def test_lost_resolution_reply_is_recognized_after_takeover(tmp_path: Path, monk
     retry_query = QueryClient()
     assert _recover(path, predecessor, generation="e" * 32, controller=Controller(), query=retry_query)
     assert not retry_query.spawned
+
+
+def test_unsettled_unknown_retains_native_client_for_cleanup_only(tmp_path: Path) -> None:
+    path = tmp_path / "hold.db"
+    predecessor, _ = _start_hold(path)
+    with closing(Database(path)) as database:
+        owner = OperationOwner.recover(database.operations, predecessor, "d" * 32)
+        row = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        created: list[ReferenceType[QueryClient]] = []
+
+        def factory() -> QueryClient:
+            client = QueryClient(settle_open_count=1)
+            created.append(ref(client))
+            return client
+
+        recovery = WSL2PlatformHoldRecovery(
+            owner,
+            row,
+            locator="opaque-locator",
+            instance_marker="c" * 32,
+            connection=CONNECTION,
+            controller_observer=Controller(),
+            guest_observer=WSL2GuestObserver(CONNECTION, client_factory=factory),
+        )
+        assert not recovery.recover(Deadline.after(2))
+        assert len(created) == 1
+        client = created[0]()
+        assert client is not None
+        assert client.spawned and not client.settled
+        assert recovery.settle_pending(Deadline.after(2))
+        assert client.settled and client.settle_calls == 2
+        assert not recovery.recover(Deadline.after(2))
+        assert len(created) == 1
+        persisted = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        assert persisted.state is LifecycleObligationState.POSSIBLE_EFFECT
+        assert decode_hold_payload(persisted.payload).query_may_have_been_admitted
+
+
+def test_complete_present_allows_same_controller_absence_retry(tmp_path: Path) -> None:
+    path = tmp_path / "hold.db"
+    predecessor, _ = _start_hold(path)
+    with closing(Database(path)) as database:
+        owner = OperationOwner.recover(database.operations, predecessor, "d" * 32)
+        row = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        clients = [QueryClient(present=True), QueryClient()]
+        created: list[QueryClient] = []
+
+        def factory() -> QueryClient:
+            client = clients[len(created)]
+            created.append(client)
+            return client
+
+        recovery = WSL2PlatformHoldRecovery(
+            owner,
+            row,
+            locator="opaque-locator",
+            instance_marker="c" * 32,
+            connection=CONNECTION,
+            controller_observer=Controller(),
+            guest_observer=WSL2GuestObserver(CONNECTION, client_factory=factory),
+        )
+        assert not recovery.recover(Deadline.after(2))
+        assert len(created) == 1 and clients[0].settled
+        assert recovery.recover(Deadline.after(2))
+        assert len(created) == 2 and clients[1].settled
+        persisted = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        assert persisted.state is LifecycleObligationState.RESOLVED

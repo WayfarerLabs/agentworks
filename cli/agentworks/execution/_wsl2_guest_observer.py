@@ -100,12 +100,33 @@ class WSL2GuestObserver:
         finally:
             self._transition_lock.release()
 
-    def _settle_pending(self) -> bool:
+    def settle_pending(self, deadline: Deadline) -> bool:
+        """Retry only local client settlement; never clear query uncertainty."""
+        if type(deadline) is not Deadline or deadline.expires_at is None:
+            raise ValidationError("WSL2 guest settlement requires a finite deadline")
+        remaining = deadline.remaining()
+        assert remaining is not None
+        if remaining <= 0 or not self._transition_lock.acquire(timeout=min(remaining, TIMEOUT_MAX)):
+            return False
+        try:
+            if deadline.expired:
+                return False
+            return self._settle_pending(deadline)
+        finally:
+            self._transition_lock.release()
+
+    def _settle_pending(self, deadline: Deadline | None = None) -> bool:
         client = self._pending
         if client is None:
             return True
         try:
-            settled = client.settle(Deadline.after(_CLEANUP_SECONDS)).settled
+            cleanup_seconds = _CLEANUP_SECONDS
+            if deadline is not None:
+                remaining = deadline.remaining()
+                assert remaining is not None
+                cleanup_seconds = min(cleanup_seconds, remaining)
+            allowance = Deadline.after(cleanup_seconds)
+            settled = client.settle(allowance).settled
         except Exception:
             return False
         if settled:
