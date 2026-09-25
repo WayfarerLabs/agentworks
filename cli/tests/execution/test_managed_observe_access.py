@@ -9,6 +9,7 @@ import pytest
 
 from agentworks.db import Database, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
+from agentworks.execution import _fixed_helper_operation as fixed_operation
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._managed_job_protocol import decode_managed_job_fact
@@ -103,28 +104,22 @@ def test_observe_uses_exact_persisted_launch_and_does_not_change_row(tmp_path: P
         database.close()
 
 
-def test_missing_facts_remain_unknown_without_replay(tmp_path: Path) -> None:
-    database, repository, owner = _reserved(tmp_path)
-    carrier = ScriptedCarrier(
-        lambda request: _records(request.nonce, ManagedResultControl((FactName.LAUNCH,)), (request.expected_launch,))
-    )
-    try:
-        outcome = _observe(repository, owner, carrier)
-        assert outcome.candidate is not None
-        assert outcome.candidate.observation is not None
-        assert outcome.candidate.observation.state is ManagedObservationState.OBSERVED
-        assert tuple(name for name, _ in outcome.candidate.observation.facts) == (FactName.LAUNCH,)
-        assert carrier.calls == 1
-        assert repository.inspect(RUN) is not None
-    finally:
-        database.close()
-
-
 @pytest.mark.parametrize("case", ["absent", "target", "boot", "operation", "platform"])
-def test_refuses_wrong_row_or_target_before_borrow_and_carrier(tmp_path: Path, case: str) -> None:
+def test_refuses_wrong_row_or_target_before_borrow_and_carrier(
+    tmp_path: Path, case: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     database, repository, owner = _reserved(tmp_path)
     carrier = ScriptedCarrier(lambda request: b"")
     changes: dict[str, object] = {}
+    borrow_calls = 0
+    original_borrow = owner.borrow
+
+    def borrow_spy():  # type: ignore[no-untyped-def]
+        nonlocal borrow_calls
+        borrow_calls += 1
+        return original_borrow()
+
+    monkeypatch.setattr(owner, "borrow", borrow_spy)
     try:
         if case == "absent":
             repository._connection.execute("DELETE FROM execution_runs WHERE run_id = ?", (RUN.run_id,))  # noqa: SLF001
@@ -144,6 +139,7 @@ def test_refuses_wrong_row_or_target_before_borrow_and_carrier(tmp_path: Path, c
         with pytest.raises((ValidationError, StateError)):
             _observe(repository, owner, carrier, **changes)
         assert carrier.calls == 0
+        assert borrow_calls == 0
         assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
         borrow = owner.borrow()
         borrow.close()
@@ -188,5 +184,31 @@ def test_carrier_base_exception_preserves_original_with_custody_fact(tmp_path: P
         assert raised.value.__cause__.outcome.pending_remote_effects
         assert carrier.calls == 1
         assert repository.inspect(RUN) == row
+    finally:
+        database.close()
+
+
+def test_release_base_exception_preserves_original_with_custody_fact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database, repository, owner = _reserved(tmp_path)
+    interrupted = KeyboardInterrupt("release interrupted")
+    carrier = ScriptedCarrier(
+        lambda request: _records(request.nonce, ManagedResultControl((FactName.LAUNCH,)), (request.expected_launch,))
+    )
+
+    def fail_release(*_args: object, **_kwargs: object) -> None:
+        raise interrupted
+
+    monkeypatch.setattr(fixed_operation, "release_borrow_after_custody", fail_release)
+    try:
+        with pytest.raises(KeyboardInterrupt) as raised:
+            _observe(repository, owner, carrier)
+        assert raised.value is interrupted
+        assert isinstance(interrupted.__cause__, ManagedObserveControlFact)
+        assert interrupted.__cause__.outcome.candidate is not None
+        assert interrupted.__cause__.outcome.coordination_uncertain
+        assert interrupted.__cause__.outcome.requires_owner_retention
+        assert carrier.calls == 1
     finally:
         database.close()

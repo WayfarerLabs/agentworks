@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING
 
 from agentworks.db import OperationResourceKind
 from agentworks.errors import ValidationError
-from agentworks.operations import OperationOwner, release_borrow_after_custody
 
 from ._fixed_helper_operation import BorrowedFixedHelperCarrier
 from ._helper_launcher import IdentityPlan, _validate_plan
@@ -38,6 +37,8 @@ from .models import Command, Input, Output, Script, Shell
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
+
+    from agentworks.operations import OperationOwner
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -141,31 +142,23 @@ def start_bound_managed_job(
                 )
                 operation.settle(result.dispatch, result.carrier_completion)
             except BaseException as control:
-                retained = operation.requires_owner_retention
-                release_failed = False
-                try:
-                    release_borrow_after_custody(borrow, retain_effect=retained)
-                except BaseException:
-                    release_failed = True
+                custody, _ = operation.release(control_escaped=True)
                 fact = ManagedJobShellFact(
                     result,
-                    operation.pending_remote_effects,
-                    operation.coordination_uncertain or operation.has_outstanding_attempt or release_failed,
-                    retained or release_failed,
+                    custody.pending_remote_effects,
+                    custody.coordination_uncertain,
+                    custody.requires_owner_retention,
                 )
                 raise control from ManagedJobShellRefusal(fact)
-            retained = operation.requires_owner_retention
-            try:
-                release_borrow_after_custody(borrow, retain_effect=retained)
-            except BaseException as release_error:
-                fact = ManagedJobShellFact(result, operation.pending_remote_effects, True, True)
-                raise release_error from ManagedJobShellRefusal(fact)
+            custody, release_error = operation.release()
             fact = ManagedJobShellFact(
                 result,
-                operation.pending_remote_effects,
-                operation.coordination_uncertain,
-                retained,
+                custody.pending_remote_effects,
+                custody.coordination_uncertain,
+                custody.requires_owner_retention,
             )
+            if release_error is not None:
+                raise release_error from ManagedJobShellRefusal(fact)
             observed = result.observation
             if (
                 result.dispatch is not Dispatch.SENT

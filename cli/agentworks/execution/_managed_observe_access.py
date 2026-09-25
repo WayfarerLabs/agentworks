@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 from agentworks.db import OperationResourceKind
 from agentworks.errors import ValidationError
-from agentworks.operations import OperationOwner, release_borrow_after_custody
+from agentworks.operations import OperationOwner
 
 from ._fixed_helper_operation import BorrowedFixedHelperCarrier
 from ._helper_launcher import IdentityPlan, _validate_plan
@@ -109,26 +109,19 @@ def observe_bound_managed_run(
         )
         operation.settle(candidate.dispatch, candidate.carrier_completion)
     except BaseException as control:
-        retained = operation.requires_owner_retention
-        release_failed = False
-        try:
-            release_borrow_after_custody(borrow, retain_effect=retained)
-        except BaseException:
-            release_failed = True
+        custody, _ = operation.release(control_escaped=True)
         outcome = ManagedObserveOutcome(
             candidate,
-            operation.pending_remote_effects,
-            operation.coordination_uncertain or operation.has_outstanding_attempt or release_failed,
-            retained or release_failed,
+            custody.pending_remote_effects,
+            custody.coordination_uncertain,
+            custody.requires_owner_retention,
         )
         raise control from ManagedObserveControlFact(outcome)
 
-    retained = operation.requires_owner_retention
-    try:
-        release_borrow_after_custody(borrow, retain_effect=retained)
-    except BaseException as control:
-        outcome = ManagedObserveOutcome(candidate, operation.pending_remote_effects, True, True)
-        raise control from ManagedObserveControlFact(outcome)
-    return ManagedObserveOutcome(
-        candidate, operation.pending_remote_effects, operation.coordination_uncertain, retained
+    custody, release_error = operation.release()
+    outcome = ManagedObserveOutcome(
+        candidate, custody.pending_remote_effects, custody.coordination_uncertain, custody.requires_owner_retention
     )
+    if release_error is not None:
+        raise release_error from ManagedObserveControlFact(outcome)
+    return outcome

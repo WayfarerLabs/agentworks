@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks.execution.carrier import CarrierIO, Dispatch, ExitStatus
+from agentworks.operations import release_borrow_after_custody
 
 if TYPE_CHECKING:
     from agentworks.execution.carrier import (
@@ -15,6 +17,15 @@ if TYPE_CHECKING:
         PreparedInvocation,
     )
     from agentworks.operations import OperationAttempt, OperationBorrow
+
+
+@dataclass(frozen=True, slots=True)
+class BorrowedHelperCustody:
+    """Safe owner-retention facts after a fixed helper releases its borrow."""
+
+    pending_remote_effects: bool
+    coordination_uncertain: bool
+    requires_owner_retention: bool
 
 
 class BorrowedFixedHelperCarrier:
@@ -83,3 +94,23 @@ class BorrowedFixedHelperCarrier:
             return dispatch is Dispatch.SENT
         self.pending_remote_effects = True
         return False
+
+    def release(self, *, control_escaped: bool = False) -> tuple[BorrowedHelperCustody, BaseException | None]:
+        """Release or retain borrowed custody and report an interrupted release.
+
+        An escaped control path reports an outstanding attempt as uncertain
+        coordination even after the borrow hands its custody back to core.
+        """
+        retained = self.requires_owner_retention
+        try:
+            release_borrow_after_custody(self._borrow, retain_effect=retained)
+        except BaseException as error:
+            return BorrowedHelperCustody(self.pending_remote_effects, True, True), error
+        return (
+            BorrowedHelperCustody(
+                self.pending_remote_effects,
+                self.coordination_uncertain or (control_escaped and self.has_outstanding_attempt),
+                retained,
+            ),
+            None,
+        )

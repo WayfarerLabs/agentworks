@@ -9,6 +9,7 @@ import pytest
 
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
+from agentworks.execution import _fixed_helper_operation as fixed_operation
 from agentworks.execution import _managed_job_access as access
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
@@ -374,7 +375,7 @@ def test_shell_release_interrupt_preserves_original_control_and_safe_fact(
         raise control
 
     monkeypatch.setattr(access, "observe_workload_shell", lambda *_args, **_kwargs: observation)
-    monkeypatch.setattr(access, "release_borrow_after_custody", fail_release)
+    monkeypatch.setattr(fixed_operation, "release_borrow_after_custody", fail_release)
     try:
         with pytest.raises(KeyboardInterrupt) as caught:
             _call(repository, owner, carrier, invocation=Script("echo hello", Shell.USER_DEFAULT))
