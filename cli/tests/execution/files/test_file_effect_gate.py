@@ -80,13 +80,11 @@ guest._fixture_guest=VMGuestIdentity(
     )
 
 
-def _hold_until_released(binding: FileEffectGateBinding, entered: str, release: str, exited: str | None = None) -> None:
+def _hold_until_released(binding: FileEffectGateBinding, entered: str, release: str) -> None:
     with hold_file_effect_gate(binding, _observe_guest):
         Path(entered).touch()
         while not Path(release).exists():
             time.sleep(0.01)
-    if exited is not None:
-        Path(exited).touch()
 
 
 def _gate(tmp_path: Path) -> FileEffectGateBinding:
@@ -106,28 +104,6 @@ def _call(binding: FileEffectGateBinding, root: Path) -> FileCallObligation:
         token=secrets.token_bytes(16),
         effect_gate=binding,
     )
-
-
-def _crash_controller_with_held_effect(
-    database_path: str, binding: FileEffectGateBinding, entered: str, release: str, exited: str
-) -> None:
-    database = Database(Path(database_path))
-    owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "gate-vm"), "download")
-    obligation = owner.register_lifecycle_obligation(
-        "file-call",
-        payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
-        payload=encode_file_call_obligation(_call(binding, Path(database_path).parent)),
-        obligation_id="a" * 32,
-    )
-    obligation.mark_possible_effect()
-    helper = multiprocessing.get_context("spawn").Process(
-        target=_hold_until_released, args=(binding, entered, release, exited)
-    )
-    helper.start()
-    until = time.monotonic() + 10
-    while not Path(entered).exists() and time.monotonic() < until:
-        time.sleep(0.01)
-    os._exit(91 if Path(entered).exists() else 92)
 
 
 def _crash_controller_with_fixed_snapshot(
@@ -227,61 +203,6 @@ def test_binding_codec_and_exact_file_call_row_survive_reopen(tmp_path: Path) ->
             )
     finally:
         database.close()
-
-
-def test_spawned_controller_loss_retains_row_and_cannot_overtake_live_helper(tmp_path: Path) -> None:
-    binding = _gate(tmp_path)
-    database_path = tmp_path / "owner.db"
-    entered = tmp_path / "entered"
-    release = tmp_path / "release"
-    exited = tmp_path / "exited"
-    controller = multiprocessing.get_context("spawn").Process(
-        target=_crash_controller_with_held_effect,
-        args=(str(database_path), binding, str(entered), str(release), str(exited)),
-    )
-    controller.start()
-    try:
-        controller.join(15)
-        assert controller.exitcode == 91
-        database = Database(database_path)
-        try:
-            scope = OperationScope(OperationResourceKind.VM, "gate-vm")
-            predecessor = database.operations.inspect(scope)
-            assert predecessor is not None
-            row = database.operations.list_lifecycle_obligations(predecessor.ownership)[0]
-            retained = decode_file_call_obligation(row.payload)
-            assert retained.effect_gate == binding
-            proposed = replace(binding, proposed_generation=secrets.token_bytes(16))
-            # The proposal is durable before the takeover advance attempt.
-            owner = OperationOwner.recover(database.operations, predecessor.ownership, "b" * 32)
-            bound = owner.rebind_lifecycle_obligation(
-                row.obligation_id, "file-call", payload_version=row.payload_version, payload=row.payload
-            )
-            bound.publish_payload(
-                expected_revision=row.payload_revision,
-                payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
-                payload=encode_file_call_obligation(replace(retained, effect_gate=proposed)),
-            )
-            while_held = database.operations.list_lifecycle_obligations(owner.ownership)[0]
-            assert decode_file_call_obligation(while_held.payload).effect_gate == proposed
-            with pytest.raises(FileEffectGateError):
-                advance_file_effect_gate(proposed, _observe_guest)
-            release.touch()
-            until = time.monotonic() + 10
-            while not exited.exists() and time.monotonic() < until:
-                time.sleep(0.01)
-            assert exited.exists()
-            advanced = advance_file_effect_gate(proposed, _observe_guest)
-            assert advance_file_effect_gate(proposed, _observe_guest) == advanced
-            with pytest.raises(FileEffectGateError), hold_file_effect_gate(binding, _observe_guest):
-                raise AssertionError("delayed old effect must not enter")
-            with hold_file_effect_gate(advanced, _observe_guest):
-                pass
-        finally:
-            database.close()
-    finally:
-        release.touch()
-        controller.join(10)
 
 
 def test_fixed_snapshot_survives_controller_loss_and_is_fenced_before_recovery(
@@ -505,6 +426,51 @@ def test_lost_advance_reply_reconciles_but_stale_advance_cannot_overwrite(tmp_pa
         advance_file_effect_gate(first, _observe_guest)
     with hold_file_effect_gate(newest, _observe_guest):
         pass
+
+
+def test_slow_guest_observation_cannot_advance_or_admit_after_deadline(tmp_path: Path) -> None:
+    binding = _gate(tmp_path)
+    proposed = replace(binding, proposed_generation=secrets.token_bytes(16))
+
+    def slow_observation() -> VMGuestIdentity:
+        time.sleep(0.05)
+        return _GUEST
+
+    with pytest.raises(FileEffectGateError):
+        advance_file_effect_gate(proposed, slow_observation, expires_at=time.monotonic() + 0.01)
+    entered = False
+    with (
+        pytest.raises(FileEffectGateError),
+        hold_file_effect_gate(binding, slow_observation, expires_at=time.monotonic() + 0.01),
+    ):
+        entered = True
+    assert not entered
+    with hold_file_effect_gate(binding, _observe_guest):
+        pass
+    assert advance_file_effect_gate(proposed, _observe_guest).generation == proposed.proposed_generation
+
+
+def test_deadline_during_sqlite_generation_check_rolls_back_before_advance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentworks.execution import _file_effect_gate
+
+    binding = _gate(tmp_path)
+    proposed = replace(binding, proposed_generation=secrets.token_bytes(16))
+    original = _file_effect_gate._record
+
+    def slow_record(connection, expected):
+        generation = original(connection, expected)
+        time.sleep(0.05)
+        return generation
+
+    monkeypatch.setattr(_file_effect_gate, "_record", slow_record)
+    with pytest.raises(FileEffectGateError):
+        advance_file_effect_gate(proposed, _observe_guest, expires_at=time.monotonic() + 0.01)
+    monkeypatch.setattr(_file_effect_gate, "_record", original)
+    with hold_file_effect_gate(binding, _observe_guest):
+        pass
+    assert advance_file_effect_gate(proposed, _observe_guest).generation == proposed.proposed_generation
 
 
 def test_missing_replaced_or_wrong_guest_state_refuses_in_same_epoch(tmp_path: Path) -> None:

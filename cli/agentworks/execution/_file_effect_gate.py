@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import errno
 import os
+import posixpath
 import secrets
 import stat
 import sys
@@ -29,7 +30,7 @@ _LOWER_HEX = frozenset("0123456789abcdef")
 
 
 def _valid_path(path: object) -> bool:
-    if type(path) is not str or not path.startswith("/") or os.path.normpath(path) != path or "\0" in path:
+    if type(path) is not str or not path.startswith("/") or posixpath.normpath(path) != path or "\0" in path:
         return False
     try:
         return len(path.encode("utf-8")) <= 4_096
@@ -190,6 +191,11 @@ def _acquire_flock(descriptor: int, expires_at: float | None) -> None:
         time.sleep(min(0.01, remaining))
 
 
+def _require_before_deadline(expires_at: float | None) -> None:
+    if expires_at is not None and time.monotonic() >= expires_at:
+        raise FileEffectGateError("file-effect gate deadline expired")
+
+
 @contextmanager
 def _locked_gate(binding: FileEffectGateBinding, expires_at: float | None) -> Iterator[int]:
     try:
@@ -205,7 +211,7 @@ def _locked_gate(binding: FileEffectGateBinding, expires_at: float | None) -> It
         os.close(descriptor)
 
 
-def _connect(binding: FileEffectGateBinding, descriptor: int, expires_at: float | None) -> Connection:
+def _connect(binding: FileEffectGateBinding, descriptor: int) -> Connection:
     """Open only while the caller owns the independent flock descriptor."""
     try:
         import sqlite3
@@ -215,12 +221,11 @@ def _connect(binding: FileEffectGateBinding, descriptor: int, expires_at: float 
     _check_inode(binding, descriptor)
     connection: Connection | None = None
     try:
-        timeout = _BUSY_SECONDS if expires_at is None else max(0.0, min(_BUSY_SECONDS, expires_at - time.monotonic()))
         connection = sqlite3.connect(
             f"file:{quote(binding.path, safe='/')}?mode=rw",
             uri=True,
             isolation_level=None,
-            timeout=timeout,
+            timeout=0.0,
         )
         _check_inode(binding, descriptor)
         if connection.execute("PRAGMA journal_mode").fetchone() != ("delete",):
@@ -283,7 +288,7 @@ def initialize_file_effect_gate(path: str, guest: VMGuestIdentity, euid: int, sc
             metadata.st_ino,
         )
         _acquire_flock(descriptor, None)
-        with closing(_connect(binding, descriptor, None)) as connection:
+        with closing(_connect(binding, descriptor)) as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 "CREATE TABLE gate (id INTEGER PRIMARY KEY CHECK (id = 1), instance BLOB NOT NULL, "
@@ -330,14 +335,17 @@ def advance_file_effect_gate(
     with _locked_gate(binding, expires_at) as descriptor:
         if observe_guest() != binding.guest:
             raise FileEffectGateError("file-effect gate guest identity changed")
-        with closing(_connect(binding, descriptor, expires_at)) as connection:
+        _require_before_deadline(expires_at)
+        with closing(_connect(binding, descriptor)) as connection:
             try:
                 connection.execute("BEGIN IMMEDIATE")
                 current = _record(connection, binding)
                 if current == binding.generation:
+                    _require_before_deadline(expires_at)
                     connection.execute("UPDATE gate SET generation = ? WHERE id = 1", (proposed,))
                 elif current != proposed:
                     raise FileEffectGateError("file-effect gate generation changed")
+                _require_before_deadline(expires_at)
                 connection.commit()
             except (sqlite3.Error, FileEffectGateError):
                 connection.rollback()
@@ -372,13 +380,16 @@ def hold_file_effect_gate(
     with _locked_gate(binding, expires_at) as descriptor:
         if observe_guest() != binding.guest:
             raise FileEffectGateError("file-effect gate guest identity changed")
-        with closing(_connect(binding, descriptor, expires_at)) as connection:
+        _require_before_deadline(expires_at)
+        with closing(_connect(binding, descriptor)) as connection:
             try:
                 connection.execute("BEGIN IMMEDIATE")
                 if _record(connection, binding) != binding.generation:
                     raise FileEffectGateError("file-effect gate generation changed")
+                _require_before_deadline(expires_at)
                 connection.commit()
             except (sqlite3.Error, FileEffectGateError):
                 connection.rollback()
                 raise FileEffectGateError("file-effect gate observation is uncertain") from None
+        _require_before_deadline(expires_at)
         yield

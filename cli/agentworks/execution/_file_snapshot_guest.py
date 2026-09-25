@@ -244,8 +244,8 @@ def main(nonce: str) -> int:
         if request.effect_gate is None:
             result = _operate(request, expires_at)
         else:
-            # Observe the current guest independently of the request and
-            # keep the gate transaction across every filesystem effect.
+            # Observe the current guest under the gate flock and retain that
+            # lock, not a SQLite transaction, across filesystem effects.
             with hold_file_effect_gate(request.effect_gate, _identity, expires_at=expires_at):
                 result = _operate(request, expires_at)
     except _SafeFailure as error:

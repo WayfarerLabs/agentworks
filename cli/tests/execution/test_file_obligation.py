@@ -9,6 +9,7 @@ from dataclasses import replace
 import pytest
 
 from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES
+from agentworks.execution._file_effect_gate import FileEffectGateBinding, FileEffectGateError
 from agentworks.execution._file_obligation import (
     _FILE_CALL_RECOVERY_HEADROOM_BYTES,
     FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
@@ -49,6 +50,7 @@ from agentworks.execution._scratch_receipt import (
 from agentworks.execution._scratch_receipt import (
     _Identity as ScratchIdentity,
 )
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 
 _TOKEN = bytes(range(16))
 _TARGET = ManagedTargetIdentity(
@@ -60,6 +62,15 @@ _TARGET = ManagedTargetIdentity(
 _PLAN = IdentityPlan(IdentityExpectation(1001, 1002, (1002, 1003)), IdentityMode.DIRECT)
 _RUNTIME = RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3")
 _MAXIMUM = (1 << 64) - 1
+
+
+def test_guest_gate_path_uses_posix_normalization_on_any_controller_os() -> None:
+    guest = VMGuestIdentity("a" * 32, "123e4567-e89b-12d3-a456-426614174000", 1)
+    path = "/run/agentworks/file-gates-v1/fence\\name.db"
+    binding = FileEffectGateBinding(path, _TOKEN, b"g" * 16, guest, 1001, "fixture-vm", 1, 2)
+    assert binding.path == path
+    with pytest.raises(FileEffectGateError):
+        replace(binding, path="/run/agentworks/../file-gates-v1/fence.db")
 
 
 def _context(family: FileCallFamily, plan: IdentityPlan = _PLAN) -> ScratchReceiptContext:
