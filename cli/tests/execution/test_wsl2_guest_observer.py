@@ -38,6 +38,7 @@ class FakeClient:
     trailing: bytes = b""
     exit_status: int | None = 0
     response: bytes | None = None
+    kind: str = "missing"
     local: LocalResourceSnapshot = OPEN
     argv: tuple[str, ...] = ()
     reads: int = 0
@@ -67,8 +68,11 @@ class FakeClient:
         self._step("read_line" if self.reads == 1 else "read_eof")
         if self.reads == 1:
             nonce = self.argv[-2]
+            ticks = "8192" if self.kind == "found" else "-"
             return (
-                self.response if self.response is not None else f"AGW_GQ2 {nonce} 137 {BOOT} 4096 missing -\n".encode()
+                self.response
+                if self.response is not None
+                else f"AGW_GQ2 {nonce} 137 {BOOT} 4096 {self.kind} {ticks}\n".encode()
             )
         return self.trailing
 
@@ -138,7 +142,7 @@ def test_trailing_output_prevents_absence(trailing: bytes) -> None:
 
 
 @pytest.mark.parametrize("fail_at", ["spawn", "close_stdin", "read_line", "wait", "read_eof", "settle"])
-def test_interruption_retains_client_then_settles_before_new_dispatch(fail_at: str) -> None:
+def test_interruption_retains_client_and_blocks_new_dispatch(fail_at: str) -> None:
     factory = Factory()
     first = FakeClient(factory.events, fail_at=fail_at)
     second = FakeClient(factory.events)
@@ -147,11 +151,12 @@ def test_interruption_retains_client_then_settles_before_new_dispatch(fail_at: s
     with pytest.raises(KeyboardInterrupt):
         subject.observe(IDENTITY, Deadline.after(1))
     first.fail_at = None
-    assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.ABSENT_CONFIRMED
-    assert factory.events.index("spawn", factory.events.index(fail_at) + 1) > factory.events.index("settle")
+    assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.UNKNOWN
+    assert not second.argv
+    assert factory.events.count("spawn") == 1
 
 
-def test_unsettled_attempt_blocks_new_dispatch_until_retry_succeeds() -> None:
+def test_unsettled_attempt_remains_blocked_after_local_settlement_retry() -> None:
     factory = Factory()
     first = FakeClient(factory.events, fail_at="read_line", settlement_blocked=True)
     second = FakeClient(factory.events)
@@ -162,8 +167,9 @@ def test_unsettled_attempt_blocks_new_dispatch_until_retry_succeeds() -> None:
     assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.UNKNOWN
     assert not second.argv
     first.settlement_blocked = False
-    assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.ABSENT_CONFIRMED
-    assert second.argv
+    assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.UNKNOWN
+    assert not second.argv
+    assert factory.events.count("spawn") == 1
 
 
 @pytest.mark.parametrize("cleanup_type", [KeyboardInterrupt, SystemExit])
@@ -179,7 +185,8 @@ def test_cleanup_control_interruption_after_ordinary_spawn_failure_propagates_an
         subject.observe(IDENTITY, Deadline.after(1))
     assert not second.argv
     first.settle_error = None
-    assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.ABSENT_CONFIRMED
+    assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.UNKNOWN
+    assert not second.argv
     assert events[:3] == ["spawn", "settle", "settle"]
 
 
@@ -192,8 +199,20 @@ def test_ordinary_cleanup_failure_after_spawn_failure_returns_unknown_and_retain
     assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.UNKNOWN
     assert not second.argv
     first.settle_error = None
-    assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.ABSENT_CONFIRMED
+    assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.UNKNOWN
+    assert not second.argv
     assert events[:3] == ["spawn", "settle", "settle"]
+
+
+def test_complete_present_result_permits_later_absence_query() -> None:
+    events: list[str] = []
+    first = FakeClient(events, kind="found")
+    second = FakeClient(events)
+    created = iter((first, second))
+    subject = WSL2GuestObserver(WSL2Connection("Ubuntu", "root", "wsl.exe"), client_factory=lambda: next(created))
+    assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.PRESENT
+    assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.ABSENT_CONFIRMED
+    assert events.count("spawn") == 2
 
 
 def test_nonzero_exit_is_unknown_even_with_complete_output_and_settlement() -> None:
@@ -201,6 +220,24 @@ def test_nonzero_exit_is_unknown_even_with_complete_output_and_settlement() -> N
     client = FakeClient(factory.events, exit_status=1)
     subject = WSL2GuestObserver(WSL2Connection("Ubuntu", "root", "wsl.exe"), client_factory=lambda: client)
     assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.UNKNOWN
+
+
+@pytest.mark.parametrize("failure", ["trailing", "exit", "malformed"])
+def test_complete_but_untrusted_attempt_blocks_later_query(failure: str) -> None:
+    events: list[str] = []
+    first = FakeClient(events)
+    if failure == "trailing":
+        first.trailing = b"extra"
+    elif failure == "exit":
+        first.exit_status = 1
+    else:
+        first.response = b"AGW_GQ2 malformed\n"
+    second = FakeClient(events)
+    created = iter((first, second))
+    subject = WSL2GuestObserver(WSL2Connection("Ubuntu", "root", "wsl.exe"), client_factory=lambda: next(created))
+    assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.UNKNOWN
+    assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.UNKNOWN
+    assert not second.argv
 
 
 @pytest.mark.parametrize("response", [b"", b"AGW_GQ2 malformed\n"])

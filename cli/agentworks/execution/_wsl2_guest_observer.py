@@ -29,7 +29,11 @@ _CLEANUP_SECONDS = 0.5
 
 
 class WSL2GuestObserver:
-    """Run a fixed, no-staging query with a separately owned native client."""
+    """Run a fixed query; an unaccounted dispatch permanently blocks retry.
+
+    Settling a local WSL client does not prove that WSLService drained its
+    guest-side dispatch. Only a complete, exact query result permits another.
+    """
 
     def __init__(
         self,
@@ -45,6 +49,7 @@ class WSL2GuestObserver:
         self._client_factory = WindowsWSL2HostClient if client_factory is None else client_factory
         self._transition_lock = Lock()
         self._pending: OwnedHostClient | None = None
+        self._query_uncertain = False
 
     def observe(self, identity: GuestAnchorIdentity, deadline: Deadline) -> GuestAnchorPresence:
         """Observe one identity; unresolved local custody prevents new dispatch."""
@@ -55,11 +60,12 @@ class WSL2GuestObserver:
         if remaining <= 0 or not self._transition_lock.acquire(timeout=min(remaining, TIMEOUT_MAX)):
             return GuestAnchorPresence.UNKNOWN
         try:
-            if not self._settle_pending() or deadline.expired:
+            if not self._settle_pending() or self._query_uncertain or deadline.expired:
                 return GuestAnchorPresence.UNKNOWN
             nonce = secrets.token_hex(16)
             client = self._client_factory()
             self._pending = client  # Retain before any call that can dispatch.
+            self._query_uncertain = True
             try:
                 client.spawn_owned(self._argv(identity, nonce), deadline)
                 client.close_stdin()
@@ -70,7 +76,7 @@ class WSL2GuestObserver:
                 settled = self._settle_pending()
                 if not settled:
                     return GuestAnchorPresence.UNKNOWN
-                return reduce_guest_query_response(
+                presence = reduce_guest_query_response(
                     response,
                     identity,
                     nonce,
@@ -78,6 +84,9 @@ class WSL2GuestObserver:
                     complete=complete,
                     deadline_expired=deadline.expired,
                 )
+                if presence is not GuestAnchorPresence.UNKNOWN:
+                    self._query_uncertain = False
+                return presence
             except BaseException as error:
                 try:
                     self._settle_pending()

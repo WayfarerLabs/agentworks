@@ -208,6 +208,7 @@ class FakeObserver:
 class QueryNative:
     events: list[str]
     name: str
+    interrupt_on_first_read: bool = False
     interrupted: bool = False
     settlement_attempts: int = 0
     argv: tuple[str, ...] = ()
@@ -218,6 +219,9 @@ class QueryNative:
         self.events.append(f"{self.name}:spawn")
         self.argv = argv
 
+    def current_controller_identity(self) -> tuple[int, int]:
+        raise AssertionError("query must not inspect controller identity")
+
     def close_stdin(self) -> None:
         self.events.append(f"{self.name}:eof")
 
@@ -225,7 +229,7 @@ class QueryNative:
         assert limit in {1, 160} and not deadline.expired
         self.reads += 1
         self.events.append(f"{self.name}:read")
-        if self.name == "query-1" and self.reads == 1 and not self.interrupted:
+        if self.interrupt_on_first_read and self.reads == 1 and not self.interrupted:
             self.interrupted = True
             raise KeyboardInterrupt
         if self.reads == 1:
@@ -244,16 +248,21 @@ class QueryNative:
         assert not deadline.expired
         self.settlement_attempts += 1
         self.events.append(f"{self.name}:settle-{self.settlement_attempts}")
-        return OPEN if self.name == "query-1" and self.settlement_attempts == 1 else SETTLED
+        return OPEN if self.interrupted and self.settlement_attempts == 1 else SETTLED
 
 
 @dataclass
 class QueryFactory:
     events: list[str]
+    interrupt_first: bool = True
     clients: list[QueryNative] = field(default_factory=list)
 
     def __call__(self) -> QueryNative:
-        client = QueryNative(self.events, f"query-{len(self.clients) + 1}")
+        client = QueryNative(
+            self.events,
+            f"query-{len(self.clients) + 1}",
+            interrupt_on_first_read=self.interrupt_first and not self.clients,
+        )
         self.clients.append(client)
         self.events.append(f"{client.name}:create")
         return client
@@ -328,7 +337,7 @@ def test_query_marker_publication_failure_prevents_observer_dispatch() -> None:
     assert not owner.obligations[0].resolved
 
 
-def test_real_observer_release_retries_custody_and_resolves_only_its_hold(tmp_path: Path) -> None:
+def test_real_observer_interrupted_query_cannot_resolve_hold_after_local_settlement(tmp_path: Path) -> None:
     with closing(Database(tmp_path / "hold.db")) as database:
         owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "proof")
         events: list[str] = []
@@ -361,19 +370,47 @@ def test_real_observer_release_retries_custody_and_resolves_only_its_hold(tmp_pa
 
         subject.release(Deadline.after(1))
 
-        assert len(query_factory.clients) == 2
+        assert len(query_factory.clients) == 1
         assert query_factory.clients[0].settlement_attempts == 2
-        assert events.index("query-1:settle-2") < events.index("query-2:create")
-        assert query_factory.clients[1].argv[:5] == ("wsl.exe", "--distribution", "Ubuntu", "--user", "root")
+        assert "query-2:create" not in events
         rows = database.operations.list_lifecycle_obligations(owner.ownership)
         assert len(rows) == 2
+        states_by_nonce = {decode_hold_payload(row.payload).nonce: row.state for row in rows}
+        assert subject.payload is not None and unrelated.payload is not None
+        assert states_by_nonce == {
+            subject.payload.nonce: LifecycleObligationState.POSSIBLE_EFFECT,
+            unrelated.payload.nonce: LifecycleObligationState.POSSIBLE_EFFECT,
+        }
+        assert events.index("query-1:create") < events.index("query-1:spawn")
+
+
+def test_real_observer_complete_query_resolves_only_its_hold(tmp_path: Path) -> None:
+    with closing(Database(tmp_path / "hold.db")) as database:
+        owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "proof")
+        events: list[str] = []
+        connection = WSL2Connection("Ubuntu", "root", "wsl.exe")
+        query_factory = QueryFactory(events, interrupt_first=False)
+        observer = WSL2GuestObserver(connection, client_factory=query_factory)
+        subject = WSL2PlatformHold(
+            owner, "vm-one", "opaque-locator", "c" * 32, connection, FakeNative(events), observer
+        )
+        unrelated = WSL2PlatformHold(
+            owner, "vm-one", "opaque-locator", "c" * 32, connection, FakeNative(events), FakeObserver(events)
+        )
+        subject.start(Deadline.after(1))
+        unrelated.start(Deadline.after(1))
+
+        subject.release(Deadline.after(1))
+
+        rows = database.operations.list_lifecycle_obligations(owner.ownership)
         states_by_nonce = {decode_hold_payload(row.payload).nonce: row.state for row in rows}
         assert subject.payload is not None and unrelated.payload is not None
         assert states_by_nonce == {
             subject.payload.nonce: LifecycleObligationState.RESOLVED,
             unrelated.payload.nonce: LifecycleObligationState.POSSIBLE_EFFECT,
         }
-        assert events.index("query-1:create") < events.index("query-1:spawn")
+        assert len(query_factory.clients) == 1
+        assert query_factory.clients[0].argv[:5] == ("wsl.exe", "--distribution", "Ubuntu", "--user", "root")
 
 
 def test_nested_holds_are_independent() -> None:
