@@ -565,10 +565,19 @@ missing-terminal result is not ready. The target commits a mode-0400 `disposal` 
 the immutable launch and syncing the run directory before removing validated artifacts. A retry
 resumes partial cleanup, and success requires only the exact one-link receipt to remain. Publishers
 refuse an observed receipt. Complete helper failure or incomplete carrier evidence remains uncertain
-because deletion may already have begun. This is boot-local private machinery; operation claim
-serialization, public jobs and live SSH/QGA proof remain open. Disposal has the same VM launch and
-guest-identity fence before it opens the store or deletes any artifact. These fences are hermetic
-protocol checks, not proof of a current production provider route or host-bound JobAccess.
+because deletion may already have begun. This is boot-local private machinery. Disposal has the same
+VM launch and guest-identity fence before it opens the store or deletes any artifact. These fences
+are hermetic protocol checks, not proof of a current production provider route or host-bound
+JobAccess.
+
+`_managed_disposal_access.py` privately binds one disposal attempt to the exact persisted
+independent VM run and a caller-held VM operation owner. It requires a reconciled launch receipt and
+arms a run-ID-only `managed-dispose` obligation after pure carrier validation but before dispatch.
+Settled no-delivery or a complete validated `NOT_READY` or `DISPOSED` response resolves only
+temporary delivery custody. `NOT_READY` does not claim deletion; `DISPOSED` requires the exact
+receipt-only proof. Uncertain delivery or interrupted arming retains the exact obligation and owner
+for recovery. The adapter leaves the run row unchanged. Explicit release authorization, production
+route and operation-claim composition, recovery, public jobs and live SSH/QGA proof remain open.
 
 ## Input accounting
 
