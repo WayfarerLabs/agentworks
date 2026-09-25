@@ -1875,7 +1875,7 @@ the installed row before dispatch; expected and actual helper journal records mu
 persisted token in every recovery generation. The tests retain completed-helper cleanup and
 surviving-helper refusal. The test-only journal does not prove native SSH/QGA dispatch drain.
 
-- [ ] Prove the shared guest effect-fence mechanism locally through DOWNLOAD first. Persist one gate
+- [x] Prove the shared guest effect-fence mechanism locally through DOWNLOAD first. Persist one gate
       binding in the existing `file-call` row, carry the verified raw guest epoch, initialize the
       gate before effect admission, and have the snapshot helper hold the same-inode Linux `flock`
       through effects and cleanup while SQLite stores generations in short rollback transactions.
@@ -1897,10 +1897,9 @@ The corrected private mechanism is composed at `b953eff7`. It binds the gate ino
 DOWNLOAD obligation, holds Linux flock across fixed-helper effects after closing the SQLite
 connection, and reproduces the original same-inode source-close race with a real spawned helper.
 Project and complexity reviews found the final correction clean; the combined tree passes 201
-focused file-gate, snapshot, recovery and obligation tests. This accepts only the local
-lock-lifetime mechanism. It does not complete this checkbox or authorize production drain evidence:
-fixed-helper interrupted cleanup and recovery of recovery, setup/advance dispatch, other file
-families and native route acceptance remain open.
+focused file-gate, snapshot, recovery and obligation tests. At that checkpoint, fixed-helper
+interrupted cleanup and recovery of recovery were still unproved. This is local lock-lifetime
+evidence, not production drain evidence.
 
 The shared fixed-helper bundle correction at `725514b9` removes docstrings and regenerates only
 trusted file-helper source before the existing BZ2/base64 delivery. It restores complete local QGA
@@ -1911,6 +1910,18 @@ helper and fixture execution on controller Python 3.12 and distribution Python 3
 combined 252 fixed-delivery, effect-gate, snapshot, recovery and obligation tests pass. The margin
 is not a guarantee for arbitrary future manifest escaping or bundle growth. Native SSH/QGA
 acceptance and the open production effect-fence gates above remain separate.
+
+The reviewed A-to-B-to-C local proof at `b06699bb` now interrupts B's real fixed-helper cleanup
+after it unlinks snapshot data while retaining the gate lock, then kills B's controller. C cannot
+advance while that helper lives; after its exact recorded exit, C advances, refuses stale B cleanup,
+reconciles the same persisted debt and completes exact cleanup without a second scratch owner. The
+test harness bounds controller and orphan-helper teardown, signals only a recorded matching process
+identity and reports incomplete dispatch/identity evidence. Complexity review accepted the scenario
+and process-descriptor teardown; project review confirmed the final journal-accounting correction.
+The combined focused selection passes 82 tests, and the non-integration execution directory passes
+3,464 tests with 17 skips and one deselection. This closes the local DOWNLOAD checkbox only.
+Production setup/advance dispatch, other helper families, native routes, guest namespace lifetime
+and a production drain-evidence producer remain unproved.
 
 - [ ] Prove the restricted
       [guest-side file-helper effect fence](file-operations-lld.md#production-file-helper-effect-fence-candidate)
