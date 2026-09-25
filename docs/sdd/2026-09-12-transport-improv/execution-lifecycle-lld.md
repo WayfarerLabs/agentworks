@@ -395,11 +395,12 @@ The first private end-to-end managed-job slice may enable only `INDEPENDENT`, wh
 evidence survives observer loss. `OPERATION` must refuse before dispatch until target-side owner
 liveness or lease, partition behavior and bounded cleanup are proved. This sequences implementation
 without changing the public lifetime contract above. The private helper now exposes fixed `observe`
-and closed `read-output` over the existing carrier interface. A private `start` exchange also
-preflights a reserved independent run and its persisted output policy, then uses the existing
-durable possible-dispatch wrapper. Private `stop` revalidates the exact launch, publishes the empty
-request create-once and waits within a fixed guest-local bound for the existing boundary fact. Its
-controller path closes finite input, gives only the main child that has not yet been reaped one
+and closed `read-output` over the existing carrier interface. A private `start` preparation now
+validates the planned independent run, output policy, request and carrier before reservation. The
+single-use preparation must match the exact reserved row before the existing durable
+possible-dispatch wrapper may consume it. Private `stop` revalidates the exact launch, publishes the
+empty request create-once and waits within a fixed guest-local bound for the existing boundary fact.
+Its controller path closes finite input, gives only the main child that has not yet been reaped one
 fixed `SIGTERM` grace, then uses the existing whole-cgroup cleanup without extending grace on retry.
 Private `dispose` validates the complete terminal predicate, commits the exact launch-linked
 receipt, removes only validated fixed artifacts and accepts success only after receipt-only
@@ -407,19 +408,21 @@ inventory. The five carrier-neutral operations are therefore implemented hermeti
 host reservation/policy reduction and live target marker/boot rereads remain open. SSH and QGA must
 each prove the protocol in production before public exposure.
 
-The private ownership-backed start kernel accepts one already reserved independent run under an
-already acquired exact-VM `OperationOwner`. Its core `managed-start` obligation holds temporary
-dispatch custody and persists only the run ID. The managed-run row and its resource owner hold the
-continuing independent job. Pure start preflight precedes effect admission; the run row records
-possible dispatch before the borrowed carrier attempts the one launch. Only a settled carrier
-attempt with a durable confirmed receipt permits the start obligation to resolve. After admission,
-any other launch state retains core custody, including a code-zero carrier completion without the
-receipt. This does not resolve the whole operation or establish job termination. Production binding,
-recovery, fresh marker/boot checks for later actions and those actions themselves remain open.
+The private ownership-backed start kernel consumes one validated, already reserved independent run
+under an already acquired exact-VM `OperationOwner`. Its core `managed-start` obligation holds
+temporary dispatch custody and persists only the run ID. The managed-run row and its resource owner
+hold the continuing independent job. Pure start preflight precedes reservation; a canceled or
+mismatched preparation refuses before borrowing. The run row records possible dispatch before the
+borrowed carrier attempts the one launch. Only a settled carrier attempt with a durable confirmed
+receipt permits the start obligation to resolve. After admission, any other launch state retains
+core custody, including a code-zero carrier completion without the receipt. This does not resolve
+the whole operation or establish job termination. Production binding, recovery, fresh marker/boot
+checks for later actions and those actions themselves remain open.
 
-Before arming, a refused registration or owner close releases the unused borrow; an installed but
-unarmed obligation resolves during that release. Once arming may have begun, the borrow retains the
-possible effect even when the database transition reply is lost. The generic borrow records this
+Before arming, a refused registration, expired deadline or owner close releases the unused borrow;
+an installed but unarmed obligation resolves during that release. A failed reservation leaves the
+caller responsible for discarding its prepared input. Once arming may have begun, the borrow retains
+the possible effect even when the database transition reply is lost. The generic borrow records this
 conservative state separately from whether a carrier attempt is outstanding.
 
 Target identity is structured as a core resource kind/name, a versioned incarnation fingerprint and

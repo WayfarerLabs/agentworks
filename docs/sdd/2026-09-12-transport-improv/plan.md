@@ -1400,6 +1400,14 @@ connection and trust only. Before broader lifecycle implementation, complete the
       rechecks that same account shell before application launch, so a changed default refuses
       instead of substituting an interpreter. This hermetic and local Python 3.11 proof does not
       establish live sudo/demotion, production owner composition, or SSH/QGA behavior.
+- [x] Move private managed-start request and carrier preflight before run reservation. Preparation
+      binds a planned run identity, exact specification, output policy, raw carrier and deadline;
+      the owned start consumes it once only after matching the reserved row. A canceled token drops
+      its retained request input, and a failed reservation can discard it. Known expiry, carrier
+      mismatch and owner closure refuse before arming; expiry after effect admission remains
+      conservative. The 52 focused start tests, Ruff and targeted mypy pass. This mechanism does not
+      yet supply the production caller that prepares, reserves and launches under a live target
+      binding, nor recovery or SSH/QGA proof.
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared
       create bootstrap. Migration 41 leaves legacy rows NULL; ordinary existing-VM operations never

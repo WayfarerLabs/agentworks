@@ -35,22 +35,25 @@ disposal exchanges exist, but none of these slices provides public jobs, live ta
 or production SSH/QGA proof.
 
 `_managed_start_operation.py` adds temporary exact-VM operation custody for one already reserved
-independent start. Its `managed-start` obligation stores only the canonical run ID. The existing
-start exchange preflights the carrier before the obligation is armed, then marks the managed-run row
-possible before the borrowed carrier attempts dispatch. A settled attempt with a confirmed receipt
-resolves only the start obligation; the resource-owned managed-run row owns the continuing job.
-Missing receipt, uncertain dispatch and interrupted admission after arming retain core custody. An
-interrupted preflight or refused admission resolves an unused registered obligation. This private
-kernel does not acquire or close the outer owner, reserve runs, recover an interrupted launch,
-compose production bindings or perform later job actions.
+independent start. Its `managed-start` obligation stores only the canonical run ID. Start
+preparation validates the planned run, request and carrier before reservation. The resulting
+single-use token must match the reserved row and exact carrier before owner borrowing; it is
+discarded if reservation fails. Once claimed, the kernel marks the managed-run row possible before
+the borrowed carrier attempts dispatch. A settled attempt with a confirmed receipt resolves only the
+start obligation; the resource-owned managed-run row owns the continuing job. Missing receipt,
+uncertain dispatch and interrupted admission after arming retain core custody. Preflight refusal
+creates no obligation; a refusal after registration but before arming resolves the unused
+obligation. This private kernel does not acquire or close the outer owner, reserve runs, recover an
+interrupted launch, compose production bindings or perform later job actions.
 
 `_managed_request_adapter.py` converts finite `Command` or `Script` values, input, environment and
 output policy into the existing independent managed request before a run is reserved. It verifies
 the caller's explicit shell choice against a supplied resolved shell identity and suppresses output
 retention for sensitive input. `_workload_shell.py` observes a supported `USER_DEFAULT` shell after
 the selected workload identity transition, with a fixed Python 3.11 guest helper and a bounded
-nonce-bound response. The controller rechecks that account shell before application launch. No
-production caller yet composes these steps or preflights the carrier before reservation.
+nonce-bound response. The controller rechecks that account shell before application launch. The
+private start kernel accepts pre-reservation carrier preparation, but no production caller yet
+composes these steps into a job API.
 
 `models.py` defines immutable literal commands and scripts with explicit `Shell.SH`, `Shell.BASH` or
 `Shell.USER_DEFAULT` selection and separate startup flags. It also defines finite `Input`, bounded
