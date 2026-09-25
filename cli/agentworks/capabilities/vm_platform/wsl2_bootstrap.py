@@ -38,6 +38,7 @@ def run_wsl2_bootstrap(
     ssh_public_key: str,
     tailscale_auth_key: str,
     hostname: str,
+    instance_marker: str,
     swap_gib: int,
     progress: BootstrapProgress,
 ) -> str:
@@ -65,6 +66,7 @@ def run_wsl2_bootstrap(
         provisioning_packages=PROVISIONING_PACKAGES,
         tailscale_auth_key=tailscale_auth_key,
         hostname=hostname,
+        instance_marker=instance_marker,
         swap=swap_gib,
     )
 

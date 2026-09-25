@@ -1,6 +1,10 @@
 # Transport Improvements: Design and Delivery Sequence
 
-- Status: Joint buffered PoC accepted; staged delivery and permission activation design
+- Status: Additive implementation started from merged #830; production execution factories and
+  RunContext remain unchanged. New-guest bootstrap installs distribution Python. The private
+  destination-lock implementation and its setup have been removed under the coordination ruling
+  below. A database operation-ownership primitive is implemented but not yet wired into production
+  orchestration or RunContext; it does not yet prevent production operation conflicts.
 - Delivery vehicle: Design PR #830, then additive implementation, consumer migration PR(s), and
   final removal/activation PR; all labeled `sdd:transport-improv`
 - Requirements: [FRD](frd.md)
@@ -8,6 +12,9 @@
 - Proposed interfaces and layout: [Execution contract](execution-contract.md)
 - Active proof implementation: [Proof LLD and evidence](proof-lld.md)
 - Proposed lifecycle: [Execution profiles and supervisor design](execution-lifecycle-lld.md)
+- Shared I/O experiment: [Carrier I/O candidate](carrier-io-lld.md), pending joint review/proof
+- Detailed candidates: [Preparation and results](preparation-lld.md) and
+  [file operations](file-operations-lld.md), with their substrate decisions and proofs still open
 
 The required order is: settle the transport-owned small contract, prove it, reconcile both SDDs,
 build independently in parallel, validate complete workflows, add the new RunContext surface,
@@ -19,8 +26,9 @@ broad-build or production-cutover gate is completed by those measurements.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
-The [0.19.0 migration inventory](migration-strategy.md) is the current baseline. `NativeFiles` is
-retired, while useful domain behavior and evidence are preserved through direct RunContext access.
+The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
+retires `NativeFiles`, while preserving useful domain behavior and evidence through direct
+RunContext access. Production callers still use `NativeFiles` until their migration batch lands.
 
 The operator directs publication of this reviewed baseline to `main` before the proof. Publication
 gives both efforts a common design reference; it does not pass the proof, complete an LLD or freeze
@@ -39,6 +47,178 @@ On 2026-09-17 the operator accepted deferring guest cancellation from the buffer
 remain local observation bounds. Live tests demonstrated surviving guest process trees after expiry;
 the PoC has neither a remote cancellation handle nor a reaper. Recording that limitation does not
 waive the production workload-lifecycle gate below or permit automatic replay.
+
+## Operation coordination correction, 2026-09-20
+
+The operator approved database-level operation coordination, unique scratch names and conservative
+file checks instead of blanket machine-wide destination locking and privileged host setup. The
+completed lock experiments below remain historical records; the lock implementation and its
+associated pending acceptance gates are superseded by this ruling.
+
+- [x] Remove destination lock acquisition, setup, bundled dependencies and lock-only failure codes
+      from the private file helpers and new-guest provisioning. Preserve Python installation,
+      identity checks, object refusal, revisions, bounds, expiry and exact cleanup evidence. Prove
+      bounded read/stat and file operations work without an installed lock namespace.
+- [x] Implement atomic database operation admission for conflicting resource scopes, with durable
+      ownership and explicit terminal release. Keep SQL transactions short; do not hold a database
+      write lock during remote execution or coordinate independent databases through a new service.
+- [x] Separate whole-operation lifecycle admission and resolution from child dispatch attempts in
+      the private ownership primitive. Core can durably arm the claim before activation without
+      holding an in-memory borrow, lend the same owner to sequential child operations, and release
+      only after core records explicit whole-workflow no-further-effects evidence. Settled child
+      attempts never imply that activation, holds, routes, workflow or teardown are quiescent;
+      interrupted admission, resolution and release reconcile against the fenced claim.
+- [ ] Carry the same operation ownership through core orchestration, RunContext and nested file
+      composition. Serialize conflicting exchanges inside that ownership; cover user/admin writers
+      and shared platform-host resources without splitting ownership by transport route or identity.
+      Retire superseded local harness coordination during consumer migration, not through a second
+      competing new-stack lock.
+- [ ] Cover pre-context activation and nested teardown when wiring ownership. At `806741ca`,
+      `gated_vm_boundary` enters `activation_gate` before assembling its ordinary operation context,
+      and `LiveVMNode` constructs a separate gate context. Context factories, harness setup's
+      explicit held-guard chain and realization teardown without arguments must retain the same
+      core-owned operation when migrated. Adding a field to RunContext alone is insufficient. The
+      [2026-09-21 integration inventory](migration-strategy.md#owned-boundary-integration-inventory-2026-09-21)
+      identifies common boundaries, bypassing activation roots and retained teardown paths.
+- [ ] Require typed aggregate no-further-effects evidence before releasing production ownership.
+      Activation, power hold, route/repair, workflow and nested teardown contribute facts to one
+      whole-operation decision; no individual component releases the claim. Ordinary success or an
+      exception from the legacy `start`, `vm_active`, transient-route or Tailscale-repair APIs does
+      not prove quiescence. An uncertain hold exit or cleanup retains the claim. Build this as a
+      parallel new-stack lifecycle contract and keep legacy callers unchanged until their migration
+      batch supplies the required evidence.
+- [x] Implement the bounded durable lifecycle-obligation ledger. Permit several independently
+      identified obligations of the same registered kind; commit `possible-effect` before each
+      effect; publish bounded, versioned, non-secret adapter-owned recovery identity when observed;
+      retain unresolved work; and seal the ledger before whole-operation resolution. Release only
+      when every obligation has typed no-further-effects evidence and no in-memory custody remains.
+      Keep managed runs specialized and do not add a workflow engine, scheduler, automatic expiry or
+      generic payload interpreter.
+- [ ] Complete and prove recovery after takeover before any restarted controller acts on an old
+      obligation. The generic database takeover kernel already retains one stable logical operation
+      identifier, rotates a separate caller-chosen generation, seals the ledger atomically and
+      fences stale predecessors. Its exact retries share one local recovery owner and serial guard;
+      handled failures retain uncertain dispatch custody. The takeover neither moves obligation rows
+      nor proves that an admitted request is drained or remote work has stopped. For every admitted
+      obligation, prove that no earlier dispatch can still arrive and that existing effects are
+      quiescent, using carrier-proved non-dispatch plus exact absence, an operation-specific remote
+      fence, or equally strong synchronous-substrate evidence. Otherwise retain the obligation and
+      report incomplete recovery. For WSL2, persist a versioned, domain-separated digest of its
+      opaque provider locator, expected VM marker, distribution and account plus exact Windows
+      controller identity before dispatch, publish exact guest boot/PID/start-time after `READY`,
+      and give each `vm_active()` lifetime an independent obligation. Replace the legacy hold only
+      after nested lifetimes, delayed delivery, every crash window, controller/locator/marker/boot
+      mismatch and production recovery pass live validation.
+- [ ] Select shared platform-host resource keys before enabling their admission. Canonical VM names
+      are available before create dispatch; site names and authored SSH routes are not canonical
+      host identities. Do not silently treat different aliases or users as independent hosts.
+- [ ] Prove additive ownership without silently migrating legacy callers: enter the new workflow's
+      core operation boundary before activation, carry the claim through nested contexts and
+      retained teardown nodes, and validate new-only workflows there. Keep old boundary calls and
+      passive accessor construction unchanged. Consumer migration explicitly adopts the new
+      operation boundary; neither first accessor use after activation nor a generic legacy exit
+      substitutes for acquisition or no-further-effects evidence.
+- [ ] Prove crash, disconnect and deadline handling retain unresolved ownership. Recovery must
+      establish that prior remote work cannot still mutate before admitting conflicting work, and
+      must not replay uncertain mutation or silently expire a claim. Report incomplete recovery
+      rather than deleting ownership or inventing remote fencing from a database row.
+- [ ] Keep VM-host lifecycle platform-owned. Prove actual Lima readiness, stop, rollback and
+      disconnected-operation recovery without requiring a generic macOS MANAGED supervisor or an
+      administrator-installed file lock. Keep Linux guest MANAGED guarantees unchanged.
+- [ ] Complete the private reviews and gates for this replacement, update permanent collateral, and
+      publish the corrected design and implementation as part of the still-draft effort.
+- [ ] Resolve the local cleanup-entry interrupt policy before production execution adoption. The
+      preparation LLD records the application-boundary inventory and proposed scoped policy;
+      operator discussion remains open. Prove both workstation and separate fixed-helper behavior,
+      including handler restoration and repeated interruption, without implicitly changing legacy
+      provisioning rollback or treating forced process termination as successful cleanup.
+
+The lifecycle-ledger checkpoint is privately accepted at `3f06c91c`. Project, complexity and
+correctness review corrected a per-dispatch row budget that would have limited ordinary uploads,
+isolated operation transactions from the legacy database connection, preserved late recovery
+identity publication while closing, and fenced interrupted admission, close and unresolved custody
+handoff. Final reviewers found no remaining material issue after 47 to 50 injected interruption
+boundaries. The complete non-integration suite passes 12,819 tests with 21 skips; Ruff, mypy (1,087
+sources), file lint, rulesync and locked-SDD checks pass. This evidence accepts the private
+primitive, not production orchestration, recovery takeover, RunContext exposure or the #377
+follow-up.
+
+The first implementation increment is privately reviewed at `063cd0bc` by the project, complexity
+and generic correctness lanes. It removes the lock/setup stack and supplies `Database.operations`,
+not production operation coordination. Admission through core orchestration, nested RunContext and
+file exchanges, resource-key selection and operation-specific recovery remain unchecked above.
+
+Review restored initial deadline refusal before filesystem access in all five helper families,
+preserved phase and known cleanup debt for all four staging operations, corrected unsafe backup
+retry guidance and removed redundant typed-interior validation. The eight-case deadline regression
+uses synthetic identity rather than Unix-only calls during collection. Final reviewers each pass 34
+affected deadline/staging tests. No native VM or host acceptance is claimed. The independent local
+launch-owner cleanup-entry interrupt gap remains open and is documented in the preparation LLD; this
+increment does not introduce global signal handling or declare launch conformance.
+
+- [ ] Factor one private local process owner for both the ordinary byte pump and SSH's held
+      forwarding resource. Prove once-only admission, cancellation before admission, natural exit
+      with held input, pipe relinquishment after all I/O users stop, idempotent settlement and
+      cleanup-only status separation. Transport owns the interface and implementation; SSH owns its
+      consumer adaptation and drainer ordering. This does not close the independently recorded
+      asynchronous cleanup-entry interruption or native-workstation acceptance gates.
+- [x] Expose the private `LocalProcessOwner` interface and use it in the ordinary byte pump. Local
+      tests cover canceled admission, held-pipe natural exit, settlement and failure facts. Private
+      review corrected inconsistent snapshot evidence after a pre-start dispatch denial; the real
+      audit-hook regression fails with the old publication order. All three lanes are clean at
+      `ee2d0a8f`, whose full local suite passes 11,912 tests with 13 skips. SSH forwarding adoption,
+      joint proof and the independent asynchronous-interruption/native gates remain open above.
+
+### Hierarchical coordination follow-up (#377)
+
+The operator directs compatibility with
+[#377](https://github.com/WayfarerLabs/agentworks/issues/377), not completion of all its
+functionality in this effort. The [HLA](hla.md#operation-coordination-and-hierarchical-extension)
+keeps admission centralized and requires conflicts in both directions between a resource and its
+ancestors/descendants. The current `Database.operations` implementation checks exact
+VM/platform-host keys only; it is neither a hierarchy nor a complete production lock service. The
+completed primitive checkbox above records that exact-key implementation, not broader #377
+acceptance.
+
+The platform-host inventory at `f646b04d` found no demonstrated need to serialize every VM operation
+on a Lima placement host. Lifecycle commands address one instance; provisioning templates use
+`mktemp -d`, and two-hop copies use a fresh transfer UUID. Current remote-create wrapper files under
+`/var/tmp` instead use a deterministic instance basename, and rollback reads the corresponding PID.
+Their migration must preserve exact attempt ownership, not carry that ambiguous fixed-name cleanup
+into the new implementation. VM ownership covers the demonstrated per-VM coordination; it does not
+establish a guarantee about Lima-internal shared resources. If a real shared-host mutation requires
+admission, canonical host-resource identity remains the gate above. Site, SSH alias and account
+strings do not prove equivalence. This inventory is source inspection of
+`capabilities/vm_platform/lima.py`, `transports/remote_lima.py` and their remote-execution helper,
+not native concurrency acceptance or authorization for a blanket host lock.
+
+Not implemented in the current tree, and deferred to the #377 follow-up unless explicitly brought
+into this effort:
+
+- System, workspace, agent, session and console claim types and atomic ancestor/descendant
+  admission.
+- Independent sibling concurrency inside a VM, multi-resource acquisition and the schema/caller
+  transition that prevents fine-grained claims from bypassing existing coarse ownership.
+- Long-lived console/session claims and the VM-upgrade-versus-attached-console acceptance case,
+  including ordinary detach/release and stale lifetime-claim recovery.
+- Operator CLI commands to list locks and explicitly force-unlock, with blocker-specific diagnostics
+  and a clear distinction between an unsafe override and evidence-backed recovery.
+- The repository-wide concurrency sweep requested by #377. Passing this transport effort's tests
+  must not imply that unrelated legacy commands permit all non-conflicting concurrent work.
+
+The transport-owned production wiring and recovery gates immediately above remain required; this
+follow-up does not defer them. Existing claim timestamps and bounded operation labels are already
+implemented, while the broader inspection and conflict UI are not. No automatic expiry or
+force-release is added under the guise of hierarchy compatibility.
+
+- [ ] Review the implemented admission boundary against the #377 extension: centralized resource
+      identity/conflict decisions, ownership preserved through activation/nested contexts, and no
+      new fine-grained key that bypasses coarse exclusion. Record exact delivered scope and
+      evidence.
+- [ ] At final SDD closeout, explicitly list in `locked.md` the delivered coordination levels and
+      production paths, remaining limitations, and each still-unimplemented item above with #377 as
+      follow-up. Keep the issue open unless separately completed and verified. Do not create the
+      lockfile early or represent deferred hierarchy work as completed transport implementation.
 
 ## Buffered PoC checkpoint record
 
@@ -79,13 +259,858 @@ open; the SDD is not complete and must not be locked.
 
 ## Parallel ownership without overlapping edits
 
+### Active implementation, 2026-09-19
+
+The operator directed implementation after merging #830 at `cea5e852`. The additive delivery branch
+is `feat/transport-execution-stack`; it builds the complete new surface without migrating existing
+production consumers. SSH proceeds in its own lane. Development delegates use isolated working trees
+from the same published baseline; the transport lead integrates their reviewed work.
+
+The first bounded assignments complete the file-operation and invocation/result LLDs and refresh the
+RunContext/platform adoption inventory. These close implementation details already called out below,
+not another requirements phase or a new prerequisite design-only PR. The lead owns shared types,
+carrier-contract changes, composition and the overall plan. SSH implementation files and its SDD
+remain SSH-owned. Broad changes wait for their relevant detailed-design/proof gate; limited
+experiments and implementation of settled pieces stay outside production until acceptance.
+
+The operator confirmed transport ownership of the shared cgroup/supervisor implementation and
+session adoption on 2026-09-19. #770 is closed; its final head matches the preserved requirements
+input at `2c406948`. The ownership gate is resolved, not the containment or compatibility proofs.
+Recipient permissions and the successor core file ceiling stay inactive until final legacy removal,
+while operational safety and deliberately selected profile guarantees apply immediately.
+
+No new public feedback/fix allowance is inferred from the completed #830 review. A coherent
+checkpoint receives the normal private reviews and validation before a testing brief and
+`review-requested`; the additive implementation is marked ready only when its own gates pass.
+
+The operator separately authorized up to three public feedback/fix rounds for #833. Round 1 began
+2026-09-19 at 20:35:58 UTC, after the initial handoff's one-hour collection window and the complete
+tester report. Its batch is the checkpoint tester report, the complexity review and its subsequent
+directory-depth retraction. The agreed documentation corrections and the separate JSON work unit
+passed project, complexity and correctness review at `ac18444f`. The operator subsequently
+authorized publication, and those corrections plus later privately reviewed increments were pushed
+at `8fec9e07`; its hosted checks passed. Round closure and a new checkpoint handoff remain
+outstanding. No second round has begun. The operator subsequently authorized continued
+implementation and confirmed three public feedback/fix loops remain available for the completed PR.
+Intermediate pushes and private reviews are not public handoffs.
+
+SSH's implementation continues in #832. Its owner agreed to transport extracting the shared bounded
+subprocess pump, while SSH retains environment sanitation, carrier-specific report interpretation,
+call-site adaptation and combined regression evidence. The shared module is available at
+`execution/carriers/_subprocess.py` in published head `8fec9e07`; the extraction does not accept the
+separate sink/terminal extensions. SSH also owns correcting its incidental preparation-module
+`Command` import when it integrates the new invocation values.
+
+### Initial implementation checkpoint
+
+- [x] Extract immutable command/script values and explicit shell constants into `execution.models`,
+      update transport-owned proof consumers, and preserve the buffered carrier interface. Local
+      execution tests report 309 passed and four platform-scoped skips; production remains
+      unchanged.
+- [x] Implement the private local JSON transformation with the four shipped strategies, literal
+      null, strict input checks and byte/depth bounds. At `ac18444f`, all 69 focused cases and the
+      three private review lanes pass. This returns proposed bytes or a skip decision only; no
+      filesystem publication, FileAccess wiring or permission boundary is claimed.
+- [x] Add distribution `python3` to the shared early provisioning package list, retaining the Phase
+      B package for existing guests. The implementation is included here; local tests cover
+      native-bootstrap and cloud-init rendering. Existing-VM native recovery, live provisioning and
+      helper compatibility retain their separate acceptance gates.
+- [x] Demonstrate the two-phase bootstrap handoff on an owned local Linux PTY with Python 3.11. The
+      executable experiment and tests are included here. Payload-ready precedes sensitive transfer;
+      interactive-ready follows terminal restoration. Premature input retains raw carriage-return
+      semantics, while post-handoff input receives canonical translation. This is not SSH delivery,
+      workstation-platform acceptance or application-start proof.
+- [x] Compose a private same-identity Linux file read through one carrier attempt without staging,
+      spool or lock creation. The implementation includes strict file-response collection and actual
+      local Python 3.11 reads; the focused file, inline, terminal and import suite passes 404 cases.
+      Native acceptance, stat-only operations, mutation, locking and FileAccess remain separate
+      gates.
+- [x] Bind private buffered command/script and file-read preparation to one explicit identity plan.
+      The shared launcher selects direct delivery, non-interactive root sudo or fixed non-root
+      demotion; the guest checks Linux real/effective/saved IDs and normalized groups before
+      workload access. At `c3cebea5`, all three private review lanes are clean, including portable
+      identity stubs and mutation-proven payload assertions. Account resolution, actual sudo/root
+      transitions, native acceptance and production RunContext remain separate gates.
+- [x] Resolve a core-bound destination account's IDs/groups through a private read-only helper and
+      one carrier attempt. At `1688da5d`, all three private review lanes are clean and all 42 new
+      account tests pass. Local Python 3.11 lookup and lookup-to-inline composition preserve the
+      distinction between database membership and actual process credentials. This adds no public
+      account selector, privilege transition, staging or permission enforcement; native acceptance
+      and production composition remain separate gates.
+- [ ] Accept the preparation/result and file-operation LLDs after private review and disposition of
+      their helper/runtime, launch-evidence, cross-identity operation coordination, and platform
+      prerequisites.
+- [ ] Integrate shared same-invocation runtime admission into account and file-owner lookup, then
+      file, inline and terminal preparation. Preserve complete prerequisite observations separately
+      from carrier failures; never infer a missing interpreter from absent evidence. Prove bounded
+      prefix forwarding, common loader imports, unchanged sensitive stdin, and clean selection
+      refusals without staging, installation or an implicit preliminary probe. Native macOS proof
+      and existing-guest bootstrap remain required, not satisfied by local selection fixtures.
+- [x] Apply private runtime admission to both account lookup kinds. Bind destination OS explicitly,
+      preserve first-existing selection and Darwin shim non-execution, check Python 3.11 and common
+      loader imports in the same invocation, and keep prerequisite evidence separate from carrier
+      facts and account results. Private review at `66aa55d8` is clean; synthetic faults execute the
+      actual trampoline and detect removal of its checks. File, inline, terminal and native adoption
+      remain part of the open integration gate above.
+- [x] Apply the same private runtime admission to all seven file families and buffered inline
+      execution. Seventeen file entrypoints and inline preparation now require `RuntimeSelection`;
+      the identity transition encloses selection, prerequisite evidence is independent, and helper
+      observations are absent without READY. All three private lanes are clean at `925cbdbf`.
+      Terminal, native and production composition remain separate gates.
+- [x] Retire the direct-runtime constructors and convert their remaining identity and bundle-sizing
+      tests to admitted entrypoints. Private review at `02e8498a` confirms no remaining Python
+      callers. The sibling SSH audit at `34a4eb71` also found no callers; complete runtime selector
+      and identity prefixes remain in provider-size measurements.
+- [x] Admit terminal preparation through the shared runtime selector with a bounded terminal-only
+      control-record adapter. Prove LF/CRLF and existing uppercase-output-mode support under real
+      local PTY settings without relaxing pipe parsing or releasing payload before raw-mode
+      readiness. All three private lanes accept this terminal slice at `02e8498a`. Carrier terminal
+      integration, transport-owned finalization and native proof remain separate acceptance gates.
+- [x] Implement private revision-aware publication with explicit Create/Replace/Match conditions,
+      bounded streaming from verified scratch, stat-only observations without old-content reads, and
+      a content-bound post-publication revision. At `75aaaa5e`, all three private lanes are clean
+      and the focused file suite passes 169 tests, including conflict, deadline and
+      uncertain-publication behavior. External-writer atomicity and native acceptance are not
+      claimed.
+- [x] Implement the private read-only transaction-lock primitive with local contention, deadline,
+      refusal and release tests. At `75aaaa5e`, all three private lanes are clean. The corrected
+      post-acquisition deadline test is mutation-proven. Protected namespace setup, ordinary/admin
+      sharing and native macOS acceptance remain separate gates.
+- [ ] Validate finite nonnegative relative budgets at the file request boundary before deriving a
+      guest-local expiry. Keep deadline and post-cleanup evidence independent of the removed
+      destination-lock prerequisite.
+- [x] Review and validate private exact-kind revision-bound object stat/removal and the Debian
+      create-time lock setup. Keep setup idempotent without replacing a valid lock inode;
+      distinguish local fixture evidence from privileged native bootstrap and ordinary/admin
+      contention. All three private lanes are clean at `876355c7`; the file/Proxmox suite passes 305
+      tests.
+- [ ] Compose fixed inline file-operation bundles with one-stream compression and data-only scratch.
+      Prove every final envelope against both complete Proxmox HTTP-body and workstation
+      process-command bounds; no executable-helper staging fallback. The Proxmox compatibility floor
+      remains 64 KiB even on providers accepting larger requests.
+- [x] Review and integrate private held-object metadata, bounded inventory, search-only root
+      traversal and read-only fixed lock-namespace composition. Preserve explicit partial/uncertain
+      mutation facts and requested-depth completeness without claiming public FileAccess or native
+      acceptance.
+- [x] Deliver concrete stat/removal helper exchanges using the shared framing, identity check and
+      fixed lock. Validate paths, revision/kind and relative time budget at the request boundary;
+      prove no staging for stat and no replay after uncertain removal before extending the same
+      composition to the remaining file operations.
+- [x] Resolve metadata owner/group pairs through the fixed account helper without caller exec or
+      identity transition. Preserve account lookup's independent full execution-identity result;
+      prove that responses cannot cross the two operation kinds.
+- [x] Bring private bounded reads under the fixed transaction lock and guest-local relative budget.
+      One host call prepares and dispatches once; the guest materializes the snapshot and checks
+      expiry while locked, then unlocks before emitting bytes. Private review at `2ad918bc` is
+      clean; removing the final expiry check makes the absence and snapshot tests fail. Native
+      acceptance and production FileAccess remain separate gates.
+- [x] Deliver private locked inventory and metadata/ensure-directory exchanges. Validate complete
+      inventory framing and bounded entries, preserve metadata partial/uncertain effects, and keep
+      identity checks before lock and target access. All three private lanes are clean at
+      `fef0045d`; the combined file/scratch selection passes 604 tests. Native acceptance and public
+      FileAccess remain separate gates.
+- [ ] Compose the remaining publication and streaming-transfer exchanges. Preserve exact-leaf
+      requests for approved-root operations through core-owned parent decomposition, without
+      granting parent/sibling authority. Bind those operations in the complete FileAccess surface
+      before the additive RunContext gate, not as a forwarding layer over legacy files.
+- [ ] Measure the complete publication helper family and carrier framing before accepting its
+      delivery shape. At `5f5ef96d`, the standalone publication test fixture is 31,880 source
+      characters, or 31,916 in a minimal Windows Python command. The actual demoting helper and SSH
+      serialization produce 33,108 Windows command characters, exceeding 32,767. Dropping the unused
+      read-protocol module while retaining framing reduces that fixture to 31,076; its dispatcher is
+      still a test, not the production exchange. Select only actual family dependencies and prove
+      complete Windows and Proxmox request bounds without an implicit executable-staging fallback.
+- [x] Deliver private stage creation and exact-offset chunk exchanges using sensitive input,
+      complete typed observations, original destination binding and the fixed transaction lock. All
+      three private lanes are clean at `85d27904`, including post-cleanup expiry and exact chunk
+      cleanup-debt binding. These two operations do not complete upload, recovery delivery,
+      publication, public FileAccess or native acceptance.
+- [x] Separate unverified scratch identity/length from final digest verification, permitting
+      one-pass upload without rewinding the source or using a whole-file host buffer. Add
+      cooperative acquisition/transfer expiry checks while retaining bounded exact cleanup after
+      expiry. Private review at `fef0045d` is clean; mutation tests prove final digest verification
+      and cleanup-only normalization remain necessary. This is a local primitive, not transfer
+      delivery.
+- [x] Add streaming from one held source inode into a private snapshot, including source-change
+      refusal, deadline checks and exact cleanup evidence, before wiring snapshot/chunk/publication
+      exchanges. The local primitive at `5b58e8f5` passes all three private review lanes with the
+      pre-existing signal-atomic descriptor-bookkeeping limitation retained explicitly; this does
+      not complete remote snapshot delivery or helper lifecycle acceptance.
+- [x] Implement bounded immutable scratch ownership receipts, core-allocated tokens and
+      identity-bound snapshot creation. Historical reconciliation recovers exact cleanup ownership,
+      not ready content or publication authority. All three private lanes are clean at `5a9d3b8f`,
+      including post-cleanup deadline checks and inherited-group handling. This is local evidence;
+      remote reconciliation, dispatch ordering and publication-stage recovery remain open below.
+- [ ] Settle and fault-test cleanup ownership when the first scratch/snapshot creation reply or
+      publication-stage cleanup-debt reply is lost. Missing identity is not absence; do not recover
+      by replaying creation or scanning a prefix. Prove the bounded immutable ownership-receipt
+      candidate, including original-parent binding, interrupted receipt creation/removal and late
+      requests. Every follow-on mutation must validate its still-existing operation receipt under
+      the caller's operation ownership before creating any artifact; read-only snapshot chunks
+      retain their existing unlocked exact-reference checks.
+- [x] Deliver private stage reconciliation and exact cleanup through the fixed identity-bound
+      helper. Accept complete historical cleanup ownership only, preserve missing-evidence
+      uncertainty and exact failure debt, and check expiry before explicit cleanup mutation and
+      after descriptor closure. All three private lanes are clean at `b0840a37`. This does not
+      complete snapshot/publication recovery or prove earlier-request quiescence.
+- [x] Admit the fixed Linux snapshot scratch parent independently of source-write authority. The
+      selector creates and repairs nothing, refuses links and unsafe ownership/mode, and preserves
+      deadline/descriptor handling. Local fixtures prove a non-root download from a read-only source
+      parent, and a separate read-only host probe admits UID 0/mode 01777. Native VM/macOS selection
+      and remote snapshot delivery remain unproved.
+- [x] Deliver private snapshot creation, exact-range chunks, historical ownership reconciliation and
+      cleanup through the fixed Linux helper. Verify binary data and ready/source revision agreement
+      before exposing typed results; preserve exact known debt on expiry, reject substituted cleanup
+      identities and phases, and treat missing source roots as absence without bypassing
+      prerequisite or final deadline checks. Local Python 3.11 helper evidence and independent
+      review at `9cdce7e6` establish this internal slice, not complete downloads, production
+      operation coordination, FileAccess or native carrier acceptance.
+- [x] Implement private publication-stage receipts and cleanup-only recovery beneath the original
+      destination parent. Admit existing upload ownership before sibling creation, recover after
+      payload removal, preserve known failures and exact debt through handled interruptions, and
+      share record-only cleanup after observed publication. All three private lanes are clean at
+      `86189dc2`; the combined local suite passes 11,902 tests with 13 skips. This does not complete
+      remote publication delivery, upload composition, helper quiescence, FileAccess or native
+      acceptance; complete carrier sizing remains an explicit gate above.
+- [x] Deliver the private publication/reconciliation/cleanup family described in the file LLD. Bind
+      all cleanup evidence to the original destination, token and stage reference; refuse
+      substituted identities and paths. Preserve confirmed publication, recovered ownership or
+      completed cleanup when only the final descriptor-closure deadline expires. Prove the actual
+      production bundle's complete carrier sizing before accepting its delivery representation, then
+      fault-test lost replies and partial observations through the exchange. This slice does not
+      itself complete upload orchestration, FileAccess or production operation ownership.
+- [x] Replace argv-embedded fixed file bundles with the reviewed bounded stdin-prefix delivery. Keep
+      one fixed codec and one invocation, verify the core-fixed length/digest before decoding or
+      executing the prefix, and leave request bytes solely to the operation parser. Exercise all
+      existing file families, fragmented/short/corrupt prefixes, exact manifest boundaries,
+      sensitive retention and complete carrier-size refusal. Do not claim native Windows/QGA
+      acceptance from a locally serialized command or an invalid-request bootstrap probe.
+- [ ] Jointly accept and prove the privately implemented carrier sink extension with the SSH owner
+      before enabling its production use or exposing it through RunContext.
+- [x] Review and prove complete private upload under a borrowed core operation owner. Cover one
+      durable claim across staging, finite source consumption, publication and ordered cleanup;
+      preserve prerequisite refusals, failure-carried debt and uncertain completion without replay.
+      All three private lanes accept `faf99365`. Corrections cover inactive settlement authority,
+      lost refusal debt, exception-context disclosure, byte accounting, canonical option validation,
+      helper deadlines and actual-dispatch admission. The final deterministic interruption
+      regression detects the old reporting gap between durable ownership and local attempt-handle
+      assignment. This is private composition, not production FileAccess or recovery acceptance.
+- [x] Compose complete private JSON updates through the existing read/stat and upload helpers under
+      one borrowed operation. Factor borrowed upload so a JSON call never releases and reacquires
+      ownership between snapshot and publication. Validate source before target I/O, avoid old-byte
+      reads for replace/skip, preserve all four strategies and retry only proved condition conflicts
+      within eight attempts and the original deadline. No uncertain dispatch, retained cleanup debt
+      or missing termination evidence permits replay. Public FileAccess/result conversion and
+      production ownership remain separate required gates. All three private review lanes accept
+      `9d97623c`. Corrections remove repeated interior validation and retain neutral
+      existing-document validation failure for parser-capacity and caller-bound refusals; both
+      refuse before publication in regression coverage.
+- [x] Implement [owned download composition](file-operations-lld.md#owned-download-composition)
+      through the existing snapshot exchanges and shared borrowed dispatch gate. Verify binary
+      chunks, exact length/digest, empty and absent sources, short/stalled/failing sinks, one claim
+      and original deadline, and retained cleanup/uncertainty facts without replay. This private
+      stream coordinator does not complete local atomic publication or public FileAccess download;
+      those remain required, including optional public size bounds and native host metadata proof.
+      All three private lanes accept `4a53c39a`. Review corrected missing deadline facts across
+      download, upload and JSON and removed duplicate control-flow branches. Admission-driven
+      timeout regressions replace a reproduced startup-timing assumption; both fail against the old
+      settlement behavior and pass under concurrent stress.
+- [ ] Settle explicit local download creation/replacement and metadata semantics before implementing
+      the local staging writer. The operator question distinguishes required create/replace choice
+      from a create-only default; neither imports guest ownership into the workstation. Complete
+      native local publication, cleanup and public result conversion remain required, including
+      propagation of timing failure alongside proved operation facts.
+- [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
+      access. The models-only checkpoint is not additive-surface completion.
+
+The owned-upload and terminal increment is privately reviewed at `faf99365`. Its complete local
+suite passes 12,126 tests with 13 skips; Ruff/format and full mypy (1024 sources) pass. Final
+focused reviews verify the interruption regression against the old assignment boundary, not merely
+the new code's success. The publication bundle's current prefix is 36,372 bytes and the measured
+complete long-path QGA body is 50,783 bytes, below the unchanged 65,536-byte bound. These are local
+serialization and helper results, not native carrier acceptance. Production ownership/recovery,
+complete FileAccess, terminal carrier integration, lifecycle and additive RunContext remain open.
+
+The following JSON/native-binding increment is privately accepted at `9d97623c`. The passive
+Proxmox/WSL2 hooks return actual delivery-account and runtime facts without constructing legacy
+transports; new QGA delivery requires verified TLS and shares explicit CA selection with the
+platform API. Review corrected unhandled CA-path expansion failures, misleading guide claims and
+authored-prose test assertions. A full combined run exposed eight stale WSL bootstrap mock targets
+after moving the production import to its call site; the correction preserves those tests' original
+behavioral assertions. Complete factory/import independence and native execution remain pending, not
+implied by the concrete hook tests.
+
+The corrected `9d97623c` code passes the full local non-integration suite: 12,175 tests and 13
+skips. Ruff lint/format and CI's full mypy selection (1029 sources) pass. These results cover local
+helpers and workstation tests, not native platform acceptance. Download composition is the next
+private file work unit; local publication, complete FileAccess and the production ownership gates
+remain required.
+
+The following download/resolver increment is privately accepted at `4a53c39a`. Its full local suite
+passes 12,208 tests with 13 skips; Ruff/format and full mypy (1,033 sources) pass. File lint,
+locked-SDD/rulesync, typer isolation and whitespace gates pass. Website validation passes 160 Python
+and 103 Node tests plus both deterministic double-build comparisons. Private review observed one
+flaky 100 ms timeout assumption despite a passing full suite; the final tests expire only after
+accepted runtime admission, and the independent concurrent stress run passes all eight cases. An
+optional duplicate test-only deadline-property patch remains acknowledged and non-gating. No native
+acceptance is claimed. Local publication, production ownership/recovery, lifecycle and RunContext
+remain required; the scoped interrupt-policy question is still open above.
+
+The publication and account-runtime increment has clean project, complexity and generic correctness
+reviews for the runtime at `66aa55d8`. The full local suite passes 12,050 tests with 13 skips;
+Ruff/format, full mypy (1016 sources), file lint, locked-SDD, rulesync, typer isolation and
+whitespace checks pass. Website validation passes 160 Python and 103 Node tests plus both
+deterministic double-build comparisons. Final test-selection bookkeeping at `e3176f11` restores the
+exact same tree. Pure prefix tests remain portable, while focused Windows CI selects the two
+subprocess trampoline cases according to CONTRIBUTING. No live infrastructure was exercised.
+
+Publication review corrected uncertain effects mislabeled as refusal, sensitive exception context,
+an inode-reuse assumption in test cleanup, impossible reconciliation debt and secondary failures
+overwriting prior mutation facts. Mutation tests detect removal of cleanup-progress binding,
+reconciliation-shape checks and failure-preserving cleanup binding. Production helper success covers
+Create, Replace and Match on the workstation interpreter and distribution Python 3.11; injected
+fault helpers are identified separately. The final fixed publication prefix is 36,212 bytes with a
+756-character bootstrap. Representative valid long-path publish/reconcile/cleanup requests across
+direct/root/demoted delivery produce 48,561 to 48,881-byte complete QGA bodies and 1,872 to
+1,982-character Windows SSH command strings. These are local serialization measurements, not native
+acceptance or universal request-fit guarantees.
+
+Account-runtime review corrected impossible Linux shim evidence and added tests that execute the
+actual trampoline under synthetic version/import failure rather than merely emitting expected
+records. Both guards are mutation-proven. The shared launcher preserves existing file/inline argv;
+only the two account entrypoints adopt runtime admission in this increment. Representative complete
+Windows SSH serialization of their shared account bundle measures 8,483 characters for Linux
+selection and 8,533 for Darwin selection. Native macOS selection, real older interpreters, remaining
+helper-family adoption and public diagnostic composition remain open.
+
+Hosted run `35575344113` at `cbd9a66f` passed all gates except Windows and its aggregate gate: both
+actual trampoline refusal tests observed UNKNOWN because Python text output translated the
+protocol's LF to CRLF. At `f646b04d`, all three runtime records use binary ASCII output; parsing
+remains strict. The subprocess fixture now reproduces Windows text translation on every host and
+also covers READY followed by helper bytes. All three cases fail with the old writer restored.
+Independent project and complexity reviews are clean, 71 focused tests pass, and the full suite
+passes 12,051 tests with 13 skips. All static, documentation and website gates pass again, including
+both deterministic builds. Representative account Windows command strings now measure 8,615/8,665
+characters for Linux/Darwin selection. All hosted checks, including Windows, pass on `6d066728` in
+[run 35576186411](https://github.com/WayfarerLabs/agentworks/actions/runs/35576186411). This CI
+correction neither expands supported workload platforms nor consumes a public feedback round.
+
+The file and inline admission increment has clean project, complexity and generic correctness
+reviews at `925cbdbf`. Its full suite passes 12,062 tests with 13 skips; Ruff/format, full mypy
+(1018 sources), file lint, locked-SDD and rulesync gates pass. Review fixed a Windows workstation
+path leaking into synthetic Linux selection, narrowed optional observations explicitly in tests, and
+reduced inline reader finalization to one call on normal and exceptional paths. The independent
+project lane also exercised 42 Windows-selected tests with a synthetic Windows interpreter path.
+This is portability evidence, not native Windows or provider acceptance.
+
+Complete representative Windows SSH commands now measure 3,677 to 3,836 characters across the seven
+file bundles and direct/root/demoted identity modes. QGA size guards continue to include the
+complete runtime launcher and serialized request. Neither measurement proves native execution. The
+read-only SSH audit at `34a4eb71` found 13 file exchanges requiring explicit selection and
+optional-observation adaptation; SSH-owned code remains untouched. Terminal runtime composition,
+complete file workflows, core ownership/recovery, lifecycle and additive RunContext remain open. No
+public feedback round is consumed by this private increment.
+
+Fixed file delivery has three clean private reviews at `72897a31`, with 11,958 full-suite passes and
+13 skips. The six production bundles produce parsed invalid-request transcripts under distribution
+Python 3.11. Successful operation tests separately cover every family: object/inventory use the
+production bundle, read/metadata/stage add trusted test entrypoints, and snapshot also redirects its
+scratch parent. These local measurements do not establish native SSH/QGA acceptance.
+
+The packaged prefixes measure 12,024 to 27,524 bytes. Complete Windows SSH command strings measure
+1,823 to 1,968 characters across the representative connection and all three identity modes.
+Complete QGA JSON bodies with a synthetic 32 KiB ASCII manifest measure 45,691 to 61,336 bytes; that
+payload is a sizing fixture, not a valid-operation proof or a guarantee about every escaped
+manifest. Oversized complete bodies refuse before wire access. Review removed a duplicate stage-size
+test and collapsed fixture setup into one patch input without dropping fault coverage. Publication
+delivery, joint SSH proof, module readiness and public FileAccess remain open.
+
+The [operator ruling](frd.md#file-safety-and-guest-runtime-rulings) approves adding `python3` to
+early guest provisioning, with helper code compatible with Bookworm's distribution Python. The
+package addition is implemented; live provisioning and existing-VM native recovery must establish
+availability on their actual paths. macOS platform hosts must provide preinstalled Python 3.11 or
+newer; detect missing, unsupported, or Xcode-shim interpreters and report clean actionable errors
+without implicit installation or an installation prompt. Prerequisite checks, file-only no-staging
+readiness and exact direct-launch evidence retain their own implementation and proof obligations.
+
+The same ruling bounds file safety to untrusted requests, conservative regular-file publication and
+required access metadata, without containment of malicious target-user processes. Preserve safe
+object checks and explicit trust assumptions, but do not build same-user namespace isolation to
+close the earlier ancestor-rename/hard-link adversarial gate. Unsupported objects or metadata refuse
+before publication; required workflows still need an implemented safe path or explicit disposition,
+not silent omission.
+
+The byte-endpoint work unit now includes borrowed live input, delivered-output retention, the shared
+subprocess pump and buffered QGA sink delivery. Private review caught the post-exit pipe timer
+incorrectly limiting temporary sink stalls. The correction keeps one accumulated collection budget
+while pending sink delivery consumes the original operation deadline. The lexical provisioning tests
+from the initial package increment were removed; package coverage and the separate live-provisioning
+gate remain. These corrections do not establish production or joint SSH acceptance. Before
+publication of the new types, the old SSH adapter must explicitly refuse unsupported I/O shapes
+instead of silently interpreting them as EOF or discard. The SSH owner supplied standalone commit
+`678e487d`, integrated here as `fc1c5310`. The integration tests exercise actual `LiveInput` and
+`SinkOutput` values, including sensitivity and both sink-delivery modes, and verify refusal before
+connection access or endpoint consumption.
+
+At `354c7a17`, all three private code-review lanes are clean, and the corrected full local suite
+reports 10,413 passed and 11 skipped. The focused execution/provisioning suite reports 496 passed
+and four skipped. These are workstation tests, not live platform acceptance. Subsequent
+combined-stream testing exposed a further gap: a pending sink paused accounting while the other pipe
+could keep collecting. The scheduler now suspends all fresh reads during post-exit pending delivery,
+then resumes the unchanged accumulated budget. Its correction received fresh review with the next
+bounded work unit, rather than inheriting the earlier clean verdict.
+
+The safe ancestor `a885ef5a` is published with only early guest Python provisioning and the local
+PTY experiment, including the provisioning-test correction. Its execution package and RunContext are
+unchanged from `e85e9f5c`. The exact publication pin passes 10,370 local tests with 11 skips and all
+hosted checks. The branch retains that ancestor without changing the implementation tree. The
+subsequent compatibility guard removes the prerequisite for publishing the new I/O types; progress
+pushes remain distinct from a public review handoff or joint acceptance.
+
+The [Darwin prerequisite candidate](preparation-lld.md#darwin-inline-prerequisite-candidate) keeps
+runtime selection above carriers and checks interpreter compatibility inside the inline invocation.
+It does not install Python, execute the known Xcode shim, or add a preliminary readiness probe.
+Implementation and native macOS proof remain open. Its local executable experiment now reuses the
+shared pump and fixed minimal environment; the separate private file snapshot primitive implements
+bounded read-only observations. Their
+[runtime](preparation-lld.md#darwin-inline-prerequisite-candidate) and
+[filesystem](file-operations-lld.md#confinement-and-filesystem-mechanics) evidence descriptions keep
+production composition, native platform acceptance, full mount handling and locking gates open.
+
+At `b881942d`, project, complexity and generic correctness reviews are clean for the runtime
+experiment, file snapshot primitive and combined-stream correction. Independent mutations prove that
+the corrected representation tests detect disclosure of either snapshot bytes or its digest. The
+runtime-identical `be168621` passes 10,470 local tests with 11 skips; the final corrected execution
+suite passes 549 with four skips. Ruff, mypy, file lint, rulesync and locked-SDD checks pass. This
+is private implementation evidence, not native platform acceptance or a completed additive
+RunContext handoff.
+
+At `6d089f67`, the private Linux publication primitive and retained exec-evidence experiment pass
+project, complexity and generic correctness review. Publication uses caller-owned staging state,
+preserves supported access metadata, refuses unsupported objects and retains exact cleanup debt;
+acquisition and post-rename interruption regressions pass. Arbitrary asynchronous interruption and
+complete helper ownership remain unproved. The same seven exec-evidence cases assert their complete
+results under the current interpreter and distribution Python 3.11, without accepting a production
+launcher or eager application-start claim. The exact head passes 10,517 non-integration tests with
+11 skips; the execution suite passes 596 with four skips. All 33 publication cases also pass under
+distribution Python 3.11. Ruff, mypy, file lint, typer isolation, rulesync, locked-SDD and website
+gates pass. These remain private building blocks: FileAccess, remote helper delivery, locking,
+platform acceptance and additive RunContext composition are not complete.
+
+At `1a5958fa`, all three private review lanes are clean for the exact-child wait correction, the
+SSH-owned compatibility guard and its shared-type integration tests, and the lifecycle
+clarifications. Repeated review exposed two post-exit scheduling defects: a newly pending stream
+could permit another fresh read in the same pass, and alternating pending streams could keep the
+collection timer paused indefinitely. Separate mutation-tested regressions now cover both
+transitions. Test callbacks no longer compete with the pump's reaper, and the external-reaper
+fixture explicitly establishes ordering. The final head passes 10,541 non-integration tests with 12
+skips; the full execution suite passes 620 with five skips. Ruff, formatting, mypy, file lint, typer
+isolation, rulesync, locked-SDD and website gates pass. This is a draft implementation progress
+push, not joint live-I/O acceptance or a completed public feedback/fix round. Launch-interruption,
+native-platform, helper, lifecycle and production RunContext gates remain open.
+
+At `e6860525`, all three private review lanes are clean for the public-launch experiment and its
+bounded evidence record. The experiment no longer forces Python's private launch selector; it
+observes the route and actual session creation under local CPython 3.12.13 and Debian 3.11.2. The
+focused suite passes 81 tests with one skip. This head also gives the oversized live-input fixture
+short parameter IDs: Windows CI at `4cf5261f` could not set pytest's environment variable for its
+65,634-character generated test identifier. The input and assertions remain unchanged. All hosted
+checks subsequently pass at `e6860525`, including Windows Python 3.13 and Linux Python
+3.12/3.13/3.14; no production-launch or native-platform gate is closed by this test correction.
+
+At `9c1993ef`, the private scratch-transfer primitive passes all three review lanes. It reopens
+identity-bound objects, verifies bounded exact-offset transfers, and retains known cleanup debt.
+Review corrected acquisition/interruption ownership, setgid inheritance ordering and interrupted
+descriptor closing, and removed checks that did not strengthen the stated guarantees. All 29 scratch
+cases pass on the current interpreter and distribution Python 3.11; the runtime head passes 10,572
+non-integration tests with 12 skips. The corrected full execution suite passes 651 with five skips.
+FileAccess, wire validation, remote delivery, concurrency composition and native-platform acceptance
+remain open. The Lima resource-lifetime candidate at `8bac9560` and shared process-core design at
+`367553fa` separately pass project and complexity review; neither claims an implemented supervisor
+or destination helper. These remain draft progress increments, not public feedback/fix rounds or
+readiness for production adoption.
+
+At `c89a349d`, the process pump is extracted into the private standard-library-only `_process`
+module, with carrier policy and report mapping retained in `carriers/_subprocess.py`. Standalone
+execution proves binary input/output and exit handling without importing Agentworks, on the current
+interpreter and distribution Python 3.11. The full suite at `2b22da86` passes 10,578 tests with 12
+skips; the final simplification removes one redundant source-inspection test and passes all 656
+execution cases with five skips, plus Ruff, formatting and strict mypy. Private review removed a
+redundant type check that could silently discard an unexpected failure. These are reuse and local
+process facts, not destination-helper or production-launch acceptance.
+
+Windows CI at `b59bf286` exposed a timing assumption in the live-input early-close test: exit 23
+could first be observed during cleanup, leaving completion legitimately unknown. The correction
+keeps that conservative runtime behavior and adds deterministic coverage for both pre-cleanup exit
+evidence and cleanup-only status. All hosted checks at `37a36aae`, including Windows Python 3.13 and
+Linux Python 3.12/3.13/3.14, pass in
+[run 35496253664](https://github.com/WayfarerLabs/agentworks/actions/runs/35496253664). The
+[Darwin ownership investigation](prior-art-research.md#darwin-ownership-feasibility) separately
+identifies a public-mechanism gap for generic MANAGED host jobs. The operation-coordination ruling
+above subsequently selected platform-owned host lifecycle without weakening guest MANAGED.
+
+SSH's implementation at `174187d2` includes transport `a885ef5a` and adopts the reviewed finite
+subprocess pump. Its owner has separately supplied the buffered compatibility guard integrated here.
+It still needs the extended shared I/O implementation and terminal preparation, plus production
+target/trust composition. Pump adoption does not close the launch interruption gate. Next, settle
+and jointly prove live source/sink reports and terminal preparation with a synchronized
+payload-to-interactive handoff. A raw envelope through an unprepared PTY is not accepted. The
+[same-terminal experiment](carrier-io-lld.md#same-terminal-preparation-experiment) separates remote
+bootstrap feasibility from the remaining local client adapter proof. Full file/lifecycle
+implementation is not a prerequisite for that bounded shared-boundary proof.
+
+At `b1250da5`, the private Linux inline candidate delivers a fixed Python helper and a separate
+bounded stdin manifest in one carrier attempt. It verifies the bound identity, separates script
+source from application input with a memory file, and validates framed wait/output facts without
+inferring application success or eager start. All three private review lanes are clean. Review
+corrected false terminal evidence after contradictory output, portable identity fixtures and an
+interpreter-path refusal, and removed duplicate parsing and unused size bookkeeping. The execution
+suite passes 1,012 tests with five skips; the full non-integration suite passes 10,933 with 12
+skips. Ruff, formatting, strict mypy and file lint pass.
+
+A built-wheel check imports the candidate from the wheel, outside the checkout and without site
+initialization, then executes its packaged helper on distribution Python 3.11. It verifies separate
+script/stdin, all 256 stdout byte values, two binary stderr bytes and exact exit 255. Local
+serialization for `/bin/true` with identity 1001 measures 63,277 fixed-source bytes, 63,391 argv
+bytes including terminators, a 249-byte manifest and a 63,754-byte Proxmox JSON request body. These
+are measurements of the current candidate, not accepted provider limits. Native delivery, eager
+start, interruption ownership, staging, elevation, terminal preparation, lifecycle and production
+RunContext remain open; the candidate is not a completed additive delivery or a public feedback/fix
+round.
+
+Hosted checks for `f768ade0` passed except Windows in
+[run 35498733365](https://github.com/WayfarerLabs/agentworks/actions/runs/35498733365). Package-wide
+import discovery exposed the guest module's eager POSIX account-database import. The fix at
+`22511320` defers that import until guest default-shell lookup and adds a fresh-process regression
+with the module unavailable; it does not skip the independence check. At `3b10267a`, the full local
+non-integration suite passes 10,934 tests with 12 skips, with Ruff, formatting, strict mypy and file
+lint passing. Hosted Windows confirmation subsequently passes in
+[run 35499698325](https://github.com/WayfarerLabs/agentworks/actions/runs/35499698325) at
+`616508bc`. That run's Linux 3.13 job exposes a test-only assumption: `pwd` was already loaded
+before the import finder guard. The correction at `728b556d` marks the module unavailable
+explicitly, preserving the regression without changing runtime behavior. All hosted checks
+subsequently pass at `7641fa7f` in
+[run 35501242049](https://github.com/WayfarerLabs/agentworks/actions/runs/35501242049), including
+Windows Python 3.13 and Linux Python 3.12/3.13/3.14.
+
+The fixed helper's packaged sources now use zlib compression before ASCII armoring; caller payload
+remains in stdin. At `728b556d`, the minimal `/bin/true` request with identity 1001 measures 18,583
+fixed-source bytes, 18,697 argv bytes including terminators, a 249-byte manifest and a 19,060-byte
+Proxmox JSON body. The full local suite passes 10,934 tests with 12 skips, including the helper's
+actual distribution-Python-3.11 execution cases. Ruff, formatting, strict mypy and file lint pass.
+These are local delivery-size and compatibility facts, not native provider acceptance.
+
+The [terminal input proposal](carrier-io-lld.md#proposed-terminal-input-adapter) now gives bootstrap
+EOF a terminal-only handoff meaning, preserves preparation-owned readiness parsing and keeps
+presentation above the carrier. Explicit input and output descriptors supply native terminal facts
+without process-global stdio lookup. This remains a candidate for joint native proof with SSH, not
+an enabled terminal mode or accepted platform evidence.
+
+At `35c72e84`, Linux snapshot lookup uses `openat2` for every descendant open without a weaker
+fallback, and private terminal preparation implements the nonce-bound two-gate source/collector and
+one-shot Linux guest. The host side is workstation-neutral. Private review corrected inherited
+Python signal dispositions and nonce transformation under restored terminal output modes, and
+removed unsupported same-process guest reuse. All three private lanes are clean. The full local
+suite passes 10,961 tests with 12 skips; Ruff, formatting, strict mypy, file lint, typer isolation,
+rulesync, locked-SDD, 160 Python/103 Node website tests and both deterministic build comparisons
+pass. Actual local Python 3.11 PTY and kernel lookup tests do not establish SSH/native workstation,
+same-filesystem bind-mount or macOS acceptance. Complete files, lifecycle and additive RunContext
+remain open; no public feedback/fix round is consumed.
+
+The private no-staging file-read slice now composes the shared fixed-source packager, strict
+file-response framing and the existing snapshot reader. Local composition drives the actual Proxmox
+carrier against a fake provider and real helper subprocess; it is not native QGA evidence. Review
+removed duplicate size/metadata and terminal bookkeeping, rejected undefined Linux mode bits, and
+corrected retained collector/reader state on exceptions. A mutation-proven partial-record fixture at
+`5e832bd7` covers reader cleanup. This does not promise secure erasure of transient Python locals or
+asynchronous interruption atomicity.
+
+Project, complexity and generic correctness reviews are clean at `7aa08d0b`; project and complexity
+rechecks cover the test-only correction and final limitation wording. The corrective round is
+private implementation work, not one of the three authorized public feedback/fix rounds.
+
+At runtime pin `7aa08d0b`, the full local suite passes 11,009 tests with 12 skips. The final
+test-only correction passes all 124 file tests. Ruff, formatting, CI-scoped mypy (933 sources), file
+lint, typer isolation, rulesync, locked-SDD, 160 Python/103 Node website tests and both
+deterministic build comparisons pass. The Python website run also emitted a server-thread
+`BrokenPipeError` while returning success; no assertion failed. An extra mypy invocation over the
+entire CLI directory, outside CI's scope, reports missing hatchling build-hook stubs; the required
+`agentworks/ tests/` invocation passes. No dependency or unrelated website code was changed.
+
+Hosted [run 35503399897](https://github.com/WayfarerLabs/agentworks/actions/runs/35503399897) at
+`b0d62063` passes Windows and Linux 3.12/3.14, but the Linux 3.13 import test assumes its blocked
+modules were not preloaded. The helper import succeeds; the test's final assertion fails. The
+test-only correction at `ed19ee21` explicitly marks those modules unavailable, like the existing
+terminal test. All three private review lanes are clean; negative import probes still fail, and the
+four focused import tests pass. Runtime code is unchanged.
+
+All hosted checks subsequently pass at `4f60e9c4` in
+[run 35503894965](https://github.com/WayfarerLabs/agentworks/actions/runs/35503894965), including
+Windows Python 3.13 and Linux Python 3.12/3.13/3.14.
+
+At `c3cebea5`, explicit private helper identity plans pass all three review lanes after test-only
+corrections. The full final non-integration suite passes 11,031 tests with 12 skips; Ruff,
+formatting and CI-scoped mypy (936 sources) pass. File lint, typer isolation, rulesync and
+locked-SDD checks pass. Website validation at the runtime-identical `400a634a` passes 160 Python and
+103 Node tests plus both deterministic build comparisons; temporary build outputs were removed. The
+shared carrier interface remains unchanged. Actual privilege transitions, target account resolution,
+native acceptance, full files/lifecycle and additive RunContext remain open. No live infrastructure
+was touched and no public feedback/fix round is consumed.
+
+All hosted checks subsequently pass at `3ada8ff0` in
+[run 35504674348](https://github.com/WayfarerLabs/agentworks/actions/runs/35504674348), including
+Windows Python 3.13 and Linux Python 3.12/3.13/3.14.
+
+The private account-discovery increment at `40a6bade` reads only the core-bound account's IDs/groups
+under the delivery identity and feeds the existing identity plan. It uses a bounded one-shot JSON
+reply, no staging or privilege change, and no public account selector. The developer's focused suite
+passes 64 tests; execution tests pass 1,151 with six skips. Real distribution-Python-3.11 lookup and
+lookup-to-inline composition run locally. The latter correctly refuses this container's differing
+database and inherited group memberships. Private review and final gates were pending at that
+integration pin. This does not close native identity-transition, Darwin acceptance or production
+composition gates.
+
+All three private lanes are subsequently clean at `1688da5d`. Review removed duplicate encoder
+validation and a redundant result-construction check, deleted an unrelated directory assertion that
+could not detect helper staging, and strengthened the account-payload assertion with a unique
+substring canary. An actual argv-embedding mutation fails that assertion. The final full suite
+passes 11,073 tests with 12 skips; Ruff, formatting and CI-scoped mypy (942 sources) pass. Website
+gates at that pin pass 160 Python tests, 103 Node tests and both deterministic build comparisons.
+Temporary build outputs were removed and no live infrastructure was touched. These private
+corrections consume no public feedback/fix round.
+
+All hosted checks subsequently pass at `aa82b8f2` in
+[run 35506094459](https://github.com/WayfarerLabs/agentworks/actions/runs/35506094459), including
+Windows Python 3.13 and Linux Python 3.12/3.13/3.14.
+
+The file-mechanics increment is privately reviewed at `75aaaa5e`. Publication now accepts explicit
+Create/Replace/Match conditions, uses metadata-only observations when no old-content match is
+required, streams verified scratch in bounded chunks, and verifies a content-bound revision after
+rename. The fixed read-only lock primitive proves local contention/refusal/release but does not
+install its namespace or close cross-identity/native acceptance. Review removed a duplicate
+post-publication reader and corrected a mistimed deadline test; deleting the post-acquisition check
+now makes that test fail. All three private lanes are clean.
+
+The final full suite at `e9cce152` passes 11,118 tests with 12 skips. Ruff, formatting and CI-scoped
+mypy (945 sources) pass. The focused file suite passes 169 tests. File lint, typer isolation,
+rulesync and locked-SDD checks pass. Website gates at `4c35aafe` pass 160 Python and 103 Node tests
+plus both deterministic build comparisons; its local server emitted a BrokenPipeError without a
+failed assertion. Temporary build output was removed. No live infrastructure was touched. Shared
+namespace setup, complete file delivery, launch ownership, lifecycle, native proof and the additive
+RunContext remain open; neither pending macOS decision is waived. These are private implementation
+corrections, not a public feedback/fix round.
+
+The next increment is privately reviewed at `876355c7`. Linux object stat/removal now binds exact
+kind and revision, and shared new-guest bootstrap provisions the protected lock after Python
+installation. Existing valid lock identity is retained; only new core-owned objects are finalized.
+Setup failures report closed phase/kind/creation facts. Review corrected a post-open descriptor
+leak, removed a redundant create-result flag and kept leaf validation at the future request
+boundary. An ACL-fixture audit found unmapped `nobody` IDs, not missing filesystem support;
+mapped-group fixtures execute the real inherited/existing ACL cases without skips.
+
+The source bundler now compresses trusted modules together, and standalone publication executes
+under Bookworm Python 3.11. The file design selects fixed operation-family inline bundles with
+data-only scratch, avoiding executable installation. The Proxmox carrier also refuses a serialized
+POST over 64 KiB before dispatch, including argv/framing/escaping. These changes do not prove the
+final file dispatcher or native carrier request sizes. Shared SSH types are unchanged; Windows SSH
+command size and complete native file delivery remain acceptance gates.
+
+At `876355c7`, the final full local suite passes 11,177 tests with 12 skips; the file/Proxmox suite
+passes 305 without skips. Ruff, formatting, CI-scoped mypy (951 sources), file lint and diff checks
+pass. Typer isolation, rulesync and locked-SDD checks also pass in this increment. The unchanged
+website code passes 160 Python and 103 Node tests and both deterministic build comparisons;
+temporary build outputs were removed. No live infrastructure was touched. All three private review
+lanes rechecked the correction pin. Native privileged setup, cross-identity contention, complete
+file delivery, lifecycle and additive RunContext remain open; both macOS operator decisions are
+still pending. No public review/test signal is raised and no public fix round is consumed.
+
+The metadata/inventory increment is privately reviewed at `4e8921eb`. Linux metadata convergence
+uses verified held-object procfs references, supports required directory set-group-ID modes and
+preserves explicit completed versus uncertain mutation facts. Inventory returns complete results
+within the requested depth with exact entry/name/encoded bounds. Shared file framing now has one
+concrete codec, while read schemas remain operation-specific. Root and fixed lock-namespace walks
+use path-only descriptors without unnecessary directory read authority; neither installs state.
+
+All three independent lanes are clear on the correction pin. Review moved invalid directory-mode
+refusal before target I/O, added a deadline check after final ACL verification, removed duplicate
+inventory serialization and redundant metadata error reconstruction, and preserved handled-control
+descriptor cleanup. Final local suite: 11,282 passed, 12 skipped. The combined file and Proxmox
+request/trust/sink suite passes 448 without skips. Ruff, formatting, strict mypy (957 sources), file
+lint, typer isolation, rulesync, locked-SDD and diff checks pass. Unchanged website code passes 160
+Python and 103 Node tests plus both deterministic build comparisons. No live infrastructure was
+touched. This is a private increment, not complete FileAccess or a public feedback round. The next
+implementation step is the concrete stat/removal helper exchange; public composition, native and
+cross-identity acceptance, lifecycle and additive RunContext remain open. Both macOS operator
+decisions remain pending.
+
+The stat/removal, metadata-ownership lookup and locked-read exchanges are privately reviewed at
+`2ad918bc`. Object requests retain exact kind/revision conditions, closed relative budgets and
+uncertain-removal evidence without replay. Ownership lookup returns only numeric owner/group IDs,
+independently of execution identity. Read snapshots use the existing protected lock and emit after
+unlocking; missing lock state refuses even when the target is absent. Neither read nor stat creates
+prerequisite state. The full local suite at that pin passes 11,449 tests with 12 skips.
+
+All three private lanes found no material issues at that pin. Corrections clear sensitive exception
+chains, preserve Windows import-test selection and remove a Proxmox fixture's dependency on the
+host's lock state. Shared identity decoding and one-pass account request parsing remove duplicate
+checks. The subsequent cleanup at `b09e1212` deletes two unused account decoder wrappers and moves
+their unchanged malformed-input cases to the real guest entry point. Public FileAccess, native
+ordinary/elevated acceptance, lifecycle and additive RunContext remain open; this private work does
+not consume a public feedback/fix round.
+
+All three lanes also verified the narrow cleanup at `b09e1212`, and the full local suite again
+passes 11,449 tests with 12 skips. Ruff, formatting and CI-scoped mypy (966 sources) pass. Website
+gates pass 160 Python and 103 Node tests and both deterministic build comparisons. File lint, typer
+isolation, rulesync, locked-SDD and diff checks pass. Generated test/build outputs were removed; no
+live infrastructure was touched. Hosted checks pass at the preceding published `6edbd94c` in
+[run 35511446645](https://github.com/WayfarerLabs/agentworks/actions/runs/35511446645); the new
+progress publication still needs its own hosted confirmation.
+
+The inventory/metadata exchanges and scratch-finalization increment are privately reviewed at
+`fef0045d`. Inventory returns entries only after complete framing, length, digest, schema and
+carrier-stream checks. Metadata and directory convergence preserve known partial versus uncertain
+effects without replay. All four file guests share one concrete record writer. Review corrected
+missing response-key handling and made compatibility cases select Python 3.11 explicitly.
+
+Scratch creation now binds identity and length without requiring the final digest in advance;
+verification establishes the ready reference. Cooperative expiry stops further acquisition and
+transfer while retaining exact cleanup. An independent reproduction found that a slow successful
+directory creation could otherwise be followed by data creation after expiry. The correction
+prevents that new object, preserving only identity capture and mode normalization necessary for
+cleanup. Mutation experiments establish the need for both final digest verification and that cleanup
+normalization.
+
+All three private lanes are clean at `fef0045d`. The final full local suite passes 11,595 tests with
+12 skips; the file/scratch selection passes 604. Ruff, formatting and CI-scoped mypy (978 sources)
+pass. File lint, typer isolation, rulesync, locked-SDD and diff checks pass. Unchanged website code
+passes 160 Python and 103 Node tests and both deterministic build comparisons. A prior full run at
+`14fb93b3` emitted multiprocessing resource-tracker warnings from a database test; the final run did
+not, and no shared-memory files remained when checked. Owned test/build output was removed. No live
+infrastructure was touched.
+
+The bounded immutable ownership-receipt candidate has independent project and complexity review, not
+implementation acceptance. Lost replies, late requests and partial receipt cleanup remain explicit
+proof gates. Streaming source-to-scratch snapshots are now assigned for implementation;
+transfer/publication exchanges, full FileAccess, lifecycle, native acceptance and additive
+RunContext remain required. Shared SSH types are unchanged. Both macOS operator decisions remain
+pending. This increment consumes no public feedback/fix round. Hosted checks passed at prior
+published `63022be8`; fresh confirmation remains required after the next progress push.
+
+The source-to-scratch snapshot increment is reviewed at `5b58e8f5`. It copies bounded chunks from
+one held source, verifies length/EOF/digest and final source identity/metadata, and returns a ready
+private copy plus the source revision. Initial absence is checked for expiry after descriptor
+closure. Review reproduced and corrected skipped parent cleanup after a leaf-close interruption and
+lost scratch cleanup debt when source closure interrupted a failed creation. An independent mutation
+of final source verification fails four tests.
+
+The generic lane also reproduced an existing traversal limitation: an asynchronous exception before
+an intermediate ancestor close can leave that descriptor until helper exit. The same ordering
+predates this increment. It remains inside the documented non-signal-atomic bookkeeping limit; blind
+close retry is not added because interruption does not establish whether that numeric descriptor has
+already been closed. Complete helper lifetime/interruption remains a production gate, not an
+acceptance claim from these local primitives.
+
+The final local suite at that runtime pin passes 11,617 tests with 12 skips. Ruff/format, CI-scoped
+mypy (980 sources), file lint, typer isolation, locked-SDD, rulesync and diff checks pass. Website
+gates pass 160 Python and 103 Node tests plus both deterministic build comparisons. Owned temporary
+test/build output was removed. No live infrastructure was touched. All hosted checks pass at the
+preceding published CI correction `46f5d948` in
+[run 35517251196](https://github.com/WayfarerLabs/agentworks/actions/runs/35517251196); the snapshot
+increment still needs fresh hosted confirmation after publication.
+
+The focused systemd 252 source audit records helper acceptance separately from payload entry,
+completion retention across unit collection and independent boundary-emptiness observation after
+stop. The later private foreground candidate below implements those source-backed mechanics without
+closing their native proof gates. Creation receipts are under implementation. Transfer/publication
+exchanges, full FileAccess, native acceptance, complete lifecycle and additive RunContext remain
+required. The macOS questions still pending at that checkpoint were resolved by the later
+platform-owned-lifecycle ruling above. No public feedback/fix round is consumed by this increment.
+
+The receipt increment is reviewed at `5a9d3b8f`. Core supplies a fresh token and execution identity
+before staging or snapshot creation. The immutable receipt binds the closed operation and original
+parent/object identities. Historical recovery permits cleanup only; active references separately
+bind the original receipt inode. Recovery neither proves that a delayed request cannot still arrive
+nor returns verified content. Remote exchange ordering and publication-stage recovery remain open.
+
+Private review corrected reconciliation expiry after missing-name lookup and descriptor closure,
+ensured the directory descriptor closes even when receipt closure interrupts, and removed redundant
+receipt decoding. The lead reproduced a real inherited-group failure and verified its fix outside
+the namespace sandbox. Both data and receipt inherit the parent's group before private directory
+mode is finalized. An early data-open failure now cleans its exactly owned empty directory; unknown
+objects remain untouched with explicit debt. Removing that normalization makes both new failure
+tests fail. The future snapshot helper must check its bound execution identity before any source
+access, including absence lookup; the local spool's receipt context is not that invocation boundary.
+
+Final full local suite: 11,634 passed, 13 skipped. The extra skip is the sandbox's unavailable
+alternate supplementary group; the committed regression passes separately outside that sandbox. The
+independent correctness lane also reports 1,713 execution tests passed, six skipped, and a Python
+3.11.2 receipt/transfer/reconciliation roundtrip. Ruff/format, CI-scoped mypy (982 sources), file
+lint, typer isolation, locked-SDD, rulesync and diff checks pass. Unchanged website gates pass 160
+Python and 103 Node tests plus both deterministic build comparisons. Owned temporary test/build
+output was removed and absence verified; no live infrastructure was touched. Hosted checks pass at
+the preceding snapshot increment `0e7a9edf` in
+[run 35518292881](https://github.com/WayfarerLabs/agentworks/actions/runs/35518292881); this receipt
+increment still needs hosted confirmation after publication.
+
+The staging exchange is assigned separately against these receipt types. Full FileAccess, native
+acceptance, launch ownership, lifecycle and additive RunContext remain required. Shared SSH types
+are unchanged, and both macOS operator decisions remain pending. This progress push consumes no
+public feedback/fix round; all three remain available for the completed PR.
+
+The private stage increment is reviewed at `85d27904`. Creation and chunk requests use the original
+destination binding, fixed lock and sensitive private protocol. Review corrected expiry after path
+and lock cleanup, oversized pytest IDs on Windows, and returned chunk cleanup debt that could
+conflict with the known active reference. Removing the debt-equality check makes all seven mismatch
+cases fail. The three private lanes pass 86 stage tests, including real local Python 3.11 helpers.
+
+The final full suite passes 11,720 tests with 13 skips. Ruff/format, CI-scoped mypy (991 sources),
+file lint, typer isolation, locked-SDD, rulesync and diff checks pass. Website Node tests pass 103
+cases and both deterministic double-builds match. One Python website run failed the unchanged
+browser keyboard-hold launch witness; a complete rerun passed all 160 tests. This is an observed
+intermittent gate failure, not a diagnosed or fixed website defect. Hosted receipt checks at
+`9d8100b2` pass in
+[run 35520474884](https://github.com/WayfarerLabs/agentworks/actions/runs/35520474884); the stage
+increment requires fresh hosted confirmation. Remote recovery is the next file implementation; full
+FileAccess, native acceptance, launch ownership, lifecycle and additive RunContext remain open.
+
+The stage recovery and Linux scratch-root increment is privately reviewed at `b0840a37`. Lost
+creation replies can recover complete historical cleanup ownership through the fixed helper, never
+an active or ready content reference. Cleanup failures cannot introduce different debt. Missing
+receipts remain uncertainty; delayed follow-on chunks refuse after receipt removal, but this does
+not establish that an earlier original creation cannot arrive later.
+
+Review corrected explicit cleanup after an expired path lookup and rejected historical replies with
+missing identities or widened receipt modes. The typed result encoder no longer repeats those
+external checks. Removing the incoming checks makes all ten malformed-history cases fail; removing
+pre-cleanup admission mutates data despite a final refusal. Six real-helper deadline tests now
+advance a controlled guest clock at the intended boundary, replacing a reproduced scheduling race.
+The final correctness lane passes 147 focused tests, all 60 repeated deadline cases and 20,000
+malformed-request probes. The complete file selection passes 736 tests. Root admission is local
+Linux evidence only: namespace-sandbox `/tmp` has UID 65534 and correctly refuses, while the same
+read-only probe outside that sandbox observes UID 0/mode 01777 and closes the admitted descriptor.
+
+The final full suite at `b0840a37` passes 11,781 tests with 13 skips. Ruff/format, CI-scoped mypy
+(993 sources), file lint, typer isolation, locked-SDD, rulesync and diff checks pass. Website gates
+pass 160 Python and 103 Node tests and both deterministic double-build comparisons. Owned temporary
+test/build output was removed and absence verified; no live infrastructure was touched.
+
+All hosted checks pass at the prior stage publication `37d8150b` in
+[run 35522218730](https://github.com/WayfarerLabs/agentworks/actions/runs/35522218730). The new
+increment still needs hosted confirmation after publication. Snapshot/publication delivery, full
+FileAccess, launch ownership, lifecycle, native acceptance and additive RunContext remain required.
+The launch-owner candidate is being implemented separately; its design evidence is not production
+acceptance. Shared SSH interfaces remain unchanged. The macOS decisions pending at that checkpoint
+were subsequently disposed by the operation-coordination correction above: no blanket host lock
+setup and no generic macOS MANAGED supervisor prerequisite for VM platforms. This progress increment
+consumes no public feedback/fix round; all three remain available for the completed PR.
+
 After the shared seam and LLD gates, the lead may charter bounded migration packages against one
 pinned contract. The following is an assignment plan, not a claim that developers are allocated:
 
 | Package                                       | Exclusive responsibility                                                                                                                                                            |
 | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Transport lead                                | Shared execution API/helpers/file policy, `capabilities/base.py`, composition boundaries, integration gates and final deletion.                                                     |
-| SSH developer                                 | `execution/carriers/ssh/`, connection/trust migration and associated tests, per #796.                                                                                               |
+| SSH developer                                 | `execution/carriers/ssh/`, connection/trust migration and associated tests, currently in #832.                                                                                      |
 | Optional harness/artifact migration developer | `harness_setup/`, harness setup/readiness invocation types, artifact publication/probes and harness plugin consumers; preserve domain behavior while replacing runner/file facades. |
 | Optional session migration developer          | Session/tmux/console consumers and tests; preserve session/run identity, restart consent, runtime evidence and owned cleanup.                                                       |
 | Optional platform/CLI migration developer     | Non-SSH adapters, VM exec/recovery, backup and workspace transfer consumers, with explicit per-file assignment before starting.                                                     |
@@ -168,7 +1193,8 @@ PoC merge enables production use.
       generated-section transforms in their domain, backed by snapshots/conditional publication.
       Enumerate tools available during native bootstrap and on supported platform hosts; prove
       destination-side confinement rather than relying on a preflight path check. Define trusted
-      ancestors/mounts, private staging/locks, root creation and fail-closed behavior.
+      ancestors/mounts, private staging, database operation ownership, root creation and fail-closed
+      behavior.
 - [ ] Inventory intended mutation destinations and actions for harness configuration, `/opt`
       provisioning, `/run` session objects, recovery and platform hosts. Review execution-bearing
       content and select explicit core allowlist entries, trusted dynamic-root resolution and
@@ -183,6 +1209,18 @@ PoC merge enables production use.
 
 ## 4. Build the independent stacks in parallel
 
+- [ ] Establish exact child-status ownership wherever a native wait becomes execution evidence.
+      CPython can substitute zero after ignored `SIGCHLD` or another reaper consumes the status; the
+      helper and workstation observers must refuse missing evidence rather than report that
+      synthetic value. Validate the retrospective completion candidate independently from eager
+      launch acknowledgment and preserve uncertainty for unproved signal termination.
+- [ ] Establish local process ownership through launch interruption on supported workstation hosts.
+      A real SIGINT probe on Linux CPython 3.12.13 left a child alive when `Popen` construction was
+      interrupted before returning its handle. Shared pump extraction and the existing SSH copy do
+      not satisfy this gate. Prove cleanup or obtain an explicit contract disposition before
+      claiming production interruption conformance; see the
+      [process-startup evidence](prior-art-research.md#local-process-startup-and-interruption).
+
 The transport lead owns shared profiles, supervisor lifecycle and session adoption. Migration
 delegates consume this implementation rather than building another launcher; SSH owns delivery,
 connection and trust only. Before broader lifecycle implementation, complete these additional gates:
@@ -193,26 +1231,330 @@ connection and trust only. Before broader lifecycle implementation, complete the
       supplies the proposal, not implementation proof.
 - [ ] Reconcile the complete #770 requirements, threat model, acceptance cases and exclusions using
       the [preserved input](inputs/session-cgroups-frd-2c406948.md), not the routing index as a
-      replacement FRD. Obtain explicit owner/operator disposition before overlapping lifecycle
-      implementation or artifact retirement; at transfer carry the accepted text into its designated
-      requirements home and reconcile any later source changes.
+      replacement FRD. Ownership is assigned to transport and #770 is closed; carry the accepted
+      text into its designated requirements home. The closed source head is `2c406948`, matching the
+      preserved snapshot; closing the PR does not complete requirements reconciliation.
+- [x] Implement a bounded private Linux foreground MANAGED candidate for native proof. The fixed
+      `systemd-run --pipe --wait` service runs under the explicit target identity, creates one
+      delegated child cgroup before workload execution, inherits the carrier byte streams directly,
+      and separately reports helper completion, payload evidence, service completion and observed
+      child-boundary emptiness. Preparation is atomically one-shot and carries no replay, public
+      job, RunContext or production-factory surface.
+- [x] Implement the private durable managed-run reservation and receipt-reconciliation kernel. A
+      fresh run is stored and its unit is derived before dispatch; possible dispatch commits before
+      the supplied one-shot launch boundary; ambiguous launch is never replayed; exact receipts and
+      exact protected-namespace absence after `NOT_SENT` reconcile idempotently. Persist only
+      bounded non-secret target/incarnation/boot, workload, shell, profile, owner/lifetime, protocol
+      and launch evidence. Application, cleanup, output retention and disposal evidence remain later
+      gates, to be introduced with real producers and consumers. This adds no supervisor/carrier
+      wiring, lease, stop/disposal, public job/RunContext surface or session backfill.
+- [x] Define and test the private bounded target-side managed-job fact protocol. Canonical
+      version-one launch, main-process wait, separate stdout/stderr end and positive boundary-empty
+      facts carry exact run/unit and launch-receipt digest binding. One closed-stream disposition
+      distinguishes complete/truncated capture, discard and sensitivity suppression, with retained
+      length and digest; missing facts remain unknown. The LLD specifies immutable create-once facts
+      in a protected boot-local per-run directory and sequences the first service slice to
+      independent lifetime. Store, target service, operation lease/cleanup, requested-policy
+      persistence/comparison, target-producer parity, carrier proof, public jobs and live lifecycle
+      validation remain open.
+- [x] Extract the canonical managed-job v1 byte schema into one Python 3.11 stdlib module that
+      reuses the portable identity helper, and route the host typed adapter through it. Exact-source
+      bundle parity covers launch, both wait outcomes, all four stream dispositions and
+      boundary-empty facts. The target producer/service, requested-policy persistence, protected
+      store, cgroup/systemd launch, carrier proof and live validation remain open.
+- [x] Persist the first consuming service's requested output policy beside the managed-run
+      reservation without changing the version-one launch receipt. Store capture, discard or
+      sensitivity suppression plus the capture ceiling; validate old/private rows and malformed
+      database values fail closed. Keep application bytes and secrets out of the database.
+- [x] Implement the Python 3.11-compatible protected target store under
+      `/run/agentworks/managed-runs-v1`: root-only fixed assets, bounded capture spools and
+      same-directory create-once fact publication. Prove partial stages are never facts, existing
+      canonical facts reconcile idempotently, conflicts refuse, closed-output reads require the
+      matching stream-end fact and strange filesystem objects fail closed. Add no file lock, mutable
+      shared status document, arbitrary path surface or automatic expiry.
+- [x] Implement and privately prove the exact-source Python 3.11 target-controller core for Linux
+      `MANAGED` plus `INDEPENDENT`. It consumes the fixed request, requires root and the exact
+      derived delegated service-cgroup membership, gates one child through placement and verified
+      groups/GID/UID, normalizes its signal state, publishes launch before readiness, and then
+      handles finite input, bounded capture/discard, normal-wait evidence and independently bounded
+      cleanup facts. Pre-exec failure, every signaled death and unproved cleanup remain unknown. At
+      `c0b5ba4c`, project, complexity and independent correctness lanes are clean; exact-source
+      Python 3.11 probes and 113 focused reviewer tests pass. This checkpoint does not construct or
+      launch the transient service, prove a live cgroup or identity transition, expose a carrier
+      exchange, or establish production target evidence.
+- [ ] Complete the first fixed target controller service for Linux `MANAGED` plus `INDEPENDENT`. Use
+      one root transient notify service and a delegated child workload cgroup; place the gated
+      child, apply and verify its exact groups/GID/UID, publish launch and readiness, then release
+      caller code. Concurrently drain both streams and wait for the main child. On main termination
+      start descendant cleanup while draining continues. Publish wait only for close-on-exec-proved
+      application entry followed by normal exit; preserve exit 126 and leave setup/exec failure or
+      any signaled death unknown in this slice. Publish each stream end only after EOF, and publish
+      boundary-empty only after `populated 0`. Preserve unknown facts on controller death,
+      uninterruptible tasks and every unproved cleanup path. Refuse `OPERATION`, live streams,
+      terminal I/O and arbitrary systemd properties before dispatch.
+- [x] Implement the bounded private carrier-neutral `observe` and closed `read-output` exchanges
+      over the protected store. The exact-source Python 3.11 target helper and host collector bind
+      one canonical launch, return only present fixed facts, and admit output only from a validated
+      stream-end and closed capture spool. Missing end remains unknown; discard and suppression are
+      known unavailable; malformed or incomplete carrier evidence promotes no facts. At
+      `4a1209ec079c9510cc671300aebc390a12c0ad25`, the manifest-only result control removes duplicate
+      status and length claims; 64 focused tests, Ruff and targeted mypy pass. This checkpoint does
+      not implement `start`, `stop` or `dispose`, host reservation/output-policy reduction, live
+      target identity rereads or SSH/QGA production proof.
+- [x] Implement the private fixed Linux `MANAGED` plus `INDEPENDENT` start exchange through combined
+      code checkpoint `10fb0f0fac34234e1938681885988c6dc816c35e`. It preflights the exact reserved
+      run, request, output policy, identity/runtime and carrier structure before durable
+      possible-dispatch, then stages only five protected assets and attempts one closed transient
+      root notify service. ASCII-armored canonical request framing preserves binary source/stdin; an
+      exact launch fact confirms a durable receipt even when systemd client acknowledgement is lost.
+      Acknowledgement additionally requires complete trusted helper/carrier evidence and client exit
+      zero. The pure `Carrier.validate` seam refuses deterministic direct-envelope incompatibility
+      without an attempt and is repeated by `execute`. Buffered SSH's pure refusal guard is
+      owner-authored at `fad2ede68dc75d1af90d26e6e4bc848756da4eab`, integrated as
+      `10fb0f0fac34234e1938681885988c6dc816c35e`; #832's expanded carrier must retain or adapt its
+      truthful no-op validator. The transport slice's exact Python 3.11 source proof, 261 focused
+      tests, Ruff, targeted mypy and documentation gates pass. Protocol asset bounds do not
+      guarantee every carrier's smaller direct envelope; large-request staging/fallback, live
+      systemd/cgroup and SSH/QGA proof, current target-marker/boot rereads, stop/dispose and public
+      composition remain open.
+- [x] Implement and privately prove the fixed managed-stop request, controller handling and
+      carrier-neutral exchange through `8b99c784843da6152591afe4508198131000b7a0`. One separate
+      protected empty `request-stop` leaf publishes only after exact launch validation; accepted
+      intent remains distinct from positive boundary emptiness. The controller gives only its exact
+      main child that has not yet been reaped one fixed grace interval, enters the existing
+      whole-cgroup cleanup on anchor exit or grace expiry, and does not extend grace on retry. The
+      guest observation remains finite for an unbounded caller deadline. A helper failure remains
+      unknown after dispatch because publication may already be visible; post-publication
+      observation faults preserve accepted intent, while only validated empty-boundary evidence
+      proves termination. The 106 focused and 358 broader managed-execution tests, Ruff, targeted
+      mypy, the full file-lint suite and diff check pass. This slice adds no process enumeration,
+      mutable stop document, `execution_runs` stop state, generic admission lock, direct
+      systemd-stop claim, disposal/retention policy or public composition. Hermetic proof does not
+      establish live systemd/cgroup, current target-marker/boot or SSH/QGA behavior.
+- [x] Implement and privately prove exact terminal disposal with a boot-local retry tombstone
+      through `4292a4a8001633045c67c18ab87a3691a081bc39`. Require the exact launch, boundary
+      emptiness and both closed stream ends before publishing `disposal` by hard-linking the
+      validated immutable launch and syncing the directory. Validate capture spools structurally
+      before deletion; their bytes, lengths and digests do not authorize release. Validate
+      recognized crash stages by fixed name, owner, type, mode and link shape rather than content.
+      First tighten controller ordering so it settles optional wait before boundary publication;
+      both stream ends may remain later and independent, but the complete disposal predicate permits
+      no later controller fact publication. Prove the late-wait race and simultaneous exact receipt
+      retries, including a delayed retry that must not create a new stage after receipt-only
+      success. After durable commitment, remove only validated fixed run artifacts and recognized
+      private stages through the held directory descriptor, sync and report disposed only when the
+      one-link receipt is the sole survivor. Exact retries resume partial cleanup; missing launch
+      plus receipt proves nothing; strange entries and mismatched receipts authorize no deletion.
+      Make target publishers refuse an observed receipt, while leaving distinct-operation
+      serialization to the core operation claim rather than adding a file lock. Add no automatic
+      retention interval, forced release, generic deletion API, mutable status or database disposal
+      field. The 451 managed-execution tests, Ruff, formatting, mypy across 252 execution sources,
+      the full file-lint suite and diff check pass. Host exchange proof covers pure preflight,
+      deadline refusal, helper and carrier uncertainty, malformed or stale receipts, complete
+      disposed/not-ready results and suppression of the launch receipt from representation.
+      Filesystem proof covers symlinks, directories, FIFOs, unsafe modes, unexplained hard links,
+      malformed bounded request and stop finals, mismatched receipts, failed receipt durability
+      barriers, partial cleanup and simultaneous exact retries. Hermetic proof does not establish
+      production ownership, current target/boot rereads or live SSH/QGA behavior.
+- [ ] Add the fixed carrier-neutral `start`, `observe`, closed `read-output`, `stop` and `dispose`
+      exchange over the target store. The private hermetic exchange now implements all five
+      operations, revalidates the exact target/run/unit/launch digest on every later action, never
+      replays start after possible dispatch and exposes no arbitrary command, unit, path or property
+      control. This item remains open until the same exchange is proved through SSH and QGA before
+      public factory, job or RunContext exposure.
+- [x] Add private exact-VM operation custody around one already reserved independent managed start.
+      The version-one `managed-start` obligation persists only the run ID. Preflight precedes
+      admission, the run row records possible dispatch before the borrowed carrier starts, and one
+      settled attempt with a confirmed receipt resolves only temporary start custody. Missing
+      receipt, uncertain dispatch and interrupted control flow after arming retain the core claim;
+      pre-arming refusal releases the unused borrow and resolves any installed row. The resource
+      owner and managed-run row own the continuing job. Production binding, recovery, current
+      marker/boot rereads and later job actions remain separate gates.
+- [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
+      provisional row and install that same non-secret 32-lowercase-hex value through every shared
+      create bootstrap. Migration 41 leaves legacy rows NULL; ordinary existing-VM operations never
+      write a marker. Bootstrap uses `/var/lib/agentworks/instance-id`, replaces only an ordinary
+      regular leaf and refuses symlinks, non-regular leaves and multiply-linked leaves. Explicit
+      adoption and production target composition remain later gates; the private probe and codec
+      checkpoint below do not complete them.
+- [x] Keep Lima marker delivery creation-only: its retained `mode: system` bootstrap omits the
+      marker, while create streams the fixed installer through `limactl shell` after create/start
+      and inside rollback. Later Lima start/restart never installs or repairs it. Isolated installer
+      tests prove conservative leaf handling and mode changes; live platform proof of target root
+      ownership and delivery remains a later integration gate.
+- [x] Introduce and prove the vm-platform v2 provider-locator observation hook before managed target
+      composition supports third-party platforms. The hook returns one bounded opaque provider token
+      or explicit unavailable, never provider fields, persistence or marker evidence. It is a hard
+      contract cutover. The reviewed dispositions are: AWS EC2 returns its account, region and live
+      instance ID; Azure VM returns its exact live ARM resource ID; GCP GCE returns project, zone
+      and numeric instance ID; WSL2 returns the Windows machine GUID, current-user SID and exact WSL
+      registration GUID. Those positive SDK/process observations derive deadline-aware best-effort
+      timeouts and reject a successful late result, but do not claim hard preemption of provider
+      I/O. Lima is unavailable because its reusable instance name/path lacks a stable placement-host
+      namespace and incarnation; Proxmox is unavailable because its VMID/node lacks a stable cluster
+      namespace. Those unavailable results are honest checkpoint outputs, not permission to ship a
+      critical or recovery operation without identity: production cutover must establish the
+      required namespace or alternative proof, or prove the operation does not require this locator.
+      No operation silently downgrades. `ProvisionRequest.instance_marker` remains creation
+      evidence; this hook alone does not establish the private guest observation/composition
+      checkpoint below or third-party managed target identity.
 - [ ] Complete and prove Linux supervisor launch through SSH and native QGA: protected identity,
       secret/source delivery, privilege changes, foreground wait, independent launch, output
       retention and terminal evidence. No workload code runs before boundary entry.
 - [ ] Prove lost-acknowledgment reconciliation, wait timeout versus stop, observer-loss cleanup,
       runtime-anchor death, concurrent forks, stale identity and independently verified emptiness.
       Settle the OPERATION liveness/lease protocol before offering target-side cleanup.
-- [ ] Complete CONTAINED's access map, compare restricted same-UID and per-run-user designs, and
-      prove the complete #770 escape/relaunch and trusted socket-identity acceptance cases. Record
-      compatibility costs requiring operator disposition.
-- [ ] Resolve non-systemd macOS host jobs, Debian/kernel/systemd floors, WSL2 power lifetime and
-      no-staging recovery. Required workflows block delivery when their guarantees cannot be met; no
-      profile downgrade or fabricated platform equivalence. Use the
+- [ ] Reconcile #770's historical escape/relaunch proposal against the later exclusion of malicious
+      target-user containment. Deliver DIRECT/MANAGED without a CONTAINED profile or
+      per-run-user/jail implementation; retain future profile extensibility. Prove trusted
+      socket-membership identity and ordinary lifecycle cases within that stated boundary.
+- [ ] Resolve platform-owned macOS host workflows, Debian/kernel/systemd floors, WSL2 power lifetime
+      and no-staging recovery. Required workflows block delivery when their guarantees cannot be
+      met; no profile downgrade or fabricated platform equivalence. Use the
       [observable proof criteria](execution-lifecycle-lld.md#delivery-sequence-and-proof-criteria)
-      and [reported test-bed gaps](prior-art-research.md#lifecycle-test-bed-gaps). For macOS host
-      jobs, prove all MANAGED ownership/tracking/stop/emptiness promises and independent lifetime;
-      workstation SSH evidence is insufficient. Price missing mechanics or infrastructure for
-      operator disposition rather than silently dropping required host work.
+      and [reported test-bed gaps](prior-art-research.md#lifecycle-test-bed-gaps). For macOS hosts,
+      prove the platform's actual start/status/stop and disconnected-operation recovery, not a
+      generic Linux-equivalent MANAGED profile. Workstation SSH evidence is insufficient; report
+      cleanup uncertainty without dropping required platform operations.
+- [ ] Prove a distribution-scoped WSL2 boot fence before production managed-run adoption. The kernel
+      boot UUID alone survives a distribution stop and restart inside the same utility VM. The
+      private guest probe now combines that UUID with PID 1 start ticks; validate stable identity
+      within one running distribution and changed identity across real stop/restart on the supported
+      WSL2 bed, including lost-hold recovery. A live hold prevents ordinary idle shutdown but does
+      not substitute for a restart fence after controller loss. Keep ambiguous or unavailable epoch
+      evidence unknown and never treat the old run as present merely because the kernel UUID agrees.
+- [ ] Prove the placement-host VM-resource lifetime separately from provisioning completion. For
+      Lima, use supported platform lifecycle operations and prove readiness, disconnect recovery,
+      stop and rollback for the supported drivers. A foreground anchor is an option to justify for a
+      concrete workflow, not a required replacement for Lima's runtime. Do not treat numeric PID
+      records as authority to kill unrelated host work.
+- [x] Prove WSL2 host-client and guest-anchor cleanup independently before wiring a production
+      platform hold. A Windows Job Object or observed `wsl.exe` exit proves only host-client
+      cleanup. The candidate must obtain a guest-ready acknowledgment, retain an exact guest process
+      identity, request cooperative exit, and verify that identity is absent after ordinary release
+      and controller hard death while unrelated guest work survives. Production platform-hold and
+      recovery composition remain separate gates.
+- [x] Build the private WSL2 platform-hold ledger adapter under an already acquired exact-VM owner.
+      Give each hold its own pre-effect canonical bounded payload and nonce, capture exact Windows
+      controller creation identity, mark possible effect before one guest-anchor dispatch, publish
+      boot-aware READY identity, and resolve ordinary release only on never-creation or settled
+      local resources plus independently confirmed exact guest absence. Keep the owner available for
+      child borrows during nested holds and retain uncertain coordination for explicit recovery.
+- [x] Implement the private Windows controller observer for one validated persisted PID and creation
+      time in native ticks under a finite deadline. A pinned process handle proves an exact live or
+      exited process, or PID reuse; only a complete process snapshot can prove absence after open
+      failure. Ambiguous API results and deadline expiry stay unknown. This is controller evidence
+      only, without dispatch drain, guest absence, recovery factory or production wiring claims.
+- [ ] Implement production WSL2 hold adoption and recovery: exact preparation discovery after a
+      crash, controller-absence and dispatch-drain proof, a production exact guest observer,
+      recovery factory, activation and platform wiring, RunContext integration, and live proof.
+
+The private WSL2 ownership candidate is implemented through `a1bb1034`. The caller owns an inert
+lifecycle object before `start`; one native owner retains the WSL client, process/pipe handles and
+Job Object handle across startup and cleanup interruption. Its snapshot keeps client exit,
+client-handle closure, Job assignment and Job-handle closure independent, invalidates pre-dispatch
+certainty before native effects, and permits bounded settlement and guest-observer retries without
+replay. The native adapter selects creation-time Job membership and explicit handle inheritance with
+no weaker fallback. Portable tests execute the fixed helper against Linux procfs and inject native
+API failures; native-Windows cases are present for Job membership, handle confinement, descendant
+cleanup and abrupt controller death without invoking WSL. Hosted Windows 2025 with Python 3.13.15
+passes all 496 selected cases with 39 skips at `dca96813` in
+[run 35710387854](https://github.com/WayfarerLabs/agentworks/actions/runs/35710387854). That
+establishes the synthetic host-client cases, including abrupt controller death while unrelated work
+survives.
+
+The live Tier 2 Windows/WSL2 round at transport `f13f48e5`, composed with SSH `3cf322f9`, closes the
+guest-anchor proof above. Windows Server 2022 with WSL 2.7.14.0 drove Ubuntu 24.04 under the bound
+root account. Real `wsl.exe` preserved all 13 tricky literal arguments, binary stdout/stderr, finite
+NUL input and EOF; bounded output and sensitive-input suppression also held. The measured nonzero
+statuses confirmed that WSL cannot distinguish normal exit from the same numeric signal, so the
+carrier correctly retains those values as observation failures rather than typed completion.
+Ordinary release and forced controller death both removed the acknowledged exact guest PID/start
+identity, independently observed through another `wsl.exe` process, while unrelated guest and
+Windows work survived. The Windows client, guest anchor and helper residue were zero before the bed
+was torn down. The composed non-integration suite passed 12,979 tests with 21 skips and every
+static, documentation, Rulesync and website gate passed. This evidence does not wire the production
+WSL platform hold, recovery factory, target identity or RunContext surface; those remain open.
+
+The next native Windows/WSL2 experiment at transport `333b17bc` examined whether a read-only WSL UNC
+file handle could hold a running distribution without a guest command. The
+[full integration report](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-5822948740)
+covers Windows Server 2022 build 20348.5622, WSL 2.7.14.0, a fresh Ubuntu 24.04 target, an
+independent running control distribution, and complete tester cleanup. The official probe result is
+`UNKNOWN`: its 30-second cold-open cap could not observe the measured 80-second `\\wsl$` refusal,
+and its `/etc/os-release` path was a symlink that the WSL share could not open. The tester
+separately sampled the stopped target throughout the cold open: `\\wsl$` refused after 80 seconds
+without starting it; `\\wsl.localhost` refused after 40 seconds, also without starting it. With the
+target already running, a supplementary run used the regular `/usr/lib/os-release` file and the
+probe's otherwise unchanged cases. Against a 15.75-second no-handle distribution lifetime, one
+handle retained it for 180 seconds; a second case closed the first of two handles, then the
+remaining handle retained it on its own for 180 seconds. It stopped after normal close, last-holder
+close, and abrupt holder death, while force-termination stopped the exact target and the unrelated
+control survived. The 60-second utility-VM idle time was distinct from the roughly 15.6-second
+target distribution idle time, especially with the unrelated distribution running.
+
+This is bounded hold-feasibility evidence, not an official probe pass or a dispatch-drain proof. A
+local synthetic review case also demonstrated a false-positive cold result: the probe observed
+distribution state only after the open attempt and holder close, so a distribution that started and
+stopped during that interval could yield `PASS`. The disposable probe and its dedicated tests were
+removed rather than expanded into a second process-observation framework; the full integration
+report preserves the observation record. The production WSL hold adoption, exact guest observation,
+dispatch drain, recovery factory and live acceptance checkbox above remain open.
+
+The durable launch checkpoint is privately accepted at `ead879ce`. Project, complexity and
+independent correctness reviews are clean. Review removed the dormant application, cleanup and
+disposal fields, the redundant stored unit name and a forwarding service object; the final schema
+records only facts the checkpoint can produce and consume. Reviewer runs pass 121 and 177 relevant
+execution, migration, backup and migration-safety tests. Independent experiments also confirm
+cross-connection commit visibility before the launch boundary, one dispatch under concurrent launch,
+exact idempotent reconciliation, malformed-state refusal and no replay after either terminal launch
+outcome. No native destination or production workflow was exercised by this private review.
+
+The checked private candidate is local mechanism evidence only. Its source harness executes the real
+bundled supervisor against a test-local cgroup-filesystem shim and deliberately avoids detached
+payloads. It does not prove Debian systemd 252+ delegation, root control to non-root service
+identity, descriptor inheritance through `systemd-run`, real `cgroup.kill`, detached-descendant
+cleanup, boundary removal timing, `waitpid` failure, carrier interruption or any SSH/QGA behavior.
+Those observations remain required by the unchecked native and lifecycle gates above; a failed
+native case blocks the MANAGED profile rather than selecting DIRECT or weakening the result.
+
+The first native round composed transport `126c12a4` with SSH `f6af80cc` without changing either
+branch. Bookworm systemd 252 and Trixie systemd 257 over SSH, plus a Bookworm guest through PVE 8
+QGA, proved target UID/GID/groups, workload placement before caller code, byte-exact binary streams,
+payload exit 23, no staging, truthful interrupted observation and cleanup of a real detached
+descendant. Independent checks found no remaining transient unit, workload cgroup or process. PVE 9
+was unavailable because every nested-virtualization-capable machine type tried in the authorized
+zone was capacity-exhausted; it remains a required coverage cell rather than inferred evidence.
+
+That round also found two candidate defects. Terminal/lifecycle `complete` depended on whether a
+normal exiting payload happened to accept all offered stdin before its wait became observable, and
+failed-to-start transient units accumulated in systemd's failed set. The corrections at `32751d5d`
+retain post-wait helper I/O failures separately from terminal/lifecycle completion and use fixed
+`--collect` for foreground unit cleanup. They do not weaken the later overall-success reduction or
+replace durable job records. A second native round must repeat immediate exit, delayed exit and
+partial-input-reader cases through SSH and QGA, prove failed-start collection on systemd 252 and a
+newer release, and retry PVE 9. Native asymmetric stream failure and `waitpid` fault injection also
+remain unmeasured; independent launch, terminal mode, reconnect-capable jobs and production
+composition remain under the broader unchecked gates above.
+
+The second native round composed transport `ae1ce293` with SSH `b57b45df`; composed head `73cdc437`
+had CLI tree `77a52a47`, which SSH later adopted unchanged. It directly exercised SSH on
+Bookworm/systemd 252 and Trixie/systemd 257, PVE 8 QGA on Bookworm, and PVE 9 QGA on Trixie.
+Immediate-exit, delayed-exit, partial-reader and full-reader cases all retained terminal lifecycle
+completion independently from their input fact. Four failed identity launches per cell left no
+failed unit, collected unit or workload cgroup, while successful and exit-23 runs retained their
+wait, stream and empty-boundary evidence. The round also re-proved target identity and groups,
+pre-payload cgroup placement, detached-descendant cleanup, binary streams, boundary-forgery
+resistance, interrupted observation without replay, self-cleanup and no staging. The composed
+non-integration suite passed 12,708 tests with 13 skips and every static, documentation, rulesync
+and website gate passed. Provider, guest unit, cgroup, process and scratch residue were
+independently zero before teardown.
+
+This closes the PVE 9 coverage cell and verifies both first-round defects. It does not complete the
+unchecked lifecycle or production-composition gates. Native asymmetric stdout-only collection
+failure and `waitpid` fault injection remain unmeasured, as do terminal mode, reconnect-capable
+jobs, production RunContext composition, migration and cutover. The public feedback/fix round closed
+cleanly at this pin; no further head change was requested by its test or complexity evidence.
 
 - [ ] SSH effort builds `execution/carriers/ssh/` and its connection/trust migration. Transport
       builds common execution, scoped context delivery, files/jobs and other adapters, and applies
@@ -242,6 +1584,495 @@ connection and trust only. Before broader lifecycle implementation, complete the
       publication-checkpoint and native-inventory tests to new delivery; copying tests does not
       establish the stronger race/concurrency promises by itself.
 
+### Target identity composition checkpoint, 2026-09-21
+
+Private project and complexity reviews of the design at `9822a26a` found no material or optional
+findings. Markdown formatting, structure, spelling, whitespace and locked-SDD checks pass. This is
+design evidence only; the implementation has its separate code evidence below.
+
+- [x] Implement the private owned target identity composer described in the preparation LLD. Observe
+      delivery/workload/root account facts as needed under one borrowed owner and deadline; produce
+      only a supported direct, sudo-root or root-demotion plan. Keep account, termination, deadline
+      and unresolved-ownership evidence distinct. Test refusals, interrupted observation, normal and
+      abnormal completion, and actual helper composition without claiming native sudo or demotion
+      acceptance. Public RunContext and production activation wiring remain separate required gates,
+      not completed by this private increment.
+
+The private composer and shared fixed-helper admission adapter are reviewed at `0c433730` by all
+three lanes, with no material findings remaining. The correction preserves expiry after abnormal or
+no-send completion without replacing its primary failure, and makes account tests collectable on
+Windows. All 35 focused cases pass; removing the expiry correction makes its four new regressions
+fail. Native identity transition acceptance is not implied. The optional suggestion to narrow the
+Windows marker is acknowledged; the small composition module remains selected as a unit.
+
+The full local suite passes 12,243 tests with 13 skips. Ruff lint/format, full mypy (1035 sources),
+file lint, locked-SDD/rulesync, typer isolation and whitespace gates pass. Website validation passes
+160 Python tests, 103 Node tests and both deterministic build comparisons. An initial run used a
+long workspace fixture directory whose inherited default ACL/setgid and Unix-socket path limits
+caused 32 failures; concurrent fixture deletion also interrupted the website repository scan. The
+same pre-correction code passed all 12,239 tests with 13 skips under a short `/tmp` fixture root,
+and the final corrected run above uses that placement. No production checks were weakened to make
+those environment-dependent failures pass. No live infrastructure was exercised.
+
+Hosted run `35596902203` passed Linux 3.12/3.13/3.14 and the non-test gates, but Windows reported
+460 passes, 39 skips and two fixture errors. Its environment-variable limit rejected pytest's
+autogenerated ID containing the 32,768-character invalid account name. The correction at `bac7bd44`
+uses short explicit IDs, preserving all inputs, assertions and Windows coverage. Private project and
+complexity reviews are clean; all 35 identity tests pass locally. All hosted checks pass in run
+`35598300799`, including Windows 3.13 and Linux 3.12/3.13/3.14.
+
+### Paired private target plans, 2026-09-24
+
+- [x] Compose a private ordinary plan and an optional elevated plan in one target identity
+      preparation call. The ordinary path must succeed before elevation is considered. Reuse the
+      same deadline, owner borrow and account observations; look up root only when the caller
+      explicitly includes elevation and non-root delivery requires sudo. Keep production target
+      composition, permissions and native transition acceptance open.
+
+### Managed VM target identity checkpoint, 2026-09-21
+
+- [x] Implement the private version-one VM incarnation codec and pure managed-target composer. The
+      codec binds the exact UTF-8 provider locator framing to the validated persisted instance
+      marker, while the composer verifies the guest marker and keeps the canonical boot UUID outside
+      the incarnation hash. Unavailable locators, legacy NULL markers, malformed values and marker
+      mismatches fail closed; ordinary composition never creates, adopts or persists a marker.
+- [x] Implement the private bounded Linux guest-identity probe. It makes one no-replay carrier
+      attempt with closed stdin, admits the pinned Python runtime, reads only the fixed instance
+      marker and boot-ID paths, validates the root-owned marker path and returns a nonce-bound typed
+      observation separately from carrier facts. Isolated tests cover unsafe leaves, malformed
+      values, incomplete streams, stderr, oversize, wrong responses, pre-expired deadlines and
+      buffer clearing.
+- [x] Compose the private VM target preparation under an already-acquired exact-VM operation owner
+      and one finite deadline. Refuse mismatched ownership, unavailable locators, legacy NULL or
+      malformed markers and expired budgets before borrowing or dispatching; use one serialized
+      helper attempt; retain the typed guest result; record it before settlement; reject carrier
+      failures, abnormal termination, runtime refusal, invalid observations and identity mismatch;
+      and retain ownership after ambiguous dispatch or interrupted control flow. This function does
+      not acquire or close the owner, activate a VM or route, look up a platform, adopt/persist
+      identity, or expose a production target. Replace exact scope equality with the future
+      core-owned hierarchy coverage predicate when #377's admission model lands.
+- [x] Compose a private selected-platform preparation seam under that same owner and deadline.
+      Static owner, platform-site, marker and finite-budget checks precede platform I/O. One serial
+      borrow spans locator observation, native binding resolution and the guest attempt. Preserve
+      typed locator-unavailable refusal, validate plugin results and deadline after each platform
+      call, then delegate one guest attempt through the shared preparer. Return the validated
+      passive binding only with successful preparation after an equal second locator observation.
+      Valid unequal locators indicate change; unavailable or invalid confirmation remains
+      unconfirmed. This detects cooperative replacement at preparation time; production later use
+      still needs a locator-bound platform hold and binding. Malicious or engineered A-B-A host
+      behavior is outside this checkpoint's threat scope. Release failure suppresses target and
+      binding with an uncertain control fact retaining guest evidence. Hermetic tests cover refusal
+      ordering, malformed returns, platform exceptions, late observations, exact input forwarding
+      and one borrowed success. WSL2 is the first current positive locator and native binding pair;
+      Proxmox remains unavailable and SSH-backed cloud/Lima bindings remain for #832 or later. This
+      checkpoint does not activate or hold a VM, open a route, acquire or close the outer owner,
+      reserve a run, establish live WSL/SSH/QGA behavior, supply Proxmox/Lima locator alternatives,
+      prove recovery drain, adopt identity or expose RunContext/public access.
+- [ ] Complete the target-identity gate with production/platform composition and live carrier proof.
+      No explicit adoption workflow, locator-unavailable alternative or public RunContext claim is
+      complete at this checkpoint.
+
+### File values and owned composition checkpoint
+
+- [x] Implement the frozen public file values and opaque revision conversion described in the file
+      LLD. Reuse the existing versioned revision schema, validate consistent metadata and
+      content-bound read results, and preserve payload privacy and portable module imports. These
+      values do not establish remote evidence or activate permissions.
+- [x] Compose bounded read, stat, inventory, conditional removal and metadata operations under one
+      borrowed operation owner and deadline. Metadata name resolution and mutation share that
+      borrow; record observations before settlement and retain ownership on unresolved effects or
+      coordination failure. Preserve partial mutation separately from deadline and termination.
+- [ ] Bind these primitives into the complete public FileAccess surface with typed error reduction,
+      exact-operation path confinement and safe target/phase diagnostics. Complete production
+      ownership, local download publication, directory transfer and native acceptance remain
+      required; these private building blocks do not close those gates.
+- [ ] Resolve lifecycle-ledger capacity before migrating high-volume artifact publication. Keep the
+      current 128-row bound and commit-without-reply evidence model; do not prune resolved rows
+      without a separate durable tombstone protocol or merely raise the limit. Prove that one
+      bounded logical directory/package operation can publish many physical members under one
+      obligation, including the current maximum supported package, or introduce an explicit lower
+      product limit before production adoption. Per-file public calls must not make a supported
+      artifact package fail only because its owning command accumulated resolved rows.
+
+The 2026-09-24 inventory found a generic capture ceiling of 4,096 regular-file members in
+`package_sources.py`, while the native harness inventory probe caps 512 entries including implied
+directories for Claude, Codex and Grok. There is no single maximum shared by all harness
+integrations. Current artifact publication iterates files and checkpoints each confirmed change;
+mapping those calls one-for-one to retained lifecycle rows would exhaust the 128-row bound for a
+supported large package.
+
+The [serial package candidate](file-operations-lld.md#serial-package-capacity-candidate) uses one
+row for the current child across preflight and mutation. It is not an implemented batch API or
+recovery proof: `FileOperation` still closes a separate row per call and lacks a post-child
+application-checkpoint gate, so the capacity checkbox remains open.
+
+- [ ] Resolve the public filesystem-root edge before claiming complete path coverage: the current
+      nonempty parent/leaf helper contract cannot address `/` itself. The operator has been asked
+      whether to exclude root targets initially or support read-only root stat/inventory. Keep
+      ordinary public reads on snapshot/chunk delivery, inline reads on the separately bound
+      no-staging path, and coexistence confinement separate from deferred permission activation.
+- [ ] Move serial-borrow lifetime to the core file boundary so returned and exceptional private
+      outcomes are retained before public reduction or relinquishment. Prove shared user/admin views
+      cannot lose cleanup responsibility, and distinguish unresolved remote effects from
+      proved-inert cleanup debt rather than using `requires_owner_retention` as a blanket claim
+      release rule. Keep the coordinator free of file protocols and a second file lock.
+- [x] Add concrete private result reducers for stat, inventory, removal, metadata, download,
+      memory-read, upload and JSON outcomes. Preserve closed diagnostic facts, known destination
+      change and partial/uncertain mutation evidence without exposing private outcome objects.
+      Generic carrier failures do not imply connectivity loss. These reducers neither manage custody
+      nor complete public FileAccess; upload/download exchange-detail retention and production
+      integration remain required.
+- [x] Retain the first primary download failure's exchange phase, dispatch and carrier failure. Keep
+      helper failure details coherent with that primary failure while later cleanup updates
+      independent cleanup/effect facts. Local sink failures and controls without a carrier report do
+      not invent exchange evidence. Public reducer consumption remains a separate step.
+- [x] Accept named `NewMetadata` in private upload, JSON and core custody composition. Resolve
+      actual creation ownership before staging under the existing borrow and deadline, recording
+      resolution before settlement. Replace/Match and existing-target JSON paths do not look up
+      unused names. Retain first-primary upload exchange and publication failure details while
+      preserving independent later cleanup facts. Numeric metadata stays at the fixed publication
+      boundary; reducer integration and production FileAccess remain required.
+- [x] Consume retained primary transfer and ownership-lookup facts in the private reducers. Preserve
+      specific carrier failures independently from mutation uncertainty and unknown runtime
+      evidence, expose a distinct removal phase and make confirmed changes visible in failure
+      guidance. Remove duplicate private completion checks while preserving independent deadline
+      refusal. This projection remains separate from public FileAccess wiring and durable recovery.
+- [x] Preserve JSON failure provenance across nested uploads and direct retry work. Delegate phase
+      and reason only when the terminal failure is the current child upload; retain direct carrier
+      dispatch/failure facts and never let a stale publication conflict mask a later read failure.
+      Production-path tests cover missing creation ownership, initial stat/read deadline loss and a
+      conflict followed by a retry-read deadline. This remains a private reduction correction, not
+      completion of the public FileAccess or recovery gates.
+- [x] Preserve file-result chronology and known effects independently from later host state. A
+      helper-confirmed change or no-change raises an ordinary typed failure with that exact effect
+      when later termination or coordination is incomplete; helper refusal precedes a deadline
+      sampled after its response. Record deadline expiry at actual upload/download cleanup entry as
+      cleanup rather than transfer. Retained stat/inventory carrier failures precede later generic
+      custody state. Direct JSON observation retains carrier failures even after normal process
+      termination, and phase-less object refusals use the caller's observation/removal phase. Real
+      producer-path tests retain custody and no-replay behavior.
+- [x] Change private upload, download, JSON, memory-read and single-file compositions to accept a
+      caller-owned `OperationBorrow` without acquiring or closing it. Nested compositions reuse the
+      same borrow. Focused lifetime tests cover normal, invalid and exceptional results and prove
+      that an unresolved attempt still prevents owner release after borrow closure. This
+      prerequisite does not complete core outcome custody, durable recovery or production
+      FileAccess.
+- [x] Implement concrete private download custody under the existing operation owner. Attach
+      validated working state before dispatch, retain original carrier/binding and unfinished
+      outcomes before borrow release, and keep multiple obligations without retaining sinks in
+      completed records. Tests cover pre-dispatch refusal, overlap, close/admission interleaving,
+      identity-keyed record removal, exceptional outcome capture and allocation/retention failures.
+      This download-only path does not complete shared public views, other file families, durable
+      recovery or the outer claim-release gate.
+- [x] Route the private memory-read adapter through shared `FileOperation` custody. Retain the
+      original download outcome before byte/result allocation, preserve original control identity,
+      and discard partial memory buffers. Fault tests prove inert cleanup debt survives failed
+      result allocation and complete-download allocation failure does not strand a borrow. No
+      compatibility bridge, new claim, public view or durable recovery is introduced.
+- [x] Extend private `FileOperation` custody to uploads and JSON updates. Attach validated parent
+      and nested upload state before dispatch, preserve exact original exceptional facts before
+      borrow release, and retain child token/state when fact construction fails. Completed custody
+      omits source streams and JSON bytes. Local tests cover all JSON strategies, no-op, overlap,
+      multiple cleanup obligations, uncertain publication and failed capture; public reduction,
+      other file families and durable recovery remain incomplete.
+- [x] Extend private core custody to stat, bounded inventory, conditional removal, metadata and
+      directory convergence. Attach original bindings and working state before dispatch, capture
+      outcomes before borrow release, and retain lookup evidence before metadata settlement under
+      the same borrow. Exchanges validate requests before dispatch; metadata validates options
+      before lookup. Local tests exercise real helper operations, lookup refusal, partial metadata,
+      overlap, failed fact construction and failed retention. Remove the unused private inline-read
+      wrapper; ordinary reads still use snapshot/download. Public reduction, durable recovery,
+      production ownership and RunContext remain separate gates.
+- [ ] Give each logical file call one adapter-owned lifecycle obligation that also provides its
+      carrier-dispatch admission. Use a caller-retained identifier for exact registration retry;
+      persist the managed target fence, confined location, helper identity/runtime and scratch token
+      before dispatch; update the same row with exact retained cleanup facts before releasing
+      in-memory custody. JSON must keep one parent row and publish each nested upload token before
+      that child can dispatch. Never persist file/JSON contents, source streams, credentials or
+      replay material. Prove clean resolution, cleanup-only retention, before/after-commit database
+      interruption and process loss around response and handoff.
+- [ ] Complete the durable recovery handoff for file work, including pre-dispatch reconciliation
+      identity and exact cleanup binding without storing payload contents. Test process loss before
+      response, after response and during handoff. A surviving claim without recovery facts is not
+      completion evidence; do not close the production ownership gate with in-memory retention
+      alone. Use a distinct restricted recovery-dispatch object rather than ordinary borrow mode.
+      Revalidate the exact generation, obligation state, payload revision and bytes before every
+      attempt; share the serial-use guard; and keep registration, initial effect admission, generic
+      publication and automatic resolution unreachable. Adapter drain evidence must cover every
+      outstanding dispatch for the obligation across all earlier generations. For DOWNLOAD, expose
+      only reconciliation and exact cleanup, persist newly discovered cleanup debt before cleanup
+      dispatch, independently observe local helper termination and refuse while a helper survives
+      controller loss. Treat this local spawned-process proof as substrate evidence only, not SSH,
+      QGA or native production acceptance.
+
+The 2026-09-24 local DOWNLOAD proof now originates its spawned-controller crash cases through
+`FileOperation.download()` rather than fabricating a possible-effect row. A test-only carrier reads
+the installed row before dispatch; expected and actual helper journal records must match its
+persisted token in every recovery generation. The tests retain completed-helper cleanup and
+surviving-helper refusal. The test-only journal does not prove native SSH/QGA dispatch drain.
+
+- [ ] Use the owned snapshot/chunk download for general in-memory reads, preserving caller byte
+      bounds independently of QGA's single-response capacity. Keep the no-staging readiness read
+      separately bound before dispatch; prove its complete encoded response fits the selected route.
+      Do not retry a failed direct read through staging after uncertain observation.
+- [x] Implement the private in-memory adapter over the owned snapshot/chunk download. Preserve the
+      exact download outcome, expose bytes only after complete verified transfer and cleanup, and
+      discard partial buffers on normal or exceptional exit. Local tests cover empty, multi-chunk,
+      absent, bounded-refusal and failure paths; a synthetic chunk source exceeds one 8 MiB
+      response. This does not complete public FileAccess, readiness response sizing or native
+      acceptance.
+- [ ] Accommodate the full bounded directory inventory in the native HTTP response reader, including
+      framing and provider-envelope overhead. Keep one traversal and a finite response limit; prove
+      local maximum-response acceptance and above-bound refusal, then obtain native PVE/QGA evidence
+      before declaring inventory delivery accepted.
+- [x] Raise the private HTTP response bound to 8 MiB and exercise an exact 4 MiB canonical inventory
+      through real framing, the synthetic provider response reader, Proxmox sink delivery and the
+      typed collector. Preserve refusal at the response bound plus one byte. Native PVE/QGA evidence
+      remains required above; this local test is not native acceptance.
+
+All three private review lanes accept code pin `54be0ba9` with no outstanding findings. Review
+corrected a public directory-entry constructor that accepted paths outside the declared UTF-8
+domain; the added invalid-path case now refuses safely while ordinary Unicode paths remain valid.
+The optional redundant serialization guard and declaration-only assertions were removed. The
+combined focused selection passes 188 tests. Restoring the old HTTP bound makes the maximum
+inventory regression fail with observation loss, without decoded entries. The measured fixture has
+4,096 entries, 4,194,304 canonical bytes and 5,651,792 provider-response bytes. These are synthetic
+delivery measurements, not a native backend claim.
+
+The final code pin passes the full local suite with 12,355 tests and 13 skips. Full Ruff
+lint/format, mypy (1041 sources), file lint, locked-SDD/rulesync, typer isolation and whitespace
+gates pass. Website gates pass 160 Python tests, 103 Node tests and both deterministic double-build
+comparisons. No live infrastructure was exercised. This is a draft implementation increment, not a
+public review/test handoff; all three authorized public feedback/fix rounds remain available.
+
+Hosted run `35604348860` at `8aef59ae` passed every platform lane except Linux Python 3.13, where
+the new file-value import-isolation test failed. Its setup imported `importlib.abc` before
+installing the guard, transitively loading `pwd` and `grp` through Python 3.13's `pathlib`. The
+correction uses a minimal finder without that setup dependency and continues to make the blocked
+modules unavailable during the tested import. Production code is unchanged; the 35 file-value tests
+pass locally on Python 3.12. Hosted Python 3.13 confirmation remains pending.
+
+All three private lanes accept the memory-read and import-test correction at `2c3af751` without
+material findings. Each passes the 73 memory-read, download and public-value tests. Fault injection
+confirms that failed final byte allocation preserves the exact exception and clears the temporary
+buffer; withholding partial bytes is independently mutation-tested. The updated handoff design
+distinguishes cleanup responsibility from possible remote effects and leaves production and durable
+recovery gates unchecked.
+
+That pin passes the full local suite with 12,365 tests and 13 skips. Full Ruff/format, mypy (1043
+sources), file lint, locked-SDD/rulesync, typer isolation and whitespace gates pass. Website gates
+pass 160 Python tests, 103 Node tests and both deterministic double-build comparisons. No live
+infrastructure was exercised. The draft remains in implementation, with all three public
+feedback/fix rounds unused.
+
+Hosted run `35606895496` at `368f5f0c` confirms the import-test correction on Linux Python 3.13; the
+Linux 3.12 and 3.14 lanes also pass. Windows Python 3.13 instead fails during artifact-capture
+cleanup with `WinError 32` on the temporary bare repository's `objects` directory. The one-byte
+storage limit prevents initialization from returning successfully, so fetch is not reached. The
+traceback does not identify the process holding the directory or prove that termination caused the
+conflict.
+
+The scoped CI correction checks storage after template-free Git initialization exits, while keeping
+deadline and output checks active. Fetch and subsequent commands retain in-flight storage checks.
+This removes size-driven interruption from the failing initialization path without retries or
+suppressed cleanup errors. A synthetic slow-initializer regression proves that sequencing change,
+not native Windows handle cleanup. Windows confirmation remains required; this is not a general
+proof of descendant termination for interrupted Git operations.
+
+All three private lanes accept the caller-owned borrow, recovery inventory and scoped CI correction
+at `05fa75e9` without material or optional findings. Project and complexity lanes each pass 225
+focused tests with 4 skips; the generic correctness lane passes 151 affected tests. A process-only
+mutation restoring initialization's in-flight storage check makes its sequencing regression fail.
+The combined execution/artifact selection passes 3,102 tests with 10 skips. The full local suite
+passes 12,366 tests with 13 skips. Full Ruff/format, mypy (1043 sources), file lint,
+locked-SDD/rulesync, typer isolation and whitespace gates pass. Website gates pass 160 Python tests,
+103 Node tests and both deterministic double-build comparisons. No live infrastructure was
+exercised. This remains draft implementation, not a public review or native acceptance handoff.
+
+Hosted run `35610495863` at `8e586040` passes every required check, including Windows Python 3.13
+and Linux Python 3.12/3.13/3.14. It verifies the scoped initialization change on that native Windows
+run, not the identity of the earlier handle holder or freedom from every possible cleanup race.
+
+All three private lanes accept concrete download custody and memory-read integration at `b867a572`
+without outstanding findings. Review corrected loss of the original control exception when outcome
+or fact allocation fails. The regression now interrupts a real download through its sink, records
+the prior typed cause at allocation, and verifies that evidence outside the production exception
+handler. Restoring the stale cause or recording the wrong cause makes both regression cases fail.
+The focused custody/download/memory selection passes 50 tests. The earlier caller-owned-borrow
+checkbox records its completed prerequisite; the later memory-custody checkbox records that
+adapter's subsequent transition to `FileOperation`.
+
+That code pin passes the full local suite with 12,378 tests and 13 skips. Full Ruff/format, mypy
+(1045 sources), file lint, locked-SDD/rulesync, typer isolation and whitespace gates pass. Website
+gates pass 160 Python tests, 103 Node tests and both deterministic double-build comparisons. No live
+infrastructure was exercised. Hosted validation of this increment remains pending; the draft has no
+review/test/merge signal and all three public feedback/fix rounds remain available.
+
+Hosted run `35614666650` at `2f34621e` subsequently passes every required check, including Windows
+Python 3.13 and Linux Python 3.12/3.13/3.14. This validates the selected workstation tests; it does
+not establish native backend acceptance or complete the remaining public composition gates.
+
+All three private lanes accept upload/JSON custody at `9d8ff26a` without outstanding findings.
+Review removed a generic completion helper, duplicate source reference and redundant interior checks
+while retaining the JSON child's required exceptional-fact provenance check. Negative mutations
+prove that removing that child check or restoring a stale source-exception cause breaks the
+corresponding regressions. The direct source cases verify their evidence outside the production
+exception handler.
+
+The final code pin passes 12,395 local tests with 13 skips. Full Ruff/format, mypy (1046 sources),
+file lint, locked-SDD/rulesync, typer isolation and whitespace checks pass. One earlier local
+website run failed its mouse-tap launch witness in
+`test_phase4k_native_input_focus_departure_and_accessibility_contracts`. Three isolated reruns and a
+complete rerun subsequently pass, with no website edits: 160 Python tests, 103 Node tests and both
+deterministic double-build comparisons. The initial failure's cause is unproved; these results are
+not a claimed fix. No live infrastructure was exercised. Hosted checks for the write-custody
+increment remain pending; no public review/test/merge signal is raised.
+
+Hosted run `35617821328` at `bb7ebb58` subsequently passes every required check, including Windows
+Python 3.13 and Linux Python 3.12/3.13/3.14. No native backend acceptance is implied.
+
+A read-only browser investigation at `9d8ff26a` reproduces the mouse-tap snapshot by delaying the
+first animation frame by 300 ms. Native pointer events arrive and queue thrust, but the simulation's
+existing 100 ms discontinuity rule discards the frame and the controller clears input before a
+physics step. Four ordinary browser runs and one instrumented control pass; the delayed-frame
+experiment reproduces the failure. The original failing run lacks event/frame evidence, so its cause
+remains unproved. Extending the wait cannot restore an already discarded input edge. No website
+source was changed: changing discontinuity behavior would require a separate behavior decision;
+bounded event/queue/frame evidence is the next diagnostic step if this recurs.
+
+All three private lanes accept the single-file custody increment at `95fb9db5` without outstanding
+findings. Review removed five unused borrowed-call wrappers and redundant immediate-fact identity
+checks. It also found and corrected two lower-exchange paths where failed uncertainty-fact
+allocation replaced the original control exception. Negative mutations prove both the guarded
+allocation and capture-before-borrow-close regressions. Project, complexity and independent
+correctness selections pass 191, 164 and 203 tests respectively. The accompanying public
+error-reduction design remains a proposal being implemented, not a completed public interface.
+
+That code pin passes 12,406 local tests with 13 skips. Full Ruff/format, mypy (1047 sources), file
+lint, locked-SDD/rulesync, typer isolation and whitespace checks pass. Website gates pass 160 Python
+tests, 103 Node tests and both deterministic double-build comparisons. No live infrastructure was
+exercised. Hosted validation remains pending, and this is still a draft implementation increment
+without a public review/test/merge signal. All three authorized public feedback/fix rounds remain
+available.
+
+All three private lanes accept the durable file-call custody groundwork at `693e9e48` without
+outstanding findings. Each logical file call now uses one adapter-owned lifecycle row for dispatch
+admission and retained recovery facts. Initial admission reserves the maximum encoded growth of its
+typed recovery state, and JSON publishes each child token and attempt on its parent row before that
+child dispatches. Review corrections prevent local encoding failure, owner closure before durable
+registration and oversized retained facts from stranding unrecorded custody. A typed refusal
+distinguishes the proved pre-registration case from registration-started or commit-unknown failure;
+the latter cases and cleanup failure retain custody conservatively. Payloads remain canonical,
+bounded and free of file content, JSON content, credentials, streams and replay material.
+
+The focused selection passes 95 tests, the combined file/operation/lifecycle selection passes 1,320
+tests, and the full non-integration suite passes 12,875 tests with 21 skips. Ruff/format, mypy
+across 1,090 sources, file lint, locked-SDD and Rulesync gates pass. No live infrastructure was
+exercised. The broader checkbox remains open: production recovery takeover and actual process-loss
+proof around before/after-commit registration, response and final handoff are not delivered by this
+private checkpoint. It adds no RunContext surface, production factory or #377 hierarchy, and raises
+no public review/test/merge signal.
+
+The database takeover kernel is complete at `60a9ce8d`. One stable operation identifier retains the
+ledger while a separate caller-retained generation rotates from an exact persisted predecessor and
+seals the ledger atomically. Exact retry after commit without reply survives database reopen;
+competing generations, fabricated predecessors, delayed repository transitions and later attempts
+from an already-armed predecessor all fail stale. Recovery can rebind exact persisted obligations,
+publish identity only for an effect that was already possible and resolve typed evidence. It cannot
+borrow ordinary dispatch, retry registration as rebind, or admit or publish a previously registered
+effect. Migration 43 rebuilds only the changed owner table and proves existing obligation payloads,
+revisions, timestamps, foreign keys and cascades survive.
+
+The subsequent pre-release schema consolidation supersedes that implementation detail: the shipping
+sequence is migrations 39 (owners, claims and obligations), 40 (managed runs) and 41 (nullable VM
+instance marker). No released database contains the former 39-44 sequence, so the consolidation does
+not add an upgrade path or change the recovery contract described above.
+
+The round-7 integration report found that older branch-built databases stamped 39-41 could otherwise
+pass ordinary open and later fail when ownership tables were used. Direct opens validate the
+completed schema for those reused numbers before migration. The safe opener validates stale versions
+39-40 under the migration lock and reaches the same direct-open guard for current version 41; the
+version-only inspector retains its existing classification and race semantics. Branch-built
+databases fail closed rather than receiving an implicit upgrade. The released v38 upgrade path and
+canonical 39-41 schemas remain supported.
+
+Final project and correctness re-reviews are clean at `f7a2ecac`; the final complexity review's two
+material simplifications are incorporated, and its optional duplicate wrapper check is removed at
+`60a9ce8d`. The combined execution/database selection passes 2,947 tests with 14 skips. After that
+last deletion, 251 focused tests and the full non-integration suite pass 12,892 tests with 21 skips.
+Ruff, formatting, mypy across 1,090 source files, file lint, locked-SDD and Rulesync drift checks
+pass. This closes only the durable database-generation portion of the open recovery checkbox above.
+It does not prove predecessor dispatch drain, remote quiescence, process-loss adapter recovery,
+production recovery factories, operation-root composition or RunContext delivery. The next private
+vertical remains DOWNLOAD snapshot recovery behind an explicit adapter-owned drain fence; no test
+binding may be presented as SSH, QGA or native production evidence.
+
+### Buffered execution result checkpoint
+
+- [x] Implement safe immutable application result values, honest wait/exit/signal precision and one
+      checked-result error. Keep deadline expiry and owned cleanup independent of the primary
+      failure; distinguish captured, delivered, discarded and suppressed output. Result values must
+      not infer completion from raw carrier status.
+- [x] Add the safe checked-error composition seam: core supplies logical target identity to the
+      contextual checker, which derives closed execution phase/reason facts and preserves the exact
+      immutable result in `CheckedExecutionError` and its standard `ErrorDetails`. The private
+      inline checked reducer reduces once, returns success or raises that bound error, and may pass
+      trusted helper observation phase only where the result phase is unknown. Result-only
+      projection refuses to reconstruct discarded phase evidence, while known nonzero application
+      status is application-status evidence. This adds no target, accessor or RunContext exposure.
+- [ ] Bind that seam during complete target/reducer composition, as required by FRD R5. The private
+      checker does not itself deliver the complete public error contract; that remains required
+      before public ExecutionAccess and RunContext delivery.
+- [x] Preserve a valid helper terminal transcript when only later carrier observation is lost, while
+      retaining the carrier error. Missing terminal, wire corruption and post-terminal records must
+      still prevent trusted terminal evidence.
+- [x] Implement and verify the selected retrospective normal-completion producer/reducer.
+      Eligibility is inline-only CPython 3.11 through 3.14, the range covered by the source and
+      mechanism audit; the shared file-helper prerequisite remains Python 3.11 or newer. Outside the
+      selected range, inline execution refuses before `LAUNCHING` rather than inventing stronger
+      evidence. Eager start, signaled-entry ambiguity and native acceptance remain separate gates.
+- [x] Bind the existing owner, inline producer and contextual reducer behind one private
+      `ExecutionAccess.run` increment. Define the intended caller values for explicit protection,
+      lifetime, finite input and bounded capture/discard now, while supporting only DIRECT plus
+      OPERATION on the Linux inline helper. Refuse MANAGED, INDEPENDENT, non-Linux runtime,
+      unsupported startup, unavailable elevation, invalid values and expired deadlines before owner
+      custody or dispatch. Keep this class internal and unexported; it neither completes the
+      unchecked target/reducer checkbox above nor permits a run-only public RunContext target.
+
+All three private lanes accept code pin `8ceb899a` with no material findings. Review corrected
+acceptance of output/status dataclass extensions that added diagnostic fields to default result
+representations, and nonempty byte subclasses that bypassed non-capture output validation. Three
+exact child-type checks close those boundaries without a new abstraction. All 68 focused
+result/observer tests pass. Removing context suppression exposes the synthetic caller-exception
+canary; reverting terminal preservation breaks its regression test. The optional removal of the
+explicit completed state check in `ok` was declined to keep the public success predicate locally
+readable.
+
+The final full local suite passes 12,291 tests with 13 skips. Ruff/format, full mypy (1037 sources),
+file lint, locked-SDD/rulesync, typer isolation and whitespace checks pass. Website gates pass 160
+Python tests, 103 Node tests and both deterministic double-build comparisons. No live infrastructure
+was exercised. Production integration remains open: safe target/phase metadata, native evidence and
+the complete public target/RunContext surface are not delivered by this checkpoint.
+
+The retrospective producer/reducer gate is subsequently complete at `c161b431`. The helper admits
+only Linux CPython 3.11 through 3.14 before launch, emits nonce-bound exact-child normal wait
+evidence, and the reducer accepts completion only after trusted terminal framing and settled
+custody. Private project and complexity review corrections keep unfinished archives payload-free
+without weakening the immediate caller result. The independent correctness lane passes 365 focused
+tests plus real `ExecutionOperation` to local-carrier probes for success, exit 255, signal,
+sensitive-output suppression and overflow. Hosted Linux 3.12 through 3.14, Windows 3.13, static,
+documentation and website checks pass. This evidence does not close eager-start, signaled-entry,
+native-platform or public-composition gates.
+
+The private DIRECT access checkpoint composes those mechanics without exposing RunContext. Local
+tests exercise literal command and explicit-script execution, binary input, exit 0 and 255,
+discard/suppression, checked diagnostics, exact deadline propagation, pre-dispatch refusals,
+uncertain owner retention and fresh-process retirement-module independence. Preparation now occurs
+once before borrowing the owner, so invalid requests do not transiently acquire child custody. This
+is not MANAGED execution, a job API, live/terminal I/O, native-platform acceptance or complete
+target composition. Its 4,096-byte per-stream capture default and maximum are private inline
+checkpoint limits, not the proposed production 1 MiB per-stream default or bounded output spooling.
+
 ## 5. Add the complete new RunContext surface
 
 The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) authorizes three delivery stages, not
@@ -250,11 +2081,46 @@ the new surface; migration and removal follow in their own PRs. Permissions are 
 removal: do not enforce new recipient grants or the successor core file ceiling, or rely on their
 isolation, in coexistence releases. Operational safety and selected profile guarantees still apply.
 
+The first checkbox below describes this section's delivery outcome, not the next construction step.
+Complete target identity, execution/jobs, FileAccess, platform composition and whole-workflow
+validation first through private composition seams. Only then expose the two passive RunContext
+accessors as one complete additive surface. An accessor-only or run-only target is not an acceptable
+intermediate public API.
+
 - [ ] Add `admin_execution_target()` and `agent_execution_target()` to the existing RunContext,
       returning the new target without changing legacy accessors or callers. Use permanent names, no
       union target type, stack selector or forwarding adapter. Prove passive construction/access and
       composition-owned lifetime, no new effects on existing callers, and independent new-stack
       usability with legacy modules unavailable. Do not claim restricted recipient authority.
+- [ ] Add platform-owned new-stack connection/provisioning composition without decoding opaque VM
+      metadata in core or constructing legacy targets. Apply the
+      [2026-09-21 factory inventory](migration-strategy.md#new-target-composition-inventory-2026-09-21):
+      explicit carrier delivery identity, Proxmox CA-bundle/trust migration and import independence,
+      WSL2 distribution/user binding, independent Lima delivery and explicit SSH placement-host
+      endpoint/account/trust/OS facts. Preserve unchanged legacy hooks during coexistence; new
+      factories cannot obtain their inputs through those hooks.
+- [ ] Implement and prove the first independent native-binding hooks for Proxmox and WSL2 under the
+      [core binding contract](execution-contract.md#core-native-binding). Preserve passive
+      construction, actual delivery-account facts, explicit runtime selection and old-hook behavior.
+      Proxmox uses the configured CA for both platform API and new QGA delivery, without accepting
+      legacy verification bypass. Other platforms, provisioning-result integration and complete
+      target identity composition remain part of the required gate above.
+- [ ] Expose native binding resolution as an explicit preparation operation with a deadline, before
+      passive target/RunContext construction. The remaining-platform inventory shows that cloud
+      public-IP resolution requires provider reads; do not force stale metadata or hide those reads
+      behind an accessor. Keep Proxmox/WSL2 resolution passive, keep route lifetime in core, and use
+      already-observed create-time endpoint facts for the new provisioning result. Retire the
+      initial private hook name without a compatibility alias before consumer adoption.
+- [x] Rename the private native hook to `resolve_native_execution_binding` with a required deadline,
+      retaining passive Proxmox/WSL2 resolution and unchanged legacy callers. Update focused tests
+      and permanent developer teaching without adding an alias or claiming cloud/provider and
+      create-time adoption. All three private lanes accept this correction at `4a53c39a`; the
+      broader native composition gate above remains open.
+- [ ] Prove fresh-process platform composition without retirement dependencies, not only calls to
+      already-imported native hooks. The first-binding audit at `6149cf06` found that VM-platform
+      package initialization imports Lima's legacy dependencies, while plugin initialization imports
+      providers that still load legacy transports. Keep this initializer work with the complete
+      platform/factory composition gate; concrete hook independence does not complete it.
 - [ ] Validate complete provisioning, native recovery without Tailscale, plugin operations, files,
       backup, host provisioning/rollback and interactive attachment through the new surface. Cover
       required operations, optional refusal, sensitivity and supported workstation/platform
@@ -288,6 +2154,12 @@ isolation, in coexistence releases. Operational safety and selected profile guar
 - [ ] Migrate sessions and other jobs to the same supervisor. Preserve session UUID/run IDs,
       tmux/harness readiness, restart consent, legacy-run uncertainty and owned cleanup. Do not
       certify legacy detached descendants by moving only a surviving parent into a new cgroup.
+
+- [ ] During sessions/console migration, replace the admin-owned multi-console agent-pane sudo path
+      with an explicitly bound and proved cross-user execution path. The current three-plan identity
+      composer does not support non-root delivery into a different non-root workload identity. Do
+      not hide this gap with ambient sudo or expose native agent authority merely to make this
+      consumer fit.
 
 ## 7. Remove legacy and activate permissions
 

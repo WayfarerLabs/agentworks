@@ -76,6 +76,10 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
 - **MUST** create the configured admin with passwordless `sudo`, SSH-key access, and no password.
 - **MUST** provide a native administrative `ExecTransport` that runs bounded, non-interactive
   commands as the admin or root without depending on the VM's Tailscale state or identity.
+- **MUST** implement read-only provider-locator observation. A returned locator is an opaque,
+  non-empty UTF-8 token of at most 4096 bytes. A platform that deliberately cannot observe one
+  returns `ProviderLocatorUnavailable`; that result is not proof that a VM exists. Once a platform
+  attempts provider observation, target absence and provider failure **MUST** raise typed errors.
 - Native interactive shell, streaming, and file transfer are optional. A platform that lacks native
   interaction **MUST** declare `native_shell_unavailable_hint` with usable provider-console
   guidance.
@@ -197,12 +201,13 @@ and DB migration.
 - `status(vm, ctx) -> VMStatus` is a read-only query.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
 
-Vm-platform is an internal capability API. Its complete bundled contract remains version 1, and all
-six implementations change atomically with the descriptor. Exact registration conformance rejects an
+Vm-platform is an internal capability API. Its complete bundled contract is version 2, and all six
+implementations change atomically with the descriptor. Exact registration conformance rejects an
 inconsistent version or missing abstract implementation as a curation error. Returning unsupported
 or implementing a no-op still violates the contract and must be caught by review and provider tests;
 registration does not attempt to infer method semantics or ask a platform to interpret Debian's
-current release.
+current release. This is a hard cutover: a version-1 platform does not register under a build that
+requires version 2, and there is no compatibility adapter.
 
 **Transport and lifecycle hooks.** `native_transport` is required; the remaining hooks have sensible
 defaults. All are entered by callers that gate first, so on entry the VM is running or was just
@@ -220,6 +225,16 @@ are local); Azure, EC2, GCE, and Proxmox use it:
   uses only `ExecTransport` for native bootstrap and recovery. `vm shell --platform` is the sole
   caller that requires the full subtype; it checks `native_shell_unavailable_hint` before route,
   credential, transport, or probe work.
+- `observe_provider_locator(vm, ctx, *, deadline) -> ProviderLocatorObservation`. The required
+  read-only observation returns either an opaque `ProviderLocator(token)` or an empty
+  `ProviderLocatorUnavailable` when this platform deliberately cannot obtain one. Core never parses
+  or normalizes the token. `Unavailable` does not establish target presence and is not a substitute
+  for a failed lookup: after lookup begins, target absence and provider failures raise their typed
+  errors. The caller supplies one finite `Deadline`; implementations derive their SDK or socket
+  timeout from `provider_locator_remaining(deadline, vm_name=vm.name)` before I/O and call it again
+  before returning so a late result is refused. Timeouts are best effort, not preemption of an
+  already-running provider call. This hook does not read a guest marker or construct target
+  identity.
 - `transient_route(vm, ctx, *, config=None) -> context manager` (default `nullcontext()`). Azure
   opens a scoped SSH route on enter (heals a missing public IP, converges the NSG onto the
   baseline-deny model, pokes this operation's own ephemeral allow rule scoped to the operator's
@@ -298,7 +313,7 @@ the descriptor and every bundled implementation must change atomically.
 - `legacy_platform_metadata(cls, row, legacy) -> dict[str, str]` maps pre-migration DB rows into the
   `platform_metadata` shape, consumed only by the one-shot DB migration.
 
-**Inputs and outputs** are uniform under vm-platform contract version 1. Every `create` receives the
+**Inputs and outputs** are uniform under vm-platform contract version 2. Every `create` receives the
 same `ProvisionRequest`, including the concrete core-selected `debian_release`, a required resolved
 Tailscale auth key, and a required value-free bootstrap-progress sink. The platform resolves the
 release through its local artifact map before backend mutation. A missing code-owned mapping names
@@ -557,8 +572,9 @@ and the operator-facing command banners that the rest of the codebase calls "pha
 
 - **Create-time bootstrap** is owned completely by `create()`, plus whatever the backend runs at
   creation time to get the VM reachable over Tailscale. The shared payload is `bootstrap_script.py`
-  (admin user, packages, SSH key, swap, hostname, the Apple-vz SVE grub mask, Tailscale). Lima
-  instance YAML, Azure `custom_data`, EC2 `UserData`, and GCE `Instance.metadata` retain
+  (admin user, packages, SSH key, swap, hostname, the Apple-vz SVE grub mask, Tailscale). The
+  package step includes distribution Python 3; file operations do not require privileged lock setup.
+  Lima instance YAML, Azure `custom_data`, EC2 `UserData`, and GCE `Instance.metadata` retain
   credential-free forms of that payload. GCE's startup wrapper checks a durable success marker
   before any mutation and is rejected when its exact UTF-8 value exceeds 256 KiB. After the payload
   installs Tailscale, `create()` sends the resolved key through one fixed guest command on the

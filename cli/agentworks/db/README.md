@@ -1,4 +1,49 @@
-# Instance State Store
+# State Database Repositories
+
+## Operation ownership
+
+`Database.operations` reserves coarse VM or platform-host resources for participating operations
+using the same state database. A fresh operation ID identifies an operation root; a separate fresh
+generation ID identifies its current owner. Its current exact resource claim is one membership of
+that root. The lifecycle ledger attaches to the operation root, not that membership, so a later
+hierarchical coordinator can add memberships without moving adapter recovery facts. The ID is not a
+secret or an authentication credential. Claims are committed in short standalone transactions, not
+held-open SQL transactions around network work. Nested command transactions cannot acquire or change
+them.
+
+Core registers each independent lifecycle obligation before its effect can be admitted. A row has a
+fresh ID, bounded lower-kebab kind, positive adapter payload version, and at most 8,192 bytes of
+opaque non-secret payload. There may be at most 128 rows for one operation. Its closed state is
+`registered`, `possible-effect`, or `resolved`; recovery identity uses a revision-checked payload
+replacement while an effect remains possible, not another state. The first possible-effect
+transition atomically arms the coarse claim. Later obligations advance independently.
+
+Core seals the ledger when the workflow can create no additional effects. Only then, after every
+obligation is resolved by typed adapter evidence and no owner work remains, can it record whole
+operation resolution. Final release removes those resolved rows and the exact claim in one short
+transaction. A reserved claim with no ledger rows may be abandoned; rows cannot be discarded through
+that path. The repository records core's conclusions, it does not establish remote quiescence. Every
+transition matches both the claim's operation and generation IDs plus prior state, so a delayed
+database update or release cannot affect a subsequent owner. Explicit recovery can atomically rotate
+the generation from one exact predecessor, seal the unchanged ledger, and retain that predecessor
+generation with the requested generation as an exact interrupted-reply retry receipt. It does not
+establish remote quiescence. Recovery can rebind and reconcile an exact persisted obligation, but it
+cannot generically register or admit a previously registered effect. It can publish recovery
+identity only for a persisted `possible-effect` obligation.
+
+Closing the database, process death and elapsed time do not delete claims. Inspection reports their
+bounded metadata without command arguments, environment or file contents. There is no automatic
+takeover, lease expiry or coordination across independent databases. Backup preserves claims and
+their ledger rows; restoring one does not establish that target state matches the snapshot.
+
+This persistence primitive is not yet connected to production operation admission or RunContext. The
+caller composition and recovery paths must be implemented before it can protect file workflows.
+Admission conflicts only on an exact resource kind/name pair. It does not check ancestors or
+descendants, provide system/workspace/agent/session/console claims, or expose lock-listing and
+force-unlock CLI commands. Adding a new resource kind alone would not establish hierarchical
+exclusion.
+
+## Instance state
 
 `Database.instance_state` is the typed persistence boundary for desired instance overlays and
 applied-state slices. It uses the owning `Database` connection, so reads share its snapshot and

@@ -769,6 +769,181 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
         ALTER TABLE consoles ADD COLUMN last_started_at TEXT;
     """,
     38: _add_session_identity,
+    # An operation root outlives its current resource membership. Resource
+    # identity stays core-selected and has no foreign key, so the same shape
+    # covers VM and platform-host work.
+    39: """
+        CREATE TABLE operation_owners (
+            operation_id TEXT PRIMARY KEY
+                CHECK (
+                    length(operation_id) = 32
+                    AND operation_id NOT GLOB '*[^0-9a-f]*'
+                ),
+            generation_id TEXT NOT NULL
+                CHECK (
+                    length(generation_id) = 32
+                    AND generation_id NOT GLOB '*[^0-9a-f]*'
+                ),
+            recovery_predecessor_generation_id TEXT
+                CHECK (
+                    recovery_predecessor_generation_id IS NULL
+                    OR (
+                        length(recovery_predecessor_generation_id) = 32
+                        AND recovery_predecessor_generation_id NOT GLOB '*[^0-9a-f]*'
+                    )
+                ),
+            operation_kind TEXT NOT NULL
+                CHECK (typeof(operation_kind) = 'text' AND length(operation_kind) BETWEEN 1 AND 64),
+            state TEXT NOT NULL
+                CHECK (state IN ('reserved', 'possible-dispatch', 'resolved')),
+            claimed_at TEXT NOT NULL CHECK (length(claimed_at) = 20),
+            updated_at TEXT NOT NULL CHECK (length(updated_at) = 20),
+            obligations_sealed_at TEXT
+                CHECK (obligations_sealed_at IS NULL OR length(obligations_sealed_at) = 20),
+            CHECK (
+                recovery_predecessor_generation_id IS NULL
+                OR (
+                    recovery_predecessor_generation_id != generation_id
+                    AND obligations_sealed_at IS NOT NULL
+                )
+            )
+        );
+
+        CREATE TABLE operation_claims (
+            resource_kind TEXT NOT NULL
+                CHECK (resource_kind IN ('vm', 'platform-host')),
+            resource_name TEXT NOT NULL
+                CHECK (typeof(resource_name) = 'text' AND length(resource_name) BETWEEN 1 AND 255),
+            operation_id TEXT NOT NULL
+                REFERENCES operation_owners(operation_id) ON DELETE CASCADE,
+            PRIMARY KEY (resource_kind, resource_name)
+        );
+
+        CREATE TABLE lifecycle_obligations (
+            operation_id TEXT NOT NULL
+                REFERENCES operation_owners(operation_id) ON DELETE CASCADE,
+            obligation_id TEXT NOT NULL UNIQUE
+                CHECK (
+                    length(obligation_id) = 32
+                    AND obligation_id NOT GLOB '*[^0-9a-f]*'
+                ),
+            obligation_kind TEXT NOT NULL
+                CHECK (typeof(obligation_kind) = 'text' AND length(obligation_kind) BETWEEN 1 AND 64),
+            state TEXT NOT NULL
+                CHECK (state IN ('registered', 'possible-effect', 'resolved')),
+            payload_version INTEGER NOT NULL
+                CHECK (typeof(payload_version) = 'integer' AND payload_version BETWEEN 1 AND 2147483647),
+            payload BLOB NOT NULL
+                CHECK (typeof(payload) = 'blob' AND length(payload) <= 8192),
+            payload_revision INTEGER NOT NULL DEFAULT 0
+                CHECK (typeof(payload_revision) = 'integer' AND payload_revision >= 0),
+            registered_at TEXT NOT NULL CHECK (length(registered_at) = 20),
+            updated_at TEXT NOT NULL CHECK (length(updated_at) = 20),
+            PRIMARY KEY (operation_id, obligation_id)
+        );
+    """,
+    # -- Private durable identity and launch reconciliation for one managed -
+    # -- execution. Payloads and output remain target-owned; the database ---
+    # -- records only bounded, non-secret identity and launch evidence. -----
+    40: """
+        CREATE TABLE execution_runs (
+            run_id TEXT PRIMARY KEY
+                CHECK (
+                    length(run_id) = 32
+                    AND run_id NOT GLOB '*[^0-9a-f]*'
+                ),
+            target_kind TEXT NOT NULL
+                CHECK (target_kind IN ('vm', 'platform-host')),
+            target_name TEXT NOT NULL
+                CHECK (length(target_name) BETWEEN 1 AND 255),
+            target_incarnation TEXT NOT NULL
+                CHECK (length(target_incarnation) BETWEEN 1 AND 255),
+            target_boot_id TEXT NOT NULL
+                CHECK (length(target_boot_id) BETWEEN 1 AND 255),
+            workload_euid INTEGER NOT NULL
+                CHECK (typeof(workload_euid) = 'integer' AND workload_euid BETWEEN 0 AND 4294967295),
+            workload_egid INTEGER NOT NULL
+                CHECK (typeof(workload_egid) = 'integer' AND workload_egid BETWEEN 0 AND 4294967295),
+            workload_groups TEXT NOT NULL
+                CHECK (length(workload_groups) BETWEEN 1 AND 720895),
+            requested_shell TEXT NOT NULL
+                CHECK (requested_shell IN ('none', 'sh', 'bash', 'user_default')),
+            resolved_shell TEXT
+                CHECK (
+                    resolved_shell IS NULL
+                    OR (length(resolved_shell) BETWEEN 2 AND 255 AND substr(resolved_shell, 1, 1) = '/')
+                ),
+            shell_login INTEGER NOT NULL CHECK (shell_login IN (0, 1)),
+            shell_interactive INTEGER NOT NULL CHECK (shell_interactive IN (0, 1)),
+            managed_profile_revision INTEGER NOT NULL
+                CHECK (typeof(managed_profile_revision) = 'integer' AND managed_profile_revision > 0),
+            owner_kind TEXT NOT NULL
+                CHECK (owner_kind IN ('operation', 'resource')),
+            owner_id TEXT NOT NULL
+                CHECK (length(owner_id) BETWEEN 1 AND 255),
+            lifetime TEXT NOT NULL
+                CHECK (lifetime IN ('operation', 'independent')),
+            receipt_namespace TEXT NOT NULL
+                CHECK (length(receipt_namespace) BETWEEN 1 AND 64),
+            receipt_protocol_version INTEGER NOT NULL
+                CHECK (typeof(receipt_protocol_version) = 'integer' AND receipt_protocol_version > 0),
+            launch_state TEXT NOT NULL
+                CHECK (launch_state IN ('reserved', 'possible-dispatch', 'receipt-confirmed', 'not-launched')),
+            created_at TEXT NOT NULL CHECK (length(created_at) = 20),
+            updated_at TEXT NOT NULL CHECK (length(updated_at) = 20),
+            possible_dispatch_at TEXT CHECK (possible_dispatch_at IS NULL OR length(possible_dispatch_at) = 20),
+            launch_reconciled_at TEXT CHECK (launch_reconciled_at IS NULL OR length(launch_reconciled_at) = 20),
+            output_mode TEXT
+                CHECK (
+                    output_mode IS NULL
+                    OR (typeof(output_mode) = 'text'
+                        AND output_mode IN ('capture', 'discard', 'sensitivity-suppressed'))
+                ),
+            output_capture_prefix_bytes INTEGER
+                CHECK (
+                    (output_mode IS NULL AND output_capture_prefix_bytes IS NULL)
+                    OR (output_mode IS NOT NULL
+                        AND (
+                            (output_mode = 'capture' AND typeof(output_capture_prefix_bytes) = 'integer'
+                                AND output_capture_prefix_bytes BETWEEN 0 AND 16777216)
+                            OR (output_mode IN ('discard', 'sensitivity-suppressed')
+                                AND output_capture_prefix_bytes IS NULL)
+                        )
+                    )
+                ),
+            CHECK (
+                (lifetime = 'operation' AND owner_kind = 'operation')
+                OR (lifetime = 'independent' AND owner_kind = 'resource')
+            ),
+            CHECK (
+                (requested_shell = 'none' AND resolved_shell IS NULL AND shell_login = 0 AND shell_interactive = 0)
+                OR (requested_shell != 'none' AND resolved_shell IS NOT NULL)
+            ),
+            CHECK (
+                (launch_state = 'reserved' AND possible_dispatch_at IS NULL AND launch_reconciled_at IS NULL)
+                OR (
+                    launch_state = 'possible-dispatch'
+                    AND possible_dispatch_at IS NOT NULL
+                    AND launch_reconciled_at IS NULL
+                )
+                OR (
+                    launch_state IN ('receipt-confirmed', 'not-launched')
+                    AND possible_dispatch_at IS NOT NULL
+                    AND launch_reconciled_at IS NOT NULL
+                )
+            )
+        );
+    """,
+    41: """
+        ALTER TABLE vms ADD COLUMN instance_marker TEXT
+            CHECK (
+                instance_marker IS NULL
+                OR (
+                    length(instance_marker) = 32
+                    AND instance_marker NOT GLOB '*[^0-9a-f]*'
+                )
+            );
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)
@@ -899,6 +1074,60 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
         "consoles": ("last_started_at",),
     },
     38: {"sessions": ("session_uuid", "run_id")},
+    39: {
+        "operation_owners": (
+            "operation_id",
+            "generation_id",
+            "recovery_predecessor_generation_id",
+            "operation_kind",
+            "state",
+            "claimed_at",
+            "updated_at",
+            "obligations_sealed_at",
+        ),
+        "operation_claims": ("resource_kind", "resource_name", "operation_id"),
+        "lifecycle_obligations": (
+            "operation_id",
+            "obligation_id",
+            "obligation_kind",
+            "state",
+            "payload_version",
+            "payload",
+            "payload_revision",
+            "registered_at",
+            "updated_at",
+        ),
+    },
+    40: {
+        "execution_runs": (
+            "run_id",
+            "target_kind",
+            "target_name",
+            "target_incarnation",
+            "target_boot_id",
+            "workload_euid",
+            "workload_egid",
+            "workload_groups",
+            "requested_shell",
+            "resolved_shell",
+            "shell_login",
+            "shell_interactive",
+            "managed_profile_revision",
+            "owner_kind",
+            "owner_id",
+            "lifetime",
+            "receipt_namespace",
+            "receipt_protocol_version",
+            "launch_state",
+            "created_at",
+            "updated_at",
+            "possible_dispatch_at",
+            "launch_reconciled_at",
+            "output_mode",
+            "output_capture_prefix_bytes",
+        )
+    },
+    41: {"vms": ("instance_marker",)},
 }
 
 _SCHEMA_SENTINEL_REMOVED_TABLES: dict[int, tuple[str, ...]] = {
@@ -981,6 +1210,10 @@ _FOREIGN_KEY_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[ForeignKeySentinel, .
         ),
     },
     34: {"vm_checkpoints": (("vms", "vm_name", "name", _NO_ACTION, "RESTRICT"),)},
+    39: {
+        "operation_claims": (("operation_owners", "operation_id", "operation_id", _NO_ACTION, "CASCADE"),),
+        "lifecycle_obligations": (("operation_owners", "operation_id", "operation_id", _NO_ACTION, "CASCADE"),),
+    },
 }
 
 _FOREIGN_KEY_SENTINEL_REMOVALS: dict[int, dict[str, tuple[ForeignKeySentinel, ...]]] = {

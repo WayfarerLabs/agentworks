@@ -1,0 +1,691 @@
+"""Private bounded JSON-file composition under one borrowed core operation."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import TYPE_CHECKING, Literal
+
+from agentworks.errors import ValidationError
+from agentworks.execution._file_object_exchange import (
+    FileObjectObservation,
+    FileObjectObservationState,
+    stat_file,
+)
+from agentworks.execution._file_objects import FileKind, FileObjectFailureKind
+from agentworks.execution._file_publication import (
+    Create,
+    Match,
+    PublicationFailureKind,
+    PublicationPhase,
+    Replace,
+)
+from agentworks.execution._file_publication_protocol import FilePublicationFailureCode
+from agentworks.execution._file_read import FileReadObservation, FileReadObservationState, read_file
+from agentworks.execution._file_read_protocol import FileReadFailure
+from agentworks.execution._file_stat import FileRevision
+from agentworks.execution._file_upload import (
+    FileUploadBinding,
+    FileUploadControlFact,
+    FileUploadFailure,
+    FileUploadOutcome,
+    FileUploadStatus,
+    _prepare_upload_borrowed,
+    _PreparedUpload,
+    _validate_inputs,
+)
+from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
+from agentworks.execution._json import (
+    ValidatedJsonObject,
+    merge_json_objects,
+    serialize_json_source,
+    validate_json_object,
+)
+from agentworks.execution._runtime_prerequisite import (
+    RuntimePrerequisiteObservation,
+    RuntimePrerequisiteState,
+    RuntimeSelection,
+)
+from agentworks.execution.carrier import Deadline, Dispatch, Failure
+from agentworks.operations import OperationBorrow
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from agentworks.execution._file_object_protocol import FileObjectFailureControl
+    from agentworks.execution._helper_launcher import IdentityPlan
+    from agentworks.execution.carrier import Carrier
+    from agentworks.execution.files import NewMetadata
+
+type JsonFileStrategy = Literal["replace", "merge-overwrite", "merge-preserve", "skip-existing"]
+
+_MAX_PUBLICATION_ATTEMPTS = 8
+_RUNTIME_REFUSALS = frozenset(
+    {
+        RuntimePrerequisiteState.MISSING,
+        RuntimePrerequisiteState.SHIM,
+        RuntimePrerequisiteState.UNUSABLE,
+        RuntimePrerequisiteState.UNSUPPORTED_VERSION,
+        RuntimePrerequisiteState.MISSING_MODULES,
+    }
+)
+
+
+class FileJsonStatus(StrEnum):
+    COMPLETE = "complete"
+    FAILED = "failed"
+    UNCERTAIN = "uncertain"
+
+
+class FileJsonChange(StrEnum):
+    CHANGED = "changed"
+    UNCHANGED = "unchanged"
+
+
+class FileJsonFailure(StrEnum):
+    DEADLINE = "deadline"
+    ABSENT = "absent"
+    OBJECT = "object"
+    READ = "read"
+    EXISTING_VALIDATION = "existing_validation"
+    TRANSFORM = "transform"
+    UPLOAD = "upload"
+    CONFLICT = "conflict"
+    OBSERVATION = "observation"
+    RUNTIME_PREREQUISITE = "runtime_prerequisite"
+    TERMINATION = "termination"
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class FileJsonBinding:
+    trusted_root_path: str
+    relative_path: str
+    strategy: JsonFileStrategy
+    create: bool
+    max_bytes: int
+    max_depth: int
+    identity_plan: IdentityPlan
+    runtime_selection: RuntimeSelection
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class FileJsonOutcome:
+    status: FileJsonStatus
+    binding: FileJsonBinding
+    change: FileJsonChange | None = None
+    revision: FileRevision | None = field(default=None, repr=False)
+    publication_attempts: int = 0
+    failure: FileJsonFailure | None = None
+    object_failure: FileObjectFailureControl | None = None
+    read_failure: FileReadFailure | None = None
+    upload_outcome: FileUploadOutcome | None = field(default=None, repr=False)
+    runtime_prerequisite: RuntimePrerequisiteObservation | None = None
+    deadline_exceeded: bool = False
+    pending_remote_effects: bool = False
+    coordination_uncertain: bool = False
+    requires_owner_retention: bool = False
+    failure_dispatch: Dispatch | None = None
+    carrier_failure: Failure | None = None
+
+
+class FileJsonControlFact(Exception):
+    """Safe bounded JSON state attached to an escaping control flow."""
+
+    def __init__(self, outcome: FileJsonOutcome) -> None:
+        self.outcome = outcome
+        super().__init__("private JSON update stopped with retained operation state")
+
+
+class _BytesSource:
+    def __init__(self, content: bytes) -> None:
+        self._content = content
+        self._offset = 0
+
+    def try_read(self, limit: int) -> bytes:
+        if self._offset == len(self._content):
+            return b""
+        end = min(len(self._content), self._offset + limit)
+        result = self._content[self._offset : end]
+        self._offset = end
+        return result
+
+
+@dataclass(slots=True, repr=False)
+class _Inputs:
+    binding: FileJsonBinding
+    source: ValidatedJsonObject
+    create_metadata: NewMetadata
+
+
+@dataclass(slots=True, repr=False)
+class _State:
+    binding: FileJsonBinding
+    operation: BorrowedFixedHelperCarrier
+    change: FileJsonChange | None = None
+    revision: FileRevision | None = None
+    publication_attempts: int = 0
+    failure: FileJsonFailure | None = None
+    object_failure: FileObjectFailureControl | None = None
+    read_failure: FileReadFailure | None = None
+    upload_outcome: FileUploadOutcome | None = None
+    runtime_prerequisite: RuntimePrerequisiteObservation | None = None
+    deadline_exceeded: bool = False
+    active_upload: _PreparedUpload | None = field(default=None, repr=False)
+    failure_dispatch: Dispatch | None = None
+    carrier_failure: Failure | None = None
+
+    def fail(
+        self,
+        failure: FileJsonFailure,
+        *,
+        dispatch: Dispatch | None = None,
+        carrier_failure: Failure | None = None,
+    ) -> None:
+        if self.failure is None:
+            self.failure = failure
+            self.failure_dispatch = dispatch
+            self.carrier_failure = carrier_failure
+
+    def record_runtime(self, observation: RuntimePrerequisiteObservation) -> None:
+        current = self.runtime_prerequisite
+        replace = current is None or (
+            current.state is RuntimePrerequisiteState.READY and observation.state is not RuntimePrerequisiteState.READY
+        )
+        replace = replace or (
+            current is not None
+            and current.state is RuntimePrerequisiteState.UNKNOWN
+            and observation.state in _RUNTIME_REFUSALS
+        )
+        if replace:
+            self.runtime_prerequisite = observation
+
+    def capture_upload(self, outcome: FileUploadOutcome) -> None:
+        self.upload_outcome = outcome
+        if outcome.runtime_prerequisite is not None:
+            self.record_runtime(outcome.runtime_prerequisite)
+        self.deadline_exceeded = self.deadline_exceeded or outcome.deadline_exceeded
+        self.active_upload = None
+
+    def finish(self) -> FileJsonOutcome:
+        upload = self.upload_outcome
+        pending = self.operation.pending_remote_effects or (upload is not None and upload.pending_remote_effects)
+        coordination = self.operation.coordination_uncertain or (upload is not None and upload.coordination_uncertain)
+        retain = self.operation.requires_owner_retention or (upload is not None and upload.requires_owner_retention)
+        if self.change is not None and self.failure is None and not retain:
+            status = FileJsonStatus.COMPLETE
+        elif pending or (upload is not None and upload.status is FileUploadStatus.UNCERTAIN):
+            status = FileJsonStatus.UNCERTAIN
+        else:
+            status = FileJsonStatus.FAILED
+        return FileJsonOutcome(
+            status,
+            self.binding,
+            self.change,
+            self.revision,
+            self.publication_attempts,
+            self.failure,
+            self.object_failure,
+            self.read_failure,
+            upload,
+            self.runtime_prerequisite,
+            self.deadline_exceeded,
+            pending,
+            coordination,
+            retain,
+            self.failure_dispatch,
+            self.carrier_failure,
+        )
+
+
+def update_json_file(
+    carrier: Carrier,
+    *,
+    trusted_root_path: str,
+    relative_path: str,
+    source: bytes,
+    strategy: JsonFileStrategy,
+    create: bool,
+    create_metadata: NewMetadata,
+    max_bytes: int,
+    max_depth: int,
+    plan: IdentityPlan,
+    deadline: Deadline,
+    runtime_selection: RuntimeSelection,
+    borrow: OperationBorrow,
+) -> FileJsonOutcome:
+    """Apply one bounded JSON strategy while holding one serial owner borrow."""
+    return _prepare_json_update(
+        carrier,
+        trusted_root_path=trusted_root_path,
+        relative_path=relative_path,
+        source=source,
+        strategy=strategy,
+        create=create,
+        create_metadata=create_metadata,
+        max_bytes=max_bytes,
+        max_depth=max_depth,
+        plan=plan,
+        deadline=deadline,
+        runtime_selection=runtime_selection,
+        borrow=borrow,
+    ).run()
+
+
+def _prepare_json_update(
+    carrier: Carrier,
+    *,
+    trusted_root_path: str,
+    relative_path: str,
+    source: bytes,
+    strategy: JsonFileStrategy,
+    create: bool,
+    create_metadata: NewMetadata,
+    max_bytes: int,
+    max_depth: int,
+    plan: IdentityPlan,
+    deadline: Deadline,
+    runtime_selection: RuntimeSelection,
+    borrow: OperationBorrow,
+) -> _PreparedJsonUpdate:
+    """Prepare one validated JSON update without dispatching it."""
+    inputs = _validate_json_inputs(
+        trusted_root_path,
+        relative_path,
+        source,
+        strategy,
+        create,
+        create_metadata,
+        max_bytes,
+        max_depth,
+        plan,
+        deadline,
+        runtime_selection,
+        borrow,
+    )
+    operation = BorrowedFixedHelperCarrier(carrier, borrow)
+    state = _State(inputs.binding, operation)
+    workflow = _JsonWorkflow(inputs, deadline, state)
+    return _PreparedJsonUpdate(inputs.binding, state, workflow)
+
+
+@dataclass(slots=True, repr=False)
+class _PreparedJsonUpdate:
+    """Validated JSON state attachable to core custody before dispatch."""
+
+    binding: FileJsonBinding
+    state: _State
+    workflow: _JsonWorkflow
+
+    def set_child_upload_callback(self, callback: Callable[[_PreparedUpload, int], None]) -> None:
+        """Set the core custody checkpoint before each child dispatch."""
+        self.workflow.set_child_upload_callback(callback)
+
+    def run(self) -> FileJsonOutcome:
+        try:
+            return self.workflow.run()
+        except BaseException as control:
+            cause = control.__cause__
+            child = self.state.active_upload
+            if child is not None:
+                if not isinstance(cause, FileUploadControlFact) or child.control_outcome is not cause.outcome:
+                    raise control from None
+                try:
+                    self.state.capture_upload(cause.outcome)
+                    self.state.fail(FileJsonFailure.UPLOAD)
+                except BaseException:
+                    raise control from cause
+            try:
+                self.state.deadline_exceeded = self.state.deadline_exceeded or self.workflow.deadline.expired
+                outcome = self.state.finish()
+                fact = FileJsonControlFact(outcome)
+            except BaseException:
+                raise control from None
+            raise control from fact
+
+
+class _JsonWorkflow:
+    def __init__(self, inputs: _Inputs, deadline: Deadline, state: _State) -> None:
+        self._inputs = inputs
+        self._deadline = deadline
+        self._state = state
+        self._child_upload_callback: Callable[[_PreparedUpload, int], None] | None = None
+
+    def set_child_upload_callback(self, callback: Callable[[_PreparedUpload, int], None]) -> None:
+        """Set the core-owned callback run after child attachment."""
+        self._child_upload_callback = callback
+
+    @property
+    def deadline(self) -> Deadline:
+        return self._deadline
+
+    def run(self) -> FileJsonOutcome:
+        if self._deadline.expired:
+            self._state.deadline_exceeded = True
+            self._state.fail(FileJsonFailure.DEADLINE)
+            return self._state.finish()
+        strategy = self._state.binding.strategy
+        if strategy == "replace" or strategy == "skip-existing":
+            return self._run_nonmerge(strategy)
+        if strategy == "merge-overwrite" or strategy == "merge-preserve":
+            return self._run_merge(strategy)
+        raise AssertionError("validated JSON strategy is not closed")
+
+    def _run_nonmerge(self, strategy: Literal["replace", "skip-existing"]) -> FileJsonOutcome:
+        observation = self._stat()
+        if observation is None:
+            return self._state.finish()
+        if observation.state is FileObjectObservationState.PRESENT:
+            if observation.object_kind is not FileKind.REGULAR or observation.revision is None:
+                self._state.fail(FileJsonFailure.OBJECT)
+                return self._state.finish()
+            if strategy == "skip-existing":
+                self._state.change = FileJsonChange.UNCHANGED
+                self._state.revision = observation.revision
+                return self._state.finish()
+            condition: Create | Replace = Replace()
+        elif observation.state is FileObjectObservationState.ABSENT:
+            if not self._state.binding.create:
+                self._state.fail(FileJsonFailure.ABSENT)
+                return self._state.finish()
+            condition = Create()
+        else:
+            return self._state.finish()
+        content = self._serialize_source()
+        if content is None:
+            return self._state.finish()
+        return self._publish(content, condition)
+
+    def _run_merge(self, strategy: Literal["merge-overwrite", "merge-preserve"]) -> FileJsonOutcome:
+        for attempt in range(_MAX_PUBLICATION_ATTEMPTS):
+            observation = self._read()
+            if observation is None:
+                return self._state.finish()
+            if observation.state is FileReadObservationState.ABSENT:
+                if not self._state.binding.create:
+                    self._state.fail(FileJsonFailure.ABSENT)
+                    return self._state.finish()
+                source_content = self._serialize_source()
+                if source_content is None:
+                    return self._state.finish()
+                content = source_content
+                condition: Create | Match = Create()
+            elif observation.state is FileReadObservationState.PRESENT:
+                snapshot = observation.snapshot
+                if snapshot is None:
+                    self._state.fail(FileJsonFailure.OBSERVATION)
+                    return self._state.finish()
+                try:
+                    existing = validate_json_object(
+                        snapshot.data,
+                        max_bytes=self._state.binding.max_bytes,
+                        max_depth=self._state.binding.max_depth,
+                    )
+                except ValidationError:
+                    self._state.fail(FileJsonFailure.EXISTING_VALIDATION)
+                    return self._state.finish()
+                try:
+                    content = merge_json_objects(
+                        self._inputs.source,
+                        existing,
+                        preserve_existing=strategy == "merge-preserve",
+                    )
+                except ValidationError:
+                    self._state.fail(FileJsonFailure.TRANSFORM)
+                    return self._state.finish()
+                condition = Match(FileRevision(snapshot.metadata, snapshot.digest))
+            else:
+                return self._state.finish()
+            outcome = self._upload(content, condition)
+            if outcome.status is FileUploadStatus.COMPLETE:
+                return self._complete_upload(outcome)
+            if not self._retryable_conflict(outcome):
+                self._state.fail(FileJsonFailure.UPLOAD)
+                return self._state.finish()
+            if attempt == _MAX_PUBLICATION_ATTEMPTS - 1:
+                self._state.fail(FileJsonFailure.CONFLICT)
+                return self._state.finish()
+        raise AssertionError("bounded JSON publication loop did not terminate")
+
+    def _stat(self) -> FileObjectObservation | None:
+        if self._deadline.expired:
+            self._state.deadline_exceeded = True
+            self._state.fail(FileJsonFailure.DEADLINE)
+            return None
+        result = stat_file(
+            self._state.operation,
+            trusted_root_path=self._state.binding.trusted_root_path,
+            relative_path=self._state.binding.relative_path,
+            plan=self._state.binding.identity_plan,
+            deadline=self._deadline,
+            runtime_selection=self._state.binding.runtime_selection,
+        )
+        self._state.record_runtime(result.runtime_prerequisite)
+        observation = result.observation
+        if observation is not None and observation.failure is not None:
+            self._state.object_failure = observation.failure
+            if observation.failure.kind is FileObjectFailureKind.DEADLINE:
+                self._state.deadline_exceeded = True
+                self._state.fail(FileJsonFailure.DEADLINE)
+            elif observation.state is FileObjectObservationState.REFUSED:
+                self._state.fail(FileJsonFailure.OBJECT)
+        normal = self._state.operation.settle(result.dispatch, result.carrier_completion)
+        self._state.deadline_exceeded = self._state.deadline_exceeded or self._deadline.expired
+        if not normal:
+            self._state.fail(
+                FileJsonFailure.OBSERVATION if result.dispatch is Dispatch.NOT_SENT else FileJsonFailure.TERMINATION,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
+            )
+            return None
+        if _runtime_refused(result.runtime_prerequisite):
+            self._state.fail(FileJsonFailure.RUNTIME_PREREQUISITE)
+            return None
+        if self._state.failure is not None:
+            return observation
+        if result.carrier_failure is not None:
+            self._state.fail(
+                FileJsonFailure.OBSERVATION,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
+            )
+            return None
+        if observation is None:
+            self._state.fail(FileJsonFailure.OBSERVATION)
+            return None
+        if observation.state is FileObjectObservationState.REFUSED:
+            self._state.fail(FileJsonFailure.OBJECT)
+        elif observation.state not in {
+            FileObjectObservationState.PRESENT,
+            FileObjectObservationState.ABSENT,
+        }:
+            self._state.fail(FileJsonFailure.OBSERVATION)
+        return observation
+
+    def _read(self) -> FileReadObservation | None:
+        if self._deadline.expired:
+            self._state.deadline_exceeded = True
+            self._state.fail(FileJsonFailure.DEADLINE)
+            return None
+        result = read_file(
+            self._state.operation,
+            trusted_root_path=self._state.binding.trusted_root_path,
+            relative_path=self._state.binding.relative_path,
+            max_bytes=self._state.binding.max_bytes,
+            plan=self._state.binding.identity_plan,
+            deadline=self._deadline,
+            runtime_selection=self._state.binding.runtime_selection,
+        )
+        self._state.record_runtime(result.runtime_prerequisite)
+        observation = result.observation
+        if observation is not None and observation.failure is not None:
+            self._state.read_failure = observation.failure
+            if observation.failure is FileReadFailure.DEADLINE:
+                self._state.deadline_exceeded = True
+                self._state.fail(FileJsonFailure.DEADLINE)
+            elif observation.state is FileReadObservationState.REFUSED:
+                self._state.fail(FileJsonFailure.READ)
+        normal = self._state.operation.settle(result.dispatch, result.carrier_completion)
+        self._state.deadline_exceeded = self._state.deadline_exceeded or self._deadline.expired
+        if not normal:
+            self._state.fail(
+                FileJsonFailure.OBSERVATION if result.dispatch is Dispatch.NOT_SENT else FileJsonFailure.TERMINATION,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
+            )
+            return None
+        if _runtime_refused(result.runtime_prerequisite):
+            self._state.fail(FileJsonFailure.RUNTIME_PREREQUISITE)
+            return None
+        if self._state.failure is not None:
+            return observation
+        if result.carrier_failure is not None:
+            self._state.fail(
+                FileJsonFailure.OBSERVATION,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
+            )
+            return None
+        if observation is None:
+            self._state.fail(FileJsonFailure.OBSERVATION)
+            return None
+        if observation.state is FileReadObservationState.REFUSED:
+            self._state.fail(FileJsonFailure.READ)
+        elif observation.state not in {
+            FileReadObservationState.PRESENT,
+            FileReadObservationState.ABSENT,
+        }:
+            self._state.fail(FileJsonFailure.OBSERVATION)
+        return observation
+
+    def _publish(self, content: bytes, condition: Create | Replace) -> FileJsonOutcome:
+        outcome = self._upload(content, condition)
+        if outcome.status is FileUploadStatus.COMPLETE:
+            return self._complete_upload(outcome)
+        self._state.fail(FileJsonFailure.UPLOAD)
+        return self._state.finish()
+
+    def _serialize_source(self) -> bytes | None:
+        try:
+            return serialize_json_source(self._inputs.source)
+        except ValidationError:
+            self._state.fail(FileJsonFailure.TRANSFORM)
+            return None
+
+    def _upload(self, content: bytes, condition: Create | Replace | Match) -> FileUploadOutcome:
+        source = _BytesSource(content)
+        binding = FileUploadBinding(
+            self._state.binding.trusted_root_path,
+            self._state.binding.relative_path,
+            len(content),
+            self._state.binding.identity_plan,
+            self._state.binding.runtime_selection,
+        )
+        self._state.publication_attempts += 1
+        upload = _prepare_upload_borrowed(
+            self._state.operation,
+            source=source,
+            deadline=self._deadline,
+            inputs=(binding, condition, self._inputs.create_metadata),
+        )
+        self._state.active_upload = upload
+        callback = self._child_upload_callback
+        if callback is not None:
+            callback(upload, self._state.publication_attempts)
+        outcome = upload.run()
+        self._state.capture_upload(outcome)
+        return outcome
+
+    def _complete_upload(self, outcome: FileUploadOutcome) -> FileJsonOutcome:
+        if outcome.revision is None:
+            self._state.fail(FileJsonFailure.OBSERVATION)
+        else:
+            self._state.change = FileJsonChange.CHANGED
+            self._state.revision = outcome.revision
+        return self._state.finish()
+
+    @staticmethod
+    def _retryable_conflict(outcome: FileUploadOutcome) -> bool:
+        failure = outcome.publication_failure
+        return (
+            outcome.status is FileUploadStatus.FAILED
+            and outcome.failure is FileUploadFailure.PUBLICATION
+            and failure is not None
+            and failure.code is FilePublicationFailureCode.PUBLICATION
+            and failure.publication_kind is PublicationFailureKind.CONFLICT
+            and failure.publication_phase is PublicationPhase.CONDITION
+            and not outcome.deadline_exceeded
+            and not _runtime_refused_outcome(outcome.runtime_prerequisite)
+            and not outcome.requires_owner_retention
+        )
+
+
+def _validate_json_inputs(
+    trusted_root_path: object,
+    relative_path: object,
+    source: object,
+    strategy: object,
+    create: object,
+    create_metadata: object,
+    max_bytes: object,
+    max_depth: object,
+    plan: object,
+    deadline: object,
+    runtime_selection: object,
+    borrow: object,
+) -> _Inputs:
+    if type(source) is not bytes:
+        raise ValidationError("JSON update requires source bytes")
+    canonical_strategy = _validate_strategy(strategy)
+    if type(create) is not bool:
+        raise ValidationError("JSON update create must be a boolean")
+    if type(max_bytes) is not int or type(max_depth) is not int:
+        raise ValidationError("JSON update limits must be positive integers")
+    validated = validate_json_object(source, max_bytes=max_bytes, max_depth=max_depth)
+    if type(borrow) is not OperationBorrow:
+        raise ValidationError("JSON update requires an active core operation borrow")
+    probe = _BytesSource(b"")
+    binding, _, canonical_metadata = _validate_inputs(
+        trusted_root_path,
+        relative_path,
+        probe,
+        0,
+        Create(),
+        create_metadata,
+        plan,
+        deadline,
+        runtime_selection,
+        borrow,
+    )
+    json_binding = FileJsonBinding(
+        binding.trusted_root_path,
+        binding.relative_path,
+        canonical_strategy,
+        create,
+        max_bytes,
+        max_depth,
+        binding.identity_plan,
+        binding.runtime_selection,
+    )
+    return _Inputs(json_binding, validated, canonical_metadata)
+
+
+def _runtime_refused(observation: RuntimePrerequisiteObservation) -> bool:
+    return observation.state in _RUNTIME_REFUSALS
+
+
+def _runtime_refused_outcome(observation: RuntimePrerequisiteObservation | None) -> bool:
+    return observation is not None and _runtime_refused(observation)
+
+
+def _validate_strategy(value: object) -> JsonFileStrategy:
+    if type(value) is not str:
+        raise ValidationError("JSON update requires one supported strategy")
+    if value == "replace":
+        return "replace"
+    if value == "merge-overwrite":
+        return "merge-overwrite"
+    if value == "merge-preserve":
+        return "merge-preserve"
+    if value == "skip-existing":
+        return "skip-existing"
+    raise ValidationError("JSON update requires one supported strategy")

@@ -37,11 +37,11 @@ production enforcement and any reliance on it wait for the removal gate.
 
 Operational invariants apply from the first new-stack release: bound identity/route and lifetime,
 explicit shell/elevation/profile selection, actual guest OS permissions, SSH trust, sensitivity,
-safe filesystem object handling and truthful outcomes. A requested MANAGED or CONTAINED profile must
-deliver its advertised protections even during coexistence; it does not confine other calls through
-the legacy API. Readiness's no-staging restriction remains an operation contract, not a deferred
-recipient permission. No claim of a file-only or profile-required recipient boundary is valid while
-legacy access remains.
+safe filesystem object handling and truthful outcomes. A requested MANAGED profile must deliver its
+advertised protections even during coexistence; it does not confine other calls through the legacy
+API. Readiness's no-staging restriction remains an operation contract, not a deferred recipient
+permission. No claim of a file-only or profile-required recipient boundary is valid while legacy
+access remains.
 
 ## Caller contract
 
@@ -173,15 +173,18 @@ Exact option types belong in the file LLD. The intended behaviors are:
 
 Every mutation uses the immutable core ceiling intersected with recipient path/action and
 metadata/elevation grants. Known denials raise `AuthorizationError` before staging or dispatch;
-destination-side object checks enforce FRD R7 at use time. Public reads have their own path grants.
-The mutation ceiling here covers the bound destination filesystem; local download publication also
-needs the owning operation's explicit local destination, not an implied workstation sandbox.
+destination-side object checks enforce FRD R7 at use time, under the
+[file-safety ruling](frd.md#file-safety-and-guest-runtime-rulings). Those checks do not promise
+containment of malicious processes already running as the target user. Public reads have their own
+path grants. The mutation ceiling here covers the bound destination filesystem; local download
+publication also needs the owning operation's explicit local destination, not an implied workstation
+sandbox.
 
 Core entries distinguish an exact file, descendants of an approved root, and explicit root creation
 or removal. Core alone supplies trusted identity-based path expansion. A caller-controlled path,
 environment, symlink or derived view cannot widen it. An exact-file grant does not confer arbitrary
-sibling writes: private staging/publication/lock names are internal authority with owned cleanup,
-not a public parent grant. Helpers and carrier optimizations must honor the same boundary.
+sibling writes: private staging/publication names are internal authority with owned cleanup, not a
+public parent grant. Helpers and carrier optimizations must honor the same boundary.
 
 Mutation results report changed/unchanged and safe publication evidence, with typed conflict,
 failure or uncertainty. A lost acknowledgement is not permission to repeat a merge or deletion.
@@ -234,10 +237,10 @@ may stage source without exposing `FileAccess`. Internal helpers cannot be reque
 to arbitrary execution through a file-only interface. Validate that boundary, not that no internal
 command was used. As FRD R9 states, an arbitrary foreground or detached execution grant already
 conveys the execution account's guest authority, including filesystem and configured sudo powers;
-these in-process views are not a plugin sandbox. The proposed CONTAINED profile adds reviewed
-guest-side protections, not Python-plugin isolation. Authorize the requested public action: `run`
-using shared launch/wait machinery does not require a public `start` grant. Existing-job operations
-recheck current authority and the bound job profile; possession of a reference is not a grant.
+these in-process views are not a plugin sandbox. MANAGED supplies lifecycle ownership, not hostile
+target-user containment. Authorize the requested public action: `run` using shared launch/wait
+machinery does not require a public `start` grant. Existing-job operations recheck current authority
+and the bound job profile; possession of a reference is not a grant.
 
 The public surface does not expose SSH credentials, provider task IDs, or a carrier constructor.
 `RunContext.admin_execution_target()` and `.agent_execution_target()` return
@@ -260,6 +263,13 @@ carrier-specific detached API.
 class Carrier(Protocol):
     features: ChannelFeatures
 
+    def validate(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+    ) -> None: ...
+
     def execute(
         self,
         invocation: PreparedInvocation,
@@ -268,6 +278,13 @@ class Carrier(Protocol):
         deadline: Deadline,
     ) -> CarrierReport: ...
 ```
+
+`validate` is a pure structural preflight for one fully prepared invocation. It can reject only
+deterministic local incompatibility, including unsupported I/O shapes and a carrier's direct
+envelope bound. It performs no discovery, credential lookup, process or network I/O, durable
+attempt, or other effect. `execute` repeats the same structural checks before effects and remains
+the sole delivery primitive. Deadline observation is call-time handling; readiness, credentials,
+connectivity, and actual delivery remain with execution.
 
 This is a private adapter-author seam, not a plugin alternative to `ExecutionTarget`. A platform
 plugin can implement it but ordinary capability consumers cannot use it to bypass bound policy.
@@ -401,6 +418,46 @@ evidence from the inner delivery. Shared host files/jobs use actual host identit
 userspace. Reuse this composition rather than introducing another SSH runner or a generic
 virtualization framework.
 
+### Core native binding
+
+Add `VMPlatform.resolve_native_execution_binding(vm, ctx, *, deadline, config=None)` alongside the
+legacy hook. This is an explicit core/platform preparation operation, not an accessor supplied to
+file or execution consumers. It returns a `NativeExecutionBinding` containing the independent
+carrier, its actual delivery account name and explicit runtime selection. Constructing that value
+and the resulting RunContext views remains passive.
+
+Core acquires operation ownership before activation, enters the platform-owned route lifetime, then
+invokes resolution with one preparation deadline before constructing the target views. Cloud
+platforms may need bounded provider reads to resolve a current endpoint: AWS, Azure and GCP obtain
+live public IPs that cannot safely be inferred from stored VM metadata. Those reads and delivered
+secret consumption belong to this explicit step. They must not be deferred to a property access or
+hidden in the carrier constructor. Core owns route activation and cleanup separately; the resolver
+does not implicitly open a route, launch a guest workload or retry an uncertain invocation.
+
+Proxmox and WSL2 already have their required endpoint/distribution facts, so their resolvers remain
+passive and perform no provider lookup. Create-time composition should use the platform's already
+observed endpoint facts instead of inventing a VM-row round trip or constructing a legacy transport
+to recover them. Provider metadata remains opaque to core in every case. The
+[remaining-platform inventory](migration-strategy.md#remaining-native-platform-inventory-2026-09-21)
+records the actual input and trust gaps.
+
+Delivery account and requested execution account are distinct facts. QGA delivers as root; WSL2's
+binding explicitly selects the VM's admin account. Target composition must observe the requested
+account and choose a proved identity transition before exposing its view. The binding does not
+certify numeric credentials, grant elevation or claim that a platform supports every identity path.
+
+The first hook implementations cover Proxmox and WSL2. Other platform implementations and
+provisioning-result composition remain required before the additive surface is accepted; an
+unfinished hook is a delivery gap, not an optional native-execution capability. Existing hooks and
+callers remain unchanged. Move legacy execution imports to their actual legacy callers so producing
+a new binding never constructs or imports a retirement transport.
+
+Proxmox configuration adds an explicit workstation CA-bundle path alongside system trust. Apply the
+same CA choice to platform API access and the new QGA connection; never reinterpret
+`verify_ssl=False` as acceptable new-stack trust. That legacy setting retains its old meaning only
+for unmigrated calls, and the new binding rejects it with migration guidance. Loading the selected
+trust material belongs to delivery/readiness, not passive carrier or binding-value construction.
+
 ## Filesystem and package layout
 
 These are proposed destination paths, not directories to create in this documentation revision. Use
@@ -421,7 +478,9 @@ cli/agentworks/
     systemd.py                  private Linux managed-boundary mechanism, after lifecycle proof
     diagnostics.py              safe execution diagnostics, no legacy SSHLogger
     carrier.py                  leaf carrier protocol and carrier-only values
+    binding.py                  core/platform native carrier and delivery-account facts
     carriers/
+      _subprocess.py            bounded local process I/O; carrier owns evidence interpretation
       ssh/
         __init__.py             SSHCarrier and SSHConnection exports
         connection.py           explicit connection value and option policy

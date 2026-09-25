@@ -12,9 +12,12 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentworks.errors import ProvisioningError
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class ProxmoxAPIError(ProvisioningError):
@@ -113,12 +116,17 @@ class ProxmoxAPI:
         token_id: str,
         token_secret: str,
         verify_ssl: bool = True,
+        ca_bundle: Path | None = None,
     ) -> None:
         # Strip trailing slash for consistent URL building
         self._base = api_url.rstrip("/") + "/api2/json"
         self._auth = f"PVEAPIToken={token_id}={token_secret}"
         self._ssl_ctx: ssl.SSLContext | None = None
-        if not verify_ssl:
+        if ca_bundle is not None and not verify_ssl:
+            raise ValueError("A Proxmox CA bundle cannot be combined with disabled TLS verification")
+        if ca_bundle is not None:
+            self._ssl_ctx = ssl.create_default_context(cafile=str(ca_bundle))
+        elif not verify_ssl:
             self._ssl_ctx = ssl.create_default_context()
             self._ssl_ctx.check_hostname = False
             self._ssl_ctx.verify_mode = ssl.CERT_NONE

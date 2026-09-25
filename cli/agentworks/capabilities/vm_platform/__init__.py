@@ -21,11 +21,16 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks.capabilities.vm_platform.base import (
+    MAX_PROVIDER_LOCATOR_BYTES,
     BootstrapProgress,
+    ProviderLocator,
+    ProviderLocatorObservation,
+    ProviderLocatorUnavailable,
     ProvisionRequest,
     ProvisionResult,
     RetainedProvisioningError,
     VMPlatform,
+    provider_locator_remaining,
 )
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
@@ -35,14 +40,19 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BootstrapProgress",
+    "MAX_PROVIDER_LOCATOR_BYTES",
     "VM_PLATFORM_REGISTRY",
     "LimaPlatform",
     "ProvisionRequest",
     "ProvisionResult",
+    "ProviderLocator",
+    "ProviderLocatorObservation",
+    "ProviderLocatorUnavailable",
     "RetainedProvisioningError",
     "VMPlatform",
     "VMPlatformEntry",
     "WSL2Platform",
+    "provider_locator_remaining",
 ]
 
 VM_PLATFORM_REGISTRY: dict[str, type[VMPlatform]] = {

@@ -15,10 +15,11 @@ import sys
 import time
 import urllib.parse
 from contextlib import suppress
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 from agentworks.errors import ValidationError
+from agentworks.execution._process import SinkWriteError, try_write_to_sink
 from agentworks.execution.carrier import (
     Capture,
     CapturedOutput,
@@ -30,12 +31,17 @@ from agentworks.execution.carrier import (
     ExitStatus,
     Failure,
     FiniteInput,
+    LiveInput,
     PreparedInvocation,
     Provenance,
     Retention,
+    SinkOutput,
 )
 
 _MAX_INPUT_BYTES = 65_536
+# Older supported PVE 8 HTTP servers limit the complete POST, independently
+# of the guest-agent input field. Include argv and JSON escaping in this bound.
+_MAX_REQUEST_BYTES = 65_536
 
 
 @dataclass(frozen=True)
@@ -153,13 +159,26 @@ class ProxmoxCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        """Check the exact ASCII request envelope before any provider access."""
+        self._request_body(invocation, io)
+
+    @staticmethod
+    def _request_body(invocation: PreparedInvocation, io: CarrierIO) -> bytes:
+        if isinstance(io.input, LiveInput) or isinstance(io.output, SinkOutput) and io.output.require_live:
+            raise ValidationError("Proxmox does not support live standard I/O")
         input_data = io.input.data if isinstance(io.input, FiniteInput) else b""
         if not input_data.isascii() or any(not arg.isascii() for arg in invocation.argv):
             raise ValidationError("Proxmox proof delivery requires ASCII-armored preparation")
         if len(input_data) > _MAX_INPUT_BYTES:
             raise ValidationError("Prepared Proxmox input exceeds the provider input limit")
         body = json.dumps({"command": invocation.argv, "input-data": input_data.decode("ascii")}).encode("ascii")
+        if len(body) > _MAX_REQUEST_BYTES:
+            raise ValidationError("Prepared Proxmox request exceeds the supported HTTP body limit")
+        return body
+
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        body = self._request_body(invocation, io)
         if deadline.expired:
             return _incomplete(Dispatch.NOT_SENT, io, Failure.DEADLINE)
         try:
@@ -174,7 +193,7 @@ class ProxmoxCarrier:
                 status = self._wire.request("GET", f"exec-status?pid={pid}", timeout=deadline.remaining())
             except Exception:
                 return _incomplete(Dispatch.SENT, io, Failure.DEADLINE if deadline.expired else Failure.OBSERVATION)
-            report = _status_report(status, io)
+            report = _status_report(status, io, deadline)
             if report is not None:
                 if deadline.expired:
                     return CarrierReport(
@@ -192,6 +211,8 @@ class ProxmoxCarrier:
 
 
 def _retention(io: CarrierIO) -> Retention:
+    if isinstance(io.output, SinkOutput):
+        return Retention.DELIVERED
     if io.sensitive:
         return Retention.SUPPRESSED
     return Retention.CAPTURED if isinstance(io.output, Capture) else Retention.DISCARDED
@@ -214,7 +235,7 @@ def _wire_boolean(value: object) -> bool | None:
     return None
 
 
-def _status_report(status: dict[str, object], io: CarrierIO) -> CarrierReport | None:
+def _status_report(status: dict[str, object], io: CarrierIO, deadline: Deadline) -> CarrierReport | None:
     """Validate external status fields without discarding independent exit facts."""
     exited = _wire_boolean(status.get("exited"))
     if exited is None:
@@ -233,7 +254,57 @@ def _status_report(status: dict[str, object], io: CarrierIO) -> CarrierReport | 
     stdout, out_failure = _output(status, "out", io, Provenance.CARRIER_STDOUT)
     stderr, err_failure = _output(status, "err", io, Provenance.MIXED_STDERR)
     failure = Failure.INVALID_RESPONSE if completion is None else out_failure or err_failure
-    return CarrierReport(Dispatch.SENT, completion=completion, stdout=stdout, stderr=stderr, failure=failure)
+    report = CarrierReport(Dispatch.SENT, completion=completion, stdout=stdout, stderr=stderr, failure=failure)
+    if isinstance(io.output, SinkOutput):
+        # Invalid provider streams never reach the collector, while a valid
+        # partial stream can still carry independently useful control evidence.
+        values = tuple(
+            value if isinstance(value, str) and invalid != Failure.INVALID_RESPONSE else ""
+            for value, invalid in ((status.get("out-data", ""), out_failure), (status.get("err-data", ""), err_failure))
+        )
+        report = _deliver(values, report, io.output, deadline)
+    return report
+
+
+def _deliver(values: tuple[str, ...], report: CarrierReport, sinks: SinkOutput, deadline: Deadline) -> CarrierReport:
+    """Fairly deliver a bounded provider response without retaining raw report bytes.
+
+    QGA has already buffered these streams. Sink delivery establishes no live
+    channel feature and never repeats the destructive terminal status read.
+    """
+    offsets = [0, 0]
+    failure: Failure | None = None
+    while any(offset < len(value) for offset, value in zip(offsets, values, strict=True)):
+        if deadline.expired:
+            failure = Failure.DEADLINE
+            break
+        progressed = False
+        for index, sink in enumerate((sinks.stdout, sinks.stderr)):
+            if offsets[index] == len(values[index]):
+                continue
+            if deadline.expired:
+                failure = Failure.DEADLINE
+                break
+            chunk = values[index][offsets[index] : offsets[index] + 65_536].encode("ascii")
+            try:
+                count = try_write_to_sink(sink, memoryview(chunk))
+            except SinkWriteError:
+                failure = Failure.OUTPUT
+                break
+            if count is not None:
+                offsets[index] += count
+                progressed = True
+        if failure is not None:
+            break
+        if not progressed:
+            remaining = deadline.remaining()
+            time.sleep(0.01 if remaining is None else min(0.01, remaining))
+    return replace(
+        report,
+        stdout=replace(report.stdout, complete=report.stdout.complete and offsets[0] == len(values[0])),
+        stderr=replace(report.stderr, complete=report.stderr.complete and offsets[1] == len(values[1])),
+        failure=failure or report.failure,
+    )
 
 
 def _output(

@@ -20,7 +20,7 @@ from agentworks.plugins.gcp.platform import GCEPlatform
 from agentworks.plugins.proxmox.platform import ProxmoxConfig, ProxmoxPlatform
 
 
-def test_all_platforms_declare_contract_version_one() -> None:
+def test_all_platforms_declare_contract_version_two() -> None:
     assert {
         LimaPlatform.contract_version,
         WSL2Platform.contract_version,
@@ -28,7 +28,7 @@ def test_all_platforms_declare_contract_version_one() -> None:
         AzureVMPlatform.contract_version,
         GCEPlatform.contract_version,
         ProxmoxPlatform.contract_version,
-    } == {1}
+    } == {2}
 
 
 def test_every_code_owned_platform_map_has_the_trixie_selector() -> None:

@@ -481,6 +481,29 @@ def test_git_storage_limit_and_failure_cleanup(repository):
     assert not staging.exists()
 
 
+def test_git_storage_limit_does_not_interrupt_repository_initialization(monkeypatch, tmp_path):
+    original = subprocess.Popen
+    completed = tmp_path / "completed"
+
+    def slow_initialization(command, *args, **kwargs):
+        assert "init" in command
+        script = (
+            "import pathlib, sys, time; "
+            "pathlib.Path('objects').mkdir(); "
+            "pathlib.Path('objects/data').write_bytes(b'x' * 4096); "
+            "time.sleep(0.1); "
+            "pathlib.Path(sys.argv[1]).touch()"
+        )
+        repository = command[command.index("-C") + 1]
+        kwargs["cwd"] = repository
+        return original([sys.executable, "-c", script, str(completed)], *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", slow_initialization)
+    with PackageCapture(CaptureLimits(storage_bytes=1)) as operation, pytest.raises(SourceRefError):
+        operation.capture("git::https://fixture.invalid/repo.git//review")
+    assert completed.exists()
+
+
 @pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
 @pytest.mark.parametrize("single_file", [False, True])
 def test_local_lfs_pointers_are_rejected(tmp_path, newline, single_file):

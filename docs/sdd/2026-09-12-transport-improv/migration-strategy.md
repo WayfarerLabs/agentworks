@@ -7,15 +7,250 @@
 
 ## Inventory and destination
 
+### Additive implementation inventory, 2026-09-19
+
+At merged #830 (`cea5e852`), the independent package contains only the accepted buffered proof: 11
+Python modules, with no target/access/file/job/profile implementation or production use. There are
+24 production `RunContext(` construction sites and no new execution-target accessors. These counts
+came from a source search, not runtime coverage.
+
+The additive composition work owns `capabilities/base.py` and these context-producing families: VM
+manager boundaries/lifecycle/nodes, agent lifecycle, session create/roll/lifecycle/scope, workspace
+create, VM inspection/power/status and doctor. They continue passing through the old targets
+unchanged while gaining separately supplied new targets. Composition binds the new targets from
+resolved connection/identity facts, never by wrapping a legacy target. Absent targets remain absent
+at preflight; adding accessors cannot activate a route or discover authority.
+
+The adapter inventory is local Lima, remote Lima's guest hop, WSL2, and Proxmox QGA, plus the
+separately owned SSH carrier used for canonical access, cloud-native access and placement hosts. The
+existing WSL2 platform hold (`capabilities/vm_platform/wsl2.py`) remains distinct from guest jobs.
+The QGA proof currently lives in `execution/carriers/proxmox.py`; moving it to the final plugin
+location first requires removing the plugin package's eager legacy-import dependency. Bypassing
+plugin initialization in a test is not proof of that independence.
+
+This refresh supplements the release-behavior baseline below. It does not mark any consumer migrated
+or establish the new lifecycle/file guarantees.
+
+### Additive implementation checkpoint, 2026-09-22
+
+The dated inventory above describes the state immediately after #830, not the current candidate. The
+independent package now contains private buffered execution, runtime admission, account selection,
+bounded file operations, operation ownership, managed-run identity, VM incarnation identity, native
+carrier candidates and WSL host-client ownership. The WSL carrier and host-client mechanisms have
+passed their scoped live Windows/WSL2 proof. These components still do not compose a complete
+`ExecutionTarget`, expose either new RunContext accessor, or serve a production consumer.
+
+A later private increment binds the DIRECT foreground subset behind `ExecutionAccess.run`: explicit
+DIRECT profile, operation lifetime, finite input, bounded capture/discard, identity-plan selection,
+one deadline and contextual checked-result reduction. Unsupported MANAGED, independent and non-Linux
+combinations refuse before dispatch. The class remains internal and incomplete as a target surface;
+it has no jobs, live/terminal I/O, target wrapper, platform factory or RunContext consumer.
+
+The WSL native-binding resolver is passive and has no production caller. Existing platform create,
+activation, recovery, provisioning and cleanup paths still use the legacy transport and keepalive
+surfaces. The next implementation checkpoints therefore remain private composition work: deliver the
+shared managed-job lifecycle, aggregate whole-operation lifecycle evidence, complete file-operation
+custody, and replace platform-specific legacy ownership only where the new mechanism and its full
+lifetime have been proved. Public target and RunContext delivery follows those gates as one complete
+additive surface, not as an accessor-only or run-only intermediate API.
+
+### Owned-boundary integration inventory, 2026-09-21
+
+The read-only audit at `faf99365` locates admission before effects without moving legacy commands
+onto the new stack. `vms/manager/boundary.py` already has the database and canonical VM before
+`_gated_vm_boundary` enters activation, but builds its ordinary RunContext only afterward. The new
+owned boundary belongs around that sequence, not inside a passive accessor or the shared activation
+engine. Existing gated and live-only boundary calls remain unchanged until their consumer migrates.
+
+Propagation has three distinct seams:
+
+- `LiveVMNode._gate_ops_ctx` constructs the activation context independently. Bind the original
+  owner into the new workflow's node before activation, then preserve it through `_platform_ops_ctx`
+  and subsequent explicit context reconstruction.
+- Agent create/reinit, workspace create, session create/start/restart, VM reinit and VM rekey have
+  activation paths outside the common gated boundary. Their eventual migration must adopt the owned
+  boundary before the gate; adding one common wrapper does not cover those paths automatically.
+- VM creation starts without an activation gate. Ownership must precede platform creation and cover
+  bootstrap, the platform power hold, initialization and rollback. `RealizationLog` invokes retained
+  nodes' no-argument teardown; pending VM/agent/workspace nodes must carry the original owner into
+  nested deletion rather than acquire a second claim.
+
+The descriptive capability `OperationScope` is not the database claim's `OperationScope`. In
+particular, a batch's SYSTEM description cannot become a system-wide claim in the current exact-VM
+repository. Explicit resource admission and later hierarchy remain distinct from context display
+scope. Finalization also remains explicit: returning from a legacy helper or leaving an ExitStack
+does not prove that remote effects stopped. This inventory locates the integration work, not
+implemented production ownership or accepted recovery.
+
+The follow-up activation audit confirms that acquisition can precede the existing gate, but safe
+release cannot be inferred from that gate's current return path. `platform.start` may take effect
+before raising; WSL's current hold suppresses cleanup errors; route and Tailscale repair span remote
+and local mutations; and nested workflow teardown can itself become uncertain. The new stack must
+aggregate typed completion and cleanup evidence across the entire activation/workflow/teardown span
+and settle the owner only after every obligation is discharged. Individual lifecycle steps do not
+release the owner, and opaque legacy success is not a no-further-effects witness. This requirement
+does not retrofit or migrate legacy callers.
+
+The private owner now models that distinction directly. Each independently recoverable adapter
+effect first registers one lifecycle obligation, then marks it possible before dispatch. Sequential
+carrier attempts under one borrow instead share one generic `carrier-dispatch` obligation, which
+resolves only when the borrow closes without an outstanding attempt. The first transition arms that
+row and the coarse claim; every later carrier attempt revalidates the current ownership generation
+against the same row before dispatch permission is returned. Core seals the ledger after the
+complete activation/workflow/teardown aggregate can create no more effects, then calls
+`record_effects_resolved()` only after every obligation has typed quiescence evidence. `close()`
+abandons only an empty never-admitted reservation or releases an explicitly resolved claim; it does
+not infer whole-operation resolution from settled children. Production orchestration and RunContext
+are not yet wired, so this is a usable primitive rather than completed coordination.
+
+The required aggregate is a bounded durable obligation ledger, not a fixed one-field-per-lifecycle
+structure. One operation may own several holds, routes or nested teardown steps; each registers its
+own obligation and may publish adapter-owned recovery identity after an effect starts. Sealing means
+no more obligations can be registered; it does not require identity from an effect proved never
+created. Opaque payloads remain non-secret and platform-specific while state and fencing remain
+core-owned. A recovery controller invalidates the predecessor through a fresh database fence, then
+proves each admitted dispatch is drained or remotely fenced and each effect is quiescent. The
+current schema implements the ledger and database takeover fence but not adapter drain evidence or
+production recovery composition, so no production hold, route or teardown may treat the existing
+claim row alone as completed recovery.
+
+Recovery dispatch is a separate restricted path rather than a mode on the ordinary borrow. It
+revalidates the sealed owner generation and one exact already-possible obligation before every
+attempt, participates in the owner's serial-use guard and never registers, admits, generically
+publishes or automatically resolves durable state. Each adapter owns typed drain evidence covering
+all outstanding dispatches for that obligation across earlier generations. The generic database
+retains only the immediate takeover predecessor; it does not accept caller-supplied lineage as
+quiescence proof. The first DOWNLOAD vertical permits reconciliation and exact cleanup only, durably
+publishes discovered cleanup debt before cleanup and cannot replay snapshot creation or transfer.
+Its spawned local proof is a database and synchronous-helper checkpoint, not production evidence for
+SSH, QGA or native carrier recovery.
+
+### Recovery-target identity inventory, 2026-09-21
+
+The read-only audit at `368f5f0c` distinguishes logical admission from target identification.
+`db/models.py` stores VM name, site, hostname, timestamps and provider metadata, but no common
+guest-generation or boot identity. `last_started_at` is a successful start/create observation time,
+not such an identity. Session boot IDs belong to session process fingerprints observed after guest
+access. The operation claim stores a logical resource key and operation ID; it does not retain the
+VM row or its provider binding when `Database.delete_vm()` removes that row.
+
+| Platform | Existing persisted selector                 | Evidence supported by the current source                                                         |
+| -------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| GCP      | Project, zone, name and numeric instance ID | The platform explicitly verifies provider incarnation identity; this is not guest boot identity. |
+| AWS      | Create-returned EC2 instance ID             | Subsequent operations address that exact provider selector.                                      |
+| Azure    | ARM resource ID                             | Resource-group/name address; no separate VM generation is retained.                              |
+| Proxmox  | Node and VMID                               | Address coordinates; no persisted creation generation.                                           |
+| WSL2     | Distribution name                           | Name coordinate only.                                                                            |
+| Lima     | Instance name                               | Name coordinate only; remote placement-host identity is not in that VM metadata.                 |
+
+These classifications come from the platform implementations and their persisted metadata, not
+native replacement experiments. The provisional VM row has empty provider metadata before create
+dispatch; successful and retained-failure provisioning results supply it afterward. Core must
+therefore acquire logical ownership first and attach the actual target binding once available,
+before dispatching target-dependent file work. A current lookup by VM or site name must not silently
+replace the original binding during recovery. Site names and SSH routes are not canonical shared
+host identities.
+
+`NativeExecutionBinding` currently contains carrier, delivery account and runtime selection only.
+`prepare_target_identity` resolves execution accounts, not VM identity. Neither it nor the current
+RunContext supplies the durable target/recovery handoff. That integration must retain the original
+operation's relevant selectors and file recovery facts without persisting carrier credentials. This
+Migration 41 adds nullable `vms.instance_marker`, constrained to exactly 32 lowercase hexadecimal
+characters when present. Existing rows stay NULL. New creation persists one core-generated marker
+before provider dispatch and passes that exact value to each platform's shared bootstrap. This does
+not adopt old VMs, establish provider incarnation identity or claim a universal provider incarnation
+guarantee. Claims coordinate participating operations in one state database; when recovery lacks the
+target or no-further-effects evidence it needs, it must report that gap rather than reinterpret a
+name, timestamp or claim row as proof.
+
+The marker field was receive-side additive for vm-platform v1. A third-party v1 platform could
+ignore it and therefore could not establish managed target identity merely by accepting the request.
+Vm-platform v2 is a hard cutover that adds only read-only opaque provider-locator observation. It
+does not make marker delivery, guest marker reads or marker-locator composition a conformance claim;
+those remain later target-identity gates.
+
+Lima retains its system bootstrap and reruns it on restart, so its marker is not part of retained
+provider YAML. Its create operation delivers the fixed installer once after create/start and rolls
+the instance back if that delivery fails. Live validation of the resulting root-owned guest file is
+still required before target identity depends on it.
+
+### Remaining-native-platform inventory, 2026-09-21
+
+The read-only inventory at `bf819094` covers Lima, AWS EC2, Azure VM and GCP GCE. The cloud native
+paths use provider APIs for identity, live endpoint and route management, then SSH to the guest;
+they are not API-based guest command channels. AWS describes its current instance IP, Azure walks
+the VM/NIC public-IP state, and GCP verifies the owned instance/network before reading its external
+IP. Stop/start can change these addresses. The platform must perform that resolution explicitly
+under the core operation's preparation deadline, not inside a passive RunContext accessor.
+
+Each cloud create path already holds the endpoint, admin account and operator key before building
+its legacy SSH transport. `ProvisionResult.native_transport` still carries that old object into
+Debian attestation and Phase A. New create-time result composition must carry an independent binding
+from those facts; adding an existing-VM resolver alone does not cover provisioning. Explicit
+known-hosts and connection-isolation inputs remain SSH-lane dependencies, not ambient trust that
+transport may infer from the operator's key path.
+
+Lima still needs an independent guest carrier. Local delivery uses `limactl shell`, but the current
+template and invocation do not explicitly select its actual guest delivery account. That account
+must be observed or explicitly established, not assumed equal to the separately created VM admin.
+Remote Lima additionally needs explicit placement-host endpoint/account/trust/OS facts and separate
+inner-guest completion evidence. Its host create/rollback currently uses legacy detached execution;
+replacing only the returned guest transport leaves those required workflows unmigrated.
+
+This inventory is source evidence, not native feasibility or acceptance. Its concrete seams are
+`plugins/aws/platform.py`, `plugins/azure/platform.py`, `plugins/gcp/platform.py`,
+`capabilities/vm_platform/lima.py`, `capabilities/vm_platform/base.py` (`ProvisionResult`),
+`vms/manager/lifecycle.py` (attestation/Phase A), and the current native factory in
+`transports/__init__.py`. Provider identities, route policy and opaque metadata decoding stay inside
+their platforms. The explicit resolver and complete create-time/factory integration remain required
+before native production cutover.
+
+### New-target composition inventory, 2026-09-21
+
+Read-only inspection at `449b297e` found that `VMPlatform.native_transport` and
+`ProvisionResult.native_transport` still expose only legacy targets. An additive new-stack
+composition seam must retain platform ownership of `VMRow.platform_metadata`; core must not decode
+provider keys itself or obtain new connection facts by constructing an old transport. Preserve the
+old hooks and callers during coexistence. New construction must state its actual delivery identity
+so account observation and DIRECT, root-entry or demotion plans do not guess from the requested
+recipient. Route and platform holds remain owned outside the target.
+
+- Proxmox owns node/VM-ID extraction and API-secret resolution. The new QGA carrier delivers as
+  root; an ordinary guest target needs observed account identity and an explicit demotion plan.
+  System-trust verification maps to the new carrier, but the old `verify_ssl=False` choice does not.
+  Add a supported explicit CA-bundle composition path and migration diagnostics rather than
+  weakening the new carrier's TLS checks. Remove the plugin's eager legacy-transport import before
+  claiming independent platform composition.
+- WSL2 owns distribution metadata and the explicit delivery user. The existing new carrier can
+  consume those facts, but the platform does not yet expose them through an independent hook.
+  Distribution lifetime remains separate from guest execution lifetime.
+- Local and remote Lima still lack independent carriers. Preserve platform-owned instance lookup;
+  replace legacy command-string execution with prepared invocation delivery and distinguish host
+  completion from guest evidence across the extra hop. Remote placement currently accepts one host
+  string, including `user@host` or ambient aliases. SSH's inspected `34a4eb71` connection contract
+  instead requires explicit endpoint/account/trust facts. Transport owns that placement migration
+  and explicit host OS/runtime binding, consuming SSH-owned policy rather than inventing another SSH
+  configuration parser or runner.
+
+These are implementation and compatibility gates, not new supported configuration or production
+factories. Exact additive hook types and provisioning-result composition still require their
+implementation review. Existing legacy trust behavior is unchanged by this inventory; required
+new-stack workflows must resolve incompatible settings before acceptance, without an insecure
+fallback or a dependency on an old target.
+
+### Release baseline
+
 The current delivery implementations are SSH, Lima, remote Lima, WSL2, and Proxmox QGA. AWS, Azure,
 and GCP reuse SSH for native access. The public abstraction has two tiers; `RunContext` currently
 delivers the richer tier only.
 
 SSH also reaches remote Lima placement hosts. `capabilities/vm_platform/lima.py:551` constructs this
 target, `:616` starts detached VM provisioning on it before the guest exists, and `:704` cancels
-that work during rollback. This host target participates in the shared execution/job migration
-without being delivered as a guest target through `RunContext`; its macOS-compatible userspace must
-be preserved.
+that work during rollback. This host target participates in the shared execution migration without
+being delivered as a guest target through `RunContext`; its macOS-compatible userspace must be
+preserved. The platform retains VM-resource lifecycle ownership rather than being required to
+replace its runtime with a generic host MANAGED job. It participates in core operation coordination
+for conflicting resources; this is not isolation from a malicious platform.
 
 The destination is reusable SSH-backed platform access. Remote Lima supplies its first management
 commands and guest-hop integration; the shared SSH carrier and host target do not depend on Lima.
@@ -125,6 +360,17 @@ types and behavior until deletion. No union type, runtime stack selector, fallba
 context object is introduced. Core composition owns both sets of passive handles during coexistence
 without routing a call from one implementation through the other.
 
+Database operation ownership is explicit at the new workflow's core entry boundary, before
+activation, not a side effect of first accessing a target. At `d07fcbc2`, the ordinary VM boundary
+already has the database and canonical VM name before entering activation; VM creation and retained
+rollback nodes have separate roots that must carry the same ownership. Adding unconditional claims
+to those existing roots would change legacy commands immediately. The additive PR instead supplies
+the new operation boundary and ownership carriage, proves new-only workflows through it, and leaves
+unmigrated calls unchanged. First adoption of a production consumer opts into that boundary as part
+of its migration batch. This adds no runtime stack selector or second RunContext type. Passive
+accessors alone cannot satisfy the pre-activation gate, and a legacy runner's successful return is
+not generic evidence that uncertain remote effects have stopped.
+
 The [2026-09-19 ruling](frd.md#operator-rulings-2026-09-19) defers new recipient permission
 enforcement, including the successor core file ceiling, until legacy is physically removed. Record
 consumer intent in the migration inventory and prepare small grant values and isolated denial tests,
@@ -172,11 +418,15 @@ workflows on isolated resources, never by sending one production request down bo
    adapters. Verify single-attempt delivery and truthful status-255 handling; apply preparation
    exactly once. Run new-stack tests with legacy modules unavailable, and test reusable
    platform-host composition independently from Lima-specific management commands.
-4. **Additive implementation PR:** validate complete new-stack workflows before exposing the new
-   RunContext accessors: provisioning, native recovery without Tailscale, files, jobs, backup, host
-   provisioning/rollback and interactive attachment. Existing callers remain unchanged. Prove their
-   behavior stays unchanged and constructing/accessing either surface adds no I/O, route activation
-   or mutations. The new surface is usable independently, not a facade calling legacy.
+4. **Additive implementation PR:** implement database-level resource-operation coordination before
+   exposing conflicting new-stack operations. Nested file requests share operation ownership;
+   uncertain remote effects retain it across disconnects and process death. Remove the private
+   destination-lock implementation and privileged setup rather than maintaining both mechanisms.
+   Validate complete new-stack workflows before exposing the new RunContext accessors: provisioning,
+   native recovery without Tailscale, files, jobs, backup, host provisioning/rollback and
+   interactive attachment. Existing callers remain unchanged. Prove their behavior stays unchanged
+   and constructing/accessing either surface adds no I/O, route activation or mutations. The new
+   surface is usable independently, not a facade calling legacy.
 5. **Consumer migration PR(s):** assign non-overlapping workflow batches with an owner and tests.
    Audit each operation's command versus file API, shell/startup, bound identity, elevation,
    environment, stdio, deadline, profile, lifetime and exact filesystem effects. Record intended
@@ -237,10 +487,10 @@ cutover prerequisites.
 
 Sessions adopt the [shared supervisor and profile design](execution-lifecycle-lld.md), not a second
 cgroup implementation. Preserve session UUID/run identity and resource-domain readiness while moving
-launch, observation and stop below it. Map #770's requirements and resolve ownership before retiring
-that proposal. Audit each consumer's required profile, action, identity, lifetime and I/O grants,
-including read-only job observers and file-only resources. Guest containment is not an in-process
-plugin sandbox.
+launch, observation and stop below it. The operator assigned this implementation to transport and
+closed #770 on 2026-09-19; its preserved requirements still need complete reconciliation. Audit each
+consumer's required profile, action, identity, lifetime and I/O grants, including read-only job
+observers and file-only resources. Guest containment is not an in-process plugin sandbox.
 
 Existing sessions do not gain containment by moving their parent into a unit. Untracked detached
 descendants require an explicit legacy-run disposition: authorized shutdown/recreation or retained

@@ -297,6 +297,15 @@ def test_proxmox_no_longer_reads_a_string_verify_ssl_as_true() -> None:
         _validate("proxmox", {**PROXMOX_CONFIG, "verify_ssl": 5})
 
 
+def test_proxmox_ca_bundle_requires_verified_tls() -> None:
+    _validate("proxmox", {**PROXMOX_CONFIG, "ca_bundle": "/trust/cluster-ca.pem"})
+    with pytest.raises(ConfigError):
+        _validate(
+            "proxmox",
+            {**PROXMOX_CONFIG, "ca_bundle": "/trust/cluster-ca.pem", "verify_ssl": False},
+        )
+
+
 @pytest.mark.parametrize(
     ("platform", "blob", "expected"),
     [

@@ -407,6 +407,12 @@ def create_vm(
             # config/validation.py MAX_VM_NAME_LENGTH for the MIN-over-sinks
             # derivation.
             hostname = f"{slug}-{vm_name}" if slug else vm_name
+            # This is generated once, before the provisional row and provider
+            # dispatch. The platform receives this exact value and its shared
+            # create bootstrap replaces any template-cloned predecessor.
+            from agentworks.vms.identity import new_vm_instance_marker
+
+            instance_marker = new_vm_instance_marker()
 
             # Create DB record with as-provisioned resource values. This is the
             # pending VM's realization artifact (what teardown deletes), so the
@@ -432,6 +438,7 @@ def create_vm(
                     disk_gib=resolved_disk,
                     swap_gib=vm_tmpl.swap,
                     admin_username=resolved_admin_username,
+                    instance_marker=instance_marker,
                 )
                 overlay_outcome = persist_vm_creation_overlays(db, vm_name, desired_overlays)
             log = RealizationLog()
@@ -493,6 +500,7 @@ def create_vm(
                     debian_release=creation_release,
                     hostname=hostname,
                     system_slug=slug,
+                    instance_marker=instance_marker,
                     admin_username=resolved_admin_username,
                     ssh_public_key=prepared_ssh.public_text,
                     ssh_private_key=config.operator.ssh_private_key,

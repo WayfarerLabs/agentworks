@@ -58,6 +58,70 @@ all required semantics. Execution and file access are separate views; command an
 execution remain independently granted, as do profiles, identity/elevation, lifetime and I/O.
 Transport feature descriptions never stand in for permissions.
 
+### Operation coordination and hierarchical extension
+
+Core orchestration owns database-backed operation admission before activation or other conflicting
+effects. RunContext and nested cleanup carry the same ownership; constructing another context does
+not acquire an unrelated claim. Admission, resolution and release use short transactions, not a SQL
+write transaction held across remote work. Claims are coordination, not permissions or remote
+process containment. The [file LLD](file-operations-lld.md#cooperating-writers-and-honest-limits)
+defines uncertainty and recovery.
+
+Each owned operation also has a bounded durable ledger of lifecycle obligations. Activation,
+platform holds, routes, nested teardown and other effect owners register independent obligations;
+several obligations of the same kind may coexist. An obligation records a closed generic state and a
+bounded, versioned, non-secret recovery payload that only its registered adapter interprets. Core
+seals the ledger after the workflow can create no more obligations and releases the operation claim
+only after every obligation has typed no-further-effects evidence. A context exit, local client
+exit, settled child attempt or ordinary workflow success is not that evidence.
+
+The ledger attaches to the operation identity, not to one resource level. This leaves the same
+mechanism usable when #377 extends one operation across hierarchical or multi-resource claims. A
+recovery controller obtains a fresh database fence that makes the predecessor stale, then proves for
+every admitted obligation both that no earlier dispatch can still arrive and that any existing
+effect is quiescent. Controller absence stops future cooperating submissions but does not drain a
+provider, carrier or guest queue. Resolution therefore also needs carrier-proved non-dispatch plus
+exact absence, an operation-specific remote fence, or equally strong adapter evidence for a
+synchronous local substrate. The ledger is not a workflow engine, scheduler, permission system or
+lease, and claims never expire automatically.
+
+The initial implementation uses coarse VM and shared platform-host resource keys. Its repository
+currently conflicts only on an exact kind/name pair. This is not hierarchical locking and does not
+complete [#377](https://github.com/WayfarerLabs/agentworks/issues/377). Coarse VM ownership
+deliberately serializes otherwise independent work within that VM until finer admission is
+implemented.
+
+Preserve one core admission boundary for extending this model to system, workspace, agent, session
+and console resources. The extension must atomically check equal, ancestor and descendant conflicts
+and insert ownership in the same transaction. A VM-wide claim blocks conflicting descendant claims;
+an existing descendant claim also blocks a conflicting VM-wide claim. Future system-wide exclusion
+is one claim against all participating resources in its authoritative state database; it does not
+coordinate independent databases. Independent siblings may proceed when their actual resource sets
+do not overlap. Fail immediately with the blocking resource, operation and available claim metadata,
+rather than waiting for another operation to finish.
+
+Resource relationships come from core-owned entity identities, not path prefixes, transport routes,
+execution users or the descriptive RunContext scope. Do not invent a single nesting chain: agents
+are VM-scoped, workspaces are VM-scoped, and session work can involve both. An operation touching
+several resources needs their explicit conflict relationships. Platform-host mutations retain a
+separate shared resource identity; a guest operation does not automatically reserve its host simply
+because the VM lives there. Central admission owns these rules, not per-command lists of descendants
+to inspect.
+
+Adding enum values to the current exact-key repository is insufficient. Enable finer claims only
+with the corresponding schema, atomic conflict checks and compatibility transition for existing
+coarse claims and callers. Until then, callers retain coarse VM exclusion rather than introducing
+apparently independent keys that bypass it. Do not build unused hierarchy tables or a generic lock
+engine in this increment.
+
+Operation ownership ends at the operation's proved completion, not automatically at the end of all
+work it started. The #377 follow-up must separately define lifetime claims for attached consoles and
+running sessions, including the VM-upgrade-versus-attached-console case. Lock listing and explicit
+force-unlock are also follow-up work: removing a row cannot stop remote work or prove quiescence, so
+an override must not be presented as safe recovery. The
+[plan](plan.md#hierarchical-coordination-follow-up-377) lists these exclusions and the final
+lockfile obligation.
+
 ### SSH-backed VM platform access
 
 SSH can reach a platform host to run management tools, not only a guest to run a workload. Reuse the
@@ -260,17 +324,22 @@ requirements and the distinction between creating an approved root and mutating 
 
 Enforcement has two parts: reject known policy violations before dispatch, and enforce safe object
 resolution and mutation inside the destination-side trusted helper. An adapter optimization cannot
-bypass either. The file LLD must prove link/race confinement on the supported guest and host
-substrates, including trusted ancestors and mount assumptions; it cannot substitute a local path
-prefix check or a check-then-shell-command sequence. Internal scratch, locks and publication names
-have narrowly defined core authority, separate from public mutation grants. No caller can redirect
-these helpers to an arbitrary destination or widen access by requesting elevation.
+bypass either. The file LLD must prove safe object handling on the supported guest and host
+substrates within the [operator's threat boundary](frd.md#file-safety-and-guest-runtime-rulings):
+untrusted requests and observed unsafe objects are refused; malicious target-user processes are not
+contained. A local path prefix check or a check-then-shell-command sequence is insufficient.
+Internal scratch and publication names have narrowly defined core authority, separate from public
+mutation grants. No caller can redirect these helpers to an arbitrary destination or widen access by
+requesting elevation.
 
 Structured operations implement a specified data transformation and protected read/modify/publish
 sequence. Internal reads do not grant content disclosure. All cooperating mutation paths share the
-chosen serialization protocol; external writer limits must be explicit. Atomic rename does not
-supply conflict detection. Preserve required metadata or refuse, and carry changed/unchanged,
-conflict, partial and uncertain outcomes without leaking document contents.
+database-level operation ownership; nested file exchanges serialize within that operation and
+external writer limits remain explicit. The core owns admission and recovery, not the carrier or a
+machine-wide destination lock. Uncertain remote work retains conflicting operation ownership until
+reconciled; loss of the local connection does not release it. Atomic rename does not supply conflict
+detection. Preserve required metadata or refuse, and carry changed/unchanged, conflict, partial and
+uncertain outcomes without leaking document contents.
 
 This is a file API boundary, not confinement of arbitrary exec or hostile in-process plugins. Review
 allowed locations for execution-bearing contents; use narrower resource operations when needed
@@ -285,11 +354,13 @@ native carriers deliver prepared control operations; neither owns a detached-job
 [lifecycle design](execution-lifecycle-lld.md) replaces the earlier process-group-wrapper proposal
 and maps the requirements from #770 without editing that effort's artifacts.
 
-Core-owned profiles add guarantees: DIRECT provides ordinary execution semantics, MANAGED adds owned
-workload boundaries and whole-boundary stop, and proposed CONTAINED adds reviewed resistance to
-escape and indirect relaunch. Linux managed execution uses a system-owned systemd service/cgroup
-created before workload code starts. The lifecycle profile table defines the guarantees and their
-limits; a future sandbox or jail must prove every inherited guarantee before satisfying a profile.
+Core-owned profiles add guarantees: DIRECT provides ordinary execution semantics and MANAGED adds
+owned workload boundaries and whole-boundary stop for ordinary descendants. The
+[operator's threat boundary](frd.md#file-safety-and-guest-runtime-rulings) excludes malicious
+target-user process containment; this delivery does not implement or advertise a CONTAINED profile.
+Linux managed execution uses a system-owned systemd service/cgroup created before workload code
+starts. The lifecycle profile table defines the guarantees and their limits; a future sandbox or
+jail must prove every inherited guarantee before satisfying a profile.
 
 Profiles are explicitly requested and independently granted. Missing authority refuses; missing
 mechanics refuses distinctly. Neither permits a weaker fallback. Required core bootstrap/recovery
@@ -301,11 +372,13 @@ I/O/evidence. A wait timeout is not stop. Stop verifies ownership and descendant
 the main PID's exit. References survive connections, but require newly authorized targets for later
 observation. Retention and abandoned-work cleanup remain the resource owner's responsibility.
 
-Platform power lifetime remains separate. WSL2 holds, non-systemd macOS host jobs and early
-bootstrap need their own measured acceptance cases; required operations cannot be made optional or
-relabeled as weaker profiles to pass. The lifecycle proof gates include lost launch acknowledgment,
-observer loss, anchor death, stale identity, descendant cleanup and containment escape paths. The
-accepted buffered PoC does not establish those guarantees.
+Platform power lifetime remains separate. WSL2 holds, platform-owned macOS host workflows and early
+bootstrap need their own measured acceptance cases. Mac hosts do not inherit a blanket guest MANAGED
+requirement; platforms own resource lifecycle and recovery without a new weak profile or a
+hostile-platform isolation claim. Required operations cannot simply be dropped. The guest lifecycle
+proof gates include lost launch acknowledgment, observer loss, anchor death, stale identity,
+descendant cleanup and containment escape paths. The accepted buffered PoC does not establish those
+guarantees.
 
 ## RunContext integration
 

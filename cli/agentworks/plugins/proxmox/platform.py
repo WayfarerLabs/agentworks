@@ -7,12 +7,19 @@ import sys
 import time
 import urllib.parse
 import uuid
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
+from pathlib import Path
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self
 
 from pydantic import Field, model_validator
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.base import (
+    ProviderLocatorObservation,
+    ProviderLocatorUnavailable,
+    ProvisionRequest,
+    ProvisionResult,
+    VMPlatform,
+)
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
@@ -20,14 +27,13 @@ from agentworks.capabilities.vm_platform.debian_release import (
 )
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import ProvisioningError, StateError
+from agentworks.errors import ConfigError, ProvisioningError, StateError
 from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
 from agentworks.plugins.proxmox.teardown import (
     rollback_create_on_interrupt,
     rollback_partial_create,
     stop_and_delete_vm,
 )
-from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
 from agentworks.schema import AgwModel, NonEmptyStr, PositiveInt, SecretRef
 from agentworks.topics import TopicProse
 
@@ -37,6 +43,9 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution.binding import NativeExecutionBinding
+    from agentworks.execution.carrier import Deadline
+    from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
 
 
 def _warn_bootstrap_file_residue() -> None:
@@ -96,6 +105,16 @@ class ProxmoxConfig(AgwModel):
     """Whether to verify the cluster's TLS certificate. Write booleans
     unquoted; quoted strings such as ``"no"`` are invalid."""
 
+    ca_bundle: NonEmptyStr | None = Field(default=None, examples=["~/.config/agentworks/proxmox-ca.pem"])
+    """Optional workstation PEM CA bundle for the cluster. Omission uses
+    normal system trust."""
+
+    @model_validator(mode="after")
+    def _validate_tls_trust(self) -> Self:
+        if self.ca_bundle is not None and not self.verify_ssl:
+            raise ValueError("ca_bundle cannot be combined with verify_ssl: false")
+        return self
+
     @model_validator(mode="before")
     @classmethod
     def _adapt_legacy_bookworm_template(cls, value: object) -> object:
@@ -121,7 +140,7 @@ class ProxmoxConfig(AgwModel):
 class ProxmoxPlatform(VMPlatform):
     """Runs VMs on a Proxmox VE cluster."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "proxmox"
     description: ClassVar[str] = "Proxmox VE cluster VMs (clone + cloud-init)"
     config_model: ClassVar[type[ProxmoxConfig]] = ProxmoxConfig
@@ -195,12 +214,42 @@ class ProxmoxPlatform(VMPlatform):
             use=LineOrientedSecretUse.PROXMOX_API,
             secret_name=self.config.token_secret,
         )
-        return ProxmoxAPI(
-            api_url=self.config.api_url,
-            token_id=self.config.token_id,
-            token_secret=token_value,
-            verify_ssl=self.config.verify_ssl,
-        )
+        ca_bundle = self._ca_bundle()
+        try:
+            api = ProxmoxAPI(
+                api_url=self.config.api_url,
+                token_id=self.config.token_id,
+                token_secret=token_value,
+                verify_ssl=self.config.verify_ssl,
+                ca_bundle=ca_bundle,
+            )
+        except (OSError, ValueError):
+            api = None
+        if api is None:
+            raise ConfigError(
+                f"Proxmox CA bundle for vm-site '{self.site_name}' could not be loaded",
+                entity_kind="vm-site",
+                entity_name=self.site_name,
+                hint=f"Check the ca_bundle path and PEM contents: {ca_bundle}",
+            )
+        return api
+
+    def _ca_bundle(self) -> Path | None:
+        configured = self.config.ca_bundle
+        if configured is None:
+            return None
+        try:
+            expanded = Path(configured).expanduser()
+        except RuntimeError:
+            expanded = None
+        if expanded is None:
+            raise ConfigError(
+                f"Proxmox CA bundle for vm-site '{self.site_name}' could not be resolved",
+                entity_kind="vm-site",
+                entity_name=self.site_name,
+                hint=f"Check the ca_bundle path: {configured}",
+            )
+        return expanded
 
     def _api(self, ctx: RunContext) -> ProxmoxAPI:
         """The op client, built on first need from the context's scoped
@@ -404,12 +453,15 @@ class ProxmoxPlatform(VMPlatform):
                     provisioning_packages=PROVISIONING_PACKAGES,
                     tailscale_auth_key=request.tailscale_auth_key,
                     hostname=request.hostname,
+                    instance_marker=request.instance_marker,
                     swap=request.swap_gib,
                 )
                 tailscale_ip = self._run_bootstrap_via_agent(node, newid, bootstrap, ctx)
                 if not tailscale_ip:
                     raise ProvisioningError("Proxmox bootstrap did not return a Tailscale IP")
                 output.detail(f"Tailscale IP: {tailscale_ip}")
+
+                from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
 
                 target = ProxmoxExecTransport(
                     self._api(ctx),
@@ -493,12 +545,70 @@ class ProxmoxPlatform(VMPlatform):
         config: Config | None = None,
     ) -> ProxmoxExecTransport:
         """Build the VM's Tailscale-independent QGA execution channel."""
+        from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
+
         del config
         return ProxmoxExecTransport(
             self._api(ctx),
             node=self._vm_node(vm),
             vmid=self._vmid(vm),
             admin_username=vm.admin_username,
+        )
+
+    def observe_provider_locator(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        deadline: Deadline,
+    ) -> ProviderLocatorObservation:
+        """PVE exposes no stable cluster namespace for an opaque locator."""
+        del vm, ctx, deadline
+        return ProviderLocatorUnavailable()
+
+    def resolve_native_execution_binding(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        deadline: Deadline,
+        config: Config | None = None,
+    ) -> NativeExecutionBinding:
+        """Bind verified QGA delivery without probing or constructing legacy execution."""
+        from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+        from agentworks.execution.binding import NativeExecutionBinding
+        from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
+        from agentworks.secrets.line_safety import (
+            LineOrientedSecretUse,
+            require_line_safe_secret,
+        )
+
+        del deadline, config
+        if not self.config.verify_ssl:
+            raise ConfigError(
+                f"Native execution for vm-site '{self.site_name}' requires TLS certificate verification",
+                entity_kind="vm-site",
+                entity_name=self.site_name,
+                hint="Enable verify_ssl and configure ca_bundle when the cluster CA is not in system trust.",
+            )
+        token_name = self.config.token_secret
+        token = require_line_safe_secret(
+            ctx.secret(token_name),
+            use=LineOrientedSecretUse.PROXMOX_API,
+            secret_name=token_name,
+        )
+        connection = ProxmoxConnection(
+            self.config.api_url,
+            self._vm_node(vm),
+            self._vmid(vm),
+            self.config.token_id,
+            token,
+            ca_bundle=self._ca_bundle(),
+        )
+        return NativeExecutionBinding(
+            ProxmoxCarrier(connection),
+            "root",
+            RuntimeSelection(RuntimeTargetOS.LINUX),
         )
 
     # -- Helpers ---------------------------------------------------------------

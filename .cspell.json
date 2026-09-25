@@ -186,6 +186,7 @@
     "setdefault",
     "setenv",
     "setgid",
+    "setpriv",
     "setuid",
     "sgid",
     "shai",

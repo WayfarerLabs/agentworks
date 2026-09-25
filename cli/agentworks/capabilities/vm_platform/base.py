@@ -18,7 +18,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from agentworks.capabilities.base import Capability, idempotent_op
-from agentworks.errors import ProvisioningError
+from agentworks.errors import LimitExceededError, ProvisioningError, StateError, ValidationError
+from agentworks.execution.carrier import Deadline
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -28,7 +29,68 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow, VMStatus
     from agentworks.debian import DebianRelease
+    from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.transports import ExecTransport
+
+
+MAX_PROVIDER_LOCATOR_BYTES = 4096
+"""Largest UTF-8 provider locator token accepted at the platform boundary."""
+
+
+@dataclass(frozen=True)
+class ProviderLocator:
+    """Opaque, provider-owned locator for one live VM.
+
+    This validates plugin-provided data at the platform boundary. Core may
+    compare or bind this token, but never parses or normalizes it.
+    """
+
+    token: str
+
+    def __post_init__(self) -> None:
+        if type(self.token) is not str or not self.token or "\0" in self.token:
+            raise ValidationError("Provider locator token must be a non-empty non-NUL string")
+        try:
+            encoded = self.token.encode("utf-8")
+        except UnicodeEncodeError as error:
+            raise ValidationError("Provider locator token must be UTF-8 encodable") from error
+        if len(encoded) > MAX_PROVIDER_LOCATOR_BYTES:
+            raise ValidationError(f"Provider locator token must be at most {MAX_PROVIDER_LOCATOR_BYTES} UTF-8 bytes")
+
+
+@dataclass(frozen=True)
+class ProviderLocatorUnavailable:
+    """A platform deliberately cannot provide a provider locator.
+
+    This is not target-presence evidence. A platform may return it without a
+    provider lookup; an attempted lookup instead raises its typed absence or
+    provider failure.
+    """
+
+
+ProviderLocatorObservation = ProviderLocator | ProviderLocatorUnavailable
+"""One provider-locator observation, or an explicit platform inability."""
+
+
+def provider_locator_remaining(deadline: Deadline, *, vm_name: str) -> float:
+    """Return the positive remaining bounded locator-observation budget.
+
+    SDK and socket timeouts should use this as their best-effort timeout, but
+    cannot preempt every provider call. Call again after provider I/O so a
+    late result is rejected rather than returned as timely.
+    """
+
+    if type(deadline) is not Deadline or deadline.expires_at is None:
+        raise ValidationError("Provider locator observation requires a finite Deadline")
+    remaining = deadline.remaining()
+    assert remaining is not None
+    if remaining <= 0:
+        raise LimitExceededError(
+            f"Provider locator observation deadline expired for VM '{vm_name}'",
+            entity_kind="vm",
+            entity_name=vm_name,
+        )
+    return remaining
 
 
 class BootstrapProgress(Protocol):
@@ -77,6 +139,10 @@ class ProvisionRequest:
     # bootstrap paths and tailscaled picks it up as the node name.
     hostname: str
     system_slug: str | None
+    # Core generates this once before provider dispatch and retains it on the
+    # provisional VM row. Platforms pass it unchanged into their shared
+    # create-time bootstrap.
+    instance_marker: str
     admin_username: str
     ssh_public_key: str
     # Path to the operator's SSH private key when a platform's create path
@@ -346,6 +412,54 @@ class VMPlatform(Capability):
         ``config.operator.ssh_private_key`` for the public-IP path),
         distinct from the bound ``platform_config``.
         """
+
+    @abstractmethod
+    def observe_provider_locator(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        deadline: Deadline,
+    ) -> ProviderLocatorObservation:
+        """Read this VM's opaque provider locator, or declare it unavailable.
+
+        This is read-only and does not establish guest identity. Return
+        :class:`ProviderLocatorUnavailable` only when this platform
+        deliberately cannot observe a locator, possibly without a provider
+        lookup. Once an implementation attempts observation, confirmed target
+        absence and provider failures must raise their existing typed errors,
+        never become ``Unavailable``.
+
+        ``deadline`` is one finite caller-owned observation budget. Call
+        :func:`provider_locator_remaining` before provider I/O to derive a
+        best-effort SDK or socket timeout, and again before returning to reject
+        a late result. Such timeouts are not magical preemption of a provider
+        call.
+        """
+
+    def resolve_native_execution_binding(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        deadline: Deadline,
+        config: Config | None = None,
+    ) -> NativeExecutionBinding:
+        """Resolve this platform's required independent native carrier binding.
+
+        Resolution is an explicit bounded preparation operation. Providers may
+        perform endpoint reads within ``deadline``; they must not defer those
+        reads to the returned binding or implicitly open a route. The concrete
+        default keeps existing platform implementations usable during additive
+        delivery, but calling an unfinished hook fails rather than treating
+        native execution as optional.
+        """
+        del vm, ctx, deadline, config
+        raise StateError(
+            f"VM platform '{self.name}' has not implemented its native execution binding",
+            entity_kind="vm-platform",
+            entity_name=self.name,
+        )
 
     def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op
         """Hook called once the VM's Tailscale node is up during create.

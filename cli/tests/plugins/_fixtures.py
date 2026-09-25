@@ -43,7 +43,12 @@ from agentworks.capabilities.secret_backend import (
     SecretSourceClient,
     TtyInteractionAccess,
 )
-from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.base import (
+    ProviderLocatorObservation,
+    ProvisionRequest,
+    ProvisionResult,
+    VMPlatform,
+)
 from agentworks.plugins import Plugin
 from agentworks.resources.graph import Readiness
 from agentworks.schema import AgwModel, AgwRootModel
@@ -51,6 +56,7 @@ from agentworks.schema import AgwModel, AgwRootModel
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.db import VMRow, VMStatus
+    from agentworks.execution.carrier import Deadline
     from agentworks.transports import ExecTransport, Transport
 
 
@@ -95,7 +101,7 @@ class ConformingVMPlatform(VMPlatform):
     Subclasses add ``name`` / ``description``.
     """
 
-    contract_version = 1
+    contract_version = 2
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
@@ -120,6 +126,15 @@ class ConformingVMPlatform(VMPlatform):
         raise NotImplementedError
 
     def native_transport(self, vm: VMRow, ctx: RunContext, *, config: object | None = None) -> ExecTransport:
+        raise NotImplementedError
+
+    def observe_provider_locator(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        deadline: Deadline,
+    ) -> ProviderLocatorObservation:
         raise NotImplementedError
 
 

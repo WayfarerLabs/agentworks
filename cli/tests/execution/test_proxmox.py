@@ -156,7 +156,7 @@ def test_malformed_wire_envelope_is_not_execution_evidence(monkeypatch: pytest.M
 
 def test_wire_bounds_response_before_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agentworks.execution.carriers._proxmox_http._MAX_RESPONSE_BYTES", 10)
-    response = io.BytesIO(b'{"data":{"pid":42}}')
+    response = io.BytesIO(b"x" * 11)
     opener = MagicMock()
     opener.open.return_value = response
     monkeypatch.setattr(urllib.request, "build_opener", lambda *args: opener)
@@ -288,6 +288,37 @@ def execute(io: CarrierIO | None = None, deadline: Deadline | None = None):
     return ProxmoxCarrier(connection()).execute(
         PreparedInvocation(("/bin/true",)), io=io or CarrierIO(), deadline=deadline or Deadline(None)
     )
+
+
+def test_structural_validation_is_pure_and_execute_repeats_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    request = MagicMock()
+    monkeypatch.setattr(_ProxmoxWire, "request", request)
+    carrier = ProxmoxCarrier(connection())
+    invocation = PreparedInvocation(("/bin/true",))
+    valid = CarrierIO(input=FiniteInput(b"armored"))
+    carrier.validate(invocation, io=valid)
+    request.assert_not_called()
+    invalid = CarrierIO(input=FiniteInput(b"\xff"))
+    with pytest.raises(ValidationError):
+        carrier.validate(invocation, io=invalid)
+    with pytest.raises(ValidationError):
+        carrier.execute(invocation, io=invalid, deadline=Deadline(None))
+    request.assert_not_called()
+
+    original = ProxmoxCarrier._request_body
+    calls = 0
+
+    def counted(prepared: PreparedInvocation, selected: CarrierIO) -> bytes:
+        nonlocal calls
+        calls += 1
+        return original(prepared, selected)
+
+    monkeypatch.setattr(ProxmoxCarrier, "_request_body", staticmethod(counted))
+    report = carrier.execute(invocation, io=valid, deadline=Deadline.after(0))
+    assert report.dispatch is Dispatch.NOT_SENT
+    assert report.failure is Failure.DEADLINE
+    assert calls == 1
+    request.assert_not_called()
 
 
 @pytest.mark.parametrize("code", [0, 1, 255])
@@ -462,10 +493,43 @@ def test_unprepared_or_oversized_input_refused_before_effect(wire: MagicMock, pa
     wire.assert_not_called()
 
 
-def test_input_limit_does_not_count_bootstrap_argv(wire: MagicMock) -> None:
-    report = execute(CarrierIO(input=FiniteInput(b"x" * 65_536)))
-    assert report.completion == ExitStatus(code=0)
-    assert len(json.loads(wire.call_args_list[0].kwargs["body"])["input-data"]) == 65_536
+@pytest.mark.parametrize("extra_bytes", [0, 1])
+def test_complete_http_body_limit_includes_bootstrap_and_framing(wire: MagicMock, extra_bytes: int) -> None:
+    argv = ("/usr/bin/python3", "-c", 'print("fixed bootstrap")')
+    overhead = len(json.dumps({"command": argv, "input-data": ""}).encode("ascii"))
+    payload = b"x" * (65_536 - overhead + extra_bytes)
+    carrier = ProxmoxCarrier(connection())
+    invocation = PreparedInvocation(argv)
+    carrier_io = CarrierIO(input=FiniteInput(payload))
+    if extra_bytes:
+        with pytest.raises(ValidationError):
+            carrier.execute(invocation, io=carrier_io, deadline=Deadline(None))
+        wire.assert_not_called()
+    else:
+        report = carrier.execute(invocation, io=carrier_io, deadline=Deadline(None))
+        assert report.completion == ExitStatus(code=0)
+        body = wire.call_args_list[0].kwargs["body"]
+        assert len(body) == 65_536
+        assert json.loads(body)["input-data"].encode("ascii") == payload
+
+
+@pytest.mark.parametrize(
+    "argv,payload",
+    [
+        (("/bin/true",), b"x" * 65_536),
+        (("/bin/true",), b"\n" * 40_000),
+        (("/bin/true", "x" * 65_536), b""),
+        (("/bin/true", '"' * 40_000), b""),
+    ],
+)
+def test_http_limit_refuses_oversized_argv_or_escaped_input(
+    wire: MagicMock, argv: tuple[str, ...], payload: bytes
+) -> None:
+    with pytest.raises(ValidationError):
+        ProxmoxCarrier(connection()).execute(
+            PreparedInvocation(argv), io=CarrierIO(input=FiniteInput(payload)), deadline=Deadline(None)
+        )
+    wire.assert_not_called()
 
 
 def test_optional_features_are_passively_absent(wire: MagicMock) -> None:

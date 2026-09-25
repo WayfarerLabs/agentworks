@@ -12,9 +12,12 @@ from agentworks.execution.carrier import (
     CarrierIO,
     CarrierReport,
     ChannelFeatures,
+    Discard,
     Dispatch,
+    EndOfInput,
     ExitStatus,
     Failure,
+    FiniteInput,
     Provenance,
 )
 from agentworks.execution.carriers.ssh._io import output_retention, run_process
@@ -43,8 +46,16 @@ class SSHCarrier:
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        """Refuse unsupported shared I/O shapes without connection or process work."""
+        if not isinstance(io.input, EndOfInput | FiniteInput):
+            raise ValidationError("Buffered SSH requires EOF or finite input")
+        if not isinstance(io.output, Capture | Discard):
+            raise ValidationError("Buffered SSH requires captured or discarded output")
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
         """Validate locally, then spend the remaining original budget on one attempt."""
+        self.validate(invocation, io=io)
         if deadline.expired:
             return _not_sent(io, Failure.DEADLINE)
         try:

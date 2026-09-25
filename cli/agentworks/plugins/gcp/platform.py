@@ -4,12 +4,20 @@ from __future__ import annotations
 
 import contextlib
 import ipaddress
+import re
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.base import (
+    ProviderLocator,
+    ProviderLocatorObservation,
+    ProvisionRequest,
+    ProvisionResult,
+    VMPlatform,
+    provider_locator_remaining,
+)
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
@@ -18,7 +26,7 @@ from agentworks.capabilities.vm_platform.debian_release import (
 from agentworks.capabilities.vm_platform.ssh_exposure import config_allow_cidrs, operator_ssh_prefixes
 from agentworks.capabilities.vm_platform.tailscale_join import EphemeralTailscaleBootstrap
 from agentworks.db import VMStatus
-from agentworks.errors import AgentworksError, ConnectivityError, StateError
+from agentworks.errors import AgentworksError, ConnectivityError, NotFoundError, StateError
 from agentworks.plugins.gcp.auth import GcpClientCache
 from agentworks.plugins.gcp.bootstrap import (
     GCE_READINESS_COMMAND,
@@ -40,6 +48,7 @@ from agentworks.plugins.gcp.compute import (
     get_project,
     get_zone,
     live_external_ipv4,
+    provider_resource_id,
     require_instance_name_available,
     resolve_balanced_disk_type,
     resolve_debian_image,
@@ -81,11 +90,13 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution.carrier import Deadline
     from agentworks.transports import Transport
 
 
 _OPERATION_TIMEOUT_SECONDS = 300.0
 _RUNNING_TIMEOUT_SECONDS = 300.0
+_GCE_LOCATOR_COMPONENT = re.compile(r"[a-z0-9-]{1,63}$")
 
 
 @dataclass(frozen=True)
@@ -178,7 +189,7 @@ class _VMIdentity:
 class GCEPlatform(VMPlatform):
     """Runs VMs on Google Compute Engine with provider-ID-owned cleanup."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "gcp-gce"
     description: ClassVar[str] = "Google Compute Engine (project + zone)"
     config_model: ClassVar[type[GcpGCEConfig]] = GcpGCEConfig
@@ -306,6 +317,7 @@ class GCEPlatform(VMPlatform):
             provisioning_packages=PROVISIONING_PACKAGES,
             tailscale_auth_key=None,
             hostname=request.hostname,
+            instance_marker=request.instance_marker,
             swap=request.swap_gib,
         )
         startup_script = build_startup_script(bootstrap, instance_name=names.backend_name)
@@ -567,6 +579,54 @@ class GCEPlatform(VMPlatform):
     def display_backend_name(self, vm: VMRow) -> str:
         identity = _VMIdentity.from_row(vm)
         return f"{identity.instance_name}@{identity.zone}"
+
+    def observe_provider_locator(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        deadline: Deadline,
+    ) -> ProviderLocatorObservation:
+        """Read one owned GCE incarnation and return its provider namespace."""
+        metadata = vm.platform_metadata
+        project_id = metadata.get("project_id")
+        zone = metadata.get("zone")
+        instance_name = metadata.get("instance_name")
+        instance_id = metadata.get("instance_id")
+        if (
+            not isinstance(project_id, str)
+            or _GCE_LOCATOR_COMPONENT.fullmatch(project_id) is None
+            or not isinstance(zone, str)
+            or _GCE_LOCATOR_COMPONENT.fullmatch(zone) is None
+            or not isinstance(instance_name, str)
+            or _GCE_LOCATOR_COMPONENT.fullmatch(instance_name) is None
+            or not isinstance(instance_id, str)
+            or provider_resource_id(instance_id) != instance_id
+        ):
+            raise StateError(
+                f"VM '{vm.name}' has invalid GCE provider identity metadata",
+                entity_kind="vm",
+                entity_name=vm.name,
+                hint="restore the persisted GCE project, zone, and instance identities before retrying",
+            )
+        remaining = provider_locator_remaining(deadline, vm_name=vm.name)
+        instances = self._clients.client("instances", ctx)
+        current = read_owned_instance(
+            instances,
+            project_id=project_id,
+            zone=zone,
+            instance_name=instance_name,
+            resource_id=instance_id,
+            timeout=remaining,
+        )
+        if current is None:
+            raise NotFoundError(
+                f"GCE instance '{instance_name}' no longer exists",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        return ProviderLocator(f"gcp-gce:{project_id}:{zone}:{instance_id}")
 
     def native_transport(
         self,

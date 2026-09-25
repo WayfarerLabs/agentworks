@@ -715,6 +715,24 @@ def _validate_canonical_schema(
         )
 
 
+def _validate_consolidated_transport_schema(connection: sqlite3.Connection, version: int) -> None:
+    """Reject pre-release transport schemas that reused completed version numbers."""
+    if version not in (39, 40, 41):
+        return
+    try:
+        _validate_canonical_schema(
+            connection,
+            version,
+            source_kind="state database",
+            hint=(
+                "Restore a compatible backup or start with a fresh state database; "
+                "older branch-built transport schemas cannot be migrated automatically."
+            ),
+        )
+    except StateError as error:
+        raise StateError(str(error), entity_kind="database", hint=error.hint) from error
+
+
 def _read_schema_version(connection: sqlite3.Connection, *, source_kind: str) -> int:
     """Return the claimed Agentworks schema version from an open source."""
     entry = connection.execute("SELECT type FROM sqlite_master WHERE name = 'schema_version'").fetchone()

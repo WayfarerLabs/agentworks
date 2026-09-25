@@ -18,6 +18,7 @@ import shlex
 from dataclasses import dataclass, field
 
 from agentworks.capabilities.vm_platform.skel import BASHRC, ZSHRC
+from agentworks.vms.identity import VM_INSTANCE_MARKER_PATH, validate_vm_instance_marker
 
 # Canonical cloud-init drop-in that stops host-key regeneration on stop/start.
 # By default cloud-init may delete and regenerate /etc/ssh/ssh_host_* on some
@@ -107,6 +108,8 @@ cat > "$HOME_DIR/.zshrc" <<'AGW_ZSHRC_EOF'
 chown "$VM_USER:$VM_USER" "$HOME_DIR/.bashrc" "$HOME_DIR/.zshrc"
 chmod 644 "$HOME_DIR/.bashrc" "$HOME_DIR/.zshrc"
 echo "##SUCCESS## shell rc seeds installed"
+
+{instance_marker_step}
 
 # -- Step 2: Provisioning packages --
 echo "##STEP## Provisioning packages"
@@ -247,6 +250,71 @@ else
 fi
 """
 
+_INSTANCE_MARKER_INSTALLER_TEMPLATE = """\\
+set -euo pipefail
+
+# -- Step 1c: VM instance marker --
+# This marker belongs to the VM record, not to a template. A clone therefore
+# receives the marker generated for this create rather than inheriting its
+# source's value. Existing leaves are deliberately constrained: following a
+# symlink, replacing a non-regular leaf, or writing a multiply-linked file
+# creates an ownership ambiguity we do not need to support.
+echo "##STEP## VM instance marker"
+VM_INSTANCE_MARKER={instance_marker}
+MARKER_FILE={instance_marker_path}
+MARKER_DIR="$(dirname "$MARKER_FILE")"
+if [ -L "$MARKER_DIR" ]; then
+    echo "##ERROR## VM instance marker directory is a symlink"
+    exit 1
+fi
+if [ -e "$MARKER_DIR" ] && [ ! -d "$MARKER_DIR" ]; then
+    echo "##ERROR## VM instance marker directory is not a directory"
+    exit 1
+fi
+mkdir -p "$MARKER_DIR"
+chown root:root "$MARKER_DIR"
+chmod 0755 "$MARKER_DIR"
+if [ -L "$MARKER_FILE" ]; then
+    echo "##ERROR## VM instance marker path is a symlink"
+    exit 1
+fi
+if [ -e "$MARKER_FILE" ]; then
+    if [ ! -f "$MARKER_FILE" ]; then
+        echo "##ERROR## VM instance marker path is not a regular file"
+        exit 1
+    fi
+    LINK_COUNT="$(stat -c %h "$MARKER_FILE")" || {{
+        echo "##ERROR## could not inspect VM instance marker link count"
+        exit 1
+    }}
+    if [ "$LINK_COUNT" != 1 ]; then
+        echo "##ERROR## VM instance marker path has multiple links"
+        exit 1
+    fi
+fi
+printf '%s\\n' "$VM_INSTANCE_MARKER" > "$MARKER_FILE"
+chown root:root "$MARKER_FILE"
+chmod 0444 "$MARKER_FILE"
+echo "##SUCCESS## VM instance marker installed"
+"""
+
+
+def generate_instance_marker_installer(*, instance_marker: str) -> str:
+    """Render the fixed-path, creation-only VM marker installer."""
+    return _render_instance_marker_installer(
+        instance_marker=instance_marker,
+        marker_path=VM_INSTANCE_MARKER_PATH,
+    )
+
+
+def _render_instance_marker_installer(*, instance_marker: str, marker_path: str) -> str:
+    """Render a marker installer for the fixed production path or an isolated test path."""
+    instance_marker = validate_vm_instance_marker(instance_marker)
+    return _INSTANCE_MARKER_INSTALLER_TEMPLATE.format(
+        instance_marker=shlex.quote(instance_marker),
+        instance_marker_path=shlex.quote(marker_path),
+    )
+
 
 def generate_bootstrap_script(
     *,
@@ -256,6 +324,7 @@ def generate_bootstrap_script(
     tailscale_auth_key: str | None,
     hostname: str,
     swap: int,
+    instance_marker: str | None = None,
 ) -> str:
     """Generate the create-time bootstrap script with parameters baked in.
 
@@ -269,7 +338,14 @@ def generate_bootstrap_script(
     to hand, so a default here would be a second declaration of the
     system default, free to disagree with the first. It did: this
     parameter defaulted to 0 while ``ResolvedVMTemplate.swap`` is 4.
+
+    ``instance_marker=None`` omits installation for Lima's retained YAML and
+    for compatibility with a v1 external platform that already calls this
+    shared helper. Such a path cannot establish managed target identity.
     """
+    instance_marker_step = ""
+    if instance_marker is not None:
+        instance_marker_step = generate_instance_marker_installer(instance_marker=instance_marker)
     if tailscale_auth_key is not None:
         from agentworks.secrets.line_safety import (
             LineOrientedSecretUse,
@@ -286,6 +362,7 @@ def generate_bootstrap_script(
         provisioning_packages=shlex.quote(" ".join(provisioning_packages)),
         tailscale_auth_key=shlex.quote(tailscale_auth_key or ""),
         vm_hostname=shlex.quote(hostname),
+        instance_marker_step=instance_marker_step,
         swap=swap,
         ssh_preserve_path=SSH_PRESERVE_KEYS_PATH,
         ssh_preserve_content=SSH_PRESERVE_KEYS_CONTENT,

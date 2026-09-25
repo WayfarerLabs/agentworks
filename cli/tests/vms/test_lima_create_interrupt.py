@@ -73,6 +73,7 @@ def _request(*, tailscale_auth_key: str = "tskey-test") -> ProvisionRequest:
         debian_release=DebianRelease.TRIXIE,
         hostname="lima--myvm",
         system_slug=None,
+        instance_marker="0123456789abcdef0123456789abcdef",
         admin_username="agw",
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=Path("/dev/null"),
@@ -286,6 +287,17 @@ def test_interrupt_during_post_start_steps_cleans_up_too(
         LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
 
     assert exc.value is interrupt
+    assert _deletes(ran) == ["limactl delete --force myvm"]
+
+
+def test_marker_install_failure_cleans_up_created_instance(monkeypatch: pytest.MonkeyPatch) -> None:
+    failure = SSHError("marker install failed")
+    ran = _wire(monkeypatch, errors={"/bin/bash -s": failure})
+
+    with pytest.raises(SSHError) as caught:
+        LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
+
+    assert caught.value is failure
     assert _deletes(ran) == ["limactl delete --force myvm"]
 
 

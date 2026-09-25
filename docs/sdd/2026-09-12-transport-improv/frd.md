@@ -113,6 +113,108 @@ These rulings supersede the earlier single-increment cutover and permission-enfo
 R7/R9/R10 and their acceptance scenarios, not the final-state requirements. The response and staged
 acceptance gates are in the [migration strategy](migration-strategy.md#sequence-and-cutover-gates).
 
+On transport ownership of the shared cgroup/supervisor implementation and session adoption:
+
+> Yes, transport owns that implementation
+
+On investigation of an early Python prerequisite:
+
+> Investigate an early Python prerequisite (recommended)
+
+On the earlier session-cgroups PR:
+
+> And 770 has been closed with a note
+
+#### File safety and guest runtime rulings
+
+On adding Python to the guest provisioning package list:
+
+> So we're already requiring some apt packages as part of provisioning, right? We probably need to
+> put more structure around that, but if you're simply asking to put python3 in that list, all good.
+> Just please ensure you don't use anything that wouldn't be supported by Bookworm's python3.
+
+On general authorization:
+
+> Isn't #1 simply: (when security lands), things can't do what they're not authorized to do? Please
+> don't tell me you have special requirements/rules/logic around just this one narrow case.
+
+On keeping file safety small and preserving access semantics:
+
+> Ok. I'm glad #1 is general.
+>
+> And for #2, I agree but keep it smart/small/elegant. And for the atomic writes, please consider it
+> a requirement that the file end up as if it were written directly, including impact of
+> ACLs/perms/etc. I'm not an expert here but I feel like writing the temp file to the target
+> directory (with a conflict-free name) is the right move.
+>
+> And finally, what situation would an operation have more OS priv than the caller? That sounds like
+> a bad idea. Can we just do everything as the target user?
+
+On conservative support and refusal:
+
+> Yeah, honestly, do we really want atomic writes? And we should err on the side of caution across
+> the board. Refusing to write strange files (sym or hard links, etc.) is perfectly reasonable,
+> especially at first. And I'd prefer that to a bunch of complexity that we'll never use.
+
+On accepting conservative atomic whole-file replacement with defined metadata semantics, and
+excluding malicious target-user process containment:
+
+> Perfect. Agreed.
+>
+> And then my general assumption is that a malicious process running as a given user will be able to
+> pwn any other process owned by that user as well as the files that user has access to. Maybe
+> cgroups give us something here (can we block process inspection outside the group?) but more is
+> going to require proper jails, which we're not doing.
+>
+> So, no, we shouldn't be protecting against a malicious target user process. That's already game
+> over for that user.
+
+<!-- cspell:ignore pwn -->
+
+On requiring a preinstalled Python 3.11 or newer, compatible with the guest helper, on SSH-accessed
+macOS platform hosts without implicit installation:
+
+> Require preinstalled Python 3
+
+On prerequisite detection and diagnostics:
+
+> Just make sure you detect when python isn't present (or is the system-default xcode shim) and
+> report that very cleanly.
+
+#### Platform authority and operation coordination ruling, 2026-09-20
+
+On the VM-host threat boundary and database-level coordination:
+
+> The only thing running stuff on VM hosts are VM platforms. And they inherently have the ability to
+> do just about anything. Something on the VM host is not going to stop a malicious platform, right?
+> Or am I missing something?
+>
+> And then I've long wanted to do db-level locks to prevent ops from conflicting with each other. I
+> would hope that takes care of most concerns. Using conflict-free filenames should then solve for
+> most of the rest. What do we really need from the file-level locking?
+
+On the recommendation to make database-level operation coordination primary, retain unique scratch
+names and conservative file checks, and require a concrete remaining race to justify any
+destination-side lock rather than imposing blanket machine-wide locking and privileged host setup:
+
+> I agree with your recommendations. Make it happen please.
+
+The [file coordination design](file-operations-lld.md#cooperating-writers-and-honest-limits) and
+[platform-host lifecycle](execution-lifecycle-lld.md#placement-host-resource-lifetime) implement
+this ruling. Host-side cooperation is not containment of a malicious platform. The existing
+exclusion of malicious target-user processes and the guest MANAGED lifecycle requirements remain.
+
+#### Hierarchical coordination follow-up ruling, 2026-09-20
+
+> Ok. Please take a look at #377. Done properly, we should be able to expand this to the other
+> levels, complete with the hierarchy (workspace locks are aware of the VM locks, etc.).
+>
+> You don't have to implement all of this but please leave room in the design and clearly indicate
+> what you didn't do in the SDD plan and lockfile.
+
+The [coordination extension design](hla.md#operation-coordination-and-hierarchical-extension) and
+[explicit follow-up scope](plan.md#hierarchical-coordination-follow-up-377) record the response.
+
 ### Implementation scope
 
 In scope for the eventual implementation:

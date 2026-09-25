@@ -33,7 +33,7 @@ from urllib.parse import urlparse
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform import ProvisionRequest, wsl2
+from agentworks.capabilities.vm_platform import ProvisionRequest, wsl2, wsl2_bootstrap
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.debian import DebianRelease
 from agentworks.errors import StateError
@@ -55,6 +55,7 @@ def _request() -> ProvisionRequest:
         debian_release=DebianRelease.TRIXIE,
         hostname="vm1",
         system_slug=None,
+        instance_marker="0123456789abcdef0123456789abcdef",
         admin_username="agw",
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=None,
@@ -117,7 +118,7 @@ def _wire(
     monkeypatch.setattr(wsl2, "_powershell", _fake_powershell)
     monkeypatch.setattr(wsl2, "_download_debian_rootfs", lambda tarball, *, tag: None)
     monkeypatch.setattr(WSL2Platform, "_distro_exists", staticmethod(lambda name: False))
-    monkeypatch.setattr(wsl2, "run_wsl2_bootstrap", lambda *args, **kwargs: "100.64.0.7")
+    monkeypatch.setattr(wsl2_bootstrap, "run_wsl2_bootstrap", lambda *args, **kwargs: "100.64.0.7")
     return calls
 
 
@@ -131,11 +132,11 @@ def test_success_runs_primary_bootstrap_before_create_returns(monkeypatch: pytes
     _wire(monkeypatch)
     request = _request()
     bootstrap = MagicMock(return_value="100.64.0.7")
-    monkeypatch.setattr(wsl2, "run_wsl2_bootstrap", bootstrap)
+    monkeypatch.setattr(wsl2_bootstrap, "run_wsl2_bootstrap", bootstrap)
 
     result = WSL2Platform("wsl2", {}).create(request, RunContext())
 
-    assert WSL2Platform.contract_version == 1
+    assert WSL2Platform.contract_version == 2
     assert result.tailscale_ip == "100.64.0.7"
     bootstrap.assert_called_once()
     assert bootstrap.call_args.kwargs == {
@@ -143,6 +144,7 @@ def test_success_runs_primary_bootstrap_before_create_returns(monkeypatch: pytes
         "ssh_public_key": "ssh-ed25519 AAAA test",
         "tailscale_auth_key": "tskey-test",
         "hostname": "vm1",
+        "instance_marker": "0123456789abcdef0123456789abcdef",
         "swap_gib": 0,
         "progress": request.progress,
     }
@@ -151,7 +153,7 @@ def test_success_runs_primary_bootstrap_before_create_returns(monkeypatch: pytes
 def test_primary_bootstrap_failure_cleans_up_and_reraises(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _wire(monkeypatch)
     failure = RuntimeError("bootstrap exploded")
-    monkeypatch.setattr(wsl2, "run_wsl2_bootstrap", MagicMock(side_effect=failure))
+    monkeypatch.setattr(wsl2_bootstrap, "run_wsl2_bootstrap", MagicMock(side_effect=failure))
 
     with pytest.raises(RuntimeError) as exc:
         WSL2Platform("wsl2", {}).create(_request(), RunContext())
@@ -184,7 +186,7 @@ def test_interrupt_during_primary_bootstrap_cleans_up_and_reraises_the_original(
     interrupt propagates for the caller's row unwind (identity pin)."""
     interrupt = KeyboardInterrupt("first")
     calls = _wire(monkeypatch)
-    monkeypatch.setattr(wsl2, "run_wsl2_bootstrap", MagicMock(side_effect=interrupt))
+    monkeypatch.setattr(wsl2_bootstrap, "run_wsl2_bootstrap", MagicMock(side_effect=interrupt))
 
     with pytest.raises(KeyboardInterrupt) as exc:
         WSL2Platform("wsl2", {}).create(_request(), RunContext())
@@ -203,7 +205,7 @@ def test_second_interrupt_abandons_cleanup_loudly(
     command, and the ORIGINAL interrupt still propagates."""
     interrupt = KeyboardInterrupt("first")
     calls = _wire(monkeypatch, errors={"--unregister": KeyboardInterrupt("second")})
-    monkeypatch.setattr(wsl2, "run_wsl2_bootstrap", MagicMock(side_effect=interrupt))
+    monkeypatch.setattr(wsl2_bootstrap, "run_wsl2_bootstrap", MagicMock(side_effect=interrupt))
 
     with pytest.raises(KeyboardInterrupt) as exc:
         WSL2Platform("wsl2", {}).create(_request(), RunContext())

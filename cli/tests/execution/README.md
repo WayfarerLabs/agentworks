@@ -14,6 +14,11 @@ discovers and imports every supplied execution module, so a combined checkout ex
 automatically and any failed import fails the check. A standalone checkout does not claim coverage
 of an absent carrier.
 
+`test_target_identity.py` exercises the private owned identity composer with the real local account
+helper and synthetic identity, refusal, deadline, termination and operation-coordination cases. Its
+sudo and demotion checks validate plan selection only; they do not invoke those transitions or
+establish destination acceptance.
+
 ## Combined-tree integration run
 
 The integration tester can merge pinned transport and SSH commits into a disposable local branch.
@@ -66,9 +71,9 @@ initial slice refuses login/interactive startup. MacOS/Windows workstations, oth
 identity/elevation, live streams and terminals require their own evidence. An affected code or
 contract change requires retesting the corresponding observations.
 
-The eight vectors use fixed interpreters, not `Shell.user_default()`. Also exercise the supported
+The eight vectors use fixed interpreters, not `Shell.USER_DEFAULT`. Also exercise the supported
 destination-account default shell through each carrier. Independently record the destination UID and
-account-shell path, then prepare a harmless `/bin/cat` script with `Shell.user_default()`, finite
+account-shell path, then prepare a harmless `/bin/cat` script with `Shell.USER_DEFAULT`, finite
 binary stdin and `env={"SHELL": "/does/not/exist"}`. Require byte-exact output, complete guest
 streams, no framing/bootstrap failure, observed completion zero and no carrier failure. The invalid
 environment hint must not replace the real account lookup. The buffered proof supports sh/bash
@@ -77,8 +82,9 @@ remain distinct from the requested script interpreter and need separately scoped
 
 Record exact guest Bash/coreutils versions, not just executable presence. Locally, the fault tests
 have measured Bash 5.2.15; a documented 5.1 minimum is not evidence of a 5.1 run. Near-limit input
-checks must account for the complete encoded envelope: 262,144 bytes at preparation, 65,536 for
-native delivery, shared among all request fields. Record pre-dispatch refusal separately from
-provider acceptance, and preserve actual boundary values rather than generalizing one raw-stdin
-example. Close the report with independent process, provider-record and test-resource cleanup
-observations, including the disposition of any unfinished provisioning from the run.
+checks must account for the complete encoded envelope: 262,144 bytes at preparation. Native delivery
+has separate 65,536-byte limits for its input field and complete serialized HTTP body, including
+bootstrap argv and JSON escaping. Record pre-dispatch refusal separately from provider acceptance,
+and preserve actual boundary values rather than generalizing one raw-stdin example. Close the report
+with independent process, provider-record and test-resource cleanup observations, including the
+disposition of any unfinished provisioning from the run.

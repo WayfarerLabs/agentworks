@@ -1,4 +1,4 @@
-"""Buffered invocation boundary for independent carrier implementations.
+"""Invocation boundary for independent carrier implementations.
 
 Reports describe channel observations, not proof that a bootstrap or application ran.
 Payload fields deliberately have no diagnostic representation. No type imports
@@ -89,6 +89,20 @@ class FiniteInput:
             raise ValidationError("Finite input must be bytes")
 
 
+class ByteSource(Protocol):
+    """Borrowed nonblocking byte source; None means temporarily stalled."""
+
+    def try_read(self, limit: int) -> bytes | None: ...
+
+
+@dataclass(frozen=True)
+class LiveInput:
+    """Borrow one bounded source for the duration of a carrier attempt."""
+
+    source: ByteSource = field(repr=False)
+    sensitive: bool = False
+
+
 @dataclass(frozen=True)
 class Capture:
     """Maximum retained bytes per carrier stream, not a truncation permission."""
@@ -105,22 +119,35 @@ class Discard:
     """Observe execution without retaining stream contents."""
 
 
+class ByteSink(Protocol):
+    """Borrowed nonblocking byte sink; None means temporarily stalled."""
+
+    def try_write(self, data: memoryview) -> int | None: ...
+
+
+@dataclass(frozen=True)
+class SinkOutput:
+    """Deliver raw carrier streams without retaining them in the report."""
+
+    stdout: ByteSink = field(repr=False)
+    stderr: ByteSink = field(repr=False)
+    require_live: bool = False
+
+
 @dataclass(frozen=True)
 class CarrierIO:
-    """The sole input owner for the buffered proof subset of the carrier API.
+    """The sole input owner and borrowed-output selection for one attempt."""
 
-    Live streams and terminals are deliberately not accepted by this slice.
-    They require a proven cancellation/ownership contract before implementation.
-    """
-
-    input: EndOfInput | FiniteInput = field(default_factory=EndOfInput)
-    output: Capture | Discard = field(default_factory=Capture)
+    input: EndOfInput | FiniteInput | LiveInput = field(default_factory=EndOfInput)
+    output: Capture | Discard | SinkOutput = field(default_factory=Capture)
     sensitive: bool = False
 
     def __post_init__(self) -> None:
-        if not isinstance(self.input, EndOfInput | FiniteInput) or not isinstance(self.output, Capture | Discard):
-            raise ValidationError("The buffered carrier requires finite input and capture or discard output")
-        if isinstance(self.input, FiniteInput) and self.input.sensitive:
+        if not isinstance(self.input, EndOfInput | FiniteInput | LiveInput) or not isinstance(
+            self.output, Capture | Discard | SinkOutput
+        ):
+            raise ValidationError("Carrier I/O requires one supported input and output mode")
+        if isinstance(self.input, FiniteInput | LiveInput) and self.input.sensitive:
             object.__setattr__(self, "sensitive", True)
 
 
@@ -138,6 +165,7 @@ class Provenance(StrEnum):
 
 class Retention(StrEnum):
     CAPTURED = "captured"
+    DELIVERED = "delivered"
     DISCARDED = "discarded"
     SUPPRESSED = "suppressed"
 
@@ -170,7 +198,7 @@ class ExitStatus:
 
 @dataclass(frozen=True)
 class CapturedOutput:
-    """Retained raw carrier bytes with independent completeness and provenance."""
+    """Raw carrier stream disposition, completeness, and captured bytes if any."""
 
     data: bytes = field(default=b"", repr=False)
     complete: bool = False
@@ -205,5 +233,9 @@ class Carrier(Protocol):
 
     @property
     def features(self) -> ChannelFeatures: ...
+
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        """Check deterministic structural limits without discovery or effects."""
+        ...
 
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport: ...

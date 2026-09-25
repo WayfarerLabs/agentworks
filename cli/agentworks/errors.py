@@ -5,6 +5,8 @@ Errors are categorized by *kind* (what went wrong) rather than by source module:
 - NotFoundError, AlreadyExistsError, ValidationError, StateError,
   AuthorizationError, SecretUnavailableError: clean domain errors that render
   as a one-liner with no traceback.
+- LimitExceededError, ConflictError, PartialMutationError,
+  UncertainOutcomeError: closed operation outcomes with bounded safe facts.
 - ConnectivityError, ExternalError: failures in external systems where the
   full traceback is preserved to the error log for diagnosis.
 - ConfigError: config file validation; rendered cleanly.
@@ -21,10 +23,32 @@ Business logic must never import typer, call sys.exit, or format output.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
+
+
+@dataclass(frozen=True, slots=True)
+class ErrorDetails:
+    """Closed diagnostic facts selected by the operation that raised an error.
+
+    ``effect`` conveys an independently proved safe effect. It does not change
+    the exception class's failure semantics and ``None`` does not mean that the
+    operation proved the target unchanged.
+    """
+
+    phase: StrEnum
+    reason: StrEnum
+    effect: StrEnum | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.phase, StrEnum) or not isinstance(self.reason, StrEnum):
+            raise TypeError("error details require closed enum phase and reason facts")
+        if self.effect is not None and not isinstance(self.effect, StrEnum):
+            raise TypeError("error details effect must be a closed enum fact")
 
 
 class AgentworksError(Exception):
@@ -37,11 +61,15 @@ class AgentworksError(Exception):
         entity_kind: str | None = None,
         entity_name: str | None = None,
         hint: str | None = None,
+        details: object = None,
     ) -> None:
+        if details is not None and not isinstance(details, ErrorDetails):
+            raise TypeError("error details must use the closed details type")
         super().__init__(message)
         self.entity_kind = entity_kind
         self.entity_name = entity_name
         self.hint = hint
+        self.details: ErrorDetails | None = details
 
 
 class TokenRejectedError(AgentworksError):
@@ -139,6 +167,69 @@ class BusyStateError(StateError):
 
 class ConnectivityError(AgentworksError):
     """Network or transport-level failure (SSH, Tailscale, host unreachable)."""
+
+
+class LimitExceededError(AgentworksError):
+    """A caller-selected or protocol bound prevented a complete result."""
+
+
+class ConflictError(AgentworksError):
+    """Observed state did not satisfy a conditional operation."""
+
+
+class PartialMutationError(AgentworksError):
+    """A mutation failed after the listed target steps completed."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        completed_steps: tuple[StrEnum, ...],
+        entity_kind: str | None = None,
+        entity_name: str | None = None,
+        hint: str | None = None,
+        details: ErrorDetails | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            entity_kind=entity_kind,
+            entity_name=entity_name,
+            hint=hint,
+            details=details,
+        )
+        self.completed_steps = completed_steps
+
+
+class UncertainOutcomeError(AgentworksError):
+    """A mutation may have changed its target without complete proof.
+
+    Confirmed steps remain safe facts even though ``attempted_step`` identifies
+    the step whose effect is unknown. ``dispatch`` is the carrier's closed
+    submission fact when the concrete workflow retained it.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        dispatch: StrEnum | None = None,
+        completed_steps: tuple[StrEnum, ...] = (),
+        attempted_step: StrEnum | None = None,
+        entity_kind: str | None = None,
+        entity_name: str | None = None,
+        hint: str | None = None,
+        details: ErrorDetails | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            entity_kind=entity_kind,
+            entity_name=entity_name,
+            hint=hint,
+            details=details,
+        )
+        self.dispatch = dispatch
+        self.completed_steps = completed_steps
+        self.attempted_step = attempted_step
 
 
 class SecretUnavailableError(AgentworksError):

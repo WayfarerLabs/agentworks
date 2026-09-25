@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from http.client import HTTPMessage
 
-_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 _MAX_WORKER_INPUT_BYTES = 8 * 1024 * 1024
 
 

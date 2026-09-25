@@ -20,14 +20,18 @@ from __future__ import annotations
 
 import contextlib
 import gzip
+import re
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import (
+    ProviderLocator,
+    ProviderLocatorObservation,
     ProvisionRequest,
     ProvisionResult,
     RetainedProvisioningError,
     VMPlatform,
+    provider_locator_remaining,
 )
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
@@ -77,6 +81,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution.carrier import Deadline
     from agentworks.transports import Transport
 
 
@@ -92,6 +97,8 @@ _DEBIAN_SSM_RELEASES: dict[DebianRelease, str] = {
 # The payload is gzipped (cloud-init decompresses natively), so this bounds the
 # COMPRESSED bytes; a pre-launch guard raises typed if even that is over.
 _MAX_USER_DATA_BYTES = 16384
+_EC2_INSTANCE_ID = re.compile(r"i-[0-9a-f]{8}(?:[0-9a-f]{9})?$")
+_AWS_REGION = re.compile(r"[a-z0-9-]{1,64}$")
 
 
 class EC2Platform(VMPlatform):
@@ -100,7 +107,7 @@ class EC2Platform(VMPlatform):
     services could plausibly back platforms of their own someday (the same
     one-service rationale ``azure-vm`` follows for Azure)."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "aws-ec2"
     description: ClassVar[str] = "Amazon EC2 instances (region + optional VPC subnet)"
     config_model: ClassVar[type[AwsEC2Config]] = AwsEC2Config
@@ -423,6 +430,7 @@ class EC2Platform(VMPlatform):
             provisioning_packages=PROVISIONING_PACKAGES,
             tailscale_auth_key=None,
             hostname=request.hostname,
+            instance_marker=request.instance_marker,
             swap=swap,
         )
         user_data = _generate_ec2_user_data(
@@ -690,6 +698,120 @@ class EC2Platform(VMPlatform):
             return vm.name
         region = vm.platform_metadata.get("region")
         return f"{instance_id}@{region}" if region else instance_id
+
+    def observe_provider_locator(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        deadline: Deadline,
+    ) -> ProviderLocatorObservation:
+        """Read the exact EC2 instance and bind its live account namespace."""
+        instance_id, region, account_id = self._locator_metadata(vm)
+        remaining = provider_locator_remaining(deadline, vm_name=vm.name)
+
+        from botocore.config import Config
+
+        session = self._get_session(ctx)
+        try:
+            ec2 = session.client(
+                "ec2",
+                region_name=region,
+                config=Config(
+                    connect_timeout=remaining,
+                    read_timeout=remaining,
+                    retries={"total_max_attempts": 1, "mode": "standard"},
+                ),
+            )
+        except Exception as exc:
+            raise wrap_ec2_error(exc) from exc
+        try:
+            try:
+                result = ec2.describe_instances(InstanceIds=[instance_id])
+            except Exception as exc:
+                if error_code(exc) == "InvalidInstanceID.NotFound":
+                    raise NotFoundError(
+                        f"EC2 instance '{instance_id}' no longer exists",
+                        entity_kind="vm",
+                        entity_name=vm.name,
+                    ) from exc
+                raise wrap_ec2_error(exc) from exc
+        finally:
+            with contextlib.suppress(Exception):
+                ec2.close()
+
+        owner_id = self._locator_owner_id(result, instance_id, vm)
+        if owner_id != account_id:
+            raise StateError(
+                f"EC2 instance '{instance_id}' belongs to a different AWS account",
+                entity_kind="vm",
+                entity_name=vm.name,
+                hint="restore the original persisted AWS account identity before retrying",
+            )
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        return ProviderLocator(f"aws-ec2:{owner_id}:{region}:{instance_id}")
+
+    @staticmethod
+    def _locator_metadata(vm: VMRow) -> tuple[str, str, str]:
+        metadata = vm.platform_metadata
+        instance_id = metadata.get("instance_id")
+        region = metadata.get("region")
+        account_id = metadata.get("account_id")
+        if (
+            not isinstance(instance_id, str)
+            or _EC2_INSTANCE_ID.fullmatch(instance_id) is None
+            or not isinstance(region, str)
+            or _AWS_REGION.fullmatch(region) is None
+            or not EC2Platform._valid_account_id(account_id)
+        ):
+            raise StateError(
+                f"VM '{vm.name}' has incomplete or invalid EC2 platform metadata",
+                entity_kind="vm",
+                entity_name=vm.name,
+                hint="restore the persisted EC2 instance, region, and account identities before retrying",
+            )
+        return instance_id, region, str(account_id)
+
+    @staticmethod
+    def _locator_owner_id(result: object, instance_id: str, vm: VMRow) -> str:
+        if not isinstance(result, dict):
+            raise EC2Error(
+                f"EC2 returned malformed instance data for '{instance_id}'",
+                detail="DescribeInstances did not return an object",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        reservations = result.get("Reservations")
+        if reservations == []:
+            raise NotFoundError(
+                f"EC2 instance '{instance_id}' no longer exists",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        if not isinstance(reservations, list) or len(reservations) != 1 or not isinstance(reservations[0], dict):
+            raise EC2Error(
+                f"EC2 did not return one exact instance for '{instance_id}'",
+                detail="DescribeInstances returned an unexpected reservation layout",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        reservation = reservations[0]
+        owner_id = reservation.get("OwnerId")
+        instances = reservation.get("Instances")
+        if (
+            not EC2Platform._valid_account_id(owner_id)
+            or not isinstance(instances, list)
+            or len(instances) != 1
+            or not isinstance(instances[0], dict)
+            or instances[0].get("InstanceId") != instance_id
+        ):
+            raise EC2Error(
+                f"EC2 did not return one exact instance for '{instance_id}'",
+                detail="DescribeInstances returned malformed instance or owner data",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        return str(owner_id)
 
     def native_transport(
         self,

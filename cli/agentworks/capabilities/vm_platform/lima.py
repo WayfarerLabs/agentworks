@@ -19,10 +19,17 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 from pydantic import Field
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.base import (
+    ProviderLocatorObservation,
+    ProviderLocatorUnavailable,
+    ProvisionRequest,
+    ProvisionResult,
+    VMPlatform,
+)
 from agentworks.capabilities.vm_platform.bootstrap_script import (
     REBOOT_SENTINEL_PATH,
     generate_bootstrap_script,
+    generate_instance_marker_installer,
     parse_bootstrap_output,
 )
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
@@ -45,6 +52,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution.carrier import Deadline
     from agentworks.resources.graph import Readiness
     from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
@@ -165,7 +173,7 @@ class LimaConfig(AgwModel):
 class LimaPlatform(VMPlatform):
     """Runs VMs via limactl, locally or on a remote host over SSH."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "lima"
     description: ClassVar[str] = "Lima VMs (local, or on a remote host via SSH)"
     config_model: ClassVar[type[LimaConfig]] = LimaConfig
@@ -385,6 +393,9 @@ class LimaPlatform(VMPlatform):
             provisioning_packages=PROVISIONING_PACKAGES,
             tailscale_auth_key=None,
             hostname=request.hostname,
+            # Lima retains and reruns mode: system provisioners on restart.
+            # Marker installation is creation-only below, never retained YAML.
+            instance_marker=None,
             swap=swap,
         )
 
@@ -413,6 +424,9 @@ class LimaPlatform(VMPlatform):
                 self._create_local(instance_name, rendered)
 
             output.detail(f"Lima VM '{instance_name}' created.")
+
+            output.detail("Installing VM instance marker...")
+            self._install_instance_marker(instance_name, request.instance_marker)
 
             tailscale_ip = None
             output.detail("Joining Tailscale...")
@@ -460,6 +474,14 @@ class LimaPlatform(VMPlatform):
             native_transport=transport,
             platform_metadata={"instance_name": instance_name},
             tailscale_ip=tailscale_ip,
+        )
+
+    def _install_instance_marker(self, instance_name: str, instance_marker: str) -> None:
+        """Install one VM marker through Lima's creation-only stdin boundary."""
+        installer = generate_instance_marker_installer(instance_marker=instance_marker)
+        self._run_lima(
+            f"limactl shell {instance_name} sudo -n /bin/bash -s",
+            input_text=installer,
         )
 
     def _join_tailscale_ephemerally(self, instance_name: str, auth_key: str) -> None:
@@ -799,6 +821,17 @@ class LimaPlatform(VMPlatform):
         # ctx is unused: limactl (local or over the placement host SSH hop)
         # needs no backend credential.
         return self._transport_for(self._instance_name(vm))
+
+    def observe_provider_locator(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        deadline: Deadline,
+    ) -> ProviderLocatorObservation:
+        """Lima names lack a provider namespace stable across placements."""
+        del vm, ctx, deadline
+        return ProviderLocatorUnavailable()
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         instance_name = self._instance_name(vm)

@@ -103,6 +103,8 @@ class VMRow:
     # The most recent successful provider create/start observed by Agentworks.
     # NULL is retained for rows created before the observation existed.
     last_started_at: str | None = None
+    # Core-generated at VM creation. Legacy rows remain unadopted (NULL).
+    instance_marker: str | None = None
 
 
 @dataclass
