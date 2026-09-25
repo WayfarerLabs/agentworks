@@ -11,6 +11,7 @@ import pytest
 
 from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
+from agentworks.errors import ValidationError
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
@@ -132,6 +133,55 @@ def test_complete_download_uses_one_owner_and_releases_after_exact_guest_absence
         assert subject.file_operation is not None and not subject.file_operation.unfinished_downloads
 
 
+def test_missing_source_resolves_file_and_hold_obligations(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "source-root"
+    root.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    scratch.chmod(0o1777)
+    install_fixture_bundle(monkeypatch, scratch)
+    with closing(Database(tmp_path / "state.db")) as database:
+        carrier = GuestThenFileCarrier(database)
+        observer = FakeObserver([])
+        subject = _subject(database, carrier, observer)
+        sink = BytesSink()
+        assert _download(subject, root, sink) is WSL2DownloadStatus.REFUSED
+        assert sink.data == b"" and carrier.calls > 1
+        assert observer.events == ["observe"]
+        assert subject.file_operation is not None and not subject.file_operation.unfinished_downloads
+        assert database.operations.inspect(subject.owner.ownership.scope) is None
+
+
+def test_default_observer_rejection_does_not_acquire_claim(tmp_path: Path) -> None:
+    with closing(Database(tmp_path / "state.db")) as database:
+        scope = OperationScope(OperationResourceKind.VM, "box")
+        with pytest.raises(ValidationError):
+            WSL2OwnedDownload(
+                database.operations,
+                _vm(),
+                ProviderLocator("wsl2:opaque-test-registration"),
+                WSL2Connection("Ubuntu", "admin", "C:/Windows/System32/wsl.exe"),
+                native=FakeNative([]),
+            )
+        assert database.operations.inspect(scope) is None
+
+
+def test_failed_inert_hold_construction_abandons_reserved_claim(tmp_path: Path) -> None:
+    with closing(Database(tmp_path / "state.db")) as database:
+        scope = OperationScope(OperationResourceKind.VM, "box")
+        native = FakeNative([], snapshot_failure_at=1, snapshot_error=RuntimeError("snapshot failed"))
+        with pytest.raises(RuntimeError, match="snapshot failed"):
+            WSL2OwnedDownload(
+                database.operations,
+                _vm(),
+                ProviderLocator("wsl2:opaque-test-registration"),
+                WSL2Connection("Ubuntu", "admin", "wsl.exe"),
+                native=native,
+                observer=FakeObserver([]),
+            )
+        assert database.operations.inspect(scope) is None
+
+
 def test_ready_epoch_mismatch_refuses_before_file_dispatch(tmp_path: Path) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database, init_ticks=4097)
@@ -162,7 +212,7 @@ def test_unresolved_file_exchange_retains_claim_and_hold(tmp_path: Path, monkeyp
     install_fixture_bundle(monkeypatch, scratch)
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database)
-        carrier.file_carrier = LostCallStdoutCarrier(1)
+        carrier.file_carrier = LostCallStdoutCarrier(3)
         observer = FakeObserver([])
         subject = _subject(database, carrier, observer)
         assert _download(subject, root, BytesSink()) is WSL2DownloadStatus.RETAINED

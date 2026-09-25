@@ -56,6 +56,10 @@ class WSL2OwnedDownload:
             raise ValidationError("WSL2 download requires an exact locator and connection")
         if vm.instance_marker is None:
             raise ValidationError("WSL2 download requires a persisted VM marker")
+        selected_carrier = WSL2Carrier(connection) if carrier is None else carrier
+        selected_runtime = runtime_selection or RuntimeSelection(RuntimeTargetOS.LINUX)
+        selected_native = WindowsWSL2HostClient() if native is None else native
+        selected_observer = WSL2GuestObserver(connection) if observer is None else observer
         self.owner = OperationOwner.acquire(
             repository, OperationScope(OperationResourceKind.VM, vm.name), "wsl2-download"
         )
@@ -63,17 +67,25 @@ class WSL2OwnedDownload:
         self._vm = vm
         self._locator = locator
         self._connection = connection
-        self._carrier = WSL2Carrier(connection) if carrier is None else carrier
-        self._runtime = runtime_selection or RuntimeSelection(RuntimeTargetOS.LINUX)
-        self.hold = WSL2PlatformHold(
-            self.owner,
-            vm.name,
-            locator.token,
-            vm.instance_marker,
-            connection,
-            WindowsWSL2HostClient() if native is None else native,
-            WSL2GuestObserver(connection) if observer is None else observer,
-        )
+        self._carrier = selected_carrier
+        self._runtime = selected_runtime
+        try:
+            self.hold = WSL2PlatformHold(
+                self.owner,
+                vm.name,
+                locator.token,
+                vm.instance_marker,
+                connection,
+                selected_native,
+                selected_observer,
+            )
+        except BaseException as construction_error:
+            # No hold activation or obligation can occur during construction.
+            try:
+                self.owner.close()
+            except BaseException as close_error:
+                raise close_error from construction_error
+            raise
         self.preparation: VMTargetPreparation | None = None
         self.file_operation: FileOperation | None = None
         self.outcome: FileDownloadOutcome | None = None
@@ -120,8 +132,7 @@ class WSL2OwnedDownload:
             runtime_selection=self._runtime,
         )
         file_settled = (
-            self.outcome.status is FileDownloadStatus.COMPLETE
-            and not self.outcome.requires_owner_retention
+            not self.outcome.requires_owner_retention
             and not self.file_operation.active_downloads
             and not self.file_operation.unfinished_downloads
         )
