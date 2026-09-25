@@ -66,7 +66,7 @@ class FileGateSetupRecovery:
             or type(target) is not ManagedTargetIdentity
             or target.kind.value != scope.resource_kind.value
             or target.name != scope.resource_name
-            or call.family not in {FileCallFamily.DOWNLOAD, FileCallFamily.UPLOAD}
+            or call.family not in {FileCallFamily.DOWNLOAD, FileCallFamily.UPLOAD, FileCallFamily.PACKAGE_UPLOAD}
             or call.target != target
             or call.gate_setup is None
             or call.effect_gate is not None

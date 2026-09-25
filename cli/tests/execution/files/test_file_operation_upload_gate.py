@@ -349,6 +349,140 @@ def test_package_persists_exact_gate_for_each_child_before_dispatch(context) -> 
     assert (root / "second").read_bytes() == b"b"
 
 
+def test_package_setup_binds_index_zero_before_any_child_side_effect(context) -> None:
+    database, owner, operation, root, plan, gate = context
+    sources = (BytesSource(b"a"), BytesSource(b"b"))
+    setup = FileEffectGateSetup(gate.path, _GUEST)
+
+    class CheckingCarrier(LocalCarrier):
+        def __init__(self) -> None:
+            super().__init__()
+            self.rows: list[tuple[int, int, bytes, bool]] = []
+
+        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+            (row,) = database.operations.list_lifecycle_obligations(owner.ownership)
+            call = decode_file_call_obligation(row.payload)
+            assert call.family is FileCallFamily.PACKAGE_UPLOAD
+            assert call.batch_index in {0, 1}
+            self.rows.append((row.payload_revision, call.batch_index, call.token or b"", call.gate_setup is not None))
+            if self.calls == 0:
+                assert call.gate_setup == setup and call.effect_gate is None
+                assert all(source.calls == 0 for source in sources)
+            else:
+                assert call.gate_setup is None and call.effect_gate == gate
+            return super().execute(invocation, io=io, deadline=deadline)
+
+    carrier = CheckingCarrier()
+    checkpoints: list[int] = []
+    outcomes = operation.upload_package(
+        carrier,
+        trusted_root_path=str(root),
+        members=(
+            PackageUploadMember("first", sources[0], 1, Create(), new_metadata()),
+            PackageUploadMember("second", sources[1], 1, Create(), new_metadata()),
+        ),
+        checkpoint=lambda index, outcome: checkpoints.append(index),
+        plan=plan,
+        deadline=Deadline.after(30),
+        runtime_selection=runtime_selection(sys.executable),
+        gate_setup=setup,
+    )
+    assert checkpoints == [0, 1]
+    assert len(outcomes) == 2
+    assert carrier.rows[0][1:] == (0, outcomes[0].token, True)
+    assert all(not setup_only for _, _, _, setup_only in carrier.rows[1:])
+    assert {index for _, index, _, _ in carrier.rows} == {0, 1}
+    assert len(database.operations.list_lifecycle_obligations(owner.ownership)) == 1
+    assert (root / "first").read_bytes() == b"a"
+    assert (root / "second").read_bytes() == b"b"
+
+
+def test_package_setup_lost_reply_recovers_only_setup(context) -> None:
+    database, owner, operation, root, plan, gate = context
+    source = BytesSource(b"a")
+
+    class LostReplyCarrier(LocalCarrier):
+        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+            super().execute(invocation, io=io, deadline=deadline)
+            raise RuntimeError("lost setup reply")
+
+    with pytest.raises(RuntimeError, match="lost setup reply"):
+        operation.upload_package(
+            LostReplyCarrier(),
+            trusted_root_path=str(root),
+            members=(PackageUploadMember("first", source, 1, Create(), new_metadata()),),
+            checkpoint=lambda index, outcome: None,
+            plan=plan,
+            deadline=Deadline.after(30),
+            runtime_selection=runtime_selection(sys.executable),
+            gate_setup=FileEffectGateSetup(gate.path, _GUEST),
+        )
+    assert source.calls == 0
+    recovered = OperationOwner.recover(database.operations, owner.ownership, "c" * 32)
+    (row,) = database.operations.list_lifecycle_obligations(recovered.ownership)
+    call = decode_file_call_obligation(row.payload)
+    assert call.family is FileCallFamily.PACKAGE_UPLOAD and call.batch_index == 0
+    assert call.gate_setup is not None
+    result = FileGateSetupRecovery.open(
+        recovered, replace(target_for_owner(recovered), boot_id=vm_guest_boot_id(_GUEST)), row
+    ).inspect(LocalCarrier(), deadline=Deadline.after(30))
+    assert result.observation is not None and result.observation.binding == gate
+    assert (
+        database.operations.list_lifecycle_obligations(recovered.ownership)[0].state
+        is LifecycleObligationState.RESOLVED
+    )
+    assert not (root / "first").exists()
+
+
+def test_package_setup_publication_failure_keeps_bound_index_zero(context, monkeypatch: pytest.MonkeyPatch) -> None:
+    database, owner, operation, root, plan, gate = context
+    source = BytesSource(b"a")
+    original = LifecycleObligation.publish_payload
+
+    def lost_reply(self: LifecycleObligation, *args, **kwargs):
+        original(self, *args, **kwargs)
+        raise RuntimeError("lost publication reply")
+
+    monkeypatch.setattr(LifecycleObligation, "publish_payload", lost_reply)
+    with pytest.raises(RuntimeError, match="lost publication reply"):
+        operation.upload_package(
+            LocalCarrier(),
+            trusted_root_path=str(root),
+            members=(PackageUploadMember("first", source, 1, Create(), new_metadata()),),
+            checkpoint=lambda index, outcome: None,
+            plan=plan,
+            deadline=Deadline.after(30),
+            runtime_selection=runtime_selection(sys.executable),
+            gate_setup=FileEffectGateSetup(gate.path, _GUEST),
+        )
+    assert source.calls == 0
+    with pytest.raises(StateError):
+        owner.close()
+    (row,) = database.operations.list_lifecycle_obligations(owner.ownership)
+    call = decode_file_call_obligation(row.payload)
+    assert call.effect_gate == gate and call.batch_index == 0
+    assert not (root / "first").exists()
+
+
+def test_package_setup_rejects_wrong_guest_before_dispatch(context) -> None:
+    database, owner, operation, root, plan, gate = context
+    source = BytesSource(b"a")
+    wrong = replace(_GUEST, init_start_ticks=_GUEST.init_start_ticks + 1)
+    with pytest.raises(ValidationError):
+        operation.upload_package(
+            LocalCarrier(),
+            trusted_root_path=str(root),
+            members=(PackageUploadMember("first", source, 1, Create(), new_metadata()),),
+            checkpoint=lambda index, outcome: None,
+            plan=plan,
+            deadline=Deadline.after(30),
+            runtime_selection=runtime_selection(sys.executable),
+            gate_setup=FileEffectGateSetup(gate.path, wrong),
+        )
+    assert source.calls == 0
+    assert not database.operations.list_lifecycle_obligations(owner.ownership)
+
+
 def test_stale_gate_also_fences_failure_cleanup(context) -> None:
     database, owner, operation, root, plan, gate = context
     carrier = _RowCheckingCarrier(database, owner, gate)

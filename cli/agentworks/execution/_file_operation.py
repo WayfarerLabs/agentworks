@@ -667,6 +667,7 @@ class FileOperation:
         deadline: Deadline,
         runtime_selection: RuntimeSelection,
         effect_gate: FileEffectGateBinding | None = None,
+        gate_setup: FileEffectGateSetup | None = None,
     ) -> tuple[FileUploadOutcome, ...]:
         """Upload at most 4096 members under one row and a durable caller checkpoint.
 
@@ -683,22 +684,41 @@ class FileOperation:
         borrow = self._owner.borrow()
         obligation: LifecycleObligation | None = None
         active: _ActiveFileUpload | None = None
+        first_prepared: _PreparedUpload | None = None
+        if gate_setup is not None:
+            active, first_prepared = self._setup_package_upload(
+                carrier,
+                trusted_root_path=trusted_root_path,
+                member=members[0],
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=runtime_selection,
+                effect_gate=effect_gate,
+                gate_setup=gate_setup,
+                borrow=borrow,
+            )
+            obligation = self._require_obligation(active)
+            effect_gate = first_prepared.binding.effect_gate
         completed: list[FileUploadOutcome] = []
         for index, member in enumerate(members):
             try:
-                prepared = _prepare_upload(
-                    carrier,
-                    trusted_root_path=trusted_root_path,
-                    relative_path=member.relative_path,
-                    source=member.source,
-                    size=member.size,
-                    condition=member.condition,
-                    create_metadata=member.create_metadata,
-                    plan=plan,
-                    deadline=deadline,
-                    runtime_selection=runtime_selection,
-                    borrow=borrow,
-                    effect_gate=effect_gate,
+                prepared = (
+                    first_prepared
+                    if index == 0 and first_prepared is not None
+                    else _prepare_upload(
+                        carrier,
+                        trusted_root_path=trusted_root_path,
+                        relative_path=member.relative_path,
+                        source=member.source,
+                        size=member.size,
+                        condition=member.condition,
+                        create_metadata=member.create_metadata,
+                        plan=plan,
+                        deadline=deadline,
+                        runtime_selection=runtime_selection,
+                        borrow=borrow,
+                        effect_gate=effect_gate,
+                    )
                 )
                 self._validate_upload_gate(prepared.binding)
             except BaseException:
@@ -719,7 +739,7 @@ class FileOperation:
                 self._active_package_uploads[id(active)] = active
                 self._install(active, admission, self._active_package_uploads)
                 obligation = self._require_obligation(active)
-            else:
+            elif index != 0 or first_prepared is None:
                 assert active is not None
                 active.binding = prepared.binding
                 active.prepared = prepared
@@ -791,6 +811,100 @@ class FileOperation:
         assert active is not None
         self._active_package_uploads.pop(id(active))
         return tuple(completed)
+
+    def _setup_package_upload(
+        self,
+        carrier: Carrier,
+        *,
+        trusted_root_path: str,
+        member: PackageUploadMember,
+        plan: IdentityPlan,
+        deadline: Deadline,
+        runtime_selection: RuntimeSelection,
+        effect_gate: FileEffectGateBinding | None,
+        gate_setup: FileEffectGateSetup,
+        borrow: OperationBorrow,
+    ) -> tuple[_ActiveFileUpload, _PreparedUpload]:
+        """Publish package index zero as setup, then bind it before any child work."""
+        try:
+            binding, condition, metadata = _validate_upload_inputs(
+                trusted_root_path,
+                member.relative_path,
+                member.source,
+                member.size,
+                member.condition,
+                member.create_metadata,
+                plan,
+                deadline,
+                runtime_selection,
+                borrow,
+                None,
+            )
+            if (
+                type(gate_setup) is not FileEffectGateSetup
+                or effect_gate is not None
+                or self._target.kind is not ManagedTargetKind.VM
+                or runtime_selection.target_os is not RuntimeTargetOS.LINUX
+                or type(gate_setup.guest) is not VMGuestIdentity
+                or vm_guest_boot_id(gate_setup.guest) != self._target.boot_id
+                or gate_setup.path != file_effect_gate_path(self._target, plan.expected.euid, gate_setup.guest)
+            ):
+                raise ValidationError("Package upload gate setup must match the selected Linux VM and identity")
+            token = secrets.token_bytes(16)
+            operation = BorrowedFixedHelperCarrier(carrier, borrow)
+            admission = self._prepare_admission(
+                FileCallFamily.PACKAGE_UPLOAD, binding, token=token, batch_index=0, gate_setup=gate_setup
+            )
+            pending = _PendingUploadSetup(gate_setup, token, operation, member.source, condition, metadata)
+            active: _ActiveFileUpload = _ActiveFileCall(carrier, binding, borrow, pending, admission.obligation_id)
+        except BaseException:
+            borrow.close()
+            raise
+        try:
+            self._active_package_uploads[id(active)] = active
+        except BaseException:
+            borrow.close()
+            raise
+        self._install(active, admission, self._active_package_uploads)
+        result = exchange_file_effect_gate(
+            operation,
+            operation=GateControlOperation.SETUP,
+            path=gate_setup.path,
+            guest=gate_setup.guest,
+            scope_name=self._target.name,
+            plan=plan,
+            deadline=deadline,
+            runtime_selection=runtime_selection,
+        )
+        normal = operation.settle(result.dispatch, result.carrier_completion)
+        if result.dispatch is Dispatch.NOT_SENT and not operation.requires_owner_retention:
+            borrow.close()
+            self._active_package_uploads.pop(id(active))
+            raise StateError("File-effect gate setup was not dispatched")
+        observed = result.observation
+        if (
+            not normal
+            or result.runtime_prerequisite.state is not RuntimePrerequisiteState.READY
+            or observed is None
+            or observed.state is not GateControlObservationState.RESOLVED
+            or observed.binding is None
+        ):
+            raise GateControlMutationUncertain("file-effect gate setup was not acknowledged")
+        bound = replace(binding, effect_gate=observed.binding)
+        self._validate_upload_gate(bound)
+        self._publish_retained(
+            active, self._obligation(FileCallFamily.PACKAGE_UPLOAD, bound, token=token, batch_index=0)
+        )
+        prepared = _prepare_upload_from_binding(
+            operation,
+            source=member.source,
+            deadline=deadline,
+            inputs=(bound, condition, metadata),
+            token=token,
+        )
+        active.binding = bound
+        active.prepared = prepared
+        return active, prepared
 
     def _validate_upload_gate(self, binding: FileUploadBinding) -> None:
         """Match a caller-supplied gate to this selected managed VM."""

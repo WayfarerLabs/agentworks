@@ -239,7 +239,8 @@ def _validate_obligation(obligation: FileCallObligation) -> None:
     if obligation.gate_setup is not None:
         setup = obligation.gate_setup
         if (
-            obligation.family not in {FileCallFamily.DOWNLOAD, FileCallFamily.UPLOAD}
+            obligation.family not in {FileCallFamily.DOWNLOAD, FileCallFamily.UPLOAD, FileCallFamily.PACKAGE_UPLOAD}
+            or (obligation.family is FileCallFamily.PACKAGE_UPLOAD and obligation.batch_index != 0)
             or obligation.target.kind is not ManagedTargetKind.VM
             or obligation.runtime_selection.target_os is not RuntimeTargetOS.LINUX
             or obligation.effect_gate is not None

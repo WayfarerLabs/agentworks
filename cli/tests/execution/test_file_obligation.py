@@ -417,6 +417,13 @@ def _setup_download() -> FileCallObligation:
     return replace(initial, gate_setup=FileEffectGateSetup.for_target(initial.target, maximum_uid, guest))
 
 
+def test_package_gate_setup_requires_first_member() -> None:
+    setup = replace(_setup_download(), family=FileCallFamily.PACKAGE_UPLOAD, batch_index=0)
+    assert decode_file_call_obligation(encode_file_call_admission(setup)) == setup
+    with pytest.raises(FileCallObligationCodecError):
+        replace(setup, batch_index=1)
+
+
 def _maximum_bound_download(setup: FileCallObligation) -> FileCallObligation:
     descriptor = setup.gate_setup
     assert descriptor is not None
