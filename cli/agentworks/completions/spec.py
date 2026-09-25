@@ -218,6 +218,14 @@ class CommandSpec:
 
 DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("database.restore", "backup_path"): "files",
+    ("config.import-ssh-trust", "directory"): "files",
+    ("config.import-ssh-trust", "sources"): "files",
+    ("config.import-ssh-trust", "revoked_host_keys"): "files",
+    ("config.refresh-ssh-trust", "directory"): "files",
+    ("config.refresh-ssh-trust", "sources"): "files",
+    ("config.refresh-ssh-trust", "revoked_host_keys"): "files",
+    ("config.block-ssh-trust", "directory"): "files",
+    ("config.describe-ssh-trust", "directory"): "files",
     ("guide.show", "topic"): "guide_topics",
     ("vm.start", "name"): "vms",
     ("vm.stop", "name"): "vms",

@@ -85,6 +85,7 @@ from agentworks.execution.carrier import (
 )
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 from agentworks.execution.carriers.ssh.connection import SSHConnection, build_ssh_argv
+from agentworks.execution.carriers.ssh.trust import SSHTrustFiles
 from tests.execution.files._runtime_support import runtime_ready_record, runtime_selection
 
 _TOKEN = bytes(range(16))
@@ -634,8 +635,10 @@ def test_complete_requests_fit_real_windows_ssh_and_qga_bounds(plan: IdentityPla
             nonce=request.nonce,
         )[0]
     )
-    connection = SSHConnection("host.example", "agent", Path("/keys/identity"), Path("/keys/known-hosts"))
-    windows_command = subprocess.list2cmdline(build_ssh_argv(connection, invocation))
+    native_root = Path(Path.cwd().anchor)
+    trust = SSHTrustFiles((native_root / "keys" / "known-hosts",))
+    connection = SSHConnection("host.example", "agent", native_root / "keys" / "identity", trust)
+    windows_command = subprocess.list2cmdline(build_ssh_argv(connection, invocation, trust=trust))
     qga_body = json.dumps(
         {"command": invocation.argv, "input-data": (FIXED_BUNDLE.prefix + manifest).decode("ascii")}
     ).encode("ascii")

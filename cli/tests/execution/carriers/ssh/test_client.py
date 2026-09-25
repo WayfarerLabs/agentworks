@@ -12,13 +12,13 @@ import sys
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from subprocess import Popen
 from threading import Thread
 from typing import Any
 
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution import _process as process_core
 from agentworks.execution.carrier import (
     Capture,
     CarrierIO,
@@ -34,7 +34,15 @@ from agentworks.execution.carrier import (
 )
 from agentworks.execution.carriers.ssh import _io, client
 from agentworks.execution.carriers.ssh.client import SSHCarrier
-from agentworks.execution.carriers.ssh.connection import SSHConnection
+from agentworks.execution.carriers.ssh.connection import SSHConnection, admit_connection
+from agentworks.execution.carriers.ssh.trust import (
+    SSHTrustFiles,
+    block_trust,
+    import_trust,
+    refresh_trust,
+    resolve_trust,
+    trust_status,
+)
 
 pytestmark = pytest.mark.windows
 
@@ -61,11 +69,12 @@ class SyntheticSSH:
 
 @pytest.fixture
 def synthetic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    tmp_path = tmp_path.resolve()
     key = tmp_path / "identity"
     known_hosts = tmp_path / "known_hosts"
     key.write_bytes(b"synthetic identity")
     known_hosts.write_bytes(b"synthetic trust")
-    connection = SSHConnection("synthetic.example", "user", key, known_hosts)
+    connection = SSHConnection("synthetic.example", "user", key, SSHTrustFiles((known_hosts,)))
     value = SyntheticSSH(SSHCarrier(connection))
     original = subprocess.Popen
 
@@ -89,7 +98,7 @@ def synthetic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_inspection_is_passive(synthetic: SyntheticSSH) -> None:
-    assert not synthetic.carrier.features.live_stdio
+    assert synthetic.carrier.features.live_stdio
     assert not synthetic.carrier.features.terminal
     assert synthetic.calls == []
 
@@ -98,8 +107,9 @@ def test_validate_does_not_admit_or_probe_connection(synthetic: SyntheticSSH, mo
     def forbidden(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("validation performed SSH admission or process work")
 
-    monkeypatch.setattr(client, "validate_connection_files", forbidden)
+    monkeypatch.setattr(client, "admit_connection", forbidden)
     monkeypatch.setattr(client, "build_ssh_argv", forbidden)
+    monkeypatch.setattr(client, "check_client_version", forbidden)
     monkeypatch.setattr(client, "run_process", forbidden)
     synthetic.carrier.validate(PreparedInvocation(("/prepared/bootstrap",)), io=CarrierIO())
     assert synthetic.calls == []
@@ -115,8 +125,9 @@ def test_execute_validates_before_connection_or_process_work(
         raise AssertionError("validation refusal did not stop SSH work")
 
     monkeypatch.setattr(synthetic.carrier, "validate", refuse)
-    monkeypatch.setattr(client, "validate_connection_files", forbidden)
+    monkeypatch.setattr(client, "admit_connection", forbidden)
     monkeypatch.setattr(client, "build_ssh_argv", forbidden)
+    monkeypatch.setattr(client, "check_client_version", forbidden)
     monkeypatch.setattr(client, "run_process", forbidden)
     with pytest.raises(ValidationError, match="unsupported static request"):
         synthetic.execute()
@@ -228,14 +239,14 @@ def test_unretained_output_never_enters_capture(
         "import sys; data=sys.stdin.buffer.read()*10000; sys.stdout.buffer.write(data); sys.stderr.buffer.write(data)"
     )
     observed = []
-    original = _io._Output.report
+    original = process_core._Output.report
 
     def report(output):
-        if output.retention != Retention.CAPTURED:
+        if output.limit is None:
             observed.append(len(output.data))
         return original(output)
 
-    monkeypatch.setattr(_io._Output, "report", report)
+    monkeypatch.setattr(process_core._Output, "report", report)
     result = synthetic.execute(io)
     assert observed == [0, 0]
     assert result.stdout.data == result.stderr.data == b""
@@ -311,6 +322,8 @@ def test_deadline_keeps_partial_evidence_and_reaps(synthetic: SyntheticSSH) -> N
     assert report.dispatch == Dispatch.UNKNOWN
     assert report.completion is None
     assert report.stdout.data == b"partial" and report.stderr.data == b"diagnostic"
+    assert report.stdout.provenance == Provenance.CARRIER_STDOUT
+    assert report.stderr.provenance == Provenance.MIXED_STDERR
     assert not report.stdout.complete and not report.stderr.complete
     synthetic.assert_closed()
 
@@ -363,50 +376,46 @@ def test_nonblocking_setup_failure_cleans_without_guessing_dispatch(
 
 
 def test_failed_reap_is_explicit(synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch) -> None:
-    original = Popen.wait
+    original = process_core._cleanup
 
-    def wait(process, timeout=None):
-        if len(synthetic.children) == 2 and process is synthetic.children[-1]:
-            raise subprocess.TimeoutExpired("secret-canary", timeout)
-        return original(process, timeout=timeout)
+    def fail(status: process_core._ProcessStatus) -> bool:
+        assert original(status)
+        return len(synthetic.children) != 2
 
     synthetic.command = "import time; time.sleep(30)"
     with monkeypatch.context() as context:
-        context.setattr(Popen, "wait", wait)
+        context.setattr(process_core, "_cleanup", fail)
         report = synthetic.execute(seconds=0.1)
     assert report.failure == Failure.OBSERVATION
     assert report.completion is None
     assert report.dispatch == Dispatch.UNKNOWN
     assert "secret-canary" not in repr(report)
-    synthetic.children[-1].wait(timeout=2)
     synthetic.assert_closed()
 
 
 def test_interrupted_failed_reap_attaches_safe_evidence(
     synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    original_wait = Popen.wait
-    original_read = _io._Output.read
+    original_cleanup = process_core._cleanup
+    original_advance = process_core._Output.advance
 
-    def read(output, pipe):
+    def advance(output, pipe):
         if len(synthetic.children) == 2:
             raise KeyboardInterrupt()
-        return original_read(output, pipe)
+        return original_advance(output, pipe)
 
-    def wait(process, timeout=None):
-        if len(synthetic.children) == 2 and process is synthetic.children[-1]:
-            raise subprocess.TimeoutExpired("secret-canary", timeout)
-        return original_wait(process, timeout=timeout)
+    def fail_cleanup(status: process_core._ProcessStatus) -> bool:
+        assert original_cleanup(status)
+        return len(synthetic.children) != 2
 
     synthetic.command = "import time; time.sleep(30)"
     with monkeypatch.context() as context:
-        context.setattr(_io._Output, "read", read)
-        context.setattr(Popen, "wait", wait)
+        context.setattr(process_core._Output, "advance", advance)
+        context.setattr(process_core, "_cleanup", fail_cleanup)
         with pytest.raises(KeyboardInterrupt) as raised:
             synthetic.execute()
     assert raised.value.__notes__
     assert "secret-canary" not in repr(raised.value.__notes__)
-    synthetic.children[-1].wait(timeout=2)
     synthetic.assert_closed()
 
 
@@ -437,8 +446,16 @@ def test_supported_client_banners(synthetic: SyntheticSSH, version: str) -> None
 
 
 @pytest.mark.parametrize("phase", ["version", "command"])
+@pytest.mark.parametrize(
+    "io,retention",
+    [
+        (CarrierIO(), Retention.CAPTURED),
+        (CarrierIO(output=Discard()), Retention.DISCARDED),
+        (CarrierIO(sensitive=True), Retention.SUPPRESSED),
+    ],
+)
 def test_failed_spawn_does_not_claim_dispatch_or_expose_exception(
-    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, phase: str
+    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, phase: str, io: CarrierIO, retention: Retention
 ) -> None:
     original = subprocess.Popen
 
@@ -448,10 +465,13 @@ def test_failed_spawn_does_not_claim_dispatch_or_expose_exception(
         return original(argv, **kwargs)
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
-    report = synthetic.execute()
+    report = synthetic.execute(io)
     assert report.dispatch == Dispatch.NOT_SENT
     assert report.failure == Failure.DISPATCH
     assert report.completion is None
+    assert report.stdout.provenance == Provenance.CARRIER_STDOUT
+    assert report.stderr.provenance == Provenance.MIXED_STDERR
+    assert report.stdout.retention == report.stderr.retention == retention
     assert "secret-canary" not in repr(report)
     synthetic.assert_closed()
 
@@ -460,14 +480,14 @@ def test_failed_spawn_does_not_claim_dispatch_or_expose_exception(
 def test_interruption_cleans_owned_process_before_propagating(
     synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, interruption: type[BaseException]
 ) -> None:
-    original = _io._Output.read
+    original = process_core._Output.advance
 
-    def read(output, pipe):
+    def advance(output, pipe):
         if len(synthetic.children) == 2:
             raise interruption()
         return original(output, pipe)
 
-    monkeypatch.setattr(_io._Output, "read", read)
+    monkeypatch.setattr(process_core._Output, "advance", advance)
     synthetic.command = "import time; time.sleep(30)"
     with pytest.raises(interruption):
         synthetic.execute()
@@ -507,15 +527,15 @@ def test_descendant_output_handles_do_not_block_cleanup(
         "sys.stdout.write('parent')"
     )
     if flood:
-        original = _io._Output.read
+        original = process_core._Output.advance
 
-        def read(output, pipe):
-            progressed = original(output, pipe)
+        def advance(output, pipe):
+            progressed, failed = original(output, pipe)
             # Model uninterrupted pipe readiness even if this test scheduler
             # happens to pause the real flooding writer between two reads.
-            return progressed or (len(synthetic.children) == 2 and not output.eof)
+            return progressed or (len(synthetic.children) == 2 and not output.eof), failed
 
-        monkeypatch.setattr(_io._Output, "read", read)
+        monkeypatch.setattr(process_core._Output, "advance", advance)
     try:
         started = time.monotonic()
         report = synthetic.execute(CarrierIO(output=Capture(32)), seconds=None)
@@ -636,7 +656,7 @@ def test_installed_ssh_owns_fresh_pipe_handles(
                     "127.0.0.1",
                     "fixture",
                     key,
-                    trust,
+                    SSHTrustFiles((trust,)),
                     port=listener.getsockname()[1],
                     ssh_executable=executable,
                 )
@@ -664,3 +684,76 @@ def test_installed_ssh_owns_fresh_pipe_handles(
                 pass
             peer.join(timeout=6)
             assert not peer.is_alive()
+
+
+@pytest.mark.parametrize("refusal", ["blocked", "corrupt", "nested_manifest"])
+def test_each_command_admits_current_managed_policy(synthetic: SyntheticSSH, tmp_path: Path, refusal: str) -> None:
+    connection = synthetic.carrier._connection
+    bundle = import_trust(tmp_path.resolve() / "managed", sources=connection.trust, authority="fixture")
+    synthetic.carrier = SSHCarrier(replace(connection, trust=bundle))
+    first = resolve_trust(bundle)
+    assert synthetic.execute().failure is None
+    assert f'UserKnownHostsFile="{first.known_hosts[0].as_posix()}"' in synthetic.calls[-1]
+    source = tmp_path.resolve() / "replacement"
+    source.write_bytes(b"complete replacement policy")
+    refresh_trust(
+        bundle,
+        sources=SSHTrustFiles((source,)),
+        authority="fixture",
+        expected_generation=trust_status(bundle).generation,
+    )
+    second = resolve_trust(bundle)
+    assert second != first
+    assert synthetic.execute().failure is None
+    assert f'UserKnownHostsFile="{second.known_hosts[0].as_posix()}"' in synthetic.calls[-1]
+    assert first.known_hosts[0].read_bytes() == b"synthetic trust"
+    if refusal == "blocked":
+        block_trust(bundle, expected_generation=trust_status(bundle).generation)
+    elif refusal == "nested_manifest":
+        (bundle.directory / "state.json").write_bytes(b"[" * 10_000 + b"]" * 10_000)
+    else:
+        second.known_hosts[0].write_bytes(b"corrupt policy")
+    previous_calls = len(synthetic.calls)
+    report = synthetic.execute()
+    assert report.dispatch == Dispatch.NOT_SENT
+    assert report.failure == Failure.DISPATCH
+    assert len(synthetic.calls) == previous_calls
+    synthetic.assert_closed()
+
+
+@pytest.mark.parametrize("stage", ["admission", "version"])
+def test_expiry_during_local_checks_prevents_dispatch(
+    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    original = admit_connection
+
+    def admit(connection: SSHConnection) -> SSHTrustFiles:
+        trust = original(connection)
+        if stage == "admission":
+            clock[0] = 2.0
+        return trust
+
+    def version(connection: SSHConnection, *, deadline: Deadline) -> None:
+        clock[0] = 2.0
+
+    monkeypatch.setattr(client, "admit_connection", admit)
+    monkeypatch.setattr(client, "check_client_version", version)
+    report = synthetic.execute(seconds=1)
+    assert report.dispatch == Dispatch.NOT_SENT
+    assert report.failure == Failure.DEADLINE
+    assert synthetic.calls == []
+
+
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit])
+def test_admission_preserves_control_flow(
+    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, interruption: type[BaseException]
+) -> None:
+    def interrupt(connection: SSHConnection) -> SSHTrustFiles:
+        raise interruption()
+
+    monkeypatch.setattr(client, "admit_connection", interrupt)
+    with pytest.raises(interruption):
+        synthetic.execute()
+    assert synthetic.calls == []
