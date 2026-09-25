@@ -36,6 +36,7 @@ from agentworks.execution._file_json import (
 from agentworks.execution._file_metadata_protocol import FileMetadataOperation
 from agentworks.execution._file_obligation import (
     FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+    MAX_PACKAGE_UPLOAD_MEMBERS,
     FileCallFamily,
     FileCallObligation,
     FileCallObligationCodecError,
@@ -64,6 +65,7 @@ from agentworks.execution._file_upload import (
     FileUploadBinding,
     FileUploadControlFact,
     FileUploadOutcome,
+    FileUploadStatus,
     _prepare_upload,
     _PreparedUpload,
 )
@@ -75,6 +77,8 @@ from agentworks.execution.carrier import Dispatch
 from agentworks.operations import LifecycleObligation, _PreRegistrationClosingRefusal, release_borrow_after_custody
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from agentworks.execution._file_effect_gate import FileEffectGateBinding
     from agentworks.execution._file_inventory_exchange import FileInventoryCandidateResult
     from agentworks.execution._file_metadata_exchange import FileMetadataCandidateResult
@@ -153,6 +157,37 @@ class UnfinishedFileUpload:
     outcome: FileUploadOutcome = field(repr=False)
 
 
+@dataclass(frozen=True, slots=True, repr=False)
+class PackageUploadMember:
+    """One caller-held package member; source bytes never enter the ledger."""
+
+    relative_path: str
+    source: ByteSource = field(repr=False)
+    size: int
+    condition: Create | Replace | Match
+    create_metadata: NewMetadata
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class UnfinishedPackageUpload:
+    """The one child retained after a batch stops."""
+
+    index: int
+    carrier: Carrier = field(repr=False)
+    binding: FileUploadBinding
+    outcome: FileUploadOutcome | None = field(default=None, repr=False)
+    checkpoint_pending: bool = False
+
+
+class PackageUploadStopped(Exception):
+    """A member did not finish; the caller must not infer a remaining plan."""
+
+    def __init__(self, index: int, outcome: FileUploadOutcome) -> None:
+        self.index = index
+        self.outcome = outcome
+        super().__init__("private package upload stopped at one member")
+
+
 type _ActiveFileUpload = _ActiveFileCall[FileUploadBinding, _PreparedUpload, FileUploadOutcome]
 
 
@@ -211,6 +246,8 @@ class FileOperation:
         self._unfinished_downloads: list[UnfinishedFileDownload] = []
         self._active_uploads: dict[int, _ActiveFileUpload] = {}
         self._unfinished_uploads: list[UnfinishedFileUpload] = []
+        self._active_package_uploads: dict[int, _ActiveFileUpload] = {}
+        self._unfinished_package_uploads: list[UnfinishedPackageUpload] = []
         self._active_json_updates: dict[int, _ActiveFileJsonUpdate] = {}
         self._unfinished_json_updates: list[UnfinishedFileJsonUpdate] = []
         self._active_stats: dict[int, _ActiveFileStat] = {}
@@ -234,6 +271,10 @@ class FileOperation:
     @property
     def unfinished_uploads(self) -> tuple[UnfinishedFileUpload, ...]:
         return tuple(self._unfinished_uploads)
+
+    @property
+    def unfinished_package_uploads(self) -> tuple[UnfinishedPackageUpload, ...]:
+        return tuple(self._unfinished_package_uploads)
 
     @property
     def active_json_updates(self) -> tuple[_ActiveFileJsonUpdate, ...]:
@@ -488,6 +529,158 @@ class FileOperation:
 
         self._capture_upload(active, outcome)
         return outcome
+
+    def upload_package(
+        self,
+        carrier: Carrier,
+        *,
+        trusted_root_path: str,
+        members: Sequence[PackageUploadMember],
+        checkpoint: Callable[[int, FileUploadOutcome], None],
+        plan: IdentityPlan,
+        deadline: Deadline,
+        runtime_selection: RuntimeSelection,
+    ) -> tuple[FileUploadOutcome, ...]:
+        """Upload at most 4096 members under one row and a durable caller checkpoint.
+
+        The caller's checkpoint must durably record each confirmed member before
+        returning. No later member is prepared or dispatched until it returns.
+        """
+        if (
+            not 1 <= len(members) <= MAX_PACKAGE_UPLOAD_MEMBERS
+            or any(type(member) is not PackageUploadMember for member in members)
+            or not callable(checkpoint)
+        ):
+            raise ValidationError("Package upload requires 1 to 4096 members")
+        members = tuple(members)
+        borrow = self._owner.borrow()
+        obligation: LifecycleObligation | None = None
+        active: _ActiveFileUpload | None = None
+        completed: list[FileUploadOutcome] = []
+        for index, member in enumerate(members):
+            try:
+                prepared = _prepare_upload(
+                    carrier,
+                    trusted_root_path=trusted_root_path,
+                    relative_path=member.relative_path,
+                    source=member.source,
+                    size=member.size,
+                    condition=member.condition,
+                    create_metadata=member.create_metadata,
+                    plan=plan,
+                    deadline=deadline,
+                    runtime_selection=runtime_selection,
+                    borrow=borrow,
+                )
+            except BaseException:
+                # A previous child has already passed its application checkpoint.
+                borrow.close()
+                if active is not None:
+                    self._active_package_uploads.pop(id(active))
+                raise
+            if obligation is None:
+                try:
+                    admission = self._prepare_admission(
+                        FileCallFamily.PACKAGE_UPLOAD, prepared.binding, token=prepared.state.token, batch_index=index
+                    )
+                except BaseException:
+                    borrow.close()
+                    raise
+                active = _ActiveFileCall(carrier, prepared.binding, borrow, prepared, admission.obligation_id)
+                self._active_package_uploads[id(active)] = active
+                self._install(active, admission, self._active_package_uploads)
+                obligation = self._require_obligation(active)
+            else:
+                assert active is not None
+                active.binding = prepared.binding
+                active.prepared = prepared
+                active.outcome = None
+                expected_revision = obligation.payload_revision
+                try:
+                    intended_payload = encode_file_call_admission(
+                        self._obligation(
+                            FileCallFamily.PACKAGE_UPLOAD,
+                            prepared.binding,
+                            token=prepared.state.token,
+                            batch_index=index,
+                        )
+                    )
+                except FileCallObligationCodecError:
+                    borrow.close()
+                    self._active_package_uploads.pop(id(active))
+                    raise ValidationError("Package child lifecycle recovery identity is too large or invalid") from None
+                try:
+                    try:
+                        published = obligation.publish_payload(
+                            expected_revision=expected_revision,
+                            payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+                            payload=intended_payload,
+                        )
+                    except BaseException:
+                        # Exact repetition reconciles a commit whose reply was lost.
+                        published = obligation.publish_payload(
+                            expected_revision=expected_revision,
+                            payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+                            payload=intended_payload,
+                        )
+                    if published.payload_revision != expected_revision + 1 or published.payload != intended_payload:
+                        raise StateError("Package upload child publication did not advance exactly once")
+                except BaseException:
+                    # The row may name either the checkpointed predecessor or
+                    # this prepared child. Keep the borrow and prepared child
+                    # attached; no child may dispatch before exact confirmation.
+                    raise
+            try:
+                outcome = prepared.run()
+            except BaseException as control:
+                fact = control.__cause__
+                if isinstance(fact, FileUploadControlFact):
+                    assert active is not None
+                    self._stop_package_upload(active, index, fact.outcome)
+                raise
+            assert active is not None
+            active.outcome = outcome
+            if outcome.status is not FileUploadStatus.COMPLETE or outcome.requires_owner_retention:
+                self._stop_package_upload(active, index, outcome)
+                raise PackageUploadStopped(index, outcome)
+            try:
+                checkpoint(index, outcome)
+            except BaseException:
+                # The checkpoint may have committed. The exact child remains
+                # retained; takeover must consult application state.
+                release_borrow_after_custody(borrow, retain_effect=True)
+                self._unfinished_package_uploads.append(
+                    UnfinishedPackageUpload(index, carrier, prepared.binding, outcome, checkpoint_pending=True)
+                )
+                self._active_package_uploads.pop(id(active))
+                raise
+            completed.append(outcome)
+        borrow.close()
+        assert active is not None
+        self._active_package_uploads.pop(id(active))
+        return tuple(completed)
+
+    def _stop_package_upload(self, active: _ActiveFileUpload, index: int, outcome: FileUploadOutcome) -> None:
+        active.outcome = outcome
+        if outcome.requires_owner_retention:
+            self._publish_retained(
+                active,
+                self._obligation(
+                    FileCallFamily.PACKAGE_UPLOAD,
+                    active.binding,
+                    token=outcome.token,
+                    batch_index=index,
+                    scratch_reference=outcome.reference,
+                    scratch_cleanup_debt=outcome.scratch_cleanup_debt,
+                    publication_cleanup_debt=outcome.publication_cleanup_debt,
+                    uncertainty=self._upload_uncertainty(outcome),
+                ),
+            )
+            self._unfinished_package_uploads.append(
+                UnfinishedPackageUpload(index, active.carrier, active.binding, outcome)
+            )
+        release_borrow_after_custody(active.borrow, retain_effect=outcome.requires_owner_retention)
+        self._active_package_uploads.pop(id(active))
 
     def update_json(
         self,
@@ -851,10 +1044,13 @@ class FileOperation:
         binding: _FileCallBinding,
         *,
         token: bytes | None = None,
+        batch_index: int | None = None,
         gate_setup: FileEffectGateSetup | None = None,
     ) -> _FileCallAdmission:
         try:
-            payload = encode_file_call_admission(self._obligation(family, binding, token=token, gate_setup=gate_setup))
+            payload = encode_file_call_admission(
+                self._obligation(family, binding, token=token, batch_index=batch_index, gate_setup=gate_setup)
+            )
         except FileCallObligationCodecError:
             raise ValidationError("File call lifecycle recovery identity is too large or invalid") from None
         return _FileCallAdmission(secrets.token_hex(16), payload)
@@ -887,6 +1083,7 @@ class FileOperation:
         *,
         token: bytes | None = None,
         attempt: int | None = None,
+        batch_index: int | None = None,
         uncertainty: frozenset[FileCallUncertainty] = frozenset(),
         scratch_reference: ScratchReference | None = None,
         scratch_cleanup_debt: ScratchCleanupDebt | None = None,
@@ -902,6 +1099,7 @@ class FileOperation:
             runtime_selection=binding.runtime_selection,
             token=token,
             attempt=attempt,
+            batch_index=batch_index,
             scratch_reference=scratch_reference,
             scratch_cleanup_debt=scratch_cleanup_debt,
             publication_cleanup_debt=publication_cleanup_debt,

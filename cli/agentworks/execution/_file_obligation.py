@@ -44,12 +44,15 @@ from agentworks.execution._scratch_wire import (
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 
 FILE_CALL_OBLIGATION_PAYLOAD_VERSION = 1
+MAX_PACKAGE_UPLOAD_MEMBERS = 4096
 _TOKEN_BYTES = 16
 _MAX_JSON_ATTEMPTS = 8
 _MAX_PATH_BYTES = 4_096
 _LOWER_HEX = frozenset("0123456789abcdef")
 _BASE_FIELDS = frozenset({"family", "identity", "path", "root", "runtime", "target", "uncertainty", "version"})
-_OPTIONAL_FIELDS = frozenset({"attempt", "effect_gate", "gate_setup", "publication_cleanup_debt", "scratch", "token"})
+_OPTIONAL_FIELDS = frozenset(
+    {"attempt", "batch_index", "effect_gate", "gate_setup", "publication_cleanup_debt", "scratch", "token"}
+)
 _TARGET_FIELDS = frozenset({"boot_id", "incarnation", "kind", "name"})
 _IDENTITY_FIELDS = frozenset({"egid", "euid", "groups", "mode"})
 _RUNTIME_FIELDS = frozenset({"explicit_path", "target_os"})
@@ -63,6 +66,7 @@ class FileCallFamily(StrEnum):
 
     DOWNLOAD = "download"
     UPLOAD = "upload"
+    PACKAGE_UPLOAD = "package-upload"
     JSON_UPDATE = "json-update"
     STAT = "stat"
     INVENTORY = "inventory"
@@ -87,6 +91,7 @@ class FileCallUncertainty(StrEnum):
 _FILE_CALL_RECOVERY_HEADROOM_BYTES = {
     FileCallFamily.DOWNLOAD: 814,
     FileCallFamily.UPLOAD: 1150,
+    FileCallFamily.PACKAGE_UPLOAD: 1150,
     FileCallFamily.JSON_UPDATE: 1205,
     FileCallFamily.STAT: 50,
     FileCallFamily.INVENTORY: 50,
@@ -115,6 +120,7 @@ class FileCallObligation:
     runtime_selection: RuntimeSelection
     token: bytes | None = None
     attempt: int | None = None
+    batch_index: int | None = None
     scratch_reference: ScratchReference | None = None
     scratch_cleanup_debt: ScratchCleanupDebt | None = None
     publication_cleanup_debt: BoundPublicationCleanupDebt | None = None
@@ -202,6 +208,11 @@ def _validate_obligation(obligation: FileCallObligation) -> None:
         type(item) is not FileCallUncertainty for item in obligation.uncertainty
     ):
         raise FileCallObligationCodecError
+    if obligation.family is FileCallFamily.PACKAGE_UPLOAD:
+        if type(obligation.batch_index) is not int or not 0 <= obligation.batch_index < MAX_PACKAGE_UPLOAD_MEMBERS:
+            raise FileCallObligationCodecError
+    elif obligation.batch_index is not None:
+        raise FileCallObligationCodecError
     if obligation.effect_gate is not None:
         if (
             obligation.family is not FileCallFamily.DOWNLOAD
@@ -245,13 +256,18 @@ def _validate_obligation(obligation: FileCallObligation) -> None:
     scratch_family = obligation.family in {
         FileCallFamily.DOWNLOAD,
         FileCallFamily.UPLOAD,
+        FileCallFamily.PACKAGE_UPLOAD,
         FileCallFamily.JSON_UPDATE,
     }
-    publication_family = obligation.family in {FileCallFamily.UPLOAD, FileCallFamily.JSON_UPDATE}
+    publication_family = obligation.family in {
+        FileCallFamily.UPLOAD,
+        FileCallFamily.PACKAGE_UPLOAD,
+        FileCallFamily.JSON_UPDATE,
+    }
     if obligation.token is None:
         if obligation.attempt is not None:
             raise FileCallObligationCodecError
-        if obligation.family in {FileCallFamily.DOWNLOAD, FileCallFamily.UPLOAD}:
+        if obligation.family in {FileCallFamily.DOWNLOAD, FileCallFamily.UPLOAD, FileCallFamily.PACKAGE_UPLOAD}:
             raise FileCallObligationCodecError
         if (
             any(
@@ -306,6 +322,8 @@ def _encode_obligation(obligation: FileCallObligation) -> dict[str, object]:
         value["token"] = obligation.token.hex()
     if obligation.attempt is not None:
         value["attempt"] = obligation.attempt
+    if obligation.batch_index is not None:
+        value["batch_index"] = obligation.batch_index
     scratch: dict[str, object] = {}
     if obligation.scratch_reference is not None:
         scratch["reference"] = encode_scratch_reference(obligation.scratch_reference)
@@ -382,6 +400,7 @@ def _decode_obligation(value: object) -> FileCallObligation:
             runtime_selection=runtime_selection,
             token=token,
             attempt=attempt,
+            batch_index=value.get("batch_index"),
             scratch_reference=scratch_reference,
             scratch_cleanup_debt=scratch_cleanup_debt,
             publication_cleanup_debt=publication_cleanup_debt,

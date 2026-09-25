@@ -149,6 +149,19 @@ obligation, replacing the generic carrier row rather than adding a second row. U
 bind their scratch token in the initial payload. JSON uses one parent row without a token, then
 publishes the child token and bounded attempt before nested upload dispatch.
 
+The private `FileOperation.upload_package` path accepts 1 to 4,096 upload members under one serial
+borrow and one `file-call` row. The row carries only the current child's path, token, index and
+bounded recovery facts. It replaces that identity by expected-revision publication before the next
+child can dispatch. The caller's checkpoint callback must durably record each completed member
+before returning; a failed or uncertain checkpoint retains the current row and stops the batch.
+Incomplete upload and uncertain row publication also stop the batch without replaying a child.
+Each member is validated when reached; a later invalid member stops the batch after earlier
+members have already been checkpointed. The caller owns its original plan and partial progress.
+This originating path is not wired to artifact publication. A package-specific takeover adapter
+still needs evidence that every helper for the retained token has exited before it may reconcile
+or clean that child. Until that proof exists, the batch does not settle package recovery or the
+ledger-capacity migration gate.
+
 Retained recovery facts and cleanup debt are published before the borrow is handed off; a clean,
 quiescent row resolves. Payloads carry lifecycle evidence only. They exclude file or JSON content,
 credentials, commands, routes and connection objects. This is private, additive groundwork. It does
