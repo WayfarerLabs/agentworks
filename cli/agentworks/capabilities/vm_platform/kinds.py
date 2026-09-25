@@ -105,7 +105,7 @@ KIND_REGISTRY["vm-platform"] = _VMPlatformKind()
 
 
 def _registry() -> dict[str, Any]:
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+    from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
 
     return VM_PLATFORM_REGISTRY
 

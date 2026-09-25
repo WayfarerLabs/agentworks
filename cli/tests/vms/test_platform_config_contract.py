@@ -20,8 +20,8 @@ from agentworks.capabilities.config import (
     resolved_capability_modes,
     validate_capability_config,
 )
-from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
+from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.errors import ConfigError
 from agentworks.plugins.aws.platform import EC2Platform

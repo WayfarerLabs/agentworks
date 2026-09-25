@@ -109,7 +109,7 @@ def test_platform_named_site_must_declare_that_platform(tmp_path: Path) -> None:
     the same seating incidentally from an earlier plugin test, which is why
     this test passed in-suite but not solo before (issue #302).
     """
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+    from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
     from agentworks.plugins import SYSTEM_PLUGINS
 
     assert "azure" in SYSTEM_PLUGINS

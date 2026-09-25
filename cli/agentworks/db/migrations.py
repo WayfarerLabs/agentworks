@@ -147,10 +147,8 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
     # backfill imports their classes DIRECTLY (from the plugin packages, not
     # through the live registry) to keep the registry-bypassing philosophy
     # above intact.
-    from agentworks.capabilities.vm_platform import (
-        LimaPlatform,
-        WSL2Platform,
-    )
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
     from agentworks.plugins.azure.platform import AzureVMPlatform
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 

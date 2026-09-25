@@ -320,7 +320,7 @@ _DEPENDENCIES_ALLOWLIST = frozenset(
 _REGISTRY_READ_ALLOWLIST = frozenset(
     {
         # Owners (each declares its kind's registry).
-        "capabilities/vm_platform/__init__.py",
+        "capabilities/vm_platform/registry.py",
         "capabilities/harness_integration/__init__.py",
         "capabilities/git_credential/__init__.py",
         "capabilities/secret_backend/base.py",

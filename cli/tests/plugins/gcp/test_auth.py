@@ -367,7 +367,7 @@ def test_client_construction_failure_is_mode_named_detached_and_not_cached(monke
 
 
 def test_gcp_import_publishes_only_through_installed_plugin_registration() -> None:
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+    from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
     from agentworks.plugins import SYSTEM_PLUGINS
 
     assert "gcp" in SYSTEM_PLUGINS

@@ -79,7 +79,7 @@ def _config(tmp_path: Path, site: str = "", *, enabled: bool = False) -> Config:
 
 
 def test_gcp_is_seated_by_vendor_bundle() -> None:
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+    from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
     from agentworks.plugins import SYSTEM_PLUGINS
     from agentworks.plugins.gcp.platform import GCEPlatform
 

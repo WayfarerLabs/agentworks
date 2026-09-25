@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 import ssl
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -95,6 +96,47 @@ def test_wsl2_binding_is_passive_and_uses_recorded_distribution_and_admin(
     )
     assert binding.delivery_account == "delivery-user"
     assert binding.runtime_selection == RuntimeSelection(RuntimeTargetOS.LINUX)
+
+
+def test_wsl2_binding_imports_without_retired_execution_modules() -> None:
+    """Exercise ordinary construction in a process with six blocked roots."""
+    code = """
+import importlib.abc, sys
+sys.path.insert(0, sys.argv[1])
+roots = ('agentworks.transports', 'agentworks.ssh', 'agentworks.remote_exec',
+         'agentworks.harness_setup.runner', 'agentworks.native_files',
+         'agentworks.plugins.proxmox.transport')
+class Guard(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if any(fullname == root or fullname.startswith(root + '.') for root in roots):
+            raise AssertionError(fullname)
+        return None
+sys.meta_path.insert(0, Guard())
+from types import SimpleNamespace
+from agentworks.capabilities.base import RunContext
+from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+from agentworks.execution.carrier import Deadline
+from agentworks.execution.carriers.wsl2 import WSL2Carrier
+vm = SimpleNamespace(name='vm-one', admin_username='delivery-user',
+                     platform_metadata={'distro_name': 'recorded-distro'})
+binding = WSL2Platform('wsl2', {}).resolve_native_execution_binding(
+    vm, RunContext(), deadline=Deadline(None))
+assert isinstance(binding.carrier, WSL2Carrier)
+connection = binding.carrier._connection
+assert (connection.distribution, connection.user, connection.wsl_executable) == (
+    'recorded-distro', 'delivery-user', 'wsl')
+assert binding.delivery_account == 'delivery-user'
+assert binding.runtime_selection == RuntimeSelection(RuntimeTargetOS.LINUX)
+assert not any(name == root or name.startswith(root + '.')
+               for name in sys.modules for root in roots)
+"""
+    subprocess.run(
+        [sys.executable, "-I", "-c", code, str(Path(__file__).resolve().parents[2])],
+        check=True,
+        capture_output=True,
+        timeout=10,
+    )
 
 
 @pytest.mark.parametrize(

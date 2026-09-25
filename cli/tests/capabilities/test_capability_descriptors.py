@@ -91,7 +91,7 @@ def _live_registry(kind: str) -> dict[str, Any]:
     from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
     from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
     from agentworks.capabilities.secret_backend import SECRET_BACKEND_REGISTRY
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+    from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
 
     registries: dict[str, dict[str, Any]] = {
         "vm-platform": VM_PLATFORM_REGISTRY,

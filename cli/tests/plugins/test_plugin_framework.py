@@ -14,6 +14,8 @@ now derives its enumeration from the descriptor table.
 from __future__ import annotations
 
 import ast
+import subprocess
+import sys
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal, cast
@@ -62,7 +64,7 @@ def _snapshot_registries() -> dict[str, dict[str, object]]:
     from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
     from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
     from agentworks.capabilities.secret_backend import SECRET_BACKEND_REGISTRY
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+    from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
 
     return {
         "vm-platform": dict(VM_PLATFORM_REGISTRY),
@@ -70,6 +72,35 @@ def _snapshot_registries() -> dict[str, dict[str, object]]:
         "git-credential-provider": dict(GIT_CREDENTIAL_PROVIDER_REGISTRY),
         "secret-backend": dict(SECRET_BACKEND_REGISTRY),
     }
+
+
+@pytest.mark.parametrize("first", ["plugins", "registry"])
+def test_vm_registry_has_one_identity_in_both_initialization_orders(first: str) -> None:
+    code = """
+import sys
+sys.path.insert(0, sys.argv[1])
+if sys.argv[2] == 'plugins':
+    from agentworks.plugins import SYSTEM_PLUGINS
+    from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
+else:
+    from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
+    from agentworks.plugins import SYSTEM_PLUGINS
+from agentworks.capabilities.descriptor import descriptor_for
+from agentworks.capabilities.vm_platform.lima import LimaPlatform
+from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+from agentworks.plugins.registration import _capability_registries
+assert VM_PLATFORM_REGISTRY['lima'] is LimaPlatform
+assert VM_PLATFORM_REGISTRY['wsl2'] is WSL2Platform
+assert VM_PLATFORM_REGISTRY['proxmox'] is SYSTEM_PLUGINS['proxmox'].capabilities['vm-platform'][0]
+assert descriptor_for('vm-platform').registry() is VM_PLATFORM_REGISTRY
+assert any(registry is VM_PLATFORM_REGISTRY for registry in _capability_registries())
+"""
+    subprocess.run(
+        [sys.executable, "-I", "-c", code, str(Path(__file__).resolve().parents[2]), first],
+        check=True,
+        capture_output=True,
+        timeout=10,
+    )
 
 
 def _plugin_origin() -> Origin:
@@ -700,7 +731,7 @@ def test_secret_backend_registration_never_calls_the_constructor() -> None:
 
 
 def test_registering_the_same_plugin_twice_is_a_no_op() -> None:
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+    from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
 
     plugin = fixture_plugin()
     with seated_plugin(plugin):
@@ -1022,11 +1053,13 @@ def test_index_wraps_a_registration_failure_with_the_module_name() -> None:
 
 
 def test_seated_plugin_round_trips_on_exception() -> None:
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+    from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
 
+    live_registry = VM_PLATFORM_REGISTRY
     before = _snapshot_registries()
     with pytest.raises(RuntimeError, match="boom"), seated_plugin(fixture_plugin()):
         assert "fixture-vm" in VM_PLATFORM_REGISTRY  # seated inside
         raise RuntimeError("boom")
     assert _snapshot_registries() == before
     assert "fixture-vm" not in VM_PLATFORM_REGISTRY
+    assert descriptor_for("vm-platform").registry() is live_registry
