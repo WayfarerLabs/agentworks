@@ -937,6 +937,22 @@ schema, it may retry within the deadline but must not remove or replace that ino
 unresolved obligation has a durable binding, absent or replaced state is uncertainty, never a reason
 to initialize again.
 
+The production control path uses one private fixed-helper family for setup, non-creating inspection
+and generation advance. It follows the file-object family's closed, bounded request and sequenced
+result framing without importing its operation implementation or exposing gate control through
+`RunContext`. Each exchange is one selected `Carrier.execute` with literal runtime argv, a fixed
+bundle and a bounded canonical manifest on finite sensitive stdin. The guest wrapper checks the
+selected effective identity and independently observes the current raw guest epoch before calling
+the gate primitive. A lost setup or advance response remains a possible control-state effect until
+exact inspection or compare-and-swap reconciliation establishes its result; ordinary command replay
+is not recovery. Inspection cannot create or advance a gate, although SQLite may recover its own
+journal under the flock. Complete provider-body and workstation-command bounds apply before
+dispatch, including the fixed bundle, identity prefix and manifest. There is no executable-staging
+fallback. Local deadline checks must precede creation or generation commit and follow guest
+observation, but deadline expiry or carrier EOF alone never proves that a dispatched helper has
+stopped. End-to-end deadline behavior and native route quiescence remain separate production
+acceptance gates.
+
 Guest setup establishes a suitable local mount and per-identity permissions; selected-route
 admission confirms the bound gate instance and inode, guest epoch and usable Python `sqlite3` and
 `flock`. An absent or unsuitable namespace refuses effect admission. Common mount visibility across
