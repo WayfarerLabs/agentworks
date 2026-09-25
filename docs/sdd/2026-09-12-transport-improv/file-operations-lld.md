@@ -243,7 +243,14 @@ refuses before any helper module executes; request bytes never become source or 
 length, digest or entry point. This is one invocation, not a source-upload handshake or a generic
 file-operation code parameter. Identity admission still precedes workload-path access.
 
-Bundling retains one fixed standard-library `bz2` codec and base64 armoring. The
+Bundling retains one fixed standard-library `bz2` codec and base64 armoring. Before encoding, core
+compacts only the trusted fixed-helper module sources using the standard library AST: remove module,
+class and function docstrings, then render the result back to source. This is one shared policy for
+every fixed stdin-delivered file family, including its test fixtures; it is not a caller option or
+an oversized-request fallback. Generated tracebacks refer to compacted source rather than original
+source lines, and helper docstrings are not a runtime interface. The generated code must execute on
+Bookworm's Python 3.11 even when the controller uses a newer Python; complete request-size checks
+remain mandatory as helper dependencies grow. The
 [publication sizing investigation](prior-art-research.md#publication-helper-delivery-sizing) shows
 that the complete helper cannot reliably fit Windows argv, including after dependency reductions.
 Moving the fixed bundle to stdin removes that command-line dependency without another codec option.

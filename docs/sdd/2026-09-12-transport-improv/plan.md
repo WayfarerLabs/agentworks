@@ -630,13 +630,13 @@ Python 3.11. Successful operation tests separately cover every family: object/in
 production bundle, read/metadata/stage add trusted test entrypoints, and snapshot also redirects its
 scratch parent. These local measurements do not establish native SSH/QGA acceptance.
 
-The packaged prefixes measure 12,024 to 27,524 bytes. Complete Windows SSH command strings measure
-1,823 to 1,968 characters across the representative connection and all three identity modes.
-Complete QGA JSON bodies with a synthetic 32 KiB ASCII manifest measure 45,691 to 61,336 bytes; that
-payload is a sizing fixture, not a valid-operation proof or a guarantee about every escaped
-manifest. Oversized complete bodies refuse before wire access. Review removed a duplicate stage-size
-test and collapsed fixture setup into one patch input without dropping fault coverage. Publication
-delivery, joint SSH proof, module readiness and public FileAccess remain open.
+At that checkpoint, packaged prefixes measured 12,024 to 27,524 bytes. Complete Windows SSH command
+strings measured 1,823 to 1,968 characters across the representative connection and all three
+identity modes. Complete QGA JSON bodies with a synthetic 32 KiB ASCII manifest measured 45,691 to
+61,336 bytes; that payload is a sizing fixture, not a valid-operation proof or a guarantee about
+every escaped manifest. Oversized complete bodies refuse before wire access. Review removed a
+duplicate stage-size test and collapsed fixture setup into one patch input without dropping fault
+coverage. Publication delivery, joint SSH proof, module readiness and public FileAccess remain open.
 
 The [operator ruling](frd.md#file-safety-and-guest-runtime-rulings) approves adding `python3` to
 early guest provisioning, with helper code compatible with Bookworm's distribution Python. The
@@ -1901,6 +1901,16 @@ focused file-gate, snapshot, recovery and obligation tests. This accepts only th
 lock-lifetime mechanism. It does not complete this checkbox or authorize production drain evidence:
 fixed-helper interrupted cleanup and recovery of recovery, setup/advance dispatch, other file
 families and native route acceptance remain open.
+
+The shared fixed-helper bundle correction at `725514b9` removes docstrings and regenerates only
+trusted file-helper source before the existing BZ2/base64 delivery. It restores complete local QGA
+serialization fit after the snapshot gate dependency enlarged that family: the largest measured body
+is 63,442 bytes with a synthetic 32 KiB ASCII manifest and demoted identity, leaving 2,094 bytes
+below the unchanged 65,536-byte limit. The six family and three identity-mode size tests, valid
+helper and fixture execution on controller Python 3.12 and distribution Python 3.11, and the
+combined 252 fixed-delivery, effect-gate, snapshot, recovery and obligation tests pass. The margin
+is not a guarantee for arbitrary future manifest escaping or bundle growth. Native SSH/QGA
+acceptance and the open production effect-fence gates above remain separate.
 
 - [ ] Prove the restricted
       [guest-side file-helper effect fence](file-operations-lld.md#production-file-helper-effect-fence-candidate)
