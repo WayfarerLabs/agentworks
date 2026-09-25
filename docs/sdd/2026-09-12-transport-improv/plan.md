@@ -1553,6 +1553,23 @@ native delivery or public JobAccess.
       ownership, establish production route freshness, or provide crash-recovery takeover, polling
       wait, OPERATION lifetime, public JobAccess, or native SSH/QGA acceptance.
 
+- [x] Add one private managed-result collection attempt after `RECEIPT_CONFIRMED`, reducing an
+      exact validated wait fact, both policy-admitted closed streams, positive boundary-empty and
+      current attempt custody into the existing `ExecutionResult`. Historical launch dispatch
+      remains unknown; no launch receipt alone proves application entry. Do not infer resolution of
+      an earlier start obligation from this result. Integrate the collector into the scripted
+      independent-job lifecycle, with deadline, truncation, suppression, missing-fact and
+      interrupted-read tests. Polling wait, production route ownership, native acceptance and
+      public JobAccess remain separate gates.
+
+The one-shot collector is a private checkpoint, not `wait` or a public job result API. A scripted
+possible-dispatch row is reconciled before collecting in the connected lifecycle test. It does not
+prove an actual lost start acknowledgment or settle the earlier start obligation. An independent
+review found the deadline-between-exchanges case; the correction returns partial evidence only
+when a later read's pure admission refuses after expiry, while interrupted admitted reads retain
+aggregate custody. The managed selection passes 622 tests, full mypy passes 1,181 files, and Ruff
+and whitespace checks pass. Live SSH/QGA and production route tests remain open.
+
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared
       create bootstrap. Migration 41 leaves legacy rows NULL; ordinary existing-VM operations never

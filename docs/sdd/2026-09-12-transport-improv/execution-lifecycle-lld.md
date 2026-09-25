@@ -493,6 +493,20 @@ or incomplete observation never proves `NOT_LAUNCHED`. Receipt reconciliation do
 earlier start attempt or obligation, release a retained operation owner, prove route freshness, or
 imply workload completion; those remain independent evidence and recovery gates.
 
+The private one-shot result collector requires a reconciled launch receipt before attempting
+another carrier call. It observes once, then reads only streams whose exact end facts were present
+in that observation, under the original finite deadline and caller-held VM claim. The later
+observation's carrier dispatch is not reused as the historical launch dispatch: the result retains
+`UNKNOWN`. A launch receipt alone leaves application state unknown; only a validated `wait` fact
+gives exit or signal status. Each stream's admitted output, complete or truncated disposition, and
+positive `boundary-empty` remain separate. A zero exit cannot make the result successful without
+both requested streams, boundary emptiness and settled current collection custody. That boundary
+and custody govern the result's `owned_cleanup_confirmed` flag; neither settles an earlier
+`managed-start` obligation. The collector does not poll, stop, dispose, replay start, release its
+owner or establish production route freshness. Deadline expiry before a later stream read is
+admitted returns a partial deadline result with the already observed facts; an interrupted attempt
+that acquired custody instead preserves the original exception with aggregate attempt facts.
+
 At the first production later-action caller, bind route freshness at the borrowed fixed helper's
 actual carrier boundary. An optional internal check supplied by that caller runs after the exact
 operation attempt has durably admitted its possible effect and immediately before the underlying

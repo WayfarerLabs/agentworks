@@ -534,14 +534,31 @@ caller-held VM operation owner. It derives the expected launch from that row, bo
 custody for one fenced observation attempt, and reports both the raw candidate and whether the owner
 must be retained after uncertain delivery. Escaping control flow keeps its original exception with
 custody facts attached as its cause. The caller must supply fresh target and guest facts, keep the
-selected provider route current, and retain or release the owner explicitly. This adapter neither
-reconciles run state nor establishes production routing; it is not JobAccess or RunContext. Its
-private read-output sibling uses the same exact-run admission and custody path for one selected
-closed stream. It accepts bytes only after the validated end fact agrees with the run's persisted
-capture policy and prefix bound. Discard and sensitivity suppression accept only their matching
-no-output end facts. The raw candidate remains internal evidence even when policy admission fails;
+selected provider route current, and retain or release the owner explicitly. The read-only observe
+action neither reconciles run state nor establishes production routing; it is not JobAccess or
+RunContext. Its private read-output sibling uses the same exact-run admission and custody path for
+one selected closed stream. It accepts bytes only after the validated end fact agrees with the
+run's persisted capture policy and prefix bound. Discard and sensitivity suppression accept only
+their matching no-output end facts. The raw candidate remains internal evidence even when policy
+admission fails;
 it must not be forwarded as a caller-facing output view. Missing or conflicting evidence stays
 unaccepted.
+
+A separate private observe-and-reconcile action uses one complete, validated observation's exact
+launch receipt to reconcile a `POSSIBLE_DISPATCH` row idempotently. It records historical launch
+dispatch as `UNKNOWN`, not the later observation carrier's dispatch. Missing or invalid observation
+does not establish nonlaunch. This transition does not settle an earlier `managed-start` obligation
+or release retained operation ownership.
+
+`_managed_result.py` privately collects one result only after a reconciled launch receipt. It
+observes once and reads only streams with observed exact end facts, all under the same finite
+deadline and caller-held VM claim. The result keeps historical dispatch unknown, derives exit or
+signal only from `wait`, preserves each output disposition, and needs positive boundary-empty plus
+settled current attempts for `owned_cleanup_confirmed`. A zero exit without both policy-admitted
+streams or boundary proof is not successful. Expiry before a later read's admission returns partial
+deadline evidence; interrupted admitted attempts carry aggregate custody. This collector does not
+poll, stop, dispose, clear prior start obligations, release the owner, prove production routing or
+provide public JobAccess.
 
 `_managed_stop_exchange.py` supplies the separate private stop attempt over the same carrier
 interface. Its fixed Python 3.11 Linux root helper revalidates the exact launch, publishes the

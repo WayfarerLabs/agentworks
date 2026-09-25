@@ -12,6 +12,7 @@ from agentworks.execution._managed_observe_access import (
     observe_and_reconcile_bound_managed_run,
     read_bound_managed_output,
 )
+from agentworks.execution._managed_result import collect_bound_managed_result
 from agentworks.execution._managed_runs import ManagedLaunchState
 from agentworks.execution._managed_stop_access import stop_bound_managed_run
 from agentworks.execution._managed_stop_exchange import ManagedStopState
@@ -20,6 +21,7 @@ from .test_managed_disposal import ExchangeCarrier, _disposed
 from .test_managed_disposal_access import _not_ready
 from .test_managed_observation import ScriptedCarrier, _records
 from .test_managed_observe_access import RUN, _options, _output_reply, _reserved
+from .test_managed_result import _reply as _result_reply
 from .test_managed_stop import Carrier as StopCarrier
 from .test_managed_stop_access import _response as _stop_response
 
@@ -59,6 +61,17 @@ def test_possible_dispatch_receipt_reconnects_without_relaunch(tmp_path: Path) -
         assert repeated.candidate is not None
         assert repository.inspect(RUN) == confirmed
         assert observe_carrier.calls == 2
+
+        result_carrier = ScriptedCarrier(_result_reply)
+        collected = collect_bound_managed_result(
+            repository,
+            RUN,
+            **_options(owner, result_carrier),  # type: ignore[arg-type]
+        )
+        assert collected.result.ok
+        assert not collected.requires_owner_retention
+        assert result_carrier.calls == 3
+        assert repository.inspect(RUN) == confirmed
 
         output_carrier = ScriptedCarrier(
             lambda request: _output_reply(request, disposition="complete-capture", content=b"ok")
