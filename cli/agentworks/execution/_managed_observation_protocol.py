@@ -12,6 +12,7 @@ from . import _managed_job_wire as wire
 from ._file_wire import valid_nonce
 from ._helper_identity import IdentityExpectation, decode_identity
 from ._managed_job_store import FactName, Stream
+from ._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 
 MAX_REQUEST_BYTES = 8192
 MAX_CONTROL_BYTES = 512
@@ -39,6 +40,7 @@ class ManagedObservationRequest:
     operation: ManagedOperation
     expected_launch: bytes
     identity: IdentityExpectation
+    guest: VMGuestIdentity
     stream: Stream | None = None
 
 
@@ -74,10 +76,21 @@ def checked_launch(data: bytes) -> dict[str, object]:
     return launch
 
 
+def checked_vm_launch(data: bytes, guest: VMGuestIdentity) -> dict[str, object]:
+    """Bind caller-supplied guest evidence to the exact VM launch before dispatch."""
+    launch = checked_launch(data)
+    if type(guest) is not VMGuestIdentity:
+        raise ManagedObservationError("invalid managed guest identity")
+    target = launch["target"]
+    if type(target) is not dict or target["kind"] != "vm" or target["boot_id"] != vm_guest_boot_id(guest):
+        raise ManagedObservationError("managed target boot mismatch")
+    return launch
+
+
 def encode_request(request: ManagedObservationRequest) -> bytes:
     if type(request) is not ManagedObservationRequest:
         raise ManagedObservationError("invalid managed observation request")
-    checked_launch(request.expected_launch)
+    checked_vm_launch(request.expected_launch, request.guest)
     if not valid_nonce(request.nonce) or type(request.operation) is not ManagedOperation:
         raise ManagedObservationError("invalid managed observation request")
     if (request.operation is ManagedOperation.OBSERVE and request.stream is not None) or (
@@ -95,6 +108,11 @@ def encode_request(request: ManagedObservationRequest) -> bytes:
                 "egid": request.identity.egid,
                 "groups": list(request.identity.groups),
             },
+            "guest": {
+                "instance_marker": request.guest.instance_marker,
+                "boot_id": request.guest.boot_id,
+                "init_start_ticks": request.guest.init_start_ticks,
+            },
             "stream": request.stream.value if request.stream is not None else None,
         }
     )
@@ -106,7 +124,7 @@ def encode_request(request: ManagedObservationRequest) -> bytes:
 
 def decode_request(data: bytes) -> ManagedObservationRequest:
     value = _load(data, MAX_REQUEST_BYTES)
-    fields = {"version", "nonce", "operation", "expected_launch", "identity", "stream"}
+    fields = {"version", "nonce", "operation", "expected_launch", "identity", "guest", "stream"}
     if set(value) != fields or type(value["version"]) is not int or value["version"] != 1:
         raise ManagedObservationError("invalid managed observation request")
     try:
@@ -121,13 +139,17 @@ def decode_request(data: bytes) -> ManagedObservationRequest:
         launch_bytes = base64.b64decode(encoded.encode("ascii"), validate=True)
         if base64.b64encode(launch_bytes).decode("ascii") != encoded:
             raise ValueError
-        checked_launch(launch_bytes)
+        guest_data = value["guest"]
+        if type(guest_data) is not dict or set(guest_data) != {"instance_marker", "boot_id", "init_start_ticks"}:
+            raise ValueError
+        guest = VMGuestIdentity(guest_data["instance_marker"], guest_data["boot_id"], guest_data["init_start_ticks"])
+        checked_vm_launch(launch_bytes, guest)
         identity = decode_identity(value["identity"])
         selected = value["stream"]
         if selected is not None and type(selected) is not str:
             raise ValueError
         stream = None if selected is None else Stream(selected)
-    except (ValueError, TypeError, UnicodeError, binascii.Error):
+    except (ValueError, TypeError, UnicodeError, KeyError, binascii.Error):
         raise ManagedObservationError("invalid managed observation request") from None
     if (
         not valid_nonce(nonce)
@@ -135,7 +157,7 @@ def decode_request(data: bytes) -> ManagedObservationRequest:
         or (operation is ManagedOperation.READ_OUTPUT and stream is None)
     ):
         raise ManagedObservationError("managed observation binding mismatch")
-    return ManagedObservationRequest(nonce, operation, launch_bytes, identity, stream)
+    return ManagedObservationRequest(nonce, operation, launch_bytes, identity, guest, stream)
 
 
 def encode_result(control: ManagedResultControl) -> bytes:

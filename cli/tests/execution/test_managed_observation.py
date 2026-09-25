@@ -42,6 +42,12 @@ from agentworks.execution._managed_observation_protocol import (
     encode_result,
 )
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+from agentworks.execution._vm_guest_identity_guest import _GuestRefusal
+from agentworks.execution._vm_guest_identity_protocol import (
+    VMGuestIdentity,
+    VMGuestIdentityFailure,
+    vm_guest_boot_id,
+)
 from agentworks.execution.carrier import (
     CapturedOutput,
     CarrierIO,
@@ -59,12 +65,14 @@ from agentworks.execution.carrier import (
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux managed store")
 RUN = "a" * 32
 NONCE = "b" * 32
+GUEST = VMGuestIdentity("d" * 32, "00000000-0000-4000-8000-000000000001", 1234)
 
 
 def _launch(
     *,
+    kind: str = "vm",
     target: str = "vm-one",
-    boot: str = "00000000-0000-4000-8000-000000000001",
+    boot: str = vm_guest_boot_id(GUEST),
     incarnation: str = "v1:" + "c" * 64,
 ) -> bytes:
     return wire.encode_fact(
@@ -73,7 +81,7 @@ def _launch(
             "kind": "launch",
             "run_id": RUN,
             "unit": f"agw-managed-{RUN}.service",
-            "target": {"kind": "vm", "name": target, "incarnation": incarnation, "boot_id": boot},
+            "target": {"kind": kind, "name": target, "incarnation": incarnation, "boot_id": boot},
             "workload": {"euid": 1001, "egid": 1001, "groups": [1001]},
             "shell": {"requested": None, "resolved_executable": None, "login": False, "interactive": False},
             "owner": {"kind": "resource", "owner_id": "session-7"},
@@ -122,7 +130,7 @@ def store(tmp_path: Path) -> Generator[ManagedJobStore, None, None]:
 def _request(
     operation: ManagedOperation = ManagedOperation.OBSERVE, stream: Stream | None = None
 ) -> ManagedObservationRequest:
-    return ManagedObservationRequest(NONCE, operation, _launch(), IdentityExpectation(0, 0, (0,)), stream)
+    return ManagedObservationRequest(NONCE, operation, _launch(), IdentityExpectation(0, 0, (0,)), GUEST, stream)
 
 
 def _records(nonce: str, control: ManagedResultControl, facts: tuple[bytes, ...], output: bytes = b"") -> bytes:
@@ -195,6 +203,7 @@ def _exchange(carrier: ScriptedCarrier, *, stream: Stream | None = None):  # typ
         "plan": _plan(),
         "deadline": Deadline.after(10),
         "runtime_selection": RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+        "guest": GUEST,
     }
     if stream is None:
         return observe_managed_run(carrier, **kwargs)  # type: ignore[arg-type]
@@ -231,6 +240,15 @@ def test_request_codec_binds_exact_launch_and_rejects_arbitrary_selectors() -> N
         value[field] = replacement
         with pytest.raises(ManagedObservationError):
             decode_request(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
+    for guest_value in (None, {}, {**json.loads(encoded)["guest"], "init_start_ticks": True}):
+        value = json.loads(encoded)
+        value["guest"] = guest_value
+        with pytest.raises(ManagedObservationError):
+            decode_request(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
+    without_guest = json.loads(encoded)
+    del without_guest["guest"]
+    with pytest.raises(ManagedObservationError):
+        decode_request(json.dumps(without_guest, sort_keys=True, separators=(",", ":")).encode())
     with pytest.raises(ManagedObservationError):
         encode_request(_request(ManagedOperation.READ_OUTPUT))
     with pytest.raises(ManagedObservationError):
@@ -246,8 +264,112 @@ def test_request_codec_binds_exact_launch_and_rejects_arbitrary_selectors() -> N
             plan=_plan(),
             deadline=Deadline.after(10),
             runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX),
+            guest=GUEST,
         )
     assert carrier.calls == 0
+
+
+@pytest.mark.parametrize("operation", [ManagedOperation.OBSERVE, ManagedOperation.READ_OUTPUT])
+def test_host_refuses_unbound_guest_before_carrier(operation: ManagedOperation) -> None:
+    carrier = ScriptedCarrier(lambda _request: b"")
+    kwargs = {
+        "expected_launch": _launch(),
+        "plan": _plan(),
+        "deadline": Deadline.after(10),
+        "runtime_selection": RuntimeSelection(RuntimeTargetOS.LINUX),
+        "guest": GUEST,
+    }
+    call = observe_managed_run if operation is ManagedOperation.OBSERVE else read_managed_output
+    if operation is ManagedOperation.READ_OUTPUT:
+        kwargs["stream"] = Stream.STDOUT
+    for launch, supplied in (
+        (_launch(boot=GUEST.boot_id), GUEST),
+        (_launch(kind="platform-host"), GUEST),
+        (_launch(target="vm-other"), VMGuestIdentity(GUEST.instance_marker, GUEST.boot_id, 1235)),
+        (_launch(), None),
+    ):
+        kwargs["expected_launch"] = launch
+        kwargs["guest"] = supplied
+        with pytest.raises(ValidationError):
+            call(carrier, **kwargs)  # type: ignore[arg-type]
+    assert carrier.calls == 0
+
+
+@pytest.mark.parametrize("operation", [ManagedOperation.OBSERVE, ManagedOperation.READ_OUTPUT])
+@pytest.mark.parametrize("failure", ["mismatch", "unsafe", "missing"])
+def test_guest_refuses_before_opening_store(
+    monkeypatch: pytest.MonkeyPatch, operation: ManagedOperation, failure: str
+) -> None:
+    request = _request(operation, Stream.STDOUT if operation is ManagedOperation.READ_OUTPUT else None)
+    records: list[tuple[FileRecordKind, bytes]] = []
+
+    class Writer:
+        def __init__(self, nonce: str) -> None:
+            assert nonce == NONCE
+
+        def write(self, kind: FileRecordKind, body: bytes) -> None:
+            records.append((kind, body))
+
+    def forbidden_store(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("store opened before guest identity fence")
+
+    def observe_guest() -> VMGuestIdentity:
+        if failure == "unsafe":
+            raise _GuestRefusal(VMGuestIdentityFailure.MARKER_UNSAFE)
+        if failure == "missing":
+            raise _GuestRefusal(VMGuestIdentityFailure.MARKER_MISSING)
+        return VMGuestIdentity("e" * 32, GUEST.boot_id, GUEST.init_start_ticks)
+
+    monkeypatch.setattr(guest, "FileRecordWriter", Writer)
+    monkeypatch.setattr(guest, "_read_request", lambda: request)
+    monkeypatch.setattr(guest, "matches_current_identity", lambda _expected: True)
+    monkeypatch.setattr(guest, "_identity", observe_guest)
+    monkeypatch.setattr(guest, "ManagedJobStore", forbidden_store)
+    assert guest.main(NONCE) == 0
+    assert records == [(FileRecordKind.FAILED, b""), (FileRecordKind.FINISHED, b"")]
+
+
+@pytest.mark.parametrize("operation", [ManagedOperation.OBSERVE, ManagedOperation.READ_OUTPUT])
+def test_guest_checks_live_identity_before_store(monkeypatch: pytest.MonkeyPatch, operation: ManagedOperation) -> None:
+    request = _request(operation, Stream.STDOUT if operation is ManagedOperation.READ_OUTPUT else None)
+    events: list[str] = []
+    records: list[FileRecordKind] = []
+
+    class Writer:
+        def __init__(self, nonce: str) -> None:
+            assert nonce == NONCE
+
+        def write(self, kind: FileRecordKind, _body: bytes) -> None:
+            records.append(kind)
+
+    class Store:
+        def __init__(self, run_id: str) -> None:
+            assert run_id == RUN
+            events.append("store")
+
+        def __enter__(self) -> Store:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            pass
+
+    def observe_guest() -> VMGuestIdentity:
+        events.append("guest")
+        return GUEST
+
+    monkeypatch.setattr(guest, "FileRecordWriter", Writer)
+    monkeypatch.setattr(guest, "_read_request", lambda: request)
+    monkeypatch.setattr(guest, "matches_current_identity", lambda _expected: True)
+    monkeypatch.setattr(guest, "_identity", observe_guest)
+    monkeypatch.setattr(guest, "ManagedJobStore", Store)
+    monkeypatch.setattr(
+        guest,
+        "_prepare",
+        lambda _request, _store: guest._PreparedResult(ManagedResultControl((FactName.LAUNCH,)), (_launch(),)),
+    )
+    assert guest.main(NONCE) == 0
+    assert events == ["guest", "store"]
+    assert records == [FileRecordKind.RESULT, FileRecordKind.DATA, FileRecordKind.FINISHED]
 
 
 @pytest.mark.parametrize("field", ["run_id", "unit", "receipt_sha256"])

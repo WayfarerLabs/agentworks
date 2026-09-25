@@ -21,9 +21,11 @@ from agentworks.execution._managed_observation_protocol import (
     ManagedResultControl,
     encode_request,
 )
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 
 NONCE = "b" * 32
 RUN = "a" * 32
+GUEST = VMGuestIdentity("d" * 32, "00000000-0000-4000-8000-000000000001", 1234)
 
 
 def _launch() -> bytes:
@@ -37,7 +39,7 @@ def _launch() -> bytes:
                 "kind": "vm",
                 "name": "vm-one",
                 "incarnation": "v1:" + "c" * 64,
-                "boot_id": "00000000-0000-4000-8000-000000000001",
+                "boot_id": vm_guest_boot_id(GUEST),
             },
             "workload": {"euid": 1001, "egid": 1001, "groups": [1001]},
             "shell": {"requested": None, "resolved_executable": None, "login": False, "interactive": False},
@@ -80,6 +82,7 @@ def test_exact_source_codec_parity(interpreter: str, tmp_path: Path) -> None:
             "_managed_job_request",
             "_managed_job_store",
             "_file_wire",
+            "_vm_guest_identity_protocol",
             "_managed_observation_protocol",
         ),
     )
@@ -92,7 +95,7 @@ def test_exact_source_codec_parity(interpreter: str, tmp_path: Path) -> None:
         "assert p.decode_result(result).facts[0].value=='launch'\n"
     )
     request = encode_request(
-        ManagedObservationRequest(NONCE, ManagedOperation.OBSERVE, _launch(), IdentityExpectation(0, 0, (0,)))
+        ManagedObservationRequest(NONCE, ManagedOperation.OBSERVE, _launch(), IdentityExpectation(0, 0, (0,)), GUEST)
     )
     result = subprocess.run(
         [interpreter, "-I", "-S", "-B", "-c", source, request.hex()],

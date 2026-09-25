@@ -40,6 +40,7 @@ _MAX_RESPONSE_RECORDS = (
 
 if TYPE_CHECKING:
     from ._helper_launcher import IdentityPlan
+    from ._vm_guest_identity_protocol import VMGuestIdentity
     from .carrier import Carrier, Deadline, ExitStatus
 
 
@@ -260,11 +261,14 @@ def _exchange(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
+    guest: VMGuestIdentity,
 ) -> ManagedObservationCandidate:
     if runtime_selection.target_os is not RuntimeTargetOS.LINUX or plan.expected.euid != 0:
         raise ValidationError("Managed observation requires a Linux root helper")
     try:
-        request = ManagedObservationRequest(secrets.token_hex(16), operation, expected_launch, plan.expected, stream)
+        request = ManagedObservationRequest(
+            secrets.token_hex(16), operation, expected_launch, plan.expected, guest, stream
+        )
         request_data = encode_request(request)
     except ManagedObservationError:
         raise ValidationError("Invalid managed observation request") from None
@@ -327,6 +331,7 @@ def observe_managed_run(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
+    guest: VMGuestIdentity,
 ) -> ManagedObservationCandidate:
     """Read present fixed facts for one expected run; absence stays unknown."""
     return _exchange(
@@ -337,6 +342,7 @@ def observe_managed_run(
         plan=plan,
         deadline=deadline,
         runtime_selection=runtime_selection,
+        guest=guest,
     )
 
 
@@ -348,6 +354,7 @@ def read_managed_output(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
+    guest: VMGuestIdentity,
 ) -> ManagedObservationCandidate:
     """Read only one closed captured stream for the expected run."""
     return _exchange(
@@ -358,4 +365,5 @@ def read_managed_output(
         plan=plan,
         deadline=deadline,
         runtime_selection=runtime_selection,
+        guest=guest,
     )

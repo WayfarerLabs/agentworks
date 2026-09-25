@@ -19,9 +19,11 @@ from ._managed_observation_protocol import (
     ManagedResultControl,
     checked_fact,
     checked_launch,
+    checked_vm_launch,
     decode_request,
     encode_result,
 )
+from ._vm_guest_identity_guest import _GuestRefusal, _identity
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -89,7 +91,7 @@ def _write_result(writer: FileRecordWriter, prepared: _PreparedResult) -> None:
 
 
 def main(nonce: str) -> int:
-    """Observe one exact run; no live marker or boot reread is claimed here."""
+    """Fence the live guest and target boot before opening the managed store."""
     writer = FileRecordWriter(nonce)
     try:
         request = _read_request()
@@ -97,10 +99,12 @@ def main(nonce: str) -> int:
             raise ManagedObservationError("managed observation prerequisite")
         if not matches_current_identity(request.identity):
             raise ManagedObservationError("managed observation identity")
-        launch = checked_launch(request.expected_launch)
+        launch = checked_vm_launch(request.expected_launch, request.guest)
+        if _identity() != request.guest:
+            raise ManagedObservationError("managed observation guest identity mismatch")
         with ManagedJobStore(cast("str", launch["run_id"])) as store:
             prepared = _prepare(request, store)
-    except (ManagedObservationError, StoreError, OSError, ValueError):
+    except (ManagedObservationError, StoreError, _GuestRefusal, OSError, ValueError, TypeError):
         writer.write(FileRecordKind.FAILED, b"")
         writer.write(FileRecordKind.FINISHED, b"")
         return 0
