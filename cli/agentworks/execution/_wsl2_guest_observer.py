@@ -81,7 +81,9 @@ class WSL2GuestObserver:
             except BaseException as error:
                 try:
                     self._settle_pending()
-                except BaseException:
+                except BaseException as cleanup_error:
+                    if not isinstance(cleanup_error, Exception):
+                        raise
                     error.add_note("WSL2 guest query local settlement remains uncertain")
                 if isinstance(error, Exception):
                     return GuestAnchorPresence.UNKNOWN
@@ -94,8 +96,7 @@ class WSL2GuestObserver:
         if client is None:
             return True
         try:
-            client.settle(Deadline.after(_CLEANUP_SECONDS))
-            settled = client.snapshot().settled
+            settled = client.settle(Deadline.after(_CLEANUP_SECONDS)).settled
         except Exception:
             return False
         if settled:

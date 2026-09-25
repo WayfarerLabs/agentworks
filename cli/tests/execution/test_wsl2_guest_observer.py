@@ -33,6 +33,8 @@ SETTLED = LocalResourceSnapshot(
 class FakeClient:
     events: list[str]
     fail_at: str | None = None
+    spawn_error: Exception | None = None
+    settle_error: BaseException | None = None
     trailing: bytes = b""
     exit_status: int | None = 0
     response: bytes | None = None
@@ -50,6 +52,8 @@ class FakeClient:
         assert not deadline.expired
         self.argv = argv
         self._step("spawn")
+        if self.spawn_error is not None:
+            raise self.spawn_error
 
     def current_controller_identity(self) -> tuple[int, int]:
         raise AssertionError("query must not inspect controller identity")
@@ -78,6 +82,8 @@ class FakeClient:
 
     def settle(self, deadline: Deadline) -> LocalResourceSnapshot:
         self._step("settle")
+        if self.settle_error is not None:
+            raise self.settle_error
         if not self.settlement_blocked:
             self.local = SETTLED
         return self.local
@@ -120,7 +126,7 @@ def test_query_uses_exact_route_fixed_source_and_complete_local_proof() -> None:
     )
     assert argv[11] == FIXED_GUEST_QUERY_SOURCE
     assert len(argv[12]) == 32 and argv[13] == "137"
-    assert factory.events == ["create", "spawn", "close_stdin", "read_line", "wait", "read_eof", "settle", "snapshot"]
+    assert factory.events == ["create", "spawn", "close_stdin", "read_line", "wait", "read_eof", "settle"]
 
 
 @pytest.mark.parametrize("trailing", [b"x", b"\n", b"another line\n"])
@@ -131,7 +137,7 @@ def test_trailing_output_prevents_absence(trailing: bytes) -> None:
     assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.UNKNOWN
 
 
-@pytest.mark.parametrize("fail_at", ["spawn", "close_stdin", "read_line", "wait", "read_eof", "settle", "snapshot"])
+@pytest.mark.parametrize("fail_at", ["spawn", "close_stdin", "read_line", "wait", "read_eof", "settle"])
 def test_interruption_retains_client_then_settles_before_new_dispatch(fail_at: str) -> None:
     factory = Factory()
     first = FakeClient(factory.events, fail_at=fail_at)
@@ -142,7 +148,7 @@ def test_interruption_retains_client_then_settles_before_new_dispatch(fail_at: s
         subject.observe(IDENTITY, Deadline.after(1))
     first.fail_at = None
     assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.ABSENT_CONFIRMED
-    assert factory.events.index("spawn", factory.events.index(fail_at) + 1) > factory.events.index("snapshot")
+    assert factory.events.index("spawn", factory.events.index(fail_at) + 1) > factory.events.index("settle")
 
 
 def test_unsettled_attempt_blocks_new_dispatch_until_retry_succeeds() -> None:
@@ -158,6 +164,36 @@ def test_unsettled_attempt_blocks_new_dispatch_until_retry_succeeds() -> None:
     first.settlement_blocked = False
     assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.ABSENT_CONFIRMED
     assert second.argv
+
+
+@pytest.mark.parametrize("cleanup_type", [KeyboardInterrupt, SystemExit])
+def test_cleanup_control_interruption_after_ordinary_spawn_failure_propagates_and_retains_client(
+    cleanup_type: type[BaseException],
+) -> None:
+    events: list[str] = []
+    first = FakeClient(events, spawn_error=OSError("spawn failed"), settle_error=cleanup_type("cleanup interrupted"))
+    second = FakeClient(events)
+    created = iter((first, second))
+    subject = WSL2GuestObserver(WSL2Connection("Ubuntu", "root", "wsl.exe"), client_factory=lambda: next(created))
+    with pytest.raises(cleanup_type):
+        subject.observe(IDENTITY, Deadline.after(1))
+    assert not second.argv
+    first.settle_error = None
+    assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.ABSENT_CONFIRMED
+    assert events[:3] == ["spawn", "settle", "settle"]
+
+
+def test_ordinary_cleanup_failure_after_spawn_failure_returns_unknown_and_retains_client() -> None:
+    events: list[str] = []
+    first = FakeClient(events, spawn_error=OSError("spawn failed"), settle_error=OSError("settle failed"))
+    second = FakeClient(events)
+    created = iter((first, second))
+    subject = WSL2GuestObserver(WSL2Connection("Ubuntu", "root", "wsl.exe"), client_factory=lambda: next(created))
+    assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.UNKNOWN
+    assert not second.argv
+    first.settle_error = None
+    assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.ABSENT_CONFIRMED
+    assert events[:3] == ["spawn", "settle", "settle"]
 
 
 def test_nonzero_exit_is_unknown_even_with_complete_output_and_settlement() -> None:
