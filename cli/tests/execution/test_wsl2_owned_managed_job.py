@@ -11,7 +11,7 @@ from unittest.mock import Mock
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform.base import ProviderLocator
+from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLocatorUnavailable
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import ValidationError
@@ -28,6 +28,7 @@ from agentworks.execution._managed_runs import (
 from agentworks.execution._managed_start_operation import ManagedStartOutcome
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution._wsl2_owned_managed_job import WSL2ManagedStartStatus, WSL2OwnedManagedJob
+from agentworks.execution._wsl2_owned_operation import WSL2RouteRefusal, WSL2RouteStatus
 from agentworks.execution._wsl2_platform_hold import OBLIGATION_KIND
 from agentworks.execution.binding import NativeExecutionBinding
 from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, PreparedInvocation
@@ -52,7 +53,7 @@ def _subject(
     monkeypatch: pytest.MonkeyPatch,
     *,
     bindings: list[NativeExecutionBinding] | None = None,
-    locators: list[ProviderLocator] | None = None,
+    locators: list[object] | None = None,
 ) -> tuple[WSL2OwnedManagedJob, Mock, GuestThenFileCarrier]:
     guest_carrier = GuestThenFileCarrier(database)
 
@@ -83,7 +84,9 @@ def _subject(
     return subject, platform, guest_carrier
 
 
-def _start(subject: WSL2OwnedManagedJob, database: Database) -> WSL2ManagedStartStatus:
+def _start(
+    subject: WSL2OwnedManagedJob, database: Database, *, deadline: Deadline | None = None
+) -> WSL2ManagedStartStatus:
     return subject.start_job(
         ManagedRunRepository(database),
         Command(["/usr/bin/true"]),
@@ -95,7 +98,7 @@ def _start(subject: WSL2OwnedManagedJob, database: Database) -> WSL2ManagedStart
         env=None,
         cwd=None,
         sensitive=False,
-        deadline=Deadline.after(30),
+        deadline=deadline if deadline is not None else Deadline.after(30),
         obligation_id="b" * 32,
         identity=RUN,
     )
@@ -125,8 +128,11 @@ def test_managed_start_passes_selected_route_guest_and_caller_identity_without_a
         assert kwargs["root_plan"] is ROOT
         assert kwargs["carrier"] is subject._carrier
         assert kwargs["owner"] is subject.owner
+        assert subject.preparation is not None
         assert kwargs["target"] is subject.preparation.target
+        assert subject.ready is not None and subject.ready.identity is not None
         assert kwargs["guest"].init_start_ticks == subject.ready.identity.init_start_ticks
+        assert callable(kwargs["before_dispatch"])
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
         assert subject.release_if_settled(Deadline.after(30), safe=True)
         assert database.operations.inspect(subject.owner.ownership.scope) is None
@@ -151,6 +157,101 @@ def test_changed_connection_refuses_before_reservation_and_releases_settled_hold
         assert carrier.calls == 1
         start.assert_not_called()
         assert database.operations.inspect(OperationScope(OperationResourceKind.VM, "box")) is None
+
+
+@pytest.mark.parametrize("observation", [ProviderLocatorUnavailable(), object()])
+def test_unconfirmed_prestart_locator_retains_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, observation: object
+) -> None:
+    with closing(Database(tmp_path / "state.db")) as database:
+        stable = ProviderLocator("wsl2:registration")
+        subject, _, carrier = _subject(database, monkeypatch, locators=[stable] * 3 + [observation])
+        start = Mock(side_effect=AssertionError("managed start after unconfirmed route"))
+        monkeypatch.setattr(managed, "start_bound_managed_job", start)
+
+        assert _start(subject, database) is WSL2ManagedStartStatus.RETAINED
+        assert carrier.calls == 1
+        start.assert_not_called()
+        assert database.operations.inspect(subject.owner.ownership.scope) is not None
+
+
+def test_exceptional_prestart_locator_preserves_original_and_retains_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with closing(Database(tmp_path / "state.db")) as database:
+        subject, platform, carrier = _subject(database, monkeypatch)
+        original = RuntimeError("locator observation failed")
+        platform.observe_provider_locator.side_effect = [ProviderLocator("wsl2:registration")] * 2 + [original]
+
+        with pytest.raises(RuntimeError) as caught:
+            _start(subject, database)
+        assert caught.value is original
+        assert carrier.calls == 1
+        assert not subject.release_if_settled(Deadline.after(30), safe=True)
+        assert database.operations.inspect(subject.owner.ownership.scope) is not None
+
+
+@pytest.mark.parametrize("change", ["locator", "connection", "runtime", "unavailable", "invalid", "late", "exception"])
+def test_dispatch_route_callback_classifies_and_retains_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    with closing(Database(tmp_path / "state.db")) as database:
+        stable = ProviderLocator("wsl2:registration")
+        replacement = ProviderLocator("wsl2:replacement")
+        locators: list[object] = [stable for _ in range(5)]
+        locators.append(replacement if change == "locator" else stable)
+        if change == "unavailable":
+            locators[-1] = ProviderLocatorUnavailable()
+        elif change == "invalid":
+            locators[-1] = object()
+        else:
+            locators.append(stable)
+        first = NativeExecutionBinding(
+            WSL2Carrier(CONNECTION), CONNECTION.user, RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable)
+        )
+        changed_connection = WSL2Connection("Debian", "admin", "wsl.exe")
+        second = NativeExecutionBinding(
+            WSL2Carrier(changed_connection if change == "connection" else CONNECTION),
+            CONNECTION.user,
+            RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3")
+            if change == "runtime"
+            else first.runtime_selection,
+        )
+        subject, platform, carrier = _subject(database, monkeypatch, locators=locators, bindings=[first, first, second])
+        original = RuntimeError("locator observation failed")
+
+        deadline = Deadline.after(30)
+
+        def observe_late(*args: object, **kwargs: object) -> ProviderLocator:
+            object.__setattr__(deadline, "expires_at", 0.0)
+            return stable
+
+        def start(*args: object, **kwargs: object) -> ManagedStartOutcome:
+            callback = kwargs["before_dispatch"]
+            assert callable(callback)
+            if change == "exception":
+                platform.observe_provider_locator.side_effect = original
+            elif change == "late":
+                platform.observe_provider_locator.side_effect = observe_late
+            callback()
+            raise AssertionError("route callback admitted changed route")
+
+        monkeypatch.setattr(managed, "start_bound_managed_job", start)
+        with pytest.raises(RuntimeError if change == "exception" else WSL2RouteRefusal) as caught:
+            _start(subject, database, deadline=deadline)
+        if change == "exception":
+            assert caught.value is original
+        else:
+            expected = (
+                WSL2RouteStatus.CHANGED
+                if change in {"locator", "connection", "runtime"}
+                else WSL2RouteStatus.UNCONFIRMED
+            )
+            assert isinstance(caught.value, WSL2RouteRefusal)
+            assert caught.value.status is expected
+        assert carrier.calls == 1
+        assert not subject.release_if_settled(Deadline.after(30), safe=True)
+        assert database.operations.inspect(subject.owner.ownership.scope) is not None
 
 
 @pytest.mark.parametrize("change", ["runtime", "late-locator"])

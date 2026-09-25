@@ -172,6 +172,7 @@ def _start(
     owner: OperationOwner | None = None,
     deadline: Deadline | None = None,
     obligation_id: str = OBLIGATION,
+    before_dispatch: Callable[[], None] | None = None,
 ):
     _, repository, record, existing_owner = owned
     selected_deadline = deadline if deadline is not None else Deadline.after(10)
@@ -194,7 +195,37 @@ def _start(
         deadline=selected_deadline,
         owner=owner if owner is not None else existing_owner,
         obligation_id=obligation_id,
+        before_dispatch=before_dispatch,
     )
+
+
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_pre_dispatch_refusal_keeps_armed_obligation_and_reserved_run(
+    owned: tuple[Database, ManagedRunRepository, ManagedRunRecord, OperationOwner],
+    interrupted: bool,
+) -> None:
+    database, repository, record, owner = owned
+    carrier = Carrier(lambda request: _records(request, receipt=True))
+    refusal = KeyboardInterrupt("route observation interrupted") if interrupted else RuntimeError("route changed")
+    observed: list[LifecycleObligationState] = []
+
+    def refuse_after_arm() -> None:
+        rows = database.operations.list_lifecycle_obligations(owner.ownership)
+        observed.append(rows[0].state)
+        assert repository.inspect(record.identity).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
+        assert carrier.calls == 0
+        raise refusal
+
+    with pytest.raises(type(refusal)) as caught:
+        _start(owned, carrier, before_dispatch=refuse_after_arm)
+    assert caught.value is refusal
+    assert isinstance(caught.value.__cause__, ManagedStartControlFact)
+    assert caught.value.__cause__.outcome.requires_owner_retention
+    assert observed == [LifecycleObligationState.POSSIBLE_EFFECT]
+    assert repository.inspect(record.identity).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
+    assert carrier.calls == 0
+    with pytest.raises(StateError):
+        owner.close()
 
 
 def test_preparation_precedes_reservation_and_binds_owned_start(tmp_path: Path) -> None:

@@ -6,7 +6,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks.execution._managed_job_access import start_bound_managed_job
-from agentworks.execution._wsl2_owned_operation import WSL2OwnedOperation
+from agentworks.execution._wsl2_owned_operation import WSL2OwnedOperation, WSL2RouteStatus
 from agentworks.vms.target_preparation import VMTargetPreparationStatus
 
 if TYPE_CHECKING:
@@ -58,8 +58,9 @@ class WSL2OwnedManagedJob(WSL2OwnedOperation):
     ) -> WSL2ManagedStartStatus:
         """Prepare one VM and invoke the bound start with the caller's run ID.
 
-        Route revalidation immediately precedes the bound-start invocation,
-        but cannot close a post-preparation, pre-dispatch route-change race.
+        Route revalidation precedes composition and repeats after dispatch
+        custody is armed, before the run records possible dispatch. Neither
+        observation closes a subsequent route-change race.
         Escaping control flow retains this operation for caller reconciliation.
         """
         guest = self.start_and_prepare(deadline)
@@ -72,8 +73,13 @@ class WSL2OwnedManagedJob(WSL2OwnedOperation):
             return self._refuse_or_retain(deadline, safe=True)
         target = preparation.target
         assert target is not None
-        if not self.selected_route_still_current(deadline):
-            return self._refuse_or_retain(deadline, safe=True)
+        try:
+            route = self.revalidate_selected_route(deadline)
+        except BaseException:
+            self._start_control_uncertain = True
+            raise
+        if route is not WSL2RouteStatus.CURRENT:
+            return self._refuse_or_retain(deadline, safe=route is WSL2RouteStatus.CHANGED)
         self._start_invoked = True
         try:
             self.start_outcome = start_bound_managed_job(
@@ -95,6 +101,7 @@ class WSL2OwnedManagedJob(WSL2OwnedOperation):
                 obligation_id=obligation_id,
                 identity=identity,
                 guest=guest,
+                before_dispatch=lambda: self.require_selected_route(deadline),
             )
         except BaseException:
             self._start_control_uncertain = True

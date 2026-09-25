@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.db import Database, OperationResourceKind, OperationScope
+from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _managed_job_access as access
 from agentworks.execution._helper_identity import IdentityExpectation
@@ -101,6 +101,34 @@ def test_start_binds_request_reservation_and_owned_custody(tmp_path: Path) -> No
         assert repository.inspect(RUN) == outcome.attempt.record
         assert carrier.calls == 1
         assert not outcome.requires_owner_retention
+    finally:
+        database.close()
+
+
+def test_bound_start_forwards_route_check_after_arming(tmp_path: Path) -> None:
+    database = Database(tmp_path / "state.db")
+    repository = ManagedRunRepository(database)
+    owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "start")
+    carrier = Carrier(lambda request: _records(request, receipt=True))
+    observed: list[ManagedLaunchState] = []
+
+    def check_route() -> None:
+        row = repository.inspect(RUN)
+        assert row is not None
+        observed.append(row.launch_state)
+        assert (
+            database.operations.list_lifecycle_obligations(owner.ownership)[0].state
+            is LifecycleObligationState.POSSIBLE_EFFECT
+        )
+        assert carrier.calls == 0
+
+    try:
+        assert (
+            _call(repository, owner, carrier, before_dispatch=check_route).launch_state
+            is ManagedLaunchState.RECEIPT_CONFIRMED
+        )
+        assert observed == [ManagedLaunchState.RESERVED]
+        assert carrier.calls == 1
     finally:
         database.close()
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import TYPE_CHECKING, Self
 
 from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLocatorUnavailable
@@ -32,6 +33,20 @@ if TYPE_CHECKING:
     from agentworks.db import VMRow
     from agentworks.db.operations import OperationRepository
     from agentworks.execution._wsl2_lifecycle import GuestAnchorObserver
+
+
+class WSL2RouteStatus(StrEnum):
+    CURRENT = "current"
+    CHANGED = "changed"
+    UNCONFIRMED = "unconfirmed"
+
+
+class WSL2RouteRefusal(Exception):
+    """A selected route cannot admit a managed start."""
+
+    def __init__(self, status: WSL2RouteStatus) -> None:
+        self.status = status
+        super().__init__(f"WSL2 selected route is {status.value}")
 
 
 class WSL2OwnedOperation:
@@ -229,48 +244,61 @@ class WSL2OwnedOperation:
             return None
         return identity
 
-    def selected_route_still_current(self, deadline: Deadline) -> bool:
-        """Reobserve selected facts before managed-start composition.
+    def revalidate_selected_route(self, deadline: Deadline) -> WSL2RouteStatus:
+        """Classify fresh route facts; propagate exceptional observations unchanged."""
+        return self._observe_selected_route(deadline)
 
-        This does not close a route change between this check and dispatch.
-        """
+    def require_selected_route(self, deadline: Deadline) -> None:
+        """Refuse admission unless every selected route fact is fresh and equal."""
+        status = self.revalidate_selected_route(deadline)
+        if status is not WSL2RouteStatus.CURRENT:
+            raise WSL2RouteRefusal(status)
+
+    def _observe_selected_route(self, deadline: Deadline) -> WSL2RouteStatus:
         locator = self._platform.observe_provider_locator(self._vm, self._ctx, deadline=deadline)
         if deadline.expired:
-            raise ValidationError("WSL2 route revalidation exceeded the deadline")
+            return WSL2RouteStatus.UNCONFIRMED
         if type(locator) is ProviderLocatorUnavailable:
-            return False
+            return WSL2RouteStatus.UNCONFIRMED
         if type(locator) is not ProviderLocator:
-            raise ValidationError("WSL2 route revalidation requires an exact provider locator")
+            return WSL2RouteStatus.UNCONFIRMED
         try:
             selected = ProviderLocator(locator.token)
-        except AttributeError as error:
-            raise ValidationError("WSL2 route revalidation requires a complete provider locator") from error
+        except (AttributeError, TypeError, ValueError, ValidationError):
+            return WSL2RouteStatus.UNCONFIRMED
         if selected != self._locator:
-            return False
+            return WSL2RouteStatus.CHANGED
         binding = self._platform.resolve_native_execution_binding(
             self._vm, self._ctx, deadline=deadline, config=self._config
         )
         if deadline.expired:
-            raise ValidationError("WSL2 route revalidation exceeded the deadline")
-        if self._selected_connection(binding) != self._connection:
-            return False
+            return WSL2RouteStatus.UNCONFIRMED
+        try:
+            connection = self._selected_connection(binding)
+        except (AttributeError, TypeError, ValueError, ValidationError):
+            return WSL2RouteStatus.UNCONFIRMED
+        if connection != self._connection:
+            return WSL2RouteStatus.CHANGED
         try:
             runtime = binding.runtime_selection
-        except AttributeError as error:
-            raise ValidationError("WSL2 route revalidation requires a complete native binding") from error
-        if type(runtime) is not RuntimeSelection or runtime != self._runtime:
-            return False
+        except AttributeError:
+            return WSL2RouteStatus.UNCONFIRMED
+        if type(runtime) is not RuntimeSelection:
+            return WSL2RouteStatus.UNCONFIRMED
+        if runtime != self._runtime:
+            return WSL2RouteStatus.CHANGED
         confirmation = self._platform.observe_provider_locator(self._vm, self._ctx, deadline=deadline)
         if deadline.expired:
-            raise ValidationError("WSL2 route revalidation exceeded the deadline")
+            return WSL2RouteStatus.UNCONFIRMED
         if type(confirmation) is ProviderLocatorUnavailable:
-            return False
+            return WSL2RouteStatus.UNCONFIRMED
         if type(confirmation) is not ProviderLocator:
-            raise ValidationError("WSL2 route revalidation requires an exact provider locator")
+            return WSL2RouteStatus.UNCONFIRMED
         try:
-            return ProviderLocator(confirmation.token) == self._locator
-        except AttributeError as error:
-            raise ValidationError("WSL2 route revalidation requires a complete provider locator") from error
+            confirmed = ProviderLocator(confirmation.token)
+        except (AttributeError, TypeError, ValueError, ValidationError):
+            return WSL2RouteStatus.UNCONFIRMED
+        return WSL2RouteStatus.CURRENT if confirmed == self._locator else WSL2RouteStatus.CHANGED
 
     def release_if_settled(self, deadline: Deadline, *, safe: bool) -> bool:
         """Release the exact hold and whole owner only with resolved obligations."""

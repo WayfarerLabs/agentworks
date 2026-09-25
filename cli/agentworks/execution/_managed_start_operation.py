@@ -23,6 +23,8 @@ from ._managed_start_exchange import ManagedStartAttempt, _PreparedAttempt, star
 from .carrier import Deadline
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.operations import OperationOwner
 
     from ._managed_runs import ManagedRunRepository
@@ -84,8 +86,13 @@ def start_owned_managed_run(
     deadline: Deadline,
     owner: OperationOwner,
     obligation_id: str,
+    before_dispatch: Callable[[], None] | None = None,
 ) -> ManagedStartOutcome:
-    """Start once under an already held exact-VM owner; never close that owner."""
+    """Start once under an already held exact-VM owner; never close that owner.
+
+    The optional route check runs after the dispatch obligation is armed and
+    before possible dispatch is recorded. Its refusal retains armed custody.
+    """
     if type(deadline) is not Deadline or deadline.expires_at is None:
         raise ValidationError("Managed start requires one finite deadline")
     if type(reserved) is not ManagedRunRecord:
@@ -122,13 +129,19 @@ def start_owned_managed_run(
             payload_version=MANAGED_START_PAYLOAD_VERSION,
             payload=payload,
         )
+
+        def before_possible_dispatch() -> None:
+            borrow.arm_dispatch_obligation()
+            if before_dispatch is not None:
+                before_dispatch()
+
         attempt = start_managed_run(
             repository,
             reserved,
             operation,
             prepared=prepared,
             deadline=deadline,
-            before_possible_dispatch=borrow.arm_dispatch_obligation,
+            before_possible_dispatch=before_possible_dispatch,
         )
         operation.settle(attempt.candidate.dispatch, attempt.candidate.carrier_completion)
         confirmed = (

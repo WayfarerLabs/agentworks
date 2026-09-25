@@ -37,7 +37,7 @@ from .carrier import Carrier, Deadline, Dispatch, ExitStatus
 from .models import Command, Input, Output, Script, Shell
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -78,6 +78,7 @@ def start_bound_managed_job(
     obligation_id: str,
     identity: ManagedRunIdentity,
     guest: VMGuestIdentity,
+    before_dispatch: Callable[[], None] | None = None,
 ) -> ManagedStartOutcome:
     """Preflight, reserve and attempt one start under an already owned exact VM.
 
@@ -90,7 +91,8 @@ def start_bound_managed_job(
     retry start with the same ID. A post-reservation refusal can leave a durable
     RESERVED row as a one-shot tombstone, even when an obligation may have been
     armed. Retain the owner conservatively if obligation state or inspection is
-    uncertain.
+    uncertain. The optional route check runs after reservation and after the
+    start obligation is armed, before possible dispatch or a carrier call.
     """
     if (
         target.kind is not ManagedTargetKind.VM
@@ -205,4 +207,5 @@ def start_bound_managed_job(
         deadline=deadline,
         owner=owner,
         obligation_id=obligation_id,
+        before_dispatch=before_dispatch,
     )
