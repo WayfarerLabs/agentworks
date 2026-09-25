@@ -1948,8 +1948,17 @@ integration and production artifact callers remain open. The capacity checkbox s
       Linux VM scope, effective UID, deterministic path and derived boot; persist it in the current
       child row before dispatch. Real local gate, stale-generation, failure-cleanup, package-child
       and near-limit payload tests pass. The optional path without a gate remains for legacy
-      callers; this checkpoint does not establish gate setup, production composition or process-loss
-      recovery.
+      callers; this checkpoint does not establish package gate setup, production composition or
+      process-loss recovery.
+- [x] Admit private single-upload gate setup under the same row, borrow and token as the upload.
+      Hold the source before registration, publish the bound gate before staging, and retain custody
+      across lost setup, publication and promotion. Setup-only takeover uses non-creating inspection
+      and settles only that control-state obligation, never the upload. The durable codec now
+      refuses download as well as upload setup/bound rows whose guest-derived boot differs from the
+      managed target. Local fixture and codec tests pass; native delivery and production composition
+      remain open.
+- [ ] Extend that setup custody to the first package-upload child without adding another row or
+      losing its index, token or application checkpoint, then prove takeover and native delivery.
 - [ ] Require the gate in production upload composition, including verified raw guest marker and
       selected provider locator, without fallback to requests lacking a gate. Prove generation
       advance waits for old gated effects and rejects delayed old-generation requests before

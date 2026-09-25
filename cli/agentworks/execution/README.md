@@ -762,15 +762,14 @@ continuous across setup and upload. Package upload setup and native carrier drai
 work.
 
 `_file_gate_setup_recovery.py` handles a lost download or single-upload setup reply whose durable
-row remains setup-only
-after database generation takeover. It rechecks that exact row, dispatches non-creating gate
-inspection, and resolves only the setup obligation after a complete positive observation. The old
-controller cannot publish the gate binding after takeover and thus cannot start the snapshot or
-upload from
-that row. A bound row, missing gate, uncertain inspection, other obligation or non-gated local
-effect still needs its own recovery proof. The gate and its UID directory must remain intact for the
-guest epoch so a delayed setup cannot create a replacement. This is private local composition, not
-native route acceptance, a production recovery factory or whole-operation release.
+row remains setup-only after database generation takeover. It rechecks that exact row, dispatches
+non-creating gate inspection, and resolves only the setup obligation after a complete positive
+observation. The old controller cannot publish the gate binding after takeover and thus cannot start
+the snapshot or upload from that row. A bound row, missing gate, uncertain inspection, other
+obligation or non-gated local effect still needs its own recovery proof. The gate and its UID
+directory must remain intact for the guest epoch so a delayed setup cannot create a replacement.
+This is private local composition, not native route acceptance, a production recovery factory or
+whole-operation release.
 
 ## Private inline file reads
 

@@ -967,9 +967,9 @@ file effect. Recovery persists a proposed generation there before advance and pu
 confirmed generation before another file effect; it never substitutes a second generic dispatch row.
 A lost control response retains the row and ownership until reconciliation provides the required
 no-further-effects evidence. The ordinary already-bound `FileOperation.download()` path installs its
-row after receiving a binding; the private setup-custody path now moves admission earlier when
-supplied a setup descriptor. The local gate primitive and fixed helper alone do not provide this
-whole-call handoff.
+row after receiving a binding; the private download and single-upload setup-custody paths move
+admission earlier when supplied a setup descriptor. The local gate primitive and fixed helper alone
+do not provide this whole-call handoff.
 
 The first custody vertical validates local download inputs, chooses its token once and attaches a
 concrete pending-setup record before registering that same `file-call` row. SETUP uses the borrow's
@@ -1000,6 +1000,14 @@ scratch. Core provisions that anchor and a target-owned private `0700` per-UID d
 trusted guest setup path for each boot, then runs the gate helper and file operation as the target
 UID. This is infrastructure setup, not elevation of an individual file operation.
 
+The private single-upload setup path now uses that same setup-only custody transition: it holds the
+source and canonical inputs before registration, keeps one borrowed `file-call` row and token from
+SETUP through upload, and publishes the exact binding before staging or publication. Its setup-only
+takeover recovery may inspect and settle the row under the same narrow conditions as download; it
+does not replay upload work. This is local admission and recovery evidence, not production route
+composition or native delayed-delivery proof. Package-upload setup remains separate: the first child
+must occupy the package's existing row, not add a second setup row or reset the child cursor.
+
 The private shared Debian VM bootstrap now installs persistent, non-cleaning `systemd-tmpfiles` `d`
 rules for the root-owned `/run` anchors and the root/admin UID directories, then applies them after
 the admin account exists. Replaying this privileged bootstrap or the boot rule may restore directory
@@ -1024,11 +1032,12 @@ directory must be owned by the target UID with mode `0700`. Access/default ACL a
 the protected chain. This does not protect against a malicious process already running as the same
 target UID, and pathname checks still require native shared-mount and lifecycle proof.
 
-The host-side durable `file-call` codec also requires a bound gate path to equal the deterministic
-path for its managed VM, effective UID and raw guest epoch. The guest helper checks its protected
-namespace and exact record identity; it does not need to recalculate the host's digest in the
-size-limited fixed bundle. A corrupted or cross-scope persisted path now refuses before recovery
-dispatch rather than relying on a later helper refusal.
+The host-side durable `file-call` codec requires a setup or bound gate path to equal the
+deterministic path for its managed VM, effective UID and raw guest epoch, and the target boot
+identity to match the guest-derived boot identity for download as well as upload. The guest helper
+checks its protected namespace and exact record identity; it does not need to recalculate the host's
+digest in the size-limited fixed bundle. A corrupted or cross-scope persisted path now refuses
+before recovery dispatch rather than relying on a later helper refusal.
 
 The private WSL2 owned-download composition now derives the setup descriptor only after the selected
 platform locator, held READY epoch and independently prepared managed VM guest agree. It uses that
