@@ -888,6 +888,70 @@ publication before cleanup, cleanup before result consumption and takeover commi
 row remains possible until an explicit resolution step. These tests prove only the local synchronous
 substrate and database protocol, not SSH, QGA or production native recovery.
 
+#### Production file-helper effect fence candidate
+
+The local journal cannot drain a request that has left the controller but is still queued by SSH,
+QGA or WSL. QGA's known-PID status query is not a dispatch listing or cancellation primitive; a
+controller may lose the reply containing the PID. A late fixed helper could therefore pass the host
+database ownership check before takeover but reach the guest after takeover. This is the specific
+residual race for which the requirements permit destination-side coordination. A guest-side effect
+fence, shared by the fixed file helpers across those carriers, is the candidate; it is **not** a
+machine-wide file-object lock, a platform-host administrator prerequisite, or a defense against a
+malicious target-user process. Arbitrary commands, jobs, VM power operations and WSL lifetime holds
+retain their separate recovery obligations.
+
+The smallest candidate uses one stable SQLite gate per effective helper identity and managed target
+scope, stored on a local filesystem writable by that identity. Its record has a random gate-instance
+identifier, a current never-reused generation token and the bound guest marker/epoch. The exact gate
+identity and token must be durable in the `file-call` obligation before any effect dispatch; the
+request carries them to the fixed helper. A gate is initialized and acknowledged before effect
+admission. After an admitted effect, an absent, replaced or unreadable gate in the same target epoch
+is uncertainty, never permission to initialize a replacement. A new target epoch requires explicit
+revalidation/adoption and cannot silently inherit the old gate. Account-home placement is a
+candidate, not a proven guarantee: readiness must establish a stable local path and usable Python
+`sqlite3` for each effective identity, including elevated calls, without privileged host setup.
+
+The first concrete binding is Linux VM-specific. Target preparation already observes a
+`VMGuestIdentity` containing the raw instance marker, kernel boot ID and PID 1 start time and
+retains it inside its `guest_result`. It also projects those facts into `ManagedTargetIdentity`'s
+provider-bound incarnation hash and derived boot UUID. That projection cannot be reversed inside
+`FileOperation`; the current private constructor receives only the projected identity. When
+production composition is built, carry the verified raw triple from the prepared result into file
+custody and the exact durable gate binding, without adding an otherwise unused field first. The
+helper must independently observe the _current_ guest triple before trusting the gate. Do not accept
+a request-to-record comparison as a guest identity check. No production caller currently constructs
+`FileOperation`, so this handoff and the provider locator proof are still open. SSH-accessed macOS
+platform hosts need their own concrete host identity/epoch proof, not the VM marker protocol; file
+recovery there remains unavailable until that proof exists.
+
+Every effect-bearing fixed helper opens the _existing_ gate, begins `BEGIN IMMEDIATE`, validates the
+instance, live guest marker/epoch and generation, and holds that transaction through all filesystem
+effects and exact cleanup for its request. A mismatched generation refuses before effects. The
+no-write, no-state readiness read/stat path keeps its separate no-staging contract and does not
+create or require this gate; those observations are not effect-fence evidence. Normal admission and
+takeover each advance the generation with expected-token compare-and-swap under `BEGIN IMMEDIATE`.
+The controller chooses a never-reused random proposed token, persists the exact instance, expected
+and proposed tokens in the obligation, then dispatches the advance. It confirms the proposed token
+in that same instance before admitting any effect-bearing helper with it. A lost acknowledgment is
+reconciled against the exact instance and expected/proposed pair under the current database owner; a
+mismatch retains custody for further exact revalidation, not automatic manual recovery. A takeover
+advance both waits for an already-effecting helper and makes a delayed older helper inert. A late
+old advance cannot overwrite the newer generation. The adapter then supplies typed
+no-further-effects evidence only after that advance is confirmed and all affected helper
+identities/scopes are fenced; it still reconciles the exact file obligation and retains cleanup
+debt. Do not use stream EOF, controller death, a local process join or a blind timeout as this
+evidence. An absent/replaced gate, irreconcilable token mismatch, uncertain target identity or
+unavailable helper retains ownership for manual recovery when exact revalidation cannot resolve it.
+
+The gate file must never be unlinked/recreated within an unresolved target epoch: replacing a locked
+SQLite path creates two independent lock domains. Use ordinary rollback journal mode and a finite
+busy timeout; avoid WAL, a pooled connection or a second custom lock protocol. This remains a design
+candidate, not shipped recovery. Native acceptance must cover a helper active across takeover, a
+delayed old request, lost advance acknowledgment, recovery of recovery, stale advance,
+missing/replaced state, guest restart and both target-user/elevated identities. The exact guest
+epoch and provider locator still need platform-specific proof. Until those tests pass, the
+`_DownloadDrainEvidence` production producer remains absent and DOWNLOAD recovery stays private.
+
 The private download, upload and JSON custody slice attaches validated prepared workflows to
 `FileOperation` before running them. This preserves original carrier, binding and token through
 outcome capture; completed capture retains only unfinished facts, not streams or file/JSON bytes.
@@ -943,8 +1007,9 @@ The database coordinator and RunContext composition are implementation gates, no
 by the current database's migration/use locks. Until they are implemented and proved, the private
 file primitives require caller-owned serial execution and are not a production FileAccess surface. A
 destination-side lock may be added only for a demonstrated residual race that this ownership
-boundary cannot address; it is not a default prerequisite or a defense against malicious platform
-code or target-user processes.
+boundary cannot address. The late-dispatch race and restricted file-helper gate candidate above are
+that exception; neither is a default file-object lock nor a defense against malicious platform code
+or target-user processes.
 
 The request decoder validates paths and extracts a single nonempty leaf without separators, NUL or
 dot components before calling the private object primitives. Those typed interior helpers do not

@@ -632,6 +632,40 @@ removed that proposed prerequisite entirely in favor of core database coordinati
 `vms/manager/lifecycle.py`, `capabilities/vm_platform/lima.py`, and `plugins/gcp/bootstrap.py` under
 `cli/agentworks/`.
 
+#### Remote dispatch and the narrower helper fence
+
+Later recovery review found a residual race that core admission cannot settle: a fixed file-helper
+request may have passed the host ownership check, then remain in a carrier/provider queue until
+after takeover. The [QEMU guest-agent API](https://www.qemu.org/docs/master/interop/qemu-ga-ref)
+returns a PID for `guest-exec` and queries `guest-exec-status` by that PID, but offers no documented
+list or cancellation of a dispatch whose PID reply was lost. `guest-sync` resynchronizes the agent
+protocol; it does not drain queued child effects. Microsoft's
+[WSL boot-process description](https://github.com/microsoft/WSL/blob/master/doc/docs/technical-documentation/boot-process.md)
+likewise describes a Linux process continuing under `wslhost.exe` after its launching `wsl.exe`
+exits. Local client termination is therefore not a guest-effect barrier. These sources do not
+establish an equivalent barrier for SSH either. The restricted
+[guest-side effect fence](file-operations-lld.md#production-file-helper-effect-fence-candidate) is a
+candidate for **fixed file helpers only**; it does not restore the rejected machine-wide file-object
+lock or demand administrator setup on a platform host.
+
+SQLite's [transaction rules](https://www.sqlite.org/lang_transaction.html) make a write transaction
+a plausible small serialization primitive, subject to native filesystem acceptance. Its
+[locking documentation](https://www.sqlite.org/lockingv3.html) does not make a pathname an immutable
+lock identity: a local experiment held a transaction on one database inode, unlinked that pathname
+and created a replacement database at the same path; both connections could then hold write
+transactions on different underlying files. The candidate therefore requires a stable gate instance,
+refuses missing/replaced state during unresolved recovery and never uses unlink as cleanup. This
+experiment is mechanism evidence, not native SSH/QGA/WSL acceptance.
+
+Proxmox target identity is a separate open proof. The upstream
+[Qemu API](https://github.com/proxmox/qemu-server/blob/master/src/PVE/API2/Qemu.pm) and
+[QemuServer configuration](https://github.com/proxmox/qemu-server/blob/master/src/PVE/QemuServer.pm)
+do not provide a documented, immutable cluster-plus-VM-incarnation locator that automatically
+survives or distinguishes every reuse, clone, migration and restore. Node plus VMID is an address,
+not such an identity. Do not infer one from SMBIOS UUID or VM generation ID without an explicit
+adoption/uniqueness policy and native proof; until then the Proxmox locator stays unavailable and
+recovery remains fail-closed.
+
 ### Decisions still required
 
 The new-guest package and preinstalled macOS host runtime choices are settled, but their

@@ -78,12 +78,13 @@ exit, settled child attempt or ordinary workflow success is not that evidence.
 The ledger attaches to the operation identity, not to one resource level. This leaves the same
 mechanism usable when #377 extends one operation across hierarchical or multi-resource claims. A
 recovery controller obtains a fresh database fence that makes the predecessor stale, then proves for
-every admitted obligation both that no earlier dispatch can still arrive and that any existing
-effect is quiescent. Controller absence stops future cooperating submissions but does not drain a
-provider, carrier or guest queue. Resolution therefore also needs carrier-proved non-dispatch plus
-exact absence, an operation-specific remote fence, or equally strong adapter evidence for a
-synchronous local substrate. The ledger is not a workflow engine, scheduler, permission system or
-lease, and claims never expire automatically.
+every admitted obligation that earlier dispatches are drained or remotely fenced against further
+effects, including work already active. A fenced late arrival must refuse before effects; controller
+absence stops future cooperating submissions but does not drain a provider, carrier or guest queue.
+Resolution therefore also needs carrier-proved non-dispatch plus exact absence, an
+operation-specific remote fence, or equally strong adapter evidence for a synchronous local
+substrate. The ledger is not a workflow engine, scheduler, permission system or lease, and claims
+never expire automatically.
 
 The initial implementation uses coarse VM and shared platform-host resource keys. Its repository
 currently conflicts only on an exact kind/name pair. This is not hierarchical locking and does not

@@ -595,15 +595,16 @@ predecessor is insufficient. If the adapter cannot reconstruct complete coverage
 refuses recovery and retains the claim.
 
 That database fence prevents further cooperating submissions but does not establish remote
-quiescence. For every obligation already in `possible-effect`, the adapter must then prove both that
-no admitted dispatch can still arrive and that any existing effect can cause no more work.
-Acceptable evidence includes carrier-proved non-dispatch paired with exact absence, an
-operation-specific remote generation fence, or equally strong proof from a synchronous local
-substrate whose controller and dispatch endpoint are both gone. Controller absence by itself is
-insufficient because provider, carrier or guest queues may outlive it. This recovery fence is
-separate from #377's future resource hierarchy. The ledger remains attached to the logical operation
-across that transition so later hierarchy can bind one operation to several resource memberships
-without moving adapter state onto one VM row.
+quiescence. For every obligation already in `possible-effect`, the adapter must then prove that
+every admitted dispatch has drained or is remotely fenced against further effects, including work
+already active. A fenced late arrival may still occur but must refuse before effects. Acceptable
+evidence includes carrier-proved non-dispatch paired with exact absence, an operation-specific
+remote generation fence, or equally strong proof from a synchronous local substrate whose controller
+and dispatch endpoint are both gone. Controller absence by itself is insufficient because provider,
+carrier or guest queues may outlive it. This recovery fence is separate from #377's future resource
+hierarchy. The ledger remains attached to the logical operation across that transition so later
+hierarchy can bind one operation to several resource memberships without moving adapter state onto
+one VM row.
 
 Local process-loss evidence must observe the actual dispatch endpoint or helper, not merely join the
 controller process. A controller may die after launching a subprocess that continues independently.

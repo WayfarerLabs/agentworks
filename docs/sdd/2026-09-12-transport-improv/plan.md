@@ -100,15 +100,15 @@ associated pending acceptance gates are superseded by this ruling.
       fences stale predecessors. Its exact retries share one local recovery owner and serial guard;
       handled failures retain uncertain dispatch custody. The takeover neither moves obligation rows
       nor proves that an admitted request is drained or remote work has stopped. For every admitted
-      obligation, prove that no earlier dispatch can still arrive and that existing effects are
-      quiescent, using carrier-proved non-dispatch plus exact absence, an operation-specific remote
-      fence, or equally strong synchronous-substrate evidence. Otherwise retain the obligation and
-      report incomplete recovery. For WSL2, persist a versioned, domain-separated digest of its
-      opaque provider locator, expected VM marker, distribution and account plus exact Windows
-      controller identity before dispatch, publish exact guest boot/init/PID/start-time after
-      `READY`, and give each `vm_active()` lifetime an independent obligation. Replace the legacy
-      hold only after nested lifetimes, delayed delivery, every crash window,
-      controller/locator/marker/boot mismatch and production recovery pass live validation.
+      obligation, prove that earlier dispatches have drained or cannot cause further effects,
+      including work already active, using carrier-proved non-dispatch plus exact absence, an
+      operation-specific remote fence, or equally strong synchronous-substrate evidence. Otherwise
+      retain the obligation and report incomplete recovery. For WSL2, persist a versioned,
+      domain-separated digest of its opaque provider locator, expected VM marker, distribution and
+      account plus exact Windows controller identity before dispatch, publish exact guest
+      boot/init/PID/start-time after `READY`, and give each `vm_active()` lifetime an independent
+      obligation. Replace the legacy hold only after nested lifetimes, delayed delivery, every crash
+      window, controller/locator/marker/boot mismatch and production recovery pass live validation.
 - [ ] Select shared platform-host resource keys before enabling their admission. Canonical VM names
       are available before create dispatch; site names and authored SSH routes are not canonical
       host identities. Do not silently treat different aliases or users as independent hosts.
@@ -1842,6 +1842,22 @@ The 2026-09-24 local DOWNLOAD proof now originates its spawned-controller crash 
 the installed row before dispatch; expected and actual helper journal records must match its
 persisted token in every recovery generation. The tests retain completed-helper cleanup and
 surviving-helper refusal. The test-only journal does not prove native SSH/QGA dispatch drain.
+
+- [ ] Prove the restricted
+      [guest-side file-helper effect fence](file-operations-lld.md#production-file-helper-effect-fence-candidate)
+      before treating adapter drain evidence as production. First carry the verified raw VM guest
+      marker, kernel boot ID and PID 1 start time from target preparation into file custody and its
+      durable obligation; the current managed-target hash/derived boot UUID cannot reconstruct them.
+      Give platform hosts a separate concrete identity/epoch proof, not VM marker inference. Bind a
+      stable gate instance and generation to the durable `file-call` row before effect dispatch;
+      make each effect-bearing fixed helper validate and hold the gate through its effects; advance
+      it on takeover using exact compare-and-swap. Cover lost advance replies, late old dispatch,
+      active effects, stale advance, repeated recovery, missing/replaced gate state, target restart,
+      and each effective user/elevated identity through real SSH, QGA and WSL paths. Preserve
+      ownership on uncertain identity or fence state. This is a documented residual remote-dispatch
+      race, not a revival of blanket file-object locks or privileged macOS host setup. The local
+      helper journal is not a substitute. Keep the public FileAccess and ownership release gates
+      open until this and the concrete recovery handoff are proved.
 
 - [ ] Use the owned snapshot/chunk download for general in-memory reads, preserving caller byte
       bounds independently of QGA's single-response capacity. Keep the no-staging readiness read
