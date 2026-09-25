@@ -156,15 +156,20 @@ def prepare_managed_vm_target_from_platform(
     deadline: Deadline,
     owner: OperationOwner,
     config: Config | None = None,
+    held_locator: ProviderLocator | None = None,
 ) -> SelectedPlatformVMTargetPreparation:
     """Compose a selected VM target from one bound platform under existing custody.
 
-    Platform observations are plugin results. One borrow serializes their
-    resolution with guest preparation; this function owns no outer operation.
+    Platform observations are plugin results. When supplied, ``held_locator``
+    binds preparation to the caller's existing platform hold. One borrow
+    serializes locator observation, binding resolution and guest preparation;
+    this function owns no outer operation.
     """
     _validate_operation_boundary(vm, deadline, owner)
     if platform.site_name != vm.site:
         raise ValidationError("Managed VM target preparation requires the VM's bound platform")
+    if held_locator is not None:
+        held_locator = _validated_provider_locator(held_locator)
     preflight = _preflight_marker_and_deadline(vm, deadline)
     if preflight is not None:
         return SelectedPlatformVMTargetPreparation(preflight, None)
@@ -172,7 +177,7 @@ def prepare_managed_vm_target_from_platform(
     borrow = owner.borrow()
     try:
         result = _prepare_selected_platform_with_borrow(
-            vm, platform, ctx, deadline=deadline, config=config, borrow=borrow
+            vm, platform, ctx, deadline=deadline, config=config, borrow=borrow, held_locator=held_locator
         )
     except BaseException as control:
         _release_preparation_borrow(borrow, control=control)
@@ -189,6 +194,7 @@ def _prepare_selected_platform_with_borrow(
     deadline: Deadline,
     config: Config | None,
     borrow: OperationBorrow,
+    held_locator: ProviderLocator | None,
 ) -> SelectedPlatformVMTargetPreparation:
     locator = platform.observe_provider_locator(vm, ctx, deadline=deadline)
     if deadline.expired:
@@ -198,6 +204,8 @@ def _prepare_selected_platform_with_borrow(
     if type(locator) is ProviderLocatorUnavailable:
         return SelectedPlatformVMTargetPreparation(_failed(VMTargetPreparationFailure.LOCATOR_UNAVAILABLE), None)
     locator = _validated_provider_locator(locator)
+    if held_locator is not None and locator != held_locator:
+        return SelectedPlatformVMTargetPreparation(_failed(VMTargetPreparationFailure.LOCATOR_CHANGED), None)
 
     binding = platform.resolve_native_execution_binding(vm, ctx, deadline=deadline, config=config)
     if deadline.expired:

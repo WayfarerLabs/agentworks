@@ -184,9 +184,16 @@ def _compose(
     deadline: Deadline | None = None,
     ctx: object = None,
     config: object = None,
+    held_locator: ProviderLocator | None = None,
 ):
     return prepare_managed_vm_target_from_platform(
-        vm or _vm(), platform, ctx, deadline=deadline or Deadline.after(10), owner=owner, config=config
+        vm or _vm(),
+        platform,
+        ctx,
+        deadline=deadline or Deadline.after(10),
+        owner=owner,
+        config=config,
+        held_locator=held_locator,
     )
 
 
@@ -901,6 +908,75 @@ def test_second_locator_detects_cooperative_replacement_before_or_during_probe(
     assert platform.observe_provider_locator.call_count == 2
     assert carrier.calls == 1
     assert len(borrows) == 1 and releases == borrows
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+def test_held_locator_matching_observations_allows_preparation(
+    owned: tuple[Database, OperationOwner],
+) -> None:
+    _, owner = owned
+    carrier = TranscriptCarrier(_success_payload())
+    platform = _platform(carrier)
+
+    result = _compose(owner, platform, held_locator=ProviderLocator("opaque"))
+
+    assert result.preparation.status is VMTargetPreparationStatus.PREPARED
+    assert result.binding is not None
+    assert platform.observe_provider_locator.call_count == 2
+    platform.resolve_native_execution_binding.assert_called_once()
+    assert carrier.calls == 1
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+def test_held_locator_mismatch_refuses_before_binding_or_guest_probe(
+    owned: tuple[Database, OperationOwner],
+) -> None:
+    _, owner = owned
+    carrier = TranscriptCarrier(_success_payload())
+    platform = _platform(carrier)
+    platform.observe_provider_locator.return_value = ProviderLocator("replacement")
+
+    result = _compose(owner, platform, held_locator=ProviderLocator("held"))
+
+    assert result.preparation.status is VMTargetPreparationStatus.FAILED
+    assert result.preparation.failure is VMTargetPreparationFailure.LOCATOR_CHANGED
+    platform.observe_provider_locator.assert_called_once()
+    platform.resolve_native_execution_binding.assert_not_called()
+    assert carrier.calls == 0
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+def test_held_locator_replacement_during_preparation_suppresses_target(
+    owned: tuple[Database, OperationOwner],
+) -> None:
+    _, owner = owned
+    carrier = TranscriptCarrier(_success_payload())
+    platform = _platform(carrier)
+    current = ["held"]
+    platform.observe_provider_locator.side_effect = lambda *args, **kwargs: ProviderLocator(current[0])
+
+    def replace_during_binding(*args: object, **kwargs: object) -> NativeExecutionBinding:
+        del args, kwargs
+        current[0] = "replacement"
+        return _binding(carrier)
+
+    platform.resolve_native_execution_binding.side_effect = replace_during_binding
+
+    result = _compose(owner, platform, held_locator=ProviderLocator("held"))
+
+    assert result.preparation.status is VMTargetPreparationStatus.FAILED
+    assert result.preparation.failure is VMTargetPreparationFailure.LOCATOR_CHANGED
+    assert result.preparation.guest_result is not None
+    assert result.preparation.target is None
+    assert result.binding is None
+    assert platform.observe_provider_locator.call_count == 2
+    assert carrier.calls == 1
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
