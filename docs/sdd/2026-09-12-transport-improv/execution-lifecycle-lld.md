@@ -623,16 +623,17 @@ the resource claim remains held.
 
 For a WSL2 platform hold, the adapter payload binds a versioned, domain-separated SHA-256 digest of
 the bounded opaque provider locator, VM instance marker, exact distribution, execution user and
-exact Windows controller process identity. After `READY`, it adds the guest boot UUID, PID and Linux
-process start time; PID/start-time evidence is meaningful only within that boot. Host Job settlement
-and `wsl.exe` exit remain host-client evidence only. Recovery must prove the recorded controller
-process is absent before using the creation-time Job and synchronous Windows process-launch facts to
-establish that no delayed client launch remains, then independently observe that the acknowledged
-guest identity is absent. A changed guest boot proves the old guest process cannot survive but does
-not excuse locator or marker mismatch. Each `vm_active()` lifetime registers its own obligation and
-anchor under the enclosing operation. Do not add hidden reference counting or collapse nested holds
-into one platform process. A recovery adapter retains the obligation when dispatch drain, identity,
-quiescence or absence cannot be established safely.
+exact Windows controller process identity. After `READY`, it adds the guest boot UUID, distribution
+PID 1 start ticks, anchor PID and Linux process start ticks; PID/start evidence is meaningful only
+within that distribution epoch. Host Job settlement and `wsl.exe` exit remain host-client evidence
+only. Recovery must prove the recorded controller process is absent before using the creation-time
+Job and synchronous Windows process-launch facts to establish that no delayed client launch remains,
+then independently observe that the acknowledged guest identity is absent. A changed guest boot or
+distribution init proves the old guest process cannot survive but does not excuse locator or marker
+mismatch. Each `vm_active()` lifetime registers its own obligation and anchor under the enclosing
+operation. Do not add hidden reference counting or collapse nested holds into one platform process.
+A recovery adapter retains the obligation when dispatch drain, identity, quiescence or absence
+cannot be established safely.
 
 The private hold now constructs the guest anchor from its exact WSL2 connection and the same native
 owner that captures the already-running controller PID and creation time in native Windows ticks
@@ -759,29 +760,33 @@ external exception injection into the raw owner thread is not a supported cancel
 The portable interface does not make those native facts true merely by naming the obligation.
 
 `start` dispatches one literal, no-shell Python helper and accepts only its nonce-bound `READY`
-record with the guest boot UUID, PID and Linux `/proc` start time. The caller retains the lifecycle
-object if dispatch, readiness, handoff or local cleanup is interrupted, so cleanup can be retried
-without replay. The operation deadline bounds dispatch and receipt observation. Local settlement
-instead gets one fresh 0.5-second allowance per explicit attempt and returns immutable facts for
-client exit, client-handle closure, Job assignment and Job-handle closure. Settlement is complete
-only when the client is known never-created or exited and both handle sets are known never-created
-or closed. Missing observations remain unknown and cannot reuse a pre-dispatch settled snapshot.
+record with the guest boot UUID, distribution PID 1 start ticks, anchor PID and Linux `/proc` start
+ticks. The caller retains the lifecycle object if dispatch, readiness, handoff or local cleanup is
+interrupted, so cleanup can be retried without replay. The operation deadline bounds dispatch and
+receipt observation. Local settlement instead gets one fresh 0.5-second allowance per explicit
+attempt and returns immutable facts for client exit, client-handle closure, Job assignment and
+Job-handle closure. Settlement is complete only when the client is known never-created or exited and
+both handle sets are known never-created or closed. Missing observations remain unknown and cannot
+reuse a pre-dispatch settled snapshot.
 
 `release` first requests cooperative EOF and observes the helper and client under the caller's
 deadline, then invokes local settlement. A later call may retry unresolved local cleanup or repeat
 the independent exact-identity guest observation after local resources have settled. Neither an
 `EXITING` helper record, client exit, closed client handles, successful Job assignment nor closed
-Job handle proves the guest anchor is absent. Only the exact guest boot UUID/PID/start-time observer
+Job handle proves the guest anchor is absent. Only the exact guest boot/init/PID/start-time observer
 may make that claim.
 
 The portable implementation and tests establish this orchestration shape and execute the helper
-protocol on local Linux procfs. Hosted synthetic Windows tests separately exercise creation-time Job
-membership, restricted handle inheritance, bounded pipe observation, retryable exact settlement and
-controller hard-death cleanup. The subsequent live Tier 2 Windows/WSL2 proof drives the same owner
-against real `wsl.exe` and establishes exact acknowledged guest-anchor absence after ordinary
-release and controller hard death while unrelated work survives. It also confirms literal argument,
-binary stream, finite input, EOF, bounded observation and conservative nonzero-status behavior. That
-proof does not wire the production platform hold, recovery factory, target identity or RunContext.
+protocol on local Linux procfs. The private hold payload now uses version 2 for the distribution
+epoch; version 1 records are not accepted because no production hold was released with that shape.
+Hosted synthetic Windows tests separately exercise creation-time Job membership, restricted handle
+inheritance, bounded pipe observation, retryable exact settlement and controller hard-death cleanup.
+The earlier live Tier 2 Windows/WSL2 proof drove the same owner against real `wsl.exe` and
+established acknowledged guest-anchor absence after ordinary release and controller hard death while
+unrelated work survived. It also confirmed literal argument, binary stream, finite input, EOF,
+bounded observation and conservative nonzero-status behavior. The epoch-bound READY/query protocol
+requires a new live proof; neither round wires the production platform hold, recovery factory,
+target identity or RunContext.
 
 ## Delivery sequence and proof criteria
 

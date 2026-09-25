@@ -105,10 +105,10 @@ associated pending acceptance gates are superseded by this ruling.
       fence, or equally strong synchronous-substrate evidence. Otherwise retain the obligation and
       report incomplete recovery. For WSL2, persist a versioned, domain-separated digest of its
       opaque provider locator, expected VM marker, distribution and account plus exact Windows
-      controller identity before dispatch, publish exact guest boot/PID/start-time after `READY`,
-      and give each `vm_active()` lifetime an independent obligation. Replace the legacy hold only
-      after nested lifetimes, delayed delivery, every crash window, controller/locator/marker/boot
-      mismatch and production recovery pass live validation.
+      controller identity before dispatch, publish exact guest boot/init/PID/start-time after
+      `READY`, and give each `vm_active()` lifetime an independent obligation. Replace the legacy
+      hold only after nested lifetimes, delayed delivery, every crash window,
+      controller/locator/marker/boot mismatch and production recovery pass live validation.
 - [ ] Select shared platform-host resource keys before enabling their admission. Canonical VM names
       are available before create dispatch; site names and authored SSH routes are not canonical
       host identities. Do not silently treat different aliases or users as independent hosts.
@@ -1446,8 +1446,9 @@ connection and trust only. Before broader lifecycle implementation, complete the
       failure. Ambiguous API results and deadline expiry stay unknown. This is controller evidence
       only, without dispatch drain, guest absence, recovery factory or production wiring claims.
 - [ ] Implement production WSL2 hold adoption and recovery: exact preparation discovery after a
-      crash, controller-absence and dispatch-drain proof, a production exact guest observer,
-      recovery factory, activation and platform wiring, RunContext integration, and live proof.
+      crash, controller-absence and dispatch-drain proof, a production exact epoch-bound guest
+      observer, recovery factory, activation and platform wiring, RunContext integration, and live
+      proof.
 
 The private WSL2 ownership candidate is implemented through `a1bb1034`. The caller owns an inert
 lifecycle object before `start`; one native owner retains the WSL client, process/pipe handles and

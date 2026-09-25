@@ -261,30 +261,34 @@ never relies on `PeekNamedPipe` as a deadline primitive. These are host-client o
 only.
 
 The fixed no-shell helper emits a nonce-bound `READY` record containing its canonical guest boot
-UUID, Linux PID and process start time, waits for controller EOF, then emits `EXITING`. These
-records, `wsl.exe` exit and Job Object state are not guest-absence evidence. Only an injected exact
-boot/PID/start-time observer may report absence, and it can be retried after local settlement.
-Portable tests execute this helper on local Linux procfs and exercise lifecycle failure orderings.
-Hosted synthetic Windows tests exercise Job membership, handle confinement, deadlines, settlement
-and controller hard death without invoking `wsl.exe`. A separate live Tier 2 Windows/WSL2 proof
-establishes literal argument and byte-stream behavior plus exact guest-anchor absence after ordinary
-release and controller hard death, while unrelated guest and Windows work survive.
+UUID, distribution PID 1 start ticks, Linux PID and process start ticks, waits for controller EOF,
+then emits `EXITING`. These records, `wsl.exe` exit and Job Object state are not guest-absence
+evidence. Only an injected exact boot/init/PID/start-time observer may report absence, and it can be
+retried after local settlement. Portable tests execute this helper on local Linux procfs and
+exercise lifecycle failure orderings. Hosted synthetic Windows tests exercise Job membership, handle
+confinement, deadlines, settlement and controller hard death without invoking `wsl.exe`. The
+epoch-bound helper still requires native Tier 2 Windows/WSL2 acceptance, including distribution
+restart while the utility VM survives.
 
 `_wsl2_platform_hold.py` privately composes that anchor with one independent `wsl2-platform-hold`
 lifecycle obligation under an already acquired exact-VM operation owner. Before effect it records a
 versioned canonical ASCII payload containing a domain-separated SHA-256 digest of the bounded opaque
 provider locator, validated instance marker, exact distribution and user, fresh nonce, and the
 already-running Windows controller PID plus creation time in native Windows ticks. It marks possible
-effect before dispatch and publishes the acknowledged boot/PID/start identity as soon as `READY`
-arrives, including when startup raises after retaining that identity. The hold serializes its start
-and release transitions so a pre-dispatch snapshot cannot discharge an active startup. This private
-path accepts only bare `wsl` or `wsl.exe` (case-insensitively), which the native owner resolves
-through the trusted Windows system directory; the executable is not recovery payload data. The
-caller retains the hold through failures and interruptions. Ordinary release resolves only after
+effect before dispatch and publishes the acknowledged boot/init/PID/start identity as soon as
+`READY` arrives, including when startup raises after retaining that identity. The hold serializes
+its start and release transitions so a pre-dispatch snapshot cannot discharge an active startup.
+This private path accepts only bare `wsl` or `wsl.exe` (case-insensitively), which the native owner
+resolves through the trusted Windows system directory; the executable is not recovery payload data.
+The caller retains the hold through failures and interruptions. Ordinary release resolves only after
 exact local never-creation or after local settlement and independently confirmed absence of the
 acknowledged guest identity. It does not close the outer owner or keep a borrow across the hold
 lifetime. A production observer, crash recovery factory, activation, platform wiring, target
 identity and RunContext integration remain open gates.
+
+`_wsl2_guest_query.py` is a private no-staging source and strict response reducer for that exact
+epoch-bound identity. It does not dispatch a WSL client or provide a production guest observer;
+observer custody, recovery drain and native acceptance remain open.
 
 ## Observation and guest lifetime
 
