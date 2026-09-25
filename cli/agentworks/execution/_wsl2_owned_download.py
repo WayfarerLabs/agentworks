@@ -1,0 +1,181 @@
+"""Private ordinary WSL2 hold, target, and DOWNLOAD composition."""
+
+from __future__ import annotations
+
+from enum import StrEnum
+from typing import TYPE_CHECKING
+
+from agentworks.capabilities.vm_platform.base import ProviderLocator
+from agentworks.db import LifecycleObligationState, OperationResourceKind, OperationScope
+from agentworks.errors import ValidationError
+from agentworks.execution._file_download import FileDownloadOutcome, FileDownloadStatus
+from agentworks.execution._file_operation import FileOperation
+from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+from agentworks.execution._vm_guest_identity import VMGuestIdentityObservationState
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
+from agentworks.execution._wsl2_guest_observer import WSL2GuestObserver
+from agentworks.execution._wsl2_lifecycle import GuestAnchorPresence, OwnedHostClient, WSL2AnchorEvidence
+from agentworks.execution._wsl2_platform_hold import WSL2PlatformHold, decode_hold_payload, locator_digest
+from agentworks.execution._wsl2_windows import WindowsWSL2HostClient
+from agentworks.execution.binding import NativeExecutionBinding
+from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
+from agentworks.operations import OperationOwner
+from agentworks.vms.target_identity import compose_managed_vm_target_identity
+from agentworks.vms.target_preparation import VMTargetPreparation, VMTargetPreparationStatus, prepare_managed_vm_target
+
+if TYPE_CHECKING:
+    from agentworks.db import VMRow
+    from agentworks.db.operations import OperationRepository
+    from agentworks.execution._helper_launcher import IdentityPlan
+    from agentworks.execution._wsl2_lifecycle import GuestAnchorObserver
+    from agentworks.execution.carrier import ByteSink, Carrier, Deadline
+
+
+class WSL2DownloadStatus(StrEnum):
+    COMPLETE = "complete"
+    REFUSED = "refused"
+    RETAINED = "retained"
+
+
+class WSL2OwnedDownload:
+    """One caller-retained private operation; escaping control flow keeps its claim."""
+
+    def __init__(
+        self,
+        repository: OperationRepository,
+        vm: VMRow,
+        locator: ProviderLocator,
+        connection: WSL2Connection,
+        *,
+        native: OwnedHostClient | None = None,
+        observer: GuestAnchorObserver | None = None,
+        carrier: Carrier | None = None,
+        runtime_selection: RuntimeSelection | None = None,
+    ) -> None:
+        if type(locator) is not ProviderLocator or type(connection) is not WSL2Connection:
+            raise ValidationError("WSL2 download requires an exact locator and connection")
+        if vm.instance_marker is None:
+            raise ValidationError("WSL2 download requires a persisted VM marker")
+        self.owner = OperationOwner.acquire(
+            repository, OperationScope(OperationResourceKind.VM, vm.name), "wsl2-download"
+        )
+        self._repository = repository
+        self._vm = vm
+        self._locator = locator
+        self._connection = connection
+        self._carrier = WSL2Carrier(connection) if carrier is None else carrier
+        self._runtime = runtime_selection or RuntimeSelection(RuntimeTargetOS.LINUX)
+        self.hold = WSL2PlatformHold(
+            self.owner,
+            vm.name,
+            locator.token,
+            vm.instance_marker,
+            connection,
+            WindowsWSL2HostClient() if native is None else native,
+            WSL2GuestObserver(connection) if observer is None else observer,
+        )
+        self.preparation: VMTargetPreparation | None = None
+        self.file_operation: FileOperation | None = None
+        self.outcome: FileDownloadOutcome | None = None
+        self._used = False
+
+    def download(
+        self,
+        *,
+        trusted_root_path: str,
+        relative_path: str,
+        sink: ByteSink,
+        max_bytes: int,
+        plan: IdentityPlan,
+        deadline: Deadline,
+    ) -> WSL2DownloadStatus:
+        """Run once; only typed settled obligations permit whole-owner release."""
+        if self._used:
+            raise ValidationError("WSL2 owned download is single use")
+        self._used = True
+        ready = self.hold.start(deadline)
+        if not self._ready_is_durable(ready):
+            return WSL2DownloadStatus.RETAINED
+
+        binding = NativeExecutionBinding(self._carrier, self._connection.user, self._runtime)
+        self.preparation = prepare_managed_vm_target(
+            self._vm, self._locator, binding, deadline=deadline, owner=self.owner
+        )
+        if self.preparation.status is not VMTargetPreparationStatus.PREPARED:
+            return self._finish_without_file(ready, deadline, safe=not self.preparation.requires_owner_retention)
+        if not self._same_ready_epoch(ready, self.preparation):
+            return self._finish_without_file(ready, deadline, safe=True)
+
+        target = self.preparation.target
+        assert target is not None
+        self.file_operation = FileOperation(self.owner, target)
+        self.outcome = self.file_operation.download(
+            self._carrier,
+            trusted_root_path=trusted_root_path,
+            relative_path=relative_path,
+            sink=sink,
+            max_bytes=max_bytes,
+            plan=plan,
+            deadline=deadline,
+            runtime_selection=self._runtime,
+        )
+        file_settled = (
+            self.outcome.status is FileDownloadStatus.COMPLETE
+            and not self.outcome.requires_owner_retention
+            and not self.file_operation.active_downloads
+            and not self.file_operation.unfinished_downloads
+        )
+        return self._finish_without_file(ready, deadline, safe=file_settled)
+
+    def _ready_is_durable(self, ready: WSL2AnchorEvidence) -> bool:
+        obligation = self.hold.obligation
+        identity = ready.identity
+        if obligation is None or identity is None:
+            return False
+        rows = self._repository.list_lifecycle_obligations(self.owner.ownership)
+        return any(
+            row.obligation_id == obligation.obligation_id
+            and row.state is LifecycleObligationState.POSSIBLE_EFFECT
+            and decode_hold_payload(row.payload).guest == identity
+            and decode_hold_payload(row.payload).locator_sha256 == locator_digest(self._locator.token)
+            and decode_hold_payload(row.payload).instance_marker == self._vm.instance_marker
+            for row in rows
+        )
+
+    def _same_ready_epoch(self, ready: WSL2AnchorEvidence, preparation: VMTargetPreparation) -> bool:
+        observed = preparation.guest_result
+        guest = observed.observation if observed is not None else None
+        identity = (
+            guest.identity if guest is not None and guest.state is VMGuestIdentityObservationState.RESOLVED else None
+        )
+        anchor = ready.identity
+        if type(identity) is not VMGuestIdentity or anchor is None or preparation.target is None:
+            return False
+        if (
+            identity.instance_marker != self._vm.instance_marker
+            or identity.boot_id != anchor.boot_id
+            or identity.init_start_ticks != anchor.init_start_ticks
+        ):
+            return False
+        return preparation.target == compose_managed_vm_target_identity(self._vm, self._locator, identity)
+
+    def _finish_without_file(self, ready: WSL2AnchorEvidence, deadline: Deadline, *, safe: bool) -> WSL2DownloadStatus:
+        """Release the exact hold; retain the claim unless every obligation settled."""
+        if not safe:
+            return WSL2DownloadStatus.RETAINED
+        released = self.hold.release(deadline)
+        if not (
+            released.local.settled
+            and released.identity == ready.identity
+            and released.guest_anchor_presence is GuestAnchorPresence.ABSENT_CONFIRMED
+        ):
+            return WSL2DownloadStatus.RETAINED
+        rows = self._repository.list_lifecycle_obligations(self.owner.ownership)
+        if not rows or any(row.state is not LifecycleObligationState.RESOLVED for row in rows):
+            return WSL2DownloadStatus.RETAINED
+        self.owner.seal_lifecycle_obligations()
+        self.owner.record_effects_resolved()
+        self.owner.close()
+        if self.outcome is None or self.outcome.status is not FileDownloadStatus.COMPLETE:
+            return WSL2DownloadStatus.REFUSED
+        return WSL2DownloadStatus.COMPLETE
