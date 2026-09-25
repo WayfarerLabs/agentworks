@@ -915,17 +915,20 @@ retain their separate recovery obligations.
 
 Package-upload takeover needs this fence too. Its upload workflow makes separate ownership, stage,
 chunk, publication, reconciliation and cleanup requests. The private stage/publication request
-codecs now accept an optional exact gate, and their fixed guest handlers hold it across the
-operation, but the upload obligation and host exchanges do not yet supply that gate. Extend the
-existing guest gate to every upload helper phase that can create, alter, publish or remove target or
-scratch state; read-only preflight is not an effect. An acknowledged generation advance under the
-same gate flock would wait for admitted old effects to leave and make delayed old-generation
-requests refuse before effects. That can replace a controller-side enumeration of queued SSH, QGA or
-WSL helpers **only after** complete mutation-path coverage, one stable gate across routes, and
-native delayed-delivery proof. The current local DOWNLOAD journal is not such proof for upload.
-Recovery must keep the current package child and its cleanup facts durable through advance, then
-reconcile only that child; it cannot infer or replay remaining package members. No adapter may
-manufacture drain evidence from a retained token alone.
+codecs accept an optional exact gate, and their fixed guest handlers hold it across the operation.
+The private pre-bound `FileOperation.upload()` and `upload_package()` paths validate a supplied gate
+against the Linux VM scope, effective UID, deterministic path and derived guest boot, persist it in
+the current child row before dispatch, and pass it through stage and publication requests including
+cleanup. Their legacy path without a gate still exists; production composition must explicitly
+require a gate, match the verified raw guest marker and selected provider locator, and never
+downgrade a bound request. Read-only preflight is not an effect. An acknowledged generation advance
+under the same gate flock would wait for admitted old effects to leave and make delayed
+old-generation requests refuse before effects. That can replace a controller-side enumeration of
+queued SSH, QGA or WSL helpers **only after** complete mutation-path coverage, one stable gate
+across routes, and native delayed-delivery proof. The current local DOWNLOAD journal is not such
+proof for upload. Recovery must keep the current package child and its cleanup facts durable through
+advance, then reconcile only that child; it cannot infer or replay remaining package members. No
+adapter may manufacture drain evidence from a retained token alone.
 
 The smallest candidate uses one stable SQLite gate database per effective helper identity, managed
 target scope and verified guest epoch. Core derives one deterministic path under the selected local

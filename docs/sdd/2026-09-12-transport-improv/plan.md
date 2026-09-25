@@ -1943,13 +1943,19 @@ member and control-flow interruption. This is not yet a process-loss recovery pr
 package API: upload-wide helper drain, takeover, preflight reads, retirement, application checkpoint
 integration and production artifact callers remain open. The capacity checkbox stays unchecked.
 
-- [ ] Extend the existing guest file-effect gate to every upload mutation phase and its durable
-      current-child identity. Prove that generation advance waits for old gated effects and rejects
-      delayed old-generation upload requests before mutation across WSL, SSH and QGA; only then bind
-      package-child recovery and application checkpoint reconciliation. Private stage/publication
-      helpers now accept and hold an optional gate with local real-gate tests; host upload exchanges
-      and the obligation codec do not yet supply it. Neither the local DOWNLOAD helper journal nor a
-      caller-asserted drain value proves upload takeover.
+- [x] Extend the private upload helpers and pre-bound `FileOperation` upload/package paths to carry
+      one exact existing gate through stage, publication, reconciliation and cleanup. Validate its
+      Linux VM scope, effective UID, deterministic path and derived boot; persist it in the current
+      child row before dispatch. Real local gate, stale-generation, failure-cleanup, package-child
+      and near-limit payload tests pass. The optional path without a gate remains for legacy
+      callers; this checkpoint does not establish gate setup, production composition or process-loss
+      recovery.
+- [ ] Require the gate in production upload composition, including verified raw guest marker and
+      selected provider locator, without fallback to requests lacking a gate. Prove generation
+      advance waits for old gated effects and rejects delayed old-generation requests before
+      mutation across WSL, SSH and QGA; then bind package-child recovery and application checkpoint
+      reconciliation. Neither the local DOWNLOAD helper journal nor a caller-asserted drain value
+      proves upload takeover.
 
 The production artifact publisher currently preflights destinations, then retires and publishes
 members with a per-file ownership callback. Agent and workspace creation can call that publisher in

@@ -85,9 +85,10 @@ class FileCallUncertainty(StrEnum):
 
 
 # The maximum expansions from an initial payload to its retained recovery
-# identity without a gate proposal: 814 download, 1150 upload, 1205 JSON, 50
-# for each single call. Typed maximum-object and exact-boundary tests prove
-# these values. A DOWNLOAD with a gate reserves its proposal separately.
+# identity without a gate proposal: 814 download, 1150 upload or package
+# upload, 1205 JSON, and 50 for each other single call. Typed maximum-object
+# and exact-boundary tests prove these values. A bound gate reserves its
+# proposed generation separately.
 _FILE_CALL_RECOVERY_HEADROOM_BYTES = {
     FileCallFamily.DOWNLOAD: 814,
     FileCallFamily.UPLOAD: 1150,
