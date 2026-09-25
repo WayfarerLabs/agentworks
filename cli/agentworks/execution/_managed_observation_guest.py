@@ -19,7 +19,6 @@ from ._managed_observation_protocol import (
     ManagedResultControl,
     checked_fact,
     checked_launch,
-    checked_vm_launch,
     decode_request,
     encode_result,
 )
@@ -99,7 +98,7 @@ def main(nonce: str) -> int:
             raise ManagedObservationError("managed observation prerequisite")
         if not matches_current_identity(request.identity):
             raise ManagedObservationError("managed observation identity")
-        launch = checked_vm_launch(request.expected_launch, request.guest)
+        launch = checked_launch(request.expected_launch)
         if _identity() != request.guest:
             raise ManagedObservationError("managed observation guest identity mismatch")
         with ManagedJobStore(cast("str", launch["run_id"])) as store:
