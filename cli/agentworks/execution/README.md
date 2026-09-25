@@ -647,6 +647,24 @@ bounds exclude the fixed prefix; carriers also enforce their complete request bo
 prefix and command serialization. Local Python and serialized Windows/QGA checks do not establish
 native carrier acceptance or public FileAccess composition.
 
+## Private file-effect gate
+
+The Linux fixed file helpers can hold a flock on an existing, exact gate inode through their guest
+filesystem effects. A generation advance waits for that lock and makes later old-generation helpers
+refuse before effects; it does not prove those helpers exited or stop a predecessor controller from
+writing a local sink. Gate setup is separately admitted under the operation owner before any
+snapshot dispatch. A complete existing gate can be adopted, but an incomplete or replaced inode is
+not repaired during the same guest epoch.
+
+`_file_gate_setup_recovery.py` handles only a lost setup reply whose durable row remains setup-only
+after database generation takeover. It rechecks that exact row, dispatches non-creating gate
+inspection, and resolves only the setup obligation after a complete positive observation. The old
+controller cannot publish the gate binding after takeover and thus cannot start the snapshot from
+that row. A bound row, missing gate, uncertain inspection, other obligation or non-gated local
+effect still needs its own recovery proof. The gate and its UID directory must remain intact for the
+guest epoch so a delayed setup cannot create a replacement. This is private local composition, not
+native route acceptance, a production recovery factory or whole-operation release.
+
 ## Private inline file reads
 
 `_file_read.py` composes a bounded, identity-bound Linux file read through one carrier attempt. The

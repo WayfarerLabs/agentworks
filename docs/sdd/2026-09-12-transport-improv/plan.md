@@ -1956,6 +1956,14 @@ selected-carrier dispatch, `/run` provisioning or native acceptance. The first p
 must still sequence setup, durable proposal, confirmed advance and DOWNLOAD dispatch on the same
 `file-call` row, then fence recovery before producing drain evidence.
 
+For a lost `SETUP` reply, a recovery owner may settle only a post-takeover, still-setup-only
+`file-call` row after positive exact non-creating `INSPECT`. Durable publication must precede
+snapshot dispatch, so the predecessor cannot begin DOWNLOAD after takeover; delayed setup only
+adopts the retained gate. Preserve that gate and UID namespace for the epoch. An absent or
+incomplete inspection retains custody, and a bound row instead requires the full effect fence and
+cleanup recovery. Prove this narrow path locally and through each native route before enabling it;
+do not mistake it for whole-operation resolution or remote helper-exit evidence.
+
 Setup is itself a remote control-state mutation, so the current possible-dispatch rule applies
 before its first attempt. The first production composition must arm one `file-call` row with a setup
 descriptor and deterministic identity/path under the existing serial borrow, then publish the

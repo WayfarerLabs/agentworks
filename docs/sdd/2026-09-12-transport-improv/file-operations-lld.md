@@ -964,13 +964,20 @@ when responsibility is safely handed off or terminated.
 The private custody path now accepts acknowledged `SETUP` for a new or existing complete gate. Setup
 still attempts exclusive creation; only `EEXIST` selects the same non-creating, flock-held
 inspection used by explicit `INSPECT`. It neither repairs an incomplete inode nor replaces an unsafe
-one. A lost setup reply remains unresolved until recovery combines separate non-creating inspection
-with native no-further-effects evidence; the acknowledged repeat-use path does not itself settle
-that case. Neither a target-user helper nor the existing `SETUP` exchange can create the root-owned
-`/run/agentworks/file-gates-v1` anchor from scratch. Core provisions that anchor and a target-owned
-private `0700` per-UID directory through a trusted guest setup path for each boot, then runs the
-gate helper and file operation as the target UID. This is infrastructure setup, not elevation of an
-individual file operation.
+one. A lost setup reply normally retains custody. There is one narrow reconciliation: after atomic
+database takeover, read the current row and confirm it is still strictly setup-only. A positive,
+exact, non-creating `INSPECT` of the complete gate under its flock can then settle that setup
+obligation without waiting for the old `SETUP` helper to exit. The old controller cannot publish a
+binding after takeover and therefore cannot reach snapshot work; a delayed `SETUP` can only adopt
+the existing complete gate. If binding publication won before takeover, the current row is bound and
+this shortcut is unavailable. Missing, incomplete, mismatched or unobserved state retains custody.
+Keep the gate and UID namespace for the epoch: deleting either would allow a late setup to create a
+new inode. This settles neither other obligations nor non-gated controller effects. The acknowledged
+repeat-use path does not itself settle the lost-reply case. Neither a target-user helper nor the
+existing `SETUP` exchange can create the root-owned `/run/agentworks/file-gates-v1` anchor from
+scratch. Core provisions that anchor and a target-owned private `0700` per-UID directory through a
+trusted guest setup path for each boot, then runs the gate helper and file operation as the target
+UID. This is infrastructure setup, not elevation of an individual file operation.
 
 The private shared Debian VM bootstrap now installs persistent, non-cleaning `systemd-tmpfiles` `d`
 rules for the root-owned `/run` anchors and the root/admin UID directories, then applies them after

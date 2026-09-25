@@ -17,7 +17,13 @@ from agentworks.execution._file_effect_gate import inspect_file_effect_gate, set
 from agentworks.execution._file_effect_gate_bundle import _MODULE_NAMES, _PACKAGE
 from agentworks.execution._file_effect_gate_exchange import GateControlMutationUncertain
 from agentworks.execution._file_gate_setup import FileEffectGateSetup
-from agentworks.execution._file_obligation import FileCallFamily, FileCallObligation, decode_file_call_obligation
+from agentworks.execution._file_gate_setup_recovery import FileGateSetupRecovery
+from agentworks.execution._file_obligation import (
+    FileCallFamily,
+    FileCallObligation,
+    decode_file_call_obligation,
+    encode_file_call_obligation,
+)
 from agentworks.execution._file_operation import FileOperation, _PendingDownloadSetup
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
@@ -333,5 +339,134 @@ def test_setup_failures_retain_one_exact_pending_call(
         assert carrier.calls == (0 if failure == "registration" else 1)
         with pytest.raises(StateError):
             owner.close()
+    finally:
+        database.close()
+
+
+def test_recovered_setup_only_inspection_settles_that_obligation_without_helper_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, gate_root = _fixture(monkeypatch, tmp_path)
+    database = Database(tmp_path / "state.db")
+    owner, operation, setup = _context(database, gate_root)
+    try:
+        with pytest.raises(RuntimeError, match="lost setup reply"):
+            _call(operation, _InspectingCarrier(database, owner, fail_setup="lost"), source, setup)
+        active = operation.active_downloads[0]
+        old_obligation = active.obligation
+        assert old_obligation is not None
+        predecessor = owner.ownership
+        recovered = OperationOwner.recover(database.operations, predecessor, "c" * 32)
+        row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
+        assert decode_file_call_obligation(row.payload).gate_setup == setup
+
+        result = FileGateSetupRecovery.open(recovered, target_for_owner(recovered), row).inspect(
+            LocalCarrier(), deadline=Deadline.after(20)
+        )
+        assert result.settled
+        assert result.exchange.observation is not None and result.exchange.observation.binding is not None
+        assert (
+            database.operations.list_lifecycle_obligations(recovered.ownership)[0].state
+            is LifecycleObligationState.RESOLVED
+        )
+        assert Path(setup.path).is_file()
+        stale_payload = encode_file_call_obligation(
+            replace(
+                decode_file_call_obligation(row.payload),
+                gate_setup=None,
+                effect_gate=result.exchange.observation.binding,
+            )
+        )
+        with pytest.raises(StateError):
+            old_obligation.publish_payload(
+                expected_revision=row.payload_revision,
+                payload_version=row.payload_version,
+                payload=stale_payload,
+            )
+        recovered.record_effects_resolved()
+        recovered.close()
+    finally:
+        database.close()
+
+
+def test_recovered_setup_only_inspection_refuses_missing_gate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source, gate_root = _fixture(monkeypatch, tmp_path)
+    database = Database(tmp_path / "state.db")
+    owner, operation, setup = _context(database, gate_root)
+    try:
+        with pytest.raises(RuntimeError, match="lost setup reply"):
+            _call(operation, _InspectingCarrier(database, owner, fail_setup="lost"), source, setup)
+        Path(setup.path).unlink()
+        recovered = OperationOwner.recover(database.operations, owner.ownership, "c" * 32)
+        row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
+        result = FileGateSetupRecovery.open(recovered, target_for_owner(recovered), row).inspect(
+            LocalCarrier(), deadline=Deadline.after(20)
+        )
+        assert not result.settled
+        assert result.exchange.observation is not None and result.exchange.observation.binding is None
+        assert (
+            database.operations.list_lifecycle_obligations(recovered.ownership)[0].state
+            is LifecycleObligationState.POSSIBLE_EFFECT
+        )
+        with pytest.raises(StateError):
+            recovered.close()
+    finally:
+        database.close()
+
+
+def test_recovered_setup_only_inspection_requires_complete_observation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, gate_root = _fixture(monkeypatch, tmp_path)
+    database = Database(tmp_path / "state.db")
+    owner, operation, setup = _context(database, gate_root)
+    try:
+        with pytest.raises(RuntimeError, match="lost setup reply"):
+            _call(operation, _InspectingCarrier(database, owner, fail_setup="lost"), source, setup)
+        recovered = OperationOwner.recover(database.operations, owner.ownership, "c" * 32)
+        row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
+        recovery = FileGateSetupRecovery.open(recovered, target_for_owner(recovered), row)
+        incomplete = recovery.inspect(
+            _InspectingCarrier(database, recovered, fail_setup="malformed"), deadline=Deadline.after(20)
+        )
+        assert not incomplete.settled
+        assert incomplete.exchange.observation is not None and incomplete.exchange.observation.binding is None
+        assert (
+            database.operations.list_lifecycle_obligations(recovered.ownership)[0].state
+            is LifecycleObligationState.POSSIBLE_EFFECT
+        )
+        complete = recovery.inspect(LocalCarrier(), deadline=Deadline.after(20))
+        assert complete.settled
+        assert complete.exchange.observation is not None and complete.exchange.observation.binding is not None
+        assert (
+            database.operations.list_lifecycle_obligations(recovered.ownership)[0].state
+            is LifecycleObligationState.RESOLVED
+        )
+    finally:
+        database.close()
+
+
+def test_recovered_setup_only_inspection_refuses_already_bound_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, gate_root = _fixture(monkeypatch, tmp_path)
+    database = Database(tmp_path / "state.db")
+    owner, operation, setup = _context(database, gate_root)
+    original_publish = LifecycleObligation.publish_payload
+
+    def lost_publication(self: LifecycleObligation, *args, **kwargs):
+        original_publish(self, *args, **kwargs)
+        raise RuntimeError("lost publication reply")
+
+    monkeypatch.setattr(LifecycleObligation, "publish_payload", lost_publication)
+    try:
+        with pytest.raises(RuntimeError, match="lost publication reply"):
+            _call(operation, LocalCarrier(), source, setup)
+        recovered = OperationOwner.recover(database.operations, owner.ownership, "c" * 32)
+        row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
+        assert decode_file_call_obligation(row.payload).effect_gate is not None
+        with pytest.raises(StateError):
+            FileGateSetupRecovery.open(recovered, target_for_owner(recovered), row)
+        assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
     finally:
         database.close()
