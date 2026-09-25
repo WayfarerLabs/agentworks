@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -44,6 +45,7 @@ def test_generate_bootstrap_script_all_steps() -> None:
 
 
 @requires_posix_shell
+@pytest.mark.skipif(sys.platform != "linux", reason="generated bootstrap step uses Debian GNU stat")
 def test_file_gate_bootstrap_preserves_db_and_refuses_bad_ancestors(
     tmp_path: Path,
 ) -> None:
@@ -88,7 +90,8 @@ def test_file_gate_bootstrap_preserves_db_and_refuses_bad_ancestors(
     root_dir = version_dir / "0"
     root_dir.mkdir(mode=0o700)
     admin_dir = version_dir / str(uid)
-    admin_dir.mkdir(mode=0o700)
+    if admin_dir != root_dir:
+        admin_dir.mkdir(mode=0o700)
 
     first = subprocess.run(["bash", "-c", step], text=True, capture_output=True)
     assert first.returncode == 0, first.stderr
