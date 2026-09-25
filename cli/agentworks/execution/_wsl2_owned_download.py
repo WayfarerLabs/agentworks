@@ -10,6 +10,7 @@ from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import ValidationError
 from agentworks.execution._file_download import FileDownloadOutcome, FileDownloadStatus
+from agentworks.execution._file_gate_setup import FileEffectGateSetup
 from agentworks.execution._file_operation import FileOperation
 from agentworks.execution._runtime_prerequisite import RuntimeSelection
 from agentworks.execution._vm_guest_identity import VMGuestIdentityObservationState
@@ -213,11 +214,13 @@ class WSL2OwnedDownload:
         )
         if self.preparation.status is not VMTargetPreparationStatus.PREPARED:
             return self._release_if_settled(ready, deadline, safe=not self.preparation.requires_owner_retention)
-        if not self._same_ready_epoch(ready, self.preparation):
+        guest = self._matching_ready_guest(ready, self.preparation)
+        if guest is None:
             return self._release_if_settled(ready, deadline, safe=True)
 
         target = self.preparation.target
         assert target is not None
+        gate_setup = FileEffectGateSetup.for_target(target, plan.expected.euid, guest)
         self.file_operation = FileOperation(self.owner, target)
         self.outcome = self.file_operation.download(
             self._carrier,
@@ -228,6 +231,7 @@ class WSL2OwnedDownload:
             plan=plan,
             deadline=deadline,
             runtime_selection=self._runtime,
+            gate_setup=gate_setup,
         )
         file_settled = (
             not self.outcome.requires_owner_retention
@@ -256,7 +260,9 @@ class WSL2OwnedDownload:
             )
         return False
 
-    def _same_ready_epoch(self, ready: WSL2AnchorEvidence, preparation: VMTargetPreparation) -> bool:
+    def _matching_ready_guest(
+        self, ready: WSL2AnchorEvidence, preparation: VMTargetPreparation
+    ) -> VMGuestIdentity | None:
         observed = preparation.guest_result
         guest = observed.observation if observed is not None else None
         identity = (
@@ -264,8 +270,10 @@ class WSL2OwnedDownload:
         )
         anchor = ready.identity
         if type(identity) is not VMGuestIdentity or anchor is None or preparation.target is None:
-            return False
-        return identity.boot_id == anchor.boot_id and identity.init_start_ticks == anchor.init_start_ticks
+            return None
+        if identity.boot_id != anchor.boot_id or identity.init_start_ticks != anchor.init_start_ticks:
+            return None
+        return identity
 
     def _release_if_settled(self, ready: WSL2AnchorEvidence, deadline: Deadline, *, safe: bool) -> WSL2DownloadStatus:
         """Release the exact hold; retain the claim unless every obligation settled."""

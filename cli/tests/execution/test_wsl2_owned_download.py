@@ -16,6 +16,9 @@ from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLo
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import ValidationError
+from agentworks.execution import _file_effect_gate_exchange, _file_gate_setup
+from agentworks.execution._file_effect_gate_bundle import _MODULE_NAMES, _PACKAGE
+from agentworks.execution._file_gate_setup import FileEffectGateSetup
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
@@ -37,8 +40,10 @@ from agentworks.execution.carrier import (
     SinkOutput,
 )
 from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
+from agentworks.vms.target_identity import vm_guest_boot_id
 from tests.execution.files._file_download_support import BytesSink, LostCallStdoutCarrier
 from tests.execution.files._file_snapshot_support import LocalCarrier, install_fixture_bundle
+from tests.execution.files._fixed_bundle_support import fixture_file_bundle
 from tests.execution.test_wsl2_platform_hold import BOOT, FakeNative, FakeObserver
 from tests.vms.test_target_preparation import _MARKER, _vm
 
@@ -155,6 +160,24 @@ def _download(subject: WSL2OwnedDownload, root: Path, sink: BytesSink) -> WSL2Do
     )
 
 
+def _install_file_fixtures(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, scratch: Path) -> Path:
+    gate_root = tmp_path / "gates"
+    gate_root.joinpath(str(os.geteuid())).mkdir(parents=True)
+    monkeypatch.setattr(_file_gate_setup, "_NAMESPACE", str(gate_root))
+    guest_patch = (
+        "from _agw_file_snapshot._vm_guest_identity_protocol import VMGuestIdentity\n"
+        f"guest._identity=lambda: VMGuestIdentity({_MARKER!r}, {BOOT!r}, 4096)\n"
+    )
+    install_fixture_bundle(monkeypatch, scratch, guest_patch)
+    gate_patch = guest_patch.replace("_agw_file_snapshot", "_agw_file_effect_gate")
+    monkeypatch.setattr(
+        _file_effect_gate_exchange,
+        "FIXED_BUNDLE",
+        fixture_file_bundle(_PACKAGE, _MODULE_NAMES, "_file_effect_gate_guest", gate_patch),
+    )
+    return gate_root
+
+
 def test_complete_download_uses_one_owner_and_releases_after_exact_guest_absence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -164,7 +187,7 @@ def test_complete_download_uses_one_owner_and_releases_after_exact_guest_absence
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     scratch.chmod(0o1777)
-    install_fixture_bundle(monkeypatch, scratch)
+    gate_root = _install_file_fixtures(monkeypatch, tmp_path, scratch)
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database)
         observer = FakeObserver([])
@@ -176,6 +199,24 @@ def test_complete_download_uses_one_owner_and_releases_after_exact_guest_absence
         assert observer.events == ["observe"]
         assert database.operations.inspect(subject.owner.ownership.scope) is None
         assert subject.file_operation is not None and not subject.file_operation.unfinished_downloads
+        assert subject.preparation is not None and subject.preparation.target is not None
+        assert subject.preparation.guest_result is not None
+        observation = subject.preparation.guest_result.observation
+        assert observation is not None and observation.identity is not None
+        assert subject.outcome is not None and subject.outcome.binding.effect_gate is not None
+        gate = subject.outcome.binding.effect_gate
+        assert gate.guest == observation.identity
+        assert gate.guest.instance_marker == _MARKER
+        assert gate.euid == _plan().expected.euid
+        assert gate.scope_name == subject.preparation.target.name
+        assert subject.preparation.target.boot_id == vm_guest_boot_id(gate.guest)
+        assert (
+            gate.path
+            == FileEffectGateSetup.for_target(
+                subject.preparation.target, _plan().expected.euid, observation.identity
+            ).path
+        )
+        assert gate.path.startswith(str(gate_root)) and Path(gate.path).is_file()
 
 
 def test_selected_platform_download_rechecks_registration_with_owned_route(
@@ -187,7 +228,7 @@ def test_selected_platform_download_rechecks_registration_with_owned_route(
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     scratch.chmod(0o1777)
-    install_fixture_bundle(monkeypatch, scratch)
+    _install_file_fixtures(monkeypatch, tmp_path, scratch)
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database)
         routes: list[WSL2Connection] = []
@@ -215,7 +256,7 @@ def test_platform_carrier_mutation_cannot_redirect_file_dispatch(
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     scratch.chmod(0o1777)
-    install_fixture_bundle(monkeypatch, scratch)
+    _install_file_fixtures(monkeypatch, tmp_path, scratch)
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database)
         routes: list[WSL2Connection] = []
@@ -259,7 +300,12 @@ def test_selected_platform_changed_or_missing_locator_refuses_before_guest_or_fi
 
 def test_registration_replacement_during_binding_resolution_refuses_before_guest(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    gate_root = tmp_path / "gates"
+    monkeypatch.setattr(_file_gate_setup, "_NAMESPACE", str(gate_root))
+    setup = Mock(side_effect=AssertionError("gate setup before target preparation"))
+    monkeypatch.setattr(FileEffectGateSetup, "for_target", setup)
     with closing(Database(tmp_path / "state.db")) as database:
         platform = Mock(spec=WSL2Platform)
         platform.site_name = "local"
@@ -291,6 +337,8 @@ def test_registration_replacement_during_binding_resolution_refuses_before_guest
         assert subject.preparation is not None
         assert subject.preparation.guest_result is None
         assert subject.file_operation is None
+        setup.assert_not_called()
+        assert not gate_root.exists()
         assert platform.observe_provider_locator.call_count == 2
         platform.resolve_native_execution_binding.assert_called_once()
         assert database.operations.inspect(subject.owner.ownership.scope) is None
@@ -388,7 +436,7 @@ def test_settled_file_with_unknown_hold_absence_retains_claim(tmp_path: Path, mo
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     scratch.chmod(0o1777)
-    install_fixture_bundle(monkeypatch, scratch)
+    _install_file_fixtures(monkeypatch, tmp_path, scratch)
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database)
         observer = FakeObserver([], GuestAnchorPresence.UNKNOWN)
@@ -407,7 +455,7 @@ def test_missing_source_resolves_file_and_hold_obligations(tmp_path: Path, monke
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     scratch.chmod(0o1777)
-    install_fixture_bundle(monkeypatch, scratch)
+    _install_file_fixtures(monkeypatch, tmp_path, scratch)
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database)
         observer = FakeObserver([])
@@ -478,13 +526,14 @@ def test_unresolved_file_exchange_retains_claim_and_hold(tmp_path: Path, monkeyp
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     scratch.chmod(0o1777)
-    install_fixture_bundle(monkeypatch, scratch)
+    _install_file_fixtures(monkeypatch, tmp_path, scratch)
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database)
-        carrier.file_carrier = LostCallStdoutCarrier(3)
+        carrier.file_carrier = LostCallStdoutCarrier(1)
         observer = FakeObserver([])
         subject = _subject(database, carrier, observer, monkeypatch)
-        assert _download(subject, root, BytesSink()) is WSL2DownloadStatus.RETAINED
+        with pytest.raises(_file_effect_gate_exchange.GateControlMutationUncertain):
+            _download(subject, root, BytesSink())
         assert carrier.calls > 1 and observer.events == []
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
         rows = database.operations.list_lifecycle_obligations(subject.owner.ownership)
