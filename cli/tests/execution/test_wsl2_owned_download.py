@@ -302,8 +302,6 @@ def test_registration_replacement_during_binding_resolution_refuses_before_guest
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    gate_root = tmp_path / "gates"
-    monkeypatch.setattr(_file_gate_setup, "_NAMESPACE", str(gate_root))
     setup = Mock(side_effect=AssertionError("gate setup before target preparation"))
     monkeypatch.setattr(FileEffectGateSetup, "for_target", setup)
     with closing(Database(tmp_path / "state.db")) as database:
@@ -338,7 +336,6 @@ def test_registration_replacement_during_binding_resolution_refuses_before_guest
         assert subject.preparation.guest_result is None
         assert subject.file_operation is None
         setup.assert_not_called()
-        assert not gate_root.exists()
         assert platform.observe_provider_locator.call_count == 2
         platform.resolve_native_execution_binding.assert_called_once()
         assert database.operations.inspect(subject.owner.ownership.scope) is None
@@ -519,7 +516,7 @@ def test_uncertain_guest_absence_retains_claim(tmp_path: Path, monkeypatch: pyte
         assert any(row.state is LifecycleObligationState.POSSIBLE_EFFECT for row in rows)
 
 
-def test_unresolved_file_exchange_retains_claim_and_hold(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unresolved_gate_setup_retains_claim_and_hold(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path / "source-root"
     root.mkdir()
     root.joinpath("source").write_bytes(b"held-wsl-download")
@@ -535,6 +532,27 @@ def test_unresolved_file_exchange_retains_claim_and_hold(tmp_path: Path, monkeyp
         with pytest.raises(_file_effect_gate_exchange.GateControlMutationUncertain):
             _download(subject, root, BytesSink())
         assert carrier.calls > 1 and observer.events == []
+        assert database.operations.inspect(subject.owner.ownership.scope) is not None
+        rows = database.operations.list_lifecycle_obligations(subject.owner.ownership)
+        assert any(row.state is LifecycleObligationState.POSSIBLE_EFFECT for row in rows)
+
+
+def test_unresolved_file_exchange_retains_claim_and_hold(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "source-root"
+    root.mkdir()
+    root.joinpath("source").write_bytes(b"held-wsl-download")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    scratch.chmod(0o1777)
+    _install_file_fixtures(monkeypatch, tmp_path, scratch)
+    with closing(Database(tmp_path / "state.db")) as database:
+        carrier = GuestThenFileCarrier(database)
+        carrier.file_carrier = LostCallStdoutCarrier(4)
+        observer = FakeObserver([])
+        subject = _subject(database, carrier, observer, monkeypatch)
+        assert _download(subject, root, BytesSink()) is WSL2DownloadStatus.RETAINED
+        assert carrier.calls > 1 and observer.events == []
+        assert subject.outcome is not None and subject.outcome.requires_owner_retention
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
         rows = database.operations.list_lifecycle_obligations(subject.owner.ownership)
         assert any(row.state is LifecycleObligationState.POSSIBLE_EFFECT for row in rows)
