@@ -8,6 +8,7 @@ import sys
 import time
 from contextlib import suppress
 
+from ._file_effect_gate import FileEffectGateError, hold_file_effect_gate
 from ._file_paths import ConfinedOpenError, open_linux_root
 from ._file_snapshot_protocol import (
     MAX_REQUEST_BYTES,
@@ -43,6 +44,7 @@ from ._scratch import (
 )
 from ._scratch_receipt import ScratchHistoricalOwnership, ScratchOwnershipUncertainty
 from ._scratch_root import ScratchRootError, ScratchRootFailureKind, open_scratch_root
+from ._vm_guest_identity_guest import _GuestRefusal, _identity
 
 _OperationResult = SpoolSnapshot | bytes | ScratchHistoricalOwnership | ScratchOwnershipUncertainty | None
 
@@ -239,9 +241,17 @@ def main(nonce: str) -> int:
     failure: FileSnapshotFailureControl | None = None
     result: _OperationResult = None
     try:
-        result = _operate(request, expires_at)
+        if request.effect_gate is None:
+            result = _operate(request, expires_at)
+        else:
+            # Observe the current guest independently of the request and
+            # keep the gate transaction across every filesystem effect.
+            with hold_file_effect_gate(request.effect_gate, _identity()):
+                result = _operate(request, expires_at)
     except _SafeFailure as error:
         failure = error.failure
+    except (FileEffectGateError, _GuestRefusal):
+        failure = FileSnapshotFailureControl(FileSnapshotFailureCode.EFFECT_GATE_REFUSED)
     if _expired(expires_at) and (
         failure is None
         or failure.code

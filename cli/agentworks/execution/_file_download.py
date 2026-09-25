@@ -10,6 +10,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
 from agentworks.errors import ValidationError
+from agentworks.execution._file_effect_gate import FileEffectGateBinding
 from agentworks.execution._file_paths import normalized_relative_path, normalized_root
 from agentworks.execution._file_snapshot_exchange import (
     FileSnapshotObservation,
@@ -101,6 +102,7 @@ class FileDownloadBinding:
     max_bytes: int
     identity_plan: IdentityPlan
     runtime_selection: RuntimeSelection
+    effect_gate: FileEffectGateBinding | None = None
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -249,6 +251,7 @@ def _prepare_download(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     borrow: OperationBorrow,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> _PreparedDownload:
     """Prepare one validated concrete download without dispatching it."""
     binding = _validate_inputs(
@@ -260,6 +263,7 @@ def _prepare_download(
         deadline,
         runtime_selection,
         borrow,
+        effect_gate,
     )
     token = secrets.token_bytes(16)
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
@@ -350,6 +354,7 @@ class _DownloadWorkflow:
             plan=self._state.binding.identity_plan,
             deadline=self._deadline,
             runtime_selection=self._state.binding.runtime_selection,
+            effect_gate=self._state.binding.effect_gate,
         )
         observation = result.observation
         if result.dispatch is not Dispatch.NOT_SENT:
@@ -420,6 +425,7 @@ class _DownloadWorkflow:
                 plan=self._state.binding.identity_plan,
                 deadline=self._deadline,
                 runtime_selection=self._state.binding.runtime_selection,
+                effect_gate=self._state.binding.effect_gate,
             )
             observation = result.observation
             if result.dispatch is not Dispatch.NOT_SENT:
@@ -504,6 +510,7 @@ class _DownloadWorkflow:
                 plan=self._state.binding.identity_plan,
                 deadline=self._deadline,
                 runtime_selection=self._state.binding.runtime_selection,
+                effect_gate=self._state.binding.effect_gate,
             )
             observation = result.observation
             if result.dispatch is not Dispatch.NOT_SENT:
@@ -516,7 +523,7 @@ class _DownloadWorkflow:
                     carrier_failure=result.carrier_failure,
                 )
             self._settle(result.dispatch, result.carrier_completion)
-        self._state.ownership_uncertain = self._state.cleanup_debt is None
+        self._state.ownership_uncertain = self._state.ownership_uncertain or self._state.cleanup_debt is None
 
     def _cleanup_after_failure(self) -> None:
         if (
@@ -541,6 +548,7 @@ class _DownloadWorkflow:
             plan=self._state.binding.identity_plan,
             deadline=self._deadline,
             runtime_selection=self._state.binding.runtime_selection,
+            effect_gate=self._state.binding.effect_gate,
         )
         observation = result.observation
         if result.dispatch is not Dispatch.NOT_SENT:
@@ -580,6 +588,8 @@ class _DownloadWorkflow:
             self._state.cleanup_debt = observation.cleanup_debt
         failure = observation.failure
         if failure is not None:
+            if failure.code is FileSnapshotFailureCode.EFFECT_GATE_REFUSED:
+                self._state.ownership_uncertain = True
             if self._state.failure is None and self._state.snapshot_failure is None:
                 self._state.snapshot_failure = failure
             if failure.cleanup_debt is not None:
@@ -648,6 +658,7 @@ def _validate_inputs(
     deadline: object,
     runtime_selection: object,
     borrow: object,
+    effect_gate: object,
 ) -> FileDownloadBinding:
     if type(trusted_root_path) is not str or not normalized_root(trusted_root_path):
         raise ValidationError("Download requires a normalized absolute trusted root")
@@ -676,6 +687,11 @@ def _validate_inputs(
         raise ValidationError("Download requires a bound runtime selection")
     if type(borrow) is not OperationBorrow:
         raise ValidationError("Download requires an active core operation borrow")
+    if effect_gate is not None:
+        if type(effect_gate) is not FileEffectGateBinding or effect_gate.euid != plan.expected.euid:
+            raise ValidationError("Download requires an exact file-effect gate binding")
+        if effect_gate.proposed_generation is not None:
+            raise ValidationError("Download effect-gate advance must finish before dispatch")
     getter_failed = False
     writer = None
     try:
@@ -684,4 +700,4 @@ def _validate_inputs(
         getter_failed = True
     if getter_failed or not callable(writer):
         raise ValidationError("Download requires a nonblocking byte sink")
-    return FileDownloadBinding(trusted_root_path, relative_path, max_bytes, plan, runtime_selection)
+    return FileDownloadBinding(trusted_root_path, relative_path, max_bytes, plan, runtime_selection, effect_gate)

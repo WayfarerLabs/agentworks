@@ -13,6 +13,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from ._file_effect_gate import (
+    FileEffectGateBinding,
+    FileEffectGateError,
+    decode_file_effect_gate,
+    encode_file_effect_gate,
+)
 from ._file_paths import normalized_relative_path, normalized_root
 from ._file_revision_wire import FileRevisionWireError, decode_file_revision, encode_file_revision
 from ._file_spool import SpoolSnapshot, SpoolSnapshotFailureKind
@@ -65,6 +71,7 @@ class FileSnapshotFailureCode(StrEnum):
     SCRATCH_ROOT_REFUSED = "scratch_root_refused"
     SPOOL = "spool"
     SCRATCH = "scratch"
+    EFFECT_GATE_REFUSED = "effect_gate_refused"
 
 
 class FileSnapshotRequestError(ValueError):
@@ -91,6 +98,7 @@ class FileSnapshotBeginRequest:
     max_bytes: int
     identity: IdentityExpectation
     remaining_seconds: float | None
+    effect_gate: FileEffectGateBinding | None = None
 
     @property
     def operation(self) -> FileSnapshotOperation:
@@ -106,6 +114,7 @@ class FileSnapshotChunkRequest:
     length: int
     identity: IdentityExpectation
     remaining_seconds: float | None
+    effect_gate: FileEffectGateBinding | None = None
 
     @property
     def operation(self) -> FileSnapshotOperation:
@@ -118,6 +127,7 @@ class FileSnapshotReconcileRequest:
     token: bytes
     identity: IdentityExpectation
     remaining_seconds: float | None
+    effect_gate: FileEffectGateBinding | None = None
 
     @property
     def operation(self) -> FileSnapshotOperation:
@@ -131,6 +141,7 @@ class FileSnapshotCleanupRequest:
     cleanup_debt: ScratchCleanupDebt
     identity: IdentityExpectation
     remaining_seconds: float | None
+    effect_gate: FileEffectGateBinding | None = None
 
     @property
     def operation(self) -> FileSnapshotOperation:
@@ -291,6 +302,10 @@ def encode_file_snapshot_request(request: FileSnapshotRequest) -> bytes:
             "token": _encode_token(request.token),
             "version": 1,
         }
+        if request.effect_gate is not None:
+            if request.effect_gate.proposed_generation is not None or request.effect_gate.euid != request.identity.euid:
+                raise FileEffectGateError("invalid snapshot gate binding")
+            common["effect_gate"] = encode_file_effect_gate(request.effect_gate)
         if isinstance(request, FileSnapshotBeginRequest):
             common.update(
                 {
@@ -322,7 +337,7 @@ def encode_file_snapshot_request(request: FileSnapshotRequest) -> bytes:
         else:
             raise TypeError
         encoded = _json_bytes(common)
-    except (AttributeError, ScratchWireError, TypeError, UnicodeEncodeError, ValueError):
+    except (AttributeError, FileEffectGateError, ScratchWireError, TypeError, UnicodeEncodeError, ValueError):
         failed = True
     if failed:
         raise _invalid_request()
@@ -362,7 +377,11 @@ def decode_file_snapshot_request(data: bytes) -> FileSnapshotRequest:
         FileSnapshotOperation.RECONCILE: _RECONCILE_FIELDS,
         FileSnapshotOperation.CLEANUP: _CLEANUP_FIELDS,
     }[operation]
-    if set(value) != expected_fields or value["version"] != 1 or type(value["version"]) is not int:
+    if (
+        set(value) not in (expected_fields, expected_fields | {"effect_gate"})
+        or value["version"] != 1
+        or type(value["version"]) is not int
+    ):
         raise _invalid_request()
     nonce = value["nonce"]
     if type(nonce) is not str or not valid_nonce(nonce):
@@ -370,6 +389,14 @@ def decode_file_snapshot_request(data: bytes) -> FileSnapshotRequest:
     token = _decode_token(value["token"])
     identity = _identity(value["identity"])
     remaining = _remaining(value["remaining_seconds"])
+    effect_gate = None
+    if "effect_gate" in value:
+        try:
+            effect_gate = decode_file_effect_gate(value["effect_gate"])
+        except FileEffectGateError:
+            raise _invalid_request() from None
+        if effect_gate.proposed_generation is not None or effect_gate.euid != identity.euid:
+            raise _invalid_request()
     if operation is FileSnapshotOperation.BEGIN:
         return FileSnapshotBeginRequest(
             nonce,
@@ -379,10 +406,11 @@ def decode_file_snapshot_request(data: bytes) -> FileSnapshotRequest:
             _bounded_request_integer(value["max_bytes"], _MAX_LENGTH, positive=True),
             identity,
             remaining,
+            effect_gate,
         )
     context = snapshot_context(identity)
     if operation is FileSnapshotOperation.RECONCILE:
-        return FileSnapshotReconcileRequest(nonce, token, identity, remaining)
+        return FileSnapshotReconcileRequest(nonce, token, identity, remaining, effect_gate)
     if operation is FileSnapshotOperation.CLEANUP:
         failed = False
         cleanup: ScratchCleanupDebt | None = None
@@ -392,7 +420,7 @@ def decode_file_snapshot_request(data: bytes) -> FileSnapshotRequest:
             failed = True
         if failed or cleanup is None:
             raise _invalid_request()
-        return FileSnapshotCleanupRequest(nonce, token, cleanup, identity, remaining)
+        return FileSnapshotCleanupRequest(nonce, token, cleanup, identity, remaining, effect_gate)
     failed = False
     ready: ReadyScratchReference | None = None
     try:
@@ -406,7 +434,7 @@ def decode_file_snapshot_request(data: bytes) -> FileSnapshotRequest:
     declared_length = ready._reference._ownership._length
     if offset > declared_length or length > declared_length - offset:
         raise _invalid_request()
-    return FileSnapshotChunkRequest(nonce, token, ready, offset, length, identity, remaining)
+    return FileSnapshotChunkRequest(nonce, token, ready, offset, length, identity, remaining, effect_gate)
 
 
 def empty_file_snapshot_body() -> bytes:

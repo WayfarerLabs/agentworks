@@ -103,6 +103,12 @@ class FileDownloadRecovery:
                 entity_name=owner.ownership.scope.resource_name,
             ) from None
         evidence._require_exact(owner.ownership, obligation, call, target)
+        if call.effect_gate is not None and call.effect_gate.proposed_generation is not None:
+            raise StateError(
+                "download recovery gate advance must be confirmed before effect dispatch",
+                entity_kind=owner.ownership.scope.resource_kind,
+                entity_name=owner.ownership.scope.resource_name,
+            )
         bound = owner.rebind_possible_effect_lifecycle_obligation(
             obligation.obligation_id,
             "file-call",
@@ -124,6 +130,7 @@ class FileDownloadRecovery:
                 plan=self._call.identity_plan,
                 deadline=deadline,
                 runtime_selection=self._call.runtime_selection,
+                effect_gate=self._call.effect_gate,
             )
         )
         observation = result.observation
@@ -154,6 +161,7 @@ class FileDownloadRecovery:
                 plan=self._call.identity_plan,
                 deadline=deadline,
                 runtime_selection=self._call.runtime_selection,
+                effect_gate=self._call.effect_gate,
             )
         )
 

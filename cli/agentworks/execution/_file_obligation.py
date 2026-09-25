@@ -14,6 +14,12 @@ from typing import cast
 
 from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES
 from agentworks.errors import ValidationError
+from agentworks.execution._file_effect_gate import (
+    FileEffectGateBinding,
+    FileEffectGateError,
+    decode_file_effect_gate,
+    encode_file_effect_gate,
+)
 from agentworks.execution._file_paths import normalized_relative_path, normalized_root
 from agentworks.execution._file_publication_wire import (
     BoundPublicationCleanupDebt,
@@ -41,7 +47,7 @@ _MAX_JSON_ATTEMPTS = 8
 _MAX_PATH_BYTES = 4_096
 _LOWER_HEX = frozenset("0123456789abcdef")
 _BASE_FIELDS = frozenset({"family", "identity", "path", "root", "runtime", "target", "uncertainty", "version"})
-_OPTIONAL_FIELDS = frozenset({"attempt", "publication_cleanup_debt", "scratch", "token"})
+_OPTIONAL_FIELDS = frozenset({"attempt", "effect_gate", "publication_cleanup_debt", "scratch", "token"})
 _TARGET_FIELDS = frozenset({"boot_id", "incarnation", "kind", "name"})
 _IDENTITY_FIELDS = frozenset({"egid", "euid", "groups", "mode"})
 _RUNTIME_FIELDS = frozenset({"explicit_path", "target_os"})
@@ -71,8 +77,9 @@ class FileCallUncertainty(StrEnum):
 
 
 # The maximum expansions from an initial payload to its retained recovery
-# identity: 814 download, 1150 upload, 1205 JSON, 50 for each single call.
-# Typed maximum-object and exact-boundary tests prove these values.
+# identity without a gate proposal: 814 download, 1150 upload, 1205 JSON, 50
+# for each single call. Typed maximum-object and exact-boundary tests prove
+# these values. A DOWNLOAD with a gate reserves its proposal separately.
 _FILE_CALL_RECOVERY_HEADROOM_BYTES = {
     FileCallFamily.DOWNLOAD: 814,
     FileCallFamily.UPLOAD: 1150,
@@ -107,6 +114,7 @@ class FileCallObligation:
     scratch_reference: ScratchReference | None = None
     scratch_cleanup_debt: ScratchCleanupDebt | None = None
     publication_cleanup_debt: BoundPublicationCleanupDebt | None = None
+    effect_gate: FileEffectGateBinding | None = None
     uncertainty: frozenset[FileCallUncertainty] = frozenset()
 
     def __post_init__(self) -> None:
@@ -134,6 +142,9 @@ def encode_file_call_admission(obligation: FileCallObligation) -> bytes:
     """Encode an initial payload while reserving its possible recovery facts."""
     encoded = encode_file_call_obligation(obligation)
     reserve = _FILE_CALL_RECOVERY_HEADROOM_BYTES[obligation.family]
+    if obligation.effect_gate is not None:
+        # A takeover first persists its proposed token in this same row.
+        reserve += len(',"proposed_generation":"' + "0" * 32 + '"')
     if len(encoded) + reserve > MAX_LIFECYCLE_PAYLOAD_BYTES:
         raise FileCallObligationCodecError
     return encoded
@@ -165,6 +176,22 @@ def _validate_obligation(obligation: FileCallObligation) -> None:
         type(item) is not FileCallUncertainty for item in obligation.uncertainty
     ):
         raise FileCallObligationCodecError
+    if obligation.effect_gate is not None:
+        if (
+            obligation.family is not FileCallFamily.DOWNLOAD
+            or obligation.target.kind is not ManagedTargetKind.VM
+            or obligation.runtime_selection.target_os is not RuntimeTargetOS.LINUX
+            or type(obligation.effect_gate) is not FileEffectGateBinding
+        ):
+            raise FileCallObligationCodecError
+        if obligation.effect_gate.euid != obligation.identity_plan.expected.euid:
+            raise FileCallObligationCodecError
+        if obligation.effect_gate.scope_name != obligation.target.name:
+            raise FileCallObligationCodecError
+        try:
+            decode_file_effect_gate(encode_file_effect_gate(obligation.effect_gate))
+        except FileEffectGateError:
+            raise FileCallObligationCodecError from None
 
     scratch_family = obligation.family in {
         FileCallFamily.DOWNLOAD,
@@ -239,6 +266,8 @@ def _encode_obligation(obligation: FileCallObligation) -> dict[str, object]:
         value["scratch"] = scratch
     if obligation.publication_cleanup_debt is not None:
         value["publication_cleanup_debt"] = encode_publication_cleanup_debt(obligation.publication_cleanup_debt)
+    if obligation.effect_gate is not None:
+        value["effect_gate"] = encode_file_effect_gate(obligation.effect_gate)
     return value
 
 
@@ -261,6 +290,12 @@ def _decode_obligation(value: object) -> FileCallObligation:
     context = _scratch_context(family, identity_plan) if token is not None else None
     scratch_reference, scratch_cleanup_debt = _decode_scratch(value.get("scratch"), token, context)
     publication_cleanup_debt = _decode_publication_debt(value.get("publication_cleanup_debt"), scratch_reference)
+    effect_gate = None
+    if "effect_gate" in value:
+        try:
+            effect_gate = decode_file_effect_gate(value["effect_gate"])
+        except FileEffectGateError:
+            raise FileCallObligationCodecError from None
     try:
         return FileCallObligation(
             family=family,
@@ -274,6 +309,7 @@ def _decode_obligation(value: object) -> FileCallObligation:
             scratch_reference=scratch_reference,
             scratch_cleanup_debt=scratch_cleanup_debt,
             publication_cleanup_debt=publication_cleanup_debt,
+            effect_gate=effect_gate,
             uncertainty=uncertainty,
         )
     except FileCallObligationCodecError:

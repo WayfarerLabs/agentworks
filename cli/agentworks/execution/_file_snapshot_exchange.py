@@ -56,6 +56,7 @@ from agentworks.execution.carrier import (
 )
 
 if TYPE_CHECKING:
+    from agentworks.execution._file_effect_gate import FileEffectGateBinding
     from agentworks.execution._file_spool import SpoolSnapshot
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution._scratch import ReadyScratchReference
@@ -397,6 +398,7 @@ def snapshot_begin(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> FileSnapshotCandidateResult:
     """Create one immutable private snapshot through one fresh attempt."""
     request = FileSnapshotBeginRequest(
@@ -407,6 +409,7 @@ def snapshot_begin(
         max_bytes,
         plan.expected,
         deadline.remaining(),
+        effect_gate,
     )
     return _exchange(carrier, request, plan, deadline, runtime_selection)
 
@@ -421,6 +424,7 @@ def snapshot_chunk(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> FileSnapshotCandidateResult:
     """Read one exact bounded range from an immutable private snapshot."""
     request = FileSnapshotChunkRequest(
@@ -431,6 +435,7 @@ def snapshot_chunk(
         length,
         plan.expected,
         deadline.remaining(),
+        effect_gate,
     )
     return _exchange(carrier, request, plan, deadline, runtime_selection)
 
@@ -442,6 +447,7 @@ def snapshot_reconcile(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> FileSnapshotCandidateResult:
     """Read historical cleanup ownership without replaying snapshot creation."""
     request = FileSnapshotReconcileRequest(
@@ -449,6 +455,7 @@ def snapshot_reconcile(
         token,
         plan.expected,
         deadline.remaining(),
+        effect_gate,
     )
     return _exchange(carrier, request, plan, deadline, runtime_selection)
 
@@ -461,6 +468,7 @@ def snapshot_cleanup(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> FileSnapshotCandidateResult:
     """Attempt exact identity-bound cleanup once without a quiescence claim."""
     request = FileSnapshotCleanupRequest(
@@ -469,5 +477,6 @@ def snapshot_cleanup(
         cleanup_debt,
         plan.expected,
         deadline.remaining(),
+        effect_gate,
     )
     return _exchange(carrier, request, plan, deadline, runtime_selection)

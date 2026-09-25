@@ -56,10 +56,11 @@ from agentworks.execution._file_upload import (
     _prepare_upload,
     _PreparedUpload,
 )
-from agentworks.execution._managed_runs import ManagedTargetIdentity
+from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTargetKind
 from agentworks.operations import LifecycleObligation, _PreRegistrationClosingRefusal, release_borrow_after_custody
 
 if TYPE_CHECKING:
+    from agentworks.execution._file_effect_gate import FileEffectGateBinding
     from agentworks.execution._file_inventory_exchange import FileInventoryCandidateResult
     from agentworks.execution._file_metadata_exchange import FileMetadataCandidateResult
     from agentworks.execution._file_object_exchange import FileObjectCandidateResult
@@ -249,8 +250,13 @@ class FileOperation:
         plan: IdentityPlan,
         deadline: Deadline,
         runtime_selection: RuntimeSelection,
+        effect_gate: FileEffectGateBinding | None = None,
     ) -> FileDownloadOutcome:
         """Run and capture one concrete download under a whole-call borrow."""
+        if effect_gate is not None and (
+            self._target.kind is not ManagedTargetKind.VM or effect_gate.scope_name != self._target.name
+        ):
+            raise ValidationError("Download effect gate must match the managed target")
         borrow = self._owner.borrow()
         try:
             prepared = _prepare_download(
@@ -263,6 +269,7 @@ class FileOperation:
                 deadline=deadline,
                 runtime_selection=runtime_selection,
                 borrow=borrow,
+                effect_gate=effect_gate,
             )
             admission = self._prepare_admission(FileCallFamily.DOWNLOAD, prepared.binding, token=prepared.state.token)
             active: _ActiveFileDownload = _ActiveFileCall(
@@ -766,6 +773,11 @@ class FileOperation:
             scratch_reference=scratch_reference,
             scratch_cleanup_debt=scratch_cleanup_debt,
             publication_cleanup_debt=publication_cleanup_debt,
+            effect_gate=(
+                binding.effect_gate
+                if family is FileCallFamily.DOWNLOAD and isinstance(binding, FileDownloadBinding)
+                else None
+            ),
             uncertainty=uncertainty,
         )
 
