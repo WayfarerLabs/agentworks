@@ -347,6 +347,16 @@ possible-dispatch run with no launch fact must reconcile first and remains uncer
 truth, while production host coordination later uses the existing operation claim and lifecycle
 obligation.
 
+The host-side stop obligation owns only delivery of the exact stop intent, not the independent job's
+continuing lifetime. It may resolve after a complete, validated `ACCEPTED` response proves the
+target has durably published that intent and the carrier attempt is settled. This never reports
+termination; only the exact `boundary-empty` fact does. A helper failure, incomplete response, lost
+delivery, or interrupted admission after possible effect retains the VM operation claim until
+recovery proves what happened. Before first stop dispatch, the host requires the exact run's launch
+receipt to have been reconciled; a merely possible-dispatch run is not stop authority. The
+resource-owned run continues to own the workload and target stop request after the temporary
+dispatch obligation resolves. No database stop-state field is introduced.
+
 The first `dispose` mechanism is an explicit authorized release of terminal retained artifacts, not
 a retention timer or a synonym for stop. Before committing release, the fixed helper requires the
 byte-exact canonical launch, its launch-bound `boundary-empty` and both launch-bound stream-end
