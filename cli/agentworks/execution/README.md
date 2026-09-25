@@ -341,12 +341,14 @@ mismatched target, boot, unit, workload, shell, profile, owner or protocol facts
 
 The target name is a core resource identity for binding and diagnostics, not authority on its own.
 Its `v1:<sha256>` incarnation fingerprint must bind the provider-owned locator with a
-core-provisioned or explicitly adopted random instance marker. The current boot UUID is a separate
-fence. The private VM codec/composer now frames the exact provider locator bytes with the persisted
-marker and composes this identity only when the private guest probe reports the same marker. The
-probe makes one bounded, no-replay helper attempt, reads only the fixed marker and Linux boot-ID
-paths, and refuses unsafe marker parents or leaves. An unavailable locator, a legacy NULL marker or
-a mismatched guest marker fails closed, and ordinary composition never creates or adopts a marker.
+core-provisioned or explicitly adopted random instance marker. A derived guest boot UUID is a
+separate fence. The private VM codec/composer now frames the exact provider locator bytes with the
+persisted marker and composes this identity only when the private guest probe reports the same
+marker. The probe makes one bounded, no-replay helper attempt, reads only the fixed marker, Linux
+kernel boot-ID and PID 1 stat paths, and refuses unsafe marker parents or leaves. The composer binds
+the kernel boot UUID and PID 1 start ticks into the guest boot fence, changing it when PID 1
+restarts within a still-running WSL2 kernel. An unavailable locator, a legacy NULL marker or a
+mismatched guest marker fails closed, and ordinary composition never creates or adopts a marker.
 This is a private checkpoint only: no production wiring, explicit adoption workflow,
 locator-unavailable alternative or public RunContext claim is enabled. This kernel also supplies no
 lease, output retention, application observation, cleanup, stop, disposal, production carrier
