@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from agentworks.operations import LifecycleObligation, OperationOwner
 
 OBLIGATION_KIND = "wsl2-platform-hold"
-PAYLOAD_VERSION = 1
+PAYLOAD_VERSION = 2
 _MAX_LOCATOR_BYTES = 4096
 
 
@@ -99,6 +99,7 @@ def encode_hold_payload(payload: WSL2HoldPayload) -> bytes:
     if payload.guest is not None:
         value.update(
             guest_boot_id=payload.guest.boot_id,
+            guest_init_start_ticks=payload.guest.init_start_ticks,
             guest_pid=payload.guest.pid,
             guest_start_time=payload.guest.start_time,
         )
@@ -122,9 +123,11 @@ def decode_hold_payload(data: bytes) -> WSL2HoldPayload:
         value = json.loads(data.decode("ascii"))
         if type(value) is not dict or type(value.get("version")) is not int or value["version"] != PAYLOAD_VERSION:
             raise ValueError("invalid version")
-        guest_fields = {"guest_boot_id", "guest_pid", "guest_start_time"}
+        guest_fields = {"guest_boot_id", "guest_init_start_ticks", "guest_pid", "guest_start_time"}
         guest = (
-            GuestAnchorIdentity(value["guest_boot_id"], value["guest_pid"], value["guest_start_time"])
+            GuestAnchorIdentity(
+                value["guest_boot_id"], value["guest_pid"], value["guest_start_time"], value["guest_init_start_ticks"]
+            )
             if guest_fields <= set(value)
             else None
         )

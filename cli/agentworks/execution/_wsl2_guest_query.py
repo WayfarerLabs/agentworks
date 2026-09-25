@@ -13,9 +13,9 @@ from agentworks.execution._wsl2_lifecycle import GuestAnchorIdentity, GuestAncho
 MAX_GUEST_QUERY_RESPONSE_BYTES = 160
 _NONCE = re.compile(r"[0-9a-f]{32}\Z")
 _RESPONSE = re.compile(
-    rb"AGW_GQ1 ([0-9a-f]{32}) ([1-9][0-9]*) "
+    rb"AGW_GQ2 ([0-9a-f]{32}) ([1-9][0-9]*) "
     rb"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|-) "
-    rb"(found|missing|unknown) (-|0|[1-9][0-9]*)\n\Z"
+    rb"(-|0|[1-9][0-9]*) (found|missing|unknown) (-|0|[1-9][0-9]*)\n\Z"
 )
 
 # This literal source runs on the WSL guest's Python 3.11. Only a validated
@@ -35,28 +35,32 @@ def boot():
         raise ValueError('invalid boot')
     return value[:-1].decode('ascii')
 
+def stat_ticks(pid):
+    with open('/proc/{}/stat'.format(pid), 'rb') as source:
+        value = source.read(4097)
+    if len(value) > 4096 or not value.endswith(b'\\n') or b'\\n' in value[:-1]:
+        raise ValueError('invalid stat')
+    prefix = str(pid).encode('ascii') + b' ('
+    closing = value.rfind(b') ')
+    if not value.startswith(prefix) or closing < len(prefix):
+        raise ValueError('invalid stat')
+    fields = value[closing + 2:-1].split()
+    if len(fields) < 20 or len(fields[19]) > 20 or not fields[19].isdigit():
+        raise ValueError('invalid stat')
+    ticks = int(fields[19])
+    if ticks > 2**64 - 1:
+        raise ValueError('invalid stat')
+    return ticks
+
 def process(pid):
     try:
-        with open('/proc/{}/stat'.format(pid), 'rb') as source:
-            value = source.read(4097)
+        ticks = stat_ticks(pid)
     except FileNotFoundError:
         try:
             os.kill(pid, 0)
         except ProcessLookupError as error:
             if error.errno == errno.ESRCH:
                 return 'missing', '-'
-        return 'unknown', '-'
-    if len(value) > 4096 or not value.endswith(b'\\n') or b'\\n' in value[:-1]:
-        return 'unknown', '-'
-    prefix = str(pid).encode('ascii') + b' ('
-    closing = value.rfind(b') ')
-    if not value.startswith(prefix) or closing < len(prefix):
-        return 'unknown', '-'
-    fields = value[closing + 2:-1].split()
-    if len(fields) < 20 or len(fields[19]) > 20 or not fields[19].isdigit():
-        return 'unknown', '-'
-    ticks = int(fields[19])
-    if ticks > 2**64 - 1:
         return 'unknown', '-'
     return 'found', str(ticks)
 
@@ -72,18 +76,19 @@ nonce, pid_text = sys.argv[1:]
 pid = int(pid_text)
 if pid <= 0:
     raise SystemExit(2)
-observed_boot, kind, ticks = '-', 'unknown', '-'
+observed_boot, observed_init, kind, ticks = '-', '-', 'unknown', '-'
 try:
-    before = boot()
+    before_boot, before_init = boot(), stat_ticks(1)
     kind, ticks = process(pid)
-    after = boot()
-    if before == after:
-        observed_boot = before
+    after_init, after_boot = stat_ticks(1), boot()
+    if before_boot == after_boot and before_init == after_init:
+        observed_boot, observed_init = before_boot, str(before_init)
     else:
         kind, ticks = 'unknown', '-'
 except (OSError, ValueError):
     kind, ticks = 'unknown', '-'
-sys.stdout.buffer.write('AGW_GQ1 {} {} {} {} {}\\n'.format(nonce, pid, observed_boot, kind, ticks).encode('ascii'))
+line = 'AGW_GQ2 {} {} {} {} {} {}\\n'.format(nonce, pid, observed_boot, observed_init, kind, ticks)
+sys.stdout.buffer.write(line.encode('ascii'))
 sys.stdout.buffer.flush()
 """
 
@@ -114,11 +119,12 @@ def reduce_guest_query_response(
     if match is None or match.group(1) != nonce.encode("ascii") or match.group(2) != str(identity.pid).encode("ascii"):
         return GuestAnchorPresence.UNKNOWN
     boot = match.group(3).decode("ascii")
-    kind = match.group(4)
-    ticks = match.group(5)
-    if kind == b"unknown":
+    init_ticks = match.group(4)
+    kind = match.group(5)
+    ticks = match.group(6)
+    if kind == b"unknown" or init_ticks == b"-":
         return GuestAnchorPresence.UNKNOWN
-    if boot == "-":
+    if boot == "-" or int(init_ticks) > 2**64 - 1:
         return GuestAnchorPresence.UNKNOWN
     if kind == b"missing":
         if ticks != b"-":
@@ -126,6 +132,6 @@ def reduce_guest_query_response(
         return GuestAnchorPresence.ABSENT_CONFIRMED
     if ticks == b"-" or int(ticks) > 2**64 - 1:
         return GuestAnchorPresence.UNKNOWN
-    if boot != identity.boot_id or int(ticks) != identity.start_time:
+    if boot != identity.boot_id or int(init_ticks) != identity.init_start_ticks or int(ticks) != identity.start_time:
         return GuestAnchorPresence.ABSENT_CONFIRMED
     return GuestAnchorPresence.PRESENT

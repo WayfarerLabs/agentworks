@@ -19,13 +19,13 @@ from agentworks.execution._wsl2_lifecycle import GuestAnchorIdentity, GuestAncho
 NONCE = "a" * 32
 BOOT = "12345678-1234-1234-1234-123456789abc"
 OTHER_BOOT = "87654321-4321-4321-4321-cba987654321"
-IDENTITY = GuestAnchorIdentity(BOOT, 137, 8192)
+IDENTITY = GuestAnchorIdentity(BOOT, 137, 8192, 4096)
 _PYTHON_311 = shutil.which("python3.11")
 _GUEST_PYTHONS = [sys.executable, *([_PYTHON_311] if _PYTHON_311 is not None else [])]
 
 
-def _wire(kind: str, *, boot: str = BOOT, ticks: str = "8192", pid: int = 137) -> bytes:
-    return f"AGW_GQ1 {NONCE} {pid} {boot} {kind} {ticks}\n".encode("ascii")
+def _wire(kind: str, *, boot: str = BOOT, init: str = "4096", ticks: str = "8192", pid: int = 137) -> bytes:
+    return f"AGW_GQ2 {NONCE} {pid} {boot} {init} {kind} {ticks}\n".encode("ascii")
 
 
 @pytest.mark.parametrize(
@@ -34,9 +34,14 @@ def _wire(kind: str, *, boot: str = BOOT, ticks: str = "8192", pid: int = 137) -
         (_wire("found"), GuestAnchorPresence.PRESENT),
         (_wire("found", ticks="8193"), GuestAnchorPresence.ABSENT_CONFIRMED),
         (_wire("found", boot=OTHER_BOOT), GuestAnchorPresence.ABSENT_CONFIRMED),
+        (_wire("found", init="4097"), GuestAnchorPresence.ABSENT_CONFIRMED),
         (_wire("missing", ticks="-"), GuestAnchorPresence.ABSENT_CONFIRMED),
         (_wire("unknown", ticks="-"), GuestAnchorPresence.UNKNOWN),
         (_wire("found", boot="-"), GuestAnchorPresence.UNKNOWN),
+        (_wire("found", init="-"), GuestAnchorPresence.UNKNOWN),
+        (_wire("found", boot=OTHER_BOOT, init="-"), GuestAnchorPresence.UNKNOWN),
+        (_wire("missing", init="-", ticks="-"), GuestAnchorPresence.UNKNOWN),
+        (_wire("missing", init="18446744073709551616", ticks="-"), GuestAnchorPresence.UNKNOWN),
         (_wire("missing", boot="-", ticks="-"), GuestAnchorPresence.UNKNOWN),
         (_wire("unknown", boot=OTHER_BOOT, ticks="-"), GuestAnchorPresence.UNKNOWN),
         (_wire("missing"), GuestAnchorPresence.UNKNOWN),
@@ -83,7 +88,9 @@ def test_fixed_guest_source_observes_current_process_and_missing_pid(python: str
         boot = source.read().decode("ascii").removesuffix("\n")
     with open(f"/proc/{os.getpid()}/stat", "rb") as source:
         fields = source.read().split(b") ")[-1].split()
-    identity = GuestAnchorIdentity(boot, os.getpid(), int(fields[19]))
+    with open("/proc/1/stat", "rb") as source:
+        init_fields = source.read().split(b") ")[-1].split()
+    identity = GuestAnchorIdentity(boot, os.getpid(), int(fields[19]), int(init_fields[19]))
     present = subprocess.run(
         [python, "-c", FIXED_GUEST_QUERY_SOURCE, NONCE, str(identity.pid)],
         capture_output=True,
@@ -114,7 +121,7 @@ def test_fixed_guest_source_observes_current_process_and_missing_pid(python: str
     assert (
         reduce_guest_query_response(
             missing.stdout,
-            GuestAnchorIdentity(boot, absent_pid, 1),
+            GuestAnchorIdentity(boot, absent_pid, 1, identity.init_start_ticks),
             NONCE,
             exit_status=missing.returncode,
             complete=True,

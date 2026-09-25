@@ -36,7 +36,7 @@ from agentworks.execution.carriers.wsl2 import WSL2Connection
 from agentworks.operations import OperationOwner
 
 BOOT = "12345678-1234-1234-1234-123456789abc"
-GUEST = GuestAnchorIdentity(BOOT, 137, 8192)
+GUEST = GuestAnchorIdentity(BOOT, 137, 8192, 4096)
 OPEN = LocalResourceSnapshot(
     HostClientStatus.ACTIVE, None, JobAssignment.ASSIGNED_AT_CREATION, HandleSettlement.OPEN, HandleSettlement.OPEN
 )
@@ -66,7 +66,7 @@ class FakeObligation:
             raise OSError("lost mark reply")
 
     def publish_payload(self, *, expected_revision: int, payload_version: int, payload: bytes) -> None:
-        assert expected_revision == 0 and payload_version == 1
+        assert expected_revision == 0 and payload_version == 2
         self.events.append("publish")
         self.payload = payload
         if self.fail_at == "publish":
@@ -92,7 +92,7 @@ class FakeOwner:
     )
 
     def register_lifecycle_obligation(self, kind: str, *, payload_version: int, payload: bytes) -> FakeObligation:
-        assert kind == OBLIGATION_KIND and payload_version == 1
+        assert kind == OBLIGATION_KIND and payload_version == 2
         self.events.append("register")
         obligation = FakeObligation(self.events, self.fail_at, payload=payload)
         self.obligations.append(obligation)
@@ -138,7 +138,7 @@ class FakeNative:
         assert limit == 513 and not deadline.expired
         self.stdout_reads += 1
         if self.stdout_reads == 1:
-            return f"READY {self.nonce} {BOOT} 137 8192\n".encode()
+            return f"READY {self.nonce} {BOOT} 137 8192 4096\n".encode()
         return f"EXITING {self.nonce}\n".encode()
 
     def close_stdin(self) -> None:
@@ -709,9 +709,10 @@ def test_canonical_payload_rejects_malformed_boundary() -> None:
     assert locator_digest("opaque-locator") == payload.locator_sha256
     for bad in (
         encoded + b" ",
-        encoded.replace(b'"version":1', b'"version":true'),
-        encoded[:-1] + b',"version":1}',
+        encoded.replace(b'"version":2', b'"version":true'),
+        encoded.replace(b'"version":2', b'"version":1'),
         encoded[:-1] + b',"version":2}',
+        encoded[:-1] + b',"version":1}',
         b"\xff",
         b"{}",
     ):
@@ -731,5 +732,13 @@ def test_canonical_payload_rejects_malformed_boundary() -> None:
         decode_hold_payload(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
     value = json.loads(encoded)
     del value["guest_pid"]
+    with pytest.raises(ValidationError):
+        decode_hold_payload(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
+    value = json.loads(encoded)
+    del value["guest_init_start_ticks"]
+    with pytest.raises(ValidationError):
+        decode_hold_payload(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
+    value = json.loads(encoded)
+    value["guest_init_start_ticks"] = -1
     with pytest.raises(ValidationError):
         decode_hold_payload(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())

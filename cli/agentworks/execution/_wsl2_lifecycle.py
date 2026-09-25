@@ -23,23 +23,52 @@ if TYPE_CHECKING:
 
 _CLEANUP_SECONDS = 0.5
 _MAX_RECEIPT_BYTES = 512
-_READY = re.compile(r"READY ([0-9a-f]{32}) ([0-9a-f-]{36}) ([1-9][0-9]*) ([0-9]+)\n")
+_READY = re.compile(r"READY ([0-9a-f]{32}) ([0-9a-f-]{36}) ([1-9][0-9]*) (0|[1-9][0-9]{0,19}) (0|[1-9][0-9]{0,19})\n")
 _EXITING = re.compile(r"EXITING ([0-9a-f]{32})\n")
 
 # Python 3.11 syntax only. The proc start time is field 22, after the final
 # right parenthesis because a process name may itself contain parentheses.
-_HELPER_SOURCE = (
-    "import os,sys;"
-    "boot=open('/proc/sys/kernel/random/boot_id',encoding='ascii').read().strip();"
-    "record=open('/proc/self/stat',encoding='ascii').read();"
-    "tail=record[record.rfind(')')+2:].split();"
-    "nonce=sys.argv[1];"
-    "sys.stdout.write('READY {} {} {} {}\\n'.format(nonce,boot,os.getpid(),tail[19]));"
-    "sys.stdout.flush();"
-    "sys.stdin.buffer.read();"
-    "sys.stdout.write('EXITING {}\\n'.format(nonce));"
-    "sys.stdout.flush()"
-)
+_HELPER_SOURCE = """import os
+import re
+import sys
+
+UUID = re.compile(rb'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\n\\Z')
+
+def boot():
+    with open('/proc/sys/kernel/random/boot_id', 'rb') as source:
+        value = source.read(38)
+    if UUID.fullmatch(value) is None:
+        raise ValueError('invalid boot')
+    return value[:-1].decode('ascii')
+
+def ticks(pid):
+    with open('/proc/{}/stat'.format(pid), 'rb') as source:
+        value = source.read(4097)
+    prefix = str(pid).encode('ascii') + b' ('
+    closing = value.rfind(b') ')
+    if (len(value) > 4096 or not value.endswith(b'\\n') or b'\\n' in value[:-1]
+            or not value.startswith(prefix) or closing < len(prefix)):
+        raise ValueError('invalid stat')
+    fields = value[closing + 2:-1].split()
+    if len(fields) < 20 or len(fields[19]) > 20 or not fields[19].isdigit():
+        raise ValueError('invalid stat')
+    result = int(fields[19])
+    if result > 2**64 - 1:
+        raise ValueError('invalid start ticks')
+    return result
+
+nonce = sys.argv[1]
+pid = os.getpid()
+before_boot, before_init = boot(), ticks(1)
+start = ticks(pid)
+if before_boot != boot() or before_init != ticks(1):
+    raise SystemExit(2)
+sys.stdout.buffer.write('READY {} {} {} {} {}\\n'.format(nonce, before_boot, pid, start, before_init).encode('ascii'))
+sys.stdout.buffer.flush()
+sys.stdin.buffer.read()
+sys.stdout.buffer.write('EXITING {}\\n'.format(nonce).encode('ascii'))
+sys.stdout.buffer.flush()
+"""
 
 
 class HostClientStatus(StrEnum):
@@ -111,16 +140,19 @@ class LocalResourceSnapshot:
 
 @dataclass(frozen=True)
 class GuestAnchorIdentity:
-    """Boot-bound guest PID and Linux start-time identity from exact READY."""
+    """Kernel boot, distribution init, and anchor process identity from READY."""
 
     boot_id: str
     pid: int
     start_time: int
+    init_start_ticks: int
 
     def __post_init__(self) -> None:
         if not _valid_boot_id(self.boot_id) or type(self.pid) is not int or self.pid <= 0:
             raise ValidationError("WSL2 guest anchor identity is invalid")
-        if type(self.start_time) is not int or self.start_time < 0:
+        if type(self.start_time) is not int or not 0 <= self.start_time <= 2**64 - 1:
+            raise ValidationError("WSL2 guest anchor identity is invalid")
+        if type(self.init_start_ticks) is not int or not 0 <= self.init_start_ticks <= 2**64 - 1:
             raise ValidationError("WSL2 guest anchor identity is invalid")
 
 
@@ -162,7 +194,7 @@ class OwnedHostClient(Protocol):
 
 
 class GuestAnchorObserver(Protocol):
-    """Externally proved observer for one precise guest PID/start-time pair."""
+    """Externally proved observer for one boot/init/PID/start identity."""
 
     def observe(self, identity: GuestAnchorIdentity, deadline: Deadline) -> GuestAnchorPresence: ...
 
@@ -177,7 +209,12 @@ def _ready_identity(receipt: object, nonce: str) -> GuestAnchorIdentity:
     matched = _READY.fullmatch(text)
     if matched is None or matched.group(1) != nonce:
         raise ValidationError("WSL2 helper readiness record is invalid")
-    return GuestAnchorIdentity(boot_id=matched.group(2), pid=int(matched.group(3)), start_time=int(matched.group(4)))
+    return GuestAnchorIdentity(
+        boot_id=matched.group(2),
+        pid=int(matched.group(3)),
+        start_time=int(matched.group(4)),
+        init_start_ticks=int(matched.group(5)),
+    )
 
 
 def _exit_receipt(receipt: object, nonce: str) -> HelperExitReceipt:
