@@ -5,7 +5,6 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from agentworks.errors import ValidationError
 from agentworks.execution._file_download import FileDownloadOutcome, FileDownloadStatus
 from agentworks.execution._file_gate_setup import FileEffectGateSetup
 from agentworks.execution._file_operation import FileOperation
@@ -41,8 +40,6 @@ class WSL2OwnedDownload(WSL2OwnedOperation):
         deadline: Deadline,
     ) -> WSL2DownloadStatus:
         """Run once; only typed settled obligations permit whole-owner release."""
-        if self._used:
-            raise ValidationError("WSL2 owned download is single use")
         guest = self.start_and_prepare(deadline)
         if self.preparation is None:
             return WSL2DownloadStatus.RETAINED

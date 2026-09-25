@@ -14,6 +14,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
+from agentworks.errors import ValidationError
 from agentworks.execution import _wsl2_owned_managed_job as managed
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
@@ -110,6 +111,9 @@ def test_managed_start_passes_selected_route_guest_and_caller_identity_without_a
         monkeypatch.setattr(managed, "start_bound_managed_job", start)
 
         assert _start(subject, database) is WSL2ManagedStartStatus.ATTEMPTED
+        with pytest.raises(ValidationError):
+            _start(subject, database)
+        assert start.call_count == 1
         assert subject.start_outcome is outcome
         assert carrier.calls == 1
         assert platform.observe_provider_locator.call_count == 5

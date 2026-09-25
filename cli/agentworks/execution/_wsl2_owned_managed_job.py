@@ -5,7 +5,6 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from agentworks.errors import ValidationError
 from agentworks.execution._managed_job_access import start_bound_managed_job
 from agentworks.execution._wsl2_owned_operation import WSL2OwnedOperation
 from agentworks.vms.target_preparation import VMTargetPreparationStatus
@@ -63,8 +62,6 @@ class WSL2OwnedManagedJob(WSL2OwnedOperation):
         but cannot close a post-preparation, pre-dispatch route-change race.
         Escaping control flow retains this operation for caller reconciliation.
         """
-        if self._used:
-            raise ValidationError("WSL2 owned managed job is single use")
         guest = self.start_and_prepare(deadline)
         preparation = self.preparation
         if preparation is None:
