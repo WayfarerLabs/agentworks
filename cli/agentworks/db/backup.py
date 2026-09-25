@@ -242,10 +242,8 @@ def inspect_schema(database_path: Path, *, timeout: float | None = None) -> Sche
         cookie = cookie_row[0]
         if type(cookie) is not int or cookie < 0:
             raise StateError("state database schema cookie is invalid")
-        if version == LATEST_VERSION:
-            _validate_consolidated_transport_schema(connection, version)
     except (OSError, sqlite3.DatabaseError, StateError) as error:
-        if isinstance(error, StateError):
+        if isinstance(error, StateError) and "schema version is invalid" in str(error):
             return SchemaInspection(SchemaState.MALFORMED, 0, LATEST_VERSION, None, str(error))
         if _is_busy(error):
             return SchemaInspection(SchemaState.BUSY, 0, LATEST_VERSION, None)
@@ -721,15 +719,18 @@ def _validate_consolidated_transport_schema(connection: sqlite3.Connection, vers
     """Reject pre-release transport schemas that reused completed version numbers."""
     if version not in (39, 40, 41):
         return
-    _validate_canonical_schema(
-        connection,
-        version,
-        source_kind="state database",
-        hint=(
-            "Restore a compatible backup or start with a fresh state database; "
-            "older branch-built transport schemas cannot be migrated automatically."
-        ),
-    )
+    try:
+        _validate_canonical_schema(
+            connection,
+            version,
+            source_kind="state database",
+            hint=(
+                "Restore a compatible backup or start with a fresh state database; "
+                "older branch-built transport schemas cannot be migrated automatically."
+            ),
+        )
+    except StateError as error:
+        raise StateError(str(error), entity_kind="database", hint=error.hint) from error
 
 
 def _read_schema_version(connection: sqlite3.Connection, *, source_kind: str) -> int:

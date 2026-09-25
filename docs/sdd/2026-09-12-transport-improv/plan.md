@@ -1990,10 +1990,11 @@ not add an upgrade path or change the recovery contract described above.
 
 The round-7 integration report found that older branch-built databases stamped 39-41 could otherwise
 pass ordinary open and later fail when ownership tables were used. Direct opens validate the
-completed schema for those reused numbers before migration; current-state inspection validates
-version 41, while stale versions 39-40 retain their existing validation under the migration lock.
-Such branch-built databases fail closed rather than receiving an implicit upgrade. The released v38
-upgrade path and canonical 39-41 schemas remain supported.
+completed schema for those reused numbers before migration. The safe opener validates stale versions
+39-40 under the migration lock and reaches the same direct-open guard for current version 41; the
+version-only inspector retains its existing classification and race semantics. Branch-built
+databases fail closed rather than receiving an implicit upgrade. The released v38 upgrade path and
+canonical 39-41 schemas remain supported.
 
 Final project and correctness re-reviews are clean at `f7a2ecac`; the final complexity review's two
 material simplifications are incorporated, and its optional duplicate wrapper check is removed at

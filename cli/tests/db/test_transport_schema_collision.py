@@ -7,7 +7,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import Database, SchemaState, inspect_schema, open_completion_database, prepare_database_open
+from agentworks.db import (
+    Database,
+    SchemaState,
+    inspect_schema,
+    open_completion_database,
+    open_database_safely,
+    prepare_database_open,
+)
 from agentworks.errors import StateError
 from tests.database_support import build_schema
 
@@ -24,10 +31,15 @@ def test_reused_schema_number_refuses_before_migration(tmp_path: Path, claimed_v
     with sqlite3.connect(path) as connection:
         connection.execute("INSERT INTO schema_version (version) VALUES (?)", (claimed_version,))
 
-    expected = SchemaState.MALFORMED if claimed_version == 41 else SchemaState.STALE
+    expected = SchemaState.CURRENT if claimed_version == 41 else SchemaState.STALE
     assert inspect_schema(path).state is expected
-    with pytest.raises(StateError):
-        prepare_database_open(path)
+    if claimed_version == 41:
+        plan = prepare_database_open(path)
+        with pytest.raises(StateError):
+            open_database_safely(path, plan, create_backup=False)
+    else:
+        with pytest.raises(StateError):
+            prepare_database_open(path)
     with pytest.raises(StateError):
         Database(path)
 
@@ -61,7 +73,7 @@ def test_completion_quietly_refuses_lock_acquired_during_schema_validation(
     def lock_after_version_read(connection: sqlite3.Connection, version: int) -> None:
         nonlocal calls, locker
         calls += 1
-        if calls == 2:
+        if calls == 1:
             locker = sqlite3.connect(path)
             locker.execute("BEGIN EXCLUSIVE")
         validate(connection, version)
@@ -73,7 +85,7 @@ def test_completion_quietly_refuses_lock_acquired_during_schema_validation(
         if locker is not None:
             locker.rollback()
             locker.close()
-    assert calls == 2
+    assert calls == 1
 
 
 @pytest.mark.parametrize("version", (39, 40, 41))
