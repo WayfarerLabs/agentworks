@@ -16,6 +16,7 @@ from agentworks.execution._file_download import (
     FileDownloadControlFact,
     FileDownloadFailure,
     FileDownloadStatus,
+    _PreparedDownload,
     _WorkingState,
 )
 from agentworks.execution._file_obligation import FileCallFamily, FileCallObligation, decode_file_call_obligation
@@ -527,7 +528,7 @@ def test_failed_unfinished_capture_keeps_attached_working_state_and_borrow(
 
         active = operation.active_downloads[0] if operation.active_downloads else None
         assert active is not None and active.outcome is captured[0].outcome
-        assert active.prepared.state is not None
+        assert isinstance(active.prepared, _PreparedDownload)
         assert active.prepared.workflow._sink is None  # noqa: SLF001
         assert operation.unfinished_downloads == ()
         with pytest.raises(StateError):
@@ -615,6 +616,7 @@ def test_outcome_allocation_failure_keeps_previously_attached_state_and_borrow(
         assert raised.value is control
         active = operation.active_downloads[0] if operation.active_downloads else None
         assert active is not None and active.outcome is None
+        assert isinstance(active.prepared, _PreparedDownload)
         assert active.prepared.state.binding is active.binding
         assert operation.unfinished_downloads == ()
         with pytest.raises(StateError):
@@ -687,6 +689,7 @@ def test_exceptional_fact_failure_preserves_control_without_reusing_prior_cause(
         assert len(operation.active_downloads) == 1
         active = operation.active_downloads[0]
         assert active.carrier is carrier and active.outcome is None
+        assert isinstance(active.prepared, _PreparedDownload)
         assert active.prepared.state.token != previous.token
         with pytest.raises(StateError):
             owner.borrow()

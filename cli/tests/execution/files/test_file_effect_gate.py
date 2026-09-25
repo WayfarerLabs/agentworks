@@ -61,7 +61,8 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the fixed snaps
 
 @pytest.fixture(autouse=True)
 def _gate_namespace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from agentworks.execution import _file_effect_gate, _file_gate_setup
+    import agentworks.execution._file_effect_gate as _file_effect_gate
+    import agentworks.execution._file_gate_setup as _file_gate_setup
 
     namespace = tmp_path / "run" / "agentworks" / "file-gates-v1"
     (namespace / str(os.geteuid())).mkdir(parents=True, mode=0o700)
@@ -107,7 +108,7 @@ guest._fixture_guest=VMGuestIdentity(
 
 
 def _hold_until_released(binding: FileEffectGateBinding, entered: str, release: str) -> None:
-    from agentworks.execution import _file_effect_gate
+    import agentworks.execution._file_effect_gate as _file_effect_gate
 
     _file_effect_gate._GATE_NAMESPACE = str(Path(binding.path).parent.parent)
     _file_effect_gate._ROOT_UID = os.geteuid()
@@ -143,14 +144,16 @@ def _crash_controller_with_fixed_snapshot(
     entered: str,
     release: str,
 ) -> None:
-    from agentworks.execution import _file_effect_gate, _file_gate_setup, _file_snapshot_exchange
+    import agentworks.execution._file_effect_gate as _file_effect_gate
+    import agentworks.execution._file_gate_setup as _file_gate_setup
+    import agentworks.execution._file_snapshot_exchange as _file_snapshot_exchange
 
     namespace = str(Path(binding.path).parent.parent)
     _file_effect_gate._GATE_NAMESPACE = namespace
     _file_effect_gate._ROOT_UID = os.geteuid()
     _file_gate_setup._NAMESPACE = namespace
 
-    _file_snapshot_exchange.FIXED_BUNDLE = fixture_source(
+    _file_snapshot_exchange.FIXED_BUNDLE = fixture_source(  # type: ignore[attr-defined]
         Path(scratch_path),
         f"""
 import time
@@ -279,8 +282,6 @@ def test_gate_binding_numeric_wire_bounds_round_trip_and_reject_oversize(tmp_pat
 def test_setup_rejects_oversize_linux_uid_before_observation_or_creation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from agentworks.execution import _file_effect_gate
-
     path = _gate_path(tmp_path)
     observed = False
 
@@ -289,7 +290,7 @@ def test_setup_rejects_oversize_linux_uid_before_observation_or_creation(
         observed = True
         return _GUEST
 
-    monkeypatch.setattr(_file_effect_gate.os, "geteuid", lambda: 1 << 32)
+    monkeypatch.setattr(os, "geteuid", lambda: 1 << 32)
     with pytest.raises(FileEffectGateError):
         setup_file_effect_gate(str(path), _GUEST, 1 << 32, "gate-vm", observe)
     assert not observed
@@ -299,7 +300,7 @@ def test_setup_rejects_oversize_linux_uid_before_observation_or_creation(
 def test_setup_deadline_prevents_gate_creation_before_and_after_guest_observation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from agentworks.execution import _file_effect_gate
+    import agentworks.execution._file_effect_gate as _file_effect_gate
 
     path = _gate_path(tmp_path)
     observations = 0
@@ -325,7 +326,7 @@ def test_setup_deadline_prevents_gate_creation_before_and_after_guest_observatio
 
 
 def test_setup_deadline_before_commit_retains_incomplete_inode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from agentworks.execution import _file_effect_gate
+    import agentworks.execution._file_effect_gate as _file_effect_gate
 
     path = _gate_path(tmp_path)
     original = _file_effect_gate._connect
@@ -367,8 +368,6 @@ def test_lost_setup_reply_can_inspect_exact_complete_gate_without_advancing(tmp_
 def test_gate_namespace_refuses_unsafe_setup_without_creation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unsafe: str
 ) -> None:
-    from agentworks.execution import _file_effect_gate
-
     path = _gate_path(tmp_path)
     uid_dir = path.parent
     namespace = uid_dir.parent
@@ -382,7 +381,7 @@ def test_gate_namespace_refuses_unsafe_setup_without_creation(
     elif unsafe == "root_mode":
         namespace.parent.chmod(0o777)
     elif unsafe == "wrong_owner":
-        original = _file_effect_gate.os.lstat
+        original = os.lstat
 
         def wrong_owner(candidate: str):
             metadata = original(candidate)
@@ -390,16 +389,16 @@ def test_gate_namespace_refuses_unsafe_setup_without_creation(
                 return SimpleNamespace(st_mode=metadata.st_mode, st_uid=os.geteuid() + 1)
             return metadata
 
-        monkeypatch.setattr(_file_effect_gate.os, "lstat", wrong_owner)
+        monkeypatch.setattr(os, "lstat", wrong_owner)
     else:
-        original_acl = _file_effect_gate.os.getxattr
+        original_acl = os.getxattr
 
         def extra_acl(candidate: str, name: str, *, follow_symlinks: bool = True) -> bytes:
             if candidate == str(uid_dir) and name == "system.posix_acl_access":
                 return b"unexpected"
             return original_acl(candidate, name, follow_symlinks=follow_symlinks)
 
-        monkeypatch.setattr(_file_effect_gate.os, "getxattr", extra_acl)
+        monkeypatch.setattr(os, "getxattr", extra_acl)
 
     with pytest.raises(FileEffectGateError):
         setup_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", _observe_guest)
@@ -460,7 +459,7 @@ def test_setup_does_not_inspect_after_nonexistence_unrelated_open_failure(
     def unexpected_inspection(*args: object, **kwargs: object) -> FileEffectGateBinding:
         raise AssertionError("non-EEXIST setup failure must not inspect")
 
-    monkeypatch.setattr(_file_effect_gate.os, "open", denied_open)
+    monkeypatch.setattr(os, "open", denied_open)
     monkeypatch.setattr(_file_effect_gate, "inspect_file_effect_gate", unexpected_inspection)
     with pytest.raises(FileEffectGateError):
         setup_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", _observe_guest)
@@ -503,7 +502,7 @@ def test_bookworm_python_can_setup_and_inspect_gate(tmp_path: Path) -> None:
     source = f"""
 import os
 import sys
-from agentworks.execution import _file_effect_gate
+import agentworks.execution._file_effect_gate as _file_effect_gate
 from agentworks.execution._file_effect_gate import setup_file_effect_gate, inspect_file_effect_gate
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 
@@ -859,7 +858,7 @@ def test_slow_guest_observation_cannot_advance_or_admit_after_deadline(tmp_path:
 def test_deadline_during_sqlite_generation_check_rolls_back_before_advance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from agentworks.execution import _file_effect_gate
+    import agentworks.execution._file_effect_gate as _file_effect_gate
 
     binding = _gate(tmp_path)
     proposed = replace(binding, proposed_generation=secrets.token_bytes(16))
