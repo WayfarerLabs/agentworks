@@ -146,11 +146,11 @@ def _diagnostic(
         ),
         FileFailureReason.RUNTIME_MISSING: (
             "required Python runtime is missing on the target",
-            "Install Python 3 on the target and retry.",
+            "Install Python 3.11 or newer on the target and retry.",
         ),
         FileFailureReason.RUNTIME_SHIM: (
             "target Python resolves to the Xcode command-line tools shim",
-            "Install a usable Python 3 runtime on the target and retry.",
+            "Install Python 3.11 or newer on the target and retry.",
         ),
         FileFailureReason.RUNTIME_UNUSABLE: (
             "target Python runtime is unusable",
@@ -158,7 +158,7 @@ def _diagnostic(
         ),
         FileFailureReason.RUNTIME_UNSUPPORTED_VERSION: (
             "target Python runtime version is unsupported",
-            "Install a supported Python 3 version on the target and retry.",
+            "Install Python 3.11 or newer on the target and retry.",
         ),
         FileFailureReason.RUNTIME_MISSING_MODULES: (
             "target Python runtime is missing required modules",
