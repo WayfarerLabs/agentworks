@@ -648,14 +648,19 @@ establish an equivalent barrier for SSH either. The restricted
 candidate for **fixed file helpers only**; it does not restore the rejected machine-wide file-object
 lock or demand administrator setup on a platform host.
 
-SQLite's [transaction rules](https://www.sqlite.org/lang_transaction.html) make a write transaction
-a plausible small serialization primitive, subject to native filesystem acceptance. Its
-[locking documentation](https://www.sqlite.org/lockingv3.html) does not make a pathname an immutable
-lock identity: a local experiment held a transaction on one database inode, unlinked that pathname
-and created a replacement database at the same path; both connections could then hold write
-transactions on different underlying files. The candidate therefore requires a stable gate instance,
-refuses missing/replaced state during unresolved recovery and never uses unlink as cleanup. This
-experiment is mechanism evidence, not native SSH/QGA/WSL acceptance.
+SQLite's [transaction rules](https://www.sqlite.org/lang_transaction.html) make it suitable for
+short, durable generation updates, but its
+[documented POSIX-lock behavior](https://www.sqlite.org/howtocorrupt.html#posix_advisory_locks_canceled_by_a_separate_thread_doing_close_)
+disqualifies a transaction held across arbitrary file-helper work: closing any other descriptor for
+the database inode releases that process's SQLite locks. Project review reproduced a concurrent
+advance while a helper still held the transaction after reading and closing the gate database as its
+source file. Linux [`flock`](https://man7.org/linux/man-pages/man2/flock.2.html) instead belongs to
+its open file description, so a separate descriptor's close does not release the held effect lock.
+The revised candidate uses flock for the effect interval and SQLite only for short transactional
+state updates. It still needs a stable instance and inode: a local experiment showed that unlinking
+and recreating a gate at the same pathname permits independent lock domains. Missing or replaced
+state during unresolved recovery is uncertainty, and unlink is never cleanup. These are local
+mechanism findings, not native SSH/QGA/WSL acceptance.
 
 SQLite warns that network-filesystem synchronization and locking vary by deployment, so a
 target-user home is not a proved gate substrate merely because it is writable. A boot-local Linux

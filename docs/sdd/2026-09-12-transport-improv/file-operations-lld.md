@@ -902,25 +902,28 @@ machine-wide file-object lock, a platform-host administrator prerequisite, or a 
 malicious target-user process. Arbitrary commands, jobs, VM power operations and WSL lifetime holds
 retain their separate recovery obligations.
 
-The smallest candidate uses one stable SQLite gate per effective helper identity and managed target
-scope, stored on a local filesystem writable by that identity. Its record has a random gate-instance
-identifier, a current never-reused generation token and the bound guest marker/epoch. The exact gate
-identity and token must be durable in the `file-call` obligation before any effect dispatch; the
-request carries them to the fixed helper. A gate is initialized and acknowledged before effect
-admission. After an admitted effect, an absent, replaced or unreadable gate in the same target epoch
-is uncertainty, never permission to initialize a replacement. A new target epoch requires explicit
-revalidation/adoption and cannot silently inherit the old gate. The proposed Linux VM destination
-selects a core-provisioned, boot-local `/run/agentworks/file-gates-v1` namespace with separate
-access for each effective helper identity. Setup and initialization precede effect admission;
-neither happens in the no-write, no-state readiness path or as a side effect of an effect request.
-Guest setup establishes a suitable local mount and per-identity permissions; selected-route
-admission confirms the bound gate instance, guest epoch and usable Python `sqlite3`. An absent or
-unsuitable namespace refuses effect admission. Common mount visibility across SSH, QGA and WSL
-routes, and no cleanup within an unresolved guest epoch, are separate native acceptance invariants.
-One selected helper cannot prove what the other routes see. Account-home and `/dev/shm` paths are
-not automatic fallbacks: a home may be network-backed, while systemd can remove ordinary-user
-`/dev/shm` contents at logout. The `/run` choice is a Linux guest candidate, not proved WSL2/SSH/QGA
-mount or boot-lifetime behavior and not a macOS host setup requirement.
+The smallest candidate uses one stable SQLite gate database per effective helper identity and
+managed target scope, stored on a local filesystem writable by that identity. Linux `flock` on a
+separate open descriptor for that same inode is the **sole effect-coordination lock**; SQLite stores
+the generation in transactions, but its POSIX locks do not span filesystem effects. The record has a
+random gate-instance identifier, a current never-reused generation token and the bound guest
+marker/epoch. The exact gate identity, device/inode and token must be durable in the `file-call`
+obligation before any effect dispatch; the request carries them to the fixed helper. A gate is
+initialized and acknowledged before effect admission. After an admitted effect, an absent, replaced
+or unreadable gate in the same target epoch is uncertainty, never permission to initialize a
+replacement. A new target epoch requires explicit revalidation/adoption and cannot silently inherit
+the old gate. The proposed Linux VM destination selects a core-provisioned, boot-local
+`/run/agentworks/file-gates-v1` namespace with separate access for each effective helper identity.
+Setup and initialization precede effect admission; neither happens in the no-write, no-state
+readiness path or as a side effect of an effect request. Guest setup establishes a suitable local
+mount and per-identity permissions; selected-route admission confirms the bound gate instance and
+inode, guest epoch and usable Python `sqlite3` and `flock`. An absent or unsuitable namespace
+refuses effect admission. Common mount visibility across SSH, QGA and WSL routes, and no cleanup
+within an unresolved guest epoch, are separate native acceptance invariants. One selected helper
+cannot prove what the other routes see. Account-home and `/dev/shm` paths are not automatic
+fallbacks: a home may be network-backed, while systemd can remove ordinary-user `/dev/shm` contents
+at logout. The `/run` choice is a Linux guest candidate, not proved WSL2/SSH/QGA mount or
+boot-lifetime behavior and not a macOS host setup requirement.
 
 The first concrete binding is Linux VM-specific. Target preparation already observes a
 `VMGuestIdentity` containing the raw instance marker, kernel boot ID and PID 1 start time and
@@ -935,15 +938,20 @@ a request-to-record comparison as a guest identity check. No production caller c
 platform hosts need their own concrete host identity/epoch proof, not the VM marker protocol; file
 recovery there remains unavailable until that proof exists.
 
-Every effect-bearing fixed helper opens the _existing_ gate, begins `BEGIN IMMEDIATE`, validates the
-instance, live guest marker/epoch and generation, and holds that transaction through all filesystem
-effects and exact cleanup for its request. A mismatched generation refuses before effects. The
-no-write, no-state readiness read/stat path keeps its separate no-staging contract and does not
-create or require this gate; those observations are not effect-fence evidence. Normal admission and
-takeover each advance the generation with expected-token compare-and-swap under `BEGIN IMMEDIATE`.
-The controller chooses a never-reused random proposed token, persists the exact instance, expected
-and proposed tokens in the obligation, then dispatches the advance. It confirms the proposed token
-in that same instance before admitting any effect-bearing helper with it. A lost acknowledgment is
+Every effect-bearing fixed helper opens the _existing_ gate without following its final symlink,
+validates its exact bound inode and acquires an exclusive Linux `flock` within the request's
+remaining deadline. Under that lock, it independently observes the live guest marker/epoch, checks
+the SQLite instance and generation, and closes the SQLite connection **before** any filesystem
+effects. It holds the original flock descriptor through all effects and exact cleanup for its
+request. A mismatched generation refuses before effects. Closing another descriptor for the gate
+inode must not release the effect lock. The no-write, no-state readiness read/stat path keeps its
+separate no-staging contract and does not create or require this gate; those observations are not
+effect-fence evidence. Normal admission and takeover each acquire the same flock first, then advance
+the generation with expected-token compare-and-swap in a short SQLite `BEGIN IMMEDIATE` transaction.
+They close the connection and release the flock only after a durable commit or an exact refusal. The
+controller chooses a never-reused random proposed token, persists the exact instance, expected and
+proposed tokens in the obligation, then dispatches the advance. It confirms the proposed token in
+that same instance before admitting any effect-bearing helper with it. A lost acknowledgment is
 reconciled against the exact instance and expected/proposed pair under the current database owner; a
 mismatch retains custody for further exact revalidation, not automatic manual recovery. A takeover
 advance both waits for an already-effecting helper and makes a delayed older helper inert. A late
@@ -955,17 +963,25 @@ evidence. An absent/replaced gate, irreconcilable token mismatch, uncertain targ
 unavailable helper retains ownership for manual recovery when exact revalidation cannot resolve it.
 
 The gate file must never be unlinked/recreated within an unresolved target epoch: replacing a locked
-SQLite path creates two independent lock domains. A service or login-session cleanup must not own
-this namespace's lifetime. Use ordinary rollback journal mode and a finite busy timeout; avoid WAL,
-a pooled connection or a second custom lock protocol. First prove the shared gate with the DOWNLOAD
-snapshot family under local spawned-controller failure, using one binding format in the existing
-`file-call` obligation and one guest gate implementation. That proof does not certify other helper
-families or production carriers. This remains a design candidate, not shipped recovery. Native
-acceptance must cover a helper active across takeover, a delayed old request, lost advance
-acknowledgment, recovery of recovery, stale advance, missing/replaced state, guest restart and both
-target-user/elevated identities. The exact guest epoch and provider locator still need
-platform-specific proof. Until those tests pass, the `_DownloadDrainEvidence` production producer
-remains absent and DOWNLOAD recovery stays private.
+path creates two independent lock domains, and matching database bytes alone do not establish inode
+continuity. A service or login-session cleanup must not own this namespace's lifetime. All setup,
+observation, helper and advance paths acquire the same flock before gate-row access; no legacy
+SQLite-only path may participate. Use ordinary rollback journal mode for transactional storage,
+close connections before effect work and avoid WAL, pooling or a custom persistence log. Its
+transient journal and the gate itself are reserved control state, not file-helper mutation targets;
+an authorized read of the gate inode must not release the effect lock. Native acceptance must prove
+namespace lifetime and local-mount semantics. The original private
+SQLite-transaction-through-effects attempt failed review because closing another descriptor for the
+database inode releases its POSIX locks, allowing a concurrent advance while an old helper still
+works. The replacement local proof must reproduce that same-inode read case, deadline expiry and
+retained flock exclusion. First prove the shared gate with the DOWNLOAD snapshot family under local
+spawned-controller failure, using one binding format in the existing `file-call` obligation and one
+guest gate implementation. That proof does not certify other helper families or production carriers.
+This remains a design candidate, not shipped recovery. Native acceptance must cover a helper active
+across takeover, a delayed old request, lost advance acknowledgment, recovery of recovery, stale
+advance, missing/replaced state, guest restart and both target-user/elevated identities. The exact
+guest epoch and provider locator still need platform-specific proof. Until those tests pass, the
+`_DownloadDrainEvidence` production producer remains absent and DOWNLOAD recovery stays private.
 
 The private download, upload and JSON custody slice attaches validated prepared workflows to
 `FileOperation` before running them. This preserves original carrier, binding and token through

@@ -1877,12 +1877,22 @@ surviving-helper refusal. The test-only journal does not prove native SSH/QGA di
 
 - [ ] Prove the shared guest effect-fence mechanism locally through DOWNLOAD first. Persist one gate
       binding in the existing `file-call` row, carry the verified raw guest epoch, initialize the
-      gate before effect admission, and have the snapshot helper hold a single SQLite rollback
-      transaction through effects and cleanup. Exercise active-helper takeover, delayed old
-      requests, lost advance replies, replaced or missing state, and incomplete cleanup with a
-      spawned controller. Use an isolated local mount fixture; this does not prove the selected
-      `/run` setup, other helper families or native carrier dispatch. Do not create gate state in
-      no-write, no-state readiness.
+      gate before effect admission, and have the snapshot helper hold the same-inode Linux `flock`
+      through effects and cleanup while SQLite stores generations in short rollback transactions.
+      Prove that reading and closing another descriptor for the gate inode cannot release the effect
+      lock. Exercise deadline expiry, active-helper takeover, delayed old requests, lost advance
+      replies, replaced or missing state, and incomplete cleanup with a spawned controller. Use an
+      isolated local mount fixture; this does not prove the selected `/run` setup, other helper
+      families or native carrier dispatch. Do not create gate state in no-write, no-state readiness.
+
+The private `f5fc93fb` DOWNLOAD checkpoint is **not accepted** as this proof. Its fixed-helper
+controller-crash tests and durable binding are useful, but project review reproduced a competing
+advance while the old helper's SQLite transaction remained open after a same-inode source descriptor
+closed. The replacement design and both independent reviews select a single-file Linux flock effect
+lock with SQLite used only for short transactional generation storage. No code from that private
+checkpoint has been published on #833 or claimed as production recovery. Fixed-helper interrupted
+cleanup, recovery of recovery, native routes and gate setup remain unproved.
+
 - [ ] Prove the restricted
       [guest-side file-helper effect fence](file-operations-lld.md#production-file-helper-effect-fence-candidate)
       before treating adapter drain evidence as production. First carry the verified raw VM guest
