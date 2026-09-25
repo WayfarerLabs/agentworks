@@ -227,6 +227,40 @@ def test_setup_observes_live_guest_before_creating_gate(tmp_path: Path) -> None:
     assert not path.exists()
 
 
+def test_gate_binding_numeric_wire_bounds_round_trip_and_reject_oversize(tmp_path: Path) -> None:
+    maximum = replace(_gate(tmp_path), euid=(1 << 32) - 1, device=(1 << 64) - 1, inode=(1 << 64) - 1)
+    encoded = encode_file_effect_gate(maximum)
+    assert decode_file_effect_gate(encoded) == maximum
+
+    for field, oversize in (("euid", 1 << 32), ("device", 1 << 64), ("inode", 1 << 64)):
+        with pytest.raises(FileEffectGateError):
+            replace(maximum, **{field: oversize})
+        malformed = dict(encoded)
+        malformed[field] = oversize
+        with pytest.raises(FileEffectGateError):
+            decode_file_effect_gate(malformed)
+
+
+def test_setup_rejects_oversize_linux_uid_before_observation_or_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentworks.execution import _file_effect_gate
+
+    path = tmp_path / "effect.db"
+    observed = False
+
+    def observe() -> VMGuestIdentity:
+        nonlocal observed
+        observed = True
+        return _GUEST
+
+    monkeypatch.setattr(_file_effect_gate.os, "geteuid", lambda: 1 << 32)
+    with pytest.raises(FileEffectGateError):
+        initialize_file_effect_gate(str(path), _GUEST, 1 << 32, "gate-vm", observe)
+    assert not observed
+    assert not path.exists()
+
+
 def test_setup_deadline_prevents_gate_creation_before_and_after_guest_observation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -27,6 +27,8 @@ if TYPE_CHECKING:
 _TOKEN_BYTES = 16
 _BUSY_SECONDS = 5.0
 _LOWER_HEX = frozenset("0123456789abcdef")
+_MAX_LINUX_UID = (1 << 32) - 1
+_MAX_U64 = (1 << 64) - 1
 
 
 def _valid_path(path: object) -> bool:
@@ -74,12 +76,12 @@ class FileEffectGateBinding:
             or len(self.generation) != _TOKEN_BYTES
             or type(self.guest) is not VMGuestIdentity
             or type(self.euid) is not int
-            or self.euid < 0
+            or not 0 <= self.euid <= _MAX_LINUX_UID
             or not _valid_scope_name(self.scope_name)
             or type(self.device) is not int
-            or self.device < 0
+            or not 0 <= self.device <= _MAX_U64
             or type(self.inode) is not int
-            or self.inode <= 0
+            or not 0 < self.inode <= _MAX_U64
             or self.proposed_generation is not None
             and (type(self.proposed_generation) is not bytes or len(self.proposed_generation) != _TOKEN_BYTES)
         ):
@@ -286,7 +288,7 @@ def _check_setup_identity(path: str, guest: VMGuestIdentity, euid: int, scope_na
         not _valid_path(path)
         or type(guest) is not VMGuestIdentity
         or type(euid) is not int
-        or euid < 0
+        or not 0 <= euid <= _MAX_LINUX_UID
         or os.geteuid() != euid
         or not _valid_scope_name(scope_name)
     ):
