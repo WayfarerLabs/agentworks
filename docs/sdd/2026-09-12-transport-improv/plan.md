@@ -1947,10 +1947,20 @@ managed scope/effective identity. A lost setup reply is reconciled by non-creati
 complete gate under flock, not by replacing it or trusting the request's guest identity. Setup and
 inspection must independently observe the live guest epoch; only initial setup may retry exclusive
 creation when no durable binding exists. A durable binding instead makes absent or replaced state a
-retained uncertainty. This is a design ruling, not implemented guest setup, inspection,
+retained uncertainty. This is a design ruling, not production guest setup/inspection,
 selected-carrier dispatch, `/run` provisioning or native acceptance. The first production vertical
 must still sequence setup, durable proposal, confirmed advance and DOWNLOAD dispatch on the same
 `file-call` row, then fence recovery before producing drain evidence.
+
+The private local setup/inspection substrate at `1040c8d1` validates identity and independently
+observes the live guest epoch before exclusive creation. Inspection opens only existing state under
+the shared flock and discovers the complete instance, generation and inode without advancing it;
+missing, incomplete or unsafe state refuses. The 87 focused gate, recovery and fixed-delivery tests
+pass, including successful setup/inspection on distribution Python 3.11. After this growth, the
+snapshot family's synthetic maximum-manifest QGA body measures 63,970 bytes, leaving 1,566 below the
+unchanged 65,536-byte compatibility limit. This is not native acceptance or a guarantee about future
+bundle growth. End-to-end setup/inspection deadlines, canonical path provisioning, selected carrier
+exchanges and recovery integration remain open.
 
 - [ ] Use the owned snapshot/chunk download for general in-memory reads, preserving caller byte
       bounds independently of QGA's single-response capacity. Keep the no-staging readiness read
