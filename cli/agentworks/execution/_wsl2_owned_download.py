@@ -11,6 +11,7 @@ from agentworks.db import LifecycleObligationState, OperationResourceKind, Opera
 from agentworks.errors import ValidationError
 from agentworks.execution._file_download import FileDownloadOutcome, FileDownloadStatus
 from agentworks.execution._file_operation import FileOperation
+from agentworks.execution._runtime_prerequisite import RuntimeSelection
 from agentworks.execution._vm_guest_identity import VMGuestIdentityObservationState
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 from agentworks.execution._wsl2_guest_observer import WSL2GuestObserver
@@ -34,7 +35,6 @@ if TYPE_CHECKING:
     from agentworks.db import VMRow
     from agentworks.db.operations import OperationRepository
     from agentworks.execution._helper_launcher import IdentityPlan
-    from agentworks.execution._runtime_prerequisite import RuntimeSelection
     from agentworks.execution._wsl2_lifecycle import GuestAnchorObserver
     from agentworks.execution.carrier import ByteSink
 
@@ -58,7 +58,6 @@ class WSL2OwnedDownload:
         connection: WSL2Connection,
         runtime_selection: RuntimeSelection,
         *,
-        config: Config | None = None,
         native: OwnedHostClient | None = None,
         observer: GuestAnchorObserver | None = None,
     ) -> None:
@@ -66,7 +65,14 @@ class WSL2OwnedDownload:
             raise ValidationError("WSL2 download requires an exact locator and connection")
         if vm.instance_marker is None:
             raise ValidationError("WSL2 download requires a persisted VM marker")
+        if type(runtime_selection) is not RuntimeSelection:
+            raise ValidationError("WSL2 download requires an exact runtime selection")
+        try:
+            selected_runtime = RuntimeSelection(runtime_selection.target_os, runtime_selection.explicit_path)
+        except AttributeError as error:
+            raise ValidationError("WSL2 download requires a complete runtime selection") from error
         selected_carrier = WSL2Carrier(connection)
+        selected_binding = NativeExecutionBinding(selected_carrier, connection.user, selected_runtime)
         selected_native = WindowsWSL2HostClient() if native is None else native
         selected_observer = WSL2GuestObserver(connection) if observer is None else observer
         self.owner = OperationOwner.acquire(
@@ -77,10 +83,10 @@ class WSL2OwnedDownload:
         self._locator = locator
         self._connection = connection
         self._carrier = selected_carrier
-        self._runtime = runtime_selection
+        self._binding = selected_binding
+        self._runtime = selected_runtime
         self._platform = platform
         self._ctx = ctx
-        self._config = config
         try:
             self.hold = WSL2PlatformHold(
                 self.owner,
@@ -133,12 +139,20 @@ class WSL2OwnedDownload:
             return None
         if type(locator) is not ProviderLocator:
             raise ValidationError("WSL2 download requires an exact provider locator")
+        try:
+            locator = ProviderLocator(locator.token)
+        except AttributeError as error:
+            raise ValidationError("WSL2 download requires a complete provider locator") from error
         binding = platform.resolve_native_execution_binding(vm, ctx, deadline=deadline, config=config)
         if deadline.expired:
             raise ValidationError("WSL2 download binding resolution exceeded the deadline")
         connection = cls._selected_connection(binding)
         if connection.user != vm.admin_username:
             raise ValidationError("WSL2 download binding does not match the VM")
+        try:
+            runtime_selection = binding.runtime_selection
+        except AttributeError as error:
+            raise ValidationError("WSL2 download requires a complete native binding") from error
         subject = cls(
             repository,
             vm,
@@ -146,8 +160,7 @@ class WSL2OwnedDownload:
             ctx,
             locator,
             connection,
-            binding.runtime_selection,
-            config=config,
+            runtime_selection,
             native=native,
             observer=observer,
         )
@@ -155,12 +168,22 @@ class WSL2OwnedDownload:
 
     @staticmethod
     def _selected_connection(binding: NativeExecutionBinding) -> WSL2Connection:
-        if type(binding) is not NativeExecutionBinding or type(binding.carrier) is not WSL2Carrier:
+        if type(binding) is not NativeExecutionBinding:
             raise ValidationError("WSL2 download requires a WSL2 native binding")
-        connection = binding.carrier.connection
-        if type(connection) is not WSL2Connection or binding.delivery_account != connection.user:
+        try:
+            carrier = binding.carrier
+            if type(carrier) is not WSL2Carrier:
+                raise ValidationError("WSL2 download requires a WSL2 native binding")
+            connection = carrier.connection
+            if type(connection) is not WSL2Connection:
+                raise ValidationError("WSL2 download native binding route is inconsistent")
+            selected = WSL2Connection(connection.distribution, connection.user, connection.wsl_executable)
+            delivery_account = binding.delivery_account
+        except AttributeError as error:
+            raise ValidationError("WSL2 download requires a complete native binding") from error
+        if delivery_account != selected.user:
             raise ValidationError("WSL2 download native binding route is inconsistent")
-        return WSL2Connection(connection.distribution, connection.user, connection.wsl_executable)
+        return selected
 
     def download(
         self,
@@ -180,23 +203,15 @@ class WSL2OwnedDownload:
         if not self._ready_is_durable(ready):
             return WSL2DownloadStatus.RETAINED
 
-        selected = prepare_managed_vm_target_from_platform(
+        self.preparation = prepare_managed_vm_target_from_platform(
             self._vm,
             self._platform,
             self._ctx,
+            self._locator,
+            self._binding,
             deadline=deadline,
             owner=self.owner,
-            config=self._config,
-            held_locator=self._locator,
         )
-        self.preparation = selected.preparation
-        if selected.binding is not None:
-            try:
-                selected_connection = self._selected_connection(selected.binding)
-            except ValidationError:
-                return self._release_if_settled(ready, deadline, safe=True)
-            if selected_connection != self._connection or selected.binding.runtime_selection != self._runtime:
-                return self._release_if_settled(ready, deadline, safe=True)
         if self.preparation.status is not VMTargetPreparationStatus.PREPARED:
             return self._release_if_settled(ready, deadline, safe=not self.preparation.requires_owner_retention)
         if not self._same_ready_epoch(ready, self.preparation):

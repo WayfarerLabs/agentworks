@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from threading import Event, Thread
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from unittest.mock import Mock, call
 
 import pytest
@@ -39,7 +39,6 @@ from agentworks.execution.carrier import (
 from agentworks.operations import OperationBorrow, OperationOwner, release_borrow_after_custody
 from agentworks.vms.target_identity import compose_managed_vm_target_identity
 from agentworks.vms.target_preparation import (
-    SelectedPlatformVMTargetPreparation,
     VMTargetPreparation,
     VMTargetPreparationControlFact,
     VMTargetPreparationFailure,
@@ -58,6 +57,8 @@ _OTHER_MARKER = "fedcba9876543210fedcba9876543210"
 _BOOT_ID = "00000000-0000-4000-8000-000000000001"
 _INIT_START_TICKS = 1234
 _NONCE_MARKER = "agentworks-runtime-prerequisite"
+_DEFAULT_BINDING = object()
+_DEFAULT_LOCATOR = ProviderLocator("opaque")
 
 
 def _vm(*, marker: str | None = _MARKER) -> VMRow:
@@ -183,17 +184,20 @@ def _compose(
     vm: VMRow | None = None,
     deadline: Deadline | None = None,
     ctx: object = None,
-    config: object = None,
-    held_locator: ProviderLocator | None = None,
+    expected_locator: ProviderLocator | object = _DEFAULT_LOCATOR,
+    binding: object = _DEFAULT_BINDING,
 ):
     return prepare_managed_vm_target_from_platform(
         vm or _vm(),
         platform,
         ctx,
+        cast(ProviderLocator, expected_locator),
+        cast(
+            NativeExecutionBinding,
+            platform.resolve_native_execution_binding.return_value if binding is _DEFAULT_BINDING else binding,
+        ),
         deadline=deadline or Deadline.after(10),
         owner=owner,
-        config=config,
-        held_locator=held_locator,
     )
 
 
@@ -571,12 +575,11 @@ def test_platform_preflight_refuses_before_any_io_or_borrow(
                 _compose(selected_owner, platform, vm=vm, deadline=deadline)
         else:
             result = _compose(selected_owner, platform, vm=vm, deadline=deadline)
-            assert result.preparation.failure is (
+            assert result.failure is (
                 VMTargetPreparationFailure.DEADLINE
                 if reason == "expired"
                 else VMTargetPreparationFailure.MARKER_MISSING
             )
-            assert result.binding is None
         platform.observe_provider_locator.assert_not_called()
         platform.resolve_native_execution_binding.assert_not_called()
         assert carrier.calls == 0
@@ -598,8 +601,7 @@ def test_platform_locator_unavailable_skips_binding_and_releases_borrow(
 
     result = _compose(owner, platform)
 
-    assert result.preparation.failure is VMTargetPreparationFailure.LOCATOR_UNAVAILABLE
-    assert result.binding is None
+    assert result.failure is VMTargetPreparationFailure.LOCATOR_UNAVAILABLE
     platform.resolve_native_execution_binding.assert_not_called()
     assert carrier.calls == 0
     assert len(borrows) == 1 and releases == borrows
@@ -648,7 +650,7 @@ def test_forged_locator_and_binding_are_revalidated_at_plugin_boundary(
     with pytest.raises(ValidationError):
         _compose(owner, platform)
     assert carrier.calls == 0
-    assert len(borrows) == 3 and releases == borrows
+    assert len(borrows) == 1 and releases == borrows
     owner.close()
 
 
@@ -660,11 +662,10 @@ def test_invalid_platform_binding_shape_refuses_before_guest(
     borrows, releases = _watch_custody(monkeypatch)
     carrier = TranscriptCarrier(_success_payload())
     platform = _platform(carrier)
-    platform.resolve_native_execution_binding.return_value = bad_binding
     with pytest.raises(ValidationError):
-        _compose(owner, platform)
+        _compose(owner, platform, binding=bad_binding)
     assert carrier.calls == 0
-    assert len(borrows) == 1 and releases == borrows
+    assert borrows == releases == []
     owner.close()
 
 
@@ -677,7 +678,7 @@ def test_invalid_plugin_carrier_releases_borrow_before_guest(
     platform.resolve_native_execution_binding.return_value = NativeExecutionBinding(object(), "admin", _runtime())
     with pytest.raises(ValidationError):
         _compose(owner, platform)
-    assert len(borrows) == 1 and releases == borrows
+    assert borrows == releases == []
     owner.close()
 
 
@@ -691,17 +692,14 @@ def test_selected_platform_must_be_bound_to_vm_site(owned: tuple[Database, Opera
     owner.close()
 
 
-@pytest.mark.parametrize("stage", ["locator", "binding"])
-def test_platform_exception_releases_unused_borrow(
-    owned: tuple[Database, OperationOwner], stage: str, monkeypatch: pytest.MonkeyPatch
+def test_platform_locator_exception_releases_unused_borrow(
+    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, owner = owned
     borrows, releases = _watch_custody(monkeypatch)
     carrier = TranscriptCarrier(_success_payload())
     platform = _platform(carrier)
-    getattr(
-        platform, "observe_provider_locator" if stage == "locator" else "resolve_native_execution_binding"
-    ).side_effect = ControlStop()
+    platform.observe_provider_locator.side_effect = ControlStop()
     with pytest.raises(ControlStop):
         _compose(owner, platform)
     assert len(borrows) == 1 and releases == borrows
@@ -766,9 +764,8 @@ def test_owner_closure_during_blocked_locator_refuses_dispatch_and_releases_borr
     owner.close()
 
 
-@pytest.mark.parametrize("stage", ["locator", "binding"])
-def test_platform_late_result_refuses_before_next_stage(
-    owned: tuple[Database, OperationOwner], stage: str, monkeypatch: pytest.MonkeyPatch
+def test_platform_late_locator_refuses_before_guest(
+    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, owner = owned
     borrows, releases = _watch_custody(monkeypatch)
@@ -779,17 +776,13 @@ def test_platform_late_result_refuses_before_next_stage(
     def expire(*args: object, **kwargs: object) -> object:
         del args, kwargs
         object.__setattr__(deadline, "expires_at", 0.0)
-        return ProviderLocator("opaque") if stage == "locator" else _binding(carrier)
+        return ProviderLocator("opaque")
 
-    getattr(
-        platform, "observe_provider_locator" if stage == "locator" else "resolve_native_execution_binding"
-    ).side_effect = expire
+    platform.observe_provider_locator.side_effect = expire
     result = _compose(owner, platform, deadline=deadline)
-    assert result.preparation.failure is VMTargetPreparationFailure.DEADLINE
-    assert result.preparation.deadline_exceeded
-    assert result.binding is None
-    if stage == "locator":
-        platform.resolve_native_execution_binding.assert_not_called()
+    assert result.failure is VMTargetPreparationFailure.DEADLINE
+    assert result.deadline_exceeded
+    platform.resolve_native_execution_binding.assert_not_called()
     assert carrier.calls == 0
     assert len(borrows) == 1 and releases == borrows
     owner.close()
@@ -802,7 +795,6 @@ def test_platform_composition_passes_exact_inputs_and_leaves_outer_owner_open(
     carrier = TranscriptCarrier(_success_payload(), deadlines=[])
     platform = _platform(carrier)
     ctx = object()
-    config = object()
     deadline = Deadline.after(10)
     borrows, releases = _watch_custody(monkeypatch)
     probe_selection: RuntimeSelection | None = None
@@ -827,33 +819,27 @@ def test_platform_composition_passes_exact_inputs_and_leaves_outer_owner_open(
 
     monkeypatch.setattr("agentworks.vms.target_preparation.observe_vm_guest_identity", probe)
     platform.observe_provider_locator.side_effect = observe
-    result = _compose(owner, platform, ctx=ctx, config=config, deadline=deadline)
+    result = _compose(owner, platform, ctx=ctx, deadline=deadline)
 
-    assert result.preparation.status is VMTargetPreparationStatus.PREPARED
-    assert result.preparation.target == compose_managed_vm_target_identity(
+    assert result.status is VMTargetPreparationStatus.PREPARED
+    assert result.target == compose_managed_vm_target_identity(
         _vm(), ProviderLocator("opaque"), VMGuestIdentity(_MARKER, _BOOT_ID, _INIT_START_TICKS)
     )
-    assert result.binding is not None
-    assert result.binding.carrier is carrier
-    assert result.binding.delivery_account == "admin"
-    assert result.binding.runtime_selection == _runtime()
-    assert result.binding.runtime_selection is probe_selection
+    assert probe_selection == _runtime()
     assert probe_carrier is not None
-    assert result.binding is not platform.resolve_native_execution_binding.return_value
-    assert "binding" not in repr(result)
     assert carrier.calls == 1
     assert carrier.deadlines == [deadline]
     assert len(borrows) == 1 and releases == borrows
     assert platform.observe_provider_locator.call_count == 2
     assert platform.observe_provider_locator.call_args_list == [call(_vm(), ctx, deadline=deadline)] * 2
-    platform.resolve_native_execution_binding.assert_called_once_with(_vm(), ctx, deadline=deadline, config=config)
+    platform.resolve_native_execution_binding.assert_not_called()
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 
 
 @pytest.mark.parametrize("report", [CarrierReport(Dispatch.NOT_SENT), CarrierReport(Dispatch.UNKNOWN)])
-def test_selected_platform_drops_binding_on_failed_or_uncertain_guest_attempt(
+def test_selected_platform_returns_failed_or_uncertain_guest_attempt(
     owned: tuple[Database, OperationOwner], report: CarrierReport
 ) -> None:
     _, owner = owned
@@ -861,50 +847,38 @@ def test_selected_platform_drops_binding_on_failed_or_uncertain_guest_attempt(
 
     result = _compose(owner, platform)
 
-    assert result.preparation.status is not VMTargetPreparationStatus.PREPARED
-    assert result.binding is None
+    assert result.status is not VMTargetPreparationStatus.PREPARED
     platform.observe_provider_locator.assert_called_once()
-    if not result.preparation.requires_owner_retention:
+    if not result.requires_owner_retention:
         owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
 
 
-@pytest.mark.parametrize("replacement_stage", ["binding", "probe"])
-def test_second_locator_detects_cooperative_replacement_before_or_during_probe(
-    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch, replacement_stage: str
+def test_second_locator_detects_cooperative_replacement_during_probe(
+    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, owner = owned
     borrows, releases = _watch_custody(monkeypatch)
     carrier = TranscriptCarrier(_success_payload())
     platform = _platform(carrier)
-    current = ["first"]
+    current = ["opaque"]
     platform.observe_provider_locator.side_effect = lambda *args, **kwargs: ProviderLocator(current[0])
-    if replacement_stage == "binding":
+    original_execute = carrier.execute
 
-        def resolve(*args: object, **kwargs: object) -> NativeExecutionBinding:
-            del args, kwargs
-            current[0] = "second"
-            return _binding(carrier)
+    def execute(invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        result = original_execute(invocation, io=io, deadline=deadline)
+        current[0] = "second"
+        return result
 
-        platform.resolve_native_execution_binding.side_effect = resolve
-    else:
-        original_execute = carrier.execute
-
-        def execute(invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-            result = original_execute(invocation, io=io, deadline=deadline)
-            current[0] = "second"
-            return result
-
-        carrier.execute = execute  # type: ignore[method-assign]
+    carrier.execute = execute  # type: ignore[method-assign]
 
     result = _compose(owner, platform)
 
-    assert result.preparation.status is VMTargetPreparationStatus.FAILED
-    assert result.preparation.failure is VMTargetPreparationFailure.LOCATOR_CHANGED
-    assert result.preparation.guest_result is not None
-    assert result.preparation.target is None
-    assert result.binding is None
+    assert result.status is VMTargetPreparationStatus.FAILED
+    assert result.failure is VMTargetPreparationFailure.LOCATOR_CHANGED
+    assert result.guest_result is not None
+    assert result.target is None
     assert platform.observe_provider_locator.call_count == 2
     assert carrier.calls == 1
     assert len(borrows) == 1 and releases == borrows
@@ -913,26 +887,25 @@ def test_second_locator_detects_cooperative_replacement_before_or_during_probe(
     owner.close()
 
 
-def test_held_locator_matching_observations_allows_preparation(
+def test_expected_locator_matching_observations_allows_preparation(
     owned: tuple[Database, OperationOwner],
 ) -> None:
     _, owner = owned
     carrier = TranscriptCarrier(_success_payload())
     platform = _platform(carrier)
 
-    result = _compose(owner, platform, held_locator=ProviderLocator("opaque"))
+    result = _compose(owner, platform, expected_locator=ProviderLocator("opaque"))
 
-    assert result.preparation.status is VMTargetPreparationStatus.PREPARED
-    assert result.binding is not None
+    assert result.status is VMTargetPreparationStatus.PREPARED
     assert platform.observe_provider_locator.call_count == 2
-    platform.resolve_native_execution_binding.assert_called_once()
+    platform.resolve_native_execution_binding.assert_not_called()
     assert carrier.calls == 1
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
 
 
-def test_held_locator_mismatch_refuses_before_binding_or_guest_probe(
+def test_expected_locator_mismatch_refuses_before_guest_probe(
     owned: tuple[Database, OperationOwner],
 ) -> None:
     _, owner = owned
@@ -940,10 +913,10 @@ def test_held_locator_mismatch_refuses_before_binding_or_guest_probe(
     platform = _platform(carrier)
     platform.observe_provider_locator.return_value = ProviderLocator("replacement")
 
-    result = _compose(owner, platform, held_locator=ProviderLocator("held"))
+    result = _compose(owner, platform, expected_locator=ProviderLocator("held"))
 
-    assert result.preparation.status is VMTargetPreparationStatus.FAILED
-    assert result.preparation.failure is VMTargetPreparationFailure.LOCATOR_CHANGED
+    assert result.status is VMTargetPreparationStatus.FAILED
+    assert result.failure is VMTargetPreparationFailure.LOCATOR_CHANGED
     platform.observe_provider_locator.assert_called_once()
     platform.resolve_native_execution_binding.assert_not_called()
     assert carrier.calls == 0
@@ -952,7 +925,7 @@ def test_held_locator_mismatch_refuses_before_binding_or_guest_probe(
     owner.close()
 
 
-def test_held_locator_replacement_during_preparation_suppresses_target(
+def test_locator_replacement_during_binding_resolution_refuses_before_probe(
     owned: tuple[Database, OperationOwner],
 ) -> None:
     _, owner = owned
@@ -967,16 +940,16 @@ def test_held_locator_replacement_during_preparation_suppresses_target(
         return _binding(carrier)
 
     platform.resolve_native_execution_binding.side_effect = replace_during_binding
+    expected = platform.observe_provider_locator(_vm(), None, deadline=Deadline.after(10))
+    binding = platform.resolve_native_execution_binding(_vm(), None, deadline=Deadline.after(10))
+    result = _compose(owner, platform, expected_locator=expected, binding=binding)
 
-    result = _compose(owner, platform, held_locator=ProviderLocator("held"))
-
-    assert result.preparation.status is VMTargetPreparationStatus.FAILED
-    assert result.preparation.failure is VMTargetPreparationFailure.LOCATOR_CHANGED
-    assert result.preparation.guest_result is not None
-    assert result.preparation.target is None
-    assert result.binding is None
+    assert result.status is VMTargetPreparationStatus.FAILED
+    assert result.failure is VMTargetPreparationFailure.LOCATOR_CHANGED
+    assert result.guest_result is None
+    assert result.target is None
     assert platform.observe_provider_locator.call_count == 2
-    assert carrier.calls == 1
+    assert carrier.calls == 0
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
@@ -1022,16 +995,15 @@ def test_second_locator_refuses_unavailable_invalid_exceptional_or_late_result(
         assert fact.preparation.target is None
     else:
         result = _compose(owner, platform, deadline=deadline)
-        assert result.preparation.status is VMTargetPreparationStatus.FAILED
-        assert result.preparation.failure is (
+        assert result.status is VMTargetPreparationStatus.FAILED
+        assert result.failure is (
             VMTargetPreparationFailure.DEADLINE
             if confirmation == "late"
             else VMTargetPreparationFailure.LOCATOR_UNCONFIRMED
         )
-        assert result.preparation.guest_result is not None
-        assert result.preparation.target is None
-        assert result.binding is None
-        assert result.preparation.deadline_exceeded is (confirmation == "late")
+        assert result.guest_result is not None
+        assert result.target is None
+        assert result.deadline_exceeded is (confirmation == "late")
     assert platform.observe_provider_locator.call_count == 2
     assert carrier.calls == 1
     assert len(borrows) == 1 and releases == borrows
@@ -1116,20 +1088,6 @@ def test_confirmation_error_and_release_error_preserve_guest_and_control_chain(
     assert len(borrows) == 1 and releases == borrows
     with pytest.raises(StateError):
         owner.borrow()
-
-
-def test_selected_platform_result_rejects_binding_status_mismatch() -> None:
-    failed = VMTargetPreparation(VMTargetPreparationStatus.FAILED, None, None)
-    target = compose_managed_vm_target_identity(
-        _vm(), ProviderLocator("opaque"), VMGuestIdentity(_MARKER, _BOOT_ID, _INIT_START_TICKS)
-    )
-    prepared = VMTargetPreparation(VMTargetPreparationStatus.PREPARED, target, None)
-    binding = _binding(TranscriptCarrier())
-
-    with pytest.raises(ValidationError):
-        SelectedPlatformVMTargetPreparation(failed, binding)
-    with pytest.raises(ValidationError):
-        SelectedPlatformVMTargetPreparation(prepared, None)
 
 
 def test_preparation_value_rejects_inconsistent_status_and_retention() -> None:

@@ -164,21 +164,22 @@ def _prepared_accesses(
     owner: OperationOwner, vm: VMRow, platform: WSL2Platform, root: Path
 ) -> tuple[ExecutionAccess, FileAccess]:
     """Prepare the private target and account plan under one existing owner."""
+    binding = platform.resolve_native_execution_binding(vm, RunContext(), deadline=Deadline.after(30))
     prepared = prepare_managed_vm_target_from_platform(
-        vm, platform, RunContext(), deadline=Deadline.after(30), owner=owner
+        vm, platform, RunContext(), _LOCATOR, binding, deadline=Deadline.after(30), owner=owner
     )
-    assert prepared.preparation.status is VMTargetPreparationStatus.PREPARED
-    assert prepared.preparation.target is not None and prepared.binding is not None
-    assert isinstance(prepared.binding.carrier, WSL2Carrier)
-    assert prepared.binding.carrier._connection.distribution == "recorded-distro"
-    assert prepared.binding.delivery_account == vm.admin_username
+    assert prepared.status is VMTargetPreparationStatus.PREPARED
+    assert prepared.target is not None
+    assert isinstance(binding.carrier, WSL2Carrier)
+    assert binding.carrier._connection.distribution == "recorded-distro"
+    assert binding.delivery_account == vm.admin_username
 
     accounts = prepare_target_identity(
-        prepared.binding.carrier,
-        delivery_account=prepared.binding.delivery_account,
+        binding.carrier,
+        delivery_account=binding.delivery_account,
         workload_account=vm.admin_username,
         include_elevated=False,
-        runtime_selection=prepared.binding.runtime_selection,
+        runtime_selection=binding.runtime_selection,
         deadline=Deadline.after(30),
         owner=owner,
     )
@@ -186,8 +187,8 @@ def _prepared_accesses(
     assert accounts.ordinary_plan is not None
     execution = ExecutionAccess(
         ExecutionOperation(owner),
-        prepared.binding.carrier,
-        runtime_selection=prepared.binding.runtime_selection,
+        binding.carrier,
+        runtime_selection=binding.runtime_selection,
         ordinary_plan=accounts.ordinary_plan,
         elevated_plan=accounts.elevated_plan,
         entity_kind="vm",
@@ -195,10 +196,10 @@ def _prepared_accesses(
         deadline=lambda: Deadline.after(30),
     )
     files = FileAccess(
-        FileOperation(owner, prepared.preparation.target),
-        prepared.binding.carrier,
+        FileOperation(owner, prepared.target),
+        binding.carrier,
         trusted_root=PurePosixPath(root),
-        runtime_selection=prepared.binding.runtime_selection,
+        runtime_selection=binding.runtime_selection,
         ordinary_plan=accounts.ordinary_plan,
         elevated_plan=accounts.elevated_plan,
         entity_kind="vm",
