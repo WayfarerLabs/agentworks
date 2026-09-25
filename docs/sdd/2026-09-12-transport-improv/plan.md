@@ -1943,6 +1943,13 @@ member and control-flow interruption. This is not yet a process-loss recovery pr
 package API: upload-wide helper drain, takeover, preflight reads, retirement, application checkpoint
 integration and production artifact callers remain open. The capacity checkbox stays unchecked.
 
+- [ ] Extend the existing guest file-effect gate to every upload mutation phase and its durable
+      current-child identity. Prove that generation advance waits for old gated effects and rejects
+      delayed old-generation upload requests before mutation across WSL, SSH and QGA; only then bind
+      package-child recovery and application checkpoint reconciliation. The present upload helpers
+      and obligation codec have no gate, and neither the local DOWNLOAD helper journal nor a
+      caller-asserted drain value proves upload takeover.
+
 - [ ] Resolve the public filesystem-root edge before claiming complete path coverage: the current
       nonempty parent/leaf helper contract cannot address `/` itself. The operator has been asked
       whether to exclude root targets initially or support read-only root stat/inventory. Keep
