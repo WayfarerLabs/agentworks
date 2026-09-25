@@ -945,20 +945,30 @@ publishes the binding discovered by setup or non-creating inspection to that sam
 file effect. Recovery persists a proposed generation there before advance and publishes the
 confirmed generation before another file effect; it never substitutes a second generic dispatch row.
 A lost control response retains the row and ownership until reconciliation provides the required
-no-further-effects evidence. The current `FileOperation.download()` installs its row only after
-receiving a binding; production composition must move admission earlier. This setup descriptor and
-handoff are not implemented by the local gate primitive or fixed helper.
+no-further-effects evidence. The ordinary already-bound `FileOperation.download()` path installs its
+row after receiving a binding; the private setup-custody path now moves admission earlier when
+supplied a setup descriptor. The local gate primitive and fixed helper alone do not provide this
+whole-call handoff.
 
 The first custody vertical validates local download inputs, chooses its token once and attaches a
 concrete pending-setup record before registering that same `file-call` row. SETUP uses the borrow's
 fixed-helper carrier, which marks possible dispatch before delivery. A lost or invalid setup reply
 retains custody; an outstanding attempt cannot be bypassed by immediately dispatching INSPECT. After
 an acknowledged exact binding, core revision-checks publication of the bound payload and only then
-constructs the snapshot workflow with the original token and borrow. A lost publication reply
-retries only the identical compare-and-swap; failure during workflow construction or custody
+constructs the snapshot workflow with the original token and borrow. A lost publication reply may be
+retried only with the identical compare-and-swap; failure during workflow construction or custody
 promotion retains the bound row rather than invoking the old pre-registration close path. Setup
 failure is not a fabricated snapshot outcome, and retained input/sink references are released only
 when responsibility is safely handed off or terminated.
+
+The private custody path currently proves only an acknowledged first `O_EXCL` setup. A second
+download in the same scope, UID and guest epoch encounters the existing canonical gate and cannot
+yet adopt it; production use requires non-creating inspection and a safe absent-versus-unsafe
+decision, including after a lost setup reply. Neither a target-user helper nor the existing `SETUP`
+exchange can create the root-owned `/run/agentworks/file-gates-v1` namespace from scratch. Core must
+provision the anchor and private per-UID directory through a trusted guest setup path for each boot,
+then run the gate helper and file operation as the target UID. This is infrastructure setup, not
+elevation of an individual file operation.
 
 The three durable states follow from the gate value itself: a setup descriptor, an exact binding, or
 an exact binding with a proposed generation. No independent phase enum is needed. Allocate the

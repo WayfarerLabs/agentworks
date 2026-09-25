@@ -2003,6 +2003,19 @@ fixed-delivery selection passes 148 tests. This does not create or dispatch the 
 prove the raw guest belongs to the managed target, provision `/run`, or provide native route and
 helper-lifetime evidence.
 
+The private acknowledged-setup custody slice at `a9d87ff65` now attaches one DOWNLOAD call before
+gate SETUP, uses its borrowed fixed-helper carrier for possible-dispatch admission, publishes the
+exact returned binding on the same `file-call` row, and starts the snapshot with the same borrow and
+token. It retains the attached call after uncertain registration, setup, publication or promotion;
+proven `NOT_SENT` and pre-registration refusal release unused custody. The scoped selection passes
+55 tests, with Ruff, targeted mypy and diff checks green. Independent project and complexity reviews
+found no blocker for this narrow slice. It handles only acknowledged first-time exclusive setup:
+existing-gate inspection/adoption, lost-response reconciliation, selected-route guest proof,
+root-owned `/run/agentworks/file-gates-v1/<euid>` provisioning each boot, native helper quiescence,
+and production recovery remain open. A target-user file helper cannot create that namespace; core
+must establish the private UID directory through a trusted guest setup path before target-UID gate
+setup, without elevating the file operation itself.
+
 - [ ] Use the owned snapshot/chunk download for general in-memory reads, preserving caller byte
       bounds independently of QGA's single-response capacity. Keep the no-staging readiness read
       separately bound before dispatch; prove its complete encoded response fits the selected route.
