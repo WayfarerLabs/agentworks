@@ -68,12 +68,13 @@ class FakeObligation:
             raise OSError("lost mark reply")
 
     def publish_payload(self, *, expected_revision: int, payload_version: int, payload: bytes) -> None:
-        assert expected_revision == 0 and payload_version == 2
-        self.events.append("publish")
+        assert expected_revision == self.payload_revision and payload_version == 3
+        event = "admit" if decode_hold_payload(payload).query_may_have_been_admitted else "publish"
+        self.events.append(event)
         self.payload = payload
-        if self.fail_at == "publish":
+        if self.fail_at == event:
             raise OSError("lost publication reply")
-        self.payload_revision = 1
+        self.payload_revision += 1
 
     def resolve(self) -> None:
         self.events.append("resolve")
@@ -94,7 +95,7 @@ class FakeOwner:
     )
 
     def register_lifecycle_obligation(self, kind: str, *, payload_version: int, payload: bytes) -> FakeObligation:
-        assert kind == OBLIGATION_KIND and payload_version == 2
+        assert kind == OBLIGATION_KIND and payload_version == 3
         self.events.append("register")
         obligation = FakeObligation(self.events, self.fail_at, payload=payload)
         self.obligations.append(obligation)
@@ -292,8 +293,39 @@ def test_registration_order_exact_connection_and_release() -> None:
     assert decode_hold_payload(owner.obligations[0].payload) == subject.payload
     assert owner.borrow() == "borrowed"
     subject.release(Deadline.after(1))
-    assert owner.events[-2:] == ["observe", "resolve"]
+    assert owner.events[-3:] == ["admit", "observe", "resolve"]
     assert owner.obligations[0].resolved
+
+
+def test_query_marker_is_one_way_across_observation_retries() -> None:
+    owner = FakeOwner()
+    observer = FakeObserver(owner.events, GuestAnchorPresence.PRESENT)
+    subject = hold(owner, observer=observer)
+    subject.start(Deadline.after(1))
+    assert subject.payload is not None and not subject.payload.query_may_have_been_admitted
+
+    subject.release(Deadline.after(1))
+    assert not owner.obligations[0].resolved
+    assert subject.payload is not None and subject.payload.query_may_have_been_admitted
+    assert decode_hold_payload(owner.obligations[0].payload).query_may_have_been_admitted
+    assert owner.events.count("admit") == 1
+
+    observer.presence = GuestAnchorPresence.ABSENT_CONFIRMED
+    subject.release(Deadline.after(1))
+    assert owner.obligations[0].resolved
+    assert owner.events.count("admit") == 1
+    assert owner.events.count("observe") == 2
+
+
+def test_query_marker_publication_failure_prevents_observer_dispatch() -> None:
+    owner = FakeOwner(fail_at="admit")
+    subject = hold(owner)
+    subject.start(Deadline.after(1))
+
+    with pytest.raises(OSError):
+        subject.release(Deadline.after(1))
+    assert "admit" in owner.events and "observe" not in owner.events
+    assert not owner.obligations[0].resolved
 
 
 def test_real_observer_release_retries_custody_and_resolves_only_its_hold(tmp_path: Path) -> None:
@@ -319,6 +351,13 @@ def test_real_observer_release_retries_custody_and_resolves_only_its_hold(tmp_pa
         assert query_factory.clients[0].settlement_attempts == 1
         rows = database.operations.list_lifecycle_obligations(owner.ownership)
         assert len(rows) == 2 and all(row.state is LifecycleObligationState.POSSIBLE_EFFECT for row in rows)
+        assert subject.payload is not None and unrelated.payload is not None
+        markers_by_nonce = {
+            decoded.nonce: decoded.query_may_have_been_admitted
+            for row in rows
+            for decoded in [decode_hold_payload(row.payload)]
+        }
+        assert markers_by_nonce == {subject.payload.nonce: True, unrelated.payload.nonce: False}
 
         subject.release(Deadline.after(1))
 
@@ -334,6 +373,7 @@ def test_real_observer_release_retries_custody_and_resolves_only_its_hold(tmp_pa
             subject.payload.nonce: LifecycleObligationState.RESOLVED,
             unrelated.payload.nonce: LifecycleObligationState.POSSIBLE_EFFECT,
         }
+        assert events.index("query-1:create") < events.index("query-1:spawn")
 
 
 def test_nested_holds_are_independent() -> None:
@@ -348,6 +388,8 @@ def test_nested_holds_are_independent() -> None:
     )
     first.release(Deadline.after(1))
     assert owner.obligations[0].resolved and not owner.obligations[1].resolved
+    assert decode_hold_payload(owner.obligations[0].payload).query_may_have_been_admitted
+    assert not decode_hold_payload(owner.obligations[1].payload).query_may_have_been_admitted
 
 
 def test_real_owner_persists_independent_rows_and_remains_borrowable(tmp_path: Path) -> None:
@@ -716,8 +758,10 @@ def test_lost_ledger_reply_keeps_state_without_replay(phase: str) -> None:
         subject.release(Deadline.after(1))
         assert owner.obligations[0].resolved
     elif phase == "publish":
-        subject.release(Deadline.after(1))
-        assert owner.obligations[0].resolved
+        with pytest.raises(ValidationError):
+            subject.release(Deadline.after(1))
+        assert not owner.obligations[0].resolved
+        assert "observe" not in owner.events
         assert owner.events.count("dispatch") == 1
     else:
         subject.release(Deadline.after(1))
@@ -762,8 +806,10 @@ def test_post_ready_start_and_publication_failure_keep_original_control() -> Non
     assert subject.payload is not None and subject.payload.guest == GUEST
     assert subject.obligation is not None
     assert owner.events.count("dispatch") == 1
-    subject.release(Deadline.after(1))
-    assert owner.obligations[0].resolved
+    with pytest.raises(ValidationError):
+        subject.release(Deadline.after(1))
+    assert not owner.obligations[0].resolved
+    assert "observe" not in owner.events
 
 
 def test_controller_observation_failure_prevents_registration_and_dispatch() -> None:
@@ -806,9 +852,9 @@ def test_canonical_payload_rejects_malformed_boundary() -> None:
     assert locator_digest("opaque-locator") == payload.locator_sha256
     for bad in (
         encoded + b" ",
-        encoded.replace(b'"version":2', b'"version":true'),
-        encoded.replace(b'"version":2', b'"version":1'),
-        encoded[:-1] + b',"version":2}',
+        encoded.replace(b'"version":3', b'"version":true'),
+        encoded.replace(b'"version":3', b'"version":2'),
+        encoded[:-1] + b',"version":3}',
         encoded[:-1] + b',"version":1}',
         b"\xff",
         b"{}",
@@ -816,6 +862,14 @@ def test_canonical_payload_rejects_malformed_boundary() -> None:
         with pytest.raises(ValidationError):
             decode_hold_payload(bad)
     value: dict[str, Any] = json.loads(encoded)
+    del value["query_may_have_been_admitted"]
+    with pytest.raises(ValidationError):
+        decode_hold_payload(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
+    value = json.loads(encoded)
+    value["query_may_have_been_admitted"] = 1
+    with pytest.raises(ValidationError):
+        decode_hold_payload(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
+    value = json.loads(encoded)
     value["guest_boot_id"] = "not-a-uuid"
     with pytest.raises(ValidationError):
         decode_hold_payload(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())

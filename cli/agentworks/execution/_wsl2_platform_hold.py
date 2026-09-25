@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from agentworks.operations import LifecycleObligation, OperationOwner
 
 OBLIGATION_KIND = "wsl2-platform-hold"
-PAYLOAD_VERSION = 2
+PAYLOAD_VERSION = 3
 _MAX_LOCATOR_BYTES = 4096
 
 
@@ -44,6 +44,7 @@ class WSL2HoldPayload:
     nonce: str
     controller: ControllerIdentity
     guest: GuestAnchorIdentity | None = None
+    query_may_have_been_admitted: bool = False
 
     def __post_init__(self) -> None:
         if not _hex(self.locator_sha256, 64) or not _valid_instance_marker(self.instance_marker):
@@ -54,6 +55,8 @@ class WSL2HoldPayload:
             raise ValidationError("WSL2 hold controller identity is invalid")
         if self.guest is not None and type(self.guest) is not GuestAnchorIdentity:
             raise ValidationError("WSL2 hold guest identity is invalid")
+        if type(self.query_may_have_been_admitted) is not bool:
+            raise ValidationError("WSL2 hold query admission marker is invalid")
 
 
 def _hex(value: object, length: int) -> bool:
@@ -93,6 +96,7 @@ def encode_hold_payload(payload: WSL2HoldPayload) -> bytes:
         "instance_marker": payload.instance_marker,
         "locator_sha256": payload.locator_sha256,
         "nonce": payload.nonce,
+        "query_may_have_been_admitted": payload.query_may_have_been_admitted,
         "user": payload.user,
         "version": PAYLOAD_VERSION,
     }
@@ -139,6 +143,7 @@ def decode_hold_payload(data: bytes) -> WSL2HoldPayload:
             value["nonce"],
             ControllerIdentity(value["controller_pid"], value["controller_creation_ticks"]),
             guest,
+            value["query_may_have_been_admitted"],
         )
         if encode_hold_payload(payload) != data:
             raise ValueError("noncanonical JSON")
@@ -166,12 +171,15 @@ class WSL2PlatformHold:
         self._marker = instance_marker
         self._connection = connection
         self._native = native
-        self._anchor = WSL2GuestAnchorOwner(connection, native, observer=observer)
+        self._anchor = WSL2GuestAnchorOwner(
+            connection, native, observer=observer, before_observe=self._admit_guest_query
+        )
         self._transition_lock = Lock()
         self._obligation: LifecycleObligation | None = None
         self._payload: WSL2HoldPayload | None = None
         self._attempted = False
         self._registration_uncertain = False
+        self._ready_publication_uncertain = False
 
     @property
     def payload(self) -> WSL2HoldPayload | None:
@@ -278,11 +286,29 @@ class WSL2PlatformHold:
         assert payload is not None and obligation is not None
         published = replace(payload, guest=identity)
         self._payload = published
+        self._ready_publication_uncertain = True
         obligation.publish_payload(
             expected_revision=obligation.payload_revision,
             payload_version=PAYLOAD_VERSION,
             payload=encode_hold_payload(published),
         )
+        self._ready_publication_uncertain = False
+
+    def _admit_guest_query(self) -> None:
+        """Persist query eligibility before any observer can start a guest query."""
+        payload = self._payload
+        obligation = self._obligation
+        if payload is None or obligation is None or self._ready_publication_uncertain:
+            raise ValidationError("WSL2 hold cannot admit a guest query without a durable obligation")
+        if payload.query_may_have_been_admitted:
+            return
+        admitted = replace(payload, query_may_have_been_admitted=True)
+        obligation.publish_payload(
+            expected_revision=obligation.payload_revision,
+            payload_version=PAYLOAD_VERSION,
+            payload=encode_hold_payload(admitted),
+        )
+        self._payload = admitted
 
     def release(self, deadline: Deadline) -> WSL2AnchorEvidence:
         """Resolve only no-client creation or settled, exact guest absence."""

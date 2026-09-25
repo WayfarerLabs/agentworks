@@ -19,6 +19,8 @@ from agentworks.execution._vm_guest_identity_protocol import _valid_boot_id
 from agentworks.execution.carrier import Deadline
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.execution.carriers.wsl2 import WSL2Connection
 
 _CLEANUP_SECONDS = 0.5
@@ -250,10 +252,12 @@ class WSL2GuestAnchorOwner:
         native: OwnedHostClient,
         *,
         observer: GuestAnchorObserver | None = None,
+        before_observe: Callable[[], None] | None = None,
     ) -> None:
         self._connection = connection
         self._native = native
         self._observer = observer
+        self._before_observe = before_observe
         self._local = native.snapshot()
         self._identity: GuestAnchorIdentity | None = None
         self._nonce: str | None = None
@@ -382,6 +386,8 @@ class WSL2GuestAnchorOwner:
             or deadline.expired
         ):
             return
+        if self._before_observe is not None:
+            self._before_observe()
         presence = self._observer.observe(self._identity, deadline)
         if type(presence) is GuestAnchorPresence:
             self._guest_anchor_presence = presence

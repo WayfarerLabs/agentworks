@@ -346,6 +346,38 @@ def test_release_retries_guest_observer_after_local_settlement(monkeypatch: pyte
     ]
 
 
+def test_before_observe_runs_only_after_settlement_and_blocks_observer_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token(monkeypatch)
+    unsettled = local(HostClientStatus.ACTIVE, assignment=JobAssignment.ASSIGNED_AT_CREATION, job=HandleSettlement.OPEN)
+    settled = local(
+        HostClientStatus.EXITED,
+        0,
+        JobAssignment.ASSIGNED_AT_CREATION,
+        HandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
+    )
+    native = FakeNative([ready(), b""], settle_results=[unsettled, settled])
+    observer = FakeObserver([GuestAnchorPresence.ABSENT_CONFIRMED])
+    calls: list[str] = []
+
+    def before_observe() -> None:
+        calls.append("admit")
+        if len(calls) == 1:
+            raise OSError("publication failed")
+
+    subject = WSL2GuestAnchorOwner(connection(), native, observer=observer, before_observe=before_observe)
+    subject.start(Deadline.after(1))
+    assert not subject.release(Deadline.after(1)).local.settled
+    assert calls == [] and observer.seen == []
+    with pytest.raises(OSError):
+        subject.release(Deadline.after(1))
+    assert calls == ["admit"] and observer.seen == []
+    assert subject.release(Deadline.after(1)).guest_anchor_presence is GuestAnchorPresence.ABSENT_CONFIRMED
+    assert calls == ["admit", "admit"] and observer.seen == [GuestAnchorIdentity(BOOT_ID, 137, 8192, INIT_START_TICKS)]
+
+
 @pytest.mark.parametrize(
     "receipt",
     [
