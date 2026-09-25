@@ -33,6 +33,8 @@ from ._runtime_prerequisite import (
 from .carrier import CarrierIO, Deadline, Dispatch, Failure, FiniteInput, PreparedInvocation, Retention, SinkOutput
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ._managed_job_store import FactName
     from ._vm_guest_identity_protocol import VMGuestIdentity
     from .carrier import Carrier, ExitStatus
@@ -193,6 +195,7 @@ def stop_managed_run(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     guest: VMGuestIdentity,
+    before_dispatch: Callable[[], None] | None = None,
 ) -> ManagedStopCandidate:
     """Publish an idempotent stop request; only exact empty evidence proves termination."""
     if (
@@ -237,6 +240,8 @@ def stop_managed_run(
                 RuntimePrerequisiteObservation(RuntimePrerequisiteState.UNKNOWN, None),
                 None,
             )
+        if before_dispatch is not None:
+            before_dispatch()
         report = carrier.execute(invocation, io=io, deadline=deadline)
         prerequisite = runtime.observation
         observation = None

@@ -5,18 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
-from agentworks.db import OperationResourceKind
 from agentworks.errors import ValidationError
-from agentworks.operations import OperationOwner
 
 from ._fixed_helper_operation import BorrowedFixedHelperCarrier
-from ._helper_launcher import IdentityPlan, _validate_plan
+from ._managed_bound_run import preflight_bound_run
 from ._managed_job_protocol import (
     ManagedJobFactError,
     StreamDisposition,
     StreamEndFact,
     decode_managed_job_fact,
-    encode_managed_job_fact,
 )
 from ._managed_job_store import Stream
 from ._managed_observation_exchange import (
@@ -28,19 +25,18 @@ from ._managed_observation_exchange import (
 from ._managed_runs import (
     ManagedOutputMode,
     ManagedRunIdentity,
-    ManagedRunLifetime,
-    ManagedRunOwnerKind,
-    ManagedRunReceipt,
     ManagedRunRepository,
     ManagedTargetIdentity,
-    ManagedTargetKind,
 )
-from ._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
-from ._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
-from .carrier import Carrier, Deadline
 
 if TYPE_CHECKING:
+    from agentworks.operations import OperationOwner
+
+    from ._helper_launcher import IdentityPlan
     from ._managed_runs import ManagedRunRecord
+    from ._runtime_prerequisite import RuntimeSelection
+    from ._vm_guest_identity_protocol import VMGuestIdentity
+    from .carrier import Carrier, Deadline
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -155,37 +151,16 @@ def _bound_exchange(
     owner: OperationOwner,
     stream: Stream | None,
 ) -> tuple[ManagedRunRecord, ManagedObservationCandidate | None, ManagedObserveOutcome]:
-    if (
-        type(identity) is not ManagedRunIdentity
-        or type(target) is not ManagedTargetIdentity
-        or target.kind is not ManagedTargetKind.VM
-        or type(guest) is not VMGuestIdentity
-        or target.boot_id != vm_guest_boot_id(guest)
-        or type(runtime_selection) is not RuntimeSelection
-        or runtime_selection.target_os is not RuntimeTargetOS.LINUX
-        or type(deadline) is not Deadline
-        or deadline.expires_at is None
-        or deadline.expired
-        or not isinstance(owner, OperationOwner)
-        or owner.ownership.scope.resource_kind is not OperationResourceKind.VM
-        or owner.ownership.scope.resource_name != target.name
-    ):
-        raise ValidationError("Managed observation requires an owned exact Linux VM and finite deadline")
-    if _validate_plan(root_plan).euid != 0:
-        raise ValidationError("Managed observation requires a root helper plan")
-
-    record = repository.inspect(identity)
-    if (
-        record is None
-        or record.identity != identity
-        or record.spec.target != target
-        or record.spec.target.kind is not ManagedTargetKind.VM
-        or record.spec.lifetime is not ManagedRunLifetime.INDEPENDENT
-        or record.spec.owner.kind is not ManagedRunOwnerKind.RESOURCE
-    ):
-        raise ValidationError("Managed observation requires an exact independent VM reservation")
-    receipt = ManagedRunReceipt(record.identity, record.identity.unit_name, record.spec)
-    expected_launch = encode_managed_job_fact(receipt)
+    record, expected_launch = preflight_bound_run(
+        repository,
+        identity,
+        target=target,
+        guest=guest,
+        root_plan=root_plan,
+        runtime_selection=runtime_selection,
+        deadline=deadline,
+        owner=owner,
+    )
 
     borrow = owner.borrow()
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
