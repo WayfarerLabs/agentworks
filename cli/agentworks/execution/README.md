@@ -322,9 +322,11 @@ Portable SQLite tests cover this sequence, not native locator-to-registration bi
 behavior, WSLService drain, crash recovery, activation or RunContext wiring. Its private
 `from_platform` path uses the selected WSL2 platform to observe registration and resolve the native
 route before acquiring the VM claim, then re-observes registration under the hold during target
-preparation. A changed registration, route or runtime refuses before file dispatch. The selected
-preparer may already have sent its readiness probe through a changed route, so this is not an atomic
-registration or pre-probe route guarantee and is not a production factory.
+preparation. It copies the selected route into one core-owned carrier used for both the guest probe
+and file dispatch. A changed registration refuses before file dispatch, and invalid route or runtime
+facts refuse before ownership. Replacement between the pre-probe observation and guest dispatch can
+still send the read-only probe to a changed registration; post-probe confirmation suppresses file
+dispatch in that case. This is not an atomic registration guarantee or a production factory.
 
 ## Observation and guest lifetime
 

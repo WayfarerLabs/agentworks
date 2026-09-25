@@ -451,25 +451,23 @@ before settlement and retains the operation after uncertain dispatch or control 
 completion may settle that attempt while preparation still rejects an invalid observation, runtime
 refusal, carrier failure or identity mismatch. The helper neither acquires nor closes the outer
 owner and performs no activation, route selection, adoption or persistence. A second private seam
-accepts the selected VM, its bound platform and existing run context, then validates owner, marker
-and deadline before platform I/O. One serial borrow spans provider locator observation, native
-binding resolution and the guest attempt. It uses the same finite deadline, validates
-plugin-returned shapes, and rejects late results before the next stage or guest dispatch. After a
-successful guest probe, a second locator observation under the same borrow must exactly match the
-first before the target and passive binding can escape. This detects ordinary cooperative provider
-replacement at the preparation linearization point. Unavailable or invalid confirmation is an
-unconfirmed locator, while two valid unequal locators establish change. Production later-use
-authority still needs a locator-bound platform hold and binding; malicious or engineered A-B-A host
-behavior is outside this checkpoint's threat scope. A release failure suppresses target and binding
-and attaches an uncertain custody fact with retained guest evidence. An unavailable locator retains
-its typed refusal without binding resolution. WSL2 can currently supply both positive facts; Proxmox
-returns locator unavailable, while SSH-backed cloud and Lima bindings remain later work. These are
-hermetic composition facts, not live carrier proof. The selected-platform result retains the
-validated passive binding only when preparation succeeds, so later private composition can use the
-same delivery facts without resolving them again. Production composition therefore still needs an
-owner acquired before activation plus typed whole-span lifecycle and cleanup evidence; legacy
-lifecycle returns cannot close that gate. Future hierarchical admission replaces exact-VM equality
-with a core-owned coverage decision rather than a target-local ancestry guess.
+accepts the selected VM, its bound platform, an expected locator observed before binding resolution,
+and one caller-owned native binding. It validates owner, marker, deadline and plugin-shaped values
+before borrowing. Under one serial borrow it compares the current locator to that expected value,
+probes the guest through the supplied binding and confirms the locator afterward. It never resolves
+another binding. The resolving caller must use the same deadline, validate and retain the selected
+route, and refuse a late resolver result. WSL2's private factory copies the selected route into one
+core-owned carrier used for both probe and file dispatch. A registration replacement during
+resolution is detected before the probe; one between the pre-probe observation and dispatch may
+still receive the read-only probe, but a changed post-probe locator suppresses file dispatch.
+Unavailable or invalid confirmation is unconfirmed; two valid unequal locators establish change.
+Release failure suppresses the target and attaches an uncertain custody fact with guest evidence.
+Production still needs an owner before activation, a locator-bound route lifetime, typed whole-span
+cleanup evidence and native proof. WSL2 supplies the first positive locator and binding pair;
+Proxmox returns locator unavailable, while SSH-backed cloud and Lima bindings remain later work.
+Malicious or engineered A-B-A host behavior is outside this checkpoint's threat scope. Future
+hierarchical admission replaces exact-VM equality with a core-owned coverage decision rather than a
+target-local ancestry guess.
 
 New VM creation generates and persists one non-secret marker before provider dispatch. The marker is
 exactly 32 lowercase hexadecimal characters and the shared create bootstrap writes that same value

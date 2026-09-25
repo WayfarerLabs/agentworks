@@ -1493,6 +1493,13 @@ connection and trust only. Before broader lifecycle implementation, complete the
       absence is uncertain. This establishes portable file-dispatch gating, not atomic registration
       observation, pre-probe route stability, native WSL behavior, WSLService drain or a production
       factory.
+- [ ] Replace the private selected-platform preparer's internal binding resolution with one
+      caller-owned binding and a locator observed before resolution. Confirm the locator before and
+      after the guest probe, and use the same core-owned WSL2 carrier for probing and file dispatch.
+      Prove replacement during resolution, changed registration around probing, isolation from
+      plugin-route mutation and uncertain custody in focused tests and private review. This
+      supersedes only the earlier checkpoint's internal re-resolution, not its completed historical
+      record or the native and production gates above.
 
 The private WSL2 hold-recovery checkpoint at `15f8a936` consumes one exact persisted obligation
 after generic takeover. It resolves a registered row without dispatch or a post-`READY` row only
