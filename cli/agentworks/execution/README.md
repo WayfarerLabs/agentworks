@@ -52,8 +52,13 @@ the caller's explicit shell choice against a supplied resolved shell identity an
 retention for sensitive input. `_workload_shell.py` observes a supported `USER_DEFAULT` shell after
 the selected workload identity transition, with a fixed Python 3.11 guest helper and a bounded
 nonce-bound response. The controller rechecks that account shell before application launch. The
-private start kernel accepts pre-reservation carrier preparation, but no production caller yet
-composes these steps into a job API.
+private start kernel accepts pre-reservation carrier preparation. `_managed_job_access.py` privately
+composes a supplied exact-VM target, workload and root identity plans, finite request, carrier
+preflight, reservation and owned start. `USER_DEFAULT` first observes the workload account shell
+under a borrow; unresolved or uncertain observation creates no run row. This is not a production
+caller or job API. The caller must still hold the selected route and reread the current target
+marker and boot before launch. Recovery, later job actions, native SSH/QGA proof and RunContext
+delivery remain open.
 
 `models.py` defines immutable literal commands and scripts with explicit `Shell.SH`, `Shell.BASH` or
 `Shell.USER_DEFAULT` selection and separate startup flags. It also defines finite `Input`, bounded
