@@ -359,6 +359,15 @@ been reconciled; a merely possible-dispatch run is not stop authority. The resou
 continues to own the workload and target stop request after the temporary dispatch obligation
 resolves. No database stop-state field is introduced.
 
+The private host-bound stop checkpoint implements this one-attempt shape under a caller-held exact
+VM owner. Shared preflight checks the persisted independent resource-owned VM run and matching
+current guest facts; stop additionally requires a reconciled launch receipt. Its `managed-stop`
+obligation persists only the canonical run ID; the stop exchange arms it after deterministic
+validation and before carrier dispatch. Settled `NOT_SENT` or complete, validated
+`ACCEPTED`/`TERMINATED` resolves the temporary obligation. Unknown or failed delivery and
+interrupted arming retain it with the original control exception and custody facts. This is hermetic
+host binding, not proof of provider route freshness, recovery takeover or native SSH/QGA delivery.
+
 The first `dispose` mechanism is an explicit authorized release of terminal retained artifacts, not
 a retention timer or a synonym for stop. Before committing release, the fixed helper requires the
 byte-exact canonical launch, its launch-bound `boundary-empty` and both launch-bound stream-end

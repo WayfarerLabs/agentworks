@@ -544,6 +544,15 @@ carrier dispatch; the helper rereads the protected marker, kernel boot and PID 1
 opening the managed store. A missing, unsafe or changed identity returns fixed refusal without
 publishing stop intent.
 
+`_managed_stop_access.py` privately binds one stop attempt to the exact persisted independent VM run
+and a caller-held VM operation owner. It requires a reconciled launch receipt, installs a
+`managed-stop` obligation containing only the run ID, and arms that obligation after pure carrier
+validation but before dispatch. Settled, validated acceptance resolves temporary stop-delivery
+custody without claiming termination; positively proved no delivery also resolves it. Unknown
+delivery or interrupted arming retains the exact obligation and owner for recovery. This adapter
+does not reconcile the row, release the owner's whole claim, prove a production provider route or
+implement recovery.
+
 `_managed_disposal_exchange.py` supplies a private fixed Linux root disposal attempt. The target
 requires the exact canonical launch, its bound boundary-empty and both stream-end facts. Wait is
 validated if present but is optional. Spool bytes and digest do not authorize deletion; fixed leaves

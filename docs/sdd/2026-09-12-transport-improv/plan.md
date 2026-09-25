@@ -1499,6 +1499,16 @@ the latter. Unknown or interrupted delivery retains the claim and exact-run reco
 does not add a mutable database stop state or make an uncertain stop retry safe before old-dispatch
 drain is proved. Host-bound disposal and recovery are separate later gates.
 
+At private checkpoint `617295760`, the owned stop adapter implements that one-attempt ruling. It
+shares exact independent-VM row preflight with observe/read-output, requires `RECEIPT_CONFIRMED`,
+installs a canonical run-ID-only `managed-stop` obligation, and arms it after pure stop-exchange
+validation but before carrier dispatch. Settled `NOT_SENT` or complete validated
+`ACCEPTED`/`TERMINATED` resolves temporary custody; unknown/failed delivery and interrupted arming
+retain the obligation and owner without replay. The row remains unchanged, and acceptance remains
+distinct from termination. The narrow local selection passed 21 tests, Ruff and mypy. Recovery
+takeover, production route freshness, host-bound disposal, live SSH/QGA proof and public JobAccess
+remain open.
+
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared
       create bootstrap. Migration 41 leaves legacy rows NULL; ordinary existing-VM operations never
