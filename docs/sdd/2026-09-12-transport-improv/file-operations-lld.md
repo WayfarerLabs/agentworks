@@ -690,8 +690,10 @@ database coordinates participating operations on its managed resources. Independ
 thereby coordinate the same target; concurrent independent controllers are not an initial guarantee.
 The core operation boundary acquires the relevant resource scope before conflicting work, then
 shares that ownership through RunContext and nested work. File helpers do not each acquire a
-machine-wide destination lock, and neither guests nor platform hosts require protected lock-file
-provisioning.
+machine-wide destination lock, and platform hosts require no protected lock setup. The narrower
+Linux guest effect-fence candidate below does require a core-provisioned `/run` gate namespace for
+recovery from delayed fixed-helper dispatch. It does not serialize arbitrary file operations or
+defend against a malicious target-user process.
 
 Start with coarse VM-level exclusion, independent of execution identity. Host-level mutations use
 the platform's shared resource scope when they can conflict across VMs; do not infer separate
@@ -911,12 +913,14 @@ revalidation/adoption and cannot silently inherit the old gate. The proposed Lin
 selects a core-provisioned, boot-local `/run/agentworks/file-gates-v1` namespace with separate
 access for each effective helper identity. Setup and initialization precede effect admission;
 neither happens in the no-write, no-state readiness path or as a side effect of an effect request.
-Effect admission must verify the actual gate mount is local and shared by all relevant helper
-routes, and that the identity can use Python `sqlite3`. An absent or unsuitable namespace refuses
-effect admission. Account-home and `/dev/shm` paths are not automatic fallbacks: a home may be
-network-backed, while systemd can remove ordinary-user `/dev/shm` contents at logout. The `/run`
-choice is a Linux guest candidate, not proved WSL2/SSH/QGA mount or boot-lifetime behavior and not a
-macOS host setup requirement.
+Guest setup establishes a suitable local mount and per-identity permissions; selected-route
+admission confirms the bound gate instance, guest epoch and usable Python `sqlite3`. An absent or
+unsuitable namespace refuses effect admission. Common mount visibility across SSH, QGA and WSL
+routes, and no cleanup within an unresolved guest epoch, are separate native acceptance invariants.
+One selected helper cannot prove what the other routes see. Account-home and `/dev/shm` paths are
+not automatic fallbacks: a home may be network-backed, while systemd can remove ordinary-user
+`/dev/shm` contents at logout. The `/run` choice is a Linux guest candidate, not proved WSL2/SSH/QGA
+mount or boot-lifetime behavior and not a macOS host setup requirement.
 
 The first concrete binding is Linux VM-specific. Target preparation already observes a
 `VMGuestIdentity` containing the raw instance marker, kernel boot ID and PID 1 start time and
