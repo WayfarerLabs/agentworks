@@ -6,7 +6,7 @@ import secrets
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol, cast
 
-from agentworks.errors import ValidationError
+from agentworks.errors import StateError, ValidationError
 from agentworks.execution._file_download import (
     FileDownloadBinding,
     FileDownloadControlFact,
@@ -71,6 +71,7 @@ from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarr
 from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTargetKind
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState, RuntimeTargetOS
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
+from agentworks.execution.carrier import Dispatch
 from agentworks.operations import LifecycleObligation, _PreRegistrationClosingRefusal, release_borrow_after_custody
 
 if TYPE_CHECKING:
@@ -323,19 +324,7 @@ class FileOperation:
             raise
         self._install(active, admission, self._active_downloads)
 
-        try:
-            outcome = prepared.run()
-        except BaseException as control:
-            fact = control.__cause__
-            if isinstance(fact, FileDownloadControlFact):
-                try:
-                    self._capture(active, fact.outcome)
-                except BaseException:
-                    raise control from fact
-            raise
-
-        self._capture(active, outcome)
-        return outcome
+        return self._run_prepared_download(active, prepared)
 
     def _download_with_gate_setup(
         self,
@@ -392,51 +381,42 @@ class FileOperation:
             borrow.close()
             raise
         self._install(active, admission, self._active_downloads)
-        # The pending record stays attached on every non-acknowledged setup or
-        # failed publication. In particular, a settled setup attempt is not
-        # evidence that the whole file-call obligation can be resolved.
-        try:
-            result = exchange_file_effect_gate(
-                operation,
-                operation=GateControlOperation.SETUP,
-                path=gate_setup.path,
-                guest=gate_setup.guest,
-                scope_name=self._target.name,
-                plan=plan,
-                deadline=deadline,
-                runtime_selection=runtime_selection,
-            )
-            normal = operation.settle(result.dispatch, result.carrier_completion)
-            observed = result.observation
-            if (
-                not normal
-                or result.runtime_prerequisite.state is not RuntimePrerequisiteState.READY
-                or observed is None
-                or observed.state is not GateControlObservationState.RESOLVED
-                or observed.binding is None
-            ):
-                raise GateControlMutationUncertain("file-effect gate setup was not acknowledged")
-            gate = observed.binding
-            if (
-                gate.path != gate_setup.path
-                or gate.guest != gate_setup.guest
-                or gate.scope_name != self._target.name
-                or gate.euid != plan.expected.euid
-            ):
-                raise GateControlMutationUncertain("file-effect gate binding did not match setup")
-            bound = replace(binding, effect_gate=gate)
-            self._publish_retained(
-                active,
-                self._obligation(FileCallFamily.DOWNLOAD, bound, token=token),
-            )
-            prepared = _prepare_download_from_binding(bound, sink, deadline, token, operation)
-            active.binding = bound
-            active.prepared = prepared
-        except BaseException:
-            # A lost publication reply may have committed either row revision;
-            # the attached pending record and owner remain unresolved.
-            raise
+        # The pending record stays attached on any possibly-effectful setup or
+        # failed publication. A lost publication reply may have committed
+        # either row revision; the owner remains unresolved in both cases.
+        result = exchange_file_effect_gate(
+            operation,
+            operation=GateControlOperation.SETUP,
+            path=gate_setup.path,
+            guest=gate_setup.guest,
+            scope_name=self._target.name,
+            plan=plan,
+            deadline=deadline,
+            runtime_selection=runtime_selection,
+        )
+        normal = operation.settle(result.dispatch, result.carrier_completion)
+        if result.dispatch is Dispatch.NOT_SENT and not operation.requires_owner_retention:
+            borrow.close()
+            self._active_downloads.pop(id(active))
+            raise StateError("File-effect gate setup was not dispatched")
+        observed = result.observation
+        if (
+            not normal
+            or result.runtime_prerequisite.state is not RuntimePrerequisiteState.READY
+            or observed is None
+            or observed.state is not GateControlObservationState.RESOLVED
+            or observed.binding is None
+        ):
+            raise GateControlMutationUncertain("file-effect gate setup was not acknowledged")
+        bound = replace(binding, effect_gate=observed.binding)
+        self._publish_retained(active, self._obligation(FileCallFamily.DOWNLOAD, bound, token=token))
+        prepared = _prepare_download_from_binding(bound, sink, deadline, token, operation)
+        active.binding = bound
+        active.prepared = prepared
+        return self._run_prepared_download(active, prepared)
 
+    def _run_prepared_download(self, active: _ActiveFileDownload, prepared: _PreparedDownload) -> FileDownloadOutcome:
+        """Complete one already attached download through the shared custody path."""
         try:
             outcome = prepared.run()
         except BaseException as control:

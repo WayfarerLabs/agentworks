@@ -21,8 +21,16 @@ from agentworks.execution._file_operation import FileOperation, _PendingDownload
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
-from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, ExitStatus, PreparedInvocation
-from agentworks.operations import LifecycleObligation, OperationBorrow, OperationOwner
+from agentworks.execution.carrier import (
+    CarrierIO,
+    CarrierReport,
+    Deadline,
+    Dispatch,
+    ExitStatus,
+    Failure,
+    PreparedInvocation,
+)
+from agentworks.operations import LifecycleObligation, OperationBorrow, OperationOwner, _PreRegistrationClosingRefusal
 from tests.execution.files._file_download_support import BytesSink
 from tests.execution.files._file_snapshot_support import LocalCarrier, install_fixture_bundle
 from tests.execution.files._fixed_bundle_support import fixture_file_bundle
@@ -48,6 +56,9 @@ class _InspectingCarrier(LocalCarrier):
         assert len(rows) == 1 and rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
         self.payloads.append(decode_file_call_obligation(rows[0].payload))
         self.borrows.append(self._owner._active_borrow)  # noqa: SLF001
+        if self._fail_setup == "not_sent":
+            self.calls += 1
+            return CarrierReport(Dispatch.NOT_SENT, failure=Failure.DISPATCH)
         result = super().execute(invocation, io=io, deadline=deadline)
         if self.calls == 1 and self._fail_setup == "lost":
             raise RuntimeError("lost setup reply")
@@ -156,6 +167,52 @@ def test_mismatched_setup_is_refused_before_registration(tmp_path: Path, monkeyp
         assert carrier.calls == 0
         assert not operation.active_downloads
         assert not database.operations.list_lifecycle_obligations(owner.ownership)
+        owner.close()
+    finally:
+        database.close()
+
+
+def test_owner_close_before_setup_registration_releases_unused_borrow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, gate_root = _fixture(monkeypatch, tmp_path)
+    database = Database(tmp_path / "state.db")
+    owner, operation, setup = _context(database, gate_root)
+    carrier = _InspectingCarrier(database, owner)
+    original_install = OperationBorrow.install_dispatch_obligation
+
+    def close_before_install(self: OperationBorrow, *args, **kwargs):
+        with pytest.raises(StateError):
+            owner.close()
+        return original_install(self, *args, **kwargs)
+
+    monkeypatch.setattr(OperationBorrow, "install_dispatch_obligation", close_before_install)
+    try:
+        with pytest.raises(_PreRegistrationClosingRefusal):
+            _call(operation, carrier, source, setup)
+        assert carrier.calls == 0
+        assert not operation.active_downloads
+        assert not database.operations.list_lifecycle_obligations(owner.ownership)
+        owner.close()
+    finally:
+        database.close()
+
+
+def test_explicit_not_sent_setup_resolves_unused_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source, gate_root = _fixture(monkeypatch, tmp_path)
+    database = Database(tmp_path / "state.db")
+    owner, operation, setup = _context(database, gate_root)
+    carrier = _InspectingCarrier(database, owner, fail_setup="not_sent")
+    try:
+        with pytest.raises(StateError):
+            _call(operation, carrier, source, setup)
+        assert carrier.calls == 1
+        assert not Path(setup.path).exists()
+        assert not operation.active_downloads
+        rows = database.operations.list_lifecycle_obligations(owner.ownership)
+        assert len(rows) == 1 and rows[0].state is LifecycleObligationState.RESOLVED
+        owner.seal_lifecycle_obligations()
+        owner.record_effects_resolved()
         owner.close()
     finally:
         database.close()
