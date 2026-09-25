@@ -10,7 +10,7 @@ from typing import cast
 from ._file_wire import FileRecordKind, FileRecordWriter
 from ._helper_identity import matches_current_identity
 from ._managed_job_store import FactName, ManagedJobStore, StoreError
-from ._managed_observation_protocol import ManagedObservationError, checked_fact, checked_launch
+from ._managed_observation_protocol import ManagedObservationError, checked_fact, checked_launch, checked_vm_launch
 from ._managed_stop_protocol import (
     MAX_REQUEST_BYTES,
     ManagedStopError,
@@ -19,6 +19,7 @@ from ._managed_stop_protocol import (
     decode_request,
     encode_result,
 )
+from ._vm_guest_identity_guest import _GuestRefusal, _identity
 
 
 def _read_request() -> ManagedStopRequest:
@@ -62,10 +63,12 @@ def main(nonce: str) -> int:
         request = _read_request()
         if request.nonce != nonce or sys.platform != "linux" or not matches_current_identity(request.identity):
             raise ManagedStopError("managed stop prerequisite")
-        launch = checked_launch(request.expected_launch)
+        launch = checked_vm_launch(request.expected_launch, request.guest)
+        if _identity() != request.guest:
+            raise ManagedStopError("managed stop guest identity mismatch")
         with ManagedJobStore(cast("str", launch["run_id"])) as store:
             result, facts = _prepare(request, store)
-    except (ManagedStopError, ManagedObservationError, StoreError, OSError, ValueError):
+    except (ManagedStopError, ManagedObservationError, StoreError, _GuestRefusal, OSError, ValueError, TypeError):
         writer.write(FileRecordKind.FAILED, b"")
         writer.write(FileRecordKind.FINISHED, b"")
         return 0

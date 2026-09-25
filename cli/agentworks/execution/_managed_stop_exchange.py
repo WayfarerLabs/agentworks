@@ -34,6 +34,7 @@ from .carrier import CarrierIO, Deadline, Dispatch, Failure, FiniteInput, Prepar
 
 if TYPE_CHECKING:
     from ._managed_job_store import FactName
+    from ._vm_guest_identity_protocol import VMGuestIdentity
     from .carrier import Carrier, ExitStatus
 
 
@@ -191,6 +192,7 @@ def stop_managed_run(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
+    guest: VMGuestIdentity,
 ) -> ManagedStopCandidate:
     """Publish an idempotent stop request; only exact empty evidence proves termination."""
     if (
@@ -207,7 +209,7 @@ def stop_managed_run(
             budget = MAX_OBSERVATION_MS
         else:
             budget = max(1, math.ceil(remaining * 1000))
-        request = ManagedStopRequest(secrets.token_hex(16), expected_launch, plan.expected, budget)
+        request = ManagedStopRequest(secrets.token_hex(16), expected_launch, plan.expected, budget, guest)
         request_data = encode_request(request)
         argv, candidates, shim = build_runtime_identity_helper_argv(
             plan, selection=runtime_selection, fixed_source=FIXED_BUNDLE.bootstrap, nonce=request.nonce

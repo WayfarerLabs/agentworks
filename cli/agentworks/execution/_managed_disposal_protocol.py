@@ -10,7 +10,8 @@ from enum import StrEnum
 
 from ._file_wire import valid_nonce
 from ._helper_identity import IdentityExpectation, decode_identity
-from ._managed_observation_protocol import ManagedObservationError, checked_launch
+from ._managed_observation_protocol import ManagedObservationError, checked_vm_launch
+from ._vm_guest_identity_protocol import VMGuestIdentity
 
 MAX_REQUEST_BYTES = 8192
 
@@ -29,6 +30,7 @@ class DisposalRequest:
     nonce: str
     expected_launch: bytes
     identity: IdentityExpectation
+    guest: VMGuestIdentity
 
 
 def _json(value: object) -> bytes:
@@ -38,6 +40,10 @@ def _json(value: object) -> bytes:
 def encode_request(request: DisposalRequest) -> bytes:
     if type(request) is not DisposalRequest:
         raise DisposalError("invalid disposal request")
+    try:
+        checked_vm_launch(request.expected_launch, request.guest)
+    except ManagedObservationError:
+        raise DisposalError("invalid disposal request") from None
     data = _json(
         {
             "version": 1,
@@ -47,6 +53,11 @@ def encode_request(request: DisposalRequest) -> bytes:
                 "euid": request.identity.euid,
                 "egid": request.identity.egid,
                 "groups": list(request.identity.groups),
+            },
+            "guest": {
+                "instance_marker": request.guest.instance_marker,
+                "boot_id": request.guest.boot_id,
+                "init_start_ticks": request.guest.init_start_ticks,
             },
         }
     )
@@ -61,7 +72,7 @@ def decode_request(data: bytes) -> DisposalRequest:
         value = json.loads(data.decode("ascii"))
         if (
             type(value) is not dict
-            or set(value) != {"version", "nonce", "expected_launch", "identity"}
+            or set(value) != {"version", "nonce", "expected_launch", "identity", "guest"}
             or _json(value) != data
         ):
             raise ValueError
@@ -73,13 +84,17 @@ def decode_request(data: bytes) -> DisposalRequest:
         launch = base64.b64decode(encoded.encode("ascii"), validate=True)
         if base64.b64encode(launch).decode("ascii") != encoded:
             raise ValueError
-        checked_launch(launch)
+        guest_data = value["guest"]
+        if type(guest_data) is not dict or set(guest_data) != {"instance_marker", "boot_id", "init_start_ticks"}:
+            raise ValueError
+        guest = VMGuestIdentity(guest_data["instance_marker"], guest_data["boot_id"], guest_data["init_start_ticks"])
+        checked_vm_launch(launch, guest)
         identity = decode_identity(value["identity"])
         if identity.euid != 0:
             raise ValueError
-    except (ManagedObservationError, ValueError, TypeError, UnicodeError, binascii.Error, RecursionError):
+    except (ManagedObservationError, KeyError, ValueError, TypeError, UnicodeError, binascii.Error, RecursionError):
         raise DisposalError("invalid disposal request") from None
-    return DisposalRequest(value["nonce"], launch, identity)
+    return DisposalRequest(value["nonce"], launch, identity, guest)
 
 
 def encode_result(result: DisposalResult) -> bytes:

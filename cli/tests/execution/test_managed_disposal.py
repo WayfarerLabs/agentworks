@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution import _managed_disposal_guest as guest
 from agentworks.execution import _managed_job_request as request_wire
 from agentworks.execution import _managed_job_wire as wire
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, encode_file_record
@@ -36,6 +37,8 @@ from agentworks.execution._managed_disposal_protocol import (
 )
 from agentworks.execution._managed_job_store import FactName, ManagedJobStore, RequestAsset, StoreError, Stream
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+from agentworks.execution._vm_guest_identity_guest import _GuestRefusal
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, VMGuestIdentityFailure, vm_guest_boot_id
 from agentworks.execution.carrier import (
     CapturedOutput,
     CarrierIO,
@@ -54,9 +57,10 @@ from agentworks.execution.carrier import (
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux managed disposal")
 RUN = "a" * 32
 NONCE = "b" * 32
+GUEST = VMGuestIdentity("d" * 32, "00000000-0000-4000-8000-000000000001", 1234)
 
 
-def _launch(target: str = "vm-one") -> bytes:
+def _launch(target: str = "vm-one", *, boot: str = vm_guest_boot_id(GUEST), kind: str = "vm") -> bytes:
     return wire.encode_fact(
         {
             "version": 1,
@@ -64,10 +68,10 @@ def _launch(target: str = "vm-one") -> bytes:
             "run_id": RUN,
             "unit": f"agw-managed-{RUN}.service",
             "target": {
-                "kind": "vm",
+                "kind": kind,
                 "name": target,
                 "incarnation": "v1:" + "c" * 64,
-                "boot_id": "00000000-0000-4000-8000-000000000001",
+                "boot_id": boot,
             },
             "workload": {"euid": 1001, "egid": 1001, "groups": [1001]},
             "shell": {"requested": None, "resolved_executable": None, "login": False, "interactive": False},
@@ -547,6 +551,7 @@ def _exchange(carrier: ExchangeCarrier, *, deadline: Deadline | None = None) -> 
         plan=IdentityPlan(IdentityExpectation(0, 0, (0,)), IdentityMode.SUDO_ROOT),
         deadline=deadline or Deadline.after(10),
         runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+        guest=GUEST,
     )
 
 
@@ -628,6 +633,17 @@ def test_host_exchange_refuses_before_dispatch() -> None:
     expired = _exchange(carrier, deadline=Deadline.after(0))
     assert expired.dispatch is Dispatch.NOT_SENT and expired.observation is None
     assert carrier.validations == 1 and carrier.calls == 0
+    for launch in (_launch(boot=GUEST.boot_id), _launch(kind="platform-host")):
+        with pytest.raises(ValidationError):
+            dispose_managed_run(
+                carrier,
+                expected_launch=launch,
+                plan=IdentityPlan(IdentityExpectation(0, 0, (0,)), IdentityMode.SUDO_ROOT),
+                deadline=Deadline.after(1),
+                runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX),
+                guest=GUEST,
+            )
+    assert carrier.validations == 1 and carrier.calls == 0
     for plan, runtime in (
         (
             IdentityPlan(IdentityExpectation(1001, 1001, (1001,)), IdentityMode.DIRECT),
@@ -645,12 +661,42 @@ def test_host_exchange_refuses_before_dispatch() -> None:
                 plan=plan,
                 deadline=Deadline.after(1),
                 runtime_selection=runtime,
+                guest=GUEST,
             )
     assert carrier.validations == 1 and carrier.calls == 0
     refusing = ExchangeCarrier(_disposed, refuse_validation=True)
     with pytest.raises(ValidationError):
         _exchange(refusing)
     assert refusing.validations == 1 and refusing.calls == 0
+
+
+@pytest.mark.parametrize("failure", ["mismatch", "unsafe"])
+def test_guest_refuses_before_store_or_disposal(monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
+    records: list[tuple[FileRecordKind, bytes]] = []
+
+    class Writer:
+        def __init__(self, nonce: str) -> None:
+            assert nonce == NONCE
+
+        def write(self, kind: FileRecordKind, body: bytes) -> None:
+            records.append((kind, body))
+
+    def observe_guest() -> VMGuestIdentity:
+        if failure == "unsafe":
+            raise _GuestRefusal(VMGuestIdentityFailure.MARKER_UNSAFE)
+        return VMGuestIdentity("e" * 32, GUEST.boot_id, GUEST.init_start_ticks)
+
+    monkeypatch.setattr(guest, "FileRecordWriter", Writer)
+    monkeypatch.setattr(
+        guest,
+        "_read_request",
+        lambda: encode_request(DisposalRequest(NONCE, _launch(), IdentityExpectation(0, 0, (0,)), GUEST)),
+    )
+    monkeypatch.setattr(guest, "matches_current_identity", lambda _identity: True)
+    monkeypatch.setattr(guest, "_identity", observe_guest)
+    monkeypatch.setattr(guest, "ManagedJobStore", lambda *_args: pytest.fail("store opened before guest fence"))
+    assert guest.main(NONCE) == 0
+    assert records == [(FileRecordKind.FAILED, b""), (FileRecordKind.FINISHED, b"")]
 
 
 def test_transcript_requires_exact_receipt_and_complete_success() -> None:
@@ -701,7 +747,7 @@ def test_transcript_requires_exact_receipt_and_complete_success() -> None:
 def test_exact_source_python_311(interpreter: str, tmp_path: Path) -> None:
     if not Path(interpreter).exists():
         pytest.skip("interpreter unavailable")
-    request = encode_request(DisposalRequest(NONCE, _launch(), IdentityExpectation(0, 0, (0,))))
+    request = encode_request(DisposalRequest(NONCE, _launch(), IdentityExpectation(0, 0, (0,)), GUEST))
     source = build_helper_modules(
         "_agw_disposal_parity",
         (
@@ -710,6 +756,7 @@ def test_exact_source_python_311(interpreter: str, tmp_path: Path) -> None:
             "_managed_job_request",
             "_managed_job_store",
             "_file_wire",
+            "_vm_guest_identity_protocol",
             "_managed_observation_protocol",
             "_managed_disposal_store",
             "_managed_disposal_protocol",

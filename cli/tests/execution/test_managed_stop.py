@@ -34,6 +34,8 @@ from agentworks.execution._managed_stop_protocol import (
     encode_result,
 )
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+from agentworks.execution._vm_guest_identity_guest import _GuestRefusal
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, VMGuestIdentityFailure, vm_guest_boot_id
 from agentworks.execution.carrier import (
     CapturedOutput,
     CarrierIO,
@@ -51,16 +53,17 @@ from agentworks.execution.carrier import (
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux managed stop")
 RUN = "a" * 32
 NONCE = "b" * 32
+GUEST = VMGuestIdentity("d" * 32, "00000000-0000-4000-8000-000000000001", 1234)
 
 
-def _launch(*, target: str = "vm-one", boot: str = "00000000-0000-4000-8000-000000000001") -> bytes:
+def _launch(*, target: str = "vm-one", boot: str = vm_guest_boot_id(GUEST), kind: str = "vm") -> bytes:
     return wire.encode_fact(
         {
             "version": 1,
             "kind": "launch",
             "run_id": RUN,
             "unit": f"agw-managed-{RUN}.service",
-            "target": {"kind": "vm", "name": target, "incarnation": "v1:" + "c" * 64, "boot_id": boot},
+            "target": {"kind": kind, "name": target, "incarnation": "v1:" + "c" * 64, "boot_id": boot},
             "workload": {"euid": 1001, "egid": 1001, "groups": [1001]},
             "shell": {"requested": None, "resolved_executable": None, "login": False, "interactive": False},
             "owner": {"kind": "resource", "owner_id": "session-7"},
@@ -96,7 +99,7 @@ def store(tmp_path: Path) -> Generator[ManagedJobStore, None, None]:
 
 
 def _request(launch: bytes | None = None, budget: int = 1) -> ManagedStopRequest:
-    return ManagedStopRequest(NONCE, launch or _launch(), IdentityExpectation(0, 0, (0,)), budget)
+    return ManagedStopRequest(NONCE, launch or _launch(), IdentityExpectation(0, 0, (0,)), budget, GUEST)
 
 
 def _records(nonce: str, result: ManagedStopResult, facts: tuple[bytes, ...]) -> bytes:
@@ -160,6 +163,7 @@ def _exchange(carrier: Carrier, *, deadline: Deadline | None = None):  # type: i
         plan=IdentityPlan(IdentityExpectation(0, 0, (0,)), IdentityMode.SUDO_ROOT),
         deadline=deadline or Deadline.after(10),
         runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+        guest=GUEST,
     )
 
 
@@ -231,6 +235,31 @@ def test_guest_publishes_before_reply_and_only_empty_establishes_termination(sto
     assert facts == (launch, _boundary(launch))
 
 
+@pytest.mark.parametrize("failure", ["mismatch", "unsafe"])
+def test_guest_refuses_before_store_or_stop_publication(monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
+    records: list[tuple[FileRecordKind, bytes]] = []
+
+    class Writer:
+        def __init__(self, nonce: str) -> None:
+            assert nonce == NONCE
+
+        def write(self, kind: FileRecordKind, body: bytes) -> None:
+            records.append((kind, body))
+
+    def observe_guest() -> VMGuestIdentity:
+        if failure == "unsafe":
+            raise _GuestRefusal(VMGuestIdentityFailure.MARKER_UNSAFE)
+        return VMGuestIdentity("e" * 32, GUEST.boot_id, GUEST.init_start_ticks)
+
+    monkeypatch.setattr(guest, "FileRecordWriter", Writer)
+    monkeypatch.setattr(guest, "_read_request", _request)
+    monkeypatch.setattr(guest, "matches_current_identity", lambda _identity: True)
+    monkeypatch.setattr(guest, "_identity", observe_guest)
+    monkeypatch.setattr(guest, "ManagedJobStore", lambda *_args: pytest.fail("store opened before guest fence"))
+    assert guest.main(NONCE) == 0
+    assert records == [(FileRecordKind.FAILED, b""), (FileRecordKind.FINISHED, b"")]
+
+
 @pytest.mark.parametrize("variant", ["stale", "malformed"])
 def test_guest_keeps_accepted_after_invalid_boundary(store: ManagedJobStore, tmp_path: Path, variant: str) -> None:
     launch = _launch()
@@ -273,7 +302,7 @@ def test_protocol_bounds_and_exact_source_python311(tmp_path: Path) -> None:
     with pytest.raises(ManagedStopError):
         decode_result(b'{"facts":["launch","wait"],"version":1}')
     with pytest.raises(ManagedStopError):
-        encode_request(ManagedStopRequest(NONCE, _launch(), IdentityExpectation(1001, 1001, (1001,)), 1))
+        encode_request(ManagedStopRequest(NONCE, _launch(), IdentityExpectation(1001, 1001, (1001,)), 1, GUEST))
     for interpreter in (sys.executable, "/usr/bin/python3.11"):
         if not Path(interpreter).exists():
             continue
@@ -296,6 +325,7 @@ def test_protocol_bounds_and_exact_source_python311(tmp_path: Path) -> None:
                 "_managed_job_request",
                 "_managed_job_store",
                 "_file_wire",
+                "_vm_guest_identity_protocol",
                 "_managed_observation_protocol",
                 "_managed_stop_protocol",
             ),
@@ -415,6 +445,7 @@ def test_expired_deadline_is_not_sent_after_validation() -> None:
             plan=IdentityPlan(IdentityExpectation(0, 0, (0,)), IdentityMode.SUDO_ROOT),
             deadline=Deadline.after(1),
             runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX),
+            guest=GUEST,
         )
     assert carrier.calls == 0
 
@@ -433,7 +464,24 @@ def test_root_linux_and_carrier_validation_precede_dispatch() -> None:
     ):
         with pytest.raises(ValidationError):
             stop_managed_run(
-                carrier, expected_launch=_launch(), plan=plan, deadline=Deadline.after(1), runtime_selection=runtime
+                carrier,
+                expected_launch=_launch(),
+                plan=plan,
+                deadline=Deadline.after(1),
+                runtime_selection=runtime,
+                guest=GUEST,
+            )
+    assert carrier.validations == 0 and carrier.calls == 0
+
+    for launch in (_launch(boot=GUEST.boot_id), _launch(kind="platform-host")):
+        with pytest.raises(ValidationError):
+            stop_managed_run(
+                carrier,
+                expected_launch=launch,
+                plan=IdentityPlan(IdentityExpectation(0, 0, (0,)), IdentityMode.SUDO_ROOT),
+                deadline=Deadline.after(1),
+                runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX),
+                guest=GUEST,
             )
     assert carrier.validations == 0 and carrier.calls == 0
 

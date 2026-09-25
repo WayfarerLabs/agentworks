@@ -24,6 +24,7 @@ from ._runtime_prerequisite import (
 from .carrier import CarrierIO, Deadline, Dispatch, Failure, FiniteInput, PreparedInvocation, Retention, SinkOutput
 
 if TYPE_CHECKING:
+    from ._vm_guest_identity_protocol import VMGuestIdentity
     from .carrier import Carrier, ExitStatus
 
 
@@ -122,6 +123,7 @@ def dispose_managed_run(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
+    guest: VMGuestIdentity,
 ) -> DisposalCandidate:
     """Dispatch only a fixed Linux root helper and preserve ambiguous effects."""
     if (
@@ -133,7 +135,7 @@ def dispose_managed_run(
     ):
         raise ValidationError("Managed disposal requires a Linux root helper and deadline")
     try:
-        request = DisposalRequest(secrets.token_hex(16), expected_launch, plan.expected)
+        request = DisposalRequest(secrets.token_hex(16), expected_launch, plan.expected, guest)
         request_data = encode_request(request)
         argv, candidates, shim = build_runtime_identity_helper_argv(
             plan, selection=runtime_selection, fixed_source=FIXED_BUNDLE.bootstrap, nonce=request.nonce

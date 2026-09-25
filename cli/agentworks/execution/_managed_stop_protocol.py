@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from ._file_wire import valid_nonce
 from ._helper_identity import IdentityExpectation, decode_identity
 from ._managed_job_store import FactName
-from ._managed_observation_protocol import ManagedObservationError, checked_launch
+from ._managed_observation_protocol import ManagedObservationError, checked_vm_launch
+from ._vm_guest_identity_protocol import VMGuestIdentity
 
 MAX_REQUEST_BYTES = 8192
 MAX_RESULT_BYTES = 96
@@ -27,6 +28,7 @@ class ManagedStopRequest:
     expected_launch: bytes
     identity: IdentityExpectation
     observation_ms: int
+    guest: VMGuestIdentity
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +55,10 @@ def _load(data: bytes, bound: int) -> dict[str, object]:
 def encode_request(request: ManagedStopRequest) -> bytes:
     if type(request) is not ManagedStopRequest:
         raise ManagedStopError("invalid managed stop request")
+    try:
+        checked_vm_launch(request.expected_launch, request.guest)
+    except ManagedObservationError:
+        raise ManagedStopError("invalid managed stop request") from None
     data = _json(
         {
             "version": 1,
@@ -64,6 +70,11 @@ def encode_request(request: ManagedStopRequest) -> bytes:
                 "groups": list(request.identity.groups),
             },
             "observation_ms": request.observation_ms,
+            "guest": {
+                "instance_marker": request.guest.instance_marker,
+                "boot_id": request.guest.boot_id,
+                "init_start_ticks": request.guest.init_start_ticks,
+            },
         }
     )
     decode_request(data)
@@ -73,7 +84,7 @@ def encode_request(request: ManagedStopRequest) -> bytes:
 def decode_request(data: bytes) -> ManagedStopRequest:
     value = _load(data, MAX_REQUEST_BYTES)
     if (
-        set(value) != {"version", "nonce", "expected_launch", "identity", "observation_ms"}
+        set(value) != {"version", "nonce", "expected_launch", "identity", "observation_ms", "guest"}
         or type(value["version"]) is not int
         or value["version"] != 1
     ):
@@ -93,13 +104,17 @@ def decode_request(data: bytes) -> ManagedStopRequest:
         launch = base64.b64decode(encoded.encode("ascii"), validate=True)
         if base64.b64encode(launch).decode("ascii") != encoded:
             raise ValueError
-        checked_launch(launch)
+        guest_data = value["guest"]
+        if type(guest_data) is not dict or set(guest_data) != {"instance_marker", "boot_id", "init_start_ticks"}:
+            raise ValueError
+        guest = VMGuestIdentity(guest_data["instance_marker"], guest_data["boot_id"], guest_data["init_start_ticks"])
+        checked_vm_launch(launch, guest)
         identity = decode_identity(value["identity"])
         if identity.euid != 0:
             raise ValueError
-    except (ManagedObservationError, ValueError, TypeError, UnicodeError, binascii.Error):
+    except (ManagedObservationError, KeyError, ValueError, TypeError, UnicodeError, binascii.Error):
         raise ManagedStopError("invalid managed stop request") from None
-    return ManagedStopRequest(nonce, launch, identity, budget)
+    return ManagedStopRequest(nonce, launch, identity, budget, guest)
 
 
 def encode_result(result: ManagedStopResult) -> bytes:
