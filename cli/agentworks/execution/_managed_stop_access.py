@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -11,6 +10,7 @@ from agentworks.operations import _PreRegistrationClosingRefusal, release_borrow
 
 from ._fixed_helper_operation import BorrowedFixedHelperCarrier
 from ._managed_bound_run import preflight_bound_run
+from ._managed_run_obligation import decode_managed_run_obligation, encode_managed_run_obligation
 from ._managed_runs import ManagedLaunchState, ManagedRunIdentity, ManagedRunRepository, ManagedTargetIdentity
 from ._managed_stop_exchange import ManagedStopCandidate, ManagedStopState, stop_managed_run
 from .carrier import Deadline, Dispatch, ExitStatus
@@ -30,24 +30,12 @@ MANAGED_STOP_PAYLOAD_VERSION = 1
 
 def encode_managed_stop_obligation(run_id: str) -> bytes:
     """Store only the canonical non-secret run ID for later recovery."""
-    identity = ManagedRunIdentity(run_id)
-    return json.dumps({"run_id": identity.run_id, "version": 1}, sort_keys=True, separators=(",", ":")).encode("ascii")
+    return encode_managed_run_obligation(run_id)
 
 
 def decode_managed_stop_obligation(payload: bytes) -> ManagedRunIdentity:
     """Reject noncanonical or additional persisted recovery data."""
-    if type(payload) is not bytes or len(payload) != 57:
-        raise ValidationError("Managed stop obligation payload is invalid")
-    try:
-        value = json.loads(payload)
-        if type(value) is not dict or set(value) != {"run_id", "version"} or value["version"] != 1:
-            raise ValueError
-        identity = ManagedRunIdentity(value["run_id"])
-        if encode_managed_stop_obligation(identity.run_id) != payload:
-            raise ValueError
-    except (TypeError, ValueError, UnicodeError):
-        raise ValidationError("Managed stop obligation payload is invalid") from None
-    return identity
+    return decode_managed_run_obligation(payload)
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -127,7 +115,6 @@ def stop_bound_managed_run(
             deadline=deadline,
             runtime_selection=runtime_selection,
             guest=guest,
-            before_dispatch=borrow.arm_dispatch_obligation,
         )
         operation.settle(candidate.dispatch, candidate.carrier_completion)
         state = candidate.observation.state if candidate.observation is not None else None

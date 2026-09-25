@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -11,9 +10,9 @@ from agentworks.errors import ValidationError
 from agentworks.operations import _PreRegistrationClosingRefusal, release_borrow_after_custody
 
 from ._fixed_helper_operation import BorrowedFixedHelperCarrier
+from ._managed_run_obligation import decode_managed_run_obligation, encode_managed_run_obligation
 from ._managed_runs import (
     ManagedLaunchState,
-    ManagedRunIdentity,
     ManagedRunLifetime,
     ManagedRunOwnerKind,
     ManagedRunRecord,
@@ -27,7 +26,7 @@ if TYPE_CHECKING:
 
     from agentworks.operations import OperationOwner
 
-    from ._managed_runs import ManagedRunRepository
+    from ._managed_runs import ManagedRunIdentity, ManagedRunRepository
     from .carrier import Carrier
 
 
@@ -37,24 +36,12 @@ MANAGED_START_PAYLOAD_VERSION = 1
 
 def encode_managed_start_obligation(run_id: str) -> bytes:
     """Encode only the canonical run identity needed to reconcile dispatch custody."""
-    identity = ManagedRunIdentity(run_id)
-    return json.dumps({"run_id": identity.run_id, "version": 1}, sort_keys=True, separators=(",", ":")).encode("ascii")
+    return encode_managed_run_obligation(run_id)
 
 
 def decode_managed_start_obligation(payload: bytes) -> ManagedRunIdentity:
     """Validate persisted recovery identity at its cross-execution boundary."""
-    if type(payload) is not bytes or len(payload) != 57:
-        raise ValidationError("Managed start obligation payload is invalid")
-    try:
-        value = json.loads(payload)
-        if type(value) is not dict or set(value) != {"run_id", "version"} or value["version"] != 1:
-            raise ValueError
-        identity = ManagedRunIdentity(value["run_id"])
-        if encode_managed_start_obligation(identity.run_id) != payload:
-            raise ValueError
-    except (TypeError, ValueError, UnicodeError):
-        raise ValidationError("Managed start obligation payload is invalid") from None
-    return identity
+    return decode_managed_run_obligation(payload)
 
 
 @dataclass(frozen=True, slots=True, repr=False)

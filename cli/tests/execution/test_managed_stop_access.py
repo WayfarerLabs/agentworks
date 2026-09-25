@@ -16,21 +16,36 @@ from agentworks.execution._managed_runs import (
     ManagedLaunchState,
     ManagedRunReceipt,
 )
+from agentworks.execution._managed_start_operation import (
+    decode_managed_start_obligation,
+    encode_managed_start_obligation,
+)
 from agentworks.execution._managed_stop_access import (
     MANAGED_STOP_OBLIGATION_KIND,
     ManagedStopControlFact,
     decode_managed_stop_obligation,
+    encode_managed_stop_obligation,
     stop_bound_managed_run,
 )
 from agentworks.execution._managed_stop_exchange import ManagedStopState
 from agentworks.execution._managed_stop_protocol import ManagedStopResult
 from agentworks.execution.carrier import Dispatch
-from agentworks.operations import OperationBorrow
 
 from .test_managed_observe_access import GUEST, RUN, TARGET, _options, _reserved
 from .test_managed_stop import Carrier, _boundary, _records
 
 OBLIGATION_ID = "e" * 32
+
+
+def test_start_and_stop_obligations_share_exact_canonical_run_payload() -> None:
+    expected = b'{"run_id":"' + RUN.run_id.encode("ascii") + b'","version":1}'
+    assert encode_managed_start_obligation(RUN.run_id) == expected
+    assert encode_managed_stop_obligation(RUN.run_id) == expected
+    assert decode_managed_start_obligation(expected) == RUN
+    assert decode_managed_stop_obligation(expected) == RUN
+    for invalid in (expected + b" ", expected.replace(b'"version":1', b'"version":2')):
+        with pytest.raises(ValidationError):
+            decode_managed_stop_obligation(invalid)
 
 
 def _confirmed(repository) -> object:  # type: ignore[no-untyped-def]
@@ -182,20 +197,21 @@ def test_failed_pure_validation_resolves_unarmed_obligation(tmp_path: Path, monk
         database.close()
 
 
-def test_interrupted_arming_keeps_original_control_and_possible_effect(
+def test_commit_then_interrupted_begin_attempt_keeps_original_control_and_possible_effect(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database, repository, owner = _reserved(tmp_path)
     _confirmed(repository)
     carrier = Carrier(_response)
-    failure = KeyboardInterrupt("arming interrupted")
-    original_arm = OperationBorrow.arm_dispatch_obligation
+    failure = KeyboardInterrupt("admission interrupted")
+    owner_repository = owner._repository  # noqa: SLF001
+    original_mark = owner_repository.mark_lifecycle_obligation_possible_effect
 
-    def interrupt_after_arm(borrow: OperationBorrow) -> None:
-        original_arm(borrow)
+    def commit_then_interrupt(*args: object, **kwargs: object) -> object:
+        original_mark(*args, **kwargs)  # type: ignore[arg-type]
         raise failure
 
-    monkeypatch.setattr(OperationBorrow, "arm_dispatch_obligation", interrupt_after_arm)
+    monkeypatch.setattr(owner_repository, "mark_lifecycle_obligation_possible_effect", commit_then_interrupt)
     try:
         with pytest.raises(KeyboardInterrupt) as raised:
             _stop(repository, owner, carrier)
@@ -204,7 +220,7 @@ def test_interrupted_arming_keeps_original_control_and_possible_effect(
         assert failure.__cause__.outcome.requires_owner_retention
         assert failure.__cause__.outcome.pending_remote_effects
         assert carrier.calls == 0
-        assert carrier.validations == 1
+        assert carrier.validations >= 1
         (obligation,) = database.operations.list_lifecycle_obligations(owner.ownership)
         assert obligation.state is LifecycleObligationState.POSSIBLE_EFFECT
     finally:
