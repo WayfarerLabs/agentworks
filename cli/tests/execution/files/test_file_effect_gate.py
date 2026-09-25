@@ -30,6 +30,7 @@ from agentworks.execution._file_effect_gate import (
     inspect_file_effect_gate,
     setup_file_effect_gate,
 )
+from agentworks.execution._file_gate_setup import file_effect_gate_path
 from agentworks.execution._file_obligation import (
     FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
     FileCallFamily,
@@ -60,16 +61,18 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the fixed snaps
 
 @pytest.fixture(autouse=True)
 def _gate_namespace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from agentworks.execution import _file_effect_gate
+    from agentworks.execution import _file_effect_gate, _file_gate_setup
 
     namespace = tmp_path / "run" / "agentworks" / "file-gates-v1"
     (namespace / str(os.geteuid())).mkdir(parents=True, mode=0o700)
     monkeypatch.setattr(_file_effect_gate, "_GATE_NAMESPACE", str(namespace))
     monkeypatch.setattr(_file_effect_gate, "_ROOT_UID", os.geteuid())
+    monkeypatch.setattr(_file_gate_setup, "_NAMESPACE", str(namespace))
 
 
 def _gate_path(tmp_path: Path) -> Path:
-    return tmp_path / "run" / "agentworks" / "file-gates-v1" / str(os.geteuid()) / ("a" * 64 + ".db")
+    name = Path(file_effect_gate_path(_target(), os.geteuid(), _GUEST)).name
+    return tmp_path / "run" / "agentworks" / "file-gates-v1" / str(os.geteuid()) / name
 
 
 _GUEST = VMGuestIdentity("a" * 32, "123e4567-e89b-12d3-a456-426614174000", 10)
@@ -82,6 +85,10 @@ def _observe_guest() -> VMGuestIdentity:
 def _plan() -> IdentityPlan:
     groups = tuple(sorted(set(os.getgroups()) | {os.getegid()}))
     return IdentityPlan(IdentityExpectation(os.geteuid(), os.getegid(), groups), IdentityMode.DIRECT)
+
+
+def _target() -> ManagedTargetIdentity:
+    return ManagedTargetIdentity(ManagedTargetKind.VM, "gate-vm", "v1:" + "b" * 64, _GUEST.boot_id)
 
 
 def _fixture(monkeypatch: pytest.MonkeyPatch, scratch: Path, guest: VMGuestIdentity = _GUEST) -> None:
@@ -116,10 +123,9 @@ def _gate(tmp_path: Path) -> FileEffectGateBinding:
 
 
 def _call(binding: FileEffectGateBinding, root: Path) -> FileCallObligation:
-    target = ManagedTargetIdentity(ManagedTargetKind.VM, "gate-vm", "v1:" + "b" * 64, _GUEST.boot_id)
     return FileCallObligation(
         FileCallFamily.DOWNLOAD,
-        target,
+        _target(),
         str(root),
         "source",
         _plan(),
@@ -137,10 +143,12 @@ def _crash_controller_with_fixed_snapshot(
     entered: str,
     release: str,
 ) -> None:
-    from agentworks.execution import _file_effect_gate, _file_snapshot_exchange
+    from agentworks.execution import _file_effect_gate, _file_gate_setup, _file_snapshot_exchange
 
-    _file_effect_gate._GATE_NAMESPACE = str(Path(binding.path).parent.parent)
+    namespace = str(Path(binding.path).parent.parent)
+    _file_effect_gate._GATE_NAMESPACE = namespace
     _file_effect_gate._ROOT_UID = os.geteuid()
+    _file_gate_setup._NAMESPACE = namespace
 
     _file_snapshot_exchange.FIXED_BUNDLE = fixture_source(
         Path(scratch_path),

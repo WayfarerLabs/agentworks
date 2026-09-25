@@ -2059,6 +2059,11 @@ RunContext factory, native delivery drain and recovery remain open.
       evidence of that `OperationOwner` exclusion. Cover interrupted provisioning, repeated reinit,
       retained work, deletion and numeric UID reuse without repairing or replacing a live gate file.
 
+The private bound-row correction now checks the deterministic VM/UID/guest gate path at the
+`file-call` codec boundary as well as the setup-only path. A substituted but syntactically valid
+gate name refuses during payload construction or decode. Focused obligation and spawned recovery
+tests pass 62/62; this does not supply native drain evidence or finish recovery orchestration.
+
 - [ ] Use the owned snapshot/chunk download for general in-memory reads, preserving caller byte
       bounds independently of QGA's single-response capacity. Keep the no-staging readiness read
       separately bound before dispatch; prove its complete encoded response fits the selected route.

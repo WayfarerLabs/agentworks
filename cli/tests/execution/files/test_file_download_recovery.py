@@ -22,7 +22,7 @@ import pytest
 
 from agentworks.db import Database, LifecycleObligation, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError
-from agentworks.execution import _file_effect_gate
+from agentworks.execution import _file_effect_gate, _file_gate_setup
 from agentworks.execution._file_download_recovery import (
     FileDownloadRecovery,
     _DownloadDrainEvidence,
@@ -33,7 +33,7 @@ from agentworks.execution._file_effect_gate import (
     advance_file_effect_gate,
     setup_file_effect_gate,
 )
-from agentworks.execution._file_gate_setup import FileEffectGateSetup
+from agentworks.execution._file_gate_setup import FileEffectGateSetup, file_effect_gate_path
 from agentworks.execution._file_obligation import (
     FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
     FileCallFamily,
@@ -475,8 +475,10 @@ guest._operate=_fixture_tracked_operate
 def _fixture_gate_namespace(binding: FileEffectGateBinding | None) -> None:
     """Carry the test-only namespace into spawned recovery controllers."""
     if binding is not None:
-        _file_effect_gate._GATE_NAMESPACE = str(Path(binding.path).parent.parent)
+        namespace = str(Path(binding.path).parent.parent)
+        _file_effect_gate._GATE_NAMESPACE = namespace
         _file_effect_gate._ROOT_UID = os.geteuid()
+        _file_gate_setup._NAMESPACE = namespace
 
 
 def _crash_controller_after_completed_snapshot(
@@ -551,9 +553,14 @@ def _crash_recovery_controller(
     after_cleanup: bool,
     data_unlinked_path: str | None = None,
     unlink_release_path: str | None = None,
+    gate_namespace: str | None = None,
 ) -> None:
     from agentworks.execution import _file_snapshot_exchange
 
+    if gate_namespace is not None:
+        _file_effect_gate._GATE_NAMESPACE = gate_namespace
+        _file_effect_gate._ROOT_UID = os.geteuid()
+        _file_gate_setup._NAMESPACE = gate_namespace
     database = Database(Path(database_path))
     predecessor = database.operations.inspect(OperationScope(OperationResourceKind.VM, "download-vm"))
     assert predecessor is not None
@@ -929,8 +936,9 @@ def test_gated_recovery_of_recovery_retries_interrupted_exact_cleanup(
     (gate_root / str(os.geteuid())).mkdir(parents=True, mode=0o700)
     monkeypatch.setattr(_file_effect_gate, "_GATE_NAMESPACE", str(gate_root))
     monkeypatch.setattr(_file_effect_gate, "_ROOT_UID", os.geteuid())
+    monkeypatch.setattr(_file_gate_setup, "_NAMESPACE", str(gate_root))
     binding = setup_file_effect_gate(
-        str(gate_root / str(os.geteuid()) / ("a" * 64 + ".db")),
+        file_effect_gate_path(_target(), os.geteuid(), _GUEST),
         _GUEST,
         os.geteuid(),
         "download-vm",
@@ -961,6 +969,7 @@ def test_gated_recovery_of_recovery_retries_interrupted_exact_cleanup(
             True,
             str(data_unlinked_path),
             str(release_path),
+            str(gate_root),
         ),
     )
     try:

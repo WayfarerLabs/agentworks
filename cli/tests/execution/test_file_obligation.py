@@ -467,6 +467,22 @@ def test_gate_setup_is_closed_to_wrong_family_identity_path_and_bound_state() ->
         replace(setup, scratch_cleanup_debt=_maximum_cleanup_debt(setup.identity_plan))
 
 
+def test_bound_gate_obligation_refuses_another_canonical_gate_name() -> None:
+    bound = _maximum_bound_download(_setup_download())
+    gate = bound.effect_gate
+    assert gate is not None
+    other_digest = "0" * 64 if not gate.path.endswith("0" * 64 + ".db") else "1" * 64
+    wrong = replace(gate, path=gate.path[:-67] + other_digest + ".db")
+    with pytest.raises(FileCallObligationCodecError):
+        replace(bound, effect_gate=wrong)
+
+    encoded = json.loads(encode_file_call_obligation(bound))
+    encoded["effect_gate"]["path"] = wrong.path
+    payload = json.dumps(encoded, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("ascii")
+    with pytest.raises(FileCallObligationCodecError):
+        decode_file_call_obligation(payload)
+
+
 def test_gate_setup_admission_reserves_maximum_bound_proposal_and_download_growth() -> None:
     baseline = _setup_download()
     maximum = _maximum_bound_download(baseline)

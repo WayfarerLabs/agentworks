@@ -214,6 +214,10 @@ def _validate_obligation(obligation: FileCallObligation) -> None:
             raise FileCallObligationCodecError
         if obligation.effect_gate.scope_name != obligation.target.name:
             raise FileCallObligationCodecError
+        if obligation.effect_gate.path != file_effect_gate_path(
+            obligation.target, obligation.identity_plan.expected.euid, obligation.effect_gate.guest
+        ):
+            raise FileCallObligationCodecError
         try:
             decode_file_effect_gate(encode_file_effect_gate(obligation.effect_gate))
         except FileEffectGateError:

@@ -996,6 +996,12 @@ directory must be owned by the target UID with mode `0700`. Access/default ACL a
 the protected chain. This does not protect against a malicious process already running as the same
 target UID, and pathname checks still require native shared-mount and lifecycle proof.
 
+The host-side durable `file-call` codec also requires a bound gate path to equal the deterministic
+path for its managed VM, effective UID and raw guest epoch. The guest helper checks its protected
+namespace and exact record identity; it does not need to recalculate the host's digest in the
+size-limited fixed bundle. A corrupted or cross-scope persisted path now refuses before recovery
+dispatch rather than relying on a later helper refusal.
+
 The private WSL2 owned-download composition now derives the setup descriptor only after the selected
 platform locator, held READY epoch and independently prepared managed VM guest agree. It uses that
 exact guest identity, target and requested effective UID with the already selected carrier/runtime.
