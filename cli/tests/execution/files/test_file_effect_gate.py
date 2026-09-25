@@ -226,6 +226,54 @@ def test_setup_observes_live_guest_before_creating_gate(tmp_path: Path) -> None:
     assert not path.exists()
 
 
+def test_setup_deadline_prevents_gate_creation_before_and_after_guest_observation(tmp_path: Path) -> None:
+    path = tmp_path / "effect.db"
+    observations = 0
+
+    def observe() -> VMGuestIdentity:
+        nonlocal observations
+        observations += 1
+        time.sleep(0.05)
+        return _GUEST
+
+    with pytest.raises(FileEffectGateError):
+        initialize_file_effect_gate(
+            str(path), _GUEST, os.geteuid(), "gate-vm", observe, expires_at=time.monotonic() - 1
+        )
+    assert observations == 0
+    assert not path.exists()
+
+    with pytest.raises(FileEffectGateError):
+        initialize_file_effect_gate(
+            str(path), _GUEST, os.geteuid(), "gate-vm", observe, expires_at=time.monotonic() + 0.01
+        )
+    assert observations == 1
+    assert not path.exists()
+
+
+def test_setup_deadline_before_commit_retains_incomplete_inode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.execution import _file_effect_gate
+
+    path = tmp_path / "effect.db"
+    original = _file_effect_gate._connect
+
+    def slow_connect(path: str, euid: int, descriptor: int, expected: tuple[int, int]):
+        connection = original(path, euid, descriptor, expected)
+        time.sleep(0.05)
+        return connection
+
+    monkeypatch.setattr(_file_effect_gate, "_connect", slow_connect)
+    with pytest.raises(FileEffectGateError):
+        initialize_file_effect_gate(
+            str(path), _GUEST, os.geteuid(), "gate-vm", _observe_guest, expires_at=time.monotonic() + 0.01
+        )
+    assert path.exists()
+    inode = path.stat().st_ino
+    with pytest.raises(FileEffectGateError):
+        inspect_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", _observe_guest)
+    assert path.stat().st_ino == inode
+
+
 def test_lost_setup_reply_can_inspect_exact_complete_gate_without_advancing(tmp_path: Path) -> None:
     binding = _gate(tmp_path)
     inspected = inspect_file_effect_gate(binding.path, _GUEST, os.geteuid(), "gate-vm", _observe_guest)

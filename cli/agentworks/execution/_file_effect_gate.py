@@ -305,6 +305,8 @@ def initialize_file_effect_gate(
     euid: int,
     scope_name: str,
     observe_guest: Callable[[], VMGuestIdentity],
+    *,
+    expires_at: float | None = None,
 ) -> FileEffectGateBinding:
     """Create a new gate during explicit setup, never during an effect request."""
     try:
@@ -313,7 +315,9 @@ def initialize_file_effect_gate(
         raise FileEffectGateError("file-effect gate requires Python sqlite3") from None
 
     _check_setup_identity(path, guest, euid, scope_name)
+    _require_before_deadline(expires_at)
     _observe_setup_guest(guest, observe_guest)
+    _require_before_deadline(expires_at)
     try:
         descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | _open_flags(), 0o600)
     except OSError:
@@ -331,7 +335,7 @@ def initialize_file_effect_gate(
             metadata.st_dev,
             metadata.st_ino,
         )
-        _acquire_flock(descriptor, None)
+        _acquire_flock(descriptor, expires_at)
         with closing(_connect(path, euid, descriptor, (binding.device, binding.inode))) as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
@@ -351,6 +355,7 @@ def initialize_file_effect_gate(
                     scope_name,
                 ),
             )
+            _require_before_deadline(expires_at)
             connection.commit()
     except (OSError, sqlite3.Error, FileEffectGateError):
         # An incomplete file is deliberately retained: replacing its path
