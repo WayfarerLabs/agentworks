@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution._file_effect_gate_bundle import FIXED_BUNDLE as GATE_BUNDLE
+from agentworks.execution._file_effect_gate_protocol import parse_gate_control_failure
 from agentworks.execution._file_inventory_bundle import FIXED_BUNDLE as INVENTORY_BUNDLE
 from agentworks.execution._file_inventory_protocol import parse_file_inventory_failure
 from agentworks.execution._file_metadata_bundle import FIXED_BUNDLE as METADATA_BUNDLE
@@ -43,6 +45,7 @@ _BUNDLES = (
     ("inventory", INVENTORY_BUNDLE),
     ("stage", STAGE_BUNDLE),
     ("snapshot", SNAPSHOT_BUNDLE),
+    ("gate", GATE_BUNDLE),
 )
 
 
@@ -155,6 +158,8 @@ def _failure_code(family: str, body: bytes) -> str:
         return parse_file_stage_failure(body, token, identity).code.value
     if family == "snapshot":
         return parse_file_snapshot_failure(body, token, identity).code.value
+    if family == "gate":
+        return parse_gate_control_failure(body).value
     raise AssertionError(f"unknown fixed file family: {family}")
 
 
