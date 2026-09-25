@@ -1516,9 +1516,10 @@ obligation kinds. The corrected narrow selection passed 17 tests, Ruff and mypy.
 
 The shared later-action preflight does not itself prove the guest marker used in the target's
 incarnation fingerprint: it has no provider locator or persisted marker input. Production callers
-must compose the exact target from the selected locator and the same observed guest marker before
-observe, read-output or stop admission, then revalidate route freshness at dispatch. Matching the
-derived boot alone is not a production target-binding proof.
+must compare the observed guest marker with the persisted VM marker, compose the exact target from
+the selected locator and that same marker before observe, read-output or stop admission, then
+revalidate route freshness at dispatch. Matching the derived boot alone is not a production
+target-binding proof.
 
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared

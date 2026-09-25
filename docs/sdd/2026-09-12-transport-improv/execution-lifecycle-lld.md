@@ -369,8 +369,9 @@ interrupted arming retain it with the original control exception and custody fac
 host binding, not proof of provider route freshness, recovery takeover or native SSH/QGA delivery.
 The shared row preflight can compare the guest's derived boot with the persisted target, but cannot
 derive the opaque incarnation fingerprint without the provider locator and persisted marker. Its
-caller must supply a target composed from the selected locator and that same observed guest marker
-before invoking any later-action adapter. A boot-only match is not sufficient production authority.
+caller must compare the observed guest marker with the persisted VM marker, then supply a target
+composed from the selected locator and that same marker before invoking any later-action adapter. A
+boot-only match is not sufficient production authority.
 
 The first `dispose` mechanism is an explicit authorized release of terminal retained artifacts, not
 a retention timer or a synonym for stop. Before committing release, the fixed helper requires the

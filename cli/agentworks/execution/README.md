@@ -553,8 +553,9 @@ delivery or interrupted arming retains the exact obligation and owner for recove
 does not reconcile the row, release the owner's whole claim, prove a production provider route or
 implement recovery. The shared row preflight checks the supplied guest's derived boot against the
 persisted target, but cannot reconstruct its opaque incarnation fingerprint from those two values
-alone. Callers must first compose that target from the selected provider locator and the same
-observed guest marker; boot agreement alone is not production target proof.
+alone. Callers must compare the observed guest marker with the persisted VM marker, then compose
+that target from the selected provider locator and the same marker. Boot agreement alone is not
+production target proof.
 
 `_managed_disposal_exchange.py` supplies a private fixed Linux root disposal attempt. The target
 requires the exact canonical launch, its bound boundary-empty and both stream-end facts. Wait is
