@@ -490,6 +490,16 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       acceptance from a locally serialized command or an invalid-request bootstrap probe.
 - [ ] Jointly accept and prove the privately implemented carrier sink extension with the SSH owner
       before enabling its production use or exposing it through RunContext.
+
+At transport `77063be1` plus SSH `3142af0a`, private local merge `d694a873` was conflict-free.
+Three installed-OpenSSH file-delivery cases and one sensitive live-duplex case passed on Linux. The
+snapshot-download fixture skipped because this host lacks its required root-owned mode-1777 `/tmp`;
+the temporary merge's shared editable Python environment also could not run the isolated
+fresh-process import check against that merge. The SSH owner
+[confirmed the shared sink shape is stable](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-5827772124)
+for the remaining transport composition. This is partial local acceptance evidence, not
+supported-workstation or production FileAccess acceptance; the checkbox stays open.
+
 - [x] Review and prove complete private upload under a borrowed core operation owner. Cover one
       durable claim across staging, finite source consumption, publication and ordered cleanup;
       preserve prerequisite refusals, failure-carried debt and uncertain completion without replay.
