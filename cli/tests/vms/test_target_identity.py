@@ -11,11 +11,16 @@ from agentworks.db import VMRow
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._managed_runs import ManagedTargetKind
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
-from agentworks.vms.target_identity import compose_managed_vm_target_identity, vm_incarnation_fingerprint
+from agentworks.vms.target_identity import (
+    compose_managed_vm_target_identity,
+    vm_guest_boot_id,
+    vm_incarnation_fingerprint,
+)
 
 _MARKER = "0123456789abcdef0123456789abcdef"
 _OTHER_MARKER = "fedcba9876543210fedcba9876543210"
 _BOOT_ID = "00000000-0000-4000-8000-000000000001"
+_INIT_START_TICKS = 1234
 
 
 def _vm(*, marker: str | None = _MARKER) -> VMRow:
@@ -40,8 +45,12 @@ def _vm(*, marker: str | None = _MARKER) -> VMRow:
     )
 
 
-def _guest(marker: str = _MARKER, boot_id: str = _BOOT_ID) -> VMGuestIdentity:
-    return VMGuestIdentity(instance_marker=marker, boot_id=boot_id)
+def _guest(
+    marker: str = _MARKER,
+    boot_id: str = _BOOT_ID,
+    init_start_ticks: int = _INIT_START_TICKS,
+) -> VMGuestIdentity:
+    return VMGuestIdentity(instance_marker=marker, boot_id=boot_id, init_start_ticks=init_start_ticks)
 
 
 def test_fingerprint_uses_stable_version_one_utf8_length_framing() -> None:
@@ -101,13 +110,19 @@ def test_composition_returns_managed_identity_and_keeps_boot_outside_fingerprint
         ProviderLocator("opaque"),
         _guest(boot_id="00000000-0000-4000-8000-000000000002"),
     )
+    restarted_distribution = compose_managed_vm_target_identity(
+        _vm(), ProviderLocator("opaque"), _guest(init_start_ticks=_INIT_START_TICKS + 1)
+    )
 
     assert identity.kind is ManagedTargetKind.VM
     assert identity.name == "box"
     assert identity.incarnation == vm_incarnation_fingerprint(ProviderLocator("opaque"), _MARKER)
-    assert identity.boot_id == _BOOT_ID
+    assert identity.boot_id == vm_guest_boot_id(_guest())
+    assert identity.boot_id != _BOOT_ID
     assert other_boot.incarnation == identity.incarnation
     assert other_boot.boot_id != identity.boot_id
+    assert restarted_distribution.incarnation == identity.incarnation
+    assert restarted_distribution.boot_id != identity.boot_id
 
 
 def test_composition_rejects_wrong_guest_shape() -> None:
@@ -117,7 +132,7 @@ def test_composition_rejects_wrong_guest_shape() -> None:
 
 def test_guest_protocol_rejects_noncanonical_boot_id() -> None:
     with pytest.raises(ValueError):
-        VMGuestIdentity(instance_marker=_MARKER, boot_id="not-a-uuid")
+        VMGuestIdentity(instance_marker=_MARKER, boot_id="not-a-uuid", init_start_ticks=_INIT_START_TICKS)
 
 
 def test_composition_does_not_change_other_vm_fields() -> None:

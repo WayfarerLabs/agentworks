@@ -377,6 +377,25 @@ main-exit cleanup of detached descendants, stop escalation, retained output and 
 refusal to replace a still-populated boundary. These are source-informed experiment constraints, not
 implemented supervisor behavior or native acceptance.
 
+### WSL2 distribution boot fence
+
+The [exact-head native WSL2 report on #833](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-5825224430)
+observed one `/proc/sys/kernel/random/boot_id` across distribution stop and restart while the shared
+utility VM remained up. That kernel value alone cannot fence a distribution-scoped managed run.
+Microsoft describes a separate PID namespace for each WSL2 distribution and systemd as its PID 1
+when enabled. Linux procfs field 22 of `/proc/1/stat` records PID 1's start time in clock ticks
+since kernel boot.
+
+Decision: the private Linux guest identity probe reads both fixed procfs values and derives the
+managed boot UUID from their pair, while retaining the provider locator and instance marker as
+separate identity facts. This is a cooperative-guest boot fence, not proof against forged procfs,
+copied state or an engineered same-tick restart. Native WSL2 stop/restart and lost-hold recovery
+remain acceptance gates; the cited report measured the underlying problem, not the new derivation.
+
+Sources: [WSL distribution namespaces](https://github.com/microsoft/WSL/blob/master/doc/docs/technical-documentation/init.md),
+[WSL systemd PID 1](https://github.com/microsoft/WSL/blob/master/doc/docs/technical-documentation/systemd.md),
+[Linux `/proc/pid/stat` field 22](https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html).
+
 ### Lifecycle test-bed gaps
 
 For macOS mechanism selection, do not equate a launchd job with a Linux cgroup. Apple's

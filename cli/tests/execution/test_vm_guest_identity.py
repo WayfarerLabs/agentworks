@@ -53,6 +53,11 @@ from agentworks.execution.carrier import (
 NONCE_MARKER = "agentworks-runtime-prerequisite"
 BOOT_ID = "12345678-1234-1234-1234-123456789abc"
 MARKER = "a" * 32
+INIT_START_TICKS = 1234
+
+
+def _init_stat(start_ticks: str = str(INIT_START_TICKS), comm: str = "systemd") -> str:
+    return "1 (" + comm + ") S " + " ".join(["0"] * 18 + [start_ticks] + ["0"] * 5) + "\n"
 
 
 def _selection() -> RuntimeSelection:
@@ -131,13 +136,16 @@ def _output(carrier: TranscriptCarrier) -> tuple[RuntimePrefixSink, _BoundedResp
 def _guest_tree(root: Path) -> tuple[Path, Path]:
     marker_parent = root / "var" / "lib" / "agentworks"
     boot_parent = root / "proc" / "sys" / "kernel" / "random"
+    init_parent = root / "proc" / "1"
     marker_parent.mkdir(parents=True)
     boot_parent.mkdir(parents=True)
+    init_parent.mkdir(parents=True)
     marker = marker_parent / "instance-id"
     boot = boot_parent / "boot_id"
     marker.write_bytes((MARKER + "\n").encode())
     marker.chmod(0o444)
     boot.write_bytes((BOOT_ID + "\n").encode())
+    (init_parent / "stat").write_text(_init_stat(), encoding="ascii")
     for path in (root / "var", root / "var" / "lib", marker_parent):
         path.chmod(0o755)
     return marker, boot
@@ -169,7 +177,7 @@ def _replace_marker_parent_with_symlink(marker: Path, _boot: Path) -> None:
 
 
 def test_success_preserves_carrier_facts_and_closes_input() -> None:
-    identity = VMGuestIdentity(MARKER, BOOT_ID)
+    identity = VMGuestIdentity(MARKER, BOOT_ID, INIT_START_TICKS)
     carrier = TranscriptCarrier(encode_vm_guest_identity_success("0" * 32, identity))
     result = _observe(carrier)
     assert carrier.calls == 1
@@ -266,7 +274,9 @@ def test_production_guest_entry_encodes_identity_from_fixed_reader(
 
     assert guest_helper.main(nonce) == 0
     assert len(output) == 1
-    assert decode_vm_guest_identity_response(output[0], nonce).identity == VMGuestIdentity(MARKER, BOOT_ID)
+    assert decode_vm_guest_identity_response(output[0], nonce).identity == VMGuestIdentity(
+        MARKER, BOOT_ID, INIT_START_TICKS
+    )
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="the fixed guest identity helper is Linux-only")
@@ -354,6 +364,38 @@ def test_guest_probe_refuses_noncanonical_fixed_path_values(
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="the fixed guest identity helper is Linux-only")
+def test_guest_probe_reads_init_start_after_embedded_parenthesis(tmp_path: Path) -> None:
+    _guest_tree(tmp_path)
+    (tmp_path / "proc" / "1" / "stat").write_text(
+        _init_stat(str(INIT_START_TICKS + 1), "init) unusual (name"), encoding="ascii"
+    )
+
+    observed = _identity(str(tmp_path), (os.geteuid(), os.getegid()))
+    assert observed.init_start_ticks == INIT_START_TICKS + 1
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the fixed guest identity helper is Linux-only")
+@pytest.mark.parametrize("content", ("2 (systemd) S 0\n", _init_stat("not-a-number"), _init_stat().rstrip("\n")))
+def test_guest_probe_refuses_invalid_init_stat(tmp_path: Path, content: str) -> None:
+    _guest_tree(tmp_path)
+    (tmp_path / "proc" / "1" / "stat").write_text(content, encoding="ascii")
+
+    with pytest.raises(_GuestRefusal) as raised:
+        _identity(str(tmp_path), (os.geteuid(), os.getegid()))
+    assert raised.value.failure is VMGuestIdentityFailure.INVALID_IDENTITY
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the fixed guest identity helper is Linux-only")
+def test_guest_probe_refuses_missing_init_stat(tmp_path: Path) -> None:
+    _guest_tree(tmp_path)
+    (tmp_path / "proc" / "1" / "stat").unlink()
+
+    with pytest.raises(_GuestRefusal) as raised:
+        _identity(str(tmp_path), (os.geteuid(), os.getegid()))
+    assert raised.value.failure is VMGuestIdentityFailure.INIT_START_UNREADABLE
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the fixed guest identity helper is Linux-only")
 def test_guest_probe_refuses_unexpected_path_owner(tmp_path: Path) -> None:
     _guest_tree(tmp_path)
 
@@ -374,7 +416,7 @@ def test_guest_probe_accepts_protected_restrictive_parent_modes(tmp_path: Path, 
     finally:
         marker.parent.chmod(0o755)
 
-    assert observed == VMGuestIdentity(MARKER, BOOT_ID)
+    assert observed == VMGuestIdentity(MARKER, BOOT_ID, INIT_START_TICKS)
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="the fixed guest identity helper is Linux-only")

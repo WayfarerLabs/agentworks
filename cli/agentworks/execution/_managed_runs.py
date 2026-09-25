@@ -126,8 +126,9 @@ class ManagedTargetIdentity:
 
     ``name`` is the core resource name used for binding and diagnostics, never
     authority by itself. ``incarnation`` binds a provider-owned locator and a
-    core-provisioned or adopted random instance marker. ``boot_id`` fences one
-    boot within that incarnation.
+    core-provisioned or adopted random instance marker. ``boot_id`` is a
+    canonical UUID fencing one guest boot within that incarnation; its source
+    may compose a kernel boot UUID with the guest init process lifetime.
     """
 
     kind: ManagedTargetKind

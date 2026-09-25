@@ -1416,6 +1416,13 @@ connection and trust only. Before broader lifecycle implementation, complete the
       prove the platform's actual start/status/stop and disconnected-operation recovery, not a
       generic Linux-equivalent MANAGED profile. Workstation SSH evidence is insufficient; report
       cleanup uncertainty without dropping required platform operations.
+- [ ] Prove a distribution-scoped WSL2 boot fence before production managed-run adoption. The
+      kernel boot UUID alone survives a distribution stop and restart inside the same utility VM.
+      The private guest probe now combines that UUID with PID 1 start ticks; validate stable identity
+      within one running distribution and changed identity across real stop/restart on the supported
+      WSL2 bed, including lost-hold recovery. A live hold prevents ordinary idle shutdown but does
+      not substitute for a restart fence after controller loss. Keep ambiguous or unavailable epoch
+      evidence unknown and never treat the old run as present merely because the kernel UUID agrees.
 - [ ] Prove the placement-host VM-resource lifetime separately from provisioning completion. For
       Lima, use supported platform lifecycle operations and prove readiness, disconnect recovery,
       stop and rollback for the supported drivers. A foreground anchor is an option to justify for a
@@ -1688,10 +1695,11 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       artifact package fail only because its owning command accumulated resolved rows.
 
 The 2026-09-24 inventory found a generic capture ceiling of 4,096 regular-file members in
-`package_sources.py`, while Codex native inventory separately caps 512 entries including implied
-directories. There is no single maximum shared by all harness integrations. Current artifact
-publication iterates files and checkpoints each confirmed change; mapping those calls one-for-one to
-retained lifecycle rows would exhaust the 128-row bound for a supported large package.
+`package_sources.py`, while the native harness inventory probe caps 512 entries including implied
+directories for Claude, Codex and Grok. There is no single maximum shared by all harness
+integrations. Current artifact publication iterates files and checkpoints each confirmed change;
+mapping those calls one-for-one to retained lifecycle rows would exhaust the 128-row bound for a
+supported large package.
 
 The [serial package candidate](file-operations-lld.md#serial-package-capacity-candidate) uses one
 row for the current child across preflight and mutation. It is not an implemented batch API or
@@ -1974,6 +1982,11 @@ publish identity only for an effect that was already possible and resolve typed 
 borrow ordinary dispatch, retry registration as rebind, or admit or publish a previously registered
 effect. Migration 43 rebuilds only the changed owner table and proves existing obligation payloads,
 revisions, timestamps, foreign keys and cascades survive.
+
+The subsequent pre-release schema consolidation supersedes that implementation detail: the
+shipping sequence is migrations 39 (owners, claims and obligations), 40 (managed runs) and 41
+(nullable VM instance marker). No released database contains the former 39-44 sequence, so the
+consolidation does not add an upgrade path or change the recovery contract described above.
 
 Final project and correctness re-reviews are clean at `f7a2ecac`; the final complexity review's two
 material simplifications are incorporated, and its optional duplicate wrapper check is removed at

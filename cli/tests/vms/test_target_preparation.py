@@ -56,6 +56,7 @@ if TYPE_CHECKING:
 _MARKER = "0123456789abcdef0123456789abcdef"
 _OTHER_MARKER = "fedcba9876543210fedcba9876543210"
 _BOOT_ID = "00000000-0000-4000-8000-000000000001"
+_INIT_START_TICKS = 1234
 _NONCE_MARKER = "agentworks-runtime-prerequisite"
 
 
@@ -209,7 +210,7 @@ def _watch_custody(monkeypatch: pytest.MonkeyPatch) -> tuple[list[OperationBorro
 
 
 def _success_payload(marker: str = _MARKER) -> bytes:
-    return encode_vm_guest_identity_success("0" * 32, VMGuestIdentity(marker, _BOOT_ID))
+    return encode_vm_guest_identity_success("0" * 32, VMGuestIdentity(marker, _BOOT_ID, _INIT_START_TICKS))
 
 
 def test_prepares_identity_under_one_borrow_and_leaves_owner_open(
@@ -823,7 +824,7 @@ def test_platform_composition_passes_exact_inputs_and_leaves_outer_owner_open(
 
     assert result.preparation.status is VMTargetPreparationStatus.PREPARED
     assert result.preparation.target == compose_managed_vm_target_identity(
-        _vm(), ProviderLocator("opaque"), VMGuestIdentity(_MARKER, _BOOT_ID)
+        _vm(), ProviderLocator("opaque"), VMGuestIdentity(_MARKER, _BOOT_ID, _INIT_START_TICKS)
     )
     assert result.binding is not None
     assert result.binding.carrier is carrier
@@ -1043,7 +1044,9 @@ def test_confirmation_error_and_release_error_preserve_guest_and_control_chain(
 
 def test_selected_platform_result_rejects_binding_status_mismatch() -> None:
     failed = VMTargetPreparation(VMTargetPreparationStatus.FAILED, None, None)
-    target = compose_managed_vm_target_identity(_vm(), ProviderLocator("opaque"), VMGuestIdentity(_MARKER, _BOOT_ID))
+    target = compose_managed_vm_target_identity(
+        _vm(), ProviderLocator("opaque"), VMGuestIdentity(_MARKER, _BOOT_ID, _INIT_START_TICKS)
+    )
     prepared = VMTargetPreparation(VMTargetPreparationStatus.PREPARED, target, None)
     binding = _binding(TranscriptCarrier())
 
@@ -1054,7 +1057,9 @@ def test_selected_platform_result_rejects_binding_status_mismatch() -> None:
 
 
 def test_preparation_value_rejects_inconsistent_status_and_retention() -> None:
-    target = compose_managed_vm_target_identity(_vm(), ProviderLocator("opaque"), VMGuestIdentity(_MARKER, _BOOT_ID))
+    target = compose_managed_vm_target_identity(
+        _vm(), ProviderLocator("opaque"), VMGuestIdentity(_MARKER, _BOOT_ID, _INIT_START_TICKS)
+    )
     prepared = VMTargetPreparation(VMTargetPreparationStatus.PREPARED, target, None)
     failed = VMTargetPreparation(VMTargetPreparationStatus.FAILED, None, None)
     uncertain = VMTargetPreparation(VMTargetPreparationStatus.UNCERTAIN, None, None, requires_owner_retention=True)

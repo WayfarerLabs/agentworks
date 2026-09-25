@@ -10,14 +10,17 @@ from typing import Any
 
 VM_INSTANCE_MARKER_PATH = "/var/lib/agentworks/instance-id"
 VM_BOOT_ID_PATH = "/proc/sys/kernel/random/boot_id"
+VM_INIT_STAT_PATH = "/proc/1/stat"
 
 # This wire is deliberately much smaller than the carrier's default capture.
 MAX_VM_GUEST_IDENTITY_MESSAGE_BYTES = 512
 
 _LOWER_HEX = frozenset("0123456789abcdef")
 _UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
-_SUCCESS_FIELDS = frozenset({"boot_id", "instance_marker", "nonce", "status", "version"})
+_SUCCESS_FIELDS = frozenset({"boot_id", "init_start_ticks", "instance_marker", "nonce", "status", "version"})
 _REFUSAL_FIELDS = frozenset({"failure", "nonce", "status", "version"})
+_VERSION = 2
+_MAX_START_TICKS = 2**64 - 1
 
 
 class VMGuestIdentityFailure(StrEnum):
@@ -28,6 +31,7 @@ class VMGuestIdentityFailure(StrEnum):
     MARKER_UNSAFE = "marker_unsafe"
     MARKER_UNREADABLE = "marker_unreadable"
     BOOT_ID_UNREADABLE = "boot_id_unreadable"
+    INIT_START_UNREADABLE = "init_start_unreadable"
     INVALID_IDENTITY = "invalid_identity"
 
 
@@ -37,16 +41,19 @@ class VMGuestIdentityResponseError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class VMGuestIdentity:
-    """The two fixed-path values that identify one guest incarnation."""
+    """Fixed-path guest facts used to identify one VM and guest boot."""
 
     instance_marker: str
     boot_id: str
+    init_start_ticks: int
 
     def __post_init__(self) -> None:
         if not _valid_instance_marker(self.instance_marker):
             raise ValueError("invalid VM instance marker")
         if not _valid_boot_id(self.boot_id):
             raise ValueError("invalid VM boot ID")
+        if type(self.init_start_ticks) is not int or not 0 <= self.init_start_ticks <= _MAX_START_TICKS:
+            raise ValueError("invalid VM init start time")
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,10 +126,11 @@ def encode_vm_guest_identity_success(nonce: str, identity: VMGuestIdentity) -> b
     try:
         value = {
             "boot_id": identity.boot_id,
+            "init_start_ticks": identity.init_start_ticks,
             "instance_marker": identity.instance_marker,
             "nonce": nonce,
             "status": "identity",
-            "version": 1,
+            "version": _VERSION,
         }
         encoded = _json_bytes(value)
     except (AttributeError, TypeError, ValueError, UnicodeEncodeError):
@@ -136,7 +144,7 @@ def encode_vm_guest_identity_failure(nonce: str, failure: VMGuestIdentityFailure
     """Encode one canonical closed refusal response."""
     if not _valid_nonce(nonce) or type(failure) is not VMGuestIdentityFailure:
         raise VMGuestIdentityResponseError
-    return _json_bytes({"failure": failure.value, "nonce": nonce, "status": "refused", "version": 1})
+    return _json_bytes({"failure": failure.value, "nonce": nonce, "status": "refused", "version": _VERSION})
 
 
 def decode_vm_guest_identity_response(data: bytes, nonce: str) -> VMGuestIdentityResponse:
@@ -146,14 +154,14 @@ def decode_vm_guest_identity_response(data: bytes, nonce: str) -> VMGuestIdentit
     value = _decode_object(data)
     if (
         type(value.get("version")) is not int
-        or value["version"] != 1
+        or value["version"] != _VERSION
         or value.get("nonce") != nonce
         or not _valid_nonce(value.get("nonce"))
     ):
         raise VMGuestIdentityResponseError
     if set(value) == _SUCCESS_FIELDS and value.get("status") == "identity":
         try:
-            identity = VMGuestIdentity(value["instance_marker"], value["boot_id"])
+            identity = VMGuestIdentity(value["instance_marker"], value["boot_id"], value["init_start_ticks"])
         except (TypeError, ValueError):
             raise VMGuestIdentityResponseError from None
         return VMGuestIdentityResponse(identity=identity)
