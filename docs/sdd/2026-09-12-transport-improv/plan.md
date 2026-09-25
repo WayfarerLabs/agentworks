@@ -1875,6 +1875,14 @@ the installed row before dispatch; expected and actual helper journal records mu
 persisted token in every recovery generation. The tests retain completed-helper cleanup and
 surviving-helper refusal. The test-only journal does not prove native SSH/QGA dispatch drain.
 
+- [ ] Prove the shared guest effect-fence mechanism locally through DOWNLOAD first. Persist one gate
+      binding in the existing `file-call` row, carry the verified raw guest epoch, initialize the
+      gate before effect admission, and have the snapshot helper hold a single SQLite rollback
+      transaction through effects and cleanup. Exercise active-helper takeover, delayed old
+      requests, lost advance replies, replaced or missing state, and incomplete cleanup with a
+      spawned controller. Use an isolated local mount fixture; this does not prove the selected
+      `/run` setup, other helper families or native carrier dispatch. Do not create gate state in
+      no-write, no-state readiness.
 - [ ] Prove the restricted
       [guest-side file-helper effect fence](file-operations-lld.md#production-file-helper-effect-fence-candidate)
       before treating adapter drain evidence as production. First carry the verified raw VM guest
@@ -1888,8 +1896,11 @@ surviving-helper refusal. The test-only journal does not prove native SSH/QGA di
       and each effective user/elevated identity through real SSH, QGA and WSL paths. Preserve
       ownership on uncertain identity or fence state. This is a documented residual remote-dispatch
       race, not a revival of blanket file-object locks or privileged macOS host setup. The local
-      helper journal is not a substitute. Keep the public FileAccess and ownership release gates
-      open until this and the concrete recovery handoff are proved.
+      helper journal is not a substitute. Prove core Linux guest setup and lifetime of the
+      `/run/agentworks/file-gates-v1` namespace, its local mount and common visibility across all
+      helper routes before native acceptance; never substitute account-home or `/dev/shm` silently.
+      Keep the public FileAccess and ownership release gates open until this and the concrete
+      recovery handoff are proved.
 
 - [ ] Use the owned snapshot/chunk download for general in-memory reads, preserving caller byte
       bounds independently of QGA's single-response capacity. Keep the no-staging readiness read

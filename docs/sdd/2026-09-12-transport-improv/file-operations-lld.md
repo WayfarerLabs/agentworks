@@ -907,9 +907,16 @@ identity and token must be durable in the `file-call` obligation before any effe
 request carries them to the fixed helper. A gate is initialized and acknowledged before effect
 admission. After an admitted effect, an absent, replaced or unreadable gate in the same target epoch
 is uncertainty, never permission to initialize a replacement. A new target epoch requires explicit
-revalidation/adoption and cannot silently inherit the old gate. Account-home placement is a
-candidate, not a proven guarantee: readiness must establish a stable local path and usable Python
-`sqlite3` for each effective identity, including elevated calls, without privileged host setup.
+revalidation/adoption and cannot silently inherit the old gate. The proposed Linux VM destination
+selects a core-provisioned, boot-local `/run/agentworks/file-gates-v1` namespace with separate
+access for each effective helper identity. Setup and initialization precede effect admission;
+neither happens in the no-write, no-state readiness path or as a side effect of an effect request.
+Effect admission must verify the actual gate mount is local and shared by all relevant helper
+routes, and that the identity can use Python `sqlite3`. An absent or unsuitable namespace refuses
+effect admission. Account-home and `/dev/shm` paths are not automatic fallbacks: a home may be
+network-backed, while systemd can remove ordinary-user `/dev/shm` contents at logout. The `/run`
+choice is a Linux guest candidate, not proved WSL2/SSH/QGA mount or boot-lifetime behavior and not a
+macOS host setup requirement.
 
 The first concrete binding is Linux VM-specific. Target preparation already observes a
 `VMGuestIdentity` containing the raw instance marker, kernel boot ID and PID 1 start time and
@@ -944,13 +951,17 @@ evidence. An absent/replaced gate, irreconcilable token mismatch, uncertain targ
 unavailable helper retains ownership for manual recovery when exact revalidation cannot resolve it.
 
 The gate file must never be unlinked/recreated within an unresolved target epoch: replacing a locked
-SQLite path creates two independent lock domains. Use ordinary rollback journal mode and a finite
-busy timeout; avoid WAL, a pooled connection or a second custom lock protocol. This remains a design
-candidate, not shipped recovery. Native acceptance must cover a helper active across takeover, a
-delayed old request, lost advance acknowledgment, recovery of recovery, stale advance,
-missing/replaced state, guest restart and both target-user/elevated identities. The exact guest
-epoch and provider locator still need platform-specific proof. Until those tests pass, the
-`_DownloadDrainEvidence` production producer remains absent and DOWNLOAD recovery stays private.
+SQLite path creates two independent lock domains. A service or login-session cleanup must not own
+this namespace's lifetime. Use ordinary rollback journal mode and a finite busy timeout; avoid WAL,
+a pooled connection or a second custom lock protocol. First prove the shared gate with the DOWNLOAD
+snapshot family under local spawned-controller failure, using one binding format in the existing
+`file-call` obligation and one guest gate implementation. That proof does not certify other helper
+families or production carriers. This remains a design candidate, not shipped recovery. Native
+acceptance must cover a helper active across takeover, a delayed old request, lost advance
+acknowledgment, recovery of recovery, stale advance, missing/replaced state, guest restart and both
+target-user/elevated identities. The exact guest epoch and provider locator still need
+platform-specific proof. Until those tests pass, the `_DownloadDrainEvidence` production producer
+remains absent and DOWNLOAD recovery stays private.
 
 The private download, upload and JSON custody slice attaches validated prepared workflows to
 `FileOperation` before running them. This preserves original carrier, binding and token through

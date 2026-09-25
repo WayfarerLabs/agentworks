@@ -657,6 +657,22 @@ transactions on different underlying files. The candidate therefore requires a s
 refuses missing/replaced state during unresolved recovery and never uses unlink as cleanup. This
 experiment is mechanism evidence, not native SSH/QGA/WSL acceptance.
 
+SQLite warns that network-filesystem synchronization and locking vary by deployment, so a
+target-user home is not a proved gate substrate merely because it is writable. A boot-local Linux
+mount avoids that assumption only when the actual guest mount and helper namespace are verified.
+`/dev/shm` is not a safe default for ordinary target users: Debian Bookworm's `RemoveIPC` defaults
+to enabled, and systemd's cleanup traverses `/dev/shm` subdirectories and removes matching users'
+files at logout. A mode-0700 child directory does not prevent privileged cleanup. The first Linux VM
+fence proof therefore selects an explicitly core-provisioned `/run/agentworks` namespace and refuses
+unsuitable mounts, without claiming that `/run` setup, boot lifetime or route visibility has been
+proved on WSL2, SSH or QGA. This is separate from the rejected machine-wide destination lock and
+does not impose a macOS platform-host administrator setup.
+
+Sources: [SQLite network-filesystem guidance](https://www.sqlite.org/useovernet.html),
+[Bookworm RemoveIPC contract](https://manpages.debian.org/bookworm/systemd/logind.conf.5.en.html),
+[systemd cleanup implementation](https://raw.githubusercontent.com/systemd/systemd/main/src/shared/clean-ipc.c),
+[Linux tmpfs documentation](https://docs.kernel.org/filesystems/tmpfs.html).
+
 Proxmox target identity is a separate open proof. The upstream
 [Qemu API](https://github.com/proxmox/qemu-server/blob/master/src/PVE/API2/Qemu.pm) and
 [QemuServer configuration](https://github.com/proxmox/qemu-server/blob/master/src/PVE/QemuServer.pm)
