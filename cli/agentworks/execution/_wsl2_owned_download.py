@@ -115,8 +115,6 @@ class WSL2OwnedDownload:
         config: Config | None = None,
         native: OwnedHostClient | None = None,
         observer: GuestAnchorObserver | None = None,
-        carrier: Carrier | None = None,
-        runtime_selection: RuntimeSelection | None = None,
     ) -> WSL2OwnedDownload | None:
         """Resolve the selected WSL2 registration and route before ownership.
 
@@ -139,7 +137,7 @@ class WSL2OwnedDownload:
         if deadline.expired:
             raise ValidationError("WSL2 download binding resolution exceeded the deadline")
         connection = cls._selected_connection(binding)
-        if connection.user != vm.admin_username or connection.distribution != vm.platform_metadata.get("distro_name"):
+        if connection.user != vm.admin_username:
             raise ValidationError("WSL2 download binding does not match the VM")
         subject = cls(
             repository,
@@ -148,8 +146,8 @@ class WSL2OwnedDownload:
             connection,
             native=native,
             observer=observer,
-            carrier=carrier if carrier is not None else binding.carrier,
-            runtime_selection=runtime_selection if runtime_selection is not None else binding.runtime_selection,
+            carrier=binding.carrier,
+            runtime_selection=binding.runtime_selection,
         )
         subject._platform = platform
         subject._ctx = ctx
@@ -205,7 +203,7 @@ class WSL2OwnedDownload:
                     selected_connection = self._selected_connection(selected.binding)
                 except ValidationError:
                     return self._release_if_settled(ready, deadline, safe=True)
-                if selected_connection != self._connection:
+                if selected_connection != self._connection or selected.binding.runtime_selection != self._runtime:
                     return self._release_if_settled(ready, deadline, safe=True)
         if self.preparation.status is not VMTargetPreparationStatus.PREPARED:
             return self._release_if_settled(ready, deadline, safe=not self.preparation.requires_owner_retention)

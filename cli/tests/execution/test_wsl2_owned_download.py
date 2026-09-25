@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import sys
 from contextlib import closing
-from dataclasses import replace
 from pathlib import Path
 from typing import cast
 from unittest.mock import Mock
@@ -121,28 +120,29 @@ def _platform_subject(
     *,
     locators: list[ProviderLocator | ProviderLocatorUnavailable] | None = None,
     connections: list[WSL2Connection] | None = None,
+    runtimes: list[RuntimeSelection] | None = None,
 ) -> tuple[WSL2OwnedDownload | None, Mock]:
     platform = Mock(spec=WSL2Platform)
     platform.site_name = "local"
     platform.observe_provider_locator.side_effect = locators or [ProviderLocator("wsl2:registration")] * 3
     routes = connections or [WSL2Connection("Ubuntu", "admin", "wsl.exe")] * 2
+    selections = runtimes or [RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable)] * len(routes)
     platform.resolve_native_execution_binding.side_effect = [
         NativeExecutionBinding(
             RoutedGuestCarrier(route, carrier),
             route.user,
-            RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable),
+            runtime,
         )
-        for route in routes
+        for route, runtime in zip(routes, selections, strict=True)
     ]
     subject = WSL2OwnedDownload.from_platform(
         database.operations,
-        replace(_vm(), platform_metadata={"distro_name": "Ubuntu"}),
+        _vm(),
         platform,
         cast(RunContext, object()),
         deadline=Deadline.after(30),
         native=FakeNative([]),
         observer=observer,
-        carrier=carrier,
     )
     return subject, platform
 
@@ -243,6 +243,25 @@ def test_selected_platform_changed_route_refuses_before_file_dispatch(tmp_path: 
         assert database.operations.inspect(subject.owner.ownership.scope) is None
 
 
+def test_selected_platform_changed_runtime_refuses_before_file_dispatch(tmp_path: Path) -> None:
+    with closing(Database(tmp_path / "state.db")) as database:
+        carrier = GuestThenFileCarrier(database)
+        subject, _ = _platform_subject(
+            database,
+            carrier,
+            FakeObserver([]),
+            runtimes=[
+                RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable),
+                RuntimeSelection(RuntimeTargetOS.LINUX, "/other/python"),
+            ],
+        )
+        assert subject is not None
+        assert _download(subject, tmp_path, BytesSink()) is WSL2DownloadStatus.REFUSED
+        assert carrier.calls == 1
+        assert subject.file_operation is None
+        assert database.operations.inspect(subject.owner.ownership.scope) is None
+
+
 def test_selected_platform_unavailable_locator_does_not_acquire(tmp_path: Path) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database)
@@ -261,14 +280,14 @@ def test_selected_platform_invalid_binding_does_not_acquire(tmp_path: Path) -> N
         platform.site_name = "local"
         platform.observe_provider_locator.return_value = ProviderLocator("wsl2:registration")
         platform.resolve_native_execution_binding.return_value = NativeExecutionBinding(
-            RoutedGuestCarrier(WSL2Connection("wrong", "admin", "wsl.exe"), carrier),
-            "admin",
+            RoutedGuestCarrier(WSL2Connection("Ubuntu", "admin", "wsl.exe"), carrier),
+            "different-account",
             RuntimeSelection(RuntimeTargetOS.LINUX),
         )
         with pytest.raises(ValidationError):
             WSL2OwnedDownload.from_platform(
                 database.operations,
-                replace(_vm(), platform_metadata={"distro_name": "Ubuntu"}),
+                _vm(),
                 platform,
                 cast(RunContext, object()),
                 deadline=Deadline.after(30),
