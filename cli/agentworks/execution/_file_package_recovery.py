@@ -146,6 +146,8 @@ class FilePackageFenceRecovery:
                     raise StateError("package child fence is already confirmed by this recovery")
                 return
             self._publish(call, payload=payload)
+            if self._fenced:
+                raise StateError("package child fence is already confirmed by this recovery")
             return
         gate = self._call.effect_gate
         assert gate is not None

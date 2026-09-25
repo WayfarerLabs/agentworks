@@ -303,3 +303,46 @@ def test_lost_confirmed_binding_publication_keeps_resolved_gate(context, monkeyp
     again = OperationOwner.recover(database.operations, recovered.ownership, "c" * 32)
     (current,) = database.operations.list_lifecycle_obligations(again.ownership)
     assert decode_file_call_obligation(current.payload).effect_gate == call.effect_gate
+
+
+def test_confirmed_binding_publication_refused_before_commit_recovers_without_redispatch(
+    context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database, owner, _, _, gate = context
+    _, row = _admit(context, 6)
+    recovered, fence = _recover(context, row, "b" * 32)
+    original = type(database.operations).publish_lifecycle_obligation_payload
+    failed = False
+
+    def refuse_once(repository, ownership, obligation_id, *, expected_revision, payload_version, payload):
+        nonlocal failed
+        call = decode_file_call_obligation(payload)
+        if not failed and call.effect_gate is not None and call.effect_gate.proposed_generation is None:
+            failed = True
+            raise RuntimeError("confirmation refused before commit")
+        return original(
+            repository,
+            ownership,
+            obligation_id,
+            expected_revision=expected_revision,
+            payload_version=payload_version,
+            payload=payload,
+        )
+
+    monkeypatch.setattr(type(database.operations), "publish_lifecycle_obligation_payload", refuse_once)
+    with pytest.raises(RuntimeError, match="confirmation refused before commit"):
+        fence.advance(LocalCarrier(), deadline=Deadline.after(30))
+    (proposed_row,) = database.operations.list_lifecycle_obligations(recovered.ownership)
+    proposed_gate = decode_file_call_obligation(proposed_row.payload).effect_gate
+    assert proposed_gate is not None and proposed_gate.proposed_generation is not None
+    carrier = LocalCarrier()
+    with pytest.raises(StateError, match="already confirmed"):
+        fence.advance(carrier, deadline=Deadline.after(30))
+    assert carrier.calls == 0
+    (confirmed_row,) = database.operations.list_lifecycle_obligations(recovered.ownership)
+    confirmed_gate = decode_file_call_obligation(confirmed_row.payload).effect_gate
+    assert confirmed_row.state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert confirmed_gate == replace(
+        proposed_gate, generation=proposed_gate.proposed_generation, proposed_generation=None
+    )
+    assert confirmed_gate != gate
