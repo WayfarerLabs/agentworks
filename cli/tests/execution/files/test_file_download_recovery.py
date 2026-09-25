@@ -279,17 +279,45 @@ def _stop_recorded_helpers(journal_path: Path) -> list[str]:
         return ["helper journal unreadable"]
     identities: set[tuple[int, str]] = set()
     unresolved: list[str] = []
+    expected_keys: Counter[tuple[str, str, str]] = Counter()
+    actual_keys: Counter[tuple[str, str, str]] = Counter()
     for line in lines:
         try:
             record = json.loads(line)
         except ValueError:
             unresolved.append("helper journal incomplete")
             continue
-        if not isinstance(record, dict) or record.get("kind") != "actual":
+        if not isinstance(record, dict):
+            unresolved.append("helper journal incomplete")
+            continue
+        kind = record.get("kind")
+        if kind not in {"expected", "actual"}:
+            continue
+        nonce, operation, token = record.get("nonce"), record.get("operation"), record.get("token")
+        if (
+            isinstance(nonce, str)
+            and nonce
+            and isinstance(operation, str)
+            and operation
+            and isinstance(token, str)
+            and token
+        ):
+            key = (nonce, operation, token)
+            if kind == "expected":
+                expected_keys[key] += 1
+            else:
+                actual_keys[key] += 1
+        else:
+            unresolved.append("helper journal has an invalid dispatch identity")
+        if kind != "actual":
             continue
         pid, ticks = record.get("pid"), record.get("ticks")
-        if type(pid) is int and pid > 0 and pid != os.getpid() and isinstance(ticks, str):
+        if type(pid) is int and pid > 0 and pid != os.getpid() and isinstance(ticks, str) and ticks.isdecimal():
             identities.add((pid, ticks))
+        else:
+            unresolved.append("helper journal has an invalid process identity")
+    if expected_keys != actual_keys:
+        unresolved.append("helper dispatch/start journal mismatch")
     for pid, ticks in identities:
         if still_running(pid, ticks) is False:
             continue
@@ -1035,16 +1063,29 @@ def test_helper_teardown_signals_only_the_exact_journaled_process(tmp_path: Path
     try:
         assert process.pid is not None
         ticks = _proc_start_ticks((Path("/proc") / str(process.pid) / "stat").read_text(encoding="ascii"))
-        _append_journal(str(journal_path), {"kind": "actual", "pid": process.pid, "ticks": "0"})
+        dispatch = {"nonce": "a" * 32, "operation": "FileSnapshotCleanupRequest", "token": "b" * 32}
+        _append_journal(str(journal_path), {"kind": "expected", **dispatch})
+        _append_journal(str(journal_path), {"kind": "actual", **dispatch, "pid": process.pid, "ticks": "0"})
         assert not _stop_recorded_helpers(journal_path)
         assert process.poll() is None
-        _append_journal(str(journal_path), {"kind": "actual", "pid": process.pid, "ticks": ticks})
+        _append_journal(str(journal_path), {"kind": "expected", **dispatch})
+        _append_journal(str(journal_path), {"kind": "actual", **dispatch, "pid": process.pid, "ticks": ticks})
         assert not _stop_recorded_helpers(journal_path)
         assert process.wait(5) != 0
     finally:
         if process.poll() is None:
             process.kill()
         process.wait(5)
+
+
+def test_helper_teardown_reports_unmatched_dispatch_and_invalid_process_identity(tmp_path: Path) -> None:
+    journal_path = tmp_path / "helpers.jsonl"
+    assert not _stop_recorded_helpers(journal_path)
+    dispatch = {"nonce": "a" * 32, "operation": "FileSnapshotCleanupRequest", "token": "b" * 32}
+    _append_journal(str(journal_path), {"kind": "expected", **dispatch})
+    assert _stop_recorded_helpers(journal_path)
+    _append_journal(str(journal_path), {"kind": "actual", **dispatch, "pid": "unknown", "ticks": "0"})
+    assert _stop_recorded_helpers(journal_path)
 
 
 def test_proc_start_ticks_uses_the_final_parenthesis() -> None:
