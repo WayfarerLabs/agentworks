@@ -961,14 +961,16 @@ promotion retains the bound row rather than invoking the old pre-registration cl
 failure is not a fabricated snapshot outcome, and retained input/sink references are released only
 when responsibility is safely handed off or terminated.
 
-The private custody path currently proves only an acknowledged first `O_EXCL` setup. A second
-download in the same scope, UID and guest epoch encounters the existing canonical gate and cannot
-yet adopt it; production use requires non-creating inspection and a safe absent-versus-unsafe
-decision, including after a lost setup reply. Neither a target-user helper nor the existing `SETUP`
-exchange can create the root-owned `/run/agentworks/file-gates-v1` namespace from scratch. Core must
-provision the anchor and private per-UID directory through a trusted guest setup path for each boot,
-then run the gate helper and file operation as the target UID. This is infrastructure setup, not
-elevation of an individual file operation.
+The private custody path now accepts acknowledged `SETUP` for a new or existing complete gate. Setup
+still attempts exclusive creation; only `EEXIST` selects the same non-creating, flock-held
+inspection used by explicit `INSPECT`. It neither repairs an incomplete inode nor replaces an unsafe
+one. A lost setup reply remains unresolved until recovery combines separate non-creating inspection
+with native no-further-effects evidence; the acknowledged repeat-use path does not itself settle
+that case. Neither a target-user helper nor the existing `SETUP` exchange can create the root-owned
+`/run/agentworks/file-gates-v1` namespace from scratch. Core must provision the anchor and private
+per-UID directory through a trusted guest setup path for each boot, then run the gate helper and
+file operation as the target UID. This is infrastructure setup, not elevation of an individual file
+operation.
 
 The three durable states follow from the gate value itself: a setup descriptor, an exact binding, or
 an exact binding with a proposed generation. No independent phase enum is needed. Allocate the

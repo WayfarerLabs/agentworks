@@ -2016,6 +2016,15 @@ and production recovery remain open. A target-user file helper cannot create tha
 must establish the private UID directory through a trusted guest setup path before target-UID gate
 setup, without elevating the file operation itself.
 
+The private repeat-use correction at `bf8fdad41` closes that normal existing-gate gap. `SETUP` still
+creates with `O_EXCL`; only `EEXIST` adopts an existing complete matching gate through the
+non-creating, flock-held inspection under the same identity and deadline. Unsafe, incomplete or
+mismatched gate files remain in place and refuse; standalone `INSPECT` remains for recovery after a
+lost response. Focused gate/helper/download tests, Ruff, format, targeted mypy and diff checks pass,
+with independent project and complexity reviews finding no blocker. This is not lost-response
+reconciliation, selected-route proof, namespace provisioning, native quiescence or production
+recovery, all of which remain open.
+
 - [ ] Use the owned snapshot/chunk download for general in-memory reads, preserving caller byte
       bounds independently of QGA's single-response capacity. Keep the no-staging readiness read
       separately bound before dispatch; prove its complete encoded response fits the selected route.

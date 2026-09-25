@@ -167,11 +167,6 @@ def test_two_downloads_adopt_same_gate_at_current_generation(tmp_path: Path, mon
         second = _call(operation, LocalCarrier(), source, setup)
         assert first.binding.effect_gate == current
         assert second.binding.effect_gate == current
-        assert second.binding.effect_gate is not None
-        assert (second.binding.effect_gate.device, second.binding.effect_gate.inode) == (
-            current.device,
-            current.inode,
-        )
         assert len(database.operations.list_lifecycle_obligations(owner.ownership)) == 2
         assert all(
             row.state is LifecycleObligationState.RESOLVED

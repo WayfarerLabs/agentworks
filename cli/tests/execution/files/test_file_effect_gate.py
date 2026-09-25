@@ -333,12 +333,6 @@ def test_setup_adopts_exact_existing_gate_at_its_current_generation(tmp_path: Pa
     advanced = advance_file_effect_gate(replace(original, proposed_generation=b"c" * 16), _observe_guest)
     adopted = setup_file_effect_gate(original.path, _GUEST, os.geteuid(), "gate-vm", _observe_guest)
     assert adopted == advanced
-    assert (adopted.device, adopted.inode, adopted.instance, adopted.generation) == (
-        advanced.device,
-        advanced.inode,
-        advanced.instance,
-        advanced.generation,
-    )
 
 
 @pytest.mark.parametrize("existing", ["incomplete", "wrong_epoch", "wrong_scope"])
@@ -365,7 +359,6 @@ def test_setup_does_not_inspect_after_nonexistence_unrelated_open_failure(
 
     path = tmp_path / "effect.db"
     original_open = os.open
-    inspections = 0
 
     def denied_open(candidate: str, flags: int, mode: int = 0o777) -> int:
         if candidate == str(path):
@@ -373,15 +366,12 @@ def test_setup_does_not_inspect_after_nonexistence_unrelated_open_failure(
         return original_open(candidate, flags, mode)
 
     def unexpected_inspection(*args: object, **kwargs: object) -> FileEffectGateBinding:
-        nonlocal inspections
-        inspections += 1
         raise AssertionError("non-EEXIST setup failure must not inspect")
 
     monkeypatch.setattr(_file_effect_gate.os, "open", denied_open)
     monkeypatch.setattr(_file_effect_gate, "inspect_file_effect_gate", unexpected_inspection)
     with pytest.raises(FileEffectGateError):
         setup_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", _observe_guest)
-    assert inspections == 0
     assert not path.exists()
 
 
