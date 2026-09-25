@@ -59,12 +59,23 @@ def test_fresh_schema_has_claim_and_lifecycle_obligation_shape(tmp_path: Path) -
     Database(path).close()
 
     connection = sqlite3.connect(path)
+    owner_columns = [str(row[1]) for row in connection.execute("PRAGMA table_info(operation_owners)")]
     columns = [str(row[1]) for row in connection.execute("PRAGMA table_info(operation_claims)")]
     foreign_keys = connection.execute("PRAGMA foreign_key_list(operation_claims)").fetchall()
     lifecycle_columns = [str(row[1]) for row in connection.execute("PRAGMA table_info(lifecycle_obligations)")]
     lifecycle_foreign_keys = connection.execute("PRAGMA foreign_key_list(lifecycle_obligations)").fetchall()
     connection.close()
 
+    assert owner_columns == [
+        "operation_id",
+        "generation_id",
+        "recovery_predecessor_generation_id",
+        "operation_kind",
+        "state",
+        "claimed_at",
+        "updated_at",
+        "obligations_sealed_at",
+    ]
     assert columns == ["resource_kind", "resource_name", "operation_id"]
     assert foreign_keys == [(0, 0, "operation_owners", "operation_id", "operation_id", "NO ACTION", "CASCADE", "NONE")]
     assert lifecycle_columns == [
@@ -81,83 +92,6 @@ def test_fresh_schema_has_claim_and_lifecycle_obligation_shape(tmp_path: Path) -
     assert lifecycle_foreign_keys == [
         (0, 0, "operation_owners", "operation_id", "operation_id", "NO ACTION", "CASCADE", "NONE")
     ]
-
-
-def test_migration_backfills_generation_from_stable_operation_id(tmp_path: Path) -> None:
-    path = tmp_path / "state.db"
-    build_schema(path, 42)
-    operation_id = "a" * 32
-    connection = sqlite3.connect(path)
-    connection.execute(
-        "INSERT INTO operation_owners (operation_id, operation_kind, state, claimed_at, updated_at) "
-        "VALUES (?, 'vm-reinitialize', 'reserved', '2026-09-22T00:00:00Z', '2026-09-22T00:00:00Z')",
-        (operation_id,),
-    )
-    connection.execute(
-        "INSERT INTO operation_claims (resource_kind, resource_name, operation_id) VALUES ('vm', 'backfill', ?)",
-        (operation_id,),
-    )
-    connection.commit()
-    connection.close()
-
-    database = Database(path)
-    try:
-        claim = database.operations.inspect(_scope("backfill"))
-        assert claim is not None
-        assert claim.ownership.operation_id == operation_id
-        assert claim.ownership.generation_id == operation_id
-    finally:
-        database.close()
-
-
-def test_generation_migration_preserves_obligations_and_foreign_key_cascades(tmp_path: Path) -> None:
-    path = tmp_path / "state.db"
-    build_schema(path, 42)
-    operation_id = "b" * 32
-    obligation_id = "c" * 32
-    connection = sqlite3.connect(path)
-    connection.execute(
-        "INSERT INTO operation_owners (operation_id, operation_kind, state, claimed_at, updated_at) "
-        "VALUES (?, 'vm-reinitialize', 'reserved', '2026-09-22T00:00:00Z', '2026-09-22T00:00:00Z')",
-        (operation_id,),
-    )
-    connection.execute(
-        "INSERT INTO operation_claims (resource_kind, resource_name, operation_id) VALUES ('vm', 'preserved', ?)",
-        (operation_id,),
-    )
-    connection.execute(
-        "INSERT INTO lifecycle_obligations "
-        "(operation_id, obligation_id, obligation_kind, state, payload_version, payload, payload_revision, "
-        "registered_at, updated_at) VALUES (?, ?, 'adapter-dispatch', 'registered', 2, ?, 3, "
-        "'2026-09-22T00:00:00Z', '2026-09-22T00:00:01Z')",
-        (operation_id, obligation_id, b"preserved"),
-    )
-    connection.commit()
-    connection.close()
-
-    database = Database(path)
-    try:
-        claim = database.operations.inspect(_scope("preserved"))
-        assert claim is not None
-        obligation = database.operations.list_lifecycle_obligations(claim.ownership)[0]
-        assert (obligation.payload, obligation.payload_revision, obligation.registered_at, obligation.updated_at) == (
-            b"preserved",
-            3,
-            "2026-09-22T00:00:00Z",
-            "2026-09-22T00:00:01Z",
-        )
-        assert database._conn.execute("PRAGMA foreign_key_check").fetchall() == []  # noqa: SLF001
-        database.operations.resolve_lifecycle_obligation(claim.ownership, obligation.obligation_id)
-        database.operations.seal_lifecycle_obligations(claim.ownership)
-        database.operations.record_effects_resolved(claim.ownership)
-        database.operations.release_resolved(claim.ownership)
-    finally:
-        database.close()
-
-    connection = sqlite3.connect(path)
-    assert connection.execute("SELECT COUNT(*) FROM operation_claims").fetchone() == (0,)
-    assert connection.execute("SELECT COUNT(*) FROM lifecycle_obligations").fetchone() == (0,)
-    connection.close()
 
 
 def test_malformed_persisted_generation_fails_closed(tmp_path: Path) -> None:
@@ -281,12 +215,24 @@ def test_v38_migration_preserves_existing_data_and_adds_empty_claim_store(tmp_pa
     try:
         assert database.get_setting("witness") == "preserved"
         assert database.operations.inspect(_scope()) is None
+        ownership = database.operations.claim(_scope(), "vm-reinitialize")
+        claim = database.operations.inspect(_scope())
+        assert claim is not None
+        assert claim.ownership == ownership
+        obligation = database.operations.register_lifecycle_obligation(ownership, "adapter-dispatch", 1, b"prepared")
+        database.operations.resolve_lifecycle_obligation(ownership, obligation.obligation_id)
+        database.operations.seal_lifecycle_obligations(ownership)
+        database.operations.record_effects_resolved(ownership)
+        database.operations.release_resolved(ownership)
+        assert database._conn.execute("PRAGMA foreign_key_check").fetchall() == []  # noqa: SLF001
     finally:
         database.close()
 
     connection = sqlite3.connect(path)
     assert connection.execute("SELECT MAX(version) FROM schema_version").fetchone() == (LATEST_VERSION,)
+    assert connection.execute("SELECT COUNT(*) FROM operation_owners").fetchone() == (0,)
     assert connection.execute("SELECT COUNT(*) FROM operation_claims").fetchone() == (0,)
+    assert connection.execute("SELECT COUNT(*) FROM lifecycle_obligations").fetchone() == (0,)
     connection.close()
 
 

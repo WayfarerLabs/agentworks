@@ -57,33 +57,15 @@ def _concurrent_admission_worker(path: Path, ownership: OperationOwnership, star
         database.close()
 
 
-@pytest.mark.parametrize("state", ["reserved", "possible-dispatch", "resolved"])
-def test_migration_adds_empty_ledger_without_changing_existing_claim(
-    tmp_path: Path,
-    state: str,
-) -> None:
+def test_v38_upgrade_adds_empty_ledger(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
-    build_schema(path, 41)
-    connection = sqlite3.connect(path)
-    connection.execute(
-        "INSERT INTO operation_claims "
-        "(resource_kind, resource_name, operation_id, operation_kind, state, claimed_at, updated_at) "
-        "VALUES ('vm', 'preserved', 'a' || substr('00000000000000000000000000000000', 2), "
-        "'vm-reinitialize', ?, '2026-09-22T00:00:00Z', '2026-09-22T00:00:01Z')",
-        (state,),
-    )
-    connection.commit()
-    connection.close()
+    build_schema(path, 38)
 
     database = Database(path)
     try:
-        claim = database.operations.inspect(_scope("preserved"))
-        assert claim is not None
-        assert claim.obligations_sealed_at is None
-        assert claim.state.value == state
-        assert claim.claimed_at == "2026-09-22T00:00:00Z"
-        assert claim.updated_at == "2026-09-22T00:00:01Z"
-        assert database.operations.list_lifecycle_obligations(claim.ownership) == ()
+        ownership = database.operations.claim(_scope("upgraded"), "vm-reinitialize")
+        assert database.operations.list_lifecycle_obligations(ownership) == ()
+        assert database._conn.execute("PRAGMA foreign_key_check").fetchall() == []  # noqa: SLF001
     finally:
         database.close()
 

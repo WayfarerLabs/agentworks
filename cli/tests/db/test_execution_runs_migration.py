@@ -44,7 +44,7 @@ def test_v39_migration_adds_empty_execution_runs_without_backfilling_sessions(tm
     run_count = database._conn.execute("SELECT COUNT(*) FROM execution_runs").fetchone()[0]
     database.close()
 
-    assert version == LATEST_VERSION == 44
+    assert version == LATEST_VERSION == 41
     assert tuple(session) == (session_uuid, None)
     assert run_count == 0
 
@@ -72,7 +72,7 @@ def test_pre_migration_backup_and_live_upgrade_fabricate_no_run_records(tmp_path
     assert backup_run_table is None
 
 
-def test_output_policy_migration_adds_nullable_private_columns(tmp_path: Path) -> None:
+def test_execution_runs_schema_has_nullable_private_output_policy_columns(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
     database = Database(path)
     connection = database._conn
