@@ -226,9 +226,7 @@ def _validate_obligation(obligation: FileCallObligation) -> None:
             raise FileCallObligationCodecError
         if obligation.effect_gate.scope_name != obligation.target.name:
             raise FileCallObligationCodecError
-        if obligation.family in {FileCallFamily.UPLOAD, FileCallFamily.PACKAGE_UPLOAD} and (
-            vm_guest_boot_id(obligation.effect_gate.guest) != obligation.target.boot_id
-        ):
+        if vm_guest_boot_id(obligation.effect_gate.guest) != obligation.target.boot_id:
             raise FileCallObligationCodecError
         if obligation.effect_gate.path != file_effect_gate_path(
             obligation.target, obligation.identity_plan.expected.euid, obligation.effect_gate.guest
@@ -250,10 +248,7 @@ def _validate_obligation(obligation: FileCallObligation) -> None:
             or type(setup.path) is not str
             or setup.path
             != file_effect_gate_path(obligation.target, obligation.identity_plan.expected.euid, setup.guest)
-            or (
-                obligation.family is FileCallFamily.UPLOAD
-                and vm_guest_boot_id(setup.guest) != obligation.target.boot_id
-            )
+            or vm_guest_boot_id(setup.guest) != obligation.target.boot_id
             or obligation.scratch_reference is not None
             or obligation.scratch_cleanup_debt is not None
             or obligation.publication_cleanup_debt is not None

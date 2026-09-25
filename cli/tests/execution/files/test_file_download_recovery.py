@@ -53,7 +53,7 @@ from agentworks.execution._file_snapshot_protocol import FileSnapshotFailureCode
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTargetKind
-from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 from agentworks.execution.carrier import (
     CarrierIO,
     CarrierReport,
@@ -630,7 +630,7 @@ def _target() -> ManagedTargetIdentity:
         ManagedTargetKind.VM,
         "download-vm",
         "v1:" + "a" * 64,
-        "123e4567-e89b-12d3-a456-426614174000",
+        vm_guest_boot_id(_GUEST),
     )
 
 

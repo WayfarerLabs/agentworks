@@ -409,6 +409,7 @@ def _setup_download() -> FileCallObligation:
     guest = VMGuestIdentity("f" * 32, "123e4567-e89b-12d3-a456-426614174000", _MAXIMUM)
     initial = replace(
         _obligation(FileCallFamily.DOWNLOAD),
+        target=replace(_TARGET, boot_id=vm_guest_boot_id(guest)),
         root="/caf\u00e9",
         relative_path="na\u00efve/file",
         identity_plan=plan,
@@ -499,12 +500,26 @@ def test_gate_setup_decoder_refuses_unrecognized_or_replaced_identity() -> None:
             decode_file_call_obligation(payload)
 
 
-def test_gate_setup_is_closed_to_wrong_family_identity_path_and_bound_state() -> None:
+def test_download_gate_setup_and_binding_require_matching_guest_boot() -> None:
+    setup = _setup_download()
+    assert setup.target.boot_id != _TARGET.boot_id
+    bound = _maximum_bound_download(setup)
+    for call in (setup, bound):
+        with pytest.raises(FileCallObligationCodecError):
+            replace(call, target=_TARGET)
+        value = json.loads(encode_file_call_obligation(call))
+        value["target"]["boot_id"] = _TARGET.boot_id
+        payload = json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("ascii")
+        with pytest.raises(FileCallObligationCodecError):
+            decode_file_call_obligation(payload)
+
+
+def test_gate_setup_is_closed_to_unsupported_family_identity_path_and_bound_state() -> None:
     setup = _setup_download()
     descriptor = setup.gate_setup
     assert descriptor is not None
     with pytest.raises(FileCallObligationCodecError):
-        replace(setup, family=FileCallFamily.UPLOAD)
+        replace(setup, family=FileCallFamily.JSON_UPDATE)
     with pytest.raises(FileCallObligationCodecError):
         replace(setup, target=replace(setup.target, name="other-vm"))
     other_uid = setup.identity_plan.expected.euid - 1

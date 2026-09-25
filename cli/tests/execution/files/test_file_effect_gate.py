@@ -49,7 +49,7 @@ from agentworks.execution._file_snapshot_protocol import FileSnapshotFailureCode
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTargetKind
-from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 from agentworks.execution.carrier import Deadline
 from agentworks.operations import OperationOwner
 from tests.execution.files._file_download_support import BytesSink
@@ -89,7 +89,7 @@ def _plan() -> IdentityPlan:
 
 
 def _target() -> ManagedTargetIdentity:
-    return ManagedTargetIdentity(ManagedTargetKind.VM, "gate-vm", "v1:" + "b" * 64, _GUEST.boot_id)
+    return ManagedTargetIdentity(ManagedTargetKind.VM, "gate-vm", "v1:" + "b" * 64, vm_guest_boot_id(_GUEST))
 
 
 def _fixture(monkeypatch: pytest.MonkeyPatch, scratch: Path, guest: VMGuestIdentity = _GUEST) -> None:
