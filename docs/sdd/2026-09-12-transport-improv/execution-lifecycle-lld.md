@@ -484,6 +484,18 @@ be forwarded as a caller-facing output view. This does not reconcile job state o
 production route freshness. Stop and dispose still need equivalent host binding; their guest fences
 alone do not establish it.
 
+At the first production later-action caller, bind route freshness at the borrowed fixed helper's
+actual carrier boundary. An optional internal check supplied by that caller runs after the exact
+operation attempt has durably admitted its possible effect and immediately before the underlying
+carrier call. It compares the selected provider locator, connection and runtime facts; the shared
+carrier knows none of those platform details. Invalid local inputs refuse before the check, and a
+changed or unconfirmed route refuses without invoking the managed helper. The callback's own failure
+must retain its original exception and truthful custody facts; an admitted obligation is not
+silently resolved merely because the local check refused. This narrow seam is added with its first
+real caller, not as an unused callback on the private adapters. Like managed start's existing
+post-arm check, success narrows the route-change window but cannot make comparison and dispatch
+atomic.
+
 Before arming, a refused registration, expired deadline or owner close releases the unused borrow;
 an installed but unarmed obligation resolves during that release. A failed reservation leaves the
 caller responsible for discarding its prepared input. Once arming may have begun, the borrow retains
