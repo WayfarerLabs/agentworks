@@ -1950,6 +1950,19 @@ integration and production artifact callers remain open. The capacity checkbox s
       and obligation codec have no gate, and neither the local DOWNLOAD helper journal nor a
       caller-asserted drain value proves upload takeover.
 
+The production artifact publisher currently preflights destinations, then retires and publishes
+members with a per-file ownership callback. Agent and workspace creation can call that publisher in
+`buffered` mode before their resource row exists; in that mode `run_setup` does not persist those
+callbacks, and agent creation writes the final state only after remote setup. The private package
+callback's durability precondition therefore cannot be met by forwarding the existing callback
+unchanged. Migration must establish an operation-owned pending creation/checkpoint record before
+remote artifact effects, or another explicit durable ownership path, and reconcile it on takeover.
+This is part of the activation-before-RunContext owner seam, not an excuse to weaken the batch gate.
+
+- [ ] Replace buffered agent/workspace artifact creation with a durable per-member ownership
+      checkpoint before adopting the new batch path. Prove interrupted creation can recover the
+      exact current child without assuming the final agent/workspace row was committed.
+
 - [ ] Resolve the public filesystem-root edge before claiming complete path coverage: the current
       nonempty parent/leaf helper contract cannot address `/` itself. The operator has been asked
       whether to exclude root targets initially or support read-only root stat/inventory. Keep
