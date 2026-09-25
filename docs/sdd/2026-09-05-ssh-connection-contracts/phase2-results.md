@@ -608,6 +608,36 @@ holder death and no unrelated-distro impact. Transport owns those probe correcti
 still-unproved strict dispatch-drain gate. The report reran no native SSH or Proxmox QGA cells; it
 does not close SSH terminal, platform binding, RunContext or supported-workstation acceptance.
 
+## Native managed lifecycle on the composed SSH branch
+
+The
+[full exact-head transport report](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-5825224430)
+composes transport `7d0746f5a3f0b12eeabbcadfdc094d97028f4d5a` with SSH
+`5f4693aa71c6e6e987c1f36fe3115c980b46e425` at tester merge head `a9c141d7`. On a Linux workstation,
+its private managed-lifecycle driver ran over the composed SSH carrier against disposable GCE Debian
+Trixie/systemd 257 and Bookworm/systemd 252 guests. The transport branch's standalone buffered SSH
+carrier rejects the required `SinkOutput`; the #832 carrier accepts the shared sink mode. The tester
+drove the private execution side-car directly from Python, not through `agw vm create` or a
+production RunContext composer.
+
+Both SSH guests returned receipt-confirmed starts with exact workload identity, environment, stdin
+and cgroup placement. An exit-7 payload produced WAIT, both stream ends and an empty descendant
+boundary with byte-matched output. Stop and disposal, including a second idempotent disposal and
+refusal to observe afterward, behaved as designed; same-record replay was refused. A TERM-trapping
+payload reported its exit and output after stop. Independent residue checks found inactive units, no
+failed units or remaining cgroups/helpers, and only disposal receipts. The tester removed both GCE
+beds and their firewall rules. This is new native Linux SSH evidence for the private managed
+mechanism, not proof of the absent production composer, creation/provisioning binding or complete
+SSH-backed workflow.
+
+The report's exact #833 head passes its full non-integration suite (**13,504 passed, 23 skipped**),
+static/docs/website gates and 14 hosted checks. Those gates are for transport's exact head; the
+report does not claim a full combined-suite run at `a9c141d7`. Its WSL2 cells use #833 without SSH
+code. They find that WSL's kernel `boot_id` can survive distribution power-off and restart, leaving
+a transport-owned managed-run fence unresolved. The Linux SSH cells do not establish native
+macOS/Windows SSH acceptance, public RunContext use, terminal delivery or recovery across that WSL
+power boundary. Those Phase 2 gates remain open.
+
 ## Remaining integration and acceptance
 
 Earlier integration `fefc2b9e` uses transport `f3339f3d3cccace129be58711dc7eeb30ec66dc2`, which adds
