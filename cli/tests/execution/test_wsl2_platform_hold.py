@@ -16,8 +16,10 @@ from agentworks.db import Database
 from agentworks.db.operations import LifecycleObligationState, OperationOwnership, OperationResourceKind, OperationScope
 from agentworks.errors import ValidationError
 from agentworks.execution import _wsl2_platform_hold as hold_module
+from agentworks.execution._wsl2_guest_observer import WSL2GuestObserver
 from agentworks.execution._wsl2_lifecycle import (
     GuestAnchorIdentity,
+    GuestAnchorObserver,
     GuestAnchorPresence,
     HandleSettlement,
     HostClientStatus,
@@ -201,11 +203,66 @@ class FakeObserver:
         return self.presence
 
 
+@dataclass
+class QueryNative:
+    events: list[str]
+    name: str
+    interrupted: bool = False
+    settlement_attempts: int = 0
+    argv: tuple[str, ...] = ()
+    reads: int = 0
+
+    def spawn_owned(self, argv: tuple[str, ...], deadline: Deadline) -> None:
+        assert not deadline.expired
+        self.events.append(f"{self.name}:spawn")
+        self.argv = argv
+
+    def close_stdin(self) -> None:
+        self.events.append(f"{self.name}:eof")
+
+    def read_stdout_line(self, limit: int, deadline: Deadline) -> bytes:
+        assert limit in {1, 160} and not deadline.expired
+        self.reads += 1
+        self.events.append(f"{self.name}:read")
+        if self.name == "query-1" and self.reads == 1 and not self.interrupted:
+            self.interrupted = True
+            raise KeyboardInterrupt
+        if self.reads == 1:
+            return f"AGW_GQ2 {self.argv[-2]} 137 {BOOT} 4096 missing -\n".encode()
+        return b""
+
+    def wait(self, deadline: Deadline) -> int:
+        assert not deadline.expired
+        self.events.append(f"{self.name}:wait")
+        return 0
+
+    def snapshot(self) -> LocalResourceSnapshot:
+        return OPEN
+
+    def settle(self, deadline: Deadline) -> LocalResourceSnapshot:
+        assert not deadline.expired
+        self.settlement_attempts += 1
+        self.events.append(f"{self.name}:settle-{self.settlement_attempts}")
+        return OPEN if self.name == "query-1" and self.settlement_attempts == 1 else SETTLED
+
+
+@dataclass
+class QueryFactory:
+    events: list[str]
+    clients: list[QueryNative] = field(default_factory=list)
+
+    def __call__(self) -> QueryNative:
+        client = QueryNative(self.events, f"query-{len(self.clients) + 1}")
+        self.clients.append(client)
+        self.events.append(f"{client.name}:create")
+        return client
+
+
 def hold(
     owner: FakeOwner,
     *,
     native: FakeNative | None = None,
-    observer: FakeObserver | None = None,
+    observer: GuestAnchorObserver | None = None,
     vm_name: str = "vm-one",
     locator: str = "opaque-locator",
     connection: WSL2Connection | None = None,
@@ -237,6 +294,32 @@ def test_registration_order_exact_connection_and_release() -> None:
     subject.release(Deadline.after(1))
     assert owner.events[-2:] == ["observe", "resolve"]
     assert owner.obligations[0].resolved
+
+
+def test_real_observer_release_retries_custody_and_resolves_only_its_hold() -> None:
+    owner = FakeOwner()
+    connection = WSL2Connection("Ubuntu", "root", "wsl.exe")
+    query_factory = QueryFactory(owner.events)
+    observer = WSL2GuestObserver(connection, client_factory=query_factory)
+    subject = hold(owner, connection=connection, observer=observer)
+    unrelated = hold(owner, connection=connection)
+
+    subject.start(Deadline.after(1))
+    unrelated.start(Deadline.after(1))
+    with pytest.raises(KeyboardInterrupt):
+        subject.release(Deadline.after(1))
+
+    assert len(query_factory.clients) == 1
+    assert query_factory.clients[0].settlement_attempts == 1
+    assert not owner.obligations[0].resolved and not owner.obligations[1].resolved
+
+    subject.release(Deadline.after(1))
+
+    assert len(query_factory.clients) == 2
+    assert query_factory.clients[0].settlement_attempts == 2
+    assert owner.events.index("query-1:settle-2") < owner.events.index("query-2:create")
+    assert query_factory.clients[1].argv[:5] == ("wsl.exe", "--distribution", "Ubuntu", "--user", "root")
+    assert owner.obligations[0].resolved and not owner.obligations[1].resolved
 
 
 def test_nested_holds_are_independent() -> None:
