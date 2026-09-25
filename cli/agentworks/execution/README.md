@@ -756,20 +756,21 @@ in the file-call row before dispatch. Every stage and publication attempt, inclu
 and cleanup, carries that binding. The guest holds the gate through stage creation, chunk writes,
 scratch cleanup, publication, publication cleanup and reconciliation. Requests without a binding
 retain their legacy behavior. Upload destinations inside the gate control namespace are refused
-before filesystem access. A private single upload may register a setup-only row and promote that
-same row to an exact binding before stage work or source reads. Its token and borrow remain
-continuous across setup and upload. Package upload setup and native carrier drain remain separate
+before filesystem access. A private single upload or package member zero may register a setup-only
+row and promote that same row to an exact binding before stage work or source reads. The token and
+borrow remain continuous across setup and upload; package members retain their durable child index
+and checkpoint protocol. Native carrier drain and package process-loss recovery remain separate
 work.
 
-`_file_gate_setup_recovery.py` handles a lost download or single-upload setup reply whose durable
-row remains setup-only after database generation takeover. It rechecks that exact row, dispatches
-non-creating gate inspection, and resolves only the setup obligation after a complete positive
-observation. The old controller cannot publish the gate binding after takeover and thus cannot start
-the snapshot or upload from that row. A bound row, missing gate, uncertain inspection, other
-obligation or non-gated local effect still needs its own recovery proof. The gate and its UID
-directory must remain intact for the guest epoch so a delayed setup cannot create a replacement.
-This is private local composition, not native route acceptance, a production recovery factory or
-whole-operation release.
+`_file_gate_setup_recovery.py` handles a lost download, single-upload or package-upload setup reply
+whose durable row remains setup-only after database generation takeover. It rechecks that exact row,
+dispatches non-creating gate inspection, and resolves only the setup obligation after a complete
+positive observation. The old controller cannot publish the gate binding after takeover and thus
+cannot start the snapshot or first upload member from that row. A bound row, missing gate, uncertain
+inspection, other obligation or non-gated local effect still needs its own recovery proof. The gate
+and its UID directory must remain intact for the guest epoch so a delayed setup cannot create a
+replacement. This is private local composition, not native route acceptance, a production recovery
+factory or whole-operation release.
 
 ## Private inline file reads
 

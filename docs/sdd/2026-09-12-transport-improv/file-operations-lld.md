@@ -1002,11 +1002,12 @@ UID. This is infrastructure setup, not elevation of an individual file operation
 
 The private single-upload setup path now uses that same setup-only custody transition: it holds the
 source and canonical inputs before registration, keeps one borrowed `file-call` row and token from
-SETUP through upload, and publishes the exact binding before staging or publication. Its setup-only
-takeover recovery may inspect and settle the row under the same narrow conditions as download; it
-does not replay upload work. This is local admission and recovery evidence, not production route
-composition or native delayed-delivery proof. Package-upload setup remains separate: the first child
-must occupy the package's existing row, not add a second setup row or reset the child cursor.
+SETUP through upload, and publishes the exact binding before staging or publication. Package upload
+now does the same for child zero in its existing row, preserving the member index and checkpoint
+protocol. Setup-only takeover recovery may inspect and settle either row under the same narrow
+conditions as download; it does not replay upload work or resume a partly completed package. This is
+local admission and recovery evidence, not production route composition or native delayed-delivery
+proof.
 
 The private shared Debian VM bootstrap now installs persistent, non-cleaning `systemd-tmpfiles` `d`
 rules for the root-owned `/run` anchors and the root/admin UID directories, then applies them after

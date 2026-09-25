@@ -1957,8 +1957,12 @@ integration and production artifact callers remain open. The capacity checkbox s
       refuses download as well as upload setup/bound rows whose guest-derived boot differs from the
       managed target. Local fixture and codec tests pass; native delivery and production composition
       remain open.
-- [ ] Extend that setup custody to the first package-upload child without adding another row or
-      losing its index, token or application checkpoint, then prove takeover and native delivery.
+- [x] Extend private setup custody to package-upload child zero without adding another row or losing
+      its index, token or application checkpoint. Publish the binding before preparing the first
+      child; a lost setup reply may settle only the setup-only row after takeover and exact
+      non-creating inspection. Local tests cover ordering, lost reply, lost binding publication and
+      wrong guest. This does not resume a partly completed package after process loss or prove
+      native carrier delivery and drain.
 - [ ] Require the gate in production upload composition, including verified raw guest marker and
       selected provider locator, without fallback to requests lacking a gate. Prove generation
       advance waits for old gated effects and rejects delayed old-generation requests before
