@@ -14,9 +14,11 @@ from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._managed_job_request import ManagedJobRequest
 from agentworks.execution._managed_start_bundle import FIXED_BUNDLE
 from agentworks.execution._managed_start_protocol import ManagedStartRequest, encode_request
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 
 NONCE = "b" * 32
 RUN = "a" * 32
+GUEST = VMGuestIdentity("d" * 32, "00000000-0000-4000-8000-000000000001", 1234)
 
 
 def _launch() -> bytes:
@@ -73,6 +75,7 @@ def test_exact_source_binary_codec_parity(interpreter: str, tmp_path: Path) -> N
             "_managed_job_request",
             "_managed_job_store",
             "_file_wire",
+            "_vm_guest_identity_protocol",
             "_managed_start_protocol",
         ),
     )
@@ -89,6 +92,7 @@ def test_exact_source_binary_codec_parity(interpreter: str, tmp_path: Path) -> N
             ManagedJobRequest(
                 _launch(), "command", ("/usr/bin/true",), None, "discard", None, (), b"", b"\x00\xff\x80"
             ),
+            GUEST,
         )
     )
     result = subprocess.run(

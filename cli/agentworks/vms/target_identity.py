@@ -10,13 +10,12 @@ from __future__ import annotations
 import hashlib
 import struct
 from typing import TYPE_CHECKING
-from uuid import NAMESPACE_DNS, uuid5
 
 from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLocatorUnavailable
 from agentworks.db import VMRow
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTargetKind
-from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 from agentworks.vms.identity import validate_vm_instance_marker
 
 if TYPE_CHECKING:
@@ -25,7 +24,6 @@ if TYPE_CHECKING:
 
 _INCARNATION_DOMAIN = b"agentworks/vm-incarnation"
 _INCARNATION_VERSION = b"v1"
-_BOOT_FENCE_DOMAIN = "agentworks/linux-guest-boot/v1"
 
 
 def vm_incarnation_fingerprint(locator: ProviderLocator, instance_marker: str) -> str:
@@ -44,16 +42,6 @@ def vm_incarnation_fingerprint(locator: ProviderLocator, instance_marker: str) -
     framed = b"\0".join((_INCARNATION_DOMAIN, _INCARNATION_VERSION))
     framed += struct.pack(">I", len(locator_bytes)) + locator_bytes + marker.encode("ascii")
     return f"v1:{hashlib.sha256(framed).hexdigest()}"
-
-
-def vm_guest_boot_id(guest: VMGuestIdentity) -> str:
-    """Derive one boot ID from the kernel boot and the guest init process.
-
-    WSL2 distributions share a kernel boot but have distinct PID 1 lifetimes.
-    The resulting UUID changes when either observed value changes. It is an
-    ordinary cooperative-guest fence, not proof against a forged procfs view.
-    """
-    return str(uuid5(NAMESPACE_DNS, f"{_BOOT_FENCE_DOMAIN}:{guest.boot_id}:{guest.init_start_ticks}"))
 
 
 def compose_managed_vm_target_identity(

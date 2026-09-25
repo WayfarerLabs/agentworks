@@ -29,6 +29,7 @@ from agentworks.execution._runtime_prerequisite import (
     RuntimeSelection,
     RuntimeTargetOS,
 )
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 from agentworks.execution._workload_shell import WorkloadShellObservationResult
 from agentworks.execution._workload_shell_protocol import WorkloadShellResponse, encode_workload_shell_response
 from agentworks.execution.carrier import (
@@ -52,7 +53,8 @@ from .test_managed_start_operation import Carrier, _records
 RUN = ManagedRunIdentity("e" * 32)
 ROOT = IdentityExpectation(0, 0, (0,))
 WORKLOAD = IdentityExpectation(1001, 1001, (1001,))
-TARGET = ManagedTargetIdentity(ManagedTargetKind.VM, "vm-one", "v1:" + "c" * 64, "00000000-0000-4000-8000-000000000001")
+GUEST = VMGuestIdentity("d" * 32, "00000000-0000-4000-8000-000000000001", 1234)
+TARGET = ManagedTargetIdentity(ManagedTargetKind.VM, "vm-one", "v1:" + "c" * 64, vm_guest_boot_id(GUEST))
 
 
 def _call(
@@ -79,6 +81,7 @@ def _call(
         "owner": held_owner,
         "obligation_id": "b" * 32,
         "identity": RUN,
+        "guest": GUEST,
     }
     options.update(changes)
     return access.start_bound_managed_job(repository, invocation or Command(["/usr/bin/true"]), **options)
@@ -122,6 +125,22 @@ def test_invalid_request_and_carrier_refusal_leave_no_reservation(tmp_path: Path
             _call(repository, owner, unsupported)
         assert repository.inspect(RUN) is None
         assert carrier.calls == unsupported.calls == 0
+    finally:
+        owner.close()
+        database.close()
+
+
+@pytest.mark.parametrize("changed", [replace(GUEST, boot_id="00000000-0000-4000-8000-000000000002"), object()])
+def test_guest_boot_mismatch_refuses_before_reservation(tmp_path: Path, changed: object) -> None:
+    database = Database(tmp_path / "state.db")
+    repository = ManagedRunRepository(database)
+    owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "start")
+    carrier = Carrier(lambda request: _records(request, receipt=True))
+    try:
+        with pytest.raises(ValidationError):
+            _call(repository, owner, carrier, guest=changed)
+        assert repository.inspect(RUN) is None
+        assert carrier.calls == carrier.validations == 0
     finally:
         owner.close()
         database.close()
@@ -223,6 +242,7 @@ def test_wrong_binding_refuses_before_reservation(tmp_path: Path, wrong: str) ->
     owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "start")
     carrier = Carrier(lambda request: _records(request, receipt=True))
     second_owner = None
+    changed: object
     try:
         if wrong == "owner":
             second_owner = OperationOwner.acquire(
@@ -267,6 +287,7 @@ def test_sensitive_script_suppresses_output_policy(tmp_path: Path) -> None:
             owner=owner,
             obligation_id="b" * 32,
             identity=RUN,
+            guest=GUEST,
         )
         assert outcome.attempt is not None
         assert outcome.attempt.record.output_policy.mode is ManagedOutputMode.SENSITIVITY_SUPPRESSED

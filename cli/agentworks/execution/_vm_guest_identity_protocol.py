@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
+from uuid import NAMESPACE_DNS, uuid5
 
 VM_INSTANCE_MARKER_PATH = "/var/lib/agentworks/instance-id"
 VM_BOOT_ID_PATH = "/proc/sys/kernel/random/boot_id"
@@ -21,6 +22,7 @@ _SUCCESS_FIELDS = frozenset({"boot_id", "init_start_ticks", "instance_marker", "
 _REFUSAL_FIELDS = frozenset({"failure", "nonce", "status", "version"})
 _VERSION = 2
 _MAX_START_TICKS = 2**64 - 1
+_BOOT_FENCE_DOMAIN = "agentworks/linux-guest-boot/v1"
 
 
 class VMGuestIdentityFailure(StrEnum):
@@ -54,6 +56,17 @@ class VMGuestIdentity:
             raise ValueError("invalid VM boot ID")
         if type(self.init_start_ticks) is not int or not 0 <= self.init_start_ticks <= _MAX_START_TICKS:
             raise ValueError("invalid VM init start time")
+
+
+def vm_guest_boot_id(guest: VMGuestIdentity) -> str:
+    """Derive a cooperative boot fence from kernel boot and PID 1 lifetime.
+
+    WSL2 distributions can share a kernel boot but have distinct PID 1
+    lifetimes. This does not prove a guest's procfs view is authentic.
+    """
+    if type(guest) is not VMGuestIdentity:
+        raise ValueError("invalid VM guest identity")
+    return str(uuid5(NAMESPACE_DNS, f"{_BOOT_FENCE_DOMAIN}:{guest.boot_id}:{guest.init_start_ticks}"))
 
 
 @dataclass(frozen=True, slots=True)

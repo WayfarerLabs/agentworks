@@ -11,6 +11,7 @@ from . import _managed_job_request as request_wire
 from ._file_wire import valid_nonce
 from ._helper_identity import IdentityExpectation, decode_identity
 from ._managed_job_store import FactName, RequestAsset
+from ._vm_guest_identity_protocol import VMGuestIdentity
 
 _ASSETS = tuple(RequestAsset)
 _ASSET_LIMITS = (
@@ -33,6 +34,7 @@ class ManagedStartRequest:
     nonce: str
     identity: IdentityExpectation
     job: request_wire.ManagedJobRequest
+    guest: VMGuestIdentity
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +51,11 @@ def _json(value: object) -> bytes:
 
 
 def encode_request(request: ManagedStartRequest) -> bytes:
-    if type(request) is not ManagedStartRequest or not valid_nonce(request.nonce):
+    if (
+        type(request) is not ManagedStartRequest
+        or not valid_nonce(request.nonce)
+        or type(request.guest) is not VMGuestIdentity
+    ):
         raise ManagedStartError("invalid managed start request")
     try:
         assets = request_wire.encode_request(request.job)
@@ -60,6 +66,11 @@ def encode_request(request: ManagedStartRequest) -> bytes:
                 "groups": list(request.identity.groups),
             }
         )
+        guest = VMGuestIdentity(
+            request.guest.instance_marker,
+            request.guest.boot_id,
+            request.guest.init_start_ticks,
+        )
     except (request_wire.RequestError, ValueError, TypeError, AttributeError):
         raise ManagedStartError("invalid managed start request") from None
     data = _json(
@@ -67,6 +78,11 @@ def encode_request(request: ManagedStartRequest) -> bytes:
             "version": 1,
             "nonce": request.nonce,
             "identity": {"euid": identity.euid, "egid": identity.egid, "groups": list(identity.groups)},
+            "guest": {
+                "instance_marker": guest.instance_marker,
+                "boot_id": guest.boot_id,
+                "init_start_ticks": guest.init_start_ticks,
+            },
             "assets": [base64.b64encode(assets[name.value]).decode("ascii") for name in _ASSETS],
         }
     )
@@ -83,13 +99,17 @@ def decode_request(data: bytes) -> ManagedStartRequest:
         if type(header) is not dict or _json(header) != data:
             raise ValueError
         if (
-            set(header) != {"version", "nonce", "identity", "assets"}
+            set(header) != {"version", "nonce", "identity", "guest", "assets"}
             or type(header["version"]) is not int
             or header["version"] != 1
             or not valid_nonce(header["nonce"])
         ):
             raise ValueError
         identity = decode_identity(header["identity"])
+        guest_data = header["guest"]
+        if type(guest_data) is not dict or set(guest_data) != {"instance_marker", "boot_id", "init_start_ticks"}:
+            raise ValueError
+        guest = VMGuestIdentity(guest_data["instance_marker"], guest_data["boot_id"], guest_data["init_start_ticks"])
         encoded = header["assets"]
         if type(encoded) is not list or len(encoded) != len(_ASSETS) or any(type(part) is not str for part in encoded):
             raise ValueError
@@ -113,7 +133,7 @@ def decode_request(data: bytes) -> ManagedStartRequest:
         request_wire.RequestError,
     ):
         raise ManagedStartError("invalid managed start request") from None
-    return ManagedStartRequest(header["nonce"], identity, job)
+    return ManagedStartRequest(header["nonce"], identity, job, guest)
 
 
 def encode_result(result: ManagedStartResult) -> bytes:

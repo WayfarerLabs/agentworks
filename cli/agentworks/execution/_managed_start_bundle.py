@@ -13,6 +13,8 @@ _MODULES = (
     "_managed_job_request",
     "_managed_job_store",
     "_file_wire",
+    "_vm_guest_identity_protocol",
+    "_vm_guest_identity_guest",
     "_managed_start_protocol",
 )
 _PACKAGE = files(__package__)

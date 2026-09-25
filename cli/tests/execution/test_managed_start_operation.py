@@ -48,6 +48,7 @@ from agentworks.execution._managed_start_protocol import (
     encode_result,
 )
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 from agentworks.execution.carrier import (
     CapturedOutput,
     CarrierIO,
@@ -66,6 +67,7 @@ from agentworks.operations import OperationBorrow, OperationOwner, _PreRegistrat
 RUN = ManagedRunIdentity("a" * 32)
 OBLIGATION = "b" * 32
 ROOT = IdentityExpectation(0, 0, (0,))
+GUEST = VMGuestIdentity("d" * 32, "00000000-0000-4000-8000-000000000001", 1234)
 
 
 @pytest.fixture
@@ -86,7 +88,7 @@ def owned(tmp_path: Path) -> Generator[tuple[Database, ManagedRunRepository, Man
 
 def _spec() -> ManagedRunSpec:
     return ManagedRunSpec(
-        ManagedTargetIdentity(ManagedTargetKind.VM, "vm-one", "v1:" + "c" * 64, "00000000-0000-4000-8000-000000000001"),
+        ManagedTargetIdentity(ManagedTargetKind.VM, "vm-one", "v1:" + "c" * 64, vm_guest_boot_id(GUEST)),
         IdentityExpectation(1001, 1001, (1001,)),
         ManagedShellIdentity(None, None),
         ManagedRunOwner(ManagedRunOwnerKind.RESOURCE, "session-7"),
@@ -182,6 +184,7 @@ def _start(
         IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
         selected_deadline,
         RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+        GUEST,
     )
     return start_owned_managed_run(
         repository,
@@ -220,7 +223,7 @@ def test_preparation_precedes_reservation_and_binds_owned_start(tmp_path: Path) 
             request.stdin,
         )
         with pytest.raises(ValidationError):
-            prepare_managed_start(carrier, RUN, spec, policy, bad, plan, deadline, runtime)
+            prepare_managed_start(carrier, RUN, spec, policy, bad, plan, deadline, runtime, GUEST)
 
         class UnsupportedCarrier(Carrier):
             def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
@@ -228,12 +231,12 @@ def test_preparation_precedes_reservation_and_binds_owned_start(tmp_path: Path) 
 
         unsupported = UnsupportedCarrier(lambda wire: _records(wire, receipt=True))
         with pytest.raises(ValidationError):
-            prepare_managed_start(unsupported, RUN, spec, policy, request, plan, deadline, runtime)
+            prepare_managed_start(unsupported, RUN, spec, policy, request, plan, deadline, runtime, GUEST)
         assert repository.inspect(RUN) is None
         assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
         assert carrier.calls == unsupported.calls == 0
 
-        prepared = prepare_managed_start(carrier, RUN, spec, policy, request, plan, deadline, runtime)
+        prepared = prepare_managed_start(carrier, RUN, spec, policy, request, plan, deadline, runtime, GUEST)
         assert b"private-canary" not in repr(prepared).encode()
         record = repository.reserve(spec, output_policy=policy, identity=RUN)
         wrong = replace(record, output_policy=ManagedOutputPolicy(ManagedOutputMode.DISCARD, None))
@@ -277,6 +280,7 @@ def test_preparation_can_be_discarded_after_reservation_failure(tmp_path: Path) 
             IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
             deadline,
             RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+            GUEST,
         )
         with pytest.raises(StateError):
             repository.reserve(spec, output_policy=policy, identity=RUN)
@@ -314,6 +318,7 @@ def test_deadline_expiring_between_preparation_and_claim_refuses_before_borrow(
         IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
         deadline,
         RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+        GUEST,
     )
     object.__setattr__(deadline, "expires_at", 0.0)
     with pytest.raises(ValidationError):

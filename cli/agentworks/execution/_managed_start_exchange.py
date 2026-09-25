@@ -43,6 +43,7 @@ from ._runtime_prerequisite import (
     RuntimeTargetOS,
     build_runtime_identity_helper_argv,
 )
+from ._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 from .carrier import CarrierIO, Deadline, Dispatch, Failure, FiniteInput, PreparedInvocation, Retention, SinkOutput
 
 if TYPE_CHECKING:
@@ -269,6 +270,7 @@ def prepare_managed_start(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
+    guest: VMGuestIdentity,
 ) -> _PreparedAttempt:
     """Prepare one exact managed start before any run reservation is written."""
     if (
@@ -291,6 +293,8 @@ def prepare_managed_start(
         raise ValidationError("Managed start deadline has expired")
     if type(request) is not request_wire.ManagedJobRequest:
         raise ValidationError("Invalid managed start request")
+    if type(guest) is not VMGuestIdentity or vm_guest_boot_id(guest) != spec.target.boot_id:
+        raise ValidationError("Managed start guest boot does not match target")
     try:
         expected_launch = encode_managed_job_fact(ManagedRunReceipt(identity, identity.unit_name, spec))
         if request.launch != expected_launch:
@@ -301,7 +305,7 @@ def prepare_managed_start(
         ):
             raise ValidationError("Managed start output policy mismatch")
         nonce = secrets.token_hex(16)
-        request_data = encode_request(ManagedStartRequest(nonce, plan.expected, request))
+        request_data = encode_request(ManagedStartRequest(nonce, plan.expected, request, guest))
         argv, candidates, shim = build_runtime_identity_helper_argv(
             plan, selection=runtime_selection, fixed_source=FIXED_BUNDLE.bootstrap, nonce=nonce
         )

@@ -20,6 +20,8 @@ from ._managed_start_protocol import (
     decode_request,
     encode_result,
 )
+from ._vm_guest_identity_guest import _GuestRefusal, _identity
+from ._vm_guest_identity_protocol import vm_guest_boot_id
 
 _SYSTEMD_RUN = "/usr/bin/systemd-run"
 _START_TIMEOUT_SECONDS = 45.0
@@ -142,7 +144,7 @@ def _write_result(writer: FileRecordWriter, prepared: _PreparedStart) -> None:
 
 
 def main(nonce: str) -> int:
-    """Attempt one start; never infer remote absence or reread live target identity."""
+    """Fence one guest identity before opening the managed job store."""
     writer = FileRecordWriter(nonce)
     try:
         request = _read_request()
@@ -152,12 +154,17 @@ def main(nonce: str) -> int:
             raise ManagedStartError("managed start runtime")
         if not matches_current_identity(request.identity):
             raise ManagedStartError("managed start identity")
+        if _identity() != request.guest:
+            raise ManagedStartError("managed start guest identity mismatch")
         from . import _managed_job_request as request_wire
 
         launch = request_wire.decode_request_launch(request.job.launch)
+        target = cast("dict[str, object]", launch["target"])
+        if target["kind"] != "vm" or target["boot_id"] != vm_guest_boot_id(request.guest):
+            raise ManagedStartError("managed start target boot mismatch")
         with ManagedJobStore(cast("str", launch["run_id"])) as store:
             prepared = _prepare_start(request, store, python=sys.executable)
-    except (ManagedStartError, StoreError, OSError, ValueError, TypeError):
+    except (ManagedStartError, StoreError, _GuestRefusal, OSError, ValueError, TypeError):
         writer.write(FileRecordKind.FAILED, b"")
         writer.write(FileRecordKind.FINISHED, b"")
         return 0

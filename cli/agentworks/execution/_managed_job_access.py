@@ -1,8 +1,8 @@
 """Private composition of one independent managed start under an owned VM.
 
-The caller supplies an already composed target identity. This module does not
-recheck its marker or boot fence; a production caller must hold the route and
-revalidate both at the dispatch boundary before using this seam.
+The caller supplies an already composed target identity and its observed guest
+identity. This module checks their boot fence before reservation. A production
+caller must still hold the route and revalidate target facts at dispatch.
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ from ._managed_runs import (
 from ._managed_start_exchange import prepare_managed_start
 from ._managed_start_operation import ManagedStartOutcome, start_owned_managed_run
 from ._runtime_prerequisite import RuntimePrerequisiteState, RuntimeSelection, RuntimeTargetOS
+from ._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 from ._workload_shell import WorkloadShellObservationResult, WorkloadShellObservationState, observe_workload_shell
 from .carrier import Carrier, Deadline, Dispatch, ExitStatus
 from .models import Command, Input, Output, Script, Shell
@@ -76,11 +77,12 @@ def start_bound_managed_job(
     owner: OperationOwner,
     obligation_id: str,
     identity: ManagedRunIdentity,
+    guest: VMGuestIdentity,
 ) -> ManagedStartOutcome:
     """Preflight, reserve and attempt one start under an already owned exact VM.
 
     This is a private composition seam, not target activation or public execution.
-    The caller must supply current target facts and retain custody on uncertain
+    The caller must supply bound target facts and retain custody on uncertain
     outcomes. A failed shell observation raises safe typed facts before reserve.
 
     The caller owns the exact ``identity`` and must inspect that ID after every
@@ -101,6 +103,8 @@ def start_bound_managed_job(
         or runtime_selection.target_os is not RuntimeTargetOS.LINUX
         or owner.ownership.scope.resource_kind is not OperationResourceKind.VM
         or owner.ownership.scope.resource_name != target.name
+        or type(guest) is not VMGuestIdentity
+        or vm_guest_boot_id(guest) != target.boot_id
     ):
         raise ValidationError("Managed job requires an owned exact Linux VM and finite deadline")
     workload = _validate_plan(workload_plan)
@@ -182,7 +186,9 @@ def start_bound_managed_job(
     request, policy = compose_managed_request(
         invocation, input=input, output=output, env=env, cwd=cwd, sensitive=sensitive, identity=identity, spec=spec
     )
-    prepared = prepare_managed_start(carrier, identity, spec, policy, request, root_plan, deadline, runtime_selection)
+    prepared = prepare_managed_start(
+        carrier, identity, spec, policy, request, root_plan, deadline, runtime_selection, guest
+    )
     if deadline.expired:
         prepared.discard()
         raise ValidationError("Managed start deadline has expired before reservation")

@@ -51,6 +51,8 @@ from agentworks.execution._managed_start_protocol import (
     encode_result,
 )
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+from agentworks.execution._vm_guest_identity_guest import _GuestRefusal
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, VMGuestIdentityFailure, vm_guest_boot_id
 from agentworks.execution.carrier import (
     CapturedOutput,
     CarrierIO,
@@ -70,11 +72,12 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux managed s
 RUN = ManagedRunIdentity("a" * 32)
 NONCE = "b" * 32
 ROOT = IdentityExpectation(0, 0, (0,))
+GUEST = VMGuestIdentity("d" * 32, "00000000-0000-4000-8000-000000000001", 1234)
 
 
 def _spec() -> ManagedRunSpec:
     return ManagedRunSpec(
-        ManagedTargetIdentity(ManagedTargetKind.VM, "vm-one", "v1:" + "c" * 64, "00000000-0000-4000-8000-000000000001"),
+        ManagedTargetIdentity(ManagedTargetKind.VM, "vm-one", "v1:" + "c" * 64, vm_guest_boot_id(GUEST)),
         IdentityExpectation(1001, 1001, (1001,)),
         ManagedShellIdentity(None, None),
         ManagedRunOwner(ManagedRunOwnerKind.RESOURCE, "session-7"),
@@ -189,6 +192,7 @@ def _start(repository: ManagedRunRepository, record: ManagedRunRecord, carrier: 
         IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
         deadline,
         RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+        GUEST,
     )
     prepared.claim(record, carrier, deadline)
     return start_managed_run(
@@ -217,6 +221,7 @@ def test_claimed_preparation_refuses_cancellation_or_carrier_switch_before_admis
         IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
         deadline,
         RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+        GUEST,
     )
     prepared.claim(record, carrier, deadline)
     if fault == "discarded":
@@ -244,7 +249,7 @@ def test_claimed_preparation_refuses_cancellation_or_carrier_switch_before_admis
 
 def test_codec_is_canonical_bounded_and_secret_safe(reserved: tuple[ManagedRunRepository, ManagedRunRecord]) -> None:
     _, record = reserved
-    request = ManagedStartRequest(NONCE, ROOT, _request(record))
+    request = ManagedStartRequest(NONCE, ROOT, _request(record), GUEST)
     data = encode_request(request)
     assert decode_request(data) == request
     assert len(data) <= MAX_REQUEST_BYTES
@@ -261,6 +266,15 @@ def test_codec_is_canonical_bounded_and_secret_safe(reserved: tuple[ManagedRunRe
         decode_request(b" " + data)
     with pytest.raises(ManagedStartError):
         decode_request(b"x" * (MAX_REQUEST_BYTES + 1))
+    for invalid_guest in (
+        {"instance_marker": "invalid", "boot_id": GUEST.boot_id, "init_start_ticks": GUEST.init_start_ticks},
+        {"instance_marker": GUEST.instance_marker, "boot_id": GUEST.boot_id, "init_start_ticks": -1},
+        {"instance_marker": GUEST.instance_marker, "boot_id": GUEST.boot_id},
+    ):
+        value = json.loads(data)
+        value["guest"] = invalid_guest
+        with pytest.raises(ManagedStartError):
+            decode_request(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
     value = json.loads(data)
     value["assets"][0] = value["assets"][0][:-1]
     with pytest.raises(ManagedStartError):
@@ -281,7 +295,7 @@ def test_guest_stages_exact_assets_and_invokes_closed_service_argv(
     reserved: tuple[ManagedRunRepository, ManagedRunRecord], store: ManagedJobStore
 ) -> None:
     _, record = reserved
-    request = ManagedStartRequest(NONCE, ROOT, _request(record))
+    request = ManagedStartRequest(NONCE, ROOT, _request(record), GUEST)
     invocations: list[tuple[str, ...]] = []
 
     def runner(argv: tuple[str, ...]) -> int:
@@ -319,11 +333,137 @@ def test_guest_stages_exact_assets_and_invokes_closed_service_argv(
     assert len(invocations) == 1
 
 
+@pytest.mark.parametrize(
+    "observed",
+    [
+        replace(GUEST, instance_marker="e" * 32),
+        replace(GUEST, boot_id="00000000-0000-4000-8000-000000000002"),
+        replace(GUEST, init_start_ticks=1235),
+        _GuestRefusal(VMGuestIdentityFailure.MARKER_MISSING),
+        _GuestRefusal(VMGuestIdentityFailure.MARKER_UNSAFE),
+        _GuestRefusal(VMGuestIdentityFailure.BOOT_ID_UNREADABLE),
+        _GuestRefusal(VMGuestIdentityFailure.INIT_START_UNREADABLE),
+    ],
+)
+def test_guest_identity_refusal_precedes_store_and_runner(
+    reserved: tuple[ManagedRunRepository, ManagedRunRecord], monkeypatch: pytest.MonkeyPatch, observed: object
+) -> None:
+    _, record = reserved
+    request = ManagedStartRequest(NONCE, ROOT, _request(record), GUEST)
+    records: list[tuple[FileRecordKind, bytes]] = []
+
+    class Writer:
+        def __init__(self, nonce: str) -> None:
+            assert nonce == NONCE
+
+        def write(self, kind: FileRecordKind, body: bytes) -> None:
+            records.append((kind, body))
+
+    def observe() -> VMGuestIdentity:
+        if isinstance(observed, _GuestRefusal):
+            raise observed
+        assert isinstance(observed, VMGuestIdentity)
+        return observed
+
+    def unexpected(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("managed store or runner reached before guest identity fence")
+
+    monkeypatch.setattr(guest, "FileRecordWriter", Writer)
+    monkeypatch.setattr(guest, "_read_request", lambda: request)
+    monkeypatch.setattr(guest, "matches_current_identity", lambda _expected: True)
+    monkeypatch.setattr(guest, "_identity", observe)
+    monkeypatch.setattr(guest, "ManagedJobStore", unexpected)
+    monkeypatch.setattr(guest, "_run_systemd", unexpected)
+    assert guest.main(NONCE) == 0
+    assert records == [(FileRecordKind.FAILED, b""), (FileRecordKind.FINISHED, b"")]
+
+
+def test_guest_exact_identity_opens_store_after_fence(
+    reserved: tuple[ManagedRunRepository, ManagedRunRecord], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, record = reserved
+    request = ManagedStartRequest(NONCE, ROOT, _request(record), GUEST)
+    events: list[str] = []
+    records: list[tuple[FileRecordKind, bytes]] = []
+
+    class Writer:
+        def __init__(self, _nonce: str) -> None:
+            pass
+
+        def write(self, kind: FileRecordKind, body: bytes) -> None:
+            records.append((kind, body))
+
+    class Store:
+        def __init__(self, run_id: str) -> None:
+            assert run_id == RUN.run_id
+            events.append("store")
+
+        def __enter__(self) -> Store:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            pass
+
+    def observe() -> VMGuestIdentity:
+        events.append("identity")
+        return GUEST
+
+    def prepare(_request: ManagedStartRequest, _store: Store, *, python: str) -> guest._PreparedStart:
+        events.append("prepare")
+        assert python == sys.executable
+        return guest._PreparedStart(ManagedStartResult(0, None, ()))
+
+    monkeypatch.setattr(guest, "FileRecordWriter", Writer)
+    monkeypatch.setattr(guest, "_read_request", lambda: request)
+    monkeypatch.setattr(guest, "matches_current_identity", lambda _expected: True)
+    monkeypatch.setattr(guest, "_identity", observe)
+    monkeypatch.setattr(guest, "ManagedJobStore", Store)
+    monkeypatch.setattr(guest, "_prepare_start", prepare)
+    assert guest.main(NONCE) == 0
+    assert events == ["identity", "store", "prepare"]
+    assert records == [
+        (FileRecordKind.RESULT, encode_result(ManagedStartResult(0, None, ()))),
+        (FileRecordKind.FINISHED, b""),
+    ]
+
+
+@pytest.mark.parametrize("fault", ["boot", "kind"])
+def test_guest_refuses_contradictory_launch_before_store(
+    reserved: tuple[ManagedRunRepository, ManagedRunRecord], monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    _, record = reserved
+    launch = json.loads(_request(record).launch)
+    launch["target"]["boot_id" if fault == "boot" else "kind"] = (
+        "00000000-0000-4000-8000-000000000002" if fault == "boot" else "platform-host"
+    )
+    job = replace(_request(record), launch=json.dumps(launch, sort_keys=True, separators=(",", ":")).encode())
+    request = ManagedStartRequest(NONCE, ROOT, job, GUEST)
+    records: list[tuple[FileRecordKind, bytes]] = []
+
+    class Writer:
+        def __init__(self, _nonce: str) -> None:
+            pass
+
+        def write(self, kind: FileRecordKind, body: bytes) -> None:
+            records.append((kind, body))
+
+    def unexpected(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("managed store opened for contradictory launch")
+
+    monkeypatch.setattr(guest, "FileRecordWriter", Writer)
+    monkeypatch.setattr(guest, "_read_request", lambda: request)
+    monkeypatch.setattr(guest, "matches_current_identity", lambda _expected: True)
+    monkeypatch.setattr(guest, "_identity", lambda: GUEST)
+    monkeypatch.setattr(guest, "ManagedJobStore", unexpected)
+    assert guest.main(NONCE) == 0
+    assert records == [(FileRecordKind.FAILED, b""), (FileRecordKind.FINISHED, b"")]
+
+
 def test_guest_nonzero_or_timeout_preserves_assets_without_absence(
     reserved: tuple[ManagedRunRepository, ManagedRunRecord], store: ManagedJobStore
 ) -> None:
     _, record = reserved
-    request = ManagedStartRequest(NONCE, ROOT, _request(record))
+    request = ManagedStartRequest(NONCE, ROOT, _request(record), GUEST)
     prepared = guest._prepare_start(request, store, python="/usr/bin/python3.11", runner=lambda _argv: None)
     assert prepared.result == ManagedStartResult(None, None, ())
     assert prepared.launch is None
@@ -472,7 +612,7 @@ def test_preflight_refuses_without_mutating_reservation(
     carrier = ScriptedCarrier(lambda _request: b"")
     with pytest.raises(ValidationError):
         prepare_managed_start(
-            carrier, record.identity, record.spec, record.output_policy, request, plan, deadline, runtime
+            carrier, record.identity, record.spec, record.output_policy, request, plan, deadline, runtime, GUEST
         )
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
     assert carrier.calls == 0
@@ -493,6 +633,7 @@ def test_preflight_refuses_bogus_request_type_before_reservation_mutation(
             IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
             Deadline.after(10),
             RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+            GUEST,
         )
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
     assert carrier.validations == carrier.calls == 0
@@ -514,6 +655,7 @@ def test_proxmox_structural_refusal_precedes_possible_dispatch(
             IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
             Deadline.after(10),
             RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+            GUEST,
         )
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
 
