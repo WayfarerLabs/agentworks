@@ -20,7 +20,6 @@ from agentworks.execution._wsl2_windows import WindowsWSL2HostClient
 from agentworks.execution.binding import NativeExecutionBinding
 from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
 from agentworks.operations import OperationOwner
-from agentworks.vms.target_identity import compose_managed_vm_target_identity
 from agentworks.vms.target_preparation import VMTargetPreparation, VMTargetPreparationStatus, prepare_managed_vm_target
 
 if TYPE_CHECKING:
@@ -114,9 +113,9 @@ class WSL2OwnedDownload:
             self._vm, self._locator, binding, deadline=deadline, owner=self.owner
         )
         if self.preparation.status is not VMTargetPreparationStatus.PREPARED:
-            return self._finish_without_file(ready, deadline, safe=not self.preparation.requires_owner_retention)
+            return self._release_if_settled(ready, deadline, safe=not self.preparation.requires_owner_retention)
         if not self._same_ready_epoch(ready, self.preparation):
-            return self._finish_without_file(ready, deadline, safe=True)
+            return self._release_if_settled(ready, deadline, safe=True)
 
         target = self.preparation.target
         assert target is not None
@@ -136,7 +135,7 @@ class WSL2OwnedDownload:
             and not self.file_operation.active_downloads
             and not self.file_operation.unfinished_downloads
         )
-        return self._finish_without_file(ready, deadline, safe=file_settled)
+        return self._release_if_settled(ready, deadline, safe=file_settled)
 
     def _ready_is_durable(self, ready: WSL2AnchorEvidence) -> bool:
         obligation = self.hold.obligation
@@ -144,14 +143,19 @@ class WSL2OwnedDownload:
         if obligation is None or identity is None:
             return False
         rows = self._repository.list_lifecycle_obligations(self.owner.ownership)
-        return any(
-            row.obligation_id == obligation.obligation_id
-            and row.state is LifecycleObligationState.POSSIBLE_EFFECT
-            and decode_hold_payload(row.payload).guest == identity
-            and decode_hold_payload(row.payload).locator_sha256 == locator_digest(self._locator.token)
-            and decode_hold_payload(row.payload).instance_marker == self._vm.instance_marker
-            for row in rows
-        )
+        for row in rows:
+            if (
+                row.obligation_id != obligation.obligation_id
+                or row.state is not LifecycleObligationState.POSSIBLE_EFFECT
+            ):
+                continue
+            payload = decode_hold_payload(row.payload)
+            return (
+                payload.guest == identity
+                and payload.locator_sha256 == locator_digest(self._locator.token)
+                and payload.instance_marker == self._vm.instance_marker
+            )
+        return False
 
     def _same_ready_epoch(self, ready: WSL2AnchorEvidence, preparation: VMTargetPreparation) -> bool:
         observed = preparation.guest_result
@@ -162,15 +166,9 @@ class WSL2OwnedDownload:
         anchor = ready.identity
         if type(identity) is not VMGuestIdentity or anchor is None or preparation.target is None:
             return False
-        if (
-            identity.instance_marker != self._vm.instance_marker
-            or identity.boot_id != anchor.boot_id
-            or identity.init_start_ticks != anchor.init_start_ticks
-        ):
-            return False
-        return preparation.target == compose_managed_vm_target_identity(self._vm, self._locator, identity)
+        return identity.boot_id == anchor.boot_id and identity.init_start_ticks == anchor.init_start_ticks
 
-    def _finish_without_file(self, ready: WSL2AnchorEvidence, deadline: Deadline, *, safe: bool) -> WSL2DownloadStatus:
+    def _release_if_settled(self, ready: WSL2AnchorEvidence, deadline: Deadline, *, safe: bool) -> WSL2DownloadStatus:
         """Release the exact hold; retain the claim unless every obligation settled."""
         if not safe:
             return WSL2DownloadStatus.RETAINED
