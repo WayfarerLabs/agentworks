@@ -355,10 +355,14 @@ dispatch in that case. This is not an atomic registration guarantee or a product
 target preparation and explicit settled release between that download path and the private
 `_wsl2_owned_managed_job.py` caller. The managed caller retains the supplied run ID and does not
 release the hold automatically after start. It compares a fresh locator, copied connection and
-runtime selection, then confirms the locator again immediately before entering the bound-start
-composition. An exact hold can settle while a managed-start obligation still keeps VM ownership.
-These local checks do not close a route change between composition and dispatch, prove native WSL2
-delivery or make this a production job API.
+runtime selection, then confirms the locator again before entering the bound-start composition.
+After the managed-start obligation is durably armed, a second check runs before the run records
+possible dispatch or the carrier sends work. Valid differences are `CHANGED`; unavailable, invalid
+or late observations are `UNCONFIRMED`, while exceptional observations preserve the original control
+exception. A post-arm refusal leaves the run `RESERVED` as a one-shot tombstone and retains VM
+custody. An exact hold can settle while a managed-start obligation still keeps VM ownership. These
+local checks do not make route validity atomic with dispatch, prove native WSL2 delivery or make
+this a production job API.
 
 ## Observation and guest lifetime
 

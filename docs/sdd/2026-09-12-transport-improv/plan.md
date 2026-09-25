@@ -1441,8 +1441,17 @@ supplied run ID, and does not automatically end the WSL hold when the independen
 Exact hold release can precede whole-owner closure while managed-start custody remains unresolved. A
 follow-up correction compares a fresh locator, selected connection and runtime, and confirms the
 locator again immediately before bound-start composition. The focused proof is local;
-post-composition route changes, dispatch-bound revalidation, live WSL2/systemd behavior, recovery
-and public RunContext delivery remain open.
+post-composition route changes, live WSL2/systemd behavior, recovery and public RunContext delivery
+remain open at that checkpoint.
+
+At private checkpoint `378b295cd`, an optional WSL2 route callback reaches the existing managed
+start admission boundary. It runs after the core managed-start obligation is durably armed but
+before the run records possible dispatch and before carrier delivery. A valid route difference is
+`CHANGED`; unavailable, invalid or late evidence is `UNCONFIRMED`; exceptional observation keeps the
+original `BaseException` with custody attached as cause. A refusal makes no managed carrier attempt
+and leaves the exact run `RESERVED` and one-shot, with owner custody retained. Focused hermetic
+proof does not bind locator observation atomically to later carrier delivery, or establish live
+WSL2/systemd, recovery, production caller or public RunContext behavior.
 
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared
