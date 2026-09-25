@@ -49,6 +49,7 @@ class WSL2OwnedOperation:
         connection: WSL2Connection,
         runtime_selection: RuntimeSelection,
         *,
+        config: Config | None = None,
         native: OwnedHostClient | None = None,
         observer: GuestAnchorObserver | None = None,
     ) -> None:
@@ -81,6 +82,7 @@ class WSL2OwnedOperation:
         self._runtime = selected_runtime
         self._platform = platform
         self._ctx = ctx
+        self._config = config
         try:
             self.hold = WSL2PlatformHold(
                 self.owner,
@@ -145,7 +147,16 @@ class WSL2OwnedOperation:
         except AttributeError as error:
             raise ValidationError(f"WSL2 {purpose} requires a complete native binding") from error
         return cls(
-            repository, vm, platform, ctx, locator, connection, runtime_selection, native=native, observer=observer
+            repository,
+            vm,
+            platform,
+            ctx,
+            locator,
+            connection,
+            runtime_selection,
+            config=config,
+            native=native,
+            observer=observer,
         )
 
     @classmethod
@@ -218,7 +229,7 @@ class WSL2OwnedOperation:
             return None
         return identity
 
-    def selected_route_still_current(self, deadline: Deadline, *, config: Config | None = None) -> bool:
+    def selected_route_still_current(self, deadline: Deadline) -> bool:
         """Reobserve selected facts before managed-start composition.
 
         This does not close a route change between this check and dispatch.
@@ -236,10 +247,30 @@ class WSL2OwnedOperation:
             raise ValidationError("WSL2 route revalidation requires a complete provider locator") from error
         if selected != self._locator:
             return False
-        binding = self._platform.resolve_native_execution_binding(self._vm, self._ctx, deadline=deadline, config=config)
+        binding = self._platform.resolve_native_execution_binding(
+            self._vm, self._ctx, deadline=deadline, config=self._config
+        )
         if deadline.expired:
             raise ValidationError("WSL2 route revalidation exceeded the deadline")
-        return self._selected_connection(binding) == self._connection
+        if self._selected_connection(binding) != self._connection:
+            return False
+        try:
+            runtime = binding.runtime_selection
+        except AttributeError as error:
+            raise ValidationError("WSL2 route revalidation requires a complete native binding") from error
+        if type(runtime) is not RuntimeSelection or runtime != self._runtime:
+            return False
+        confirmation = self._platform.observe_provider_locator(self._vm, self._ctx, deadline=deadline)
+        if deadline.expired:
+            raise ValidationError("WSL2 route revalidation exceeded the deadline")
+        if type(confirmation) is ProviderLocatorUnavailable:
+            return False
+        if type(confirmation) is not ProviderLocator:
+            raise ValidationError("WSL2 route revalidation requires an exact provider locator")
+        try:
+            return ProviderLocator(confirmation.token) == self._locator
+        except AttributeError as error:
+            raise ValidationError("WSL2 route revalidation requires a complete provider locator") from error
 
     def release_if_settled(self, deadline: Deadline, *, safe: bool) -> bool:
         """Release the exact hold and whole owner only with resolved obligations."""

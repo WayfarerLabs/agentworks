@@ -478,6 +478,13 @@ resolution is detected before the probe; one between the pre-probe observation a
 still receive the read-only probe, but a changed post-probe locator suppresses file dispatch.
 Unavailable or invalid confirmation is unconfirmed; two valid unequal locators establish change.
 Release failure suppresses the target and attaches an uncertain custody fact with guest evidence.
+The private WSL2 owned-operation extraction now shares this selected route, VM owner, durable hold,
+prepared target and exact release with download and independent managed start. The managed caller
+checks a fresh locator, connection and runtime, then confirms the locator after resolving the
+binding immediately before entering the bound-start composition. It does not automatically release
+the hold after start. Exact hold settlement and whole-owner closure are separate: unresolved
+managed-start custody can retain VM ownership after the guest anchor is gone. The check is not a
+dispatch-bound route fence, and this sibling has no production caller or native WSL2 proof.
 Production still needs an owner before activation, a locator-bound route lifetime, typed whole-span
 cleanup evidence and native proof. WSL2 supplies the first positive locator and binding pair;
 Proxmox returns locator unavailable, while SSH-backed cloud and Lima bindings remain later work.

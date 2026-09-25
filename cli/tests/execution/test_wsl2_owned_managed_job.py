@@ -64,7 +64,7 @@ def _subject(
     monkeypatch.setattr(WSL2Carrier, "execute", execute)
     platform = Mock(spec=WSL2Platform)
     platform.site_name = "local"
-    platform.observe_provider_locator.side_effect = locators or [ProviderLocator("wsl2:registration")] * 4
+    platform.observe_provider_locator.side_effect = locators or [ProviderLocator("wsl2:registration")] * 5
     first = NativeExecutionBinding(
         WSL2Carrier(CONNECTION), CONNECTION.user, RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable)
     )
@@ -112,7 +112,7 @@ def test_managed_start_passes_selected_route_guest_and_caller_identity_without_a
         assert _start(subject, database) is WSL2ManagedStartStatus.ATTEMPTED
         assert subject.start_outcome is outcome
         assert carrier.calls == 1
-        assert platform.observe_provider_locator.call_count == 4
+        assert platform.observe_provider_locator.call_count == 5
         assert platform.resolve_native_execution_binding.call_count == 2
         kwargs = start.call_args.kwargs
         assert kwargs["identity"] is RUN
@@ -141,6 +141,33 @@ def test_changed_connection_refuses_before_reservation_and_releases_settled_hold
         )
         subject, _, carrier = _subject(database, monkeypatch, bindings=[first, second])
         start = Mock(side_effect=AssertionError("managed start after route change"))
+        monkeypatch.setattr(managed, "start_bound_managed_job", start)
+
+        assert _start(subject, database) is WSL2ManagedStartStatus.REFUSED
+        assert carrier.calls == 1
+        start.assert_not_called()
+        assert database.operations.inspect(OperationScope(OperationResourceKind.VM, "box")) is None
+
+
+@pytest.mark.parametrize("change", ["runtime", "late-locator"])
+def test_changed_runtime_or_late_locator_refuses_before_managed_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    with closing(Database(tmp_path / "state.db")) as database:
+        first = NativeExecutionBinding(
+            WSL2Carrier(CONNECTION), CONNECTION.user, RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable)
+        )
+        second = NativeExecutionBinding(
+            WSL2Carrier(CONNECTION),
+            CONNECTION.user,
+            RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3")
+            if change == "runtime"
+            else first.runtime_selection,
+        )
+        stable = ProviderLocator("wsl2:registration")
+        locators = [stable] * 4 + [ProviderLocator("wsl2:replacement") if change == "late-locator" else stable]
+        subject, _, carrier = _subject(database, monkeypatch, bindings=[first, second], locators=locators)
+        start = Mock(side_effect=AssertionError("managed start after selected route changed"))
         monkeypatch.setattr(managed, "start_bound_managed_job", start)
 
         assert _start(subject, database) is WSL2ManagedStartStatus.REFUSED

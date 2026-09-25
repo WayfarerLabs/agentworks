@@ -351,6 +351,15 @@ facts refuse before ownership. Replacement between the pre-probe observation and
 still send the read-only probe to a changed registration; post-probe confirmation suppresses file
 dispatch in that case. This is not an atomic registration guarantee or a production factory.
 
+`_wsl2_owned_operation.py` now shares selected-route copying, VM ownership, the WSL2 hold, exact
+target preparation and explicit settled release between that download path and the private
+`_wsl2_owned_managed_job.py` caller. The managed caller retains the supplied run ID and does not
+release the hold automatically after start. It compares a fresh locator, copied connection and
+runtime selection, then confirms the locator again immediately before entering the bound-start
+composition. An exact hold can settle while a managed-start obligation still keeps VM ownership.
+These local checks do not close a route change between composition and dispatch, prove native WSL2
+delivery or make this a production job API.
+
 ## Observation and guest lifetime
 
 A deadline bounds local observation only. Ordinary guest commands and bootstrap descendants can

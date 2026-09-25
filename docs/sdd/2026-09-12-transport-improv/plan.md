@@ -1434,6 +1434,16 @@ focused proof is hermetic. A production caller must still hold and revalidate th
 route and locator, compose the exact target, and prove live SSH/QGA delivery; this guest fence alone
 does not satisfy those gates.
 
+At private checkpoint `0c1523e4e`, one WSL2 owned-operation object shares selected route, durable
+hold, guest-target preparation and explicit settled release between the existing download and a new
+managed-start caller. The caller passes the exact target and guest to the bound start, retains its
+supplied run ID, and does not automatically end the WSL hold when the independent start returns.
+Exact hold release can precede whole-owner closure while managed-start custody remains unresolved. A
+follow-up correction compares a fresh locator, selected connection and runtime, and confirms the
+locator again immediately before bound-start composition. The focused proof is local;
+post-composition route changes, dispatch-bound revalidation, live WSL2/systemd behavior, recovery
+and public RunContext delivery remain open.
+
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared
       create bootstrap. Migration 41 leaves legacy rows NULL; ordinary existing-VM operations never
