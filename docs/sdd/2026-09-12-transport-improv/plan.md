@@ -376,9 +376,12 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       refusal and release tests. At `75aaaa5e`, all three private lanes are clean. The corrected
       post-acquisition deadline test is mutation-proven. Protected namespace setup, ordinary/admin
       sharing and native macOS acceptance remain separate gates.
-- [ ] Validate finite nonnegative relative budgets at the file request boundary before deriving a
+- [x] Validate finite nonnegative relative budgets at the file request boundary before deriving a
       guest-local expiry. Keep deadline and post-cleanup evidence independent of the removed
-      destination-lock prerequisite.
+      destination-lock prerequisite. All seven private decoders reject wrong-type, non-finite and
+      negative budgets; local helper tests prove initial refusal before filesystem access and
+      retained deadline/cleanup facts after late expiry where scratch debt exists. Native platform
+      acceptance remains a separate gate.
 - [x] Review and validate private exact-kind revision-bound object stat/removal and the Debian
       create-time lock setup. Keep setup idempotent without replacing a valid lock inode;
       distinguish local fixture evidence from privileged native bootstrap and ordinary/admin
