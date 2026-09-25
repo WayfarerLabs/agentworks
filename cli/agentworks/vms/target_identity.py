@@ -53,8 +53,6 @@ def vm_guest_boot_id(guest: VMGuestIdentity) -> str:
     The resulting UUID changes when either observed value changes. It is an
     ordinary cooperative-guest fence, not proof against a forged procfs view.
     """
-    if type(guest) is not VMGuestIdentity:
-        raise ValidationError("VM boot identity requires a guest observation")
     return str(uuid5(NAMESPACE_DNS, f"{_BOOT_FENCE_DOMAIN}:{guest.boot_id}:{guest.init_start_ticks}"))
 
 
