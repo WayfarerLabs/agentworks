@@ -65,7 +65,6 @@ def _call(
 ):
     options = {
         "target": TARGET,
-        "workload": WORKLOAD,
         "workload_plan": IdentityPlan(WORKLOAD, IdentityMode.DEMOTE),
         "root_plan": IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
         "run_owner": ManagedRunOwner(ManagedRunOwnerKind.RESOURCE, "session-7"),
@@ -95,6 +94,7 @@ def test_start_binds_request_reservation_and_owned_custody(tmp_path: Path) -> No
         assert outcome.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
         assert outcome.attempt is not None
         assert outcome.attempt.record.identity == RUN
+        assert outcome.attempt.record.spec.workload == WORKLOAD
         assert repository.inspect(RUN) == outcome.attempt.record
         assert carrier.calls == 1
         assert not outcome.requires_owner_retention
@@ -142,7 +142,7 @@ def test_missing_receipt_keeps_uncertain_start_custody(tmp_path: Path) -> None:
         database.close()
 
 
-@pytest.mark.parametrize("wrong", ["owner", "target", "workload"])
+@pytest.mark.parametrize("wrong", ["owner", "target"])
 def test_wrong_binding_refuses_before_reservation(tmp_path: Path, wrong: str) -> None:
     database = Database(tmp_path / "state.db")
     repository = ManagedRunRepository(database)
@@ -157,8 +157,6 @@ def test_wrong_binding_refuses_before_reservation(tmp_path: Path, wrong: str) ->
             changed = second_owner
         elif wrong == "target":
             changed = replace(TARGET, name="vm-two")
-        else:
-            changed = IdentityExpectation(1002, 1002, (1002,))
         with pytest.raises(ValidationError):
             _call(repository, owner, carrier, **{wrong: changed})
         assert repository.inspect(RUN) is None
@@ -181,7 +179,6 @@ def test_sensitive_script_suppresses_output_policy(tmp_path: Path) -> None:
             repository,
             Script(secret, Shell.SH),
             target=TARGET,
-            workload=WORKLOAD,
             workload_plan=IdentityPlan(WORKLOAD, IdentityMode.DEMOTE),
             root_plan=IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
             run_owner=ManagedRunOwner(ManagedRunOwnerKind.RESOURCE, "session-7"),
@@ -230,6 +227,42 @@ def test_unresolved_user_default_shell_refuses_without_reservation(
         assert carrier.calls == 0
     finally:
         owner.close()
+        database.close()
+
+
+def test_shell_release_interrupt_preserves_original_control_and_safe_fact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "state.db")
+    repository = ManagedRunRepository(database)
+    owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "start")
+    carrier = Carrier(lambda request: _records(request, receipt=True))
+    observation = WorkloadShellObservationResult(
+        Dispatch.NOT_SENT,
+        None,
+        None,
+        Failure.DEADLINE,
+        RuntimePrerequisiteObservation(RuntimePrerequisiteState.UNKNOWN, None),
+        None,
+    )
+    control = KeyboardInterrupt("release interrupted")
+
+    def fail_release(*_args: object, **_kwargs: object) -> None:
+        raise control
+
+    monkeypatch.setattr(access, "observe_workload_shell", lambda *_args, **_kwargs: observation)
+    monkeypatch.setattr(access, "release_borrow_after_custody", fail_release)
+    try:
+        with pytest.raises(KeyboardInterrupt) as caught:
+            _call(repository, owner, carrier, invocation=Script("echo hello", Shell.USER_DEFAULT))
+        assert caught.value is control
+        assert isinstance(control.__cause__, access.ManagedJobShellRefusal)
+        assert control.__cause__.fact.observation == observation
+        assert control.__cause__.fact.coordination_uncertain
+        assert control.__cause__.fact.requires_owner_retention
+        assert repository.inspect(RUN) is None
+        assert carrier.calls == 0
+    finally:
         database.close()
 
 
