@@ -1486,6 +1486,13 @@ connection and trust only. Before broader lifecycle implementation, complete the
       missing source is a refusal, not retained work; uncertain file or hold outcomes retain the
       claim. This portable composition proof does not establish native locator-to-registration
       binding, WSLService drain, crash recovery, a production factory or RunContext access.
+- [x] Add a private selected-WSL2-platform path for that ordinary DOWNLOAD. Observe the current
+      registration and resolve the platform-owned native route before VM ownership, then start the
+      hold under that owner and use selected-platform preparation with the held locator. Refuse
+      changed registration, route or runtime before file dispatch, retaining the claim if exact hold
+      absence is uncertain. This establishes portable file-dispatch gating, not atomic registration
+      observation, pre-probe route stability, native WSL behavior, WSLService drain or a production
+      factory.
 
 The private WSL2 hold-recovery checkpoint at `15f8a936` consumes one exact persisted obligation
 after generic takeover. It resolves a registered row without dispatch or a post-`READY` row only

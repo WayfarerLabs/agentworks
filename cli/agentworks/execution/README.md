@@ -319,7 +319,12 @@ boot ID and PID-1 start ticks against the hold's persisted READY epoch before `F
 dispatch, and releases only after file custody and the exact guest anchor settle. Missing source or
 other settled refusal releases safely; uncertain file or hold outcomes retain the owner and hold.
 Portable SQLite tests cover this sequence, not native locator-to-registration binding, Windows/WSL
-behavior, WSLService drain, crash recovery, activation or RunContext wiring.
+behavior, WSLService drain, crash recovery, activation or RunContext wiring. Its private
+`from_platform` path uses the selected WSL2 platform to observe registration and resolve the native
+route before acquiring the VM claim, then re-observes registration under the hold during target
+preparation. A changed registration, route or runtime refuses before file dispatch. The selected
+preparer may already have sent its readiness probe through a changed route, so this is not an atomic
+registration or pre-probe route guarantee and is not a production factory.
 
 ## Observation and guest lifetime
 
