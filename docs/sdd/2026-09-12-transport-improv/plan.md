@@ -1521,6 +1521,16 @@ the selected locator and that same marker before observe, read-output or stop ad
 revalidate route freshness at dispatch. Matching the derived boot alone is not a production
 target-binding proof.
 
+The following private host-disposal slice will use a distinct `managed-dispose` obligation with the
+same canonical run-ID recovery payload and exact VM claim. It requires a reconciled launch receipt
+but delegates terminal predicate and receipt-only proof to the fixed target helper. Positively
+proved no delivery or a complete validated `NOT_READY` with settled carrier delivery resolves this
+one-attempt obligation without claiming disposal; complete validated `DISPOSED` resolves it with
+exact receipt proof. Every incomplete, failed, interrupted or ambiguous possible effect retains
+custody. Guest idempotence does not authorize host replay until prior dispatch drain is proved.
+Explicit retention-release authorization, production route composition, recovery, native SSH/QGA
+proof and public JobAccess remain separate gates.
+
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared
       create bootstrap. Migration 41 leaves legacy rows NULL; ordinary existing-VM operations never
