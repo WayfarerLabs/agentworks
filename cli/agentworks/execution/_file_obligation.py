@@ -41,7 +41,7 @@ from agentworks.execution._scratch_wire import (
     encode_cleanup_debt,
     encode_scratch_reference,
 )
-from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 
 FILE_CALL_OBLIGATION_PAYLOAD_VERSION = 1
 MAX_PACKAGE_UPLOAD_MEMBERS = 4096
@@ -215,7 +215,7 @@ def _validate_obligation(obligation: FileCallObligation) -> None:
         raise FileCallObligationCodecError
     if obligation.effect_gate is not None:
         if (
-            obligation.family is not FileCallFamily.DOWNLOAD
+            obligation.family not in {FileCallFamily.DOWNLOAD, FileCallFamily.UPLOAD, FileCallFamily.PACKAGE_UPLOAD}
             or obligation.target.kind is not ManagedTargetKind.VM
             or obligation.runtime_selection.target_os is not RuntimeTargetOS.LINUX
             or type(obligation.effect_gate) is not FileEffectGateBinding
@@ -224,6 +224,10 @@ def _validate_obligation(obligation: FileCallObligation) -> None:
         if obligation.effect_gate.euid != obligation.identity_plan.expected.euid:
             raise FileCallObligationCodecError
         if obligation.effect_gate.scope_name != obligation.target.name:
+            raise FileCallObligationCodecError
+        if obligation.family in {FileCallFamily.UPLOAD, FileCallFamily.PACKAGE_UPLOAD} and (
+            vm_guest_boot_id(obligation.effect_gate.guest) != obligation.target.boot_id
+        ):
             raise FileCallObligationCodecError
         if obligation.effect_gate.path != file_effect_gate_path(
             obligation.target, obligation.identity_plan.expected.euid, obligation.effect_gate.guest

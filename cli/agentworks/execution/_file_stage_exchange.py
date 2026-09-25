@@ -49,6 +49,7 @@ from agentworks.execution.carrier import (
 )
 
 if TYPE_CHECKING:
+    from agentworks.execution._file_effect_gate import FileEffectGateBinding
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution._scratch import ScratchReference
     from agentworks.execution._scratch_receipt import ScratchCleanupDebt
@@ -411,6 +412,7 @@ def stage_begin(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> FileStageCandidateResult:
     """Create one private stage through one fresh non-replayed attempt."""
     request = FileStageBeginRequest(
@@ -421,6 +423,7 @@ def stage_begin(
         expected_length,
         plan.expected,
         deadline.remaining(),
+        effect_gate,
     )
     return _exchange(carrier, request, plan, deadline, runtime_selection)
 
@@ -438,6 +441,7 @@ def stage_chunk(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> FileStageCandidateResult:
     """Write one bounded stage chunk through one fresh non-replayed attempt."""
     request = FileStageChunkRequest(
@@ -451,6 +455,7 @@ def stage_chunk(
         chunk_digest,
         plan.expected,
         deadline.remaining(),
+        effect_gate,
     )
     return _exchange(carrier, request, plan, deadline, runtime_selection)
 
@@ -464,6 +469,7 @@ def stage_reconcile(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> FileStageCandidateResult:
     """Read one exact stage receipt without replaying creation or promoting it."""
     request = FileStageReconcileRequest(
@@ -473,6 +479,7 @@ def stage_reconcile(
         token,
         plan.expected,
         deadline.remaining(),
+        effect_gate,
     )
     return _exchange(carrier, request, plan, deadline, runtime_selection)
 
@@ -487,6 +494,7 @@ def stage_cleanup(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> FileStageCandidateResult:
     """Attempt exact cleanup once without inferring terminal quiescence."""
     request = FileStageCleanupRequest(
@@ -497,5 +505,6 @@ def stage_cleanup(
         cleanup_debt,
         plan.expected,
         deadline.remaining(),
+        effect_gate,
     )
     return _exchange(carrier, request, plan, deadline, runtime_selection)

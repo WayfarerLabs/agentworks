@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
 from agentworks.execution._account import AccountObservationState, FileOwnershipResolutionResult, resolve_file_ownership
+from agentworks.execution._file_effect_gate import FileEffectGateBinding
 from agentworks.execution._file_paths import normalized_relative_path, normalized_root
 from agentworks.execution._file_publication import Create, CreateMetadata, Match, PublicationFailureKind, Replace
 from agentworks.execution._file_publication_exchange import (
@@ -121,6 +122,7 @@ class FileUploadBinding:
     expected_size: int
     identity_plan: IdentityPlan
     runtime_selection: RuntimeSelection
+    effect_gate: FileEffectGateBinding | None = None
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -265,6 +267,7 @@ def upload_file(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     borrow: OperationBorrow,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> FileUploadOutcome:
     """Consume one exact source under the caller's active serial borrow."""
     return _prepare_upload(
@@ -279,6 +282,7 @@ def upload_file(
         deadline=deadline,
         runtime_selection=runtime_selection,
         borrow=borrow,
+        effect_gate=effect_gate,
     ).run()
 
 
@@ -295,6 +299,7 @@ def _prepare_upload(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     borrow: OperationBorrow,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> _PreparedUpload:
     """Prepare one validated concrete upload without dispatching it."""
     binding, canonical_condition, canonical_metadata = _validate_inputs(
@@ -308,6 +313,7 @@ def _prepare_upload(
         deadline,
         runtime_selection,
         borrow,
+        effect_gate,
     )
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
     return _prepare_upload_borrowed(
@@ -478,6 +484,7 @@ class _UploadWorkflow:
             plan=self._state.binding.identity_plan,
             deadline=self._deadline,
             runtime_selection=self._state.binding.runtime_selection,
+            effect_gate=self._state.binding.effect_gate,
         )
         observation = result.observation
         if result.dispatch is not Dispatch.NOT_SENT:
@@ -553,6 +560,7 @@ class _UploadWorkflow:
                 plan=self._state.binding.identity_plan,
                 deadline=self._deadline,
                 runtime_selection=self._state.binding.runtime_selection,
+                effect_gate=self._state.binding.effect_gate,
             )
             observation = result.observation
             if result.dispatch is not Dispatch.NOT_SENT:
@@ -645,6 +653,7 @@ class _UploadWorkflow:
             plan=self._state.binding.identity_plan,
             deadline=self._deadline,
             runtime_selection=self._state.binding.runtime_selection,
+            effect_gate=self._state.binding.effect_gate,
         )
         observation = result.observation
         if result.dispatch is not Dispatch.NOT_SENT:
@@ -721,6 +730,7 @@ class _UploadWorkflow:
                 plan=self._state.binding.identity_plan,
                 deadline=self._deadline,
                 runtime_selection=self._state.binding.runtime_selection,
+                effect_gate=self._state.binding.effect_gate,
             )
             observation = result.observation
             if result.dispatch is not Dispatch.NOT_SENT:
@@ -745,6 +755,7 @@ class _UploadWorkflow:
                 plan=self._state.binding.identity_plan,
                 deadline=self._deadline,
                 runtime_selection=self._state.binding.runtime_selection,
+                effect_gate=self._state.binding.effect_gate,
             )
             observation = result.observation
             if result.dispatch is not Dispatch.NOT_SENT:
@@ -786,6 +797,7 @@ class _UploadWorkflow:
             plan=self._state.binding.identity_plan,
             deadline=self._deadline,
             runtime_selection=self._state.binding.runtime_selection,
+            effect_gate=self._state.binding.effect_gate,
         )
         observation = result.observation
         if result.dispatch is not Dispatch.NOT_SENT:
@@ -813,6 +825,7 @@ class _UploadWorkflow:
             plan=self._state.binding.identity_plan,
             deadline=self._deadline,
             runtime_selection=self._state.binding.runtime_selection,
+            effect_gate=self._state.binding.effect_gate,
         )
         observation = result.observation
         if result.dispatch is not Dispatch.NOT_SENT:
@@ -927,6 +940,7 @@ def _validate_inputs(
     deadline: object,
     runtime_selection: object,
     borrow: object,
+    effect_gate: object = None,
 ) -> tuple[FileUploadBinding, Create | Replace | Match, NewMetadata]:
     if type(trusted_root_path) is not str or not normalized_root(trusted_root_path):
         raise ValidationError("Upload requires a normalized absolute trusted root")
@@ -957,6 +971,11 @@ def _validate_inputs(
         raise ValidationError("Upload requires a bound runtime selection")
     if type(borrow) is not OperationBorrow:
         raise ValidationError("Upload requires an active core operation borrow")
+    if effect_gate is not None:
+        if type(effect_gate) is not FileEffectGateBinding or effect_gate.euid != plan.expected.euid:
+            raise ValidationError("Upload requires an exact file-effect gate binding")
+        if effect_gate.proposed_generation is not None:
+            raise ValidationError("Upload effect-gate advance must finish before dispatch")
     stage_validation_failed = False
     try:
         encode_file_stage_request(
@@ -968,6 +987,7 @@ def _validate_inputs(
                 size,
                 plan.expected,
                 deadline.remaining(),
+                effect_gate,
             )
         )
     except FileStageRequestError:
@@ -983,7 +1003,7 @@ def _validate_inputs(
     if getter_failed or not callable(reader):
         raise ValidationError("Upload requires a nonblocking byte source")
     return (
-        FileUploadBinding(trusted_root_path, relative_path, size, plan, runtime_selection),
+        FileUploadBinding(trusted_root_path, relative_path, size, plan, runtime_selection, effect_gate),
         publication_inputs[0],
         create_metadata,
     )

@@ -72,7 +72,7 @@ from agentworks.execution._file_upload import (
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTargetKind
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState, RuntimeTargetOS
-from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 from agentworks.execution.carrier import Dispatch
 from agentworks.operations import LifecycleObligation, _PreRegistrationClosingRefusal, release_borrow_after_custody
 
@@ -484,6 +484,7 @@ class FileOperation:
         plan: IdentityPlan,
         deadline: Deadline,
         runtime_selection: RuntimeSelection,
+        effect_gate: FileEffectGateBinding | None = None,
     ) -> FileUploadOutcome:
         """Run and capture one concrete upload under a whole-call borrow."""
         borrow = self._owner.borrow()
@@ -500,7 +501,9 @@ class FileOperation:
                 deadline=deadline,
                 runtime_selection=runtime_selection,
                 borrow=borrow,
+                effect_gate=effect_gate,
             )
+            self._validate_upload_gate(prepared.binding)
             admission = self._prepare_admission(FileCallFamily.UPLOAD, prepared.binding, token=prepared.state.token)
             active: _ActiveFileUpload = _ActiveFileCall(
                 carrier, prepared.binding, borrow, prepared, admission.obligation_id
@@ -540,6 +543,7 @@ class FileOperation:
         plan: IdentityPlan,
         deadline: Deadline,
         runtime_selection: RuntimeSelection,
+        effect_gate: FileEffectGateBinding | None = None,
     ) -> tuple[FileUploadOutcome, ...]:
         """Upload at most 4096 members under one row and a durable caller checkpoint.
 
@@ -571,7 +575,9 @@ class FileOperation:
                     deadline=deadline,
                     runtime_selection=runtime_selection,
                     borrow=borrow,
+                    effect_gate=effect_gate,
                 )
+                self._validate_upload_gate(prepared.binding)
             except BaseException:
                 # A previous child has already passed its application checkpoint.
                 borrow.close()
@@ -662,6 +668,21 @@ class FileOperation:
         assert active is not None
         self._active_package_uploads.pop(id(active))
         return tuple(completed)
+
+    def _validate_upload_gate(self, binding: FileUploadBinding) -> None:
+        """Match a caller-supplied gate to this selected managed VM."""
+        effect_gate = binding.effect_gate
+        if effect_gate is None:
+            return
+        if (
+            self._target.kind is not ManagedTargetKind.VM
+            or binding.runtime_selection.target_os is not RuntimeTargetOS.LINUX
+            or vm_guest_boot_id(effect_gate.guest) != self._target.boot_id
+            or effect_gate.scope_name != self._target.name
+            or effect_gate.path
+            != file_effect_gate_path(self._target, binding.identity_plan.expected.euid, effect_gate.guest)
+        ):
+            raise ValidationError("Upload effect gate must match the selected Linux VM and identity")
 
     def _stop_package_upload(self, active: _ActiveFileUpload, index: int, outcome: FileUploadOutcome) -> None:
         active.outcome = outcome
@@ -1108,7 +1129,13 @@ class FileOperation:
             publication_cleanup_debt=publication_cleanup_debt,
             effect_gate=(
                 binding.effect_gate
-                if family is FileCallFamily.DOWNLOAD and isinstance(binding, FileDownloadBinding)
+                if (
+                    (family is FileCallFamily.DOWNLOAD and isinstance(binding, FileDownloadBinding))
+                    or (
+                        family in {FileCallFamily.UPLOAD, FileCallFamily.PACKAGE_UPLOAD}
+                        and isinstance(binding, FileUploadBinding)
+                    )
+                )
                 else None
             ),
             gate_setup=gate_setup,

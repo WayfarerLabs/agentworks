@@ -56,6 +56,7 @@ from agentworks.execution.carrier import (
 )
 
 if TYPE_CHECKING:
+    from agentworks.execution._file_effect_gate import FileEffectGateBinding
     from agentworks.execution._file_publication_wire import BoundPublicationCleanupDebt
     from agentworks.execution._file_stat import FileRevision
     from agentworks.execution._helper_launcher import IdentityPlan
@@ -413,6 +414,7 @@ def publish(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> FilePublicationCandidateResult:
     """Publish one verified stage through one fresh non-replayed attempt."""
     request = FilePublishRequest(
@@ -426,6 +428,7 @@ def publish(
         create_metadata,
         plan.expected,
         deadline.remaining(),
+        effect_gate,
     )
     return _exchange(carrier, request, plan, deadline, runtime_selection)
 
@@ -440,6 +443,7 @@ def publication_reconcile(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> FilePublicationCandidateResult:
     """Recover historical cleanup ownership without inferring publication."""
     request = FilePublicationReconcileRequest(
@@ -450,6 +454,7 @@ def publication_reconcile(
         reference,
         plan.expected,
         deadline.remaining(),
+        effect_gate,
     )
     return _exchange(carrier, request, plan, deadline, runtime_selection)
 
@@ -465,6 +470,7 @@ def publication_cleanup(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
+    effect_gate: FileEffectGateBinding | None = None,
 ) -> FilePublicationCandidateResult:
     """Attempt one exact publication cleanup without a quiescence claim."""
     request = FilePublicationCleanupRequest(
@@ -476,5 +482,6 @@ def publication_cleanup(
         cleanup_debt,
         plan.expected,
         deadline.remaining(),
+        effect_gate,
     )
     return _exchange(carrier, request, plan, deadline, runtime_selection)

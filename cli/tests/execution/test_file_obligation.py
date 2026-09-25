@@ -10,7 +10,7 @@ import pytest
 
 from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES
 from agentworks.execution._file_effect_gate import FileEffectGateBinding, FileEffectGateError
-from agentworks.execution._file_gate_setup import FileEffectGateSetup
+from agentworks.execution._file_gate_setup import FileEffectGateSetup, file_effect_gate_path
 from agentworks.execution._file_obligation import (
     _FILE_CALL_RECOVERY_HEADROOM_BYTES,
     FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
@@ -51,7 +51,7 @@ from agentworks.execution._scratch_receipt import (
 from agentworks.execution._scratch_receipt import (
     _Identity as ScratchIdentity,
 )
-from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 
 _TOKEN = bytes(range(16))
 _TARGET = ManagedTargetIdentity(
@@ -151,7 +151,12 @@ def _maximum_publication_debt(reference: ScratchReference):
 
 
 def _obligation(family: FileCallFamily, *, token: bytes | None = None) -> FileCallObligation:
-    has_scratch = family in {FileCallFamily.DOWNLOAD, FileCallFamily.UPLOAD, FileCallFamily.JSON_UPDATE}
+    has_scratch = family in {
+        FileCallFamily.DOWNLOAD,
+        FileCallFamily.UPLOAD,
+        FileCallFamily.PACKAGE_UPLOAD,
+        FileCallFamily.JSON_UPDATE,
+    }
     selected_token = _TOKEN if has_scratch and family is not FileCallFamily.JSON_UPDATE else token
     return FileCallObligation(
         family=family,
@@ -162,6 +167,7 @@ def _obligation(family: FileCallFamily, *, token: bytes | None = None) -> FileCa
         runtime_selection=_RUNTIME,
         token=selected_token,
         attempt=None,
+        batch_index=4095 if family is FileCallFamily.PACKAGE_UPLOAD else None,
     )
 
 
@@ -281,7 +287,12 @@ def _maximum_recovery_obligation(
         FileCallUncertainty.PENDING_REMOTE_EFFECT,
         FileCallUncertainty.COORDINATION_UNCERTAINTY,
     }
-    if family not in {FileCallFamily.DOWNLOAD, FileCallFamily.UPLOAD, FileCallFamily.JSON_UPDATE}:
+    if family not in {
+        FileCallFamily.DOWNLOAD,
+        FileCallFamily.UPLOAD,
+        FileCallFamily.PACKAGE_UPLOAD,
+        FileCallFamily.JSON_UPDATE,
+    }:
         return replace(initial, uncertainty=frozenset(uncertainty))
 
     reference = _maximum_reference(family, initial.identity_plan)
@@ -294,7 +305,7 @@ def _maximum_recovery_obligation(
     }
     if family is FileCallFamily.JSON_UPDATE:
         changes["attempt"] = 8
-    if family in {FileCallFamily.UPLOAD, FileCallFamily.JSON_UPDATE}:
+    if family in {FileCallFamily.UPLOAD, FileCallFamily.PACKAGE_UPLOAD, FileCallFamily.JSON_UPDATE}:
         uncertainty.add(FileCallUncertainty.PUBLICATION_OWNERSHIP)
         changes["publication_cleanup_debt"] = _maximum_publication_debt(reference)
         changes["uncertainty"] = frozenset(uncertainty)
@@ -345,6 +356,51 @@ def test_admission_ceiling_leaves_room_for_the_largest_retained_payload(family: 
     if family is FileCallFamily.JSON_UPDATE:
         child = replace(admitted, token=_TOKEN, attempt=8)
         assert len(encode_file_call_obligation(child)) == len(encode_file_call_obligation(admitted)) + 55
+
+
+def test_gated_package_current_child_reserves_recovery_at_envelope_limit() -> None:
+    guest = VMGuestIdentity("f" * 32, "123e4567-e89b-12d3-a456-426614174000", 10)
+    target = replace(_TARGET, boot_id=vm_guest_boot_id(guest))
+    gate = FileEffectGateBinding(
+        file_effect_gate_path(target, _PLAN.expected.euid, guest),
+        b"i" * 16,
+        b"g" * 16,
+        guest,
+        _PLAN.expected.euid,
+        target.name,
+        1,
+        2,
+    )
+    baseline = replace(
+        _obligation(FileCallFamily.PACKAGE_UPLOAD),
+        target=target,
+        effect_gate=gate,
+        root="/",
+        relative_path="a",
+    )
+    proposed = replace(gate, proposed_generation=b"p" * 16)
+    growth = (
+        _FILE_CALL_RECOVERY_HEADROOM_BYTES[FileCallFamily.PACKAGE_UPLOAD]
+        + len(encode_file_call_obligation(replace(baseline, effect_gate=proposed)))
+        - len(encode_file_call_obligation(baseline))
+    )
+    remaining = MAX_LIFECYCLE_PAYLOAD_BYTES - growth - len(encode_file_call_obligation(baseline))
+    relative_padding = min(remaining, 4_095)
+    root_padding = remaining - relative_padding
+    assert 0 <= root_padding <= 4_095
+    admitted = replace(
+        baseline,
+        root="/" + "a" * root_padding,
+        relative_path="a" * (relative_padding + 1),
+    )
+    recovered = _maximum_recovery_obligation(
+        FileCallFamily.PACKAGE_UPLOAD,
+        initial=replace(admitted, effect_gate=proposed),
+    )
+    assert decode_file_call_obligation(encode_file_call_admission(admitted)) == admitted
+    assert len(encode_file_call_obligation(recovered)) == MAX_LIFECYCLE_PAYLOAD_BYTES
+    with pytest.raises(FileCallObligationCodecError):
+        encode_file_call_admission(replace(admitted, root=admitted.root + "a"))
 
 
 def _setup_download() -> FileCallObligation:
