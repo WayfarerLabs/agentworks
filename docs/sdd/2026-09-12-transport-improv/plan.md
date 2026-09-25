@@ -1479,6 +1479,13 @@ connection and trust only. Before broader lifecycle implementation, complete the
       crash, controller-absence and dispatch-drain proof, a production exact epoch-bound guest
       observer, recovery factory, activation and platform wiring, RunContext integration, and live
       proof.
+- [x] Compose one private ordinary WSL2 VM DOWNLOAD under a single exact-VM owner. Start the
+      platform hold, prepare the target, require the resolved guest marker, boot ID and PID-1 start
+      ticks to match the hold's durable READY evidence before file dispatch, then release only after
+      settled file custody, exact guest-anchor absence and resolved lifecycle obligations. A settled
+      missing source is a refusal, not retained work; uncertain file or hold outcomes retain the
+      claim. This portable composition proof does not establish native locator-to-registration
+      binding, WSLService drain, crash recovery, a production factory or RunContext access.
 
 The private WSL2 hold-recovery checkpoint at `15f8a936` consumes one exact persisted obligation
 after generic takeover. It resolves a registered row without dispatch or a post-`READY` row only

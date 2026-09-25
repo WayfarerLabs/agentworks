@@ -313,6 +313,14 @@ in the same controller. It retains a complete `ABSENT` result for exact resoluti
 another guest query. These portable process-loss tests do not prove WSLService delivery drain,
 native Windows/WSL2 behavior, preparation discovery, a production factory or RunContext integration.
 
+`_wsl2_owned_download.py` is a private ordinary-path composition, not a production entry point. It
+acquires one VM operation owner before starting the WSL2 hold, checks the resolved guest marker,
+boot ID and PID-1 start ticks against the hold's persisted READY epoch before `FileOperation`
+dispatch, and releases only after file custody and the exact guest anchor settle. Missing source or
+other settled refusal releases safely; uncertain file or hold outcomes retain the owner and hold.
+Portable SQLite tests cover this sequence, not native locator-to-registration binding, Windows/WSL
+behavior, WSLService drain, crash recovery, activation or RunContext wiring.
+
 ## Observation and guest lifetime
 
 A deadline bounds local observation only. Ordinary guest commands and bootstrap descendants can
