@@ -90,6 +90,17 @@ def test_sensitive_input_and_explicit_sensitivity_suppress_retention() -> None:
     assert request.capture_prefix_bytes is None
 
 
+def test_unsupported_capture_limit_refuses_even_when_sensitive() -> None:
+    with pytest.raises(ValidationError):
+        _compose(Command(["/bin/true"]), output=Output.capture(16_777_217), input=Input.sensitive(b"secret"))
+
+
+def test_multibyte_script_source_exceeds_byte_limit() -> None:
+    script = Script("é" * (MAX_SOURCE_BYTES // 2 + 1), Shell.SH)
+    with pytest.raises(ValidationError):
+        _compose(script, spec=_spec(ManagedShellIdentity(Shell.SH, "/bin/sh")))
+
+
 @pytest.mark.parametrize(
     ("invocation", "changes"),
     [
@@ -108,9 +119,7 @@ def test_sensitive_input_and_explicit_sensitivity_suppress_retention() -> None:
         (Script("x" * (MAX_SOURCE_BYTES + 1), Shell.SH), {"spec": _spec(ManagedShellIdentity(Shell.SH, "/bin/sh"))}),
     ],
 )
-def test_invalid_or_unsupported_request_refuses_before_reservation(
-    invocation: Command | Script, changes: dict[str, object]
-) -> None:
+def test_invalid_or_unsupported_request_refuses(invocation: Command | Script, changes: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         _compose(invocation, **changes)
 

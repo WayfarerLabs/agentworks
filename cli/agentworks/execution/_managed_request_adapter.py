@@ -3,16 +3,23 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from itertools import islice
 
 from agentworks.errors import ValidationError
 
 from ._managed_job_protocol import ManagedJobFactError, encode_managed_job_fact
-from ._managed_job_request import ManagedJobRequest, RequestError, encode_request
+from ._managed_job_request import (
+    MAX_CAPTURE_PREFIX_BYTES,
+    MAX_ENVIRONMENT_ENTRIES,
+    MAX_SOURCE_BYTES,
+    ManagedJobRequest,
+    RequestError,
+    encode_request,
+)
 from ._managed_runs import (
     ManagedOutputMode,
     ManagedOutputPolicy,
     ManagedRunIdentity,
-    ManagedRunLifetime,
     ManagedRunReceipt,
     ManagedRunSpec,
 )
@@ -37,13 +44,10 @@ def compose_managed_request(
         or type(sensitive) is not bool
         or type(identity) is not ManagedRunIdentity
         or type(spec) is not ManagedRunSpec
-        or spec.lifetime is not ManagedRunLifetime.INDEPENDENT
     ):
         raise ValidationError("Invalid independent managed request")
 
     if isinstance(invocation, Command):
-        if spec.shell.requested is not None:
-            raise ValidationError("Literal command requires no shell identity")
         kind, argv, source = "command", invocation.argv, b""
     elif isinstance(invocation, Script):
         shell = spec.shell
@@ -53,12 +57,14 @@ def compose_managed_request(
             or shell.interactive != invocation.interactive
         ):
             raise ValidationError("Script shell identity does not match invocation")
-        if shell.interactive:
-            raise ValidationError("Interactive managed scripts are unsupported")
+        if len(invocation.source) > MAX_SOURCE_BYTES:
+            raise ValidationError("Managed script source exceeds byte bound")
         try:
             source = invocation.source.encode("utf-8")
         except UnicodeError:
             raise ValidationError("Invalid managed script source") from None
+        if len(source) > MAX_SOURCE_BYTES:
+            raise ValidationError("Managed script source exceeds byte bound")
         kind, argv = "script", ()
     else:
         raise ValidationError("Managed execution requires a command or script")
@@ -69,18 +75,14 @@ def compose_managed_request(
         if not isinstance(env, Mapping):
             raise ValidationError("Managed environment must be a string mapping")
         try:
-            entries = iter(env.items())
-            bounded: list[tuple[str, str]] = []
-            for entry in entries:
-                if len(bounded) == 256:
-                    raise ValidationError("Managed environment exceeds entry bound")
-                if type(entry) is not tuple or len(entry) != 2:
-                    raise ValidationError("Managed environment must be a string mapping")
-                bounded.append(entry)
-            environment = tuple(sorted(bounded))
+            environment = tuple(sorted(islice(env.items(), MAX_ENVIRONMENT_ENTRIES + 1)))
         except (TypeError, ValueError):
             raise ValidationError("Managed environment must be a string mapping") from None
+        if len(environment) > MAX_ENVIRONMENT_ENTRIES:
+            raise ValidationError("Managed environment exceeds entry bound")
 
+    if output.max_bytes is not None and output.max_bytes > MAX_CAPTURE_PREFIX_BYTES:
+        raise ValidationError("Managed capture exceeds byte bound")
     if sensitive or input.is_sensitive:
         policy = ManagedOutputPolicy(ManagedOutputMode.SENSITIVITY_SUPPRESSED)
     elif output.max_bytes is None:
