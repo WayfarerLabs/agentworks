@@ -1531,6 +1531,15 @@ possible effect retains custody. Guest idempotence does not authorize host repla
 dispatch drain is proved. Explicit retention-release authorization, production route composition,
 recovery, native SSH/QGA proof and public JobAccess remain separate gates.
 
+At private checkpoint `19209cfd0`, the host-bound disposal adapter implements that one-attempt
+custody rule without changing the persisted run. It shares exact independent-VM row preflight,
+requires `RECEIPT_CONFIRMED`, and durably arms a distinct run-ID-only `managed-dispose` obligation
+before carrier dispatch. Settled no-delivery, complete validated `NOT_READY`, or complete validated
+`DISPOSED` resolves the temporary obligation; all ambiguous possible effects retain it, and an
+escaping control exception retains its original identity. Eighteen focused hermetic tests pass, with
+Ruff and mypy clean. This does not establish explicit release authorization, production route
+freshness, recovery takeover, native delivery or public JobAccess.
+
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared
       create bootstrap. Migration 41 leaves legacy rows NULL; ordinary existing-VM operations never

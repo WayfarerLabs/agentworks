@@ -422,6 +422,14 @@ retries are protocol-safe; they do not authorize host replay of uncertain delive
 separately proves the earlier dispatch drained. No mutable database disposal state or retention
 timer is introduced.
 
+The private host-bound disposal checkpoint applies this one-attempt rule under a caller-held exact
+VM owner. It shares the persisted-run and guest preflight with observation, output reading and stop,
+and additionally requires a reconciled launch receipt. Its distinct `managed-dispose` obligation
+contains only the canonical run ID. Settled no-delivery, validated `NOT_READY` and validated
+`DISPOSED` resolve temporary custody; every uncertain or interrupted possible effect retains it. The
+adapter leaves the managed-run row unchanged and makes no production route, authorization, recovery
+takeover or native carrier claim.
+
 Carrier-neutral control remains a fixed closed protocol with `start`, `observe`, `read-output`,
 `stop` and `dispose`; it accepts no arbitrary path, unit, command or systemd property. `start` is
 the only operation that can consume staged request assets and is never replayed after possible
