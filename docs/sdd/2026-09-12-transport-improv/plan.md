@@ -1543,6 +1543,16 @@ Ruff and mypy clean; the neighboring disposal, stop and observation selection pa
 does not establish explicit release authorization, production route freshness, recovery takeover,
 native delivery or public JobAccess.
 
+- [x] Connect the private independent-job lifecycle from a persisted `POSSIBLE_DISPATCH` row:
+      observe one exact, validated launch receipt, reconcile it idempotently using historical
+      `UNKNOWN` dispatch, then exercise read-output, stop and disposal without relaunch. Keep
+      ordinary observation read-only. Invalid or incomplete observations do not move the row, and
+      post-exchange control failure preserves its original exception with custody facts. The
+      connected test uses a scripted possible-dispatch row and later-action carriers; it does not
+      prove a real lost start acknowledgment or settle an earlier start obligation, close retained
+      ownership, establish production route freshness, or provide crash-recovery takeover, polling
+      wait, OPERATION lifetime, public JobAccess, or native SSH/QGA acceptance.
+
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared
       create bootstrap. Migration 41 leaves legacy rows NULL; ordinary existing-VM operations never

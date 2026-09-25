@@ -11,14 +11,20 @@ from agentworks.db import Database, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _fixed_helper_operation as fixed_operation
 from agentworks.execution import _managed_observe_access as access
+from agentworks.execution._file_wire import FileRecord, FileRecordKind, encode_file_record
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
-from agentworks.execution._managed_job_protocol import StreamDisposition, decode_managed_job_fact
+from agentworks.execution._managed_job_protocol import (
+    StreamDisposition,
+    decode_managed_job_fact,
+    encode_managed_job_fact,
+)
 from agentworks.execution._managed_job_store import FactName, Stream
 from agentworks.execution._managed_observation_exchange import ManagedObservationState
 from agentworks.execution._managed_observation_protocol import ManagedResultControl
 from agentworks.execution._managed_observe_access import (
     ManagedObserveControlFact,
+    observe_and_reconcile_bound_managed_run,
     observe_bound_managed_run,
     read_bound_managed_output,
 )
@@ -89,6 +95,12 @@ def _observe(repository: ManagedRunRepository, owner: OperationOwner, carrier: S
     return observe_bound_managed_run(repository, RUN, **_options(owner, carrier, **changes))  # type: ignore[arg-type]
 
 
+def _observe_and_reconcile(
+    repository: ManagedRunRepository, owner: OperationOwner, carrier: ScriptedCarrier, **changes: object
+):  # type: ignore[no-untyped-def]
+    return observe_and_reconcile_bound_managed_run(repository, RUN, **_options(owner, carrier, **changes))  # type: ignore[arg-type]
+
+
 def _read(repository: ManagedRunRepository, owner: OperationOwner, carrier: ScriptedCarrier, **changes: object):  # type: ignore[no-untyped-def]
     options = _options(owner, carrier, stream=Stream.STDOUT)
     options.update(changes)
@@ -134,6 +146,185 @@ def test_observe_uses_exact_persisted_launch_and_does_not_change_row(tmp_path: P
         assert carrier.calls == 1
         assert repository.inspect(RUN) == record
         assert record.launch_state is ManagedLaunchState.RESERVED
+    finally:
+        database.close()
+
+
+def test_observe_and_reconcile_confirms_receipt_idempotently(tmp_path: Path) -> None:
+    database, repository, owner = _reserved(tmp_path)
+    reserved = repository.inspect(RUN)
+    assert reserved is not None
+    repository.mark_possible_dispatch(reserved)
+    carrier = ScriptedCarrier(
+        lambda request: _records(
+            request.nonce,
+            ManagedResultControl((FactName.LAUNCH, FactName.WAIT)),
+            (request.expected_launch, _fact(FactName.WAIT, request.expected_launch)),
+        )
+    )
+    try:
+        outcome = _observe_and_reconcile(repository, owner, carrier)
+        confirmed = repository.inspect(RUN)
+        assert confirmed is not None
+        assert confirmed.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
+        assert confirmed.launch_reconciled_at is not None
+        assert carrier.calls == 1
+        assert outcome.candidate is not None and outcome.candidate.observation is not None
+        assert outcome.candidate.observation.state is ManagedObservationState.OBSERVED
+
+        repeated_carrier = ScriptedCarrier(
+            lambda request: _records(
+                request.nonce, ManagedResultControl((FactName.LAUNCH,)), (request.expected_launch,)
+            )
+        )
+        _observe_and_reconcile(repository, owner, repeated_carrier)
+        assert repository.inspect(RUN) == confirmed
+        assert repeated_carrier.calls == 1
+    finally:
+        database.close()
+
+
+@pytest.mark.parametrize("case", ["uncertain", "incomplete", "refused", "invalid", "mismatched"])
+def test_observe_and_reconcile_leaves_unconfirmed_evidence_unreconciled(tmp_path: Path, case: str) -> None:
+    database, repository, owner = _reserved(tmp_path)
+    reserved = repository.inspect(RUN)
+    assert reserved is not None
+    possible = repository.mark_possible_dispatch(reserved)
+
+    def response(request):  # type: ignore[no-untyped-def]
+        if case == "refused":
+            return b"".join(
+                encode_file_record(request.nonce, FileRecord(index, kind, body))
+                for index, (kind, body) in enumerate(((FileRecordKind.FAILED, b""), (FileRecordKind.FINISHED, b"")))
+            )
+        if case == "invalid":
+            return _records(request.nonce, ManagedResultControl((FactName.LAUNCH,)), (b"invalid",))
+        if case == "mismatched":
+            receipt = decode_managed_job_fact(request.expected_launch)
+            assert isinstance(receipt, ManagedRunReceipt)
+            wrong = replace(receipt, spec=replace(receipt.spec, target=replace(TARGET, name="vm-other")))
+            return _records(
+                request.nonce,
+                ManagedResultControl((FactName.LAUNCH,)),
+                (encode_managed_job_fact(wrong),),
+            )
+        return _records(request.nonce, ManagedResultControl((FactName.LAUNCH,)), (request.expected_launch,))
+
+    carrier = ScriptedCarrier(
+        response,
+        dispatch=Dispatch.UNKNOWN if case == "uncertain" else Dispatch.SENT,
+        complete=case != "incomplete",
+    )
+    try:
+        outcome = _observe_and_reconcile(repository, owner, carrier)
+        assert outcome.candidate is not None and outcome.candidate.observation is not None
+        expected = {
+            "uncertain": ManagedObservationState.UNKNOWN,
+            "incomplete": ManagedObservationState.INCOMPLETE,
+            "refused": ManagedObservationState.REFUSED,
+            "invalid": ManagedObservationState.INVALID,
+            "mismatched": ManagedObservationState.INVALID,
+        }[case]
+        assert outcome.candidate.observation.state is expected
+        assert carrier.calls == 1
+        assert repository.inspect(RUN) == possible
+    finally:
+        database.close()
+
+
+def test_observe_and_reconcile_database_base_exception_preserves_custody_cause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database, repository, owner = _reserved(tmp_path)
+    reserved = repository.inspect(RUN)
+    assert reserved is not None
+    possible = repository.mark_possible_dispatch(reserved)
+    carrier = ScriptedCarrier(
+        lambda request: _records(request.nonce, ManagedResultControl((FactName.LAUNCH,)), (request.expected_launch,))
+    )
+    interrupted = KeyboardInterrupt("reconcile interrupted")
+
+    def fail_reconcile(*_args: object, **_kwargs: object) -> None:
+        raise interrupted
+
+    monkeypatch.setattr(repository, "reconcile", fail_reconcile)
+    try:
+        with pytest.raises(KeyboardInterrupt) as raised:
+            _observe_and_reconcile(repository, owner, carrier)
+        assert raised.value is interrupted
+        assert isinstance(raised.value.__cause__, ManagedObserveControlFact)
+        assert raised.value.__cause__.outcome.candidate is not None
+        assert carrier.calls == 1
+        assert repository.inspect(RUN) == possible
+    finally:
+        database.close()
+
+
+def test_observe_and_reconcile_decode_interrupt_preserves_custody_cause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database, repository, owner = _reserved(tmp_path)
+    reserved = repository.inspect(RUN)
+    assert reserved is not None
+    possible = repository.mark_possible_dispatch(reserved)
+    carrier = ScriptedCarrier(
+        lambda request: _records(request.nonce, ManagedResultControl((FactName.LAUNCH,)), (request.expected_launch,))
+    )
+    interrupted = KeyboardInterrupt("decode interrupted")
+
+    def interrupt_decode(_data: bytes) -> None:
+        raise interrupted
+
+    monkeypatch.setattr(access, "decode_managed_job_fact", interrupt_decode)
+    try:
+        with pytest.raises(KeyboardInterrupt) as raised:
+            _observe_and_reconcile(repository, owner, carrier)
+        assert raised.value is interrupted
+        assert isinstance(raised.value.__cause__, ManagedObserveControlFact)
+        assert raised.value.__cause__.outcome.candidate is not None
+        assert not raised.value.__cause__.outcome.requires_owner_retention
+        assert carrier.calls == 1
+        assert repository.inspect(RUN) == possible
+    finally:
+        database.close()
+
+
+def test_observe_and_reconcile_post_commit_interruption_retries_idempotently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database, repository, owner = _reserved(tmp_path)
+    reserved = repository.inspect(RUN)
+    assert reserved is not None
+    repository.mark_possible_dispatch(reserved)
+    original_reconcile = repository.reconcile
+    interrupted = KeyboardInterrupt("after commit")
+
+    def commit_then_interrupt(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        original_reconcile(*args, **kwargs)  # type: ignore[arg-type]
+        raise interrupted
+
+    monkeypatch.setattr(repository, "reconcile", commit_then_interrupt)
+    first_carrier = ScriptedCarrier(
+        lambda request: _records(request.nonce, ManagedResultControl((FactName.LAUNCH,)), (request.expected_launch,))
+    )
+    try:
+        with pytest.raises(KeyboardInterrupt) as raised:
+            _observe_and_reconcile(repository, owner, first_carrier)
+        assert raised.value is interrupted
+        assert isinstance(raised.value.__cause__, ManagedObserveControlFact)
+        committed = repository.inspect(RUN)
+        assert committed is not None
+        assert committed.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
+
+        monkeypatch.setattr(repository, "reconcile", original_reconcile)
+        retry_carrier = ScriptedCarrier(
+            lambda request: _records(
+                request.nonce, ManagedResultControl((FactName.LAUNCH,)), (request.expected_launch,)
+            )
+        )
+        _observe_and_reconcile(repository, owner, retry_carrier)
+        assert repository.inspect(RUN) == committed
+        assert first_carrier.calls == retry_carrier.calls == 1
     finally:
         database.close()
 

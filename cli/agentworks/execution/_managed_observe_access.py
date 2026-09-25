@@ -15,7 +15,7 @@ from ._managed_job_protocol import (
     StreamEndFact,
     decode_managed_job_fact,
 )
-from ._managed_job_store import Stream
+from ._managed_job_store import FactName, Stream
 from ._managed_observation_exchange import (
     ManagedObservationCandidate,
     ManagedObservationState,
@@ -23,11 +23,14 @@ from ._managed_observation_exchange import (
     read_managed_output,
 )
 from ._managed_runs import (
+    ManagedLaunchObservation,
     ManagedOutputMode,
     ManagedRunIdentity,
+    ManagedRunReceipt,
     ManagedRunRepository,
     ManagedTargetIdentity,
 )
+from .carrier import Dispatch
 
 if TYPE_CHECKING:
     from agentworks.operations import OperationOwner
@@ -68,6 +71,52 @@ class ManagedReadOutputOutcome:
     @property
     def accepted(self) -> bool:
         return self.disposition is not None
+
+
+def observe_and_reconcile_bound_managed_run(
+    repository: ManagedRunRepository,
+    identity: ManagedRunIdentity,
+    *,
+    target: ManagedTargetIdentity,
+    guest: VMGuestIdentity,
+    root_plan: IdentityPlan,
+    carrier: Carrier,
+    runtime_selection: RuntimeSelection,
+    deadline: Deadline,
+    owner: OperationOwner,
+) -> ManagedObserveOutcome:
+    """Observe one exact run and reconcile only a validated launch receipt."""
+    record, candidate, outcome = _bound_exchange(
+        repository,
+        identity,
+        target=target,
+        guest=guest,
+        root_plan=root_plan,
+        carrier=carrier,
+        runtime_selection=runtime_selection,
+        deadline=deadline,
+        owner=owner,
+        stream=None,
+    )
+    try:
+        observation = None if candidate is None else candidate.observation
+        if observation is None or observation.state is not ManagedObservationState.OBSERVED:
+            return outcome
+        if not observation.facts or observation.facts[0][0] is not FactName.LAUNCH:
+            return outcome
+        try:
+            receipt = decode_managed_job_fact(observation.facts[0][1])
+        except ManagedJobFactError:
+            return outcome
+        if not isinstance(receipt, ManagedRunReceipt):
+            return outcome
+        repository.reconcile(
+            record,
+            ManagedLaunchObservation(Dispatch.UNKNOWN, receipt),
+        )
+    except BaseException as control:
+        raise control from ManagedObserveControlFact(outcome)
+    return outcome
 
 
 def observe_bound_managed_run(

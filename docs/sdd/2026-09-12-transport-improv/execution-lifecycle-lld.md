@@ -475,14 +475,23 @@ The private host-bound observe adapter reads the exact independent resource-owne
 borrowing a caller-held VM operation owner. It constructs the expected launch from the persisted
 specification and makes one fenced read-only observation attempt. It returns raw facts and custody
 state; on interrupted control flow the original exception remains primary with custody facts as its
-cause. It does not update the run row, choose an output view, reconcile uncertainty, release the
-owner, or establish a production provider route. Its private read-output sibling uses the same
-exact-run admission and custody path. Only a validated selected stream end matching the persisted
-capture policy and prefix bound admits bytes; discard and sensitivity suppression require their
-matching no-output dispositions. The raw candidate is retained only as internal evidence and cannot
-be forwarded as a caller-facing output view. This does not reconcile job state or establish
-production route freshness. Stop and dispose still need equivalent host binding; their guest fences
-alone do not establish it.
+cause. This read-only action does not update the run row, choose an output view, reconcile
+uncertainty, release the owner, or establish a production provider route. Its private read-output
+sibling uses the same exact-run admission and custody path. Only a validated selected stream end
+matching the persisted capture policy and prefix bound admits bytes; discard and sensitivity
+suppression require their matching no-output dispositions. The raw candidate is retained only as
+internal evidence and cannot be forwarded as a caller-facing output view. This does not reconcile
+job state or establish production route freshness. Stop and disposal have their own exact-VM
+host-bound adapters; those private guest fences likewise do not establish a production provider
+route.
+
+A separate private observe-and-reconcile action may update a `POSSIBLE_DISPATCH` run only after one
+complete, validated observation contains its exact launch receipt. It uses the persisted row and
+the repository's idempotent reconciliation transition, treating the historical launch dispatch as
+unknown rather than borrowing the later observation's carrier status. A missing, refused, invalid
+or incomplete observation never proves `NOT_LAUNCHED`. Receipt reconciliation does not settle an
+earlier start attempt or obligation, release a retained operation owner, prove route freshness, or
+imply workload completion; those remain independent evidence and recovery gates.
 
 At the first production later-action caller, bind route freshness at the borrowed fixed helper's
 actual carrier boundary. An optional internal check supplied by that caller runs after the exact
