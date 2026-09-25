@@ -10,6 +10,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from ._file_effect_gate import (
+    FileEffectGateBinding,
+    FileEffectGateError,
+    decode_file_effect_gate,
+    encode_file_effect_gate,
+    targets_file_effect_gate_namespace,
+)
 from ._file_paths import normalized_relative_path, normalized_root
 from ._file_wire import valid_nonce
 from ._helper_identity import IdentityExpectation, decode_identity
@@ -59,6 +66,7 @@ class FileStageFailureCode(StrEnum):
     ROOT_REFUSED = "root_refused"
     PARENT_REFUSED = "parent_refused"
     SCRATCH = "scratch"
+    EFFECT_GATE_REFUSED = "effect_gate_refused"
 
 
 class FileStageRequestError(ValueError):
@@ -85,6 +93,7 @@ class FileStageBeginRequest:
     expected_length: int
     identity: IdentityExpectation
     remaining_seconds: float | None
+    effect_gate: FileEffectGateBinding | None = None
 
     @property
     def operation(self) -> FileStageOperation:
@@ -103,6 +112,7 @@ class FileStageChunkRequest:
     chunk_digest: bytes
     identity: IdentityExpectation
     remaining_seconds: float | None
+    effect_gate: FileEffectGateBinding | None = None
 
     @property
     def operation(self) -> FileStageOperation:
@@ -117,6 +127,7 @@ class FileStageReconcileRequest:
     token: bytes
     identity: IdentityExpectation
     remaining_seconds: float | None
+    effect_gate: FileEffectGateBinding | None = None
 
     @property
     def operation(self) -> FileStageOperation:
@@ -132,6 +143,7 @@ class FileStageCleanupRequest:
     cleanup_debt: ScratchCleanupDebt
     identity: IdentityExpectation
     remaining_seconds: float | None
+    effect_gate: FileEffectGateBinding | None = None
 
     @property
     def operation(self) -> FileStageOperation:
@@ -275,6 +287,10 @@ def encode_file_stage_request(request: FileStageRequest) -> bytes:
             "token": _encode_bytes(request.token),
             "version": 1,
         }
+        if request.effect_gate is not None:
+            if request.effect_gate.proposed_generation is not None or request.effect_gate.euid != request.identity.euid:
+                raise FileEffectGateError("invalid upload gate binding")
+            common["effect_gate"] = encode_file_effect_gate(request.effect_gate)
         if isinstance(request, FileStageBeginRequest):
             common["expected_length"] = request.expected_length
         elif isinstance(request, FileStageChunkRequest):
@@ -301,7 +317,7 @@ def encode_file_stage_request(request: FileStageRequest) -> bytes:
         else:
             raise TypeError
         encoded = _json_bytes(common)
-    except (AttributeError, ScratchWireError, TypeError, UnicodeEncodeError, ValueError):
+    except (AttributeError, FileEffectGateError, ScratchWireError, TypeError, UnicodeEncodeError, ValueError):
         failed = True
     if failed:
         raise _invalid_request()
@@ -341,16 +357,30 @@ def decode_file_stage_request(data: bytes) -> FileStageRequest:
         FileStageOperation.RECONCILE: _RECONCILE_FIELDS,
         FileStageOperation.CLEANUP: _CLEANUP_FIELDS,
     }[operation]
-    if set(value) != expected_fields or value["version"] != 1 or type(value["version"]) is not int:
+    if (
+        set(value) not in (expected_fields, expected_fields | {"effect_gate"})
+        or value["version"] != 1
+        or type(value["version"]) is not int
+    ):
         raise _invalid_request()
     nonce = value["nonce"]
     if type(nonce) is not str or not valid_nonce(nonce):
         raise _invalid_request()
     root_path = _decode_path(value["root"], root=True)
     relative_path = _decode_path(value["path"], root=False)
+    if targets_file_effect_gate_namespace(root_path, relative_path):
+        raise _invalid_request()
     token = _decode_bytes(value["token"], 16, exact=16)
     identity = _identity(value["identity"])
     remaining = _remaining(value["remaining_seconds"])
+    effect_gate = None
+    if "effect_gate" in value:
+        try:
+            effect_gate = decode_file_effect_gate(value["effect_gate"])
+        except FileEffectGateError:
+            raise _invalid_request() from None
+        if effect_gate.proposed_generation is not None or effect_gate.euid != identity.euid:
+            raise _invalid_request()
     if operation is FileStageOperation.BEGIN:
         return FileStageBeginRequest(
             nonce,
@@ -360,10 +390,11 @@ def decode_file_stage_request(data: bytes) -> FileStageRequest:
             _bounded_integer(value["expected_length"], _MAX_OFFSET),
             identity,
             remaining,
+            effect_gate,
         )
     context = stage_context(identity)
     if operation is FileStageOperation.RECONCILE:
-        return FileStageReconcileRequest(nonce, root_path, relative_path, token, identity, remaining)
+        return FileStageReconcileRequest(nonce, root_path, relative_path, token, identity, remaining, effect_gate)
     if operation is FileStageOperation.CLEANUP:
         failed = False
         cleanup: ScratchCleanupDebt | None = None
@@ -373,7 +404,9 @@ def decode_file_stage_request(data: bytes) -> FileStageRequest:
             failed = True
         if failed or cleanup is None:
             raise _invalid_request()
-        return FileStageCleanupRequest(nonce, root_path, relative_path, token, cleanup, identity, remaining)
+        return FileStageCleanupRequest(
+            nonce, root_path, relative_path, token, cleanup, identity, remaining, effect_gate
+        )
     failed = False
     reference: ScratchReference | None = None
     try:
@@ -396,6 +429,7 @@ def decode_file_stage_request(data: bytes) -> FileStageRequest:
         _decode_bytes(value["chunk_sha256"], 32, exact=32),
         identity,
         remaining,
+        effect_gate,
     )
 
 

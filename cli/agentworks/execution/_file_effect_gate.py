@@ -35,6 +35,12 @@ _ACL_ACCESS = "system.posix_acl_access"
 _ACL_DEFAULT = "system.posix_acl_default"
 
 
+def targets_file_effect_gate_namespace(root: str, relative_path: str) -> bool:
+    """Whether an upload destination names the gate control namespace."""
+    target = posixpath.join(root, relative_path)
+    return target == _GATE_NAMESPACE or target.startswith(_GATE_NAMESPACE + "/")
+
+
 def _check_gate_namespace(path: str, euid: int) -> None:
     """Admit a gate only inside the pre-provisioned guest namespace."""
     prefix = f"{_GATE_NAMESPACE}/{euid}/"

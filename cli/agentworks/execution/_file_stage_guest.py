@@ -7,6 +7,7 @@ import sys
 import time
 from contextlib import suppress
 
+from ._file_effect_gate import FileEffectGateError, hold_file_effect_gate
 from ._file_paths import ConfinedOpenError, open_linux_confined, open_linux_root
 from ._file_stage_protocol import (
     MAX_REQUEST_BYTES,
@@ -41,6 +42,7 @@ from ._scratch import (
     write_scratch_chunk,
 )
 from ._scratch_receipt import ScratchHistoricalOwnership, ScratchOwnershipUncertainty
+from ._vm_guest_identity_guest import _GuestRefusal, _identity
 
 _OperationResult = ScratchReference | ScratchHistoricalOwnership | ScratchOwnershipUncertainty | None
 
@@ -210,9 +212,15 @@ def main(nonce: str) -> int:
     failure: FileStageFailureControl | None = None
     result: _OperationResult = None
     try:
-        result = _operate(request, expires_at)
+        if request.effect_gate is None:
+            result = _operate(request, expires_at)
+        else:
+            with hold_file_effect_gate(request.effect_gate, _identity, expires_at=expires_at):
+                result = _operate(request, expires_at)
     except _SafeFailure as error:
         failure = error.failure
+    except (FileEffectGateError, _GuestRefusal):
+        failure = FileStageFailureControl(FileStageFailureCode.EFFECT_GATE_REFUSED)
     if _expired(expires_at):
         if failure is None:
             failure = _deadline_failure(request, result)

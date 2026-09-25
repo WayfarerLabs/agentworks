@@ -7,6 +7,7 @@ import sys
 import time
 from contextlib import suppress
 
+from ._file_effect_gate import FileEffectGateError, hold_file_effect_gate
 from ._file_paths import ConfinedOpenError, open_linux_confined, open_linux_root
 from ._file_publication import (
     FilePublicationError,
@@ -55,6 +56,7 @@ from ._publication_receipt import (
     reconcile_publication_stage,
 )
 from ._scratch import ScratchTransferError, verify_scratch
+from ._vm_guest_identity_guest import _GuestRefusal, _identity
 
 _OperationResult = FilePublishResult | FilePublicationReconcileResult | FilePublicationCleanupResult
 
@@ -325,9 +327,15 @@ def main(nonce: str) -> int:
     if _expired(expires_at):
         return _finish_failure(writer, FilePublicationFailureControl(FilePublicationFailureCode.DEADLINE))
     try:
-        result = _operate(request, expires_at)
+        if request.effect_gate is None:
+            result = _operate(request, expires_at)
+        else:
+            with hold_file_effect_gate(request.effect_gate, _identity, expires_at=expires_at):
+                result = _operate(request, expires_at)
     except _SafeFailure as error:
         return _finish_failure(writer, error.failure)
+    except (FileEffectGateError, _GuestRefusal):
+        return _finish_failure(writer, FilePublicationFailureControl(FilePublicationFailureCode.EFFECT_GATE_REFUSED))
     deadline_exceeded = _expired(expires_at)
     if isinstance(result, FilePublishResult):
         result = FilePublishResult(result.revision, deadline_exceeded)

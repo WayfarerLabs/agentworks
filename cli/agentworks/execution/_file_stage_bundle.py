@@ -7,6 +7,9 @@ from agentworks.execution._helper_bundle import build_file_helper_bundle
 _PACKAGE = "_agw_file_stage"
 _MODULE_NAMES = (
     "_helper_identity",
+    "_vm_guest_identity_protocol",
+    "_vm_guest_identity_guest",
+    "_file_effect_gate",
     "_file_paths",
     "_scratch_receipt",
     "_scratch",

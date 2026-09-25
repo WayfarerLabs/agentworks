@@ -12,6 +12,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+from ._file_effect_gate import (
+    FileEffectGateBinding,
+    FileEffectGateError,
+    decode_file_effect_gate,
+    encode_file_effect_gate,
+    targets_file_effect_gate_namespace,
+)
 from ._file_paths import normalized_relative_path, normalized_root
 from ._file_publication import (
     Create,
@@ -68,6 +75,7 @@ class FilePublicationFailureCode(StrEnum):
     SCRATCH = "scratch"
     PUBLICATION = "publication"
     RECEIPT = "receipt"
+    EFFECT_GATE_REFUSED = "effect_gate_refused"
 
 
 class PublicationCleanupState(StrEnum):
@@ -99,6 +107,7 @@ class FilePublishRequest:
     create_metadata: CreateMetadata
     identity: IdentityExpectation
     remaining_seconds: float | None
+    effect_gate: FileEffectGateBinding | None = None
 
     @property
     def operation(self) -> FilePublicationOperation:
@@ -114,6 +123,7 @@ class FilePublicationReconcileRequest:
     reference: ScratchReference
     identity: IdentityExpectation
     remaining_seconds: float | None
+    effect_gate: FileEffectGateBinding | None = None
 
     @property
     def operation(self) -> FilePublicationOperation:
@@ -130,6 +140,7 @@ class FilePublicationCleanupRequest:
     cleanup_debt: BoundPublicationCleanupDebt
     identity: IdentityExpectation
     remaining_seconds: float | None
+    effect_gate: FileEffectGateBinding | None = None
 
     @property
     def operation(self) -> FilePublicationOperation:
@@ -342,6 +353,10 @@ def encode_file_publication_request(request: FilePublicationRequest) -> bytes:
             "token": request.token.hex(),
             "version": 1,
         }
+        if request.effect_gate is not None:
+            if request.effect_gate.proposed_generation is not None or request.effect_gate.euid != request.identity.euid:
+                raise FileEffectGateError("invalid upload gate binding")
+            value["effect_gate"] = encode_file_effect_gate(request.effect_gate)
         if isinstance(request, FilePublishRequest):
             value.update(
                 {
@@ -357,7 +372,15 @@ def encode_file_publication_request(request: FilePublicationRequest) -> bytes:
         elif not isinstance(request, FilePublicationReconcileRequest):
             raise TypeError
         encoded = _json_bytes(value)
-    except (AttributeError, FilePublicationWireError, ScratchWireError, TypeError, UnicodeEncodeError, ValueError):
+    except (
+        AttributeError,
+        FileEffectGateError,
+        FilePublicationWireError,
+        ScratchWireError,
+        TypeError,
+        UnicodeEncodeError,
+        ValueError,
+    ):
         raise _invalid_request() from None
     if len(encoded) > MAX_REQUEST_BYTES:
         raise FilePublicationRequestError(FilePublicationFailureCode.OVERSIZED_REQUEST)
@@ -388,7 +411,11 @@ def decode_file_publication_request(data: bytes) -> FilePublicationRequest:
         FilePublicationOperation.RECONCILE: _RECONCILE_FIELDS,
         FilePublicationOperation.CLEANUP: _CLEANUP_FIELDS,
     }[operation]
-    if set(value) != expected or value["version"] != 1 or type(value["version"]) is not int:
+    if (
+        set(value) not in (expected, expected | {"effect_gate"})
+        or value["version"] != 1
+        or type(value["version"]) is not int
+    ):
         raise _invalid_request()
     nonce = value["nonce"]
     token_value = value["token"]
@@ -398,6 +425,14 @@ def decode_file_publication_request(data: bytes) -> FilePublicationRequest:
         raise _invalid_request()
     token = bytes.fromhex(token_value)
     identity = _identity(value["identity"])
+    effect_gate = None
+    if "effect_gate" in value:
+        try:
+            effect_gate = decode_file_effect_gate(value["effect_gate"])
+        except FileEffectGateError:
+            raise _invalid_request() from None
+        if effect_gate.proposed_generation is not None or effect_gate.euid != identity.euid:
+            raise _invalid_request()
     try:
         reference = decode_scratch_reference(value["reference"], token, publication_context(identity))
     except ScratchWireError:
@@ -409,6 +444,8 @@ def decode_file_publication_request(data: bytes) -> FilePublicationRequest:
         _decode_path(value["path"], root=False),
         reference,
     )
+    if targets_file_effect_gate_namespace(common[2], common[3]):
+        raise _invalid_request()
     remaining = _remaining(value["remaining_seconds"])
     if operation is FilePublicationOperation.PUBLISH:
         digest = value["sha256"]
@@ -421,14 +458,15 @@ def decode_file_publication_request(data: bytes) -> FilePublicationRequest:
             _decode_metadata(value["create_metadata"]),
             identity,
             remaining,
+            effect_gate,
         )
     if operation is FilePublicationOperation.RECONCILE:
-        return FilePublicationReconcileRequest(*common, identity, remaining)
+        return FilePublicationReconcileRequest(*common, identity, remaining, effect_gate)
     try:
         cleanup = decode_publication_cleanup_debt(value["cleanup"], reference)
     except FilePublicationWireError:
         raise _invalid_request() from None
-    return FilePublicationCleanupRequest(*common, cleanup, identity, remaining)
+    return FilePublicationCleanupRequest(*common, cleanup, identity, remaining, effect_gate)
 
 
 def empty_file_publication_body() -> bytes:

@@ -750,6 +750,11 @@ writing a local sink. Gate setup is separately admitted under the operation owne
 snapshot dispatch. A complete existing gate can be adopted, but an incomplete or replaced inode is
 not repaired during the same guest epoch.
 
+Private stage and publication requests can carry that same exact binding. The guest holds the gate
+through stage creation, chunk writes, scratch cleanup, publication, publication cleanup and
+reconciliation. Requests without a binding retain their legacy behavior until host admission binds
+them. Upload destinations inside the gate control namespace are refused before filesystem access.
+
 `_file_gate_setup_recovery.py` handles only a lost setup reply whose durable row remains setup-only
 after database generation takeover. It rechecks that exact row, dispatches non-creating gate
 inspection, and resolves only the setup obligation after a complete positive observation. The old
