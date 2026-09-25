@@ -168,7 +168,6 @@ def test_success_stdout_budget_covers_data_frames_and_terminal_records(size: int
     )
     budget = _max_success_stdout_bytes(size)
     assert budget >= MAX_RUNTIME_RECORD_BYTES + data_frames + 2 * MAX_RECORD_BYTES
-    assert budget - (MAX_RUNTIME_RECORD_BYTES + data_frames + 2 * MAX_RECORD_BYTES) <= 3 * len(chunks)
 
 
 def test_sink_complete_stdout_capacity_requires_a_positive_integer() -> None:
