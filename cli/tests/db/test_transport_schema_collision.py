@@ -9,6 +9,7 @@ import pytest
 
 from agentworks.db import (
     Database,
+    SchemaInspection,
     SchemaState,
     inspect_schema,
     open_completion_database,
@@ -67,17 +68,18 @@ def test_completion_quietly_refuses_lock_acquired_during_schema_validation(
     path = tmp_path / "state.db"
     build_schema(path, 41)
     validate = backup_module._validate_consolidated_transport_schema
-    calls = 0
     locker: sqlite3.Connection | None = None
 
+    def already_current(_path: Path, *, timeout: float | None = None) -> SchemaInspection:
+        return SchemaInspection(SchemaState.CURRENT, 41, 41, 1)
+
     def lock_after_version_read(connection: sqlite3.Connection, version: int) -> None:
-        nonlocal calls, locker
-        calls += 1
-        if calls == 1:
-            locker = sqlite3.connect(path)
-            locker.execute("BEGIN EXCLUSIVE")
+        nonlocal locker
+        locker = sqlite3.connect(path)
+        locker.execute("BEGIN EXCLUSIVE")
         validate(connection, version)
 
+    monkeypatch.setattr(backup_module, "inspect_schema", already_current)
     monkeypatch.setattr(backup_module, "_validate_consolidated_transport_schema", lock_after_version_read)
     try:
         assert open_completion_database(path) is None
@@ -85,7 +87,7 @@ def test_completion_quietly_refuses_lock_acquired_during_schema_validation(
         if locker is not None:
             locker.rollback()
             locker.close()
-    assert calls == 1
+    assert locker is not None
 
 
 @pytest.mark.parametrize("version", (39, 40, 41))
