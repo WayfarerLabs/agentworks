@@ -421,8 +421,9 @@ borrowed carrier attempts the one launch. Only a settled carrier attempt with a 
 receipt permits the start obligation to resolve. After admission, any other launch state retains
 core custody, including a code-zero carrier completion without the receipt. This does not resolve
 the whole operation or establish job termination. Production binding and recovery remain open.
-Private observe and read-output now reread guest identity before store access; stop and dispose
-still need that fence and host composition.
+Private observe, read-output, stop and dispose now reread guest identity before store access. Their
+current-guest fences are hermetic; host-side action composition and production route proof remain
+open.
 
 The private host-bound observe adapter reads the exact independent resource-owned VM run row before
 borrowing a caller-held VM operation owner. It constructs the expected launch from the persisted
@@ -430,7 +431,7 @@ specification and makes one fenced read-only observation attempt. It returns raw
 state; on interrupted control flow the original exception remains primary with custody facts as its
 cause. It does not update the run row, choose an output view, reconcile uncertainty, release the
 owner, or establish a production provider route. Read-output, stop and dispose still need equivalent
-host binding and guest fences where applicable.
+host binding; their guest fences alone do not establish it.
 
 Before arming, a refused registration, expired deadline or owner close releases the unused borrow;
 an installed but unarmed obligation resolves during that release. A failed reservation leaves the

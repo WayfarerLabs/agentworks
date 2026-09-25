@@ -1470,6 +1470,16 @@ reconciliation, output-policy reduction and owner release. This is neither a pro
 nor a public RunContext surface. Equivalent host-bound read-output, stop and dispose, recovery and
 live SSH/QGA proof remain open.
 
+At private checkpoint `9e578dbbb`, the closed stop and disposal requests also require a canonical
+observed VM guest identity. Host encoding checks the exact launch's VM kind and derived boot before
+carrier validation or dispatch. Both fixed Python 3.11 guest helpers reread the protected marker,
+kernel boot and PID 1 start time before opening the managed store; missing, unsafe or mismatched
+evidence returns fixed refusal without stop publication or deletion. Isolated bundle tests now
+include the VM-identity modules required by their shared protocol imports. The first focused
+stop/disposal run passed 94 tests; a redundant rerun exhausted scratch space while creating a large
+test fixture, not on a code assertion. Host-bound action composition, current provider route,
+recovery, native SSH/QGA proof and public JobAccess remain open.
+
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared
       create bootstrap. Migration 41 leaves legacy rows NULL; ordinary existing-VM operations never

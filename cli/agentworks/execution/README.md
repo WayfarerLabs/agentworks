@@ -532,7 +532,11 @@ reply, including a complete helper failure, can leave stop intent published. An 
 unreadable boundary fact leaves a successfully published request accepted with termination unknown.
 Retrying this helper publishes the same sentinel and never launches again. This private path
 requires an existing launch fact; it offers no prelaunch stop, new-admission API, operation-owner
-lease, public jobs or live SSH/QGA proof.
+lease, public jobs or live SSH/QGA proof. Its closed request now binds the exact VM launch to a
+canonical observed guest identity. The host refuses a different target kind or derived boot before
+carrier dispatch; the helper rereads the protected marker, kernel boot and PID 1 start time before
+opening the managed store. A missing, unsafe or changed identity returns fixed refusal without
+publishing stop intent.
 
 `_managed_disposal_exchange.py` supplies a private fixed Linux root disposal attempt. The target
 requires the exact canonical launch, its bound boundary-empty and both stream-end facts. Wait is
@@ -543,7 +547,9 @@ the immutable launch and syncing the run directory before removing validated art
 resumes partial cleanup, and success requires only the exact one-link receipt to remain. Publishers
 refuse an observed receipt. Complete helper failure or incomplete carrier evidence remains uncertain
 because deletion may already have begun. This is boot-local private machinery; operation claim
-serialization, public jobs and live SSH/QGA proof remain open.
+serialization, public jobs and live SSH/QGA proof remain open. Disposal has the same VM launch and
+guest-identity fence before it opens the store or deletes any artifact. These fences are hermetic
+protocol checks, not proof of a current production provider route or host-bound JobAccess.
 
 ## Input accounting
 
