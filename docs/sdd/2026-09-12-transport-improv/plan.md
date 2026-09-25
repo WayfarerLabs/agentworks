@@ -1492,12 +1492,12 @@ pass, not native integration.
 
 The next host-side stop slice will use an adapter-owned `managed-stop` lifecycle obligation under
 the same exact VM claim. It will admit only a reconciled launch receipt, arm the obligation before
-the one carrier attempt, and resolve temporary dispatch custody only on a complete, validated
-`ACCEPTED` or `TERMINATED` response with settled delivery. `ACCEPTED` proves durable target intent,
-not job termination; only `boundary-empty` proves the latter. Unknown or interrupted delivery
-retains the claim and exact-run recovery identity. This does not add a mutable database stop state
-or make an uncertain stop retry safe before old-dispatch drain is proved. Host-bound disposal and
-recovery are separate later gates.
+the one carrier attempt, and resolve temporary dispatch custody on positively proved no delivery
+with settled coordination, or a complete, validated `ACCEPTED` or `TERMINATED` response with settled
+delivery. `ACCEPTED` proves durable target intent, not job termination; only `boundary-empty` proves
+the latter. Unknown or interrupted delivery retains the claim and exact-run recovery identity. This
+does not add a mutable database stop state or make an uncertain stop retry safe before old-dispatch
+drain is proved. Host-bound disposal and recovery are separate later gates.
 
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared

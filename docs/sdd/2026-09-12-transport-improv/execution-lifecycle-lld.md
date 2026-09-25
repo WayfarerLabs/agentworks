@@ -352,10 +352,12 @@ continuing lifetime. It may resolve after a complete, validated `ACCEPTED` respo
 target has durably published that intent and the carrier attempt is settled. This never reports
 termination; only the exact `boundary-empty` fact does. A helper failure, incomplete response, lost
 delivery, or interrupted admission after possible effect retains the VM operation claim until
-recovery proves what happened. Before first stop dispatch, the host requires the exact run's launch
-receipt to have been reconciled; a merely possible-dispatch run is not stop authority. The
-resource-owned run continues to own the workload and target stop request after the temporary
-dispatch obligation resolves. No database stop-state field is introduced.
+recovery proves what happened. Positively established `NOT_SENT` with settled coordination also
+resolves the temporary obligation because no stop intent reached the target; ambiguous arming is not
+that proof. Before first stop dispatch, the host requires the exact run's launch receipt to have
+been reconciled; a merely possible-dispatch run is not stop authority. The resource-owned run
+continues to own the workload and target stop request after the temporary dispatch obligation
+resolves. No database stop-state field is introduced.
 
 The first `dispose` mechanism is an explicit authorized release of terminal retained artifacts, not
 a retention timer or a synonym for stop. Before committing release, the fixed helper requires the
