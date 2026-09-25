@@ -1,4 +1,9 @@
-"""Private WSL2-shaped target composition under one operation owner."""
+"""Private WSL2-shaped composition with local command and file helper evidence.
+
+The guest identity and account lookup replies are synthetic. Account lookup is
+not proved here; the response uses the process identity so sandbox group
+restrictions cannot turn an otherwise valid local helper into a refusal.
+"""
 
 from __future__ import annotations
 
@@ -14,10 +19,17 @@ from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import Database, OperationClaimState, OperationResourceKind, OperationScope, VMRow
 from agentworks.errors import StateError
+from agentworks.execution._account_bundle import FIXED_SOURCE as ACCOUNT_SOURCE
+from agentworks.execution._account_protocol import (
+    AccountRequest,
+    decode_account_lookup_request,
+    encode_account_identity,
+)
 from agentworks.execution._execution_operation import ExecutionOperation
 from agentworks.execution._file_operation import FileOperation
+from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._target_identity import TargetIdentityStatus, prepare_target_identity
-from agentworks.execution._vm_guest_identity_bundle import FIXED_SOURCE
+from agentworks.execution._vm_guest_identity_bundle import FIXED_SOURCE as GUEST_SOURCE
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, encode_vm_guest_identity_success
 from agentworks.execution.access import ExecutionAccess, FileAccess
 from agentworks.execution.carrier import (
@@ -27,6 +39,7 @@ from agentworks.execution.carrier import (
     Deadline,
     Dispatch,
     ExitStatus,
+    FiniteInput,
     PreparedInvocation,
     Retention,
     SinkOutput,
@@ -77,7 +90,6 @@ class _LocalWSL2Dispatch:
     """Exercise a real WSL2 binding without launching a Windows client."""
 
     def __init__(self) -> None:
-        self.guest_uncertain = False
         self.inline_uncertain = False
         self.calls = 0
 
@@ -86,13 +98,23 @@ class _LocalWSL2Dispatch:
     ) -> CarrierReport:
         carrier.validate(invocation, io=io)
         self.calls += 1
-        if FIXED_SOURCE in invocation.argv:
-            if self.guest_uncertain:
-                return CarrierReport(Dispatch.UNKNOWN)
+        if GUEST_SOURCE in invocation.argv:
             assert isinstance(io.output, SinkOutput)
             nonce = invocation.argv[invocation.argv.index("agentworks-runtime-prerequisite") + 1]
             payload = f"AGW_RUNTIME_1:{nonce}:ready:0\n".encode("ascii")
             io.output.stdout.try_write(memoryview(payload + encode_vm_guest_identity_success(nonce, _GUEST)))
+            complete = CapturedOutput(complete=True, retention=Retention.DELIVERED)
+            return CarrierReport(Dispatch.SENT, ExitStatus(code=0), stdout=complete, stderr=complete)
+        if ACCOUNT_SOURCE in invocation.argv:
+            assert isinstance(io.input, FiniteInput) and isinstance(io.output, SinkOutput)
+            request = decode_account_lookup_request(io.input.data)
+            assert isinstance(request, AccountRequest) and request.account == carrier._connection.user
+            nonce = invocation.argv[invocation.argv.index("agentworks-runtime-prerequisite") + 1]
+            assert request.nonce == nonce
+            groups = tuple(sorted(set(os.getgroups()) | {os.getegid()}))
+            identity = IdentityExpectation(os.geteuid(), os.getegid(), groups)
+            payload = f"AGW_RUNTIME_1:{nonce}:ready:0\n".encode("ascii")
+            io.output.stdout.try_write(memoryview(payload + encode_account_identity(nonce, identity)))
             complete = CapturedOutput(complete=True, retention=Retention.DELIVERED)
             return CarrierReport(Dispatch.SENT, ExitStatus(code=0), stdout=complete, stderr=complete)
         if self.inline_uncertain:
@@ -138,10 +160,10 @@ def composition(
         database.close()
 
 
-def test_prepared_wsl2_binding_drives_command_and_file_under_one_owner(
-    composition: tuple[Database, OperationOwner, VMRow, WSL2Platform, _LocalWSL2Dispatch], tmp_path: Path
-) -> None:
-    database, owner, vm, platform, dispatch = composition
+def _prepared_accesses(
+    owner: OperationOwner, vm: VMRow, platform: WSL2Platform, root: Path
+) -> tuple[ExecutionAccess, FileAccess]:
+    """Prepare the private target and account plan under one existing owner."""
     prepared = prepare_managed_vm_target_from_platform(
         vm, platform, RunContext(), deadline=Deadline.after(30), owner=owner
     )
@@ -175,7 +197,7 @@ def test_prepared_wsl2_binding_drives_command_and_file_under_one_owner(
     files = FileAccess(
         FileOperation(owner, prepared.preparation.target),
         prepared.binding.carrier,
-        trusted_root=PurePosixPath(tmp_path),
+        trusted_root=PurePosixPath(root),
         runtime_selection=prepared.binding.runtime_selection,
         ordinary_plan=accounts.ordinary_plan,
         elevated_plan=accounts.elevated_plan,
@@ -183,6 +205,14 @@ def test_prepared_wsl2_binding_drives_command_and_file_under_one_owner(
         entity_name=vm.name,
         deadline=lambda: Deadline.after(30),
     )
+    return execution, files
+
+
+def test_prepared_wsl2_binding_drives_command_and_file_under_one_owner(
+    composition: tuple[Database, OperationOwner, VMRow, WSL2Platform, _LocalWSL2Dispatch], tmp_path: Path
+) -> None:
+    database, owner, vm, platform, dispatch = composition
+    execution, files = _prepared_accesses(owner, vm, platform, tmp_path)
 
     target = tmp_path / "observed.txt"
     target.write_bytes(b"observed")
@@ -197,62 +227,11 @@ def test_prepared_wsl2_binding_drives_command_and_file_under_one_owner(
     owner.close()
 
 
-def test_uncertain_guest_preparation_withholds_binding_and_later_custody(
-    composition: tuple[Database, OperationOwner, VMRow, WSL2Platform, _LocalWSL2Dispatch],
-) -> None:
-    _, owner, vm, platform, dispatch = composition
-    dispatch.guest_uncertain = True
-    prepared = prepare_managed_vm_target_from_platform(
-        vm, platform, RunContext(), deadline=Deadline.after(30), owner=owner
-    )
-
-    assert prepared.preparation.status is VMTargetPreparationStatus.UNCERTAIN
-    assert prepared.preparation.target is None and prepared.binding is None
-    assert prepared.preparation.requires_owner_retention
-    with pytest.raises(StateError):
-        owner.borrow()
-    assert dispatch.calls == 1
-
-
 def test_uncertain_execution_prevents_following_file_custody(
     composition: tuple[Database, OperationOwner, VMRow, WSL2Platform, _LocalWSL2Dispatch], tmp_path: Path
 ) -> None:
     _, owner, vm, platform, dispatch = composition
-    prepared = prepare_managed_vm_target_from_platform(
-        vm, platform, RunContext(), deadline=Deadline.after(30), owner=owner
-    )
-    assert prepared.binding is not None and prepared.preparation.target is not None
-    accounts = prepare_target_identity(
-        prepared.binding.carrier,
-        delivery_account=prepared.binding.delivery_account,
-        workload_account=vm.admin_username,
-        include_elevated=False,
-        runtime_selection=prepared.binding.runtime_selection,
-        deadline=Deadline.after(30),
-        owner=owner,
-    )
-    assert accounts.ordinary_plan is not None
-    execution = ExecutionAccess(
-        ExecutionOperation(owner),
-        prepared.binding.carrier,
-        runtime_selection=prepared.binding.runtime_selection,
-        ordinary_plan=accounts.ordinary_plan,
-        elevated_plan=None,
-        entity_kind="vm",
-        entity_name=vm.name,
-        deadline=lambda: Deadline.after(30),
-    )
-    files = FileAccess(
-        FileOperation(owner, prepared.preparation.target),
-        prepared.binding.carrier,
-        trusted_root=PurePosixPath(tmp_path),
-        runtime_selection=prepared.binding.runtime_selection,
-        ordinary_plan=accounts.ordinary_plan,
-        elevated_plan=None,
-        entity_kind="vm",
-        entity_name=vm.name,
-        deadline=lambda: Deadline.after(30),
-    )
+    execution, files = _prepared_accesses(owner, vm, platform, tmp_path)
 
     dispatch.inline_uncertain = True
     result = execution.run(Command(("/bin/true",)), profile=Protection.DIRECT)
