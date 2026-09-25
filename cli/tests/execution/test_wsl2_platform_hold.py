@@ -296,30 +296,44 @@ def test_registration_order_exact_connection_and_release() -> None:
     assert owner.obligations[0].resolved
 
 
-def test_real_observer_release_retries_custody_and_resolves_only_its_hold() -> None:
-    owner = FakeOwner()
-    connection = WSL2Connection("Ubuntu", "root", "wsl.exe")
-    query_factory = QueryFactory(owner.events)
-    observer = WSL2GuestObserver(connection, client_factory=query_factory)
-    subject = hold(owner, connection=connection, observer=observer)
-    unrelated = hold(owner, connection=connection)
+def test_real_observer_release_retries_custody_and_resolves_only_its_hold(tmp_path: Path) -> None:
+    with closing(Database(tmp_path / "hold.db")) as database:
+        owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "proof")
+        events: list[str] = []
+        connection = WSL2Connection("Ubuntu", "root", "wsl.exe")
+        query_factory = QueryFactory(events)
+        observer = WSL2GuestObserver(connection, client_factory=query_factory)
+        subject = WSL2PlatformHold(
+            owner, "vm-one", "opaque-locator", "c" * 32, connection, FakeNative(events), observer
+        )
+        unrelated = WSL2PlatformHold(
+            owner, "vm-one", "opaque-locator", "c" * 32, connection, FakeNative(events), FakeObserver(events)
+        )
 
-    subject.start(Deadline.after(1))
-    unrelated.start(Deadline.after(1))
-    with pytest.raises(KeyboardInterrupt):
+        subject.start(Deadline.after(1))
+        unrelated.start(Deadline.after(1))
+        with pytest.raises(KeyboardInterrupt):
+            subject.release(Deadline.after(1))
+
+        assert len(query_factory.clients) == 1
+        assert query_factory.clients[0].settlement_attempts == 1
+        rows = database.operations.list_lifecycle_obligations(owner.ownership)
+        assert len(rows) == 2 and all(row.state is LifecycleObligationState.POSSIBLE_EFFECT for row in rows)
+
         subject.release(Deadline.after(1))
 
-    assert len(query_factory.clients) == 1
-    assert query_factory.clients[0].settlement_attempts == 1
-    assert not owner.obligations[0].resolved and not owner.obligations[1].resolved
-
-    subject.release(Deadline.after(1))
-
-    assert len(query_factory.clients) == 2
-    assert query_factory.clients[0].settlement_attempts == 2
-    assert owner.events.index("query-1:settle-2") < owner.events.index("query-2:create")
-    assert query_factory.clients[1].argv[:5] == ("wsl.exe", "--distribution", "Ubuntu", "--user", "root")
-    assert owner.obligations[0].resolved and not owner.obligations[1].resolved
+        assert len(query_factory.clients) == 2
+        assert query_factory.clients[0].settlement_attempts == 2
+        assert events.index("query-1:settle-2") < events.index("query-2:create")
+        assert query_factory.clients[1].argv[:5] == ("wsl.exe", "--distribution", "Ubuntu", "--user", "root")
+        rows = database.operations.list_lifecycle_obligations(owner.ownership)
+        assert len(rows) == 2
+        states_by_nonce = {decode_hold_payload(row.payload).nonce: row.state for row in rows}
+        assert subject.payload is not None and unrelated.payload is not None
+        assert states_by_nonce == {
+            subject.payload.nonce: LifecycleObligationState.RESOLVED,
+            unrelated.payload.nonce: LifecycleObligationState.POSSIBLE_EFFECT,
+        }
 
 
 def test_nested_holds_are_independent() -> None:
