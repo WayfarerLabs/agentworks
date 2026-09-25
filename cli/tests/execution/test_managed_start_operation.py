@@ -281,7 +281,7 @@ def test_preparation_can_be_discarded_after_reservation_failure(tmp_path: Path) 
         with pytest.raises(StateError):
             repository.reserve(spec, output_policy=policy, identity=RUN)
         prepared.discard()
-        prepared.close()
+        prepared.discard()
         assert prepared.io is None
         with pytest.raises(ValidationError):
             start_owned_managed_run(
@@ -297,6 +297,39 @@ def test_preparation_can_be_discarded_after_reservation_failure(tmp_path: Path) 
         assert carrier.calls == 0
     finally:
         database.close()
+
+
+def test_deadline_expiring_between_preparation_and_claim_refuses_before_borrow(
+    owned: tuple[Database, ManagedRunRepository, ManagedRunRecord, OperationOwner],
+) -> None:
+    database, repository, record, owner = owned
+    carrier = Carrier(lambda request: _records(request, receipt=True))
+    deadline = Deadline.after(10)
+    prepared = prepare_managed_start(
+        carrier,
+        record.identity,
+        record.spec,
+        record.output_policy,
+        _request(record),
+        IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
+        deadline,
+        RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+    )
+    object.__setattr__(deadline, "expires_at", 0.0)
+    with pytest.raises(ValidationError):
+        start_owned_managed_run(
+            repository,
+            record,
+            carrier,
+            prepared=prepared,
+            deadline=deadline,
+            owner=owner,
+            obligation_id=OBLIGATION,
+        )
+    prepared.discard()
+    assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+    assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
+    assert carrier.calls == 0
 
 
 def test_confirmed_receipt_hands_off_to_resource_owned_run(
@@ -398,6 +431,30 @@ def test_owner_close_during_preparation_prevents_borrow_without_obligation(
         _start(owned, carrier)
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
     assert carrier.calls == 0
+
+
+def test_owner_close_after_registration_before_arming_resolves_unused_row(
+    owned: tuple[Database, ManagedRunRepository, ManagedRunRecord, OperationOwner], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database, repository, _, owner = owned
+    carrier = Carrier(lambda request: _records(request, receipt=True))
+
+    def close_before_arm(self: OperationBorrow) -> None:
+        with pytest.raises(StateError):
+            owner.close()
+        raise StateError("interrupted before arming")
+
+    monkeypatch.setattr(OperationBorrow, "arm_dispatch_obligation", close_before_arm)
+    with pytest.raises(StateError) as caught:
+        _start(owned, carrier)
+    assert isinstance(caught.value.__cause__, ManagedStartControlFact)
+    assert not caught.value.__cause__.outcome.requires_owner_retention
+    assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
+    assert database.operations.list_lifecycle_obligations(owner.ownership)[0].state is LifecycleObligationState.RESOLVED
+    assert carrier.calls == 0
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
 
 
 def test_invalid_obligation_id_releases_unused_borrow(

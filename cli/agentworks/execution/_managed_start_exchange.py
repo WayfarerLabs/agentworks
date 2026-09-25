@@ -11,6 +11,7 @@ from agentworks.errors import ValidationError
 
 from . import _managed_job_request as request_wire
 from ._file_wire import FileRecord, FileRecordKind, FileRecordReader, FileWireError
+from ._fixed_helper_operation import BorrowedFixedHelperCarrier
 from ._helper_launcher import IdentityPlan
 from ._managed_job_protocol import ManagedJobFactError, encode_managed_job_fact
 from ._managed_job_store import FactName
@@ -102,9 +103,7 @@ class _PreparedAttempt:
     spec: ManagedRunSpec
     policy: ManagedOutputPolicy
     carrier: Carrier
-    plan: IdentityPlan
     deadline: Deadline
-    runtime_selection: RuntimeSelection
     invocation: PreparedInvocation
     io: CarrierIO | None
     collector: _Collector
@@ -118,13 +117,12 @@ class _PreparedAttempt:
     def discard(self) -> None:
         """Release retained evidence and prevent this preparation from being used."""
         self._used = True
+        self._claimed = False
         self.io = None
         self.runtime.clear()
         self.reader.abort()
         self.collector.abort()
         self.stderr.clear()
-
-    close = discard
 
     def verify(self, reserved: ManagedRunRecord, carrier: Carrier, deadline: Deadline) -> None:
         if self._used or (
@@ -135,8 +133,14 @@ class _PreparedAttempt:
             or reserved.output_policy != self.policy
             or carrier is not self.carrier
             or deadline is not self.deadline
+            or deadline.expired
         ):
             raise ValidationError("Managed start preparation does not match reservation and carrier")
+
+    def matches_delivery(self, carrier: Carrier) -> bool:
+        return carrier is self.carrier or (
+            isinstance(carrier, BorrowedFixedHelperCarrier) and carrier.wraps(self.carrier)
+        )
 
     def claim(self, reserved: ManagedRunRecord, carrier: Carrier, deadline: Deadline) -> None:
         self.verify(reserved, carrier, deadline)
@@ -318,9 +322,7 @@ def prepare_managed_start(
         spec,
         output_policy,
         carrier,
-        plan,
         deadline,
-        runtime_selection,
         invocation,
         io,
         collector,
@@ -387,12 +389,14 @@ def start_managed_run(
     """Commit possible dispatch, attempt once, and reconcile only admitted launch fact."""
     if (
         not prepared._claimed
+        or prepared.io is None
         or type(reserved) is not ManagedRunRecord
         or reserved.launch_state is not ManagedLaunchState.RESERVED
         or reserved.identity != prepared.identity
         or reserved.spec != prepared.spec
         or reserved.output_policy != prepared.policy
         or deadline is not prepared.deadline
+        or not prepared.matches_delivery(carrier)
     ):
         raise ValidationError("Managed start preparation has not been claimed")
     prepared._claimed = False

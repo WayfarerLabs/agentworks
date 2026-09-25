@@ -200,6 +200,48 @@ def _start(repository: ManagedRunRepository, record: ManagedRunRecord, carrier: 
     )
 
 
+@pytest.mark.parametrize("fault", ["discarded", "other_carrier"])
+def test_claimed_preparation_refuses_cancellation_or_carrier_switch_before_admission(
+    reserved: tuple[ManagedRunRepository, ManagedRunRecord], fault: str
+) -> None:
+    repository, record = reserved
+    carrier = ScriptedCarrier(lambda _request: b"")
+    other = ScriptedCarrier(lambda _request: b"")
+    deadline = Deadline.after(10)
+    prepared = prepare_managed_start(
+        carrier,
+        record.identity,
+        record.spec,
+        record.output_policy,
+        _request(record),
+        IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
+        deadline,
+        RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+    )
+    prepared.claim(record, carrier, deadline)
+    if fault == "discarded":
+        prepared.discard()
+    armed = False
+
+    def before() -> None:
+        nonlocal armed
+        armed = True
+
+    with pytest.raises(ValidationError):
+        start_managed_run(
+            repository,
+            record,
+            carrier if fault == "discarded" else other,
+            prepared=prepared,
+            deadline=deadline,
+            before_possible_dispatch=before,
+        )
+    prepared.discard()
+    assert not armed
+    assert carrier.calls == other.calls == 0
+    assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
+
+
 def test_codec_is_canonical_bounded_and_secret_safe(reserved: tuple[ManagedRunRepository, ManagedRunRecord]) -> None:
     _, record = reserved
     request = ManagedStartRequest(NONCE, ROOT, _request(record))

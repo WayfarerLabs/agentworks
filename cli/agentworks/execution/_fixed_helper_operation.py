@@ -48,6 +48,10 @@ class BorrowedFixedHelperCarrier:
         """Delegate pure structural validation without borrowing an attempt."""
         self._carrier.validate(invocation, io=io)
 
+    def wraps(self, carrier: Carrier) -> bool:
+        """Identify the exact carrier behind this borrowed dispatch boundary."""
+        return self._carrier is carrier
+
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
         self.validate(invocation, io=io)
         try:
