@@ -1968,11 +1968,12 @@ The private setup-only recovery adapter at `3b95a068e` now rebinds a post-takeov
 refuses a cross-scope or already-bound target, and resolves only that obligation after complete
 positive `INSPECT`. Missing and incomplete observations retain custody. An interruption after local
 attempt settlement no longer strands an active recovery dispatch; the same correction covers the
-existing DOWNLOAD adapter. A local held-delivery test lets an old `SETUP` arrive after takeover and
-confirms it cannot publish or start the snapshot. The file test directory passes 1,332 tests, and
-project, correctness and complexity re-reviews of the adapter report no remaining finding. This is
-local proof, not a production takeover factory, native delayed-helper test, native route acceptance,
-namespace-lifetime proof or whole-owner release.
+existing DOWNLOAD adapter. A local held-delivery test completes old `SETUP`, takes over and inspects
+while its carrier result is still withheld, then confirms the stale controller cannot publish or
+start the snapshot. The file test directory passes 1,332 tests, and project, correctness and
+complexity re-reviews of the adapter report no remaining finding. This is local proof, not a
+production takeover factory, native delayed-helper test, native route acceptance, namespace-lifetime
+proof or whole-owner release.
 
 Setup is itself a remote control-state mutation, so the current possible-dispatch rule applies
 before its first attempt. The first production composition must arm one `file-call` row with a setup

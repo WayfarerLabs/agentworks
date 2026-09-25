@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
-import threading
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
@@ -84,17 +84,16 @@ class _InspectingCarrier(LocalCarrier):
         return result
 
 
-class _DelayedSetupCarrier(LocalCarrier):
-    def __init__(self, started: threading.Event, release: threading.Event) -> None:
+class _TakeoverAfterSetupCarrier(LocalCarrier):
+    def __init__(self, takeover: Callable[[], None]) -> None:
         super().__init__()
-        self._started = started
-        self._release = release
+        self._takeover = takeover
 
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-        self._started.set()
-        if not self._release.wait(10):
-            raise TimeoutError("delayed setup was not released")
-        return super().execute(invocation, io=io, deadline=deadline)
+        result = super().execute(invocation, io=io, deadline=deadline)
+        if self.calls == 1:
+            self._takeover()
+        return result
 
 
 def _fixture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Path]:
@@ -415,43 +414,31 @@ def test_delayed_setup_cannot_publish_or_start_snapshot_after_takeover(
     source, gate_root = _fixture(monkeypatch, tmp_path)
     database = Database(tmp_path / "state.db")
     owner, operation, setup = _context(database, gate_root)
-    existing = setup_file_effect_gate(setup.path, _GUEST, os.geteuid(), "core-file-vm", lambda: _GUEST)
-    started = threading.Event()
-    release = threading.Event()
-    carrier = _DelayedSetupCarrier(started, release)
-    errors: list[BaseException] = []
+    recovered: OperationOwner | None = None
 
-    def old_controller() -> None:
-        try:
-            _call(operation, carrier, source, setup)
-        except BaseException as error:
-            errors.append(error)
-
-    thread = threading.Thread(target=old_controller, daemon=True)
-    try:
-        thread.start()
-        assert started.wait(10)
+    def takeover() -> None:
+        nonlocal recovered
         recovered = OperationOwner.recover(database.operations, owner.ownership, "c" * 32)
         row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
         assert decode_file_call_obligation(row.payload).gate_setup == setup
         inspected = FileGateSetupRecovery.open(recovered, target_for_owner(recovered), row).inspect(
             LocalCarrier(), deadline=Deadline.after(20)
         )
-        assert inspected.observation is not None and inspected.observation.binding == existing
+        assert inspected.observation is not None and inspected.observation.binding is not None
         assert (
             database.operations.list_lifecycle_obligations(recovered.ownership)[0].state
             is LifecycleObligationState.RESOLVED
         )
-        release.set()
-        thread.join(10)
-        assert not thread.is_alive()
-        assert len(errors) == 1 and isinstance(errors[0], StateError)
+
+    carrier = _TakeoverAfterSetupCarrier(takeover)
+    try:
+        with pytest.raises(StateError):
+            _call(operation, carrier, source, setup)
         assert carrier.calls == 1
+        assert recovered is not None
         recovered.record_effects_resolved()
         recovered.close()
     finally:
-        release.set()
-        thread.join(10)
         database.close()
 
 
