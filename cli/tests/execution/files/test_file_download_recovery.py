@@ -22,6 +22,12 @@ from agentworks.execution._file_download_recovery import (
     FileDownloadRecovery,
     _DownloadDrainEvidence,
 )
+from agentworks.execution._file_effect_gate import (
+    FileEffectGateBinding,
+    FileEffectGateError,
+    advance_file_effect_gate,
+    initialize_file_effect_gate,
+)
 from agentworks.execution._file_obligation import (
     FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
     FileCallFamily,
@@ -34,11 +40,14 @@ from agentworks.execution._file_operation import FileOperation
 from agentworks.execution._file_snapshot_exchange import (
     FileSnapshotObservationState,
     snapshot_begin,
+    snapshot_cleanup,
     snapshot_reconcile,
 )
+from agentworks.execution._file_snapshot_protocol import FileSnapshotFailureCode
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTargetKind
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 from agentworks.execution.carrier import (
     CarrierReport,
     Deadline,
@@ -51,6 +60,8 @@ from tests.execution.files._file_snapshot_support import LocalCarrier, fixture_s
 from tests.execution.files._runtime_support import runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the private snapshot helper requires Linux")
+
+_GUEST = VMGuestIdentity("a" * 32, "123e4567-e89b-12d3-a456-426614174000", 10)
 
 
 class _LocalHelperDrainRecord:
@@ -134,6 +145,24 @@ class _CrashAfterHelperCarrier(_JournalCarrier):
     def execute(self, invocation: PreparedInvocation, *, io, deadline) -> CarrierReport:
         super().execute(invocation, io=io, deadline=deadline)
         os._exit(self._exit_code)
+
+
+class _CrashAfterDataUnlinkCarrier(_JournalCarrier):
+    def __init__(self, journal_path: str, token: bytes, data_unlinked_path: str) -> None:
+        super().__init__(journal_path, token, "FileSnapshotCleanupRequest")
+        self._data_unlinked_path = data_unlinked_path
+
+    def execute(self, invocation: PreparedInvocation, *, io, deadline) -> CarrierReport:
+        def crash_after_data_unlink() -> None:
+            until = time.monotonic() + 20
+            while time.monotonic() < until:
+                if Path(self._data_unlinked_path).exists():
+                    os._exit(97)
+                time.sleep(0.01)
+            os._exit(94)
+
+        threading.Thread(target=crash_after_data_unlink, daemon=True).start()
+        return super().execute(invocation, io=io, deadline=deadline)
 
 
 class _CrashAfterActualCarrier(_RecordedExitCarrier):
@@ -224,12 +253,43 @@ def _drain_records_from_journal(path: Path, token: bytes) -> tuple[_LocalHelperD
     return tuple(result)
 
 
-def _tracking_bundle(scratch_path: str, journal_path: str, *, release_path: str | None = None):
+def _tracking_bundle(
+    scratch_path: str,
+    journal_path: str,
+    *,
+    release_path: str | None = None,
+    binding: FileEffectGateBinding | None = None,
+    data_unlinked_path: str | None = None,
+    unlink_release_path: str | None = None,
+):
     wait_for_release = ""
     if release_path is not None:
         wait_for_release = f"""
  while not os.path.exists({release_path!r}):
   time.sleep(0.01)
+"""
+    identity_patch = ""
+    if binding is not None:
+        guest = binding.guest
+        identity_patch = f"""
+from _agw_file_snapshot._vm_guest_identity_protocol import VMGuestIdentity
+guest._identity=lambda: VMGuestIdentity(
+ {guest.instance_marker!r}, {guest.boot_id!r}, {guest.init_start_ticks!r})
+"""
+    unlink_patch = ""
+    if data_unlinked_path is not None and unlink_release_path is not None:
+        unlink_patch = f"""
+from _agw_file_snapshot import _scratch_receipt as receipt
+_fixture_unlink=receipt.os.unlink
+def _fixture_interrupt_after_data_unlink(path, *args, **kwargs):
+ _fixture_unlink(path, *args, **kwargs)
+ if path == "data":
+  _fixture_journal({{"kind":"data_unlinked", "token":guest._fixture_token.hex()}})
+  open({data_unlinked_path!r}, "wb").close()
+  while not os.path.exists({unlink_release_path!r}):
+   time.sleep(0.01)
+  os._exit(98)
+receipt.os.unlink=_fixture_interrupt_after_data_unlink
 """
     return fixture_source(
         Path(scratch_path),
@@ -237,6 +297,7 @@ def _tracking_bundle(scratch_path: str, journal_path: str, *, release_path: str 
 import json
 import os
 import time
+{identity_patch}
 def _fixture_journal(record):
  descriptor=os.open({journal_path!r}, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
  try:
@@ -251,6 +312,7 @@ def _fixture_tracked_main(nonce):
 guest.main=_fixture_tracked_main
 _fixture_operate=guest._operate
 def _fixture_tracked_operate(request, expires_at):
+ guest._fixture_token=request.token
  _fixture_journal({{
   "kind":"actual",
   "nonce":guest._fixture_nonce,
@@ -262,6 +324,7 @@ def _fixture_tracked_operate(request, expires_at):
 {wait_for_release}
  return _fixture_operate(request, expires_at)
 guest._operate=_fixture_tracked_operate
+{unlink_patch}
 """,
     )
 
@@ -271,10 +334,13 @@ def _crash_controller_after_completed_snapshot(
     root_path: str,
     scratch_path: str,
     journal_path: str,
+    binding: FileEffectGateBinding | None = None,
 ) -> None:
     from agentworks.execution import _file_snapshot_exchange
 
-    _file_snapshot_exchange.FIXED_BUNDLE = _tracking_bundle(scratch_path, journal_path)  # type: ignore[attr-defined]
+    _file_snapshot_exchange.FIXED_BUNDLE = _tracking_bundle(  # type: ignore[attr-defined]
+        scratch_path, journal_path, binding=binding
+    )
     database = Database(Path(database_path))
     target = _target()
     plan = _plan()
@@ -289,6 +355,7 @@ def _crash_controller_after_completed_snapshot(
         plan=plan,
         deadline=Deadline.after(30),
         runtime_selection=runtime_selection(sys.executable),
+        effect_gate=binding,
     )
     os._exit(92)
 
@@ -331,10 +398,11 @@ def _crash_recovery_controller(
     journal_path: str,
     generation_id: str,
     after_cleanup: bool,
+    data_unlinked_path: str | None = None,
+    unlink_release_path: str | None = None,
 ) -> None:
     from agentworks.execution import _file_snapshot_exchange
 
-    _file_snapshot_exchange.FIXED_BUNDLE = _tracking_bundle(scratch_path, journal_path)  # type: ignore[attr-defined]
     database = Database(Path(database_path))
     predecessor = database.operations.inspect(OperationScope(OperationResourceKind.VM, "download-vm"))
     assert predecessor is not None
@@ -342,7 +410,19 @@ def _crash_recovery_controller(
     call = decode_file_call_obligation(persisted.payload)
     token = call.token
     assert token is not None
+    _file_snapshot_exchange.FIXED_BUNDLE = _tracking_bundle(  # type: ignore[attr-defined]
+        scratch_path,
+        journal_path,
+        binding=call.effect_gate,
+        data_unlinked_path=data_unlinked_path,
+        unlink_release_path=unlink_release_path,
+    )
     recovered = OperationOwner.recover(database.operations, predecessor.ownership, generation_id)
+    if call.effect_gate is not None:
+        persisted, proposed = _propose_gate_advance(recovered, persisted, b"b" * 16)
+        advanced = advance_file_effect_gate(proposed, lambda: _GUEST)
+        persisted = _confirm_gate_advance(recovered, persisted, advanced)
+        call = decode_file_call_obligation(persisted.payload)
     evidence = _local_drain_evidence(
         recovered.ownership,
         persisted,
@@ -357,10 +437,54 @@ def _crash_recovery_controller(
     if not after_cleanup:
         os._exit(96)
     recovery.cleanup(
-        _CrashAfterHelperCarrier(journal_path, token, "FileSnapshotCleanupRequest", 97),
+        _CrashAfterDataUnlinkCarrier(journal_path, token, data_unlinked_path)
+        if data_unlinked_path is not None
+        else _CrashAfterHelperCarrier(journal_path, token, "FileSnapshotCleanupRequest", 97),
         deadline=Deadline.after(30),
     )
     raise AssertionError("controller should exit after the cleanup helper")
+
+
+def _propose_gate_advance(
+    owner: OperationOwner,
+    persisted: LifecycleObligation,
+    generation: bytes,
+) -> tuple[LifecycleObligation, FileEffectGateBinding]:
+    call = decode_file_call_obligation(persisted.payload)
+    binding = call.effect_gate
+    assert binding is not None
+    proposed = replace(binding, proposed_generation=generation)
+    bound = owner.rebind_lifecycle_obligation(
+        persisted.obligation_id,
+        "file-call",
+        payload_version=persisted.payload_version,
+        payload=persisted.payload,
+    )
+    pending = bound.publish_payload(
+        expected_revision=persisted.payload_revision,
+        payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+        payload=encode_file_call_obligation(replace(call, effect_gate=proposed)),
+    )
+    return pending, proposed
+
+
+def _confirm_gate_advance(
+    owner: OperationOwner,
+    pending: LifecycleObligation,
+    advanced: FileEffectGateBinding,
+) -> LifecycleObligation:
+    call = decode_file_call_obligation(pending.payload)
+    bound = owner.rebind_lifecycle_obligation(
+        pending.obligation_id,
+        "file-call",
+        payload_version=pending.payload_version,
+        payload=pending.payload,
+    )
+    return bound.publish_payload(
+        expected_revision=pending.payload_revision,
+        payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+        payload=encode_file_call_obligation(replace(call, effect_gate=advanced)),
+    )
 
 
 def _target() -> ManagedTargetIdentity:
@@ -659,6 +783,153 @@ def test_spawned_recovery_crash_retains_persisted_debt_for_the_next_generation(
         )
     finally:
         database.close()
+
+
+def test_gated_recovery_of_recovery_retries_interrupted_exact_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "source-root"
+    root.mkdir()
+    (root / "source").write_bytes(b"gated recovery of recovery")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    scratch.chmod(0o1777)
+    binding = initialize_file_effect_gate(str(tmp_path / "effect.db"), _GUEST, os.geteuid(), "download-vm")
+    database_path = tmp_path / "state.db"
+    journal_path = tmp_path / "helpers.jsonl"
+    data_unlinked_path = tmp_path / "data-unlinked"
+    release_path = tmp_path / "release-cleanup-helper"
+    initial = multiprocessing.get_context("spawn").Process(
+        target=_crash_controller_after_completed_snapshot,
+        args=(str(database_path), str(root), str(scratch), str(journal_path), binding),
+    )
+    initial.start()
+    initial.join(30)
+    assert initial.exitcode == 91
+
+    interrupted = multiprocessing.get_context("spawn").Process(
+        target=_crash_recovery_controller,
+        args=(
+            str(database_path),
+            str(scratch),
+            str(journal_path),
+            "b" * 32,
+            True,
+            str(data_unlinked_path),
+            str(release_path),
+        ),
+    )
+    interrupted.start()
+    try:
+        interrupted.join(30)
+        assert interrupted.exitcode == 97
+        assert data_unlinked_path.exists()
+        scratch_children = tuple(scratch.iterdir())
+        assert len(scratch_children) == 1
+        scratch_directory = scratch_children[0]
+        assert not (scratch_directory / "data").exists()
+        assert (scratch_directory / "receipt").is_file()
+
+        database = Database(database_path)
+        try:
+            predecessor = database.operations.inspect(OperationScope(OperationResourceKind.VM, "download-vm"))
+            assert predecessor is not None
+            persisted = database.operations.list_lifecycle_obligations(predecessor.ownership)[0]
+            call_b = decode_file_call_obligation(persisted.payload)
+            debt = call_b.scratch_cleanup_debt
+            token = call_b.token
+            assert persisted.state is LifecycleObligationState.POSSIBLE_EFFECT
+            assert debt is not None and token is not None
+            assert call_b.effect_gate is not None and call_b.effect_gate.generation == b"b" * 16
+            recorded = _drain_records_from_journal(journal_path, token)
+            assert len(recorded) == 3 and sum(not record.exited for record in recorded) == 1
+
+            recovered_c = OperationOwner.recover(database.operations, predecessor.ownership, "c" * 32)
+            with pytest.raises(ValueError):
+                _local_drain_evidence(recovered_c.ownership, persisted, call_b, recorded)
+            pending, proposed = _propose_gate_advance(recovered_c, persisted, b"c" * 16)
+            with pytest.raises(FileEffectGateError):
+                advance_file_effect_gate(proposed, lambda: _GUEST, expires_at=time.monotonic() + 0.2)
+            still_pending = database.operations.list_lifecycle_obligations(recovered_c.ownership)[0]
+            assert still_pending == pending
+            assert decode_file_call_obligation(still_pending.payload).scratch_cleanup_debt == debt
+            assert (scratch_directory / "receipt").is_file()
+
+            release_path.touch()
+            until = time.monotonic() + 20
+            while time.monotonic() < until and not all(
+                record.exited for record in _drain_records_from_journal(journal_path, token)
+            ):
+                time.sleep(0.01)
+            assert all(record.exited for record in _drain_records_from_journal(journal_path, token))
+            assert (scratch_directory / "receipt").is_file()
+
+            advanced = advance_file_effect_gate(proposed, lambda: _GUEST)
+            current = _confirm_gate_advance(recovered_c, pending, advanced)
+            call_c = decode_file_call_obligation(current.payload)
+            assert call_c.scratch_cleanup_debt == debt
+            assert call_c.effect_gate == advanced
+            from agentworks.execution import _file_snapshot_exchange
+
+            monkeypatch.setattr(
+                _file_snapshot_exchange,
+                "FIXED_BUNDLE",
+                _tracking_bundle(str(scratch), str(journal_path), binding=advanced),
+            )
+            stale = snapshot_cleanup(
+                LocalCarrier(),
+                token=token,
+                cleanup_debt=debt,
+                plan=_plan(),
+                deadline=Deadline.after(30),
+                runtime_selection=runtime_selection(sys.executable),
+                effect_gate=call_b.effect_gate,
+            )
+            assert stale.observation is not None and stale.observation.failure is not None
+            assert stale.observation.failure.code is FileSnapshotFailureCode.EFFECT_GATE_REFUSED
+            assert (scratch_directory / "receipt").is_file()
+
+            evidence = _local_drain_evidence(
+                recovered_c.ownership,
+                current,
+                call_c,
+                _drain_records_from_journal(journal_path, token),
+            )
+            recovery = FileDownloadRecovery.open(recovered_c, _target(), current, evidence)
+            reconciled = recovery.reconcile(
+                _JournalCarrier(str(journal_path), token, "FileSnapshotReconcileRequest"),
+                deadline=Deadline.after(30),
+            )
+            assert reconciled.observation is not None
+            assert reconciled.observation.state is FileSnapshotObservationState.RECOVERED
+            assert reconciled.observation.cleanup_debt == debt
+            retained = database.operations.list_lifecycle_obligations(recovered_c.ownership)[0]
+            assert decode_file_call_obligation(retained.payload).scratch_cleanup_debt == debt
+            cleaned = recovery.cleanup(
+                _JournalCarrier(str(journal_path), token, "FileSnapshotCleanupRequest"),
+                deadline=Deadline.after(30),
+            )
+            assert cleaned.observation is not None
+            assert cleaned.observation.state is FileSnapshotObservationState.CLEANED
+            assert not tuple(scratch.iterdir())
+            final = database.operations.list_lifecycle_obligations(recovered_c.ownership)[0]
+            assert final.state is LifecycleObligationState.POSSIBLE_EFFECT
+            assert decode_file_call_obligation(final.payload).scratch_cleanup_debt == debt
+            journal = [json.loads(line) for line in journal_path.read_text(encoding="ascii").splitlines()]
+            assert sum(record["kind"] == "data_unlinked" for record in journal) == 1
+            assert (
+                sum(
+                    record["kind"] == "actual" and record["operation"] == "FileSnapshotCleanupRequest"
+                    for record in journal
+                )
+                == 2
+            )
+        finally:
+            database.close()
+    finally:
+        release_path.touch()
+        interrupted.join(10)
 
 
 def test_local_journal_refuses_a_helper_identity_still_owned_by_this_test() -> None:
