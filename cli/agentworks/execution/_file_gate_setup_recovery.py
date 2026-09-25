@@ -19,22 +19,14 @@ from agentworks.execution._file_obligation import (
     FileCallObligation,
     decode_file_call_obligation,
 )
+from agentworks.execution._managed_runs import ManagedTargetIdentity
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
 from agentworks.execution.carrier import Dispatch, ExitStatus
 
 if TYPE_CHECKING:
     from agentworks.db.operations import LifecycleObligation
-    from agentworks.execution._managed_runs import ManagedTargetIdentity
     from agentworks.execution.carrier import Carrier, Deadline
     from agentworks.operations import OperationOwner, RecoveredLifecycleObligation
-
-
-@dataclass(frozen=True, slots=True)
-class FileGateSetupRecoveryResult:
-    """Keep obligation settlement distinct from the helper observation."""
-
-    settled: bool
-    exchange: GateControlCandidateResult
 
 
 @dataclass(slots=True, repr=False)
@@ -71,6 +63,9 @@ class FileGateSetupRecovery:
             ) from None
         if (
             obligation.ownership != owner.ownership
+            or type(target) is not ManagedTargetIdentity
+            or target.kind.value != scope.resource_kind.value
+            or target.name != scope.resource_name
             or call.family is not FileCallFamily.DOWNLOAD
             or call.target != target
             or call.gate_setup is None
@@ -90,7 +85,7 @@ class FileGateSetupRecovery:
         )
         return cls(owner, obligation, call, bound)
 
-    def inspect(self, carrier: Carrier, *, deadline: Deadline) -> FileGateSetupRecoveryResult:
+    def inspect(self, carrier: Carrier, *, deadline: Deadline) -> GateControlCandidateResult:
         """Resolve this setup row only after a complete positive INSPECT."""
         setup = self._call.gate_setup
         assert setup is not None
@@ -113,30 +108,32 @@ class FileGateSetupRecovery:
             )
             if not terminated:
                 dispatch.handoff_unresolved()
-                return FileGateSetupRecoveryResult(False, result)
+                return result
             attempt.settle()
             dispatch.close()
-            observation = result.observation
-            settled = (
-                result.dispatch is Dispatch.SENT
-                and result.carrier_failure is None
-                and result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
-                and observation is not None
-                and observation.state is GateControlObservationState.RESOLVED
-                and observation.binding is not None
-            )
-            if settled:
-                self._owner.rebind_lifecycle_obligation(
-                    self._persisted.obligation_id,
-                    "file-call",
-                    payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
-                    payload=self._persisted.payload,
-                ).resolve()
-            return FileGateSetupRecoveryResult(settled, result)
         except BaseException:
             with suppress(BaseException):
                 if attempt is None:
                     dispatch._abort_unreturned_attempt()  # noqa: SLF001
                 else:
-                    dispatch.handoff_unresolved()
+                    try:
+                        dispatch.handoff_unresolved()
+                    except StateError:
+                        dispatch._abort_unreturned_attempt()  # noqa: SLF001
             raise
+        observation = result.observation
+        if (
+            result.dispatch is Dispatch.SENT
+            and result.carrier_failure is None
+            and result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+            and observation is not None
+            and observation.state is GateControlObservationState.RESOLVED
+            and observation.binding is not None
+        ):
+            self._owner.rebind_lifecycle_obligation(
+                self._persisted.obligation_id,
+                "file-call",
+                payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+                payload=self._persisted.payload,
+            ).resolve()
+        return result

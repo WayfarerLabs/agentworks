@@ -55,12 +55,13 @@ from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTargetKind
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 from agentworks.execution.carrier import (
+    CarrierIO,
     CarrierReport,
     Deadline,
     PreparedInvocation,
 )
 from agentworks.operations import LifecycleObligation as OwnerLifecycleObligation
-from agentworks.operations import OperationOwner, RecoveryDispatch
+from agentworks.operations import OperationOwner, RecoveryAttempt, RecoveryDispatch
 from tests.execution.files._file_download_support import BytesSink
 from tests.execution.files._file_snapshot_support import LocalCarrier, fixture_source, install_fixture_bundle
 from tests.execution.files._runtime_support import runtime_selection
@@ -119,7 +120,7 @@ class _JournalCarrier(LocalCarrier):
         self._token = token
         self._operation = operation
 
-    def execute(self, invocation: PreparedInvocation, *, io, deadline):
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
         self.validate(invocation, io=io)
         marker = invocation.argv.index("agentworks-runtime-prerequisite")
         _append_journal(
@@ -738,6 +739,43 @@ def test_recovery_reconciles_then_persists_exact_debt_before_cleanup(
         assert not tuple(scratch.iterdir())
         assert database.operations.list_lifecycle_obligations(recovered_again.ownership)[0].state is (
             LifecycleObligationState.POSSIBLE_EFFECT
+        )
+    finally:
+        database.close()
+
+
+def test_download_recovery_settle_interruption_releases_local_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "source-root"
+    root.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    scratch.chmod(0o1777)
+    install_fixture_bundle(monkeypatch, scratch)
+    database = Database(tmp_path / "state.db")
+    owner, call, _ = _possible_download(database, root, _target(), _plan())
+    try:
+        recovered = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+        row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
+        evidence = _local_drain_evidence(
+            recovered.ownership, row, call, (_LocalHelperDrainRecord("previous-helper", exited=True),)
+        )
+        recovery = FileDownloadRecovery.open(recovered, _target(), row, evidence)
+        original_settle = RecoveryAttempt.settle
+
+        def interrupted_settle(self: RecoveryAttempt) -> None:
+            original_settle(self)
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(RecoveryAttempt, "settle", interrupted_settle)
+        with pytest.raises(KeyboardInterrupt):
+            recovery.reconcile(LocalCarrier(), deadline=Deadline.after(30))
+        monkeypatch.setattr(RecoveryAttempt, "settle", original_settle)
+        assert recovery.reconcile(LocalCarrier(), deadline=Deadline.after(30)).observation is not None
+        assert (
+            database.operations.list_lifecycle_obligations(recovered.ownership)[0].state
+            is LifecycleObligationState.POSSIBLE_EFFECT
         )
     finally:
         database.close()

@@ -188,7 +188,10 @@ class FileDownloadRecovery:
                 if attempt is None:
                     dispatch._abort_unreturned_attempt()  # noqa: SLF001
                 else:
-                    dispatch.handoff_unresolved()
+                    try:
+                        dispatch.handoff_unresolved()
+                    except StateError:
+                        dispatch._abort_unreturned_attempt()  # noqa: SLF001
             raise
 
     def _persist_cleanup_debt(self, debt: ScratchCleanupDebt) -> None:
