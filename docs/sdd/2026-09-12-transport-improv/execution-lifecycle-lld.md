@@ -452,11 +452,11 @@ completion may settle that attempt while preparation still rejects an invalid ob
 refusal, carrier failure or identity mismatch. The helper neither acquires nor closes the outer
 owner and performs no activation, route selection, adoption or persistence. A second private seam
 accepts the selected VM, its bound platform, an expected locator observed before binding resolution,
-and one caller-owned native binding. It validates owner, marker, deadline and plugin-shaped values
-before borrowing. Under one serial borrow it compares the current locator to that expected value,
-probes the guest through the supplied binding and confirms the locator afterward. It never resolves
-another binding. The resolving caller must use the same deadline, validate and retain the selected
-route, and refuse a late resolver result. WSL2's private factory copies the selected route into one
+and one caller-owned native binding. It validates owner, marker and deadline before borrowing. Under
+one serial borrow it validates a fresh plugin locator and compares it to that expected value, probes
+the guest through the supplied binding and confirms the locator afterward. It never resolves another
+binding. The resolving caller must use the same deadline, validate and retain the selected route,
+and refuse a late resolver result. WSL2's private factory copies the selected route into one
 core-owned carrier used for both probe and file dispatch. A registration replacement during
 resolution is detected before the probe; one between the pre-probe observation and dispatch may
 still receive the read-only probe, but a changed post-probe locator suppresses file dispatch.
