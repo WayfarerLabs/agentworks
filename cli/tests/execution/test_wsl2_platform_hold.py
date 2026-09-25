@@ -14,7 +14,7 @@ import pytest
 
 from agentworks.db import Database
 from agentworks.db.operations import LifecycleObligationState, OperationOwnership, OperationResourceKind, OperationScope
-from agentworks.errors import ValidationError
+from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _wsl2_platform_hold as hold_module
 from agentworks.execution._wsl2_guest_observer import WSL2GuestObserver
 from agentworks.execution._wsl2_lifecycle import (
@@ -795,10 +795,12 @@ def test_lost_ledger_reply_keeps_state_without_replay(phase: str) -> None:
         subject.release(Deadline.after(1))
         assert owner.obligations[0].resolved
     elif phase == "publish":
-        with pytest.raises(ValidationError):
-            subject.release(Deadline.after(1))
-        assert not owner.obligations[0].resolved
-        assert "observe" not in owner.events
+        # This fake loses the reply before incrementing its revision. The
+        # later admission CAS can therefore publish identity and marker
+        # together before any query is dispatched.
+        subject.release(Deadline.after(1))
+        assert owner.obligations[0].resolved
+        assert owner.events.index("admit") < owner.events.index("observe")
         assert owner.events.count("dispatch") == 1
     else:
         subject.release(Deadline.after(1))
@@ -843,10 +845,62 @@ def test_post_ready_start_and_publication_failure_keep_original_control() -> Non
     assert subject.payload is not None and subject.payload.guest == GUEST
     assert subject.obligation is not None
     assert owner.events.count("dispatch") == 1
-    with pytest.raises(ValidationError):
-        subject.release(Deadline.after(1))
-    assert not owner.obligations[0].resolved
-    assert "observe" not in owner.events
+    subject.release(Deadline.after(1))
+    assert owner.obligations[0].resolved
+    assert owner.events.index("admit") < owner.events.index("observe")
+
+
+@pytest.mark.parametrize("committed_before_reply_lost", [False, True])
+def test_real_lost_ready_reply_requires_fresh_admission_cas(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, committed_before_reply_lost: bool
+) -> None:
+    with closing(Database(tmp_path / "hold.db")) as database:
+        repository = database.operations
+        owner = OperationOwner.acquire(repository, OperationScope(OperationResourceKind.VM, "vm-one"), "proof")
+        events: list[str] = []
+        subject = WSL2PlatformHold(
+            owner,
+            "vm-one",
+            "opaque-locator",
+            "c" * 32,
+            WSL2Connection("Ubuntu", "root", "wsl.exe"),
+            FakeNative(events),
+            FakeObserver(events),
+        )
+        original_publish = repository.publish_lifecycle_obligation_payload
+        injected = False
+
+        def lose_ready_reply(*args: Any, **kwargs: Any) -> Any:
+            nonlocal injected
+            payload = decode_hold_payload(kwargs["payload"])
+            if not injected and payload.guest is not None and not payload.query_may_have_been_admitted:
+                injected = True
+                if committed_before_reply_lost:
+                    original_publish(*args, **kwargs)
+                raise OSError("lost READY publication reply")
+            return original_publish(*args, **kwargs)
+
+        monkeypatch.setattr(repository, "publish_lifecycle_obligation_payload", lose_ready_reply)
+        with pytest.raises(OSError, match="lost READY publication reply"):
+            subject.start(Deadline.after(1))
+        assert injected and events.count("dispatch") == 1
+
+        if committed_before_reply_lost:
+            with pytest.raises(StateError, match="payload changed concurrently"):
+                subject.release(Deadline.after(1))
+            assert "observe" not in events
+        else:
+            subject.release(Deadline.after(1))
+            assert events.count("observe") == 1
+
+        rows = repository.list_lifecycle_obligations(owner.ownership)
+        assert len(rows) == 1
+        assert rows[0].state is (
+            LifecycleObligationState.POSSIBLE_EFFECT
+            if committed_before_reply_lost
+            else LifecycleObligationState.RESOLVED
+        )
+        assert decode_hold_payload(rows[0].payload).query_may_have_been_admitted is not committed_before_reply_lost
 
 
 def test_controller_observation_failure_prevents_registration_and_dispatch() -> None:

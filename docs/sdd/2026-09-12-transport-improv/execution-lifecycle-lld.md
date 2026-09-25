@@ -648,9 +648,15 @@ in-progress startup. A caller's finite deadline also bounds entry to either tran
 leaves the obligation unresolved. It accepts only bare `wsl` or `wsl.exe` case-insensitively,
 resolved by the native owner through the trusted Windows system directory, rather than persisting an
 executable path. Registration, mark and publication uncertainty retain the caller-owned hold without
-replay. Ordinary release may resolve an ambiguous post-READY publication after local settlement and
-independent exact absence; it never resolves on `EXITING`, client exit, Job settlement or missing
-guest identity alone. Recovery discovery and production controller-absence composition remain
+replay. Before an ordinary guest query, the hold durably CAS-publishes version 3's one-way
+`query_may_have_been_admitted` marker with the exact guest identity. A failed READY publication
+whose row did not advance can be followed by this combined publication; a committed publication with
+a lost reply leaves a stale revision, so admission refuses without querying or resolving. Ordinary
+release resolves only after local settlement and independent exact absence; it never resolves on
+`EXITING`, client exit, Job settlement or missing guest identity alone. An interrupted query may
+retry local settlement but cannot dispatch another query in that controller or claim absence. A
+complete, validated `PRESENT` result permits a later query. The durable marker is not a service-side
+dispatch-drain proof. Recovery discovery and production controller-absence composition remain
 separate unfinished obligations. A private Windows observer now reports exact controller presence,
 confirmed absence or unknown under a finite deadline; it does not establish dispatch drain or guest
 absence.
@@ -780,16 +786,16 @@ Job handle proves the guest anchor is absent. Only the exact guest boot/init/PID
 may make that claim.
 
 The portable implementation and tests establish this orchestration shape and execute the helper
-protocol on local Linux procfs. The private hold payload now uses version 2 for the distribution
-epoch; version 1 records are not accepted because no production hold was released with that shape.
-Hosted synthetic Windows tests separately exercise creation-time Job membership, restricted handle
-inheritance, bounded pipe observation, retryable exact settlement and controller hard-death cleanup.
-The earlier live Tier 2 Windows/WSL2 proof drove the same owner against real `wsl.exe` and
-established acknowledged guest-anchor absence after ordinary release and controller hard death while
-unrelated work survived. It also confirmed literal argument, binary stream, finite input, EOF,
-bounded observation and conservative nonzero-status behavior. The epoch-bound READY/query protocol
-requires a new live proof; neither round wires the production platform hold, recovery factory,
-target identity or RunContext.
+protocol on local Linux procfs. The private hold payload now uses version 3 for the distribution
+epoch and one-way query-admission marker; version 1 and 2 records are not accepted because no
+production hold was released with either shape. Hosted synthetic Windows tests separately exercise
+creation-time Job membership, restricted handle inheritance, bounded pipe observation, retryable
+exact settlement and controller hard-death cleanup. The earlier live Tier 2 Windows/WSL2 proof drove
+the same owner against real `wsl.exe` and established acknowledged guest-anchor absence after
+ordinary release and controller hard death while unrelated work survived. It also confirmed literal
+argument, binary stream, finite input, EOF, bounded observation and conservative nonzero-status
+behavior. The epoch-bound READY/query protocol requires a new live proof; neither round wires the
+production platform hold, recovery factory, target identity or RunContext.
 
 ## Delivery sequence and proof criteria
 

@@ -286,12 +286,21 @@ acknowledged guest identity. It does not close the outer owner or keep a borrow 
 lifetime. A production observer, crash recovery factory, activation, platform wiring, target
 identity and RunContext integration remain open gates.
 
+The private payload is version 3. Before an ordinary guest query, the hold durably publishes a
+one-way `query_may_have_been_admitted` marker alongside the exact guest identity. A failed READY
+publication can be reconciled by that combined compare-and-swap only if the earlier publication did
+not advance the row; a committed publication with a lost reply refuses on the stale revision without
+dispatching a query. The marker does not itself prove that a query actually ran or drained.
+
 `_wsl2_guest_query.py` is a private no-staging source and strict response reducer for that exact
 epoch-bound identity. `_wsl2_guest_observer.py` owns an ordinary-path query through a separate fresh
 native WSL client. It retains that client before dispatch, retries local settlement before another
-query, and accepts absence only after a complete exact response, zero client exit, live deadline and
-settled local handles. This private observer does not provide controller-death recovery or
-production wiring; recovery drain and native Windows/WSL2 acceptance remain open.
+query only when the prior query returned a complete, validated result. An interrupted or otherwise
+unaccounted query may retry local settlement but cannot dispatch again or confirm absence, even
+after its Windows client settles. A clean absence requires a complete exact response, zero client
+exit, live deadline and settled local handles. This private observer does not provide
+controller-death recovery or production wiring; recovery drain and native Windows/WSL2 acceptance
+remain open.
 
 ## Observation and guest lifetime
 

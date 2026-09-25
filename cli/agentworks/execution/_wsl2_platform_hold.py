@@ -57,6 +57,8 @@ class WSL2HoldPayload:
             raise ValidationError("WSL2 hold guest identity is invalid")
         if type(self.query_may_have_been_admitted) is not bool:
             raise ValidationError("WSL2 hold query admission marker is invalid")
+        if self.query_may_have_been_admitted and self.guest is None:
+            raise ValidationError("WSL2 hold query admission requires a guest identity")
 
 
 def _hex(value: object, length: int) -> bool:
@@ -179,7 +181,6 @@ class WSL2PlatformHold:
         self._payload: WSL2HoldPayload | None = None
         self._attempted = False
         self._registration_uncertain = False
-        self._ready_publication_uncertain = False
 
     @property
     def payload(self) -> WSL2HoldPayload | None:
@@ -286,19 +287,17 @@ class WSL2PlatformHold:
         assert payload is not None and obligation is not None
         published = replace(payload, guest=identity)
         self._payload = published
-        self._ready_publication_uncertain = True
         obligation.publish_payload(
             expected_revision=obligation.payload_revision,
             payload_version=PAYLOAD_VERSION,
             payload=encode_hold_payload(published),
         )
-        self._ready_publication_uncertain = False
 
     def _admit_guest_query(self) -> None:
         """Persist query eligibility before any observer can start a guest query."""
         payload = self._payload
         obligation = self._obligation
-        if payload is None or obligation is None or self._ready_publication_uncertain:
+        if payload is None or obligation is None or payload.guest is None:
             raise ValidationError("WSL2 hold cannot admit a guest query without a durable obligation")
         if payload.query_may_have_been_admitted:
             return

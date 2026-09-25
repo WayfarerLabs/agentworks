@@ -1457,21 +1457,27 @@ connection and trust only. Before broader lifecycle implementation, complete the
       launch: the claim must stay unresolved. Establish which acknowledged launches can be recovered
       safely, and retain pre-`READY` ambiguity unless a stronger fence is proved. Distribution
       termination alone is not a drain proof or permission to disrupt unrelated work.
+- [ ] Implement recovery handling for version 3's one-way guest-query admission marker. A later
+      controller must retain any marked obligation unless every earlier admitted query can be
+      accounted for or an independent service-side dispatch drain is proved; a fresh absence query
+      alone cannot discharge it. Preserve the ordinary controller's ability to resolve on one
+      complete exact absence result without claiming that the marker proves drain.
 - [ ] Implement production WSL2 hold adoption and recovery: exact preparation discovery after a
       crash, controller-absence and dispatch-drain proof, a production exact epoch-bound guest
       observer, recovery factory, activation and platform wiring, RunContext integration, and live
       proof.
 
-The private WSL2 ownership candidate is implemented through `a1bb1034`. The caller owns an inert
-lifecycle object before `start`; one native owner retains the WSL client, process/pipe handles and
-Job Object handle across startup and cleanup interruption. Its snapshot keeps client exit,
+The private WSL2 ownership candidate is implemented in the isolated proof branch. The caller owns an
+inert lifecycle object before `start`; one native owner retains the WSL client, process/pipe handles
+and Job Object handle across startup and cleanup interruption. Its snapshot keeps client exit,
 client-handle closure, Job assignment and Job-handle closure independent, invalidates pre-dispatch
-certainty before native effects, and permits bounded settlement and guest-observer retries without
-replay. The native adapter selects creation-time Job membership and explicit handle inheritance with
-no weaker fallback. Portable tests execute the fixed helper against Linux procfs and inject native
-API failures; native-Windows cases are present for Job membership, handle confinement, descendant
-cleanup and abrupt controller death without invoking WSL. Hosted Windows 2025 with Python 3.13.15
-passes all 496 selected cases with 39 skips at `dca96813` in
+certainty before native effects. After an unaccounted guest query, ordinary release may retry local
+settlement but refuses a second query or absence claim. A complete exact `PRESENT` response may be
+queried again without replaying the anchor. The native adapter selects creation-time Job membership
+and explicit handle inheritance with no weaker fallback. Portable tests execute the fixed helper
+against Linux procfs and inject native API failures; native-Windows cases are present for Job
+membership, handle confinement, descendant cleanup and abrupt controller death without invoking WSL.
+Hosted Windows 2025 with Python 3.13.15 passes all 496 selected cases with 39 skips at `dca96813` in
 [run 35710387854](https://github.com/WayfarerLabs/agentworks/actions/runs/35710387854). That
 establishes the synthetic host-client cases, including abrupt controller death while unrelated work
 survives.
