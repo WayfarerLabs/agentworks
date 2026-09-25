@@ -1383,6 +1383,15 @@ connection and trust only. Before broader lifecycle implementation, complete the
       pre-arming refusal releases the unused borrow and resolves any installed row. The resource
       owner and managed-run row own the continuing job. Production binding, recovery, current
       marker/boot rereads and later job actions remain separate gates.
+- [x] Add a private adapter from finite caller values to a managed request. It preserves literal
+      argv, separate script source and stdin, the exact supplied shell selection, bounded
+      environment and output policy, and suppresses output retention for sensitive input. It
+      validates through the existing request codec before returning, with a pre-encoding source
+      bound. This is not a start API or production caller: the first start caller must obtain the
+      target account's actual shell for `USER_DEFAULT`, preflight the carrier before reserving the
+      exact run ID, then bind the reservation to owned launch custody. The adapter alone does not
+      prove that reservation is residue-free on refusal or establish SSH/QGA and live lifecycle
+      behavior.
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared
       create bootstrap. Migration 41 leaves legacy rows NULL; ordinary existing-VM operations never
