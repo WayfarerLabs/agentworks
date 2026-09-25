@@ -1990,8 +1990,18 @@ visibility, helper quiescence and recovery integration remain open.
 
 The private numeric-bound correction at `69cc281d4` limits gate UIDs to Linux's 32-bit range and
 device/inode identities to unsigned 64-bit values. This makes their encoded growth finite for the
-future 8,192-byte admission reserve; a short canonical production gate path and the exact reserve
-calculation remain open. The gate, recovery and fixed-delivery focused selection passes 109 tests.
+future 8,192-byte admission reserve. At that checkpoint, a short canonical gate path and exact
+reserve calculation remained open. The gate, recovery and fixed-delivery focused selection passed
+109 tests.
+
+The private setup codec at `2447a1220` now persists only the exact bounded path and raw guest triple
+in the version-1 `file-call` row. A setup descriptor and exact binding cannot coexist. Its admission
+check encodes a maximal bound binding with proposal and reserves the existing DOWNLOAD recovery
+growth before any possible setup dispatch. Old version-1 rows remain byte-for-byte valid; setup-only
+rows are refused by ordinary snapshot recovery. The combined obligation, gate, recovery and
+fixed-delivery selection passes 148 tests. This does not create or dispatch the production row,
+prove the raw guest belongs to the managed target, provision `/run`, or provide native route and
+helper-lifetime evidence.
 
 - [ ] Use the owned snapshot/chunk download for general in-memory reads, preserving caller byte
       bounds independently of QGA's single-response capacity. Keep the no-staging readiness read
