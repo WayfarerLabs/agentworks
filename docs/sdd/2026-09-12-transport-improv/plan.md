@@ -2153,6 +2153,17 @@ intermediate public API.
       package initialization imports Lima's legacy dependencies, while plugin initialization imports
       providers that still load legacy transports. Keep this initializer work with the complete
       platform/factory composition gate; concrete hook independence does not complete it.
+
+The private WSL2 import checkpoint at `acc1fdec` moves concrete built-ins into one explicit registry
+and loads the legacy SSH error type only when command checks run. A fresh subprocess blocks the six
+retirement roots before importing, constructs an ordinary WSL2 platform and resolves its recorded
+distribution/user native binding. Both plugin-first and registry-first processes share the same
+descriptor and registration dictionary; historical migration mapping stays fixed. The affected local
+suite passed 1,041 tests, and private project, complexity and generic correctness reviews found no
+material findings. This proves only the WSL2 construction/binding path on the local host;
+plugin-package independence, complete platform composition and native Windows acceptance keep the
+checkbox open.
+
 - [ ] Validate complete provisioning, native recovery without Tailscale, plugin operations, files,
       backup, host provisioning/rollback and interactive attachment through the new surface. Cover
       required operations, optional refusal, sensitivity and supported workstation/platform

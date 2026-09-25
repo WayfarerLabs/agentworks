@@ -13,9 +13,9 @@ self-registers into ``KIND_REGISTRY`` at load.
 implementations live in ``agentworks.capabilities.vm_platform``; the
 companion publisher there adds one ``VMPlatformEntry`` row per installed
 platform, built-in with source
-``"agentworks.capabilities.vm_platform"``. The row (``VMPlatformEntry``)
-stays in the package ``__init__`` beside the registry it mirrors, which
-is where the ``vm-site`` era put it.
+``"agentworks.capabilities.vm_platform"``. The ``VMPlatformEntry`` row
+stays in the package ``__init__``; the concrete registry lives in
+``registry.py``.
 """
 
 from __future__ import annotations
