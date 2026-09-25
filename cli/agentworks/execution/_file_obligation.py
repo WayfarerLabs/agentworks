@@ -8,7 +8,7 @@ objects, carrier details, diagnostics, commands, or replay instructions.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import cast
 
@@ -20,6 +20,7 @@ from agentworks.execution._file_effect_gate import (
     decode_file_effect_gate,
     encode_file_effect_gate,
 )
+from agentworks.execution._file_gate_setup import FileEffectGateSetup, file_effect_gate_path
 from agentworks.execution._file_paths import normalized_relative_path, normalized_root
 from agentworks.execution._file_publication_wire import (
     BoundPublicationCleanupDebt,
@@ -40,6 +41,7 @@ from agentworks.execution._scratch_wire import (
     encode_cleanup_debt,
     encode_scratch_reference,
 )
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 
 FILE_CALL_OBLIGATION_PAYLOAD_VERSION = 1
 _TOKEN_BYTES = 16
@@ -47,11 +49,13 @@ _MAX_JSON_ATTEMPTS = 8
 _MAX_PATH_BYTES = 4_096
 _LOWER_HEX = frozenset("0123456789abcdef")
 _BASE_FIELDS = frozenset({"family", "identity", "path", "root", "runtime", "target", "uncertainty", "version"})
-_OPTIONAL_FIELDS = frozenset({"attempt", "effect_gate", "publication_cleanup_debt", "scratch", "token"})
+_OPTIONAL_FIELDS = frozenset({"attempt", "effect_gate", "gate_setup", "publication_cleanup_debt", "scratch", "token"})
 _TARGET_FIELDS = frozenset({"boot_id", "incarnation", "kind", "name"})
 _IDENTITY_FIELDS = frozenset({"egid", "euid", "groups", "mode"})
 _RUNTIME_FIELDS = frozenset({"explicit_path", "target_os"})
 _SCRATCH_FIELDS = frozenset({"cleanup_debt", "reference"})
+_GATE_SETUP_FIELDS = frozenset({"guest", "path"})
+_GUEST_FIELDS = frozenset({"boot_id", "init_start_ticks", "instance_marker"})
 
 
 class FileCallFamily(StrEnum):
@@ -115,6 +119,7 @@ class FileCallObligation:
     scratch_cleanup_debt: ScratchCleanupDebt | None = None
     publication_cleanup_debt: BoundPublicationCleanupDebt | None = None
     effect_gate: FileEffectGateBinding | None = None
+    gate_setup: FileEffectGateSetup | None = None
     uncertainty: frozenset[FileCallUncertainty] = frozenset()
 
     def __post_init__(self) -> None:
@@ -126,6 +131,14 @@ def encode_file_call_obligation(obligation: FileCallObligation) -> bytes:
     if type(obligation) is not FileCallObligation:
         raise FileCallObligationCodecError
     _validate_obligation(obligation)
+    encoded = _encode_unbounded(obligation)
+    if len(encoded) > MAX_LIFECYCLE_PAYLOAD_BYTES:
+        raise FileCallObligationCodecError
+    return encoded
+
+
+def _encode_unbounded(obligation: FileCallObligation) -> bytes:
+    """Render a validated row before applying the database envelope limit."""
     value = _encode_obligation(obligation)
     try:
         encoded = json.dumps(value, allow_nan=False, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode(
@@ -133,8 +146,6 @@ def encode_file_call_obligation(obligation: FileCallObligation) -> bytes:
         )
     except (TypeError, ValueError, UnicodeEncodeError):
         raise FileCallObligationCodecError from None
-    if len(encoded) > MAX_LIFECYCLE_PAYLOAD_BYTES:
-        raise FileCallObligationCodecError
     return encoded
 
 
@@ -142,7 +153,22 @@ def encode_file_call_admission(obligation: FileCallObligation) -> bytes:
     """Encode an initial payload while reserving its possible recovery facts."""
     encoded = encode_file_call_obligation(obligation)
     reserve = _FILE_CALL_RECOVERY_HEADROOM_BYTES[obligation.family]
-    if obligation.effect_gate is not None:
+    if obligation.gate_setup is not None:
+        setup = obligation.gate_setup
+        bound = FileEffectGateBinding(
+            setup.path,
+            b"\0" * _TOKEN_BYTES,
+            b"\1" * _TOKEN_BYTES,
+            setup.guest,
+            obligation.identity_plan.expected.euid,
+            obligation.target.name,
+            (1 << 64) - 1,
+            (1 << 64) - 1,
+            b"\2" * _TOKEN_BYTES,
+        )
+        full = replace(obligation, gate_setup=None, effect_gate=bound)
+        reserve += len(_encode_unbounded(full)) - len(encoded)
+    elif obligation.effect_gate is not None:
         # A takeover first persists its proposed token in this same row.
         reserve += len(',"proposed_generation":"' + "0" * 32 + '"')
     if len(encoded) + reserve > MAX_LIFECYCLE_PAYLOAD_BYTES:
@@ -192,6 +218,25 @@ def _validate_obligation(obligation: FileCallObligation) -> None:
             decode_file_effect_gate(encode_file_effect_gate(obligation.effect_gate))
         except FileEffectGateError:
             raise FileCallObligationCodecError from None
+    if obligation.gate_setup is not None:
+        setup = obligation.gate_setup
+        if (
+            obligation.family is not FileCallFamily.DOWNLOAD
+            or obligation.target.kind is not ManagedTargetKind.VM
+            or obligation.runtime_selection.target_os is not RuntimeTargetOS.LINUX
+            or obligation.effect_gate is not None
+            or type(setup) is not FileEffectGateSetup
+            or type(setup.guest) is not VMGuestIdentity
+            or type(setup.path) is not str
+            or setup.path
+            != file_effect_gate_path(obligation.target, obligation.identity_plan.expected.euid, setup.guest)
+            or obligation.scratch_reference is not None
+            or obligation.scratch_cleanup_debt is not None
+            or obligation.publication_cleanup_debt is not None
+            or FileCallUncertainty.SCRATCH_OWNERSHIP in obligation.uncertainty
+            or FileCallUncertainty.PUBLICATION_OWNERSHIP in obligation.uncertainty
+        ):
+            raise FileCallObligationCodecError
 
     scratch_family = obligation.family in {
         FileCallFamily.DOWNLOAD,
@@ -268,6 +313,16 @@ def _encode_obligation(obligation: FileCallObligation) -> dict[str, object]:
         value["publication_cleanup_debt"] = encode_publication_cleanup_debt(obligation.publication_cleanup_debt)
     if obligation.effect_gate is not None:
         value["effect_gate"] = encode_file_effect_gate(obligation.effect_gate)
+    if obligation.gate_setup is not None:
+        guest = obligation.gate_setup.guest
+        value["gate_setup"] = {
+            "guest": {
+                "boot_id": guest.boot_id,
+                "init_start_ticks": guest.init_start_ticks,
+                "instance_marker": guest.instance_marker,
+            },
+            "path": obligation.gate_setup.path,
+        }
     return value
 
 
@@ -296,6 +351,23 @@ def _decode_obligation(value: object) -> FileCallObligation:
             effect_gate = decode_file_effect_gate(value["effect_gate"])
         except FileEffectGateError:
             raise FileCallObligationCodecError from None
+    gate_setup = None
+    if "gate_setup" in value:
+        setup_value = value["gate_setup"]
+        if type(setup_value) is not dict or set(setup_value) != _GATE_SETUP_FIELDS:
+            raise FileCallObligationCodecError
+        guest_value = setup_value["guest"]
+        if type(guest_value) is not dict or set(guest_value) != _GUEST_FIELDS:
+            raise FileCallObligationCodecError
+        try:
+            gate_setup = FileEffectGateSetup(
+                setup_value["path"],
+                VMGuestIdentity(
+                    guest_value["instance_marker"], guest_value["boot_id"], guest_value["init_start_ticks"]
+                ),
+            )
+        except (TypeError, ValueError):
+            raise FileCallObligationCodecError from None
     try:
         return FileCallObligation(
             family=family,
@@ -310,6 +382,7 @@ def _decode_obligation(value: object) -> FileCallObligation:
             scratch_cleanup_debt=scratch_cleanup_debt,
             publication_cleanup_debt=publication_cleanup_debt,
             effect_gate=effect_gate,
+            gate_setup=gate_setup,
             uncertainty=uncertainty,
         )
     except FileCallObligationCodecError:

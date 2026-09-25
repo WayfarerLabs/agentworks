@@ -10,6 +10,7 @@ import pytest
 
 from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES
 from agentworks.execution._file_effect_gate import FileEffectGateBinding, FileEffectGateError
+from agentworks.execution._file_gate_setup import FileEffectGateSetup
 from agentworks.execution._file_obligation import (
     _FILE_CALL_RECOVERY_HEADROOM_BYTES,
     FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
@@ -106,12 +107,12 @@ def _cleanup_debt(token: bytes = _TOKEN, plan: IdentityPlan = _PLAN) -> ScratchC
     )
 
 
-def _maximum_reference(family: FileCallFamily) -> ScratchReference:
+def _maximum_reference(family: FileCallFamily, plan: IdentityPlan = _PLAN) -> ScratchReference:
     identity = ScratchIdentity(_MAXIMUM, _MAXIMUM)
     return ScratchReference(
         ScratchOwnership(
             _TOKEN,
-            _context(family),
+            _context(family, plan),
             identity,
             identity,
             identity,
@@ -122,7 +123,7 @@ def _maximum_reference(family: FileCallFamily) -> ScratchReference:
     )
 
 
-def _maximum_cleanup_debt() -> ScratchCleanupDebt:
+def _maximum_cleanup_debt(plan: IdentityPlan = _PLAN) -> ScratchCleanupDebt:
     identity = ScratchIdentity(_MAXIMUM, _MAXIMUM)
     return ScratchCleanupDebt(
         scratch_name(_TOKEN),
@@ -131,7 +132,7 @@ def _maximum_cleanup_debt() -> ScratchCleanupDebt:
         identity,
         identity,
         (_RECEIPT_BUILD_MODE, _RECEIPT_MODE),
-        _PLAN.expected.euid,
+        plan.expected.euid,
         _MAXIMUM,
     )
 
@@ -272,8 +273,10 @@ def test_envelope_bound_accepts_8192_bytes_within_each_path_bound_and_refuses_81
         encode_file_call_obligation(replace(accepted, relative_path=accepted.relative_path + "a"))
 
 
-def _maximum_recovery_obligation(family: FileCallFamily) -> FileCallObligation:
-    initial = _obligation(family)
+def _maximum_recovery_obligation(
+    family: FileCallFamily, *, initial: FileCallObligation | None = None
+) -> FileCallObligation:
+    initial = _obligation(family) if initial is None else initial
     uncertainty = {
         FileCallUncertainty.PENDING_REMOTE_EFFECT,
         FileCallUncertainty.COORDINATION_UNCERTAINTY,
@@ -281,12 +284,12 @@ def _maximum_recovery_obligation(family: FileCallFamily) -> FileCallObligation:
     if family not in {FileCallFamily.DOWNLOAD, FileCallFamily.UPLOAD, FileCallFamily.JSON_UPDATE}:
         return replace(initial, uncertainty=frozenset(uncertainty))
 
-    reference = _maximum_reference(family)
+    reference = _maximum_reference(family, initial.identity_plan)
     uncertainty.add(FileCallUncertainty.SCRATCH_OWNERSHIP)
     changes: dict[str, object] = {
         "token": _TOKEN,
         "scratch_reference": reference,
-        "scratch_cleanup_debt": _maximum_cleanup_debt(),
+        "scratch_cleanup_debt": _maximum_cleanup_debt(initial.identity_plan),
         "uncertainty": frozenset(uncertainty),
     }
     if family is FileCallFamily.JSON_UPDATE:
@@ -342,6 +345,145 @@ def test_admission_ceiling_leaves_room_for_the_largest_retained_payload(family: 
     if family is FileCallFamily.JSON_UPDATE:
         child = replace(admitted, token=_TOKEN, attempt=8)
         assert len(encode_file_call_obligation(child)) == len(encode_file_call_obligation(admitted)) + 55
+
+
+def _setup_download() -> FileCallObligation:
+    maximum_uid = (1 << 32) - 1
+    plan = IdentityPlan(IdentityExpectation(maximum_uid, maximum_uid, (maximum_uid,)), IdentityMode.DIRECT)
+    guest = VMGuestIdentity("f" * 32, "123e4567-e89b-12d3-a456-426614174000", _MAXIMUM)
+    initial = replace(
+        _obligation(FileCallFamily.DOWNLOAD),
+        root="/caf\u00e9",
+        relative_path="na\u00efve/file",
+        identity_plan=plan,
+    )
+    return replace(initial, gate_setup=FileEffectGateSetup.for_target(initial.target, maximum_uid, guest))
+
+
+def _maximum_bound_download(setup: FileCallObligation) -> FileCallObligation:
+    descriptor = setup.gate_setup
+    assert descriptor is not None
+    binding = FileEffectGateBinding(
+        descriptor.path,
+        b"\0" * 16,
+        b"\1" * 16,
+        descriptor.guest,
+        setup.identity_plan.expected.euid,
+        setup.target.name,
+        _MAXIMUM,
+        _MAXIMUM,
+        b"\2" * 16,
+    )
+    return _maximum_recovery_obligation(
+        FileCallFamily.DOWNLOAD,
+        initial=replace(setup, gate_setup=None, effect_gate=binding),
+    )
+
+
+def _setup_with_encoded_length(length: int) -> FileCallObligation:
+    baseline = _setup_download()
+    remaining = length - len(encode_file_call_obligation(baseline))
+    relative_padding = min(remaining, 4_096 - len(baseline.relative_path.encode("utf-8")))
+    root_padding = remaining - relative_padding
+    assert 0 <= root_padding <= 4_096 - len(baseline.root.encode("utf-8"))
+    return replace(
+        baseline,
+        root=baseline.root + "a" * root_padding,
+        relative_path=baseline.relative_path + "a" * relative_padding,
+    )
+
+
+def test_gate_setup_round_trip_and_legacy_download_remains_ungated() -> None:
+    legacy = _obligation(FileCallFamily.DOWNLOAD)
+    old_payload = encode_file_call_obligation(legacy)
+    expected_legacy = (
+        b'{"family":"download","identity":{"egid":1002,"euid":1001,"groups":[1002,1003],'
+        b'"mode":"direct"},"path":"settings/naive-cafe.json","root":"/srv/agentworks",'
+        b'"runtime":{"explicit_path":"/usr/bin/python3","target_os":"linux"},'
+        b'"target":{"boot_id":"123e4567-e89b-12d3-a456-426614174000",'
+        b'"incarnation":"v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",'
+        b'"kind":"vm","name":"fixture-vm"},"token":"000102030405060708090a0b0c0d0e0f",'
+        b'"uncertainty":[],"version":1}'
+    )
+    setup = _setup_download()
+    encoded = encode_file_call_obligation(setup)
+
+    assert FILE_CALL_OBLIGATION_PAYLOAD_VERSION == 1
+    assert old_payload == expected_legacy
+    assert b'"gate_setup"' not in old_payload
+    assert b'"effect_gate"' not in old_payload
+    assert decode_file_call_obligation(old_payload) == legacy
+    assert encode_file_call_obligation(decode_file_call_obligation(old_payload)) == old_payload
+    assert decode_file_call_obligation(encoded) == setup
+    assert b'"gate_setup"' in encoded
+    assert b"\\u00e9" in encoded and b"\\u00ef" in encoded
+    assert setup.gate_setup is not None
+    assert (
+        setup.gate_setup.path
+        == FileEffectGateSetup.for_target(
+            replace(setup.target, incarnation="v1:" + "b" * 64),
+            setup.identity_plan.expected.euid,
+            setup.gate_setup.guest,
+        ).path
+    )
+
+
+def test_gate_setup_decoder_refuses_unrecognized_or_replaced_identity() -> None:
+    setup = _setup_download()
+    value = json.loads(encode_file_call_obligation(setup))
+    setup_value = value["gate_setup"]
+    for changed_setup in (
+        {**setup_value, "future": True},
+        {**setup_value, "guest": {**setup_value["guest"], "init_start_ticks": True}},
+        {**setup_value, "path": setup_value["path"] + "-other"},
+    ):
+        changed = {**value, "gate_setup": changed_setup}
+        payload = json.dumps(changed, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("ascii")
+        with pytest.raises(FileCallObligationCodecError):
+            decode_file_call_obligation(payload)
+
+
+def test_gate_setup_is_closed_to_wrong_family_identity_path_and_bound_state() -> None:
+    setup = _setup_download()
+    descriptor = setup.gate_setup
+    assert descriptor is not None
+    with pytest.raises(FileCallObligationCodecError):
+        replace(setup, family=FileCallFamily.UPLOAD)
+    with pytest.raises(FileCallObligationCodecError):
+        replace(setup, target=replace(setup.target, name="other-vm"))
+    other_uid = setup.identity_plan.expected.euid - 1
+    with pytest.raises(FileCallObligationCodecError):
+        replace(
+            setup,
+            identity_plan=IdentityPlan(IdentityExpectation(other_uid, other_uid, (other_uid,)), IdentityMode.DIRECT),
+        )
+    with pytest.raises(FileCallObligationCodecError):
+        replace(setup, gate_setup=replace(descriptor, guest=replace(descriptor.guest, init_start_ticks=1)))
+    with pytest.raises(FileCallObligationCodecError):
+        replace(setup, gate_setup=replace(descriptor, path=descriptor.path + "-other"))
+    with pytest.raises(FileCallObligationCodecError):
+        replace(setup, effect_gate=_maximum_bound_download(setup).effect_gate)
+    with pytest.raises(FileCallObligationCodecError):
+        replace(setup, scratch_cleanup_debt=_maximum_cleanup_debt(setup.identity_plan))
+
+
+def test_gate_setup_admission_reserves_maximum_bound_proposal_and_download_growth() -> None:
+    baseline = _setup_download()
+    maximum = _maximum_bound_download(baseline)
+    growth = len(encode_file_call_obligation(maximum)) - len(encode_file_call_obligation(baseline))
+    admitted = _setup_with_encoded_length(MAX_LIFECYCLE_PAYLOAD_BYTES - growth)
+    refused = _setup_with_encoded_length(MAX_LIFECYCLE_PAYLOAD_BYTES - growth + 1)
+
+    assert maximum.effect_gate is not None
+    assert maximum.effect_gate.device == maximum.effect_gate.inode == _MAXIMUM
+    assert maximum.effect_gate.euid == (1 << 32) - 1
+    assert maximum.effect_gate.guest.init_start_ticks == _MAXIMUM
+    assert len(encode_file_call_admission(admitted)) == MAX_LIFECYCLE_PAYLOAD_BYTES - growth
+    assert len(encode_file_call_obligation(_maximum_bound_download(admitted))) == MAX_LIFECYCLE_PAYLOAD_BYTES
+    with pytest.raises(FileCallObligationCodecError):
+        encode_file_call_admission(refused)
+    with pytest.raises(FileCallObligationCodecError):
+        encode_file_call_obligation(_maximum_bound_download(refused))
 
 
 def test_decoder_normalizes_python_integer_digit_refusal() -> None:

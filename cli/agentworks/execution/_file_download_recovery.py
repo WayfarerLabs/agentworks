@@ -103,6 +103,12 @@ class FileDownloadRecovery:
                 entity_name=owner.ownership.scope.resource_name,
             ) from None
         evidence._require_exact(owner.ownership, obligation, call, target)
+        if call.gate_setup is not None:
+            raise StateError(
+                "download recovery gate setup must be reconciled before snapshot recovery",
+                entity_kind=owner.ownership.scope.resource_kind,
+                entity_name=owner.ownership.scope.resource_name,
+            )
         if call.effect_gate is not None and call.effect_gate.proposed_generation is not None:
             raise StateError(
                 "download recovery gate advance must be confirmed before effect dispatch",

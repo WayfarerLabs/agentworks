@@ -32,6 +32,7 @@ from agentworks.execution._file_effect_gate import (
     advance_file_effect_gate,
     initialize_file_effect_gate,
 )
+from agentworks.execution._file_gate_setup import FileEffectGateSetup
 from agentworks.execution._file_obligation import (
     FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
     FileCallFamily,
@@ -1143,6 +1144,39 @@ def test_recovery_refuses_stale_payload_family_and_target(tmp_path: Path) -> Non
             ),
         )
         with pytest.raises(StateError):
+            FileDownloadRecovery.open(recovered, target, persisted, evidence)
+    finally:
+        database.close()
+
+
+def test_snapshot_recovery_refuses_a_setup_only_download(tmp_path: Path) -> None:
+    root = tmp_path / "source-root"
+    root.mkdir()
+    database = Database(tmp_path / "state.db")
+    target = _target()
+    plan = _plan()
+    owner, call, persisted = _possible_download(database, root, target, plan)
+    try:
+        setup = replace(
+            call,
+            uncertainty=frozenset(),
+            gate_setup=FileEffectGateSetup.for_target(target, plan.expected.euid, _GUEST),
+        )
+        bound = OwnerLifecycleObligation(owner, persisted)
+        persisted = bound.publish_payload(
+            expected_revision=persisted.payload_revision,
+            payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+            payload=encode_file_call_obligation(setup),
+        )
+        recovered = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+        evidence = _local_drain_evidence(
+            recovered.ownership,
+            persisted,
+            setup,
+            (_LocalHelperDrainRecord("gate-setup", exited=True),),
+        )
+
+        with pytest.raises(StateError, match="gate setup"):
             FileDownloadRecovery.open(recovered, target, persisted, evidence)
     finally:
         database.close()
