@@ -413,13 +413,14 @@ is accepted only with the matching receipt and final receipt-only inventory.
 The host-side disposal obligation owns only one explicitly requested release attempt under the exact
 VM operation claim. It requires a reconciled launch receipt but derives no terminal state or
 disposal state from the managed-run row; the fixed target helper checks the terminal predicate and
-receipt-only inventory. Positively proved `NOT_SENT` or a complete, validated `NOT_READY` response
-with settled delivery resolves the temporary obligation without claiming disposal. Complete,
-validated `DISPOSED` with settled delivery also resolves it and proves the exact retained artifacts
-were released. An incomplete response, helper failure, lost delivery or interrupted possible effect
-retains the claim and run-ID recovery identity. Exact guest retry is protocol-safe only after
-recovery separately proves the earlier dispatch drained; it is not automatic host replay. No mutable
-database disposal state or retention timer is introduced.
+receipt-only inventory. Positively proved `NOT_SENT` with settled coordination, or a complete,
+validated `NOT_READY` response with settled delivery, resolves the temporary obligation without
+claiming disposal. Complete, validated `DISPOSED` with settled delivery also resolves it and proves
+the exact retained artifacts were released. An incomplete response, helper failure, lost delivery or
+interrupted possible effect retains the claim and run-ID recovery identity. Concurrent exact guest
+retries are protocol-safe; they do not authorize host replay of uncertain delivery until recovery
+separately proves the earlier dispatch drained. No mutable database disposal state or retention
+timer is introduced.
 
 Carrier-neutral control remains a fixed closed protocol with `start`, `observe`, `read-output`,
 `stop` and `dispose`; it accepts no arbitrary path, unit, command or systemd property. `start` is
