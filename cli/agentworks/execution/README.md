@@ -298,9 +298,20 @@ native WSL client. It retains that client before dispatch, retries local settlem
 query only when the prior query returned a complete, validated result. An interrupted or otherwise
 unaccounted query may retry local settlement but cannot dispatch again or confirm absence, even
 after its Windows client settles. A clean absence requires a complete exact response, zero client
-exit, live deadline and settled local handles. This private observer does not provide
+exit, live deadline and settled local handles. This private observer alone does not provide
 controller-death recovery or production wiring; recovery drain and native Windows/WSL2 acceptance
 remain open.
+
+`_wsl2_platform_hold_recovery.py` now privately consumes one exact persisted hold obligation after
+generic takeover. A registered row resolves without launch. A possible-effect row with durable
+`READY` and no earlier query admission may resolve only after exact old-controller absence and a
+new, fully settled query confirms the recorded guest anchor is absent. Missing `READY`, an earlier
+query-admission marker, uncertain controller observation or an incomplete query retains the claim.
+The caller-retained recovery object keeps its guest observer and native-client cleanup custody:
+uncertain queries permit cleanup-only retry, while a complete `PRESENT` result permits another query
+in the same controller. It retains a complete `ABSENT` result for exact resolution retry without
+another guest query. These portable process-loss tests do not prove WSLService delivery drain,
+native Windows/WSL2 behavior, preparation discovery, a production factory or RunContext integration.
 
 ## Observation and guest lifetime
 

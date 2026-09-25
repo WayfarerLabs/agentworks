@@ -1480,6 +1480,17 @@ connection and trust only. Before broader lifecycle implementation, complete the
       observer, recovery factory, activation and platform wiring, RunContext integration, and live
       proof.
 
+The private WSL2 hold-recovery checkpoint at `15f8a936` consumes one exact persisted obligation
+after generic takeover. It resolves a registered row without dispatch or a post-`READY` row only
+after exact old-controller absence and a new, fully settled exact guest-absence query. Missing
+`READY`, an earlier one-way query marker and uncertain observation retain the claim. Its
+caller-retained observer preserves native-client cleanup custody after an unaccounted query; a
+complete `PRESENT` result permits another query only within that same recovery controller, while a
+complete `ABSENT` result permits exact ledger-resolution retry without another query. Portable
+SQLite process-loss tests and focused static checks pass. This is not the production factory,
+activation/RunContext wiring, native WSLService drain proof or live Windows/WSL2 acceptance; the
+three gates above remain open.
+
 The private WSL2 ownership candidate is implemented in the isolated proof branch. The caller owns an
 inert lifecycle object before `start`; one native owner retains the WSL client, process/pipe handles
 and Job Object handle across startup and cleanup interruption. Its snapshot keeps client exit,
