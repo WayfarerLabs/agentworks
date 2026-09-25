@@ -1416,9 +1416,9 @@ connection and trust only. Before broader lifecycle implementation, complete the
       prove the platform's actual start/status/stop and disconnected-operation recovery, not a
       generic Linux-equivalent MANAGED profile. Workstation SSH evidence is insufficient; report
       cleanup uncertainty without dropping required platform operations.
-- [ ] Prove a distribution-scoped WSL2 boot fence before production managed-run adoption. The
-      kernel boot UUID alone survives a distribution stop and restart inside the same utility VM.
-      The private guest probe now combines that UUID with PID 1 start ticks; validate stable identity
+- [ ] Prove a distribution-scoped WSL2 boot fence before production managed-run adoption. The kernel
+      boot UUID alone survives a distribution stop and restart inside the same utility VM. The
+      private guest probe now combines that UUID with PID 1 start ticks; validate stable identity
       within one running distribution and changed identity across real stop/restart on the supported
       WSL2 bed, including lost-hold recovery. A live hold prevents ordinary idle shutdown but does
       not substitute for a restart fence after controller loss. Keep ambiguous or unavailable epoch
@@ -1983,10 +1983,10 @@ borrow ordinary dispatch, retry registration as rebind, or admit or publish a pr
 effect. Migration 43 rebuilds only the changed owner table and proves existing obligation payloads,
 revisions, timestamps, foreign keys and cascades survive.
 
-The subsequent pre-release schema consolidation supersedes that implementation detail: the
-shipping sequence is migrations 39 (owners, claims and obligations), 40 (managed runs) and 41
-(nullable VM instance marker). No released database contains the former 39-44 sequence, so the
-consolidation does not add an upgrade path or change the recovery contract described above.
+The subsequent pre-release schema consolidation supersedes that implementation detail: the shipping
+sequence is migrations 39 (owners, claims and obligations), 40 (managed runs) and 41 (nullable VM
+instance marker). No released database contains the former 39-44 sequence, so the consolidation does
+not add an upgrade path or change the recovery contract described above.
 
 Final project and correctness re-reviews are clean at `f7a2ecac`; the final complexity review's two
 material simplifications are incorporated, and its optional duplicate wrapper check is removed at

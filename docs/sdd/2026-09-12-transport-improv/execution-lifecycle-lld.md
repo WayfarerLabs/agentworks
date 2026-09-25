@@ -432,15 +432,14 @@ construct and verify these facts.
 
 The private implementation checkpoint now supplies the version-one VM fingerprint codec, a bounded
 fixed-path Linux guest probe and a pure composer. The probe makes one no-replay carrier attempt,
-admits the pinned runtime, validates the protected root-owned marker path, reads the canonical kernel
-boot UUID and PID 1 start ticks, and keeps carrier facts separate from the nonce-bound observation.
-The codec length-prefixes
-the exact provider locator bytes; the composer verifies the persisted marker against the guest
-observation and keeps a derived boot UUID as a separate target fence. The derived UUID binds the
-kernel boot UUID and the guest init process start ticks under a fixed domain. This is necessary on
-WSL2, where a distribution can restart without rebooting the shared utility-VM kernel. It identifies
-an ordinary guest boot, not an uncopyable provider incarnation; native restart and recovery proof
-remain open. Provider-locator unavailability,
+admits the pinned runtime, validates the protected root-owned marker path, reads the canonical
+kernel boot UUID and PID 1 start ticks, and keeps carrier facts separate from the nonce-bound
+observation. The codec length-prefixes the exact provider locator bytes; the composer verifies the
+persisted marker against the guest observation and keeps a derived boot UUID as a separate target
+fence. The derived UUID binds the kernel boot UUID and the guest init process start ticks under a
+fixed domain. This is necessary on WSL2, where a distribution can restart without rebooting the
+shared utility-VM kernel. It identifies an ordinary guest boot, not a provider incarnation that
+cannot be copied; native restart and recovery proof remain open. Provider-locator unavailability,
 legacy NULL markers, unsafe guest paths and mismatches refuse without mutation. This does not claim
 production/platform wiring, explicit adoption, a locator-unavailable alternative or a public
 RunContext target; the combined target-identity gate remains open.

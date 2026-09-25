@@ -379,7 +379,8 @@ implemented supervisor behavior or native acceptance.
 
 ### WSL2 distribution boot fence
 
-The [exact-head native WSL2 report on #833](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-5825224430)
+The
+[exact-head native WSL2 report on #833](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-5825224430)
 observed one `/proc/sys/kernel/random/boot_id` across distribution stop and restart while the shared
 utility VM remained up. That kernel value alone cannot fence a distribution-scoped managed run.
 Microsoft describes a separate PID namespace for each WSL2 distribution and systemd as its PID 1
@@ -392,7 +393,8 @@ separate identity facts. This is a cooperative-guest boot fence, not proof again
 copied state or an engineered same-tick restart. Native WSL2 stop/restart and lost-hold recovery
 remain acceptance gates; the cited report measured the underlying problem, not the new derivation.
 
-Sources: [WSL distribution namespaces](https://github.com/microsoft/WSL/blob/master/doc/docs/technical-documentation/init.md),
+Sources:
+[WSL distribution namespaces](https://github.com/microsoft/WSL/blob/master/doc/docs/technical-documentation/init.md),
 [WSL systemd PID 1](https://github.com/microsoft/WSL/blob/master/doc/docs/technical-documentation/systemd.md),
 [Linux `/proc/pid/stat` field 22](https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html).
 
