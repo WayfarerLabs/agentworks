@@ -1964,6 +1964,15 @@ incomplete inspection retains custody, and a bound row instead requires the full
 cleanup recovery. Prove this narrow path locally and through each native route before enabling it;
 do not mistake it for whole-operation resolution or remote helper-exit evidence.
 
+The private setup-only recovery adapter at `3b95a068e` now rebinds a post-takeover exact row,
+refuses a cross-scope or already-bound target, and resolves only that obligation after complete
+positive `INSPECT`. Missing and incomplete observations retain custody. An interruption after local
+attempt settlement no longer strands an active recovery dispatch; the same correction covers the
+existing DOWNLOAD adapter. The file test directory passes 1,331 tests, and project, correctness and
+complexity re-reviews report no remaining finding. This is local proof, not a production takeover
+factory, live delayed-SETUP test, native route acceptance, namespace-lifetime proof or whole-owner
+release.
+
 Setup is itself a remote control-state mutation, so the current possible-dispatch rule applies
 before its first attempt. The first production composition must arm one `file-call` row with a setup
 descriptor and deterministic identity/path under the existing serial borrow, then publish the
