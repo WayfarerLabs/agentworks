@@ -504,13 +504,16 @@ stops after a fixed bound, leaving unproved facts absent. `_managed_service_bund
 exact source without embedding request values. This controller has no live systemd proof.
 
 `_managed_observation_exchange.py` supplies private fixed `observe` and closed `read-output`
-attempts over the same carrier interface. Its Python 3.11 target helper reads only the protected
-store for an exact expected launch, run, derived unit, target incarnation and boot identity. It
-returns only present fixed facts; absent facts remain unknown. Output bytes require the matching
-validated stream-end and closed capture spool. The host admits facts and bytes only after complete
-runtime, identity, record, stream and helper completion evidence. The request has no arbitrary path,
-unit, command, property, fact name or environment selector. This slice does not reread the live
-instance marker or boot or establish production target evidence.
+attempts over the same carrier interface. Its Python 3.11 target helper reads fixed guest identity
+paths and the protected store for an exact expected launch, run, derived unit, target incarnation
+and boot identity. It returns only present fixed facts; absent facts remain unknown. Output bytes
+require the matching validated stream-end and closed capture spool. The host admits facts and bytes
+only after complete runtime, identity, record, stream and helper completion evidence. The request
+has no arbitrary path, unit, command, property, fact name or environment selector. Both private
+observation operations now require an observed VM guest identity: host preparation checks the
+expected launch's VM kind and derived boot, and the bundled helper rereads the protected marker,
+kernel boot and PID 1 start time before opening the store. This does not establish a production
+route or public job view.
 
 `_managed_stop_exchange.py` supplies the separate private stop attempt over the same carrier
 interface. Its fixed Python 3.11 Linux root helper revalidates the exact launch, publishes the

@@ -1453,6 +1453,14 @@ and leaves the exact run `RESERVED` and one-shot, with owner custody retained. F
 proof does not bind locator observation atomically to later carrier delivery, or establish live
 WSL2/systemd, recovery, production caller or public RunContext behavior.
 
+At private checkpoint `ec36d7887`, managed observe and read-output require a canonical observed VM
+guest identity. Host request preparation checks VM target kind and derived boot before carrier
+dispatch; the fixed Python 3.11 guest helper rereads the protected marker, kernel boot and PID 1
+start time before opening the managed store. Missing, unsafe or mismatched guest evidence refuses
+without reading run facts or output. This closes one later-action guest fence hermetically, not a
+production route or host-side JobAccess view. Stop and dispose still need equivalent current-guest
+checks; live SSH/QGA delivery, recovery and public RunContext remain open.
+
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared
       create bootstrap. Migration 41 leaves legacy rows NULL; ordinary existing-VM operations never

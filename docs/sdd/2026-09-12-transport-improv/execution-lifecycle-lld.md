@@ -420,8 +420,9 @@ mismatched preparation refuses before borrowing. The run row records possible di
 borrowed carrier attempts the one launch. Only a settled carrier attempt with a durable confirmed
 receipt permits the start obligation to resolve. After admission, any other launch state retains
 core custody, including a code-zero carrier completion without the receipt. This does not resolve
-the whole operation or establish job termination. Production binding, recovery, fresh marker/boot
-checks for later actions and those actions themselves remain open.
+the whole operation or establish job termination. Production binding and recovery remain open.
+Private observe and read-output now reread guest identity before store access; stop and dispose
+still need that fence and host composition.
 
 Before arming, a refused registration, expired deadline or owner close releases the unused borrow;
 an installed but unarmed obligation resolves during that release. A failed reservation leaves the
