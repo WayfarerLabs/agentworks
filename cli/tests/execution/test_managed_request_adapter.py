@@ -114,14 +114,24 @@ def test_multibyte_script_source_exceeds_byte_limit() -> None:
         (Command(["/bin/true"]), {"cwd": "relative"}),
         (Command(["/bin/true"]), {"env": {"BASH_ENV": "secret"}}),
         (Command(["/bin/true"]), {"output": Output.capture(16_777_217)}),
-        (Command(["/bin/true"]), {"input": Input.bytes(b"x" * (MAX_STDIN_BYTES + 1))}),
         (Command(["/bin/true"] * (MAX_ARGV + 1)), {}),
-        (Script("x" * (MAX_SOURCE_BYTES + 1), Shell.SH), {"spec": _spec(ManagedShellIdentity(Shell.SH, "/bin/sh"))}),
     ],
 )
-def test_invalid_or_unsupported_request_refuses(invocation: Command | Script, changes: dict[str, object]) -> None:
+def test_invalid_or_unsupported_request_refuses_during_preparation(
+    invocation: Command | Script, changes: dict[str, object]
+) -> None:
     with pytest.raises(ValidationError):
         _compose(invocation, **changes)
+
+
+def test_oversize_stdin_refuses_during_preparation() -> None:
+    with pytest.raises(ValidationError):
+        _compose(Command(["/bin/true"]), input=Input.bytes(b"x" * (MAX_STDIN_BYTES + 1)))
+
+
+def test_oversize_script_source_refuses_during_preparation() -> None:
+    with pytest.raises(ValidationError):
+        _compose(Script("x" * (MAX_SOURCE_BYTES + 1), Shell.SH), spec=_spec(ManagedShellIdentity(Shell.SH, "/bin/sh")))
 
 
 def test_operation_lifetime_refuses() -> None:
