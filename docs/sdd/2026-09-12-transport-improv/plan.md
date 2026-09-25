@@ -1893,6 +1893,15 @@ lock with SQLite used only for short transactional generation storage. No code f
 checkpoint has been published on #833 or claimed as production recovery. Fixed-helper interrupted
 cleanup, recovery of recovery, native routes and gate setup remain unproved.
 
+The corrected private mechanism is composed at `b953eff7`. It binds the gate inode in the durable
+DOWNLOAD obligation, holds Linux flock across fixed-helper effects after closing the SQLite
+connection, and reproduces the original same-inode source-close race with a real spawned helper.
+Project and complexity reviews found the final correction clean; the combined tree passes 201
+focused file-gate, snapshot, recovery and obligation tests. This accepts only the local
+lock-lifetime mechanism. It does not complete this checkbox or authorize production drain evidence:
+fixed-helper interrupted cleanup and recovery of recovery, setup/advance dispatch, other file
+families and native route acceptance remain open.
+
 - [ ] Prove the restricted
       [guest-side file-helper effect fence](file-operations-lld.md#production-file-helper-effect-fence-candidate)
       before treating adapter drain evidence as production. First carry the verified raw VM guest
