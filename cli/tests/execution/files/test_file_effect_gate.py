@@ -5,6 +5,7 @@ from __future__ import annotations
 import multiprocessing
 import os
 import secrets
+import shutil
 import sys
 import threading
 import time
@@ -55,6 +56,10 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the fixed snaps
 _GUEST = VMGuestIdentity("a" * 32, "123e4567-e89b-12d3-a456-426614174000", 10)
 
 
+def _observe_guest() -> VMGuestIdentity:
+    return _GUEST
+
+
 def _plan() -> IdentityPlan:
     groups = tuple(sorted(set(os.getgroups()) | {os.getegid()}))
     return IdentityPlan(IdentityExpectation(os.geteuid(), os.getegid(), groups), IdentityMode.DIRECT)
@@ -76,7 +81,7 @@ guest._fixture_guest=VMGuestIdentity(
 
 
 def _hold_until_released(binding: FileEffectGateBinding, entered: str, release: str, exited: str | None = None) -> None:
-    with hold_file_effect_gate(binding, _GUEST):
+    with hold_file_effect_gate(binding, _observe_guest):
         Path(entered).touch()
         while not Path(release).exists():
             time.sleep(0.01)
@@ -143,10 +148,23 @@ from _agw_file_snapshot._vm_guest_identity_protocol import VMGuestIdentity
 guest._identity=lambda: VMGuestIdentity({_GUEST.instance_marker!r}, {_GUEST.boot_id!r}, {_GUEST.init_start_ticks!r})
 _original_operate=guest._operate
 def _held_operate(request, expires_at):
+    result=_original_operate(request, expires_at)
+    assert result is not None
+    with open({binding.path!r}, 'rb') as same_inode_source:
+        same_inode_source.read(1)
+    bound_descriptors=[]
+    for candidate in os.listdir('/proc/self/fd'):
+        try:
+            metadata=os.fstat(int(candidate))
+        except OSError:
+            continue
+        if (metadata.st_dev, metadata.st_ino)==({binding.device!r}, {binding.inode!r}):
+            bound_descriptors.append(candidate)
+    assert len(bound_descriptors)==1
     open({entered!r}, 'wb').close()
     while not os.path.exists({release!r}):
         time.sleep(0.01)
-    return _original_operate(request, expires_at)
+    return result
 guest._operate=_held_operate
 """,
     )
@@ -164,9 +182,9 @@ guest._operate=_held_operate
     operation.download(
         LocalCarrier(),
         trusted_root_path=root_path,
-        relative_path="source",
+        relative_path="effect.db",
         sink=BytesSink(),
-        max_bytes=1024,
+        max_bytes=65_536,
         plan=_plan(),
         deadline=Deadline.after(30),
         runtime_selection=runtime_selection(sys.executable),
@@ -177,6 +195,8 @@ guest._operate=_held_operate
 
 def test_binding_codec_and_exact_file_call_row_survive_reopen(tmp_path: Path) -> None:
     binding = _gate(tmp_path)
+    metadata = Path(binding.path).stat()
+    assert (binding.device, binding.inode) == (metadata.st_dev, metadata.st_ino)
     call = _call(binding, tmp_path)
     database = Database(tmp_path / "state.db")
     try:
@@ -245,17 +265,17 @@ def test_spawned_controller_loss_retains_row_and_cannot_overtake_live_helper(tmp
             while_held = database.operations.list_lifecycle_obligations(owner.ownership)[0]
             assert decode_file_call_obligation(while_held.payload).effect_gate == proposed
             with pytest.raises(FileEffectGateError):
-                advance_file_effect_gate(proposed, _GUEST)
+                advance_file_effect_gate(proposed, _observe_guest)
             release.touch()
             until = time.monotonic() + 10
             while not exited.exists() and time.monotonic() < until:
                 time.sleep(0.01)
             assert exited.exists()
-            advanced = advance_file_effect_gate(proposed, _GUEST)
-            assert advance_file_effect_gate(proposed, _GUEST) == advanced
-            with pytest.raises(FileEffectGateError), hold_file_effect_gate(binding, _GUEST):
+            advanced = advance_file_effect_gate(proposed, _observe_guest)
+            assert advance_file_effect_gate(proposed, _observe_guest) == advanced
+            with pytest.raises(FileEffectGateError), hold_file_effect_gate(binding, _observe_guest):
                 raise AssertionError("delayed old effect must not enter")
-            with hold_file_effect_gate(advanced, _GUEST):
+            with hold_file_effect_gate(advanced, _observe_guest):
                 pass
         finally:
             database.close()
@@ -268,9 +288,7 @@ def test_fixed_snapshot_survives_controller_loss_and_is_fenced_before_recovery(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     binding = _gate(tmp_path)
-    root = tmp_path / "root"
-    root.mkdir()
-    (root / "source").write_bytes(b"snapshot after controller loss")
+    root = tmp_path
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     scratch.chmod(0o1777)
@@ -293,6 +311,9 @@ def test_fixed_snapshot_survives_controller_loss_and_is_fenced_before_recovery(
             call = decode_file_call_obligation(row.payload)
             assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
             assert call.effect_gate == binding and call.token is not None
+            assert (call.root, call.relative_path) == (str(root), "effect.db")
+            source_metadata = (root / "effect.db").stat()
+            assert (source_metadata.st_dev, source_metadata.st_ino) == (binding.device, binding.inode)
             proposed = replace(binding, proposed_generation=secrets.token_bytes(16))
             owner = OperationOwner.recover(database.operations, predecessor.ownership, "b" * 32)
             bound = owner.rebind_lifecycle_obligation(
@@ -304,18 +325,18 @@ def test_fixed_snapshot_survives_controller_loss_and_is_fenced_before_recovery(
                 payload=encode_file_call_obligation(replace(call, effect_gate=proposed)),
             )
             with pytest.raises(FileEffectGateError):
-                advance_file_effect_gate(proposed, _GUEST)
+                advance_file_effect_gate(proposed, _observe_guest)
             release.touch()
             until = time.monotonic() + 15
             advanced = None
             while advanced is None and time.monotonic() < until:
                 try:
-                    advanced = advance_file_effect_gate(proposed, _GUEST)
+                    advanced = advance_file_effect_gate(proposed, _observe_guest)
                 except FileEffectGateError:
                     time.sleep(0.05)
             assert advanced is not None
             # Simulate an acknowledgment lost after the guest committed.
-            assert advance_file_effect_gate(proposed, _GUEST) == advanced
+            assert advance_file_effect_gate(proposed, _observe_guest) == advanced
             pending_row = database.operations.list_lifecycle_obligations(owner.ownership)[0]
             confirmed = owner.rebind_lifecycle_obligation(
                 pending_row.obligation_id,
@@ -341,8 +362,8 @@ guest._identity=lambda: VMGuestIdentity({_GUEST.instance_marker!r}, {_GUEST.boot
             delayed = snapshot_begin(
                 LocalCarrier(),
                 trusted_root_path=str(root),
-                relative_path="source",
-                max_bytes=1024,
+                relative_path="effect.db",
+                max_bytes=65_536,
                 token=call.token,
                 plan=_plan(),
                 deadline=Deadline.after(30),
@@ -452,16 +473,21 @@ def test_active_helper_blocks_advance_and_delayed_old_generation_refuses(tmp_pat
             time.sleep(0.01)
         assert entered.exists()
         proposed = replace(binding, proposed_generation=secrets.token_bytes(16))
-        # A held BEGIN IMMEDIATE prevents takeover from overtaking its effect.
+        # The original flock descriptor prevents takeover during the effect.
+        expires_at = time.monotonic() + 0.05
         with pytest.raises(FileEffectGateError):
-            advance_file_effect_gate(proposed, _GUEST)
+            advance_file_effect_gate(proposed, _observe_guest, expires_at=expires_at)
+        assert time.monotonic() >= expires_at
+        expires_at = time.monotonic() + 0.05
+        with pytest.raises(FileEffectGateError), hold_file_effect_gate(binding, _observe_guest, expires_at=expires_at):
+            raise AssertionError("second helper must not enter before its deadline")
         release.touch()
         helper.join(10)
         assert helper.exitcode == 0
-        advanced = advance_file_effect_gate(proposed, _GUEST)
-        with pytest.raises(FileEffectGateError), hold_file_effect_gate(binding, _GUEST):
+        advanced = advance_file_effect_gate(proposed, _observe_guest)
+        with pytest.raises(FileEffectGateError), hold_file_effect_gate(binding, _observe_guest):
             raise AssertionError("old helper must not enter")
-        with hold_file_effect_gate(advanced, _GUEST):
+        with hold_file_effect_gate(advanced, _observe_guest):
             pass
     finally:
         release.touch()
@@ -471,27 +497,30 @@ def test_active_helper_blocks_advance_and_delayed_old_generation_refuses(tmp_pat
 def test_lost_advance_reply_reconciles_but_stale_advance_cannot_overwrite(tmp_path: Path) -> None:
     binding = _gate(tmp_path)
     first = replace(binding, proposed_generation=secrets.token_bytes(16))
-    advanced = advance_file_effect_gate(first, _GUEST)
-    assert advance_file_effect_gate(first, _GUEST) == advanced
+    advanced = advance_file_effect_gate(first, _observe_guest)
+    assert advance_file_effect_gate(first, _observe_guest) == advanced
     second = replace(advanced, proposed_generation=secrets.token_bytes(16))
-    newest = advance_file_effect_gate(second, _GUEST)
+    newest = advance_file_effect_gate(second, _observe_guest)
     with pytest.raises(FileEffectGateError):
-        advance_file_effect_gate(first, _GUEST)
-    with hold_file_effect_gate(newest, _GUEST):
+        advance_file_effect_gate(first, _observe_guest)
+    with hold_file_effect_gate(newest, _observe_guest):
         pass
 
 
 def test_missing_replaced_or_wrong_guest_state_refuses_in_same_epoch(tmp_path: Path) -> None:
     binding = _gate(tmp_path)
     wrong_guest = replace(_GUEST, init_start_ticks=11)
-    with pytest.raises(FileEffectGateError), hold_file_effect_gate(binding, wrong_guest):
+    with pytest.raises(FileEffectGateError), hold_file_effect_gate(binding, lambda: wrong_guest):
         pass
-    Path(binding.path).rename(tmp_path / "old-effect.db")
-    with pytest.raises(FileEffectGateError), hold_file_effect_gate(binding, _GUEST):
+    original = tmp_path / "old-effect.db"
+    Path(binding.path).rename(original)
+    with pytest.raises(FileEffectGateError), hold_file_effect_gate(binding, _observe_guest):
         pass
-    replacement = initialize_file_effect_gate(binding.path, _GUEST, os.geteuid(), "gate-vm")
-    assert replacement.instance != binding.instance
-    with pytest.raises(FileEffectGateError), hold_file_effect_gate(binding, _GUEST):
+    shutil.copyfile(original, binding.path)
+    Path(binding.path).chmod(0o600)
+    assert Path(binding.path).read_bytes() == original.read_bytes()
+    assert Path(binding.path).stat().st_ino != binding.inode
+    with pytest.raises(FileEffectGateError), hold_file_effect_gate(binding, _observe_guest):
         pass
 
 
@@ -527,7 +556,7 @@ def test_fixed_snapshot_helper_checks_independent_guest_and_fences_cleanup(
 
     cleanup_debt = _cleanup_debt(begun.observation.snapshot.ready)
     proposed = replace(binding, proposed_generation=secrets.token_bytes(16))
-    advanced = advance_file_effect_gate(proposed, _GUEST)
+    advanced = advance_file_effect_gate(proposed, _observe_guest)
     delayed = begin(binding)
     assert delayed.observation is not None
     assert delayed.observation.failure is not None

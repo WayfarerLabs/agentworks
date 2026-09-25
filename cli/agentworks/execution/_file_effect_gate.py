@@ -1,15 +1,17 @@
-"""Local SQLite effect fence for one fixed Linux guest file-helper identity.
+"""Local flock effect fence and SQLite generation for one Linux guest identity.
 
 Initialization is an explicit setup action. Effect requests only open an
-existing gate and hold its write transaction until their work is complete.
+existing gate and hold its inode lock until their work is complete.
 """
 
 from __future__ import annotations
 
+import errno
 import os
 import secrets
-import sqlite3
 import stat
+import sys
+import time
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -18,7 +20,8 @@ from urllib.parse import quote
 from ._vm_guest_identity_protocol import VMGuestIdentity
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
+    from sqlite3 import Connection
 
 _TOKEN_BYTES = 16
 _BUSY_SECONDS = 5.0
@@ -57,6 +60,8 @@ class FileEffectGateBinding:
     guest: VMGuestIdentity
     euid: int
     scope_name: str
+    device: int
+    inode: int
     proposed_generation: bytes | None = None
 
     def __post_init__(self) -> None:
@@ -70,6 +75,10 @@ class FileEffectGateBinding:
             or type(self.euid) is not int
             or self.euid < 0
             or not _valid_scope_name(self.scope_name)
+            or type(self.device) is not int
+            or self.device < 0
+            or type(self.inode) is not int
+            or self.inode <= 0
             or self.proposed_generation is not None
             and (type(self.proposed_generation) is not bytes or len(self.proposed_generation) != _TOKEN_BYTES)
         ):
@@ -93,6 +102,8 @@ def encode_file_effect_gate(binding: FileEffectGateBinding) -> dict[str, object]
         },
         "euid": binding.euid,
         "scope_name": binding.scope_name,
+        "device": binding.device,
+        "inode": binding.inode,
     }
     if binding.proposed_generation is not None:
         value["proposed_generation"] = binding.proposed_generation.hex()
@@ -101,7 +112,7 @@ def encode_file_effect_gate(binding: FileEffectGateBinding) -> dict[str, object]
 
 def decode_file_effect_gate(value: object) -> FileEffectGateBinding:
     """Decode an exact persisted or request binding at the trust boundary."""
-    required = {"path", "instance", "generation", "guest", "euid", "scope_name"}
+    required = {"path", "instance", "generation", "guest", "euid", "scope_name", "device", "inode"}
     if type(value) is not dict or not required <= set(value) <= required | {"proposed_generation"}:
         raise FileEffectGateError("invalid file-effect gate binding")
     guest = value["guest"]
@@ -126,44 +137,92 @@ def decode_file_effect_gate(value: object) -> FileEffectGateBinding:
             VMGuestIdentity(guest["instance_marker"], guest["boot_id"], guest["init_start_ticks"]),
             value["euid"],
             value["scope_name"],
+            value["device"],
+            value["inode"],
             token("proposed_generation") if "proposed_generation" in value else None,
         )
     except (KeyError, TypeError, ValueError):
         raise FileEffectGateError("invalid file-effect gate binding") from None
 
 
-def _existing_gate(path: str, euid: int) -> None:
-    """Reject missing, redirected, shared or unexpectedly owned gate files."""
+def _open_flags() -> int:
+    if sys.platform != "linux" or not getattr(os, "O_NOFOLLOW", 0) or not getattr(os, "O_CLOEXEC", 0):
+        raise FileEffectGateError("file-effect gate requires Linux descriptor controls")
+    return os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+
+
+def _check_inode(binding: FileEffectGateBinding, descriptor: int) -> None:
+    """Verify both the held descriptor and its still-named path."""
     try:
-        descriptor = os.open(
-            path,
-            os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
-        )
-        try:
-            metadata = os.fstat(descriptor)
-        finally:
-            os.close(descriptor)
+        held = os.fstat(descriptor)
+        named = os.stat(binding.path, follow_symlinks=False)
     except OSError:
         raise FileEffectGateError("file-effect gate is unavailable") from None
-    if (
-        not stat.S_ISREG(metadata.st_mode)
-        or metadata.st_nlink != 1
-        or metadata.st_uid != euid
-        or stat.S_IMODE(metadata.st_mode) != 0o600
-    ):
-        raise FileEffectGateError("file-effect gate is unsafe")
+    for metadata in (held, named):
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 1
+            or metadata.st_uid != binding.euid
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or (metadata.st_dev, metadata.st_ino) != (binding.device, binding.inode)
+        ):
+            raise FileEffectGateError("file-effect gate inode changed or is unsafe")
 
 
-def _connect(binding: FileEffectGateBinding) -> sqlite3.Connection:
-    _existing_gate(binding.path, binding.euid)
-    connection: sqlite3.Connection | None = None
+def _acquire_flock(descriptor: int, expires_at: float | None) -> None:
+    """Wait only to the caller's deadline, with a finite default for setup."""
     try:
+        import fcntl
+    except ImportError:
+        raise FileEffectGateError("file-effect gate requires Linux flock") from None
+
+    limit = time.monotonic() + _BUSY_SECONDS if expires_at is None else expires_at
+    while True:
+        remaining = limit - time.monotonic()
+        if remaining <= 0:
+            raise FileEffectGateError("file-effect gate lock deadline expired")
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except OSError as error:
+            if error.errno not in {errno.EAGAIN, errno.EWOULDBLOCK, errno.EINTR}:
+                raise FileEffectGateError("file-effect gate lock failed") from None
+        time.sleep(min(0.01, remaining))
+
+
+@contextmanager
+def _locked_gate(binding: FileEffectGateBinding, expires_at: float | None) -> Iterator[int]:
+    try:
+        descriptor = os.open(binding.path, os.O_RDONLY | _open_flags())
+    except OSError:
+        raise FileEffectGateError("file-effect gate is unavailable") from None
+    try:
+        _check_inode(binding, descriptor)
+        _acquire_flock(descriptor, expires_at)
+        _check_inode(binding, descriptor)
+        yield descriptor
+    finally:
+        os.close(descriptor)
+
+
+def _connect(binding: FileEffectGateBinding, descriptor: int, expires_at: float | None) -> Connection:
+    """Open only while the caller owns the independent flock descriptor."""
+    try:
+        import sqlite3
+    except ImportError:
+        raise FileEffectGateError("file-effect gate requires Python sqlite3") from None
+
+    _check_inode(binding, descriptor)
+    connection: Connection | None = None
+    try:
+        timeout = _BUSY_SECONDS if expires_at is None else max(0.0, min(_BUSY_SECONDS, expires_at - time.monotonic()))
         connection = sqlite3.connect(
             f"file:{quote(binding.path, safe='/')}?mode=rw",
             uri=True,
             isolation_level=None,
-            timeout=_BUSY_SECONDS,
+            timeout=timeout,
         )
+        _check_inode(binding, descriptor)
         if connection.execute("PRAGMA journal_mode").fetchone() != ("delete",):
             raise FileEffectGateError("file-effect gate requires rollback journaling")
         connection.execute("PRAGMA synchronous=FULL")
@@ -174,7 +233,7 @@ def _connect(binding: FileEffectGateBinding) -> sqlite3.Connection:
         raise FileEffectGateError("file-effect gate is unavailable") from None
 
 
-def _record(connection: sqlite3.Connection, binding: FileEffectGateBinding) -> bytes:
+def _record(connection: Connection, binding: FileEffectGateBinding) -> bytes:
     row = connection.execute(
         "SELECT instance, generation, marker, boot_id, init_ticks, euid, scope_name FROM gate WHERE id = 1"
     ).fetchone()
@@ -199,15 +258,32 @@ def _record(connection: sqlite3.Connection, binding: FileEffectGateBinding) -> b
 
 def initialize_file_effect_gate(path: str, guest: VMGuestIdentity, euid: int, scope_name: str) -> FileEffectGateBinding:
     """Create a new gate during explicit setup, never during an effect request."""
-    binding = FileEffectGateBinding(
-        path, secrets.token_bytes(_TOKEN_BYTES), secrets.token_bytes(_TOKEN_BYTES), guest, euid, scope_name
-    )
+    try:
+        import sqlite3
+    except ImportError:
+        raise FileEffectGateError("file-effect gate requires Python sqlite3") from None
+
     if os.geteuid() != euid:
         raise FileEffectGateError("file-effect gate setup identity mismatch")
     try:
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
-        os.close(descriptor)
-        with closing(_connect(binding)) as connection:
+        descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | _open_flags(), 0o600)
+    except OSError:
+        raise FileEffectGateError("file-effect gate setup failed") from None
+    try:
+        os.fchmod(descriptor, 0o600)
+        metadata = os.fstat(descriptor)
+        binding = FileEffectGateBinding(
+            path,
+            secrets.token_bytes(_TOKEN_BYTES),
+            secrets.token_bytes(_TOKEN_BYTES),
+            guest,
+            euid,
+            scope_name,
+            metadata.st_dev,
+            metadata.st_ino,
+        )
+        _acquire_flock(descriptor, None)
+        with closing(_connect(binding, descriptor, None)) as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 "CREATE TABLE gate (id INTEGER PRIMARY KEY CHECK (id = 1), instance BLOB NOT NULL, "
@@ -231,53 +307,78 @@ def initialize_file_effect_gate(path: str, guest: VMGuestIdentity, euid: int, sc
         # An incomplete file is deliberately retained: replacing its path
         # within an unresolved epoch would create another lock domain.
         raise FileEffectGateError("file-effect gate setup failed") from None
+    finally:
+        os.close(descriptor)
     return binding
 
 
 def advance_file_effect_gate(
     binding: FileEffectGateBinding,
-    current_guest: VMGuestIdentity,
+    observe_guest: Callable[[], VMGuestIdentity],
+    *,
+    expires_at: float | None = None,
 ) -> FileEffectGateBinding:
     """CAS an already persisted proposed generation, reconciling lost replies."""
-    proposed = binding.proposed_generation
-    if proposed is None or current_guest != binding.guest or os.geteuid() != binding.euid:
-        raise FileEffectGateError("file-effect gate advance identity or proposal is invalid")
-    connection = _connect(binding)
     try:
-        connection.execute("BEGIN IMMEDIATE")
-        current = _record(connection, binding)
-        if current == binding.generation:
-            connection.execute("UPDATE gate SET generation = ? WHERE id = 1", (proposed,))
-        elif current != proposed:
-            raise FileEffectGateError("file-effect gate generation changed")
-        connection.commit()
+        import sqlite3
+    except ImportError:
+        raise FileEffectGateError("file-effect gate requires Python sqlite3") from None
+
+    proposed = binding.proposed_generation
+    if proposed is None or os.geteuid() != binding.euid:
+        raise FileEffectGateError("file-effect gate advance identity or proposal is invalid")
+    with _locked_gate(binding, expires_at) as descriptor:
+        if observe_guest() != binding.guest:
+            raise FileEffectGateError("file-effect gate guest identity changed")
+        with closing(_connect(binding, descriptor, expires_at)) as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                current = _record(connection, binding)
+                if current == binding.generation:
+                    connection.execute("UPDATE gate SET generation = ? WHERE id = 1", (proposed,))
+                elif current != proposed:
+                    raise FileEffectGateError("file-effect gate generation changed")
+                connection.commit()
+            except (sqlite3.Error, FileEffectGateError):
+                connection.rollback()
+                raise FileEffectGateError("file-effect gate advance is uncertain") from None
         return FileEffectGateBinding(
-            binding.path, binding.instance, proposed, binding.guest, binding.euid, binding.scope_name
+            binding.path,
+            binding.instance,
+            proposed,
+            binding.guest,
+            binding.euid,
+            binding.scope_name,
+            binding.device,
+            binding.inode,
         )
-    except (sqlite3.Error, FileEffectGateError):
-        connection.rollback()
-        raise FileEffectGateError("file-effect gate advance is uncertain") from None
-    finally:
-        connection.close()
 
 
 @contextmanager
 def hold_file_effect_gate(
     binding: FileEffectGateBinding,
-    current_guest: VMGuestIdentity,
+    observe_guest: Callable[[], VMGuestIdentity],
+    *,
+    expires_at: float | None = None,
 ) -> Iterator[None]:
-    """Hold the exact rollback write transaction around a fixed helper effect."""
-    if binding.proposed_generation is not None or current_guest != binding.guest or os.geteuid() != binding.euid:
-        raise FileEffectGateError("file-effect gate identity or generation is invalid")
-    connection = _connect(binding)
+    """Hold the exact inode flock after closing the SQLite generation read."""
     try:
-        connection.execute("BEGIN IMMEDIATE")
-        if _record(connection, binding) != binding.generation:
-            raise FileEffectGateError("file-effect gate generation changed")
+        import sqlite3
+    except ImportError:
+        raise FileEffectGateError("file-effect gate requires Python sqlite3") from None
+
+    if binding.proposed_generation is not None or os.geteuid() != binding.euid:
+        raise FileEffectGateError("file-effect gate identity or generation is invalid")
+    with _locked_gate(binding, expires_at) as descriptor:
+        if observe_guest() != binding.guest:
+            raise FileEffectGateError("file-effect gate guest identity changed")
+        with closing(_connect(binding, descriptor, expires_at)) as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                if _record(connection, binding) != binding.generation:
+                    raise FileEffectGateError("file-effect gate generation changed")
+                connection.commit()
+            except (sqlite3.Error, FileEffectGateError):
+                connection.rollback()
+                raise FileEffectGateError("file-effect gate observation is uncertain") from None
         yield
-        connection.commit()
-    except BaseException:
-        connection.rollback()
-        raise
-    finally:
-        connection.close()

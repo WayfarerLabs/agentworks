@@ -246,7 +246,7 @@ def main(nonce: str) -> int:
         else:
             # Observe the current guest independently of the request and
             # keep the gate transaction across every filesystem effect.
-            with hold_file_effect_gate(request.effect_gate, _identity()):
+            with hold_file_effect_gate(request.effect_gate, _identity, expires_at=expires_at):
                 result = _operate(request, expires_at)
     except _SafeFailure as error:
         failure = error.failure
