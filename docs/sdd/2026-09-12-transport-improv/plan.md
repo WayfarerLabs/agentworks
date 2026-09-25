@@ -1946,8 +1946,9 @@ integration and production artifact callers remain open. The capacity checkbox s
 - [ ] Extend the existing guest file-effect gate to every upload mutation phase and its durable
       current-child identity. Prove that generation advance waits for old gated effects and rejects
       delayed old-generation upload requests before mutation across WSL, SSH and QGA; only then bind
-      package-child recovery and application checkpoint reconciliation. The present upload helpers
-      and obligation codec have no gate, and neither the local DOWNLOAD helper journal nor a
+      package-child recovery and application checkpoint reconciliation. Private stage/publication
+      helpers now accept and hold an optional gate with local real-gate tests; host upload exchanges
+      and the obligation codec do not yet supply it. Neither the local DOWNLOAD helper journal nor a
       caller-asserted drain value proves upload takeover.
 
 The production artifact publisher currently preflights destinations, then retires and publishes
