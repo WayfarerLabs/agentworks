@@ -391,10 +391,12 @@ def test_settled_file_with_unknown_hold_absence_retains_claim(tmp_path: Path, mo
     install_fixture_bundle(monkeypatch, scratch)
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database)
-        subject, _ = _platform_subject(database, carrier, FakeObserver([], GuestAnchorPresence.UNKNOWN), monkeypatch)
+        observer = FakeObserver([], GuestAnchorPresence.UNKNOWN)
+        subject, _ = _platform_subject(database, carrier, observer, monkeypatch)
         assert subject is not None
         assert _download(subject, tmp_path, BytesSink()) is WSL2DownloadStatus.RETAINED
         assert carrier.calls > 1
+        assert observer.events == ["observe"]
         assert subject.file_operation is not None
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
 

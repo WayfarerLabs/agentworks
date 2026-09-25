@@ -1493,7 +1493,7 @@ connection and trust only. Before broader lifecycle implementation, complete the
       absence is uncertain. This establishes portable file-dispatch gating, not atomic registration
       observation, pre-probe route stability, native WSL behavior, WSLService drain or a production
       factory.
-- [ ] Replace the private selected-platform preparer's internal binding resolution with one
+- [x] Replace the private selected-platform preparer's internal binding resolution with one
       caller-owned binding and a locator observed before resolution. Confirm the locator before and
       after the guest probe, and use the same core-owned WSL2 carrier for probing and file dispatch.
       Prove replacement during resolution, changed registration around probing, isolation from
