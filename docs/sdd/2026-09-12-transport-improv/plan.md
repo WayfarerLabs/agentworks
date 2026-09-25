@@ -1952,6 +1952,13 @@ selected-carrier dispatch, `/run` provisioning or native acceptance. The first p
 must still sequence setup, durable proposal, confirmed advance and DOWNLOAD dispatch on the same
 `file-call` row, then fence recovery before producing drain evidence.
 
+Setup is itself a remote control-state mutation, so the current possible-dispatch rule applies
+before its first attempt. The first production composition must arm one `file-call` row with a setup
+phase and deterministic identity/path under the existing serial borrow, then publish the discovered
+gate binding to that row before file effects. `FileOperation.download()` currently installs its row
+after receiving a gate binding, so the admission and handoff must move earlier; adding only a setup
+call before `download()` would leave it untracked. Do not add a second generic row.
+
 The private local setup/inspection substrate at `1040c8d1` validates identity and independently
 observes the live guest epoch before exclusive creation. Inspection opens only existing state under
 the shared flock and discovers the complete instance, generation and inode without advancing it;
@@ -1967,6 +1974,15 @@ or exclusive creation and before committing a generation; deterministic tests al
 incomplete inode remains after later expiry. It does not interrupt blocked guest observation,
 filesystem or SQLite calls, or prove quiescence after a lost carrier response. The private bounded
 gate-control exchange described in the LLD is still needed for selected-route production use.
+
+The private fixed gate-control helper at `8e8c67953` now supplies one non-replayed selected-carrier
+exchange for setup, non-creating inspection and generation advance. It forwards the finite setup
+deadline to the local primitive and treats complete runtime-output loss after dispatched setup or
+advance as explicit uncertainty. The combined gate and fixed-delivery selection passes 85 tests; the
+representative complete demoted-identity QGA body is 47,023 bytes with a 32 KiB manifest, below the
+unchanged 65,536-byte limit. The helper executes under distribution Python 3.11. These are local
+protocol and delivery checks only: the production obligation handoff, guest namespace, native route
+visibility, helper quiescence and recovery integration remain open.
 
 - [ ] Use the owned snapshot/chunk download for general in-memory reads, preserving caller byte
       bounds independently of QGA's single-response capacity. Keep the no-staging readiness read

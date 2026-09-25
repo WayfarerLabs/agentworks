@@ -937,6 +937,18 @@ schema, it may retry within the deadline but must not remove or replace that ino
 unresolved obligation has a durable binding, absent or replaced state is uncertainty, never a reason
 to initialize again.
 
+Setup itself is a remote control-state mutation, so it does not bypass the operation owner's
+possible-dispatch rule. The production composition arms one `file-call` obligation under its serial
+borrow before the first setup attempt, initially recording the deterministic path, selected
+identity, verified raw guest epoch and setup phase without claiming an exact gate binding. It
+publishes the binding discovered by setup or non-creating inspection to that same row before any
+file effect. Recovery persists a proposed generation there before advance and publishes the
+confirmed generation before another file effect; it never substitutes a second generic dispatch row.
+A lost control response retains the row and ownership until reconciliation provides the required
+no-further-effects evidence. The current `FileOperation.download()` installs its row only after
+receiving a binding; production composition must move admission earlier. This setup phase and
+handoff are not implemented by the local gate primitive or fixed helper.
+
 The production control path uses one private fixed-helper family for setup, non-creating inspection
 and generation advance. It follows the file-object family's closed, bounded request and sequenced
 result framing without importing its operation implementation or exposing gate control through
