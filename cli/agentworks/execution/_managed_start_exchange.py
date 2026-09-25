@@ -401,6 +401,8 @@ def start_managed_run(
         raise ValidationError("Managed start preparation has not been claimed")
     prepared._claimed = False
     try:
+        if deadline.expired:
+            raise ValidationError("Managed start deadline has expired before dispatch admission")
         if before_possible_dispatch is not None:
             before_possible_dispatch()
         candidate: ManagedStartCandidate | None = None

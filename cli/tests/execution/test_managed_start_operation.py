@@ -438,15 +438,42 @@ def test_owner_close_after_registration_before_arming_resolves_unused_row(
 ) -> None:
     database, repository, _, owner = owned
     carrier = Carrier(lambda request: _records(request, receipt=True))
+    original = OperationBorrow.arm_dispatch_obligation
 
     def close_before_arm(self: OperationBorrow) -> None:
         with pytest.raises(StateError):
             owner.close()
-        raise StateError("interrupted before arming")
+        original(self)
 
     monkeypatch.setattr(OperationBorrow, "arm_dispatch_obligation", close_before_arm)
     with pytest.raises(StateError) as caught:
         _start(owned, carrier)
+    assert isinstance(caught.value.__cause__, ManagedStartControlFact)
+    assert not caught.value.__cause__.outcome.requires_owner_retention
+    assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
+    assert database.operations.list_lifecycle_obligations(owner.ownership)[0].state is LifecycleObligationState.RESOLVED
+    assert carrier.calls == 0
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+def test_deadline_expiring_during_registration_resolves_unused_obligation(
+    owned: tuple[Database, ManagedRunRepository, ManagedRunRecord, OperationOwner], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database, repository, _, owner = owned
+    carrier = Carrier(lambda request: _records(request, receipt=True))
+    deadline = Deadline.after(10)
+    original = OperationBorrow.install_dispatch_obligation
+
+    def expire_after_registration(self: OperationBorrow, *args: object, **kwargs: object) -> object:
+        row = original(self, *args, **kwargs)  # type: ignore[arg-type]
+        object.__setattr__(deadline, "expires_at", 0.0)
+        return row
+
+    monkeypatch.setattr(OperationBorrow, "install_dispatch_obligation", expire_after_registration)
+    with pytest.raises(ValidationError) as caught:
+        _start(owned, carrier, deadline=deadline)
     assert isinstance(caught.value.__cause__, ManagedStartControlFact)
     assert not caught.value.__cause__.outcome.requires_owner_retention
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
