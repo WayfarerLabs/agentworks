@@ -2082,6 +2082,16 @@ RunContext factory, native delivery drain and recovery remain open.
       evidence of that `OperationOwner` exclusion. Cover interrupted provisioning, repeated reinit,
       retained work, deletion and numeric UID reuse without repairing or replacing a live gate file.
 
+The account lifecycle audit found the shared create/reinit seam in `create_agent_on_vm`, after
+`useradd` or account convergence and before agent-level SSH. Standalone deletion currently continues
+after a best-effort remote cleanup failure and cannot establish safe UID retirement. Complete the
+owned VM lifecycle boundary first, then provision and retire the gate namespace with those callers;
+do not add an unused standalone ensure/retire API. Use a separate persistent `systemd-tmpfiles` rule
+per managed UID rather than rewriting bootstrap's root/admin rule file, which bootstrap replaces on
+replay. Retire the rule and directory only after the old helper and gate obligations are proved
+quiescent, before freeing the numeric UID. Neither the existing local mutation guard nor `pkill`
+alone provides that proof.
+
 The private bound-row correction now checks the deterministic VM/UID/guest gate path at the
 `file-call` codec boundary as well as the setup-only path. A substituted but syntactically valid
 gate name refuses during payload construction or decode. Focused obligation and spawned recovery
