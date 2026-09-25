@@ -10,6 +10,7 @@ import pytest
 from agentworks.db import Database, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _fixed_helper_operation as fixed_operation
+from agentworks.execution import _managed_observe_access as access
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._managed_job_protocol import StreamDisposition, decode_managed_job_fact
@@ -225,13 +226,19 @@ def test_carrier_base_exception_preserves_original_with_custody_fact(tmp_path: P
         database.close()
 
 
+@pytest.mark.parametrize("read", [False, True])
 def test_release_base_exception_preserves_original_with_custody_fact(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, read: bool
 ) -> None:
     database, repository, owner = _reserved(tmp_path)
     interrupted = KeyboardInterrupt("release interrupted")
+    secret = b"release-private-output"
     carrier = ScriptedCarrier(
-        lambda request: _records(request.nonce, ManagedResultControl((FactName.LAUNCH,)), (request.expected_launch,))
+        lambda request: (
+            _output_reply(request, disposition="complete-capture", content=secret)
+            if read
+            else _records(request.nonce, ManagedResultControl((FactName.LAUNCH,)), (request.expected_launch,))
+        )
     )
 
     def fail_release(*_args: object, **_kwargs: object) -> None:
@@ -240,10 +247,19 @@ def test_release_base_exception_preserves_original_with_custody_fact(
     monkeypatch.setattr(fixed_operation, "release_borrow_after_custody", fail_release)
     try:
         with pytest.raises(KeyboardInterrupt) as raised:
-            _observe(repository, owner, carrier)
+            if read:
+                _read(repository, owner, carrier)
+            else:
+                _observe(repository, owner, carrier)
         assert raised.value is interrupted
         assert isinstance(interrupted.__cause__, ManagedObserveControlFact)
         assert interrupted.__cause__.outcome.candidate is not None
+        if read:
+            observation = interrupted.__cause__.outcome.candidate.observation
+            assert observation is not None
+            assert observation.state is ManagedObservationState.AVAILABLE
+            assert observation.output is None
+            assert secret not in repr(interrupted.__cause__.outcome).encode()
         assert interrupted.__cause__.outcome.coordination_uncertain
         assert interrupted.__cause__.outcome.requires_owner_retention
         assert carrier.calls == 1
@@ -272,6 +288,7 @@ def test_read_admits_exact_captured_prefix_under_persisted_bound(
         assert outcome.attempt.candidate is not None
         assert outcome.attempt.candidate.observation is not None
         assert outcome.attempt.candidate.observation.state is ManagedObservationState.AVAILABLE
+        assert outcome.attempt.candidate.observation.output is None
         assert not outcome.attempt.requires_owner_retention
         assert carrier.calls == 1
         assert repository.inspect(RUN) == row
@@ -280,7 +297,7 @@ def test_read_admits_exact_captured_prefix_under_persisted_bound(
         database.close()
 
 
-def test_read_rejects_capture_over_persisted_bound_but_preserves_raw_candidate(tmp_path: Path) -> None:
+def test_read_rejects_capture_over_persisted_bound_without_exposing_raw_bytes(tmp_path: Path) -> None:
     database, repository, owner = _reserved(tmp_path, ManagedOutputPolicy(ManagedOutputMode.CAPTURE, 2))
     carrier = ScriptedCarrier(lambda request: _output_reply(request, disposition="truncated-capture", content=b"abc"))
     try:
@@ -289,7 +306,7 @@ def test_read_rejects_capture_over_persisted_bound_but_preserves_raw_candidate(t
         assert outcome.attempt.candidate is not None
         assert outcome.attempt.candidate.observation is not None
         assert outcome.attempt.candidate.observation.state is ManagedObservationState.AVAILABLE
-        assert outcome.attempt.candidate.observation.output == b"abc"
+        assert outcome.attempt.candidate.observation.output is None
         assert carrier.calls == 1
     finally:
         database.close()
@@ -394,5 +411,32 @@ def test_read_ambiguous_dispatch_retains_custody_and_does_not_admit_output(tmp_p
         assert carrier.calls == 1 and repository.inspect(RUN) == row
         with pytest.raises(StateError):
             owner.borrow()
+    finally:
+        database.close()
+
+
+def test_read_reducer_base_exception_preserves_original_with_sanitized_custody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database, repository, owner = _reserved(tmp_path)
+    secret = b"reducer-private-output"
+    carrier = ScriptedCarrier(lambda request: _output_reply(request, disposition="complete-capture", content=secret))
+    interrupted = KeyboardInterrupt("reducer interrupted")
+
+    def fail_reducer(*_args: object) -> None:
+        raise interrupted
+
+    monkeypatch.setattr(access, "_admit_output", fail_reducer)
+    try:
+        with pytest.raises(KeyboardInterrupt) as raised:
+            _read(repository, owner, carrier)
+        assert raised.value is interrupted
+        assert isinstance(interrupted.__cause__, ManagedObserveControlFact)
+        attempt = interrupted.__cause__.outcome
+        assert attempt.candidate is not None and attempt.candidate.observation is not None
+        assert attempt.candidate.observation.state is ManagedObservationState.AVAILABLE
+        assert attempt.candidate.observation.output is None
+        assert not attempt.requires_owner_retention
+        assert carrier.calls == 1
     finally:
         database.close()

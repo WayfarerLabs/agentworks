@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from agentworks.db import OperationResourceKind
@@ -17,9 +17,8 @@ from ._managed_job_protocol import (
     StreamEndFact,
     decode_managed_job_fact,
     encode_managed_job_fact,
-    fact_matches_receipt,
 )
-from ._managed_job_store import FactName, Stream
+from ._managed_job_store import Stream
 from ._managed_observation_exchange import (
     ManagedObservationCandidate,
     ManagedObservationState,
@@ -46,7 +45,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True, repr=False)
 class ManagedObserveOutcome:
-    """Raw one-attempt observation and explicit operation custody state."""
+    """One-attempt evidence and explicit operation custody state."""
 
     candidate: ManagedObservationCandidate | None = field(default=None, repr=False)
     pending_remote_effects: bool = False
@@ -64,7 +63,7 @@ class ManagedObserveControlFact(Exception):
 
 @dataclass(frozen=True, slots=True, repr=False)
 class ManagedReadOutputOutcome:
-    """One raw attempt and its policy-admitted selected stream, if any."""
+    """One sanitized attempt and its policy-admitted selected stream, if any."""
 
     attempt: ManagedObserveOutcome
     disposition: StreamDisposition | None = None
@@ -124,7 +123,7 @@ def read_bound_managed_output(
     """Read one exact closed stream and admit it under persisted output policy."""
     if type(stream) is not Stream:
         raise ValidationError("Managed output requires one selected stream")
-    record, receipt, attempt = _bound_exchange(
+    record, raw_candidate, attempt = _bound_exchange(
         repository,
         identity,
         target=target,
@@ -137,7 +136,7 @@ def read_bound_managed_output(
         stream=stream,
     )
     try:
-        disposition, output = _admit_output(record, receipt, stream, attempt)
+        disposition, output = _admit_output(record, raw_candidate)
     except BaseException as control:
         raise control from ManagedObserveControlFact(attempt)
     return ManagedReadOutputOutcome(attempt, disposition, output)
@@ -155,7 +154,7 @@ def _bound_exchange(
     deadline: Deadline,
     owner: OperationOwner,
     stream: Stream | None,
-) -> tuple[ManagedRunRecord, ManagedRunReceipt, ManagedObserveOutcome]:
+) -> tuple[ManagedRunRecord, ManagedObservationCandidate | None, ManagedObserveOutcome]:
     if (
         type(identity) is not ManagedRunIdentity
         or type(target) is not ManagedTargetIdentity
@@ -215,7 +214,7 @@ def _bound_exchange(
     except BaseException as control:
         custody, _ = operation.release(control_escaped=True)
         outcome = ManagedObserveOutcome(
-            candidate,
+            _without_output(candidate) if stream is not None else candidate,
             custody.pending_remote_effects,
             custody.coordination_uncertain,
             custody.requires_owner_retention,
@@ -224,36 +223,37 @@ def _bound_exchange(
 
     custody, release_error = operation.release()
     outcome = ManagedObserveOutcome(
-        candidate, custody.pending_remote_effects, custody.coordination_uncertain, custody.requires_owner_retention
+        _without_output(candidate) if stream is not None else candidate,
+        custody.pending_remote_effects,
+        custody.coordination_uncertain,
+        custody.requires_owner_retention,
     )
     if release_error is not None:
         raise release_error from ManagedObserveControlFact(outcome)
-    return record, receipt, outcome
+    return record, candidate, outcome
+
+
+def _without_output(candidate: ManagedObservationCandidate | None) -> ManagedObservationCandidate | None:
+    """Keep read evidence while stripping bytes before it leaves this module."""
+    if candidate is None or candidate.observation is None:
+        return candidate
+    return replace(candidate, observation=replace(candidate.observation, output=None))
 
 
 def _admit_output(
     record: ManagedRunRecord,
-    receipt: ManagedRunReceipt,
-    stream: Stream,
-    attempt: ManagedObserveOutcome,
+    candidate: ManagedObservationCandidate | None,
 ) -> tuple[StreamDisposition | None, bytes | None]:
-    candidate = attempt.candidate
     if candidate is None or candidate.observation is None:
         return None, None
     observation = candidate.observation
-    end_name = FactName.STDOUT_END if stream is Stream.STDOUT else FactName.STDERR_END
-    facts = observation.facts
-    if (
-        len(facts) != 2
-        or facts[0] != (FactName.LAUNCH, encode_managed_job_fact(receipt))
-        or facts[1][0] is not end_name
-    ):
+    if observation.state not in (ManagedObservationState.AVAILABLE, ManagedObservationState.UNAVAILABLE):
         return None, None
     try:
-        end = decode_managed_job_fact(facts[1][1])
-    except ManagedJobFactError:
+        end = decode_managed_job_fact(observation.facts[1][1])
+    except (ManagedJobFactError, IndexError):
         return None, None
-    if not isinstance(end, StreamEndFact) or end.stream.value != stream.value or not fact_matches_receipt(end, receipt):
+    if not isinstance(end, StreamEndFact):
         return None, None
 
     policy = record.output_policy
@@ -265,7 +265,6 @@ def _admit_output(
             and output is not None
             and policy.capture_prefix_bytes is not None
             and end.retained_bytes <= policy.capture_prefix_bytes
-            and len(output) == end.retained_bytes
         ):
             return end.disposition, output
     elif (
