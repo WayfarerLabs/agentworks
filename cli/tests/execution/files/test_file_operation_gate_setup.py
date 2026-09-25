@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from dataclasses import replace
 from pathlib import Path
 
@@ -81,6 +82,19 @@ class _InspectingCarrier(LocalCarrier):
         if self.calls == 1 and self._fail_setup == "malformed":
             return replace(result, stdout=replace(result.stdout, complete=False))
         return result
+
+
+class _DelayedSetupCarrier(LocalCarrier):
+    def __init__(self, started: threading.Event, release: threading.Event) -> None:
+        super().__init__()
+        self._started = started
+        self._release = release
+
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        self._started.set()
+        if not self._release.wait(10):
+            raise TimeoutError("delayed setup was not released")
+        return super().execute(invocation, io=io, deadline=deadline)
 
 
 def _fixture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Path]:
@@ -392,6 +406,52 @@ def test_recovered_setup_only_inspection_settles_that_obligation_without_helper_
         recovered.record_effects_resolved()
         recovered.close()
     finally:
+        database.close()
+
+
+def test_delayed_setup_cannot_publish_or_start_snapshot_after_takeover(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, gate_root = _fixture(monkeypatch, tmp_path)
+    database = Database(tmp_path / "state.db")
+    owner, operation, setup = _context(database, gate_root)
+    existing = setup_file_effect_gate(setup.path, _GUEST, os.geteuid(), "core-file-vm", lambda: _GUEST)
+    started = threading.Event()
+    release = threading.Event()
+    carrier = _DelayedSetupCarrier(started, release)
+    errors: list[BaseException] = []
+
+    def old_controller() -> None:
+        try:
+            _call(operation, carrier, source, setup)
+        except BaseException as error:
+            errors.append(error)
+
+    thread = threading.Thread(target=old_controller, daemon=True)
+    try:
+        thread.start()
+        assert started.wait(10)
+        recovered = OperationOwner.recover(database.operations, owner.ownership, "c" * 32)
+        row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
+        assert decode_file_call_obligation(row.payload).gate_setup == setup
+        inspected = FileGateSetupRecovery.open(recovered, target_for_owner(recovered), row).inspect(
+            LocalCarrier(), deadline=Deadline.after(20)
+        )
+        assert inspected.observation is not None and inspected.observation.binding == existing
+        assert (
+            database.operations.list_lifecycle_obligations(recovered.ownership)[0].state
+            is LifecycleObligationState.RESOLVED
+        )
+        release.set()
+        thread.join(10)
+        assert not thread.is_alive()
+        assert len(errors) == 1 and isinstance(errors[0], StateError)
+        assert carrier.calls == 1
+        recovered.record_effects_resolved()
+        recovered.close()
+    finally:
+        release.set()
+        thread.join(10)
         database.close()
 
 
