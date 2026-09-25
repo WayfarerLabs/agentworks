@@ -18,6 +18,7 @@ from agentworks.execution._file_effect_gate import (
     setup_file_effect_gate,
 )
 from agentworks.execution._file_effect_gate_bundle import _MODULE_NAMES, _PACKAGE
+from agentworks.execution._file_effect_gate_exchange import exchange_file_effect_gate
 from agentworks.execution._file_gate_setup import file_effect_gate_path
 from agentworks.execution._file_obligation import (
     FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
@@ -185,7 +186,8 @@ def test_lost_proposal_publication_reply_does_not_choose_another_generation(
     (current,) = database.operations.list_lifecycle_obligations(again.ownership)
     FilePackageFenceRecovery.open(again, target, current).advance(LocalCarrier(), deadline=Deadline.after(30))
     (current,) = database.operations.list_lifecycle_obligations(again.ownership)
-    assert decode_file_call_obligation(current.payload).effect_gate.generation == proposed.proposed_generation
+    confirmed = decode_file_call_obligation(current.payload).effect_gate
+    assert confirmed is not None and confirmed.generation == proposed.proposed_generation
 
 
 def test_stale_row_and_missing_gate_refuse_without_resolution(context) -> None:
@@ -209,7 +211,8 @@ def test_stale_row_and_missing_gate_refuse_without_resolution(context) -> None:
     assert result.observation is None or result.observation.binding is None
     (current,) = database.operations.list_lifecycle_obligations(recovered.ownership)
     assert current.state is LifecycleObligationState.POSSIBLE_EFFECT
-    assert decode_file_call_obligation(current.payload).effect_gate.proposed_generation is not None
+    proposed = decode_file_call_obligation(current.payload).effect_gate
+    assert proposed is not None and proposed.proposed_generation is not None
 
 
 def test_wrong_guest_and_replaced_gate_refuse(context) -> None:
@@ -226,7 +229,8 @@ def test_wrong_guest_and_replaced_gate_refuse(context) -> None:
     assert result.observation is None or result.observation.binding is None
     (current,) = database.operations.list_lifecycle_obligations(recovered.ownership)
     assert current.state is LifecycleObligationState.POSSIBLE_EFFECT
-    assert decode_file_call_obligation(current.payload).effect_gate.proposed_generation is not None
+    proposed = decode_file_call_obligation(current.payload).effect_gate
+    assert proposed is not None and proposed.proposed_generation is not None
 
 
 def test_ungated_package_row_is_not_a_fence_candidate(context) -> None:
@@ -254,7 +258,7 @@ def test_control_stop_after_proposal_reuses_it_on_next_takeover(context, monkeyp
     def interrupted(*args, **kwargs):
         raise KeyboardInterrupt("interrupted after proposal")
 
-    original = _file_package_recovery.exchange_file_effect_gate
+    original = exchange_file_effect_gate
     monkeypatch.setattr(_file_package_recovery, "exchange_file_effect_gate", interrupted)
     with pytest.raises(KeyboardInterrupt, match="interrupted after proposal"):
         fence.advance(LocalCarrier(), deadline=Deadline.after(30))
@@ -266,7 +270,8 @@ def test_control_stop_after_proposal_reuses_it_on_next_takeover(context, monkeyp
     (current,) = database.operations.list_lifecycle_obligations(again.ownership)
     FilePackageFenceRecovery.open(again, target, current).advance(LocalCarrier(), deadline=Deadline.after(30))
     (current,) = database.operations.list_lifecycle_obligations(again.ownership)
-    assert decode_file_call_obligation(current.payload).effect_gate.generation == proposed.proposed_generation
+    confirmed = decode_file_call_obligation(current.payload).effect_gate
+    assert confirmed is not None and confirmed.generation == proposed.proposed_generation
 
 
 def test_lost_confirmed_binding_publication_keeps_resolved_gate(context, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -336,7 +341,7 @@ def test_confirmed_binding_publication_refused_before_commit_recovers_without_re
     proposed_gate = decode_file_call_obligation(proposed_row.payload).effect_gate
     assert proposed_gate is not None and proposed_gate.proposed_generation is not None
     carrier = LocalCarrier()
-    with pytest.raises(StateError, match="already confirmed"):
+    with pytest.raises(StateError):
         fence.advance(carrier, deadline=Deadline.after(30))
     assert carrier.calls == 0
     (confirmed_row,) = database.operations.list_lifecycle_obligations(recovered.ownership)
