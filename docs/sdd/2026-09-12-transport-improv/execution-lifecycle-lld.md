@@ -362,11 +362,15 @@ resolves. No database stop-state field is introduced.
 The private host-bound stop checkpoint implements this one-attempt shape under a caller-held exact
 VM owner. Shared preflight checks the persisted independent resource-owned VM run and matching
 current guest facts; stop additionally requires a reconciled launch receipt. Its `managed-stop`
-obligation persists only the canonical run ID; the stop exchange arms it after deterministic
-validation and before carrier dispatch. Settled `NOT_SENT` or complete, validated
-`ACCEPTED`/`TERMINATED` resolves the temporary obligation. Unknown or failed delivery and
+obligation persists only the canonical run ID; the borrowed carrier's ordinary `begin_attempt` arms
+it after deterministic validation and before carrier dispatch. Settled `NOT_SENT` or complete,
+validated `ACCEPTED`/`TERMINATED` resolves the temporary obligation. Unknown or failed delivery and
 interrupted arming retain it with the original control exception and custody facts. This is hermetic
 host binding, not proof of provider route freshness, recovery takeover or native SSH/QGA delivery.
+The shared row preflight can compare the guest's derived boot with the persisted target, but cannot
+derive the opaque incarnation fingerprint without the provider locator and persisted marker. Its
+caller must supply a target composed from the selected locator and that same observed guest marker
+before invoking any later-action adapter. A boot-only match is not sufficient production authority.
 
 The first `dispose` mechanism is an explicit authorized release of terminal retained artifacts, not
 a retention timer or a synonym for stop. Before committing release, the fixed helper requires the

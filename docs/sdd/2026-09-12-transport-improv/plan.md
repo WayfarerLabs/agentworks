@@ -1509,6 +1509,17 @@ distinct from termination. The narrow local selection passed 21 tests, Ruff and 
 takeover, production route freshness, host-bound disposal, live SSH/QGA proof and public JobAccess
 remain open.
 
+Correction `9f4a8d50f` removes the redundant stop-specific arm callback: the borrowed carrier's
+existing attempt admission already durably arms the supplied obligation after validation and before
+delivery. Start and stop now share one canonical run-ID obligation codec while keeping distinct
+obligation kinds. The corrected narrow selection passed 17 tests, Ruff and mypy.
+
+The shared later-action preflight does not itself prove the guest marker used in the target's
+incarnation fingerprint: it has no provider locator or persisted marker input. Production callers
+must compose the exact target from the selected locator and the same observed guest marker before
+observe, read-output or stop admission, then revalidate route freshness at dispatch. Matching the
+derived boot alone is not a production target-binding proof.
+
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared
       create bootstrap. Migration 41 leaves legacy rows NULL; ordinary existing-VM operations never
