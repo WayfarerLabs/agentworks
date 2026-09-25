@@ -430,8 +430,13 @@ borrowing a caller-held VM operation owner. It constructs the expected launch fr
 specification and makes one fenced read-only observation attempt. It returns raw facts and custody
 state; on interrupted control flow the original exception remains primary with custody facts as its
 cause. It does not update the run row, choose an output view, reconcile uncertainty, release the
-owner, or establish a production provider route. Read-output, stop and dispose still need equivalent
-host binding; their guest fences alone do not establish it.
+owner, or establish a production provider route. Its private read-output sibling uses the same
+exact-run admission and custody path. Only a validated selected stream end matching the persisted
+capture policy and prefix bound admits bytes; discard and sensitivity suppression require their
+matching no-output dispositions. The raw candidate is retained only as internal evidence and cannot
+be forwarded as a caller-facing output view. This does not reconcile job state or establish
+production route freshness. Stop and dispose still need equivalent host binding; their guest fences
+alone do not establish it.
 
 Before arming, a refused registration, expired deadline or owner close releases the unused borrow;
 an installed but unarmed obligation resolves during that release. A failed reservation leaves the

@@ -521,7 +521,13 @@ custody for one fenced observation attempt, and reports both the raw candidate a
 must be retained after uncertain delivery. Escaping control flow keeps its original exception with
 custody facts attached as its cause. The caller must supply fresh target and guest facts, keep the
 selected provider route current, and retain or release the owner explicitly. This adapter neither
-reconciles run state nor reduces output policy; it is not JobAccess or RunContext.
+reconciles run state nor establishes production routing; it is not JobAccess or RunContext. Its
+private read-output sibling uses the same exact-run admission and custody path for one selected
+closed stream. It accepts bytes only after the validated end fact agrees with the run's persisted
+capture policy and prefix bound. Discard and sensitivity suppression accept only their matching
+no-output end facts. The raw candidate remains internal evidence even when policy admission fails;
+it must not be forwarded as a caller-facing output view. Missing or conflicting evidence stays
+unaccepted.
 
 `_managed_stop_exchange.py` supplies the separate private stop attempt over the same carrier
 interface. Its fixed Python 3.11 Linux root helper revalidates the exact launch, publishes the

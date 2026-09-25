@@ -1480,6 +1480,16 @@ stop/disposal run passed 94 tests; a redundant rerun exhausted scratch space whi
 test fixture, not on a code assertion. Host-bound action composition, current provider route,
 recovery, native SSH/QGA proof and public JobAccess remain open.
 
+At private checkpoint `c975c4f1b`, one host-bound closed-stream read shares the exact persisted VM
+run admission and borrowed custody path with observation. It reduces the raw candidate against the
+persisted output policy: complete or truncated capture requires a validated stream end and retained
+bytes within the reserved prefix bound; discard and sensitivity suppression require matching
+no-output end facts. Missing, mismatched, invalid or uncertain evidence is not accepted. The raw
+candidate is internal evidence, never a caller-facing output view; the adapter does not mutate the
+run row or release the caller's owner. Route freshness, job-state reconciliation, host-bound stop
+and disposal, recovery, live SSH/QGA proof and public JobAccess remain open. Focused hermetic tests
+pass, not native integration.
+
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared
       create bootstrap. Migration 41 leaves legacy rows NULL; ordinary existing-VM operations never
