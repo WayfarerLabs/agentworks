@@ -8,7 +8,7 @@ import sys
 
 from ._helper_identity import matches_current_identity
 from ._workload_shell_protocol import (
-    MAX_WORKLOAD_SHELL_MESSAGE_BYTES,
+    MAX_WORKLOAD_SHELL_REQUEST_BYTES,
     SUPPORTED_SHELLS,
     WorkloadShellFailure,
     WorkloadShellResponse,
@@ -20,8 +20,8 @@ from ._workload_shell_protocol import (
 
 def _read_request() -> bytes:
     data = bytearray()
-    while len(data) <= MAX_WORKLOAD_SHELL_MESSAGE_BYTES:
-        chunk = os.read(0, MAX_WORKLOAD_SHELL_MESSAGE_BYTES + 1 - len(data))
+    while len(data) <= MAX_WORKLOAD_SHELL_REQUEST_BYTES:
+        chunk = os.read(0, MAX_WORKLOAD_SHELL_REQUEST_BYTES + 1 - len(data))
         if not chunk:
             break
         data.extend(chunk)

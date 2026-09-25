@@ -17,15 +17,18 @@ from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState,
 from agentworks.execution._workload_shell import (
     WorkloadShellObservationError,
     WorkloadShellObservationState,
+    _BoundedResponseSink,
     observe_workload_shell,
 )
 from agentworks.execution._workload_shell_bundle import FIXED_SOURCE
 from agentworks.execution._workload_shell_protocol import (
-    MAX_WORKLOAD_SHELL_MESSAGE_BYTES,
+    MAX_WORKLOAD_SHELL_REQUEST_BYTES,
+    MAX_WORKLOAD_SHELL_RESPONSE_BYTES,
     WorkloadShellFailure,
     WorkloadShellRequest,
     WorkloadShellResponse,
     WorkloadShellWireError,
+    decode_workload_shell_request,
     decode_workload_shell_response,
     encode_workload_shell_request,
     encode_workload_shell_response,
@@ -153,7 +156,7 @@ def test_guest_identity_mismatch_refuses_before_lookup() -> None:
     ("payload", "error"),
     [
         (b"{", WorkloadShellObservationError.RESPONSE),
-        (b"x" * (MAX_WORKLOAD_SHELL_MESSAGE_BYTES + 1), WorkloadShellObservationError.OVERSIZED),
+        (b"x" * (MAX_WORKLOAD_SHELL_RESPONSE_BYTES + 1), WorkloadShellObservationError.OVERSIZED),
         (b"", WorkloadShellObservationError.MISSING),
     ],
 )
@@ -191,6 +194,24 @@ def test_nonce_and_canonical_response_are_required() -> None:
         decode_workload_shell_response(response, "b" * 32)
     with pytest.raises(WorkloadShellWireError):
         decode_workload_shell_response(response + b" ", NONCE)
+
+
+def test_response_limit_is_small_and_clears_oversized_capture() -> None:
+    sink = _BoundedResponseSink()
+    sink.try_write(memoryview(b"x" * MAX_WORKLOAD_SHELL_RESPONSE_BYTES))
+    assert len(sink.data) == MAX_WORKLOAD_SHELL_RESPONSE_BYTES
+    sink.try_write(memoryview(b"y"))
+    assert sink.oversized
+    assert not sink.data
+    with pytest.raises(WorkloadShellWireError):
+        decode_workload_shell_response(b"x" * (MAX_WORKLOAD_SHELL_RESPONSE_BYTES + 1), NONCE)
+
+
+def test_large_valid_identity_request_remains_bounded() -> None:
+    identity = IdentityExpectation(1, 1, tuple(range(65_536)))
+    request = encode_workload_shell_request(WorkloadShellRequest(NONCE, identity))
+    assert MAX_WORKLOAD_SHELL_RESPONSE_BYTES < len(request) <= MAX_WORKLOAD_SHELL_REQUEST_BYTES
+    assert decode_workload_shell_request(request).identity == identity
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux identity helper")

@@ -9,7 +9,8 @@ from typing import Any
 
 from ._helper_identity import IdentityExpectation, decode_identity
 
-MAX_WORKLOAD_SHELL_MESSAGE_BYTES = 1_048_576
+MAX_WORKLOAD_SHELL_REQUEST_BYTES = 1_048_576
+MAX_WORKLOAD_SHELL_RESPONSE_BYTES = 256
 SUPPORTED_SHELLS = frozenset({"/bin/sh", "/usr/bin/sh", "/bin/bash", "/usr/bin/bash"})
 _HEX = frozenset("0123456789abcdef")
 
@@ -56,8 +57,8 @@ def _unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def _object(data: bytes) -> dict[str, Any]:
-    if type(data) is not bytes or len(data) > MAX_WORKLOAD_SHELL_MESSAGE_BYTES:
+def _object(data: bytes, limit: int) -> dict[str, Any]:
+    if type(data) is not bytes or len(data) > limit:
         raise WorkloadShellWireError
     try:
         value = json.loads(data.decode("ascii"), object_pairs_hook=_unique)
@@ -81,13 +82,13 @@ def encode_workload_shell_request(request: WorkloadShellRequest) -> bytes:
     if type(request) is not WorkloadShellRequest or not _nonce(request.nonce):
         raise WorkloadShellWireError
     data = _json({"identity": _identity(request.identity), "nonce": request.nonce, "version": 1})
-    if len(data) > MAX_WORKLOAD_SHELL_MESSAGE_BYTES:
+    if len(data) > MAX_WORKLOAD_SHELL_REQUEST_BYTES:
         raise WorkloadShellWireError
     return data
 
 
 def decode_workload_shell_request(data: bytes) -> WorkloadShellRequest:
-    value = _object(data)
+    value = _object(data, MAX_WORKLOAD_SHELL_REQUEST_BYTES)
     if (
         set(value) != {"identity", "nonce", "version"}
         or type(value["version"]) is not int
@@ -116,13 +117,16 @@ def encode_workload_shell_response(nonce: str, response: WorkloadShellResponse) 
         value = {"failure": response.failure.value, "nonce": nonce, "status": "refused", "version": 1}
     else:
         raise WorkloadShellWireError
-    return _json(value)
+    data = _json(value)
+    if len(data) > MAX_WORKLOAD_SHELL_RESPONSE_BYTES:
+        raise WorkloadShellWireError
+    return data
 
 
 def decode_workload_shell_response(data: bytes, nonce: str) -> WorkloadShellResponse:
     if not _nonce(nonce):
         raise WorkloadShellWireError
-    value = _object(data)
+    value = _object(data, MAX_WORKLOAD_SHELL_RESPONSE_BYTES)
     if value.get("nonce") != nonce or type(value.get("version")) is not int or value["version"] != 1:
         raise WorkloadShellWireError
     if (

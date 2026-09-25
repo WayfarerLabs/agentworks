@@ -16,7 +16,7 @@ from agentworks.execution._runtime_prerequisite import (
 )
 from agentworks.execution._workload_shell_bundle import FIXED_SOURCE
 from agentworks.execution._workload_shell_protocol import (
-    MAX_WORKLOAD_SHELL_MESSAGE_BYTES,
+    MAX_WORKLOAD_SHELL_RESPONSE_BYTES,
     WorkloadShellFailure,
     WorkloadShellRequest,
     WorkloadShellWireError,
@@ -80,7 +80,7 @@ class _BoundedResponseSink:
 
     def try_write(self, data: memoryview) -> int:
         if data and not self.oversized:
-            if len(data) > MAX_WORKLOAD_SHELL_MESSAGE_BYTES - len(self.data):
+            if len(data) > MAX_WORKLOAD_SHELL_RESPONSE_BYTES - len(self.data):
                 self.data.clear()
                 self.oversized = True
             else:
