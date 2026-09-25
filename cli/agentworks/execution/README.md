@@ -31,8 +31,10 @@ the protocol's own asset ceiling is not a promise that every carrier can deliver
 Possible dispatch is recorded durably before the sole carrier effect. An exact launch fact can
 confirm a receipt independently of the systemd client exit, while acknowledgement also requires
 trusted complete helper/carrier evidence and a zero client outcome. Separate private stop and
-disposal exchanges exist, but none of these slices provides public jobs, live target-marker rereads
-or production SSH/QGA proof.
+disposal exchanges exist, but none of these slices provides public jobs or production SSH/QGA proof.
+The private start helper now checks the fixed guest marker, kernel boot and PID 1 start time before
+opening the store or launching systemd. This is a guest-side fence, not proof that a production
+caller selected and retained the right provider route.
 
 `_managed_start_operation.py` adds temporary exact-VM operation custody for one already reserved
 independent start. Its `managed-start` obligation stores only the canonical run ID. Start
@@ -56,12 +58,13 @@ private start kernel accepts pre-reservation carrier preparation. `_managed_job_
 composes a supplied exact-VM target, workload and root identity plans, finite request, carrier
 preflight, reservation and owned start. `USER_DEFAULT` first observes the workload account shell
 under a borrow; unresolved or uncertain observation creates no run row. This is not a production
-caller or job API. The caller must still hold the selected route and reread the current target
-marker and boot before launch. Once a reservation succeeds, a later refusal may retain its
-`RESERVED` row as a one-shot tombstone. The caller keeps the supplied run ID, inspects it after any
-escaping failure, and never retries start with that ID; a still-armed or uncertain obligation keeps
-owner custody. Recovery, later job actions, native SSH/QGA proof and RunContext delivery remain
-open.
+caller or job API. The caller must still hold the selected route and revalidate the provider locator
+and current target before launch. The guest helper independently rereads its fixed identity paths
+and refuses a mismatch before opening the store. Once a reservation succeeds, a later refusal may
+retain its `RESERVED` row as a one-shot tombstone. The caller keeps the supplied run ID, inspects it
+after any escaping failure, and never retries start with that ID. A still-armed or uncertain
+obligation keeps owner custody. Recovery, later job actions, native SSH/QGA proof and RunContext
+delivery remain open.
 
 `models.py` defines immutable literal commands and scripts with explicit `Shell.SH`, `Shell.BASH` or
 `Shell.USER_DEFAULT` selection and separate startup flags. It also defines finite `Input`, bounded

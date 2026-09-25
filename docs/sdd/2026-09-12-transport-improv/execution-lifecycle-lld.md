@@ -221,9 +221,12 @@ possible-dispatch before delivery. Private managed `stop` now durably publishes 
 lets the owned controller terminate its main child and boundary, and distinguishes accepted intent
 from positive boundary emptiness. Private managed `dispose` now requires the complete exact-run
 terminal predicate, commits a launch-linked receipt and removes only validated fixed artifacts;
-exact retry resumes partial cleanup. Crash recovery and live destination behavior remain open.
-Hermetic start/stop/dispose proof does not establish live systemd/cgroup behavior, current target
-marker or boot rereads, or SSH/QGA production delivery.
+exact retry resumes partial cleanup. Crash recovery and live destination behavior remain open. The
+private start request now carries the observed VM guest marker, kernel boot and PID 1 start time.
+Before opening the store or invoking systemd, the bundled guest helper rereads those fixed paths and
+refuses any mismatch; host preparation also compares the derived boot fence with the planned run.
+This is a hermetic guest-side identity fence, not a production provider-route or locator check. Live
+systemd/cgroup behavior and SSH/QGA production delivery remain unproved.
 
 The stream fact is self-describing. Managed-run reservation now persists the requested output policy
 atomically alongside run identity. A future consuming service must compare that policy to each
@@ -405,8 +408,9 @@ fixed `SIGTERM` grace, then uses the existing whole-cgroup cleanup without exten
 Private `dispose` validates the complete terminal predicate, commits the exact launch-linked
 receipt, removes only validated fixed artifacts and accepts success only after receipt-only
 inventory. The five carrier-neutral operations are therefore implemented hermetically. Production
-host reservation/policy reduction and live target marker/boot rereads remain open. SSH and QGA must
-each prove the protocol in production before public exposure.
+host reservation/policy reduction and provider-route revalidation remain open. The private start
+helper rereads fixed guest marker and boot paths, but SSH and QGA must each prove the protocol in
+production before public exposure.
 
 The private ownership-backed start kernel consumes one validated, already reserved independent run
 under an already acquired exact-VM `OperationOwner`. Its core `managed-start` obligation holds

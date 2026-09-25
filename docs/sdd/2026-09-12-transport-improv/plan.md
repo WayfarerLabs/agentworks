@@ -1422,9 +1422,17 @@ as a one-shot tombstone. The caller owns its run ID, inspects it after every esc
 not retry start with that ID, and retains owner custody if obligation or inspection state is
 uncertain. An armed obligation can coexist with a `RESERVED` row; do not delete such a row or invent
 a possible-dispatch timestamp. The existing armed-obligation regression covers that gap. This does
-not constitute a production caller: the selected route must stay held and current marker/boot facts
-must be revalidated at the launch boundary. Interrupted-start recovery, later job actions, native
-SSH/QGA proof and the complete RunContext surface remain open.
+not constitute a production caller: the selected route must stay held and the provider locator must
+be revalidated at the launch boundary. Interrupted-start recovery, later job actions, native SSH/QGA
+proof and the complete RunContext surface remain open.
+
+At private checkpoint `18aa1f4c2`, host preflight binds an observed VM guest identity and verifies
+its derived boot fence against the planned run before reservation. The fixed Python 3.11 guest
+helper rereads the protected marker, kernel boot and PID 1 start time before opening the run store
+or invoking systemd, and refuses mismatch or unsafe evidence without publishing a launch fact. The
+focused proof is hermetic. A production caller must still hold and revalidate the selected provider
+route and locator, compose the exact target, and prove live SSH/QGA delivery; this guest fence alone
+does not satisfy those gates.
 
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared
