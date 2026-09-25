@@ -246,19 +246,8 @@ class WSL2OwnedOperation:
 
     def revalidate_selected_route(self, deadline: Deadline) -> WSL2RouteStatus:
         """Classify fresh route facts; propagate exceptional observations unchanged."""
-        return self._observe_selected_route(deadline)
-
-    def require_selected_route(self, deadline: Deadline) -> None:
-        """Refuse admission unless every selected route fact is fresh and equal."""
-        status = self.revalidate_selected_route(deadline)
-        if status is not WSL2RouteStatus.CURRENT:
-            raise WSL2RouteRefusal(status)
-
-    def _observe_selected_route(self, deadline: Deadline) -> WSL2RouteStatus:
         locator = self._platform.observe_provider_locator(self._vm, self._ctx, deadline=deadline)
         if deadline.expired:
-            return WSL2RouteStatus.UNCONFIRMED
-        if type(locator) is ProviderLocatorUnavailable:
             return WSL2RouteStatus.UNCONFIRMED
         if type(locator) is not ProviderLocator:
             return WSL2RouteStatus.UNCONFIRMED
@@ -290,8 +279,6 @@ class WSL2OwnedOperation:
         confirmation = self._platform.observe_provider_locator(self._vm, self._ctx, deadline=deadline)
         if deadline.expired:
             return WSL2RouteStatus.UNCONFIRMED
-        if type(confirmation) is ProviderLocatorUnavailable:
-            return WSL2RouteStatus.UNCONFIRMED
         if type(confirmation) is not ProviderLocator:
             return WSL2RouteStatus.UNCONFIRMED
         try:
@@ -299,6 +286,12 @@ class WSL2OwnedOperation:
         except (AttributeError, TypeError, ValueError, ValidationError):
             return WSL2RouteStatus.UNCONFIRMED
         return WSL2RouteStatus.CURRENT if confirmed == self._locator else WSL2RouteStatus.CHANGED
+
+    def require_selected_route(self, deadline: Deadline) -> None:
+        """Refuse admission unless every selected route fact is fresh and equal."""
+        status = self.revalidate_selected_route(deadline)
+        if status is not WSL2RouteStatus.CURRENT:
+            raise WSL2RouteRefusal(status)
 
     def release_if_settled(self, deadline: Deadline, *, safe: bool) -> bool:
         """Release the exact hold and whole owner only with resolved obligations."""
