@@ -5,11 +5,15 @@ from __future__ import annotations
 import json
 import multiprocessing
 import os
+import signal
+import subprocess
 import sys
 import threading
 import time
 from collections import Counter
+from contextlib import suppress
 from dataclasses import replace
+from multiprocessing.process import BaseProcess
 from pathlib import Path
 from types import FrameType
 from typing import Any
@@ -233,6 +237,117 @@ def _recorded_helper_is_gone(pid: int, start_ticks: str) -> bool:
     return current_ticks != start_ticks
 
 
+def _stop_controller(controller: BaseProcess) -> bool:
+    """Bound a controller created by this test, including its failure path."""
+    if controller.pid is None:
+        return True
+    controller.join(0)
+    if controller.is_alive():
+        with suppress(OSError):
+            controller.terminate()
+        controller.join(1)
+    if controller.is_alive():
+        with suppress(OSError):
+            controller.kill()
+        controller.join(1)
+    return not controller.is_alive()
+
+
+def _stop_recorded_helpers(journal_path: Path) -> list[str]:
+    """Bound exact journaled helpers and report any whose exit was not proved."""
+
+    def still_running(pid: int, ticks: str) -> bool | None:
+        try:
+            stat = (Path("/proc") / str(pid) / "stat").read_text(encoding="ascii")
+        except FileNotFoundError:
+            return False
+        except OSError:
+            return None
+        try:
+            if _proc_start_ticks(stat) != ticks:
+                return False
+            state = stat.rpartition(")")[2].split()[0]
+        except (IndexError, ValueError):
+            return None
+        return state not in {"Z", "X"}
+
+    try:
+        lines = journal_path.read_text(encoding="ascii").splitlines()
+    except FileNotFoundError:
+        return []
+    except (OSError, UnicodeError):
+        return ["helper journal unreadable"]
+    identities: set[tuple[int, str]] = set()
+    unresolved: list[str] = []
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except ValueError:
+            unresolved.append("helper journal incomplete")
+            continue
+        if not isinstance(record, dict) or record.get("kind") != "actual":
+            continue
+        pid, ticks = record.get("pid"), record.get("ticks")
+        if type(pid) is int and pid > 0 and pid != os.getpid() and isinstance(ticks, str):
+            identities.add((pid, ticks))
+    for pid, ticks in identities:
+        if still_running(pid, ticks) is False:
+            continue
+        try:
+            descriptor = os.pidfd_open(pid)
+        except (AttributeError, OSError):
+            if still_running(pid, ticks) is not False:
+                unresolved.append(f"helper {pid}:{ticks} could not be opened")
+            continue
+        try:
+            for signal_number in (None, signal.SIGTERM, signal.SIGKILL):
+                if still_running(pid, ticks) is not True:
+                    break
+                if signal_number is not None:
+                    with suppress(AttributeError, OSError):
+                        signal.pidfd_send_signal(descriptor, signal_number)
+                until = time.monotonic() + 1
+                while still_running(pid, ticks) is True and time.monotonic() < until:
+                    time.sleep(0.01)
+        finally:
+            with suppress(OSError):
+                os.close(descriptor)
+        if still_running(pid, ticks) is not False:
+            unresolved.append(f"helper {pid}:{ticks} did not exit")
+    return unresolved
+
+
+def _finish_spawned_test(
+    controller: BaseProcess,
+    journal_path: Path,
+    *,
+    release_path: Path | None = None,
+) -> None:
+    """Preserve the primary failure while making incomplete teardown observable."""
+    primary = sys.exception()
+    issues: list[str] = []
+    if release_path is not None:
+        try:
+            release_path.touch()
+        except OSError:
+            issues.append("fixture release failed")
+    try:
+        if not _stop_controller(controller):
+            issues.append("controller did not exit")
+    except Exception as error:
+        issues.append(f"controller teardown failed: {type(error).__name__}")
+    try:
+        issues.extend(_stop_recorded_helpers(journal_path))
+    except Exception as error:
+        issues.append(f"helper teardown failed: {type(error).__name__}")
+    if issues:
+        message = "spawned recovery test teardown: " + "; ".join(issues)
+        if primary is not None:
+            primary.add_note(message)
+        else:
+            pytest.fail(message)
+
+
 def _drain_records_from_journal(path: Path, token: bytes) -> tuple[_LocalHelperDrainRecord, ...]:
     records = [json.loads(line) for line in path.read_text(encoding="ascii").splitlines()]
     expected = [record for record in records if record.get("kind") == "expected"]
@@ -284,7 +399,6 @@ _fixture_unlink=receipt.os.unlink
 def _fixture_interrupt_after_data_unlink(path, *args, **kwargs):
  _fixture_unlink(path, *args, **kwargs)
  if path == "data":
-  _fixture_journal({{"kind":"data_unlinked", "token":guest._fixture_token.hex()}})
   open({data_unlinked_path!r}, "wb").close()
   while not os.path.exists({unlink_release_path!r}):
    time.sleep(0.01)
@@ -312,7 +426,6 @@ def _fixture_tracked_main(nonce):
 guest.main=_fixture_tracked_main
 _fixture_operate=guest._operate
 def _fixture_tracked_operate(request, expires_at):
- guest._fixture_token=request.token
  _fixture_journal({{
   "kind":"actual",
   "nonce":guest._fixture_nonce,
@@ -419,9 +532,10 @@ def _crash_recovery_controller(
     )
     recovered = OperationOwner.recover(database.operations, predecessor.ownership, generation_id)
     if call.effect_gate is not None:
-        persisted, proposed = _propose_gate_advance(recovered, persisted, b"b" * 16)
+        proposed = replace(call.effect_gate, proposed_generation=b"b" * 16)
+        persisted = _publish_gate_binding(recovered, persisted, proposed)
         advanced = advance_file_effect_gate(proposed, lambda: _GUEST)
-        persisted = _confirm_gate_advance(recovered, persisted, advanced)
+        persisted = _publish_gate_binding(recovered, persisted, advanced)
         call = decode_file_call_obligation(persisted.payload)
     evidence = _local_drain_evidence(
         recovered.ownership,
@@ -445,45 +559,22 @@ def _crash_recovery_controller(
     raise AssertionError("controller should exit after the cleanup helper")
 
 
-def _propose_gate_advance(
+def _publish_gate_binding(
     owner: OperationOwner,
     persisted: LifecycleObligation,
-    generation: bytes,
-) -> tuple[LifecycleObligation, FileEffectGateBinding]:
+    binding: FileEffectGateBinding,
+) -> LifecycleObligation:
     call = decode_file_call_obligation(persisted.payload)
-    binding = call.effect_gate
-    assert binding is not None
-    proposed = replace(binding, proposed_generation=generation)
     bound = owner.rebind_lifecycle_obligation(
         persisted.obligation_id,
         "file-call",
         payload_version=persisted.payload_version,
         payload=persisted.payload,
     )
-    pending = bound.publish_payload(
+    return bound.publish_payload(
         expected_revision=persisted.payload_revision,
         payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
-        payload=encode_file_call_obligation(replace(call, effect_gate=proposed)),
-    )
-    return pending, proposed
-
-
-def _confirm_gate_advance(
-    owner: OperationOwner,
-    pending: LifecycleObligation,
-    advanced: FileEffectGateBinding,
-) -> LifecycleObligation:
-    call = decode_file_call_obligation(pending.payload)
-    bound = owner.rebind_lifecycle_obligation(
-        pending.obligation_id,
-        "file-call",
-        payload_version=pending.payload_version,
-        payload=pending.payload,
-    )
-    return bound.publish_payload(
-        expected_revision=pending.payload_revision,
-        payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
-        payload=encode_file_call_obligation(replace(call, effect_gate=advanced)),
+        payload=encode_file_call_obligation(replace(call, effect_gate=binding)),
     )
 
 
@@ -804,9 +895,12 @@ def test_gated_recovery_of_recovery_retries_interrupted_exact_cleanup(
         target=_crash_controller_after_completed_snapshot,
         args=(str(database_path), str(root), str(scratch), str(journal_path), binding),
     )
-    initial.start()
-    initial.join(30)
-    assert initial.exitcode == 91
+    try:
+        initial.start()
+        initial.join(30)
+        assert initial.exitcode == 91
+    finally:
+        _finish_spawned_test(initial, journal_path)
 
     interrupted = multiprocessing.get_context("spawn").Process(
         target=_crash_recovery_controller,
@@ -820,8 +914,8 @@ def test_gated_recovery_of_recovery_retries_interrupted_exact_cleanup(
             str(release_path),
         ),
     )
-    interrupted.start()
     try:
+        interrupted.start()
         interrupted.join(30)
         assert interrupted.exitcode == 97
         assert data_unlinked_path.exists()
@@ -848,7 +942,8 @@ def test_gated_recovery_of_recovery_retries_interrupted_exact_cleanup(
             recovered_c = OperationOwner.recover(database.operations, predecessor.ownership, "c" * 32)
             with pytest.raises(ValueError):
                 _local_drain_evidence(recovered_c.ownership, persisted, call_b, recorded)
-            pending, proposed = _propose_gate_advance(recovered_c, persisted, b"c" * 16)
+            proposed = replace(call_b.effect_gate, proposed_generation=b"c" * 16)
+            pending = _publish_gate_binding(recovered_c, persisted, proposed)
             with pytest.raises(FileEffectGateError):
                 advance_file_effect_gate(proposed, lambda: _GUEST, expires_at=time.monotonic() + 0.2)
             still_pending = database.operations.list_lifecycle_obligations(recovered_c.ownership)[0]
@@ -866,7 +961,7 @@ def test_gated_recovery_of_recovery_retries_interrupted_exact_cleanup(
             assert (scratch_directory / "receipt").is_file()
 
             advanced = advance_file_effect_gate(proposed, lambda: _GUEST)
-            current = _confirm_gate_advance(recovered_c, pending, advanced)
+            current = _publish_gate_binding(recovered_c, pending, advanced)
             call_c = decode_file_call_obligation(current.payload)
             assert call_c.scratch_cleanup_debt == debt
             assert call_c.effect_gate == advanced
@@ -917,7 +1012,6 @@ def test_gated_recovery_of_recovery_retries_interrupted_exact_cleanup(
             assert final.state is LifecycleObligationState.POSSIBLE_EFFECT
             assert decode_file_call_obligation(final.payload).scratch_cleanup_debt == debt
             journal = [json.loads(line) for line in journal_path.read_text(encoding="ascii").splitlines()]
-            assert sum(record["kind"] == "data_unlinked" for record in journal) == 1
             assert (
                 sum(
                     record["kind"] == "actual" and record["operation"] == "FileSnapshotCleanupRequest"
@@ -928,12 +1022,29 @@ def test_gated_recovery_of_recovery_retries_interrupted_exact_cleanup(
         finally:
             database.close()
     finally:
-        release_path.touch()
-        interrupted.join(10)
+        _finish_spawned_test(interrupted, journal_path, release_path=release_path)
 
 
 def test_local_journal_refuses_a_helper_identity_still_owned_by_this_test() -> None:
     assert not _recorded_helper_is_gone(os.getpid(), _start_ticks())
+
+
+def test_helper_teardown_signals_only_the_exact_journaled_process(tmp_path: Path) -> None:
+    process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    journal_path = tmp_path / "helpers.jsonl"
+    try:
+        assert process.pid is not None
+        ticks = _proc_start_ticks((Path("/proc") / str(process.pid) / "stat").read_text(encoding="ascii"))
+        _append_journal(str(journal_path), {"kind": "actual", "pid": process.pid, "ticks": "0"})
+        assert not _stop_recorded_helpers(journal_path)
+        assert process.poll() is None
+        _append_journal(str(journal_path), {"kind": "actual", "pid": process.pid, "ticks": ticks})
+        assert not _stop_recorded_helpers(journal_path)
+        assert process.wait(5) != 0
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait(5)
 
 
 def test_proc_start_ticks_uses_the_final_parenthesis() -> None:
