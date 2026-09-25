@@ -579,7 +579,9 @@ def test_carrier_fault_never_promotes_launch(
     assert attempt.candidate.observation.launch_fact is None
 
 
-@pytest.mark.parametrize("fault", ["output", "target", "lifetime", "expired", "unbounded", "darwin", "nonroot"])
+@pytest.mark.parametrize(
+    "fault", ["output", "target", "target-kind", "lifetime", "expired", "unbounded", "darwin", "nonroot"]
+)
 def test_preflight_refuses_without_mutating_reservation(
     reserved: tuple[ManagedRunRepository, ManagedRunRecord], fault: str
 ) -> None:
@@ -592,6 +594,11 @@ def test_preflight_refuses_without_mutating_reservation(
         request = replace(request, capture_prefix_bytes=1)
     elif fault == "target":
         request = replace(request, launch=request.launch.replace(b"vm-one", b"vm-two"))
+    elif fault == "target-kind":
+        record = replace(
+            record, spec=replace(record.spec, target=replace(record.spec.target, kind=ManagedTargetKind.PLATFORM_HOST))
+        )
+        request = _request(record)
     elif fault == "lifetime":
         record = replace(
             record,
@@ -615,7 +622,7 @@ def test_preflight_refuses_without_mutating_reservation(
             carrier, record.identity, record.spec, record.output_policy, request, plan, deadline, runtime, GUEST
         )
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
-    assert carrier.calls == 0
+    assert carrier.validations == carrier.calls == 0
 
 
 def test_preflight_refuses_bogus_request_type_before_reservation_mutation(

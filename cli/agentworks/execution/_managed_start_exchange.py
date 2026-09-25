@@ -25,6 +25,7 @@ from ._managed_runs import (
     ManagedRunRecord,
     ManagedRunRepository,
     ManagedRunSpec,
+    ManagedTargetKind,
     launch_managed_run,
 )
 from ._managed_start_bundle import FIXED_BUNDLE
@@ -293,7 +294,11 @@ def prepare_managed_start(
         raise ValidationError("Managed start deadline has expired")
     if type(request) is not request_wire.ManagedJobRequest:
         raise ValidationError("Invalid managed start request")
-    if type(guest) is not VMGuestIdentity or vm_guest_boot_id(guest) != spec.target.boot_id:
+    if (
+        spec.target.kind is not ManagedTargetKind.VM
+        or type(guest) is not VMGuestIdentity
+        or vm_guest_boot_id(guest) != spec.target.boot_id
+    ):
         raise ValidationError("Managed start guest boot does not match target")
     try:
         expected_launch = encode_managed_job_fact(ManagedRunReceipt(identity, identity.unit_name, spec))
