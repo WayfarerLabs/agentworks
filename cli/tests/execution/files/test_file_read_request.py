@@ -77,7 +77,7 @@ def _request_manifest(remaining_seconds: object) -> bytes:
     ).encode("ascii")
 
 
-@pytest.mark.parametrize("remaining", [True, 0, -1, float("nan"), float("inf"), -float("inf"), 10**4000])
+@pytest.mark.parametrize("remaining", [True, 0, -1, -1.0, float("nan"), float("inf"), -float("inf"), 10**4000])
 def test_remaining_seconds_rejects_noncanonical_or_nonfinite_values_without_overflow(remaining: object) -> None:
     with pytest.raises(FileReadRequestError) as raised:
         decode_file_read_request(_request_manifest(remaining))
