@@ -949,6 +949,17 @@ no-further-effects evidence. The current `FileOperation.download()` installs its
 receiving a binding; production composition must move admission earlier. This setup descriptor and
 handoff are not implemented by the local gate primitive or fixed helper.
 
+The first custody vertical validates local download inputs, chooses its token once and attaches a
+concrete pending-setup record before registering that same `file-call` row. SETUP uses the borrow's
+fixed-helper carrier, which marks possible dispatch before delivery. A lost or invalid setup reply
+retains custody; an outstanding attempt cannot be bypassed by immediately dispatching INSPECT. After
+an acknowledged exact binding, core revision-checks publication of the bound payload and only then
+constructs the snapshot workflow with the original token and borrow. A lost publication reply
+retries only the identical compare-and-swap; failure during workflow construction or custody
+promotion retains the bound row rather than invoking the old pre-registration close path. Setup
+failure is not a fabricated snapshot outcome, and retained input/sink references are released only
+when responsibility is safely handed off or terminated.
+
 The three durable states follow from the gate value itself: a setup descriptor, an exact binding, or
 an exact binding with a proposed generation. No independent phase enum is needed. Allocate the
 download token before setup and retain one whole-call borrow and obligation across control, snapshot
