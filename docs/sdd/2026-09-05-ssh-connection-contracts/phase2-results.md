@@ -633,10 +633,38 @@ SSH-backed workflow.
 The report's exact #833 head passes its full non-integration suite (**13,504 passed, 23 skipped**),
 static/docs/website gates and 14 hosted checks. Those gates are for transport's exact head; the
 report does not claim a full combined-suite run at `a9c141d7`. Its WSL2 cells use #833 without SSH
-code. They find that WSL's kernel `boot_id` can survive distribution power-off and restart, leaving
-a transport-owned managed-run fence unresolved. The Linux SSH cells do not establish native
-macOS/Windows SSH acceptance, public RunContext use, terminal delivery or recovery across that WSL
-power boundary. Those Phase 2 gates remain open.
+code. At that head they find that WSL's kernel `boot_id` can survive distribution power-off and
+restart, leaving a transport-owned managed-run fence unresolved. The Linux SSH cells do not
+establish native macOS/Windows SSH acceptance, public RunContext use, terminal delivery or recovery
+across that WSL power boundary. Those Phase 2 gates remain open.
+
+## Derived guest boot-fence proof on composed SSH
+
+The
+[complete round-7 report](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-5825746788)
+tests transport `e7568a22c6a558f0b6def316c1ed4edf91bac1ba` with SSH
+`e02704cfe28dea0d24fb088f12053d93642f4911` in a clean local composition. On a Linux workstation, the
+private guest-identity probe ran over real SSH against disposable GCE Debian Trixie/systemd 257 and
+Bookworm/systemd 252 guests. Independent reads matched the probe's instance marker, kernel boot UUID
+and PID 1 start ticks. The derived managed boot UUID remained stable across repeat probes and PID 1
+re-exec, then changed after a real reboot on both guests. The GCE fixtures accepted host keys on
+first contact because the images did not publish them out of band; this does not prove the SSH trust
+migration or strict pre-enrolled host-key path.
+
+The WSL2 cells used transport's exact head without #832 code. The derived UUID stayed stable within
+one running distribution and changed after `wsl --terminate`, natural idle stop and restart, and
+utility-VM shutdown; a concurrent clone sharing the instance marker had a distinct fence. Managed
+complete and TERM-trapping stop regressions still passed. Lost-hold recovery could not run because
+that path does not exist at this head, and no production target composer or public RunContext path
+was exercised. Native macOS/Windows SSH, terminal delivery and complete production workflows also
+remain unproved.
+
+Transport's exact-head local gates pass **13,507 non-integration tests with 23 skips**, but hosted
+Website and aggregate `ci-success` failed when Chromium did not publish its DevTools endpoint; this
+is not a green transport CI result. The report also finds that databases built by earlier unreleased
+branch migrations 39 to 41 can open under the consolidated schema without the expected tables.
+Transport owns that disposition. Neither finding is an SSH carrier defect, and the native boot-fence
+result alone does not close Phase 2 acceptance.
 
 ## Remaining integration and acceptance
 
