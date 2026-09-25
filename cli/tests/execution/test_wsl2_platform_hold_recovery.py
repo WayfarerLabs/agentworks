@@ -371,6 +371,56 @@ def test_lost_resolution_reply_is_recognized_after_takeover(tmp_path: Path, monk
     assert not retry_query.spawned
 
 
+@pytest.mark.parametrize("committed", [False, True])
+def test_terminal_absence_retries_resolution_without_guest_query(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, committed: bool
+) -> None:
+    path = tmp_path / "hold.db"
+    predecessor, _ = _start_hold(path)
+    with closing(Database(path)) as database:
+        owner = OperationOwner.recover(database.operations, predecessor, "d" * 32)
+        row = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        query = QueryClient()
+        created: list[QueryClient] = []
+
+        def factory() -> QueryClient:
+            created.append(query)
+            return query
+
+        controller = Controller()
+        recovery = WSL2PlatformHoldRecovery(
+            owner,
+            row,
+            locator="opaque-locator",
+            instance_marker="c" * 32,
+            connection=CONNECTION,
+            controller_observer=controller,
+            guest_observer=WSL2GuestObserver(CONNECTION, client_factory=factory),
+        )
+        original = OperationRepository.resolve_lifecycle_obligation
+
+        def failed_reply(self: OperationRepository, *args: object) -> object:
+            if committed:
+                original(self, *args)  # type: ignore[arg-type]
+            raise OSError("resolution reply unavailable")
+
+        monkeypatch.setattr(OperationRepository, "resolve_lifecycle_obligation", failed_reply)
+        with pytest.raises(OSError):
+            recovery.recover(Deadline.after(2))
+        assert query.spawned and query.settled and len(created) == 1
+        persisted = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        assert persisted.state is (
+            LifecycleObligationState.RESOLVED if committed else LifecycleObligationState.POSSIBLE_EFFECT
+        )
+        monkeypatch.setattr(OperationRepository, "resolve_lifecycle_obligation", original)
+        assert recovery.recover(Deadline.after(2))
+        assert len(created) == 1 and controller.calls == 1
+        assert (
+            database.operations.list_lifecycle_obligations(owner.ownership)[0].state
+            is LifecycleObligationState.RESOLVED
+        )
+
+
 def test_unsettled_unknown_retains_native_client_for_cleanup_only(tmp_path: Path) -> None:
     path = tmp_path / "hold.db"
     predecessor, _ = _start_hold(path)

@@ -92,6 +92,7 @@ class WSL2PlatformHoldRecovery:
         self._query_uncertain = False
         self._completed_present = False
         self._admission_uncertain = False
+        self._terminal_absence = False
 
     def recover(self, deadline: Deadline) -> bool:
         """Return true only after this exact obligation is durably resolved."""
@@ -121,6 +122,12 @@ class WSL2PlatformHoldRecovery:
         if self._state is LifecycleObligationState.REGISTERED:
             # The old generation cannot mark possible effect after takeover.
             # The original hold could not dispatch before that mark committed.
+            self._bound.resolve()
+            self._state = LifecycleObligationState.RESOLVED
+            return True
+        if self._terminal_absence:
+            # The complete, settled exact absence has already closed its
+            # recovery attempt. Resolve retries never issue another query.
             self._bound.resolve()
             self._state = LifecycleObligationState.RESOLVED
             return True
@@ -188,6 +195,7 @@ class WSL2PlatformHoldRecovery:
             else:
                 dispatch.handoff_unresolved()
             raise
+        self._terminal_absence = True
         self._bound.resolve()
         self._state = LifecycleObligationState.RESOLVED
         return True
