@@ -1414,11 +1414,17 @@ identity plans, an already-held VM owner, carrier, runtime and deadline. It chec
 resolves `USER_DEFAULT` through an owned workload-shell observation, prepares the raw carrier,
 reserves one independent resource-owned run and hands it to the owned start. Local tests cover
 success, invalid request and carrier refusal before reservation, uncertain launch custody, wrong
-binding, sensitive input and shell-observation uncertainty. The focused and neighboring selection
-passes 67 tests; Ruff and targeted mypy pass. This does not constitute a production caller: the
-selected route must stay held and current marker/boot facts must be revalidated at the launch
-boundary. Interrupted-start recovery, later job actions, native SSH/QGA proof and the complete
-RunContext surface remain open.
+binding, sensitive input and shell-observation uncertainty. Corrections through `f66336d15` keep the
+original interruption when shell-borrow release fails, derive workload identity from its plan, and
+check deadline expiry again before reservation. The focused and neighboring selection passes 70
+tests; Ruff and targeted mypy pass. A refusal after reservation may retain an exact `RESERVED` row
+as a one-shot tombstone. The caller owns its run ID, inspects it after every escaping failure, does
+not retry start with that ID, and retains owner custody if obligation or inspection state is
+uncertain. An armed obligation can coexist with a `RESERVED` row; do not delete such a row or invent
+a possible-dispatch timestamp. The existing armed-obligation regression covers that gap. This does
+not constitute a production caller: the selected route must stay held and current marker/boot facts
+must be revalidated at the launch boundary. Interrupted-start recovery, later job actions, native
+SSH/QGA proof and the complete RunContext surface remain open.
 
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared

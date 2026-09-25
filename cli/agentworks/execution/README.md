@@ -57,8 +57,11 @@ composes a supplied exact-VM target, workload and root identity plans, finite re
 preflight, reservation and owned start. `USER_DEFAULT` first observes the workload account shell
 under a borrow; unresolved or uncertain observation creates no run row. This is not a production
 caller or job API. The caller must still hold the selected route and reread the current target
-marker and boot before launch. Recovery, later job actions, native SSH/QGA proof and RunContext
-delivery remain open.
+marker and boot before launch. Once a reservation succeeds, a later refusal may retain its
+`RESERVED` row as a one-shot tombstone. The caller keeps the supplied run ID, inspects it after any
+escaping failure, and never retries start with that ID; a still-armed or uncertain obligation keeps
+owner custody. Recovery, later job actions, native SSH/QGA proof and RunContext delivery remain
+open.
 
 `models.py` defines immutable literal commands and scripts with explicit `Shell.SH`, `Shell.BASH` or
 `Shell.USER_DEFAULT` selection and separate startup flags. It also defines finite `Input`, bounded

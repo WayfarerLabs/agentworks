@@ -425,6 +425,15 @@ caller responsible for discarding its prepared input. Once arming may have begun
 the possible effect even when the database transition reply is lost. The generic borrow records this
 conservative state separately from whether a carrier attempt is outstanding.
 
+The private bound-start caller supplies and retains the exact run ID. If any control flow escapes,
+including uncertainty about the reservation commit, it inspects that ID and never retries start with
+it. A refusal after reservation may leave a durable `RESERVED` row as a one-shot tombstone;
+`RESERVED` alone is not permission to delete it, because a managed-start obligation may already be
+armed while that row still has this state. An inconclusive inspection or obligation state retains
+owner custody until reconciled. Do not fabricate possible-dispatch evidence merely to fit the
+current database terminal-state constraint. Production recovery and disposition of these retained
+rows remain open.
+
 Target identity is structured as a core resource kind/name, a versioned incarnation fingerprint and
 a separate boot UUID. The core name supports binding and diagnostics but is not authority. The
 incarnation fingerprint must bind the provider-owned locator plus a core-provisioned or explicitly
