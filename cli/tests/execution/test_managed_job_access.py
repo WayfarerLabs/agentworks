@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.db import Database, OperationResourceKind, OperationScope
-from agentworks.errors import ValidationError
+from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _managed_job_access as access
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
@@ -124,6 +124,80 @@ def test_invalid_request_and_carrier_refusal_leave_no_reservation(tmp_path: Path
         assert carrier.calls == unsupported.calls == 0
     finally:
         owner.close()
+        database.close()
+
+
+def test_deadline_expiring_during_carrier_validation_leaves_no_reservation(tmp_path: Path) -> None:
+    database = Database(tmp_path / "state.db")
+    repository = ManagedRunRepository(database)
+    owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "start")
+    deadline = Deadline.after(10)
+
+    class ExpiringCarrier(Carrier):
+        def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+            super().validate(invocation, io=io)
+            object.__setattr__(deadline, "expires_at", 0.0)
+
+    carrier = ExpiringCarrier(lambda request: _records(request, receipt=True))
+    try:
+        with pytest.raises(ValidationError):
+            _call(repository, owner, carrier, deadline=deadline)
+        assert repository.inspect(RUN) is None
+        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        assert carrier.calls == 0
+    finally:
+        owner.close()
+        database.close()
+
+
+def test_deadline_expiring_after_reservation_keeps_one_shot_tombstone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "state.db")
+    repository = ManagedRunRepository(database)
+    owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "start")
+    deadline = Deadline.after(10)
+    carrier = Carrier(lambda request: _records(request, receipt=True))
+    original_reserve = repository.reserve
+
+    def reserve_then_expire(*args: object, **kwargs: object):
+        record = original_reserve(*args, **kwargs)
+        object.__setattr__(deadline, "expires_at", 0.0)
+        return record
+
+    monkeypatch.setattr(repository, "reserve", reserve_then_expire)
+    try:
+        with pytest.raises(ValidationError):
+            _call(repository, owner, carrier, deadline=deadline)
+        reserved = repository.inspect(RUN)
+        assert reserved is not None
+        assert reserved.launch_state is ManagedLaunchState.RESERVED
+        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        assert carrier.calls == 0
+    finally:
+        database.close()
+
+
+def test_owner_borrow_refusal_after_reservation_keeps_known_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    database = Database(tmp_path / "state.db")
+    repository = ManagedRunRepository(database)
+    owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "start")
+    carrier = Carrier(lambda request: _records(request, receipt=True))
+
+    def refuse_borrow() -> None:
+        raise StateError("owner cannot lend custody")
+
+    monkeypatch.setattr(owner, "borrow", refuse_borrow)
+    try:
+        with pytest.raises(StateError):
+            _call(repository, owner, carrier)
+        reserved = repository.inspect(RUN)
+        assert reserved is not None
+        assert reserved.identity == RUN
+        assert reserved.launch_state is ManagedLaunchState.RESERVED
+        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        assert carrier.calls == 0
+    finally:
         database.close()
 
 

@@ -82,6 +82,13 @@ def start_bound_managed_job(
     This is a private composition seam, not target activation or public execution.
     The caller must supply current target facts and retain custody on uncertain
     outcomes. A failed shell observation raises safe typed facts before reserve.
+
+    The caller owns the exact ``identity`` and must inspect that ID after every
+    escaping BaseException, including uncertainty about a reserve commit. Never
+    retry start with the same ID. A post-reservation refusal can leave a durable
+    RESERVED row as a one-shot tombstone, even when an obligation may have been
+    armed. Retain the owner conservatively if obligation state or inspection is
+    uncertain.
     """
     if (
         target.kind is not ManagedTargetKind.VM
@@ -92,7 +99,6 @@ def start_bound_managed_job(
         or deadline.expires_at is None
         or deadline.expired
         or runtime_selection.target_os is not RuntimeTargetOS.LINUX
-        or not isinstance(owner, OperationOwner)
         or owner.ownership.scope.resource_kind is not OperationResourceKind.VM
         or owner.ownership.scope.resource_name != target.name
     ):
@@ -101,8 +107,6 @@ def start_bound_managed_job(
     if _validate_plan(root_plan).euid != 0:
         raise ValidationError("Managed job requires a root helper plan")
 
-    if not isinstance(invocation, Command | Script):
-        raise ValidationError("Managed execution requires a command or script")
     if isinstance(invocation, Script):
         if invocation.shell is Shell.USER_DEFAULT:
             provisional_spec = ManagedRunSpec(
@@ -179,6 +183,9 @@ def start_bound_managed_job(
         invocation, input=input, output=output, env=env, cwd=cwd, sensitive=sensitive, identity=identity, spec=spec
     )
     prepared = prepare_managed_start(carrier, identity, spec, policy, request, root_plan, deadline, runtime_selection)
+    if deadline.expired:
+        prepared.discard()
+        raise ValidationError("Managed start deadline has expired before reservation")
     try:
         reserved = repository.reserve(spec, output_policy=policy, identity=identity)
     except BaseException:
