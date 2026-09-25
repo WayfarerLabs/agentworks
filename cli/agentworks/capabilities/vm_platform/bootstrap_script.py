@@ -38,6 +38,10 @@ SSH_PRESERVE_KEYS_CONTENT = "".join(f"{line}\n" for line in SSH_PRESERVE_KEYS_LI
 # it. Shared so the writers and the probe cannot drift apart.
 REBOOT_SENTINEL_PATH = "/run/agentworks-reboot-required"
 
+# Boot recreates these volatile directories from the root-owned drop-in. The
+# numeric admin identity is resolved on the guest after its account exists.
+FILE_GATES_TMPFILES_PATH = "/etc/tmpfiles.d/agentworks-file-gates.conf"
+
 # grub drop-in that disables SVE at the kernel cmdline on Apple Virtualization
 # guests (see the "Mask SVE" step below for the why). Shared by the create-time
 # bootstrap step and the Phase B reconcile step (initializer._apply_sve_mask),
@@ -119,6 +123,42 @@ timeout 600 apt-get dist-upgrade -y -qq -o Dpkg::Options::="--force-confnew"
 # shellcheck disable=SC2086
 apt-get install -y -qq -o Dpkg::Options::="--force-confnew" $PROVISIONING_PACKAGES
 echo "##SUCCESS## provisioning packages installed"
+
+# -- Step 2a: Volatile file gate directories --
+# Lima replays this provisioner on every boot. Keep existing gate databases
+# in place, and fail before tmpfiles can change an unexpected directory.
+echo "##STEP## File gate directories"
+ADMIN_UID=$(id -u "$VM_USER")
+ADMIN_GID=$(id -g "$VM_USER")
+check_gate_dir() {{
+    local path="$1" expected="$2"
+    if [ -e "$path" ] || [ -L "$path" ]; then
+        if [ -L "$path" ] || [ ! -d "$path" ] \
+            || [ "$(stat -c '%u:%g:%a' "$path")" != "$expected" ]; then
+            echo "##ERROR## Unexpected file gate directory: $path"
+            exit 1
+        fi
+    fi
+}}
+check_gate_dir /run/agentworks 0:0:755
+check_gate_dir /run/agentworks/file-gates-v1 0:0:755
+check_gate_dir /run/agentworks/file-gates-v1/0 0:0:700
+check_gate_dir "/run/agentworks/file-gates-v1/$ADMIN_UID" "$ADMIN_UID:$ADMIN_GID:700"
+if [ -L {file_gates_tmpfiles_path} ] \
+    || ( [ -e {file_gates_tmpfiles_path} ] && [ ! -f {file_gates_tmpfiles_path} ] ); then
+    echo "##ERROR## Unexpected file gate tmpfiles drop-in"
+    exit 1
+fi
+cat > {file_gates_tmpfiles_path} <<AGW_FILE_GATES_TMPFILES
+d /run/agentworks 0755 0 0 -
+d /run/agentworks/file-gates-v1 0755 0 0 -
+d /run/agentworks/file-gates-v1/0 0700 0 0 -
+d /run/agentworks/file-gates-v1/$ADMIN_UID 0700 $ADMIN_UID $ADMIN_GID -
+AGW_FILE_GATES_TMPFILES
+chown root:root {file_gates_tmpfiles_path}
+chmod 0644 {file_gates_tmpfiles_path}
+systemd-tmpfiles --create {file_gates_tmpfiles_path}
+echo "##SUCCESS## file gate directories ready"
 
 # -- Step 2b: Preserve SSH host keys across reboots --
 # By default, cloud-init may delete and regenerate SSH host keys on certain
@@ -367,6 +407,7 @@ def generate_bootstrap_script(
         ssh_preserve_path=SSH_PRESERVE_KEYS_PATH,
         ssh_preserve_content=SSH_PRESERVE_KEYS_CONTENT,
         reboot_sentinel=REBOOT_SENTINEL_PATH,
+        file_gates_tmpfiles_path=FILE_GATES_TMPFILES_PATH,
         sve_apple_vz_grep=SVE_APPLE_VZ_GREP,
         sve_cpuinfo_grep=SVE_CPUINFO_GREP,
         sve_grub_path=SVE_NOSVE_GRUB_PATH,
