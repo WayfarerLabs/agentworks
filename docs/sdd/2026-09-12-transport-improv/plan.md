@@ -2025,6 +2025,16 @@ with independent project and complexity reviews finding no blocker. This is not 
 reconciliation, selected-route proof, namespace provisioning, native quiescence or production
 recovery, all of which remain open.
 
+The private WSL2 owned-download composition at `6e16d979b` now constructs the setup descriptor from
+the exact guest identity returned by selected-route target preparation only after that guest matches
+the durable READY hold epoch. It carries the managed target and requested effective UID through the
+same selected carrier/runtime into the one-row gate setup and download. Separate tests cover lost
+setup and later snapshot responses without releasing the owner or hold. The 19 focused WSL2 tests,
+Ruff, targeted mypy and diff checks pass, and independent reviews found no remaining finding. This
+path still has no root-owned guest gate namespace provisioner, production RunContext factory, native
+Windows/WSL2 delivery-drain evidence or production recovery; portable fixture success does not
+establish a live WSL2 pass.
+
 - [ ] Use the owned snapshot/chunk download for general in-memory reads, preserving caller byte
       bounds independently of QGA's single-response capacity. Keep the no-staging readiness read
       separately bound before dispatch; prove its complete encoded response fits the selected route.

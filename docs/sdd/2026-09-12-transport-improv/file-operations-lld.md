@@ -972,6 +972,18 @@ per-UID directory through a trusted guest setup path for each boot, then run the
 file operation as the target UID. This is infrastructure setup, not elevation of an individual file
 operation.
 
+The shared Debian VM bootstrap can install a boot-time `systemd-tmpfiles` rule for the root-owned
+anchor across supported VM platforms. It knows the admin account but not agent UIDs created later,
+so it cannot create every private UID directory ahead of time. Core must establish each required UID
+directory through a separately owned runtime/provisioning path, including after guest reboot.
+Neither the shared bootstrap change nor that runtime path is implemented by the private gate proof.
+
+The private WSL2 owned-download composition now derives the setup descriptor only after the selected
+platform locator, held READY epoch and independently prepared managed VM guest agree. It uses that
+exact guest identity, target and requested effective UID with the already selected carrier/runtime.
+This closes the local composition seam for that private path, not the missing namespace
+provisioning, native Windows/WSL2 delivery proof, production factory or RunContext API.
+
 The three durable states follow from the gate value itself: a setup descriptor, an exact binding, or
 an exact binding with a proposed generation. No independent phase enum is needed. Allocate the
 download token before setup and retain one whole-call borrow and obligation across control, snapshot
