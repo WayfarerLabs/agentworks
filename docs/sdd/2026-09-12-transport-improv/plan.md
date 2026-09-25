@@ -1461,6 +1461,15 @@ without reading run facts or output. This closes one later-action guest fence he
 production route or host-side JobAccess view. Stop and dispose still need equivalent current-guest
 checks; live SSH/QGA delivery, recovery and public RunContext remain open.
 
+At private checkpoint `d560ce3f2`, a host-bound read-only observation adapter admits only one exact
+persisted independent VM run under a caller-held VM operation owner. It derives the expected launch
+from the row and borrows custody for one guest-fenced attempt. The result reports the raw candidate
+and whether uncertain delivery requires retaining the owner; escaping control flow preserves its
+original exception with custody facts attached. The caller still owns route freshness, row
+reconciliation, output-policy reduction and owner release. This is neither a production JobAccess
+nor a public RunContext surface. Equivalent host-bound read-output, stop and dispose, recovery and
+live SSH/QGA proof remain open.
+
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared
       create bootstrap. Migration 41 leaves legacy rows NULL; ordinary existing-VM operations never

@@ -424,6 +424,14 @@ the whole operation or establish job termination. Production binding and recover
 Private observe and read-output now reread guest identity before store access; stop and dispose
 still need that fence and host composition.
 
+The private host-bound observe adapter reads the exact independent resource-owned VM run row before
+borrowing a caller-held VM operation owner. It constructs the expected launch from the persisted
+specification and makes one fenced read-only observation attempt. It returns raw facts and custody
+state; on interrupted control flow the original exception remains primary with custody facts as its
+cause. It does not update the run row, choose an output view, reconcile uncertainty, release the
+owner, or establish a production provider route. Read-output, stop and dispose still need equivalent
+host binding and guest fences where applicable.
+
 Before arming, a refused registration, expired deadline or owner close releases the unused borrow;
 an installed but unarmed obligation resolves during that release. A failed reservation leaves the
 caller responsible for discarding its prepared input. Once arming may have begun, the borrow retains

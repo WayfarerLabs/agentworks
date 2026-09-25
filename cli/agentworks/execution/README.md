@@ -515,6 +515,14 @@ expected launch's VM kind and derived boot, and the bundled helper rereads the p
 kernel boot and PID 1 start time before opening the store. This does not establish a production
 route or public job view.
 
+`_managed_observe_access.py` privately admits one exact, persisted independent VM run under a
+caller-held VM operation owner. It derives the expected launch from that row, borrows dispatch
+custody for one fenced observation attempt, and reports both the raw candidate and whether the owner
+must be retained after uncertain delivery. Escaping control flow keeps its original exception with
+custody facts attached as its cause. The caller must supply fresh target and guest facts, keep the
+selected provider route current, and retain or release the owner explicitly. This adapter neither
+reconciles run state nor reduces output policy; it is not JobAccess or RunContext.
+
 `_managed_stop_exchange.py` supplies the separate private stop attempt over the same carrier
 interface. Its fixed Python 3.11 Linux root helper revalidates the exact launch, publishes the
 create-once empty stop leaf and polls only the exact boundary-empty fact within a finite capped
