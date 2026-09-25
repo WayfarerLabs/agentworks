@@ -1445,6 +1445,18 @@ connection and trust only. Before broader lifecycle implementation, complete the
       exited process, or PID reuse; only a complete process snapshot can prove absence after open
       failure. Ambiguous API results and deadline expiry stay unknown. This is controller evidence
       only, without dispatch drain, guest absence, recovery factory or production wiring claims.
+- [x] Build a private ordinary-release guest observer with a fixed no-staging Python query bound to
+      guest boot, distribution init, PID and process start. Retain its native WSL client before
+      dispatch and through uncertain cleanup; require complete nonce-bound output, exact zero exit,
+      live deadline and local settlement before accepting absence. Compose it with a real
+      SQLite-backed owner and two independent hold obligations in portable tests. This does not
+      establish controller-death recovery, service-side dispatch drain or native WSL acceptance.
+- [ ] Prove WSLService-side dispatch drain after controller death independently of Windows client
+      Job cleanup. In a controlled delayed-delivery case, hold an admitted `CreateLxProcess` before
+      guest creation, lose its controller, run a later absence observation, then release the delayed
+      launch: the claim must stay unresolved. Establish which acknowledged launches can be recovered
+      safely, and retain pre-`READY` ambiguity unless a stronger fence is proved. Distribution
+      termination alone is not a drain proof or permission to disrupt unrelated work.
 - [ ] Implement production WSL2 hold adoption and recovery: exact preparation discovery after a
       crash, controller-absence and dispatch-drain proof, a production exact epoch-bound guest
       observer, recovery factory, activation and platform wiring, RunContext integration, and live

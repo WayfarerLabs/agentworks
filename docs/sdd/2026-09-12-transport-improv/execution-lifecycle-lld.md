@@ -627,8 +627,11 @@ exact Windows controller process identity. After `READY`, it adds the guest boot
 PID 1 start ticks, anchor PID and Linux process start ticks; PID/start evidence is meaningful only
 within that distribution epoch. Host Job settlement and `wsl.exe` exit remain host-client evidence
 only. Recovery must prove the recorded controller process is absent before using the creation-time
-Job and synchronous Windows process-launch facts to establish that no delayed client launch remains,
-then independently observe that the acknowledged guest identity is absent. A changed guest boot or
+Job and synchronous Windows process-launch facts to establish that no delayed **Windows client**
+launch remains. Those facts do not drain a `CreateLxProcess` request already admitted by WSLService.
+Before a later guest-absence observation can resolve the hold, the adapter must independently prove
+that the earlier service-side guest launch cannot still arrive. A durable `READY` identifies an
+already launched helper; without it, dispatch remains ambiguous. A changed guest boot or
 distribution init proves the old guest process cannot survive but does not excuse locator or marker
 mismatch. Each `vm_active()` lifetime registers its own obligation and anchor under the enclosing
 operation. Do not add hidden reference counting or collapse nested holds into one platform process.
