@@ -5,11 +5,16 @@ from __future__ import annotations
 import os
 import sys
 from contextlib import closing
+from dataclasses import replace
 from pathlib import Path
+from typing import cast
+from unittest.mock import Mock
 
 import pytest
 
-from agentworks.capabilities.vm_platform.base import ProviderLocator
+from agentworks.capabilities.base import RunContext
+from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLocatorUnavailable
+from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import ValidationError
 from agentworks.execution._helper_identity import IdentityExpectation
@@ -18,6 +23,7 @@ from agentworks.execution._runtime_prerequisite import RuntimeSelection, Runtime
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, encode_vm_guest_identity_success
 from agentworks.execution._wsl2_lifecycle import GuestAnchorPresence
 from agentworks.execution._wsl2_owned_download import WSL2DownloadStatus, WSL2OwnedDownload
+from agentworks.execution.binding import NativeExecutionBinding
 from agentworks.execution.carrier import (
     CapturedOutput,
     Carrier,
@@ -31,7 +37,7 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
-from agentworks.execution.carriers.wsl2 import WSL2Connection
+from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
 from tests.execution.files._file_download_support import BytesSink, LostCallStdoutCarrier
 from tests.execution.files._file_snapshot_support import LocalCarrier, install_fixture_bundle
 from tests.execution.test_wsl2_platform_hold import BOOT, FakeNative, FakeObserver
@@ -79,6 +85,15 @@ class GuestThenFileCarrier:
         )
 
 
+class RoutedGuestCarrier(WSL2Carrier):
+    def __init__(self, connection: WSL2Connection, guest: GuestThenFileCarrier) -> None:
+        super().__init__(connection)
+        self.guest = guest
+
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        return self.guest.execute(invocation, io=io, deadline=deadline)
+
+
 def _plan() -> IdentityPlan:
     gid = os.getegid()
     return IdentityPlan(
@@ -97,6 +112,39 @@ def _subject(database: Database, carrier: GuestThenFileCarrier, observer: FakeOb
         carrier=carrier,
         runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable),
     )
+
+
+def _platform_subject(
+    database: Database,
+    carrier: GuestThenFileCarrier,
+    observer: FakeObserver,
+    *,
+    locators: list[ProviderLocator | ProviderLocatorUnavailable] | None = None,
+    connections: list[WSL2Connection] | None = None,
+) -> tuple[WSL2OwnedDownload | None, Mock]:
+    platform = Mock(spec=WSL2Platform)
+    platform.site_name = "local"
+    platform.observe_provider_locator.side_effect = locators or [ProviderLocator("wsl2:registration")] * 3
+    routes = connections or [WSL2Connection("Ubuntu", "admin", "wsl.exe")] * 2
+    platform.resolve_native_execution_binding.side_effect = [
+        NativeExecutionBinding(
+            RoutedGuestCarrier(route, carrier),
+            route.user,
+            RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable),
+        )
+        for route in routes
+    ]
+    subject = WSL2OwnedDownload.from_platform(
+        database.operations,
+        replace(_vm(), platform_metadata={"distro_name": "Ubuntu"}),
+        platform,
+        cast(RunContext, object()),
+        deadline=Deadline.after(30),
+        native=FakeNative([]),
+        observer=observer,
+        carrier=carrier,
+    )
+    return subject, platform
 
 
 def _download(subject: WSL2OwnedDownload, root: Path, sink: BytesSink) -> WSL2DownloadStatus:
@@ -131,6 +179,131 @@ def test_complete_download_uses_one_owner_and_releases_after_exact_guest_absence
         assert observer.events == ["observe"]
         assert database.operations.inspect(subject.owner.ownership.scope) is None
         assert subject.file_operation is not None and not subject.file_operation.unfinished_downloads
+
+
+def test_selected_platform_download_rechecks_registration_and_route(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "source-root"
+    root.mkdir()
+    root.joinpath("source").write_bytes(b"held-wsl-download")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    scratch.chmod(0o1777)
+    install_fixture_bundle(monkeypatch, scratch)
+    with closing(Database(tmp_path / "state.db")) as database:
+        carrier = GuestThenFileCarrier(database)
+        subject, platform = _platform_subject(database, carrier, FakeObserver([]))
+        assert subject is not None
+        sink = BytesSink()
+        assert _download(subject, root, sink) is WSL2DownloadStatus.COMPLETE
+        assert bytes(sink.data) == b"held-wsl-download"
+        assert platform.observe_provider_locator.call_count == 3
+        assert platform.resolve_native_execution_binding.call_count == 2
+        assert carrier.calls > 1
+        assert database.operations.inspect(subject.owner.ownership.scope) is None
+
+
+@pytest.mark.parametrize("later", [ProviderLocator("wsl2:changed"), ProviderLocatorUnavailable()])
+def test_selected_platform_changed_or_missing_locator_refuses_before_guest_or_file(
+    tmp_path: Path, later: ProviderLocator | ProviderLocatorUnavailable
+) -> None:
+    with closing(Database(tmp_path / "state.db")) as database:
+        carrier = GuestThenFileCarrier(database)
+        subject, platform = _platform_subject(
+            database,
+            carrier,
+            FakeObserver([]),
+            locators=[ProviderLocator("wsl2:registration"), later],
+        )
+        assert subject is not None
+        assert _download(subject, tmp_path, BytesSink()) is WSL2DownloadStatus.REFUSED
+        assert carrier.calls == 0
+        platform.resolve_native_execution_binding.assert_called_once()
+        assert database.operations.inspect(subject.owner.ownership.scope) is None
+
+
+def test_selected_platform_changed_route_refuses_before_file_dispatch(tmp_path: Path) -> None:
+    with closing(Database(tmp_path / "state.db")) as database:
+        carrier = GuestThenFileCarrier(database)
+        subject, _ = _platform_subject(
+            database,
+            carrier,
+            FakeObserver([]),
+            connections=[
+                WSL2Connection("Ubuntu", "admin", "wsl.exe"),
+                WSL2Connection("Ubuntu", "admin", "C:/other/wsl.exe"),
+            ],
+        )
+        assert subject is not None
+        assert _download(subject, tmp_path, BytesSink()) is WSL2DownloadStatus.REFUSED
+        # Selected preparation has already run its guest probe through the changed route.
+        assert carrier.calls == 1
+        assert subject.file_operation is None
+        assert database.operations.inspect(subject.owner.ownership.scope) is None
+
+
+def test_selected_platform_unavailable_locator_does_not_acquire(tmp_path: Path) -> None:
+    with closing(Database(tmp_path / "state.db")) as database:
+        carrier = GuestThenFileCarrier(database)
+        subject, platform = _platform_subject(
+            database, carrier, FakeObserver([]), locators=[ProviderLocatorUnavailable()]
+        )
+        assert subject is None
+        platform.resolve_native_execution_binding.assert_not_called()
+        assert database.operations.inspect(OperationScope(OperationResourceKind.VM, "box")) is None
+
+
+def test_selected_platform_invalid_binding_does_not_acquire(tmp_path: Path) -> None:
+    with closing(Database(tmp_path / "state.db")) as database:
+        carrier = GuestThenFileCarrier(database)
+        platform = Mock(spec=WSL2Platform)
+        platform.site_name = "local"
+        platform.observe_provider_locator.return_value = ProviderLocator("wsl2:registration")
+        platform.resolve_native_execution_binding.return_value = NativeExecutionBinding(
+            RoutedGuestCarrier(WSL2Connection("wrong", "admin", "wsl.exe"), carrier),
+            "admin",
+            RuntimeSelection(RuntimeTargetOS.LINUX),
+        )
+        with pytest.raises(ValidationError):
+            WSL2OwnedDownload.from_platform(
+                database.operations,
+                replace(_vm(), platform_metadata={"distro_name": "Ubuntu"}),
+                platform,
+                cast(RunContext, object()),
+                deadline=Deadline.after(30),
+            )
+        assert database.operations.inspect(OperationScope(OperationResourceKind.VM, "box")) is None
+
+
+def test_selected_platform_uncertain_guest_retains_claim(tmp_path: Path) -> None:
+    with closing(Database(tmp_path / "state.db")) as database:
+        carrier = GuestThenFileCarrier(database, init_ticks=4097)
+        subject, _ = _platform_subject(database, carrier, FakeObserver([], GuestAnchorPresence.UNKNOWN))
+        assert subject is not None
+        assert _download(subject, tmp_path, BytesSink()) is WSL2DownloadStatus.RETAINED
+        assert carrier.calls == 1
+        assert subject.file_operation is None
+        assert database.operations.inspect(subject.owner.ownership.scope) is not None
+
+
+def test_selected_platform_changed_route_retains_when_hold_absence_is_unknown(tmp_path: Path) -> None:
+    with closing(Database(tmp_path / "state.db")) as database:
+        carrier = GuestThenFileCarrier(database)
+        subject, _ = _platform_subject(
+            database,
+            carrier,
+            FakeObserver([], GuestAnchorPresence.UNKNOWN),
+            connections=[
+                WSL2Connection("Ubuntu", "admin", "wsl.exe"),
+                WSL2Connection("Ubuntu", "admin", "C:/other/wsl.exe"),
+            ],
+        )
+        assert subject is not None
+        assert _download(subject, tmp_path, BytesSink()) is WSL2DownloadStatus.RETAINED
+        assert carrier.calls == 1
+        assert subject.file_operation is None
+        assert database.operations.inspect(subject.owner.ownership.scope) is not None
 
 
 def test_missing_source_resolves_file_and_hold_obligations(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

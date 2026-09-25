@@ -56,6 +56,11 @@ class WSL2Carrier:
         self._connection = connection
 
     @property
+    def connection(self) -> WSL2Connection:
+        """Literal native route fixed at carrier construction."""
+        return self._connection
+
+    @property
     def features(self) -> ChannelFeatures:
         return ChannelFeatures()
 
