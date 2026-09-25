@@ -55,6 +55,22 @@ class RowCheckingCarrier:
         return self._inner.execute(invocation, io=io, deadline=deadline)
 
 
+class InterruptCarrier:
+    def __init__(self, control: BaseException) -> None:
+        self._inner = LocalCarrier()
+        self._control = control
+
+    @property
+    def features(self) -> ChannelFeatures:
+        return self._inner.features
+
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self._inner.validate(invocation, io=io)
+
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        raise self._control
+
+
 @pytest.fixture(autouse=True)
 def bundles(monkeypatch: pytest.MonkeyPatch) -> None:
     install_stage(monkeypatch)
@@ -354,5 +370,101 @@ def test_unconfirmed_child_cas_never_dispatches_that_child(tmp_path: Path, monke
     assert decode_file_call_obligation(row.payload).batch_index == 0
     assert source.calls == 0
     assert not (root / "second").exists()
+    with pytest.raises(StateError):
+        owner.close()
+
+
+def test_child_cas_control_stop_never_retries_or_dispatches_next_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "owner.db")
+    owner = OperationOwner.acquire(
+        database.operations,
+        OperationScope(OperationResourceKind.VM, "package-vm"),
+        "package",
+    )
+    operation = FileOperation(owner, target_for_owner(owner))
+    root = tmp_path / "root"
+    root.mkdir()
+    source = BytesSource(b"b")
+    members = (
+        PackageUploadMember("first", BytesSource(b"a"), 1, Create(), new_metadata()),
+        PackageUploadMember("second", source, 1, Create(), new_metadata()),
+    )
+    original = type(database.operations).publish_lifecycle_obligation_payload
+    control = KeyboardInterrupt("child CAS interrupted")
+    attempts = 0
+
+    def publish(repository, ownership, obligation_id, *, expected_revision, payload_version, payload):
+        nonlocal attempts
+        result = original(
+            repository,
+            ownership,
+            obligation_id,
+            expected_revision=expected_revision,
+            payload_version=payload_version,
+            payload=payload,
+        )
+        if decode_file_call_obligation(payload).batch_index == 1:
+            attempts += 1
+            raise control
+        return result
+
+    monkeypatch.setattr(type(database.operations), "publish_lifecycle_obligation_payload", publish)
+    checkpoints: list[int] = []
+    with pytest.raises(KeyboardInterrupt) as caught:
+        operation.upload_package(
+            LocalCarrier(),
+            trusted_root_path=str(root),
+            members=members,
+            checkpoint=lambda index, outcome: checkpoints.append(index),
+            plan=_plan(),
+            deadline=Deadline.after(30),
+            runtime_selection=runtime_selection(sys.executable),
+        )
+    assert caught.value is control
+    assert attempts == 1
+    assert checkpoints == [0]
+    assert source.calls == 0
+    assert not (root / "second").exists()
+    (row,) = database.operations.list_lifecycle_obligations(owner.ownership)
+    assert decode_file_call_obligation(row.payload).batch_index == 1
+    with pytest.raises(StateError):
+        owner.close()
+
+
+def test_retention_failure_preserves_package_control_and_attached_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "owner.db")
+    owner = OperationOwner.acquire(
+        database.operations,
+        OperationScope(OperationResourceKind.VM, "package-vm"),
+        "package",
+    )
+    operation = FileOperation(owner, target_for_owner(owner))
+    root = tmp_path / "root"
+    root.mkdir()
+    source = BytesSource(b"private-source")
+    control = KeyboardInterrupt("upload interrupted")
+    retention = RuntimeError("retention failed")
+
+    def fail_retention(*_args: object) -> None:
+        raise retention
+
+    monkeypatch.setattr(operation, "_stop_package_upload", fail_retention)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        operation.upload_package(
+            InterruptCarrier(control),
+            trusted_root_path=str(root),
+            members=(PackageUploadMember("first", source, len(b"private-source"), Create(), new_metadata()),),
+            checkpoint=lambda index, outcome: None,
+            plan=_plan(),
+            deadline=Deadline.after(30),
+            runtime_selection=runtime_selection(sys.executable),
+        )
+    assert caught.value is control
+    active = next(iter(operation._active_package_uploads.values()))  # noqa: SLF001
+    assert active.prepared.workflow._source is source  # noqa: SLF001
     with pytest.raises(StateError):
         owner.close()

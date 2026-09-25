@@ -1933,9 +1933,15 @@ mapping those calls one-for-one to retained lifecycle rows would exhaust the 128
 supported large package.
 
 The [serial package candidate](file-operations-lld.md#serial-package-capacity-candidate) uses one
-row for the current child across preflight and mutation. It is not an implemented batch API or
-recovery proof: `FileOperation` still closes a separate row per call and lacks a post-child
-application-checkpoint gate, so the capacity checkbox remains open.
+row for the current child across preflight and mutation. A private originating-path
+`FileOperation.upload_package` increment now uses one borrow and row for up to 4,096 upload members,
+persists each child index and token before dispatch, and waits for a caller-supplied durable
+checkpoint before preparing the next child. A real 129-member test stops after a checkpoint commits
+but loses its reply; a synthetic 4,096-member test exercises the ledger bound without claiming 4,096
+native file writes. The tests also cover a lost child-CAS reply, an unconfirmed CAS, a later invalid
+member and control-flow interruption. This is not yet a process-loss recovery proof or a complete
+package API: upload-wide helper drain, takeover, preflight reads, retirement, application checkpoint
+integration and production artifact callers remain open. The capacity checkbox stays unchecked.
 
 - [ ] Resolve the public filesystem-root edge before claiming complete path coverage: the current
       nonempty parent/leaf helper contract cannot address `/` itself. The operator has been asked

@@ -846,10 +846,14 @@ payload replacement, reconciling a lost reply against that same child and revisi
 recover only the retained child and stop; do not infer the remaining package plan or replay content
 from the row. Keep completed ownership in the application checkpoint, not a growing row payload.
 This requires an actual post-child checkpoint gate in core file custody and a package-aware recovery
-adapter; neither exists yet. A second peer that duplicates `FileOperation` admission and capture
-would not satisfy the intended shared boundary merely by reusing the generic borrow. Preserve the
-current bounds and exact retry semantics until this is proved at the largest supported package size
-and interruption boundaries.
+adapter. The private `FileOperation.upload_package` increment implements the originating upload gate
+and one-row child admission, including exact-payload CAS retry after a lost reply. It does not yet
+supply an upload-wide helper-drain producer or process-loss takeover, cover per-member preflight
+reads and retirement, or wire artifact publication to a durable application checkpoint. A second
+peer that duplicates `FileOperation` admission and capture would not satisfy the intended shared
+boundary merely by reusing the generic borrow. Preserve the current bounds and exact retry semantics
+until the complete workflow is proved at the largest supported package size and interruption
+boundaries.
 
 ### DOWNLOAD recovery dispatch
 

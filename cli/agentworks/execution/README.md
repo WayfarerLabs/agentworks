@@ -154,12 +154,12 @@ borrow and one `file-call` row. The row carries only the current child's path, t
 bounded recovery facts. It replaces that identity by expected-revision publication before the next
 child can dispatch. The caller's checkpoint callback must durably record each completed member
 before returning; a failed or uncertain checkpoint retains the current row and stops the batch.
-Incomplete upload and uncertain row publication also stop the batch without replaying a child.
-Each member is validated when reached; a later invalid member stops the batch after earlier
-members have already been checkpointed. The caller owns its original plan and partial progress.
-This originating path is not wired to artifact publication. A package-specific takeover adapter
-still needs evidence that every helper for the retained token has exited before it may reconcile
-or clean that child. Until that proof exists, the batch does not settle package recovery or the
+Incomplete upload and uncertain row publication also stop the batch without replaying a child. Each
+member is validated when reached; a later invalid member stops the batch after earlier members have
+already passed their checkpoints. The caller owns its original plan and partial progress. This
+originating path is not wired to artifact publication. A package-specific takeover adapter still
+needs evidence that every helper for the retained token has exited before it may reconcile or clean
+that child. Until that proof exists, the batch does not settle package recovery or the
 ledger-capacity migration gate.
 
 Retained recovery facts and cleanup debt are published before the borrow is handed off; a clean,

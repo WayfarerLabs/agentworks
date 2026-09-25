@@ -616,7 +616,7 @@ class FileOperation:
                             payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
                             payload=intended_payload,
                         )
-                    except BaseException:
+                    except Exception:
                         # Exact repetition reconciles a commit whose reply was lost.
                         published = obligation.publish_payload(
                             expected_revision=expected_revision,
@@ -636,7 +636,10 @@ class FileOperation:
                 fact = control.__cause__
                 if isinstance(fact, FileUploadControlFact):
                     assert active is not None
-                    self._stop_package_upload(active, index, fact.outcome)
+                    try:
+                        self._stop_package_upload(active, index, fact.outcome)
+                    except BaseException:
+                        raise control from fact
                 raise
             assert active is not None
             active.outcome = outcome
