@@ -1962,6 +1962,12 @@ unchanged 65,536-byte compatibility limit. This is not native acceptance or a gu
 bundle growth. End-to-end setup/inspection deadlines, canonical path provisioning, selected carrier
 exchanges and recovery integration remain open.
 
+The private local deadline correction at `82e702f17` refuses expired setup before guest observation
+or exclusive creation and before committing a generation; deterministic tests also confirm that an
+incomplete inode remains after later expiry. It does not interrupt blocked guest observation,
+filesystem or SQLite calls, or prove quiescence after a lost carrier response. The private bounded
+gate-control exchange described in the LLD is still needed for selected-route production use.
+
 - [ ] Use the owned snapshot/chunk download for general in-memory reads, preserving caller byte
       bounds independently of QGA's single-response capacity. Keep the no-staging readiness read
       separately bound before dispatch; prove its complete encoded response fits the selected route.
