@@ -253,6 +253,13 @@ work is proceeding in parallel in the transport lane, as confirmed by the operat
       isolation and trust acceptance requirements. Record missing live coverage for operator
       disposition; inherited PoC evidence covers only its observed cases.
 
+The
+[2026-09-25 native managed-lifecycle report](phase2-results.md#native-managed-lifecycle-on-the-composed-ssh-branch)
+adds test-scoped Linux/GCE evidence on the #833 + #832 composition. It does not supply the
+production composer, public RunContext path, terminal delivery or supported-workstation acceptance.
+Its WSL2 distribution boot-fence finding belongs to transport's still-open power-lifetime and
+recovery work.
+
 ### Integrate and deliver the usable new path
 
 - [ ] Integrate with transport's platform-host/provisioning consumers and review provider-inner
