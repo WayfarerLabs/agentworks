@@ -88,8 +88,9 @@ stderr or a truncation allowance. `Carrier.validate` refuses a finite-buffer rou
 support the declared size before any dispatch; `execute` repeats validation. Proxmox applies a
 conservative local 1 MiB stdout budget under its separate 8 MiB whole-HTTP-response reader bound.
 The buffer and native QGA/PVE capture behavior still need native proof. WSL2 streams to its local
-sink, while the current buffered SSH adapter rejects sink output entirely. This does not cap general
-snapshot/chunk reads or enable live I/O.
+sink. The transport branch's buffered SSH adapter rejects sink output; the separate #832 live SSH
+sink streams without a fixed capture ceiling and can honor this requirement without a finite-size
+preflight. This does not cap general snapshot/chunk reads or enable live I/O on other routes.
 
 Sensitivity still prohibits retained raw carrier bytes. An explicit public live-presentation request
 is a separate preparation decision; a control collector is not consent to show secret-bearing

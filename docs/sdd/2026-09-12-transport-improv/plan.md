@@ -2095,7 +2095,8 @@ tests pass 62/62; this does not supply native drain evidence or finish recovery 
 The private no-staging read now calculates a conservative complete successful stdout bound from the
 caller limit and asks the selected carrier to validate it before dispatch. Proxmox rejects a
 declared bound above 1 MiB before POST, reserving response-envelope space under its 8 MiB HTTP
-reader limit; WSL2's local sink remains streaming and buffered SSH still refuses sink output. Local
+reader limit; WSL2's local sink remains streaming. The transport branch's buffered SSH adapter
+refuses sink output, while #832's live SSH sink streams without a fixed capture ceiling. Local
 boundary and refusal tests are not native QGA/PVE capture evidence. The unchecked item still
 requires native maximum-response acceptance, an explicit readiness consumer and integration with the
 production route selection; ordinary in-memory FileAccess reads continue through owned chunks.

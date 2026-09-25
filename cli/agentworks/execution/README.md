@@ -692,9 +692,10 @@ Before dispatch, the host bounds the complete successful runtime and `AGWF1` std
 the caller's byte limit and asks the selected carrier to validate that capacity requirement. Proxmox
 accepts at most a 1 MiB declared stdout budget, leaving room for JSON escaping and the remaining
 HTTP response inside its 8 MiB reader limit. This is a route-specific preflight, not a global
-file-size limit or native QGA capture proof. Buffered SSH still refuses sink output; WSL2 delivers
-it through a local streaming pipe. A failed or truncated response cannot become a read result, and
-the direct read does not retry through staging.
+file-size limit or native QGA capture proof. The transport branch's buffered SSH adapter still
+refuses sink output; #832's separate live SSH sink has no fixed capture ceiling. WSL2 delivers it
+through a local streaming pipe. A failed or truncated response cannot become a read result, and the
+direct read does not retry through staging.
 
 An exceptional exit clears collector-owned response state and the reader's partial record before
 propagating the exception. This is not secure erasure of Python memory or traceback locals; callers
