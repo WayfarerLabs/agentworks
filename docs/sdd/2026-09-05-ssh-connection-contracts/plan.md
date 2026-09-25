@@ -254,11 +254,13 @@ work is proceeding in parallel in the transport lane, as confirmed by the operat
       disposition; inherited PoC evidence covers only its observed cases.
 
 The
-[2026-09-25 native managed-lifecycle report](phase2-results.md#native-managed-lifecycle-on-the-composed-ssh-branch)
-adds test-scoped Linux/GCE evidence on the #833 + #832 composition. It does not supply the
-production composer, public RunContext path, terminal delivery or supported-workstation acceptance.
-Its WSL2 distribution boot-fence finding belongs to transport's still-open power-lifetime and
-recovery work.
+[native managed-lifecycle report](phase2-results.md#native-managed-lifecycle-on-the-composed-ssh-branch)
+adds test-scoped Linux/GCE evidence on the #833 + #832 composition. The
+[follow-up native boot-fence report](phase2-results.md#derived-guest-boot-fence-proof-on-composed-ssh)
+verifies stable and changed guest-boot identity across real Linux SSH reboots and WSL2 distribution
+restarts. Neither supplies the production composer, public RunContext path, lost-hold recovery,
+terminal delivery or supported-workstation acceptance. The boot-fence recovery gate remains with
+transport.
 
 ### Integrate and deliver the usable new path
 
