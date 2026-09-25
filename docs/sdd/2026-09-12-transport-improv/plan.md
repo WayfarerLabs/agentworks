@@ -683,9 +683,11 @@ pushes remain distinct from a public review handoff or joint acceptance.
 The [Darwin prerequisite candidate](preparation-lld.md#darwin-inline-prerequisite-candidate) keeps
 runtime selection above carriers and checks interpreter compatibility inside the inline invocation.
 It does not install Python, execute the known Xcode shim, or add a preliminary readiness probe.
-Implementation and native macOS proof remain open. Its local executable experiment now reuses the
-shared pump and fixed minimal environment; the separate private file snapshot primitive implements
-bounded read-only observations. Their
+Private file diagnostics distinguish missing, Xcode-shim and unsupported-version refusals with
+Python 3.11-or-newer guidance. Inline execution still reduces these to generic preparation failure;
+production macOS host diagnostics and native proof remain open. Its local executable experiment now
+reuses the shared pump and fixed minimal environment; the separate private file snapshot primitive
+implements bounded read-only observations. Their
 [runtime](preparation-lld.md#darwin-inline-prerequisite-candidate) and
 [filesystem](file-operations-lld.md#confinement-and-filesystem-mechanics) evidence descriptions keep
 production composition, native platform acceptance, full mount handling and locking gates open.
