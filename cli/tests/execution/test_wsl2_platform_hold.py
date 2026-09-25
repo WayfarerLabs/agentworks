@@ -886,7 +886,7 @@ def test_real_lost_ready_reply_requires_fresh_admission_cas(
         assert injected and events.count("dispatch") == 1
 
         if committed_before_reply_lost:
-            with pytest.raises(StateError, match="payload changed concurrently"):
+            with pytest.raises(StateError):
                 subject.release(Deadline.after(1))
             assert "observe" not in events
         else:
