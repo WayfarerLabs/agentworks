@@ -769,19 +769,28 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
         ALTER TABLE consoles ADD COLUMN last_started_at TEXT;
     """,
     38: _add_session_identity,
-    # Durable coarse operation ownership is independent of connection and -
-    # process lifetime. Resource identity stays core-selected and has no ---
-    # foreign key so the same shape covers VM and platform-host work. ------
+    # An operation root outlives its current resource membership. Resource
+    # identity stays core-selected and has no foreign key, so the same shape
+    # covers VM and platform-host work.
     39: """
-        CREATE TABLE operation_claims (
-            resource_kind TEXT NOT NULL
-                CHECK (resource_kind IN ('vm', 'platform-host')),
-            resource_name TEXT NOT NULL
-                CHECK (typeof(resource_name) = 'text' AND length(resource_name) BETWEEN 1 AND 255),
-            operation_id TEXT NOT NULL UNIQUE
+        CREATE TABLE operation_owners (
+            operation_id TEXT PRIMARY KEY
                 CHECK (
                     length(operation_id) = 32
                     AND operation_id NOT GLOB '*[^0-9a-f]*'
+                ),
+            generation_id TEXT NOT NULL
+                CHECK (
+                    length(generation_id) = 32
+                    AND generation_id NOT GLOB '*[^0-9a-f]*'
+                ),
+            recovery_predecessor_generation_id TEXT
+                CHECK (
+                    recovery_predecessor_generation_id IS NULL
+                    OR (
+                        length(recovery_predecessor_generation_id) = 32
+                        AND recovery_predecessor_generation_id NOT GLOB '*[^0-9a-f]*'
+                    )
                 ),
             operation_kind TEXT NOT NULL
                 CHECK (typeof(operation_kind) = 'text' AND length(operation_kind) BETWEEN 1 AND 64),
@@ -789,7 +798,48 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
                 CHECK (state IN ('reserved', 'possible-dispatch', 'resolved')),
             claimed_at TEXT NOT NULL CHECK (length(claimed_at) = 20),
             updated_at TEXT NOT NULL CHECK (length(updated_at) = 20),
+            obligations_sealed_at TEXT
+                CHECK (obligations_sealed_at IS NULL OR length(obligations_sealed_at) = 20),
+            CHECK (
+                recovery_predecessor_generation_id IS NULL
+                OR (
+                    recovery_predecessor_generation_id != generation_id
+                    AND obligations_sealed_at IS NOT NULL
+                )
+            )
+        );
+
+        CREATE TABLE operation_claims (
+            resource_kind TEXT NOT NULL
+                CHECK (resource_kind IN ('vm', 'platform-host')),
+            resource_name TEXT NOT NULL
+                CHECK (typeof(resource_name) = 'text' AND length(resource_name) BETWEEN 1 AND 255),
+            operation_id TEXT NOT NULL
+                REFERENCES operation_owners(operation_id) ON DELETE CASCADE,
             PRIMARY KEY (resource_kind, resource_name)
+        );
+
+        CREATE TABLE lifecycle_obligations (
+            operation_id TEXT NOT NULL
+                REFERENCES operation_owners(operation_id) ON DELETE CASCADE,
+            obligation_id TEXT NOT NULL UNIQUE
+                CHECK (
+                    length(obligation_id) = 32
+                    AND obligation_id NOT GLOB '*[^0-9a-f]*'
+                ),
+            obligation_kind TEXT NOT NULL
+                CHECK (typeof(obligation_kind) = 'text' AND length(obligation_kind) BETWEEN 1 AND 64),
+            state TEXT NOT NULL
+                CHECK (state IN ('registered', 'possible-effect', 'resolved')),
+            payload_version INTEGER NOT NULL
+                CHECK (typeof(payload_version) = 'integer' AND payload_version BETWEEN 1 AND 2147483647),
+            payload BLOB NOT NULL
+                CHECK (typeof(payload) = 'blob' AND length(payload) <= 8192),
+            payload_revision INTEGER NOT NULL DEFAULT 0
+                CHECK (typeof(payload_revision) = 'integer' AND payload_revision >= 0),
+            registered_at TEXT NOT NULL CHECK (length(registered_at) = 20),
+            updated_at TEXT NOT NULL CHECK (length(updated_at) = 20),
+            PRIMARY KEY (operation_id, obligation_id)
         );
     """,
     # -- Private durable identity and launch reconciliation for one managed -
@@ -843,6 +893,24 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
             updated_at TEXT NOT NULL CHECK (length(updated_at) = 20),
             possible_dispatch_at TEXT CHECK (possible_dispatch_at IS NULL OR length(possible_dispatch_at) = 20),
             launch_reconciled_at TEXT CHECK (launch_reconciled_at IS NULL OR length(launch_reconciled_at) = 20),
+            output_mode TEXT
+                CHECK (
+                    output_mode IS NULL
+                    OR (typeof(output_mode) = 'text'
+                        AND output_mode IN ('capture', 'discard', 'sensitivity-suppressed'))
+                ),
+            output_capture_prefix_bytes INTEGER
+                CHECK (
+                    (output_mode IS NULL AND output_capture_prefix_bytes IS NULL)
+                    OR (output_mode IS NOT NULL
+                        AND (
+                            (output_mode = 'capture' AND typeof(output_capture_prefix_bytes) = 'integer'
+                                AND output_capture_prefix_bytes BETWEEN 0 AND 16777216)
+                            OR (output_mode IN ('discard', 'sensitivity-suppressed')
+                                AND output_capture_prefix_bytes IS NULL)
+                        )
+                    )
+                ),
             CHECK (
                 (lifetime = 'operation' AND owner_kind = 'operation')
                 OR (lifetime = 'independent' AND owner_kind = 'resource')
@@ -873,135 +941,6 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
                 OR (
                     length(instance_marker) = 32
                     AND instance_marker NOT GLOB '*[^0-9a-f]*'
-                )
-            );
-    """,
-    # The operation root outlives its one current resource membership. Future
-    # hierarchical admission can add memberships without relocating lifecycle
-    # evidence or giving a resource row ownership of adapter state.
-    42: """
-        CREATE TABLE operation_owners (
-            operation_id TEXT PRIMARY KEY
-                CHECK (
-                    length(operation_id) = 32
-                    AND operation_id NOT GLOB '*[^0-9a-f]*'
-                ),
-            operation_kind TEXT NOT NULL
-                CHECK (typeof(operation_kind) = 'text' AND length(operation_kind) BETWEEN 1 AND 64),
-            state TEXT NOT NULL
-                CHECK (state IN ('reserved', 'possible-dispatch', 'resolved')),
-            claimed_at TEXT NOT NULL CHECK (length(claimed_at) = 20),
-            updated_at TEXT NOT NULL CHECK (length(updated_at) = 20),
-            obligations_sealed_at TEXT
-                CHECK (obligations_sealed_at IS NULL OR length(obligations_sealed_at) = 20)
-        );
-
-        INSERT INTO operation_owners (operation_id, operation_kind, state, claimed_at, updated_at)
-        SELECT operation_id, operation_kind, state, claimed_at, updated_at
-        FROM operation_claims;
-
-        CREATE TABLE operation_claims_new (
-            resource_kind TEXT NOT NULL
-                CHECK (resource_kind IN ('vm', 'platform-host')),
-            resource_name TEXT NOT NULL
-                CHECK (typeof(resource_name) = 'text' AND length(resource_name) BETWEEN 1 AND 255),
-            operation_id TEXT NOT NULL
-                REFERENCES operation_owners(operation_id) ON DELETE CASCADE,
-            PRIMARY KEY (resource_kind, resource_name)
-        );
-
-        INSERT INTO operation_claims_new (resource_kind, resource_name, operation_id)
-        SELECT resource_kind, resource_name, operation_id
-        FROM operation_claims;
-
-        DROP TABLE operation_claims;
-        ALTER TABLE operation_claims_new RENAME TO operation_claims;
-
-        CREATE TABLE lifecycle_obligations (
-            operation_id TEXT NOT NULL
-                REFERENCES operation_owners(operation_id) ON DELETE CASCADE,
-            obligation_id TEXT NOT NULL UNIQUE
-                CHECK (
-                    length(obligation_id) = 32
-                    AND obligation_id NOT GLOB '*[^0-9a-f]*'
-                ),
-            obligation_kind TEXT NOT NULL
-                CHECK (typeof(obligation_kind) = 'text' AND length(obligation_kind) BETWEEN 1 AND 64),
-            state TEXT NOT NULL
-                CHECK (state IN ('registered', 'possible-effect', 'resolved')),
-            payload_version INTEGER NOT NULL
-                CHECK (typeof(payload_version) = 'integer' AND payload_version BETWEEN 1 AND 2147483647),
-            payload BLOB NOT NULL
-                CHECK (typeof(payload) = 'blob' AND length(payload) <= 8192),
-            payload_revision INTEGER NOT NULL DEFAULT 0
-                CHECK (typeof(payload_revision) = 'integer' AND payload_revision >= 0),
-            registered_at TEXT NOT NULL CHECK (length(registered_at) = 20),
-            updated_at TEXT NOT NULL CHECK (length(updated_at) = 20),
-            PRIMARY KEY (operation_id, obligation_id)
-        );
-    """,
-    43: """
-        CREATE TABLE operation_owners_new (
-            operation_id TEXT PRIMARY KEY
-                CHECK (
-                    length(operation_id) = 32
-                    AND operation_id NOT GLOB '*[^0-9a-f]*'
-                ),
-            generation_id TEXT NOT NULL
-                CHECK (
-                    length(generation_id) = 32
-                    AND generation_id NOT GLOB '*[^0-9a-f]*'
-                ),
-            recovery_predecessor_generation_id TEXT
-                CHECK (
-                    recovery_predecessor_generation_id IS NULL
-                    OR (
-                        length(recovery_predecessor_generation_id) = 32
-                        AND recovery_predecessor_generation_id NOT GLOB '*[^0-9a-f]*'
-                    )
-                ),
-            operation_kind TEXT NOT NULL
-                CHECK (typeof(operation_kind) = 'text' AND length(operation_kind) BETWEEN 1 AND 64),
-            state TEXT NOT NULL
-                CHECK (state IN ('reserved', 'possible-dispatch', 'resolved')),
-            claimed_at TEXT NOT NULL CHECK (length(claimed_at) = 20),
-            updated_at TEXT NOT NULL CHECK (length(updated_at) = 20),
-            obligations_sealed_at TEXT
-                CHECK (obligations_sealed_at IS NULL OR length(obligations_sealed_at) = 20),
-            CHECK (
-                recovery_predecessor_generation_id IS NULL
-                OR (
-                    recovery_predecessor_generation_id != generation_id
-                    AND obligations_sealed_at IS NOT NULL
-                )
-            )
-        );
-
-        INSERT INTO operation_owners_new
-            (operation_id, generation_id, operation_kind, state, claimed_at, updated_at, obligations_sealed_at)
-        SELECT operation_id, operation_id, operation_kind, state, claimed_at, updated_at, obligations_sealed_at
-        FROM operation_owners;
-
-        DROP TABLE operation_owners;
-        ALTER TABLE operation_owners_new RENAME TO operation_owners;
-    """,
-    44: """
-        ALTER TABLE execution_runs ADD COLUMN output_mode TEXT
-            CHECK (
-                output_mode IS NULL
-                OR (typeof(output_mode) = 'text'
-                    AND output_mode IN ('capture', 'discard', 'sensitivity-suppressed'))
-            );
-        ALTER TABLE execution_runs ADD COLUMN output_capture_prefix_bytes INTEGER
-            CHECK (
-                (output_mode IS NULL AND output_capture_prefix_bytes IS NULL)
-                OR (output_mode IS NOT NULL
-                    AND (
-                        (output_mode = 'capture' AND typeof(output_capture_prefix_bytes) = 'integer'
-                            AND output_capture_prefix_bytes BETWEEN 0 AND 16777216)
-                        OR (output_mode IN ('discard', 'sensitivity-suppressed')
-                            AND output_capture_prefix_bytes IS NULL)
-                    )
                 )
             );
     """,
@@ -1136,15 +1075,28 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
     },
     38: {"sessions": ("session_uuid", "run_id")},
     39: {
-        "operation_claims": (
-            "resource_kind",
-            "resource_name",
+        "operation_owners": (
             "operation_id",
+            "generation_id",
+            "recovery_predecessor_generation_id",
             "operation_kind",
             "state",
             "claimed_at",
             "updated_at",
-        )
+            "obligations_sealed_at",
+        ),
+        "operation_claims": ("resource_kind", "resource_name", "operation_id"),
+        "lifecycle_obligations": (
+            "operation_id",
+            "obligation_id",
+            "obligation_kind",
+            "state",
+            "payload_version",
+            "payload",
+            "payload_revision",
+            "registered_at",
+            "updated_at",
+        ),
     },
     40: {
         "execution_runs": (
@@ -1171,33 +1123,11 @@ _SCHEMA_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[str, ...]]] = {
             "updated_at",
             "possible_dispatch_at",
             "launch_reconciled_at",
+            "output_mode",
+            "output_capture_prefix_bytes",
         )
     },
     41: {"vms": ("instance_marker",)},
-    42: {
-        "operation_owners": (
-            "operation_id",
-            "operation_kind",
-            "state",
-            "claimed_at",
-            "updated_at",
-            "obligations_sealed_at",
-        ),
-        "operation_claims": ("resource_kind", "resource_name", "operation_id"),
-        "lifecycle_obligations": (
-            "operation_id",
-            "obligation_id",
-            "obligation_kind",
-            "state",
-            "payload_version",
-            "payload",
-            "payload_revision",
-            "registered_at",
-            "updated_at",
-        ),
-    },
-    43: {"operation_owners": ("generation_id", "recovery_predecessor_generation_id")},
-    44: {"execution_runs": ("output_mode", "output_capture_prefix_bytes")},
 }
 
 _SCHEMA_SENTINEL_REMOVED_TABLES: dict[int, tuple[str, ...]] = {
@@ -1219,7 +1149,6 @@ _SCHEMA_SENTINEL_REMOVED_COLUMNS: dict[int, dict[str, tuple[str, ...]]] = {
     },
     28: {"workspaces": ("last_seen_at",)},
     31: {"sessions": ("harness_state",)},
-    42: {"operation_claims": ("operation_kind", "state", "claimed_at", "updated_at")},
 }
 
 
@@ -1281,7 +1210,7 @@ _FOREIGN_KEY_SENTINEL_ADDITIONS: dict[int, dict[str, tuple[ForeignKeySentinel, .
         ),
     },
     34: {"vm_checkpoints": (("vms", "vm_name", "name", _NO_ACTION, "RESTRICT"),)},
-    42: {
+    39: {
         "operation_claims": (("operation_owners", "operation_id", "operation_id", _NO_ACTION, "CASCADE"),),
         "lifecycle_obligations": (("operation_owners", "operation_id", "operation_id", _NO_ACTION, "CASCADE"),),
     },
