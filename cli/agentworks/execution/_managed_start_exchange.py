@@ -17,10 +17,13 @@ from ._managed_job_store import FactName
 from ._managed_runs import (
     ManagedLaunchObservation,
     ManagedLaunchState,
+    ManagedOutputPolicy,
+    ManagedRunIdentity,
     ManagedRunLifetime,
     ManagedRunReceipt,
     ManagedRunRecord,
     ManagedRunRepository,
+    ManagedRunSpec,
     launch_managed_run,
 )
 from ._managed_start_bundle import FIXED_BUNDLE
@@ -93,15 +96,52 @@ class ManagedStartAttempt:
     candidate: ManagedStartCandidate
 
 
-@dataclass(frozen=True, slots=True, repr=False)
+@dataclass(slots=True, repr=False, eq=False)
 class _PreparedAttempt:
+    identity: ManagedRunIdentity
+    spec: ManagedRunSpec
+    policy: ManagedOutputPolicy
+    carrier: Carrier
+    plan: IdentityPlan
+    deadline: Deadline
+    runtime_selection: RuntimeSelection
     invocation: PreparedInvocation
-    io: CarrierIO
+    io: CarrierIO | None
     collector: _Collector
     reader: FileRecordReader
     runtime: RuntimePrefixSink
     stderr: _DiagnosticSink
     expected_launch: bytes
+    _used: bool = False
+    _claimed: bool = False
+
+    def discard(self) -> None:
+        """Release retained evidence and prevent this preparation from being used."""
+        self._used = True
+        self.io = None
+        self.runtime.clear()
+        self.reader.abort()
+        self.collector.abort()
+        self.stderr.clear()
+
+    close = discard
+
+    def verify(self, reserved: ManagedRunRecord, carrier: Carrier, deadline: Deadline) -> None:
+        if self._used or (
+            type(reserved) is not ManagedRunRecord
+            or reserved.launch_state is not ManagedLaunchState.RESERVED
+            or reserved.identity != self.identity
+            or reserved.spec != self.spec
+            or reserved.output_policy != self.policy
+            or carrier is not self.carrier
+            or deadline is not self.deadline
+        ):
+            raise ValidationError("Managed start preparation does not match reservation and carrier")
+
+    def claim(self, reserved: ManagedRunRecord, carrier: Carrier, deadline: Deadline) -> None:
+        self.verify(reserved, carrier, deadline)
+        self._used = True
+        self._claimed = True
 
 
 class _DiagnosticSink:
@@ -216,20 +256,26 @@ class _Collector:
         return observation
 
 
-def _prepare_attempt(
+def prepare_managed_start(
     carrier: Carrier,
-    reserved: ManagedRunRecord,
+    identity: ManagedRunIdentity,
+    spec: ManagedRunSpec,
+    output_policy: ManagedOutputPolicy,
     request: request_wire.ManagedJobRequest,
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
 ) -> _PreparedAttempt:
-    """Validate all caller input before the durable possible-dispatch transition."""
-    if type(reserved) is not ManagedRunRecord or reserved.launch_state is not ManagedLaunchState.RESERVED:
-        raise ValidationError("Managed start requires an exact reserved run")
-    if reserved.spec.lifetime is not ManagedRunLifetime.INDEPENDENT:
+    """Prepare one exact managed start before any run reservation is written."""
+    if (
+        type(identity) is not ManagedRunIdentity
+        or type(spec) is not ManagedRunSpec
+        or type(output_policy) is not ManagedOutputPolicy
+    ):
+        raise ValidationError("Managed start requires exact planned run facts")
+    if spec.lifetime is not ManagedRunLifetime.INDEPENDENT:
         raise ValidationError("Managed start supports only independent lifetime")
-    if type(plan) is not IdentityPlan or type(deadline) is not Deadline:
+    if type(plan) is not IdentityPlan or type(deadline) is not Deadline or deadline.expires_at is None:
         raise ValidationError("Managed start requires a bound identity and deadline")
     if (
         type(runtime_selection) is not RuntimeSelection
@@ -242,13 +288,13 @@ def _prepare_attempt(
     if type(request) is not request_wire.ManagedJobRequest:
         raise ValidationError("Invalid managed start request")
     try:
-        expected_launch = encode_managed_job_fact(
-            ManagedRunReceipt(reserved.identity, reserved.identity.unit_name, reserved.spec)
-        )
+        expected_launch = encode_managed_job_fact(ManagedRunReceipt(identity, identity.unit_name, spec))
         if request.launch != expected_launch:
-            raise ValidationError("Managed start request does not match reservation")
-        policy = reserved.output_policy
-        if request.output_mode != policy.mode.value or request.capture_prefix_bytes != policy.capture_prefix_bytes:
+            raise ValidationError("Managed start request does not match planned run")
+        if (
+            request.output_mode != output_policy.mode.value
+            or request.capture_prefix_bytes != output_policy.capture_prefix_bytes
+        ):
             raise ValidationError("Managed start output policy mismatch")
         nonce = secrets.token_hex(16)
         request_data = encode_request(ManagedStartRequest(nonce, plan.expected, request))
@@ -267,8 +313,28 @@ def _prepare_attempt(
         output=SinkOutput(runtime, stderr, require_live=False),
         sensitive=True,
     )
-    carrier.validate(invocation, io=io)
-    return _PreparedAttempt(invocation, io, collector, reader, runtime, stderr, expected_launch)
+    prepared = _PreparedAttempt(
+        identity,
+        spec,
+        output_policy,
+        carrier,
+        plan,
+        deadline,
+        runtime_selection,
+        invocation,
+        io,
+        collector,
+        reader,
+        runtime,
+        stderr,
+        expected_launch,
+    )
+    try:
+        carrier.validate(invocation, io=io)
+    except BaseException:
+        prepared.discard()
+        raise
+    return prepared
 
 
 def _exchange(carrier: Carrier, prepared: _PreparedAttempt, deadline: Deadline) -> ManagedStartCandidate:
@@ -282,6 +348,7 @@ def _exchange(carrier: Carrier, prepared: _PreparedAttempt, deadline: Deadline) 
             None,
         )
     try:
+        assert prepared.io is not None
         report = carrier.execute(prepared.invocation, io=prepared.io, deadline=deadline)
         prerequisite = prepared.runtime.observation
         observation = None
@@ -305,10 +372,7 @@ def _exchange(carrier: Carrier, prepared: _PreparedAttempt, deadline: Deadline) 
             report.dispatch, report.completion, report.local_status, report.failure, prerequisite, observation
         )
     finally:
-        prepared.runtime.clear()
-        prepared.reader.abort()
-        prepared.collector.abort()
-        prepared.stderr.clear()
+        prepared.discard()
 
 
 def start_managed_run(
@@ -316,30 +380,41 @@ def start_managed_run(
     reserved: ManagedRunRecord,
     carrier: Carrier,
     *,
-    request: request_wire.ManagedJobRequest,
-    plan: IdentityPlan,
+    prepared: _PreparedAttempt,
     deadline: Deadline,
-    runtime_selection: RuntimeSelection,
     before_possible_dispatch: Callable[[], None] | None = None,
 ) -> ManagedStartAttempt:
     """Commit possible dispatch, attempt once, and reconcile only admitted launch fact."""
-    prepared = _prepare_attempt(carrier, reserved, request, plan, deadline, runtime_selection)
-    if before_possible_dispatch is not None:
-        before_possible_dispatch()
-    candidate: ManagedStartCandidate | None = None
+    if (
+        not prepared._claimed
+        or type(reserved) is not ManagedRunRecord
+        or reserved.launch_state is not ManagedLaunchState.RESERVED
+        or reserved.identity != prepared.identity
+        or reserved.spec != prepared.spec
+        or reserved.output_policy != prepared.policy
+        or deadline is not prepared.deadline
+    ):
+        raise ValidationError("Managed start preparation has not been claimed")
+    prepared._claimed = False
+    try:
+        if before_possible_dispatch is not None:
+            before_possible_dispatch()
+        candidate: ManagedStartCandidate | None = None
 
-    def boundary(run: ManagedRunRecord) -> ManagedLaunchObservation:
-        nonlocal candidate
-        assert run.identity == reserved.identity
-        candidate = _exchange(carrier, prepared, deadline)
-        observed = candidate.observation
-        receipt = (
-            ManagedRunReceipt(reserved.identity, reserved.identity.unit_name, reserved.spec)
-            if observed is not None and observed.launch_fact == prepared.expected_launch
-            else None
-        )
-        return ManagedLaunchObservation(candidate.dispatch, receipt)
+        def boundary(run: ManagedRunRecord) -> ManagedLaunchObservation:
+            nonlocal candidate
+            assert run.identity == reserved.identity
+            candidate = _exchange(carrier, prepared, deadline)
+            observed = candidate.observation
+            receipt = (
+                ManagedRunReceipt(reserved.identity, reserved.identity.unit_name, reserved.spec)
+                if observed is not None and observed.launch_fact == prepared.expected_launch
+                else None
+            )
+            return ManagedLaunchObservation(candidate.dispatch, receipt)
 
-    record = launch_managed_run(repository, reserved, boundary)
-    assert candidate is not None
-    return ManagedStartAttempt(record, candidate)
+        record = launch_managed_run(repository, reserved, boundary)
+        assert candidate is not None
+        return ManagedStartAttempt(record, candidate)
+    finally:
+        prepared.discard()

@@ -39,7 +39,7 @@ from agentworks.execution._managed_runs import (
 )
 from agentworks.execution._managed_service_bundle import FIXED_SOURCE
 from agentworks.execution._managed_start_bundle import FIXED_BUNDLE
-from agentworks.execution._managed_start_exchange import ManagedStartState, start_managed_run
+from agentworks.execution._managed_start_exchange import ManagedStartState, prepare_managed_start, start_managed_run
 from agentworks.execution._managed_start_protocol import (
     MAX_REQUEST_BYTES,
     ManagedStartError,
@@ -179,14 +179,24 @@ class ScriptedCarrier:
 
 
 def _start(repository: ManagedRunRepository, record: ManagedRunRecord, carrier: ScriptedCarrier):  # type: ignore[no-untyped-def]
+    deadline = Deadline.after(10)
+    prepared = prepare_managed_start(
+        carrier,
+        record.identity,
+        record.spec,
+        record.output_policy,
+        _request(record),
+        IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
+        deadline,
+        RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+    )
+    prepared.claim(record, carrier, deadline)
     return start_managed_run(
         repository,
         record,
         carrier,
-        request=_request(record),
-        plan=IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
-        deadline=Deadline.after(10),
-        runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+        prepared=prepared,
+        deadline=deadline,
     )
 
 
@@ -387,7 +397,7 @@ def test_carrier_fault_never_promotes_launch(
     assert attempt.candidate.observation.launch_fact is None
 
 
-@pytest.mark.parametrize("fault", ["output", "target", "lifetime", "expired", "darwin", "nonroot"])
+@pytest.mark.parametrize("fault", ["output", "target", "lifetime", "expired", "unbounded", "darwin", "nonroot"])
 def test_preflight_refuses_without_mutating_reservation(
     reserved: tuple[ManagedRunRepository, ManagedRunRecord], fault: str
 ) -> None:
@@ -411,14 +421,16 @@ def test_preflight_refuses_without_mutating_reservation(
         )
     elif fault == "expired":
         deadline = Deadline.after(0)
+    elif fault == "unbounded":
+        deadline = Deadline.after(None)
     elif fault == "darwin":
         runtime = RuntimeSelection(RuntimeTargetOS.DARWIN)
     else:
         plan = IdentityPlan(IdentityExpectation(1001, 1001, (1001,)), IdentityMode.DEMOTE)
     carrier = ScriptedCarrier(lambda _request: b"")
     with pytest.raises(ValidationError):
-        start_managed_run(
-            repository, record, carrier, request=request, plan=plan, deadline=deadline, runtime_selection=runtime
+        prepare_managed_start(
+            carrier, record.identity, record.spec, record.output_policy, request, plan, deadline, runtime
         )
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
     assert carrier.calls == 0
@@ -430,14 +442,15 @@ def test_preflight_refuses_bogus_request_type_before_reservation_mutation(
     repository, record = reserved
     carrier = ScriptedCarrier(lambda _request: b"")
     with pytest.raises(ValidationError):
-        start_managed_run(
-            repository,
-            record,
+        prepare_managed_start(
             carrier,
-            request=object(),  # type: ignore[arg-type]
-            plan=IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
-            deadline=Deadline.after(10),
-            runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+            record.identity,
+            record.spec,
+            record.output_policy,
+            object(),  # type: ignore[arg-type]
+            IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
+            Deadline.after(10),
+            RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
         )
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
     assert carrier.validations == carrier.calls == 0
@@ -450,14 +463,15 @@ def test_proxmox_structural_refusal_precedes_possible_dispatch(
     carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.example", "node", 101, "operator!token", "secret"))
     request = replace(_request(record), stdin=b"x" * 50_000)
     with pytest.raises(ValidationError):
-        start_managed_run(
-            repository,
-            record,
+        prepare_managed_start(
             carrier,
-            request=request,
-            plan=IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
-            deadline=Deadline.after(10),
-            runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+            record.identity,
+            record.spec,
+            record.output_policy,
+            request,
+            IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
+            Deadline.after(10),
+            RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
         )
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
 

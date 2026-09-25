@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Generator
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -33,6 +34,7 @@ from agentworks.execution._managed_runs import (
     ManagedTargetKind,
 )
 from agentworks.execution._managed_start_bundle import FIXED_BUNDLE
+from agentworks.execution._managed_start_exchange import prepare_managed_start
 from agentworks.execution._managed_start_operation import (
     ManagedStartControlFact,
     decode_managed_start_obligation,
@@ -70,14 +72,9 @@ ROOT = IdentityExpectation(0, 0, (0,))
 def owned(tmp_path: Path) -> Generator[tuple[Database, ManagedRunRepository, ManagedRunRecord, OperationOwner]]:
     database = Database(tmp_path / "state.db")
     repository = ManagedRunRepository(database)
-    spec = ManagedRunSpec(
-        ManagedTargetIdentity(ManagedTargetKind.VM, "vm-one", "v1:" + "c" * 64, "00000000-0000-4000-8000-000000000001"),
-        IdentityExpectation(1001, 1001, (1001,)),
-        ManagedShellIdentity(None, None),
-        ManagedRunOwner(ManagedRunOwnerKind.RESOURCE, "session-7"),
-        ManagedRunLifetime.INDEPENDENT,
+    record = repository.reserve(
+        _spec(), output_policy=ManagedOutputPolicy(ManagedOutputMode.CAPTURE, 4096), identity=RUN
     )
-    record = repository.reserve(spec, output_policy=ManagedOutputPolicy(ManagedOutputMode.CAPTURE, 4096), identity=RUN)
     owner = OperationOwner.acquire(
         database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "managed-start"
     )
@@ -87,9 +84,23 @@ def owned(tmp_path: Path) -> Generator[tuple[Database, ManagedRunRepository, Man
         database.close()
 
 
+def _spec() -> ManagedRunSpec:
+    return ManagedRunSpec(
+        ManagedTargetIdentity(ManagedTargetKind.VM, "vm-one", "v1:" + "c" * 64, "00000000-0000-4000-8000-000000000001"),
+        IdentityExpectation(1001, 1001, (1001,)),
+        ManagedShellIdentity(None, None),
+        ManagedRunOwner(ManagedRunOwnerKind.RESOURCE, "session-7"),
+        ManagedRunLifetime.INDEPENDENT,
+    )
+
+
 def _request(record: ManagedRunRecord) -> ManagedJobRequest:
+    return _planned_request(record.identity, record.spec)
+
+
+def _planned_request(identity: ManagedRunIdentity, spec: ManagedRunSpec) -> ManagedJobRequest:
     return ManagedJobRequest(
-        encode_managed_job_fact(ManagedRunReceipt(record.identity, record.identity.unit_name, record.spec)),
+        encode_managed_job_fact(ManagedRunReceipt(identity, identity.unit_name, spec)),
         "command",
         ("/usr/bin/true",),
         "/tmp",
@@ -161,17 +172,131 @@ def _start(
     obligation_id: str = OBLIGATION,
 ):
     _, repository, record, existing_owner = owned
+    selected_deadline = deadline if deadline is not None else Deadline.after(10)
+    prepared = prepare_managed_start(
+        carrier,
+        record.identity,
+        record.spec,
+        record.output_policy,
+        request if request is not None else _request(record),
+        IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
+        selected_deadline,
+        RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+    )
     return start_owned_managed_run(
         repository,
         record,
         carrier,
-        request=request if request is not None else _request(record),
-        plan=IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
-        deadline=deadline if deadline is not None else Deadline.after(10),
-        runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+        prepared=prepared,
+        deadline=selected_deadline,
         owner=owner if owner is not None else existing_owner,
         obligation_id=obligation_id,
     )
+
+
+def test_preparation_precedes_reservation_and_binds_owned_start(tmp_path: Path) -> None:
+    database = Database(tmp_path / "state.db")
+    repository = ManagedRunRepository(database)
+    owner = OperationOwner.acquire(
+        database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "managed-start"
+    )
+    spec = _spec()
+    policy = ManagedOutputPolicy(ManagedOutputMode.CAPTURE, 4096)
+    request = _planned_request(RUN, spec)
+    plan = IdentityPlan(ROOT, IdentityMode.SUDO_ROOT)
+    runtime = RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3")
+    deadline = Deadline.after(10)
+    carrier = Carrier(lambda wire: _records(wire, receipt=True))
+    try:
+        bad = ManagedJobRequest(
+            b"bad",
+            request.kind,
+            request.argv,
+            request.cwd,
+            request.output_mode,
+            request.capture_prefix_bytes,
+            request.environment,
+            request.source,
+            request.stdin,
+        )
+        with pytest.raises(ValidationError):
+            prepare_managed_start(carrier, RUN, spec, policy, bad, plan, deadline, runtime)
+
+        class UnsupportedCarrier(Carrier):
+            def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+                raise ValidationError("unsupported channel")
+
+        unsupported = UnsupportedCarrier(lambda wire: _records(wire, receipt=True))
+        with pytest.raises(ValidationError):
+            prepare_managed_start(unsupported, RUN, spec, policy, request, plan, deadline, runtime)
+        assert repository.inspect(RUN) is None
+        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        assert carrier.calls == unsupported.calls == 0
+
+        prepared = prepare_managed_start(carrier, RUN, spec, policy, request, plan, deadline, runtime)
+        assert b"private-canary" not in repr(prepared).encode()
+        record = repository.reserve(spec, output_policy=policy, identity=RUN)
+        wrong = replace(record, output_policy=ManagedOutputPolicy(ManagedOutputMode.DISCARD, None))
+        with pytest.raises(ValidationError):
+            start_owned_managed_run(
+                repository, wrong, carrier, prepared=prepared, deadline=deadline, owner=owner, obligation_id=OBLIGATION
+            )
+        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        outcome = start_owned_managed_run(
+            repository, record, carrier, prepared=prepared, deadline=deadline, owner=owner, obligation_id=OBLIGATION
+        )
+        assert outcome.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
+        assert carrier.calls == 1
+        with pytest.raises(ValidationError):
+            start_owned_managed_run(
+                repository, record, carrier, prepared=prepared, deadline=deadline, owner=owner, obligation_id="c" * 32
+            )
+        assert carrier.calls == 1
+    finally:
+        database.close()
+
+
+def test_preparation_can_be_discarded_after_reservation_failure(tmp_path: Path) -> None:
+    database = Database(tmp_path / "state.db")
+    repository = ManagedRunRepository(database)
+    owner = OperationOwner.acquire(
+        database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "managed-start"
+    )
+    spec = _spec()
+    policy = ManagedOutputPolicy(ManagedOutputMode.CAPTURE, 4096)
+    carrier = Carrier(lambda wire: _records(wire, receipt=True))
+    deadline = Deadline.after(10)
+    try:
+        record = repository.reserve(spec, output_policy=policy, identity=RUN)
+        prepared = prepare_managed_start(
+            carrier,
+            RUN,
+            spec,
+            policy,
+            _planned_request(RUN, spec),
+            IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
+            deadline,
+            RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+        )
+        with pytest.raises(StateError):
+            repository.reserve(spec, output_policy=policy, identity=RUN)
+        prepared.discard()
+        prepared.close()
+        assert prepared.io is None
+        with pytest.raises(ValidationError):
+            start_owned_managed_run(
+                repository,
+                record,
+                carrier,
+                prepared=prepared,
+                deadline=deadline,
+                owner=owner,
+                obligation_id=OBLIGATION,
+            )
+        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        assert carrier.calls == 0
+    finally:
+        database.close()
 
 
 def test_confirmed_receipt_hands_off_to_resource_owned_run(
@@ -258,7 +383,7 @@ def test_owner_close_before_registration_releases_unused_borrow(
     owner.close()
 
 
-def test_owner_close_after_registration_before_arming_resolves_unused_row(
+def test_owner_close_during_preparation_prevents_borrow_without_obligation(
     owned: tuple[Database, ManagedRunRepository, ManagedRunRecord, OperationOwner], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database, repository, _, owner = owned
@@ -266,20 +391,13 @@ def test_owner_close_after_registration_before_arming_resolves_unused_row(
 
     def close_during_preflight(invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         carrier.validations += 1
-        with pytest.raises(StateError):
-            owner.close()
+        owner.close()
 
     monkeypatch.setattr(carrier, "validate", close_during_preflight)
-    with pytest.raises(StateError) as caught:
+    with pytest.raises(StateError):
         _start(owned, carrier)
-    assert isinstance(caught.value.__cause__, ManagedStartControlFact)
-    assert not caught.value.__cause__.outcome.requires_owner_retention
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
-    assert database.operations.list_lifecycle_obligations(owner.ownership)[0].state is LifecycleObligationState.RESOLVED
     assert carrier.calls == 0
-    owner.seal_lifecycle_obligations()
-    owner.record_effects_resolved()
-    owner.close()
 
 
 def test_invalid_obligation_id_releases_unused_borrow(
@@ -453,7 +571,7 @@ def test_preflight_refusal_leaves_reservation(
     with pytest.raises(ValidationError):
         _start(owned, carrier, request=bad)
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
-    assert database.operations.list_lifecycle_obligations(owner.ownership)[0].state is LifecycleObligationState.RESOLVED
+    assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
     assert carrier.calls == 0
 
 

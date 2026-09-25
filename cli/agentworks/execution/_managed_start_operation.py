@@ -19,16 +19,13 @@ from ._managed_runs import (
     ManagedRunRecord,
     ManagedTargetKind,
 )
-from ._managed_start_exchange import ManagedStartAttempt, start_managed_run
+from ._managed_start_exchange import ManagedStartAttempt, _PreparedAttempt, start_managed_run
 from .carrier import Deadline
 
 if TYPE_CHECKING:
     from agentworks.operations import OperationOwner
 
-    from ._helper_launcher import IdentityPlan
-    from ._managed_job_request import ManagedJobRequest
     from ._managed_runs import ManagedRunRepository
-    from ._runtime_prerequisite import RuntimeSelection
     from .carrier import Carrier
 
 
@@ -83,10 +80,8 @@ def start_owned_managed_run(
     reserved: ManagedRunRecord,
     carrier: Carrier,
     *,
-    request: ManagedJobRequest,
-    plan: IdentityPlan,
+    prepared: _PreparedAttempt,
     deadline: Deadline,
-    runtime_selection: RuntimeSelection,
     owner: OperationOwner,
     obligation_id: str,
 ) -> ManagedStartOutcome:
@@ -106,8 +101,15 @@ def start_owned_managed_run(
         or spec.owner.kind is not ManagedRunOwnerKind.RESOURCE
     ):
         raise ValidationError("Managed start requires an exact VM and independent resource owner")
+    if type(prepared) is not _PreparedAttempt:
+        raise ValidationError("Managed start requires exact preparation")
     payload = encode_managed_start_obligation(reserved.identity.run_id)
-    borrow = owner.borrow()
+    prepared.claim(reserved, carrier, deadline)
+    try:
+        borrow = owner.borrow()
+    except BaseException:
+        prepared.discard()
+        raise
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
     attempt: ManagedStartAttempt | None = None
     registration_started = False
@@ -124,10 +126,8 @@ def start_owned_managed_run(
             repository,
             reserved,
             operation,
-            request=request,
-            plan=plan,
+            prepared=prepared,
             deadline=deadline,
-            runtime_selection=runtime_selection,
             before_possible_dispatch=borrow.arm_dispatch_obligation,
         )
         operation.settle(attempt.candidate.dispatch, attempt.candidate.carrier_completion)
@@ -147,9 +147,11 @@ def start_owned_managed_run(
         release_borrow_after_custody(borrow, retain_effect=retained)
         return outcome
     except _PreRegistrationClosingRefusal:
+        prepared.discard()
         borrow.close()
         raise
     except BaseException as control:
+        prepared.discard()
         armed_effect = borrow.dispatch_obligation_may_be_armed
         registration_uncertain = registration_started and not borrow.has_installed_dispatch_obligation
         retained = armed_effect or operation.requires_owner_retention or registration_uncertain
