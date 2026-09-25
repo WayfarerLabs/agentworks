@@ -273,6 +273,7 @@ def test_platform_carrier_mutation_cannot_redirect_file_dispatch(
         assert subject is not None
         original = WSL2Connection("Ubuntu", "admin", "wsl.exe")
         initial_carrier = cast(WSL2Carrier, platform.test_binding.carrier)
+        object.__setattr__(initial_carrier.connection, "distribution", "mutated")
         initial_carrier._connection = WSL2Connection("other", "admin", "C:/other/wsl.exe")
         assert type(subject._carrier) is WSL2Carrier
         assert subject._carrier is not initial_carrier

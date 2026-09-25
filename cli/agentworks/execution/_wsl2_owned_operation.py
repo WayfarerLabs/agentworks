@@ -1,0 +1,273 @@
+"""Private selected WSL2 route, platform hold, and exact VM preparation."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Self
+
+from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLocatorUnavailable
+from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+from agentworks.db import LifecycleObligationState, OperationResourceKind, OperationScope
+from agentworks.errors import ValidationError
+from agentworks.execution._runtime_prerequisite import RuntimeSelection
+from agentworks.execution._vm_guest_identity import VMGuestIdentityObservationState
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
+from agentworks.execution._wsl2_guest_observer import WSL2GuestObserver
+from agentworks.execution._wsl2_lifecycle import GuestAnchorPresence, OwnedHostClient, WSL2AnchorEvidence
+from agentworks.execution._wsl2_platform_hold import WSL2PlatformHold, decode_hold_payload, locator_digest
+from agentworks.execution._wsl2_windows import WindowsWSL2HostClient
+from agentworks.execution.binding import NativeExecutionBinding
+from agentworks.execution.carrier import Deadline
+from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
+from agentworks.operations import OperationOwner
+from agentworks.vms.identity import validate_vm_instance_marker
+from agentworks.vms.target_preparation import (
+    VMTargetPreparation,
+    VMTargetPreparationStatus,
+    prepare_managed_vm_target_from_platform,
+)
+
+if TYPE_CHECKING:
+    from agentworks.capabilities.base import RunContext
+    from agentworks.config import Config
+    from agentworks.db import VMRow
+    from agentworks.db.operations import OperationRepository
+    from agentworks.execution._wsl2_lifecycle import GuestAnchorObserver
+
+
+class WSL2OwnedOperation:
+    """One selected route and caller-retained VM claim shared by private operations."""
+
+    _purpose = "operation"
+
+    def __init__(
+        self,
+        repository: OperationRepository,
+        vm: VMRow,
+        platform: WSL2Platform,
+        ctx: RunContext,
+        locator: ProviderLocator,
+        connection: WSL2Connection,
+        runtime_selection: RuntimeSelection,
+        *,
+        native: OwnedHostClient | None = None,
+        observer: GuestAnchorObserver | None = None,
+    ) -> None:
+        purpose = self._purpose
+        if type(locator) is not ProviderLocator or type(connection) is not WSL2Connection:
+            raise ValidationError(f"WSL2 {purpose} requires an exact locator and connection")
+        if vm.instance_marker is None:
+            raise ValidationError(f"WSL2 {purpose} requires a persisted VM marker")
+        if type(runtime_selection) is not RuntimeSelection:
+            raise ValidationError(f"WSL2 {purpose} requires an exact runtime selection")
+        try:
+            selected_locator = ProviderLocator(locator.token)
+            selected_connection = WSL2Connection(connection.distribution, connection.user, connection.wsl_executable)
+            selected_runtime = RuntimeSelection(runtime_selection.target_os, runtime_selection.explicit_path)
+        except AttributeError as error:
+            raise ValidationError(f"WSL2 {purpose} requires complete selected route facts") from error
+        selected_carrier = WSL2Carrier(selected_connection)
+        selected_binding = NativeExecutionBinding(selected_carrier, selected_connection.user, selected_runtime)
+        selected_native = WindowsWSL2HostClient() if native is None else native
+        selected_observer = WSL2GuestObserver(selected_connection) if observer is None else observer
+        self.owner = OperationOwner.acquire(
+            repository, OperationScope(OperationResourceKind.VM, vm.name), f"wsl2-{purpose}"
+        )
+        self._repository = repository
+        self._vm = vm
+        self._locator = selected_locator
+        self._connection = selected_connection
+        self._carrier = selected_carrier
+        self._binding = selected_binding
+        self._runtime = selected_runtime
+        self._platform = platform
+        self._ctx = ctx
+        try:
+            self.hold = WSL2PlatformHold(
+                self.owner,
+                vm.name,
+                selected_locator.token,
+                vm.instance_marker,
+                selected_connection,
+                selected_native,
+                selected_observer,
+            )
+        except BaseException as construction_error:
+            # Construction has not activated the hold or registered an obligation.
+            try:
+                self.owner.close()
+            except BaseException as close_error:
+                raise close_error from construction_error
+            raise
+        self.ready: WSL2AnchorEvidence | None = None
+        self.preparation: VMTargetPreparation | None = None
+        self._used = False
+        self._hold_released = False
+
+    @classmethod
+    def from_platform(
+        cls,
+        repository: OperationRepository,
+        vm: VMRow,
+        platform: WSL2Platform,
+        ctx: RunContext,
+        *,
+        deadline: Deadline,
+        config: Config | None = None,
+        native: OwnedHostClient | None = None,
+        observer: GuestAnchorObserver | None = None,
+    ) -> Self | None:
+        """Select a copied route before acquiring the VM claim."""
+        purpose = cls._purpose
+        if not isinstance(platform, WSL2Platform) or platform.site_name != vm.site:
+            raise ValidationError(f"WSL2 {purpose} requires the VM's selected WSL2 platform")
+        validate_vm_instance_marker(vm.instance_marker)
+        if type(deadline) is not Deadline or deadline.expires_at is None or deadline.expired:
+            raise ValidationError(f"WSL2 {purpose} requires an unexpired finite deadline")
+        locator = platform.observe_provider_locator(vm, ctx, deadline=deadline)
+        if deadline.expired:
+            raise ValidationError(f"WSL2 {purpose} locator observation exceeded the deadline")
+        if type(locator) is ProviderLocatorUnavailable:
+            return None
+        if type(locator) is not ProviderLocator:
+            raise ValidationError(f"WSL2 {purpose} requires an exact provider locator")
+        try:
+            locator = ProviderLocator(locator.token)
+        except AttributeError as error:
+            raise ValidationError(f"WSL2 {purpose} requires a complete provider locator") from error
+        binding = platform.resolve_native_execution_binding(vm, ctx, deadline=deadline, config=config)
+        if deadline.expired:
+            raise ValidationError(f"WSL2 {purpose} binding resolution exceeded the deadline")
+        connection = cls._selected_connection(binding)
+        if connection.user != vm.admin_username:
+            raise ValidationError(f"WSL2 {purpose} binding does not match the VM")
+        try:
+            runtime_selection = binding.runtime_selection
+        except AttributeError as error:
+            raise ValidationError(f"WSL2 {purpose} requires a complete native binding") from error
+        return cls(
+            repository, vm, platform, ctx, locator, connection, runtime_selection, native=native, observer=observer
+        )
+
+    @classmethod
+    def _selected_connection(cls, binding: NativeExecutionBinding) -> WSL2Connection:
+        purpose = cls._purpose
+        if type(binding) is not NativeExecutionBinding:
+            raise ValidationError(f"WSL2 {purpose} requires a WSL2 native binding")
+        try:
+            carrier = binding.carrier
+            if type(carrier) is not WSL2Carrier:
+                raise ValidationError(f"WSL2 {purpose} requires a WSL2 native binding")
+            connection = carrier.connection
+            if type(connection) is not WSL2Connection:
+                raise ValidationError(f"WSL2 {purpose} native binding route is inconsistent")
+            selected = WSL2Connection(connection.distribution, connection.user, connection.wsl_executable)
+            delivery_account = binding.delivery_account
+        except AttributeError as error:
+            raise ValidationError(f"WSL2 {purpose} requires a complete native binding") from error
+        if delivery_account != selected.user:
+            raise ValidationError(f"WSL2 {purpose} native binding route is inconsistent")
+        return selected
+
+    def start_and_prepare(self, deadline: Deadline) -> VMGuestIdentity | None:
+        """Start once and prepare only under a durable READY claim."""
+        if self._used:
+            raise ValidationError(f"WSL2 owned {self._purpose} is single use")
+        self._used = True
+        ready = self.hold.start(deadline)
+        self.ready = ready
+        if not self._ready_is_durable(ready):
+            return None
+        self.preparation = prepare_managed_vm_target_from_platform(
+            self._vm, self._platform, self._ctx, self._locator, self._binding, deadline=deadline, owner=self.owner
+        )
+        if self.preparation.status is not VMTargetPreparationStatus.PREPARED:
+            return None
+        return self._matching_ready_guest(ready, self.preparation)
+
+    def _ready_is_durable(self, ready: WSL2AnchorEvidence) -> bool:
+        obligation = self.hold.obligation
+        identity = ready.identity
+        if obligation is None or identity is None:
+            return False
+        rows = self._repository.list_lifecycle_obligations(self.owner.ownership)
+        for row in rows:
+            if (
+                row.obligation_id != obligation.obligation_id
+                or row.state is not LifecycleObligationState.POSSIBLE_EFFECT
+            ):
+                continue
+            payload = decode_hold_payload(row.payload)
+            return (
+                payload.guest == identity
+                and payload.locator_sha256 == locator_digest(self._locator.token)
+                and payload.instance_marker == self._vm.instance_marker
+            )
+        return False
+
+    @staticmethod
+    def _matching_ready_guest(ready: WSL2AnchorEvidence, preparation: VMTargetPreparation) -> VMGuestIdentity | None:
+        observed = preparation.guest_result
+        guest = observed.observation if observed is not None else None
+        identity = (
+            guest.identity if guest is not None and guest.state is VMGuestIdentityObservationState.RESOLVED else None
+        )
+        anchor = ready.identity
+        if type(identity) is not VMGuestIdentity or anchor is None or preparation.target is None:
+            return None
+        if identity.boot_id != anchor.boot_id or identity.init_start_ticks != anchor.init_start_ticks:
+            return None
+        return identity
+
+    def selected_route_still_current(self, deadline: Deadline, *, config: Config | None = None) -> bool:
+        """Reobserve selected facts before managed-start composition.
+
+        This does not close a route change between this check and dispatch.
+        """
+        locator = self._platform.observe_provider_locator(self._vm, self._ctx, deadline=deadline)
+        if deadline.expired:
+            raise ValidationError("WSL2 route revalidation exceeded the deadline")
+        if type(locator) is ProviderLocatorUnavailable:
+            return False
+        if type(locator) is not ProviderLocator:
+            raise ValidationError("WSL2 route revalidation requires an exact provider locator")
+        try:
+            selected = ProviderLocator(locator.token)
+        except AttributeError as error:
+            raise ValidationError("WSL2 route revalidation requires a complete provider locator") from error
+        if selected != self._locator:
+            return False
+        binding = self._platform.resolve_native_execution_binding(self._vm, self._ctx, deadline=deadline, config=config)
+        if deadline.expired:
+            raise ValidationError("WSL2 route revalidation exceeded the deadline")
+        return self._selected_connection(binding) == self._connection
+
+    def release_if_settled(self, deadline: Deadline, *, safe: bool) -> bool:
+        """Release the exact hold and whole owner only with resolved obligations."""
+        return self._release_exact_hold(deadline, safe=safe) and self._close_settled_owner()
+
+    def _release_exact_hold(self, deadline: Deadline, *, safe: bool) -> bool:
+        if not safe:
+            return False
+        if self._hold_released:
+            return True
+        ready = self.ready
+        if ready is None or not self._ready_is_durable(ready):
+            return False
+        released = self.hold.release(deadline)
+        if not (
+            released.local.settled
+            and released.identity == ready.identity
+            and released.guest_anchor_presence is GuestAnchorPresence.ABSENT_CONFIRMED
+        ):
+            return False
+        self._hold_released = True
+        return True
+
+    def _close_settled_owner(self) -> bool:
+        rows = self._repository.list_lifecycle_obligations(self.owner.ownership)
+        if not rows or any(row.state is not LifecycleObligationState.RESOLVED for row in rows):
+            return False
+        self.owner.seal_lifecycle_obligations()
+        self.owner.record_effects_resolved()
+        self.owner.close()
+        return True
