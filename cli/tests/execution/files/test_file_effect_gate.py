@@ -57,6 +57,21 @@ from tests.execution.files._runtime_support import runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the fixed snapshot helper requires Linux")
 
+
+@pytest.fixture(autouse=True)
+def _gate_namespace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.execution import _file_effect_gate
+
+    namespace = tmp_path / "run" / "agentworks" / "file-gates-v1"
+    (namespace / str(os.geteuid())).mkdir(parents=True, mode=0o700)
+    monkeypatch.setattr(_file_effect_gate, "_GATE_NAMESPACE", str(namespace))
+    monkeypatch.setattr(_file_effect_gate, "_ROOT_UID", os.geteuid())
+
+
+def _gate_path(tmp_path: Path) -> Path:
+    return tmp_path / "run" / "agentworks" / "file-gates-v1" / str(os.geteuid()) / ("a" * 64 + ".db")
+
+
 _GUEST = VMGuestIdentity("a" * 32, "123e4567-e89b-12d3-a456-426614174000", 10)
 
 
@@ -85,6 +100,10 @@ guest._fixture_guest=VMGuestIdentity(
 
 
 def _hold_until_released(binding: FileEffectGateBinding, entered: str, release: str) -> None:
+    from agentworks.execution import _file_effect_gate
+
+    _file_effect_gate._GATE_NAMESPACE = str(Path(binding.path).parent.parent)
+    _file_effect_gate._ROOT_UID = os.geteuid()
     with hold_file_effect_gate(binding, _observe_guest):
         Path(entered).touch()
         while not Path(release).exists():
@@ -92,7 +111,7 @@ def _hold_until_released(binding: FileEffectGateBinding, entered: str, release: 
 
 
 def _gate(tmp_path: Path) -> FileEffectGateBinding:
-    gate = tmp_path / "effect.db"
+    gate = _gate_path(tmp_path)
     return setup_file_effect_gate(str(gate), _GUEST, os.geteuid(), "gate-vm", _observe_guest)
 
 
@@ -118,7 +137,10 @@ def _crash_controller_with_fixed_snapshot(
     entered: str,
     release: str,
 ) -> None:
-    from agentworks.execution import _file_snapshot_exchange
+    from agentworks.execution import _file_effect_gate, _file_snapshot_exchange
+
+    _file_effect_gate._GATE_NAMESPACE = str(Path(binding.path).parent.parent)
+    _file_effect_gate._ROOT_UID = os.geteuid()
 
     _file_snapshot_exchange.FIXED_BUNDLE = fixture_source(
         Path(scratch_path),
@@ -162,7 +184,7 @@ guest._operate=_held_operate
     operation.download(
         LocalCarrier(),
         trusted_root_path=root_path,
-        relative_path="effect.db",
+        relative_path=Path(binding.path).name,
         sink=BytesSink(),
         max_bytes=65_536,
         plan=_plan(),
@@ -210,7 +232,7 @@ def test_binding_codec_and_exact_file_call_row_survive_reopen(tmp_path: Path) ->
 
 
 def test_setup_observes_live_guest_before_creating_gate(tmp_path: Path) -> None:
-    path = tmp_path / "effect.db"
+    path = _gate_path(tmp_path)
     observed: list[bool] = []
 
     def stale_guest() -> VMGuestIdentity:
@@ -246,7 +268,7 @@ def test_setup_rejects_oversize_linux_uid_before_observation_or_creation(
 ) -> None:
     from agentworks.execution import _file_effect_gate
 
-    path = tmp_path / "effect.db"
+    path = _gate_path(tmp_path)
     observed = False
 
     def observe() -> VMGuestIdentity:
@@ -266,7 +288,7 @@ def test_setup_deadline_prevents_gate_creation_before_and_after_guest_observatio
 ) -> None:
     from agentworks.execution import _file_effect_gate
 
-    path = tmp_path / "effect.db"
+    path = _gate_path(tmp_path)
     observations = 0
     now = [2.0]
     monkeypatch.setattr(_file_effect_gate, "time", SimpleNamespace(monotonic=lambda: now[0], sleep=time.sleep))
@@ -292,7 +314,7 @@ def test_setup_deadline_prevents_gate_creation_before_and_after_guest_observatio
 def test_setup_deadline_before_commit_retains_incomplete_inode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.execution import _file_effect_gate
 
-    path = tmp_path / "effect.db"
+    path = _gate_path(tmp_path)
     original = _file_effect_gate._connect
     now = [0.0]
     monkeypatch.setattr(_file_effect_gate, "time", SimpleNamespace(monotonic=lambda: now[0], sleep=time.sleep))
@@ -328,6 +350,63 @@ def test_lost_setup_reply_can_inspect_exact_complete_gate_without_advancing(tmp_
         pass
 
 
+@pytest.mark.parametrize("unsafe", ["missing", "symlink", "uid_mode", "root_mode", "wrong_owner", "acl"])
+def test_gate_namespace_refuses_unsafe_setup_without_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unsafe: str
+) -> None:
+    from agentworks.execution import _file_effect_gate
+
+    path = _gate_path(tmp_path)
+    uid_dir = path.parent
+    namespace = uid_dir.parent
+    if unsafe == "missing":
+        uid_dir.rmdir()
+    elif unsafe == "symlink":
+        uid_dir.rmdir()
+        uid_dir.symlink_to(tmp_path, target_is_directory=True)
+    elif unsafe == "uid_mode":
+        uid_dir.chmod(0o750)
+    elif unsafe == "root_mode":
+        namespace.parent.chmod(0o777)
+    elif unsafe == "wrong_owner":
+        original = _file_effect_gate.os.lstat
+
+        def wrong_owner(candidate: str):
+            metadata = original(candidate)
+            if candidate == str(namespace):
+                return SimpleNamespace(st_mode=metadata.st_mode, st_uid=os.geteuid() + 1)
+            return metadata
+
+        monkeypatch.setattr(_file_effect_gate.os, "lstat", wrong_owner)
+    else:
+        original_acl = _file_effect_gate.os.getxattr
+
+        def extra_acl(candidate: str, name: str, *, follow_symlinks: bool = True) -> bytes:
+            if candidate == str(uid_dir) and name == "system.posix_acl_access":
+                return b"unexpected"
+            return original_acl(candidate, name, follow_symlinks=follow_symlinks)
+
+        monkeypatch.setattr(_file_effect_gate.os, "getxattr", extra_acl)
+
+    with pytest.raises(FileEffectGateError):
+        setup_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", _observe_guest)
+    assert not path.exists()
+
+
+def test_unsafe_namespace_refuses_inspect_advance_and_hold_without_changing_gate(tmp_path: Path) -> None:
+    binding = _gate(tmp_path)
+    before = Path(binding.path).read_bytes()
+    Path(binding.path).parent.chmod(0o755)
+
+    with pytest.raises(FileEffectGateError):
+        inspect_file_effect_gate(binding.path, _GUEST, os.geteuid(), "gate-vm", _observe_guest)
+    with pytest.raises(FileEffectGateError):
+        advance_file_effect_gate(replace(binding, proposed_generation=b"z" * 16), _observe_guest)
+    with pytest.raises(FileEffectGateError), hold_file_effect_gate(binding, _observe_guest):
+        pass
+    assert Path(binding.path).read_bytes() == before
+
+
 def test_setup_adopts_exact_existing_gate_at_its_current_generation(tmp_path: Path) -> None:
     original = _gate(tmp_path)
     advanced = advance_file_effect_gate(replace(original, proposed_generation=b"c" * 16), _observe_guest)
@@ -337,7 +416,7 @@ def test_setup_adopts_exact_existing_gate_at_its_current_generation(tmp_path: Pa
 
 @pytest.mark.parametrize("existing", ["incomplete", "wrong_epoch", "wrong_scope"])
 def test_setup_never_repairs_or_replaces_unacceptable_existing_gate(tmp_path: Path, existing: str) -> None:
-    path = tmp_path / "effect.db"
+    path = _gate_path(tmp_path)
     if existing == "incomplete":
         path.touch(mode=0o600)
     elif existing == "wrong_epoch":
@@ -357,7 +436,7 @@ def test_setup_does_not_inspect_after_nonexistence_unrelated_open_failure(
 ) -> None:
     from agentworks.execution import _file_effect_gate
 
-    path = tmp_path / "effect.db"
+    path = _gate_path(tmp_path)
     original_open = os.open
 
     def denied_open(candidate: str, flags: int, mode: int = 0o777) -> int:
@@ -376,7 +455,7 @@ def test_setup_does_not_inspect_after_nonexistence_unrelated_open_failure(
 
 
 def test_concurrent_setup_adopts_one_complete_inode(tmp_path: Path) -> None:
-    path = tmp_path / "effect.db"
+    path = _gate_path(tmp_path)
     start = threading.Barrier(3)
     bindings: list[FileEffectGateBinding] = []
     errors: list[BaseException] = []
@@ -408,12 +487,15 @@ def test_bookworm_python_can_setup_and_inspect_gate(tmp_path: Path) -> None:
     python = Path("/usr/bin/python3.11")
     if not python.is_file():
         pytest.skip("Bookworm Python 3.11 is unavailable on this host")
-    source = """
+    source = f"""
 import os
 import sys
+from agentworks.execution import _file_effect_gate
 from agentworks.execution._file_effect_gate import setup_file_effect_gate, inspect_file_effect_gate
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 
+_file_effect_gate._GATE_NAMESPACE = {str(_gate_path(tmp_path).parent.parent)!r}
+_file_effect_gate._ROOT_UID = os.geteuid()
 guest = VMGuestIdentity('a' * 32, '123e4567-e89b-12d3-a456-426614174000', 10)
 def observe_guest():
     return guest
@@ -421,7 +503,7 @@ binding = setup_file_effect_gate(sys.argv[1], guest, os.geteuid(), 'gate-vm', ob
 assert inspect_file_effect_gate(sys.argv[1], guest, os.geteuid(), 'gate-vm', observe_guest) == binding
 """
     result = subprocess.run(
-        [str(python), "-c", source, str(tmp_path / "effect.db")],
+        [str(python), "-c", source, str(_gate_path(tmp_path))],
         check=False,
         capture_output=True,
         env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[3])},
@@ -431,7 +513,7 @@ assert inspect_file_effect_gate(sys.argv[1], guest, os.geteuid(), 'gate-vm', obs
 
 
 def test_inspection_refuses_absent_incomplete_and_unsafe_gate(tmp_path: Path) -> None:
-    path = tmp_path / "effect.db"
+    path = _gate_path(tmp_path)
 
     def inspect() -> FileEffectGateBinding:
         return inspect_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", _observe_guest)
@@ -520,7 +602,7 @@ def test_fixed_snapshot_survives_controller_loss_and_is_fenced_before_recovery(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     binding = _gate(tmp_path)
-    root = tmp_path
+    root = Path(binding.path).parent
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     scratch.chmod(0o1777)
@@ -543,8 +625,8 @@ def test_fixed_snapshot_survives_controller_loss_and_is_fenced_before_recovery(
             call = decode_file_call_obligation(row.payload)
             assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
             assert call.effect_gate == binding and call.token is not None
-            assert (call.root, call.relative_path) == (str(root), "effect.db")
-            source_metadata = (root / "effect.db").stat()
+            assert (call.root, call.relative_path) == (str(root), Path(binding.path).name)
+            source_metadata = Path(binding.path).stat()
             assert (source_metadata.st_dev, source_metadata.st_ino) == (binding.device, binding.inode)
             proposed = replace(binding, proposed_generation=secrets.token_bytes(16))
             owner = OperationOwner.recover(database.operations, predecessor.ownership, "b" * 32)
@@ -594,7 +676,7 @@ guest._identity=lambda: VMGuestIdentity({_GUEST.instance_marker!r}, {_GUEST.boot
             delayed = snapshot_begin(
                 LocalCarrier(),
                 trusted_root_path=str(root),
-                relative_path="effect.db",
+                relative_path=Path(binding.path).name,
                 max_bytes=65_536,
                 token=call.token,
                 plan=_plan(),

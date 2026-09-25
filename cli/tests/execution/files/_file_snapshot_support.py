@@ -6,7 +6,7 @@ import textwrap
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from agentworks.execution import _file_snapshot_exchange
+from agentworks.execution import _file_effect_gate, _file_snapshot_exchange
 from agentworks.execution._file_snapshot_bundle import _MODULE_NAMES, _PACKAGE
 from agentworks.execution._helper_bundle import FixedFileHelperBundle
 from agentworks.execution.carrier import (
@@ -26,11 +26,15 @@ if TYPE_CHECKING:
 
 
 def fixture_source(scratch_root: Path, guest_patch: str = "") -> FixedFileHelperBundle:
+    gate_namespace = _file_effect_gate._GATE_NAMESPACE
     setup = f"""
 import os
 root=sys.modules[{(_PACKAGE + "._scratch_root")!r}]
 root._LINUX_SCRATCH_ROOT={str(scratch_root)!r}
 root._EXPECTED_OWNER_UID=os.geteuid()
+gate=sys.modules[{(_PACKAGE + "._file_effect_gate")!r}]
+gate._GATE_NAMESPACE={gate_namespace!r}
+gate._ROOT_UID=os.geteuid() if {gate_namespace != "/run/agentworks/file-gates-v1"!r} else 0
 """
     return fixture_file_bundle(_PACKAGE, _MODULE_NAMES, "_file_snapshot_guest", setup + textwrap.dedent(guest_patch))
 

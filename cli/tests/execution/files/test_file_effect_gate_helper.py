@@ -38,6 +38,21 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the file gate is Linux-only")
 
+
+@pytest.fixture(autouse=True)
+def _gate_namespace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.execution import _file_effect_gate
+
+    namespace = tmp_path / "run" / "agentworks" / "file-gates-v1"
+    (namespace / str(os.geteuid())).mkdir(parents=True, mode=0o700)
+    monkeypatch.setattr(_file_effect_gate, "_GATE_NAMESPACE", str(namespace))
+    monkeypatch.setattr(_file_effect_gate, "_ROOT_UID", os.geteuid())
+
+
+def _gate_path(tmp_path: Path) -> Path:
+    return tmp_path / "run" / "agentworks" / "file-gates-v1" / str(os.geteuid()) / ("a" * 64 + ".db")
+
+
 _NONCE = "a" * 32
 _GUEST = VMGuestIdentity("b" * 32, "123e4567-e89b-12d3-a456-426614174000", 10)
 
@@ -53,10 +68,15 @@ def _request(path: Path, operation: GateControlOperation = GateControlOperation.
 
 
 def _fixture(monkeypatch: pytest.MonkeyPatch, guest: VMGuestIdentity = _GUEST) -> None:
+    from agentworks.execution import _file_effect_gate
+
     fixture = fixture_file_bundle(
         _PACKAGE,
         _MODULE_NAMES,
         "_file_effect_gate_guest",
+        f"import os,sys\ngate=sys.modules[{(_PACKAGE + '._file_effect_gate')!r}]\n"
+        f"gate._GATE_NAMESPACE={_file_effect_gate._GATE_NAMESPACE!r}\n"
+        "gate._ROOT_UID=os.geteuid()\n"
         "from _agw_file_effect_gate._vm_guest_identity_protocol import VMGuestIdentity\n"
         f"guest._identity=lambda: VMGuestIdentity({guest.instance_marker!r}, {guest.boot_id!r}, "
         f"{guest.init_start_ticks!r})\n",
@@ -87,7 +107,7 @@ def _exchange(
 
 
 def test_request_is_canonical_closed_and_exactly_bounded(tmp_path: Path) -> None:
-    request = _request(tmp_path / "gate.db")
+    request = _request(_gate_path(tmp_path))
     encoded = encode_gate_control_request(request)
     assert decode_gate_control_request(encoded) == request
     with pytest.raises(GateControlProtocolError):
@@ -123,7 +143,7 @@ def test_bundle_reports_invalid_request_as_closed_records() -> None:
 
 def test_fixed_guest_setup_inspect_and_advance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _fixture(monkeypatch)
-    path = tmp_path / "gate.db"
+    path = _gate_path(tmp_path)
     carrier = LocalCarrier()
     setup = exchange_file_effect_gate(
         carrier,
@@ -171,7 +191,7 @@ def test_fixed_guest_setup_inspect_and_advance(tmp_path: Path, monkeypatch: pyte
 
 def test_stale_guest_is_refused_before_creation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _fixture(monkeypatch, replace(_GUEST, init_start_ticks=11))
-    path = tmp_path / "gate.db"
+    path = _gate_path(tmp_path)
     _, state = _exchange(path, GateControlOperation.SETUP)
     assert state is GateControlObservationState.REFUSED
     assert not path.exists()
@@ -200,7 +220,7 @@ def test_lost_setup_output_remains_uncertain_until_noncreating_inspection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _fixture(monkeypatch)
-    path = tmp_path / "gate.db"
+    path = _gate_path(tmp_path)
     setup = exchange_file_effect_gate(
         _LostOutputCarrier(),
         operation=GateControlOperation.SETUP,
@@ -246,7 +266,7 @@ def test_complete_runtime_prefix_loss_after_setup_is_explicitly_uncertain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _fixture(monkeypatch)
-    path = tmp_path / "gate.db"
+    path = _gate_path(tmp_path)
     setup = exchange_file_effect_gate(
         _LostCompleteOutputCarrier(),
         operation=GateControlOperation.SETUP,
@@ -283,7 +303,7 @@ def test_complete_runtime_prefix_loss_after_advance_is_explicitly_uncertain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _fixture(monkeypatch)
-    path = tmp_path / "gate.db"
+    path = _gate_path(tmp_path)
     setup = exchange_file_effect_gate(
         LocalCarrier(),
         operation=GateControlOperation.SETUP,

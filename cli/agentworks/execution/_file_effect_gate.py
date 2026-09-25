@@ -29,6 +29,55 @@ _BUSY_SECONDS = 5.0
 _LOWER_HEX = frozenset("0123456789abcdef")
 _MAX_LINUX_UID = (1 << 32) - 1
 _MAX_U64 = (1 << 64) - 1
+_GATE_NAMESPACE = "/run/agentworks/file-gates-v1"
+_ROOT_UID = 0
+_ACL_ACCESS = "system.posix_acl_access"
+_ACL_DEFAULT = "system.posix_acl_default"
+
+
+def _check_gate_namespace(path: str, euid: int) -> None:
+    """Admit a gate only inside the pre-provisioned guest namespace."""
+    prefix = f"{_GATE_NAMESPACE}/{euid}/"
+    if (
+        not _valid_path(path)
+        or not path.startswith(prefix)
+        or len(path) != len(prefix) + 67
+        or path[-3:] != ".db"
+        or any(character not in _LOWER_HEX for character in path[len(prefix) : -3])
+    ):
+        raise FileEffectGateError("file-effect gate path is outside its namespace")
+
+    uid_dir = prefix[:-1]
+    root_dirs = (
+        posixpath.dirname(posixpath.dirname(_GATE_NAMESPACE)),
+        posixpath.dirname(_GATE_NAMESPACE),
+        _GATE_NAMESPACE,
+    )
+    # lstat every ancestor, including those above the namespace, so a
+    # test namespace cannot conceal an intervening symlink.
+    ancestor = ""
+    try:
+        for component in uid_dir.split("/")[1:]:
+            ancestor += "/" + component
+            metadata = os.lstat(ancestor)
+            if not stat.S_ISDIR(metadata.st_mode):
+                raise FileEffectGateError("file-effect gate namespace is unsafe")
+            if ancestor == uid_dir:
+                if metadata.st_uid != euid or stat.S_IMODE(metadata.st_mode) != 0o700:
+                    raise FileEffectGateError("file-effect gate UID directory is unsafe")
+            elif ancestor in root_dirs and (metadata.st_uid != _ROOT_UID or metadata.st_mode & 0o022):
+                raise FileEffectGateError("file-effect gate namespace is unsafe")
+            if ancestor == uid_dir or ancestor in root_dirs:
+                for name in (_ACL_ACCESS, _ACL_DEFAULT):
+                    try:
+                        os.getxattr(ancestor, name, follow_symlinks=False)
+                    except OSError as error:
+                        if error.errno not in (errno.ENODATA, errno.EOPNOTSUPP):
+                            raise
+                    else:
+                        raise FileEffectGateError("file-effect gate namespace ACL is unsafe")
+    except OSError:
+        raise FileEffectGateError("file-effect gate namespace is unavailable") from None
 
 
 def _valid_path(path: object) -> bool:
@@ -208,6 +257,7 @@ def _require_before_deadline(expires_at: float | None) -> None:
 
 @contextmanager
 def _locked_gate(binding: FileEffectGateBinding, expires_at: float | None) -> Iterator[int]:
+    _check_gate_namespace(binding.path, binding.euid)
     try:
         descriptor = os.open(binding.path, os.O_RDONLY | _open_flags())
     except OSError:
@@ -317,6 +367,7 @@ def setup_file_effect_gate(
         raise FileEffectGateError("file-effect gate requires Python sqlite3") from None
 
     _check_setup_identity(path, guest, euid, scope_name)
+    _check_gate_namespace(path, euid)
     _require_before_deadline(expires_at)
     _observe_setup_guest(guest, observe_guest)
     _require_before_deadline(expires_at)
@@ -388,6 +439,7 @@ def inspect_file_effect_gate(
         raise FileEffectGateError("file-effect gate requires Python sqlite3") from None
 
     _check_setup_identity(path, guest, euid, scope_name)
+    _check_gate_namespace(path, euid)
     try:
         descriptor = os.open(path, os.O_RDONLY | _open_flags())
     except OSError:
