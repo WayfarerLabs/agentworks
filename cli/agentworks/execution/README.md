@@ -157,10 +157,11 @@ before returning; a failed or uncertain checkpoint retains the current row and s
 Incomplete upload and uncertain row publication also stop the batch without replaying a child. Each
 member is validated when reached; a later invalid member stops the batch after earlier members have
 already passed their checkpoints. The caller owns its original plan and partial progress. This
-originating path is not wired to artifact publication. A package-specific takeover adapter still
-needs evidence that every helper for the retained token has exited before it may reconcile or clean
-that child. Until that proof exists, the batch does not settle package recovery or the
-ledger-capacity migration gate.
+originating path is not wired to artifact publication. A private package takeover adapter can now
+advance an exact bound guest gate for the retained child, but it does not reconcile or clean that
+child. Native mutation-path coverage, predecessor-controller and non-gated effect evidence, and
+application-checkpoint reconciliation remain necessary before package recovery or the
+ledger-capacity migration gate can settle.
 
 Retained recovery facts and cleanup debt are published before the borrow is handed off; a clean,
 quiescent row resolves. Payloads carry lifecycle evidence only. They exclude file or JSON content,
@@ -771,6 +772,13 @@ inspection, other obligation or non-gated local effect still needs its own recov
 and its UID directory must remain intact for the guest epoch so a delayed setup cannot create a
 replacement. This is private local composition, not native route acceptance, a production recovery
 factory or whole-operation release.
+
+`_file_package_recovery.py` opens only the exact current bound package child after owner takeover.
+It publishes one proposed generation in that row, advances the same guest gate and publishes the
+confirmed binding without changing the child index, token, path or cleanup facts. A lost reply may
+be reconciled only against the same proposal. The row stays a possible effect: this fence does not
+prove helper exit, stop non-gated or predecessor-controller effects, replay the child, reconcile its
+application checkpoint, clean up, or release ownership.
 
 ## Private inline file reads
 

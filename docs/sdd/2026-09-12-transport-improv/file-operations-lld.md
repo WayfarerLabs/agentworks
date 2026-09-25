@@ -930,6 +930,14 @@ proof for upload. Recovery must keep the current package child and its cleanup f
 advance, then reconcile only that child; it cannot infer or replay remaining package members. No
 adapter may manufacture drain evidence from a retained token alone.
 
+The private `FilePackageFenceRecovery` now implements only the first durable takeover step for a
+bound current child. It rebinds the exact possible-effect row after database-owner takeover,
+publishes and reuses one proposed generation, advances the same gate, and records the confirmed
+binding without changing child identity or cleanup facts. The row remains possible-effect. Local
+tests cover delayed stale effects, interruption and reply loss, but this does not establish native
+path coverage, predecessor-controller custody, package checkpoint reconciliation or a safe child
+replay/cleanup decision.
+
 The smallest candidate uses one stable SQLite gate database per effective helper identity, managed
 target scope and verified guest epoch. Core derives one deterministic path under the selected local
 namespace from those facts; every participating route must address that same path. Linux `flock` on

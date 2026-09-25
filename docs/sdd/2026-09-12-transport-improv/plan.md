@@ -1963,6 +1963,13 @@ integration and production artifact callers remain open. The capacity checkbox s
       non-creating inspection. Local tests cover ordering, lost reply, lost binding publication and
       wrong guest. This does not resume a partly completed package after process loss or prove
       native carrier delivery and drain.
+- [x] Add a private fence-only takeover for the exact current bound package child. Persist and reuse
+      one proposed gate generation in the same possible-effect row, dispatch advance, and publish a
+      confirmed binding without changing its index, token, path or cleanup facts. Local tests cover
+      stale delayed effects, lost replies, interruption, row changes and absent/replaced gates. The
+      child remains unresolved: this does not replay it, reconcile the application checkpoint, prove
+      native mutation-path coverage or establish predecessor-controller and other non-gated effect
+      custody.
 - [ ] Require the gate in production upload composition, including verified raw guest marker and
       selected provider locator, without fallback to requests lacking a gate. Prove generation
       advance waits for old gated effects and rejects delayed old-generation requests before
