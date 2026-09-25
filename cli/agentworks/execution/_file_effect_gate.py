@@ -294,8 +294,6 @@ def _check_setup_identity(path: str, guest: VMGuestIdentity, euid: int, scope_na
 
 
 def _observe_setup_guest(guest: VMGuestIdentity, observe_guest: Callable[[], VMGuestIdentity]) -> None:
-    if not callable(observe_guest):
-        raise FileEffectGateError("file-effect gate requires a live guest observer")
     observed = observe_guest()
     if type(observed) is not VMGuestIdentity or observed != guest:
         raise FileEffectGateError("file-effect gate guest identity changed")

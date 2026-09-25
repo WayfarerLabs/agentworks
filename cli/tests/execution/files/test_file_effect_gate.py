@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
 
@@ -316,6 +317,7 @@ def test_inspection_waits_for_same_flock_and_respects_deadline(tmp_path: Path) -
     helper = multiprocessing.get_context("spawn").Process(
         target=_hold_until_released, args=(binding, str(entered), str(release))
     )
+    helper.daemon = True
     helper.start()
     try:
         until = time.monotonic() + 10
@@ -336,8 +338,20 @@ def test_inspection_waits_for_same_flock_and_respects_deadline(tmp_path: Path) -
         assert helper.exitcode == 0
         assert inspect_file_effect_gate(binding.path, _GUEST, os.geteuid(), "gate-vm", _observe_guest) == binding
     finally:
-        release.touch()
-        helper.join(10)
+        failed = sys.exc_info()[0] is not None
+        with suppress(OSError):
+            release.touch()
+        helper.join(1)
+        if helper.is_alive():
+            with suppress(OSError):
+                helper.terminate()
+            helper.join(1)
+        if helper.is_alive():
+            with suppress(OSError):
+                helper.kill()
+            helper.join(1)
+        if not failed:
+            assert helper.exitcode is not None
 
 
 def test_fixed_snapshot_survives_controller_loss_and_is_fenced_before_recovery(
