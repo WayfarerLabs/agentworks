@@ -31,11 +31,11 @@ if TYPE_CHECKING:
 
 @dataclass(slots=True, repr=False)
 class FileGateSetupRecovery:
-    """Inspect and settle only a still-setup-only DOWNLOAD after takeover.
+    """Inspect and settle a still-setup-only file call after takeover.
 
     A positive exact inspection proves the gate's creation completed. The
     predecessor cannot publish a binding after database generation takeover,
-    so this path cannot have started snapshot work. It does not resolve other
+    so this path cannot have started snapshot or upload work. It does not resolve other
     obligations or release the whole operation owner.
     """
 
@@ -66,7 +66,7 @@ class FileGateSetupRecovery:
             or type(target) is not ManagedTargetIdentity
             or target.kind.value != scope.resource_kind.value
             or target.name != scope.resource_name
-            or call.family is not FileCallFamily.DOWNLOAD
+            or call.family not in {FileCallFamily.DOWNLOAD, FileCallFamily.UPLOAD}
             or call.target != target
             or call.gate_setup is None
             or call.effect_gate is not None

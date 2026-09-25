@@ -67,8 +67,10 @@ from agentworks.execution._file_upload import (
     FileUploadOutcome,
     FileUploadStatus,
     _prepare_upload,
+    _prepare_upload_from_binding,
     _PreparedUpload,
 )
+from agentworks.execution._file_upload import _validate_inputs as _validate_upload_inputs
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTargetKind
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState, RuntimeTargetOS
@@ -188,7 +190,17 @@ class PackageUploadStopped(Exception):
         super().__init__("private package upload stopped at one member")
 
 
-type _ActiveFileUpload = _ActiveFileCall[FileUploadBinding, _PreparedUpload, FileUploadOutcome]
+@dataclass(frozen=True, slots=True, repr=False)
+class _PendingUploadSetup:
+    setup: FileEffectGateSetup
+    token: bytes
+    operation: BorrowedFixedHelperCarrier
+    source: ByteSource = field(repr=False)
+    condition: Create | Replace | Match
+    create_metadata: NewMetadata | None
+
+
+type _ActiveFileUpload = _ActiveFileCall[FileUploadBinding, _PreparedUpload | _PendingUploadSetup, FileUploadOutcome]
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -485,8 +497,24 @@ class FileOperation:
         deadline: Deadline,
         runtime_selection: RuntimeSelection,
         effect_gate: FileEffectGateBinding | None = None,
+        gate_setup: FileEffectGateSetup | None = None,
     ) -> FileUploadOutcome:
         """Run and capture one concrete upload under a whole-call borrow."""
+        if gate_setup is not None:
+            return self._upload_with_gate_setup(
+                carrier,
+                trusted_root_path=trusted_root_path,
+                relative_path=relative_path,
+                source=source,
+                size=size,
+                condition=condition,
+                create_metadata=create_metadata,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=runtime_selection,
+                gate_setup=gate_setup,
+                effect_gate=effect_gate,
+            )
         borrow = self._owner.borrow()
         try:
             prepared = _prepare_upload(
@@ -519,6 +547,102 @@ class FileOperation:
             raise
         self._install(active, admission, self._active_uploads)
 
+        return self._run_prepared_upload(active, prepared)
+
+    def _upload_with_gate_setup(
+        self,
+        carrier: Carrier,
+        *,
+        trusted_root_path: str,
+        relative_path: str,
+        source: ByteSource,
+        size: int,
+        condition: Create | Replace | Match,
+        create_metadata: NewMetadata,
+        plan: IdentityPlan,
+        deadline: Deadline,
+        runtime_selection: RuntimeSelection,
+        gate_setup: FileEffectGateSetup,
+        effect_gate: FileEffectGateBinding | None,
+    ) -> FileUploadOutcome:
+        """Register pending setup and promote its row before upload effects."""
+        borrow = self._owner.borrow()
+        try:
+            binding, canonical_condition, canonical_metadata = _validate_upload_inputs(
+                trusted_root_path,
+                relative_path,
+                source,
+                size,
+                condition,
+                create_metadata,
+                plan,
+                deadline,
+                runtime_selection,
+                borrow,
+                None,
+            )
+            if (
+                type(gate_setup) is not FileEffectGateSetup
+                or effect_gate is not None
+                or self._target.kind is not ManagedTargetKind.VM
+                or runtime_selection.target_os is not RuntimeTargetOS.LINUX
+                or type(gate_setup.guest) is not VMGuestIdentity
+                or vm_guest_boot_id(gate_setup.guest) != self._target.boot_id
+                or gate_setup.path != file_effect_gate_path(self._target, plan.expected.euid, gate_setup.guest)
+            ):
+                raise ValidationError("Upload gate setup must match the selected Linux VM and identity")
+            token = secrets.token_bytes(16)
+            operation = BorrowedFixedHelperCarrier(carrier, borrow)
+            admission = self._prepare_admission(FileCallFamily.UPLOAD, binding, token=token, gate_setup=gate_setup)
+            pending = _PendingUploadSetup(gate_setup, token, operation, source, canonical_condition, canonical_metadata)
+            active: _ActiveFileUpload = _ActiveFileCall(carrier, binding, borrow, pending, admission.obligation_id)
+        except BaseException:
+            borrow.close()
+            raise
+        try:
+            self._active_uploads[id(active)] = active
+        except BaseException:
+            borrow.close()
+            raise
+        self._install(active, admission, self._active_uploads)
+        result = exchange_file_effect_gate(
+            operation,
+            operation=GateControlOperation.SETUP,
+            path=gate_setup.path,
+            guest=gate_setup.guest,
+            scope_name=self._target.name,
+            plan=plan,
+            deadline=deadline,
+            runtime_selection=runtime_selection,
+        )
+        normal = operation.settle(result.dispatch, result.carrier_completion)
+        if result.dispatch is Dispatch.NOT_SENT and not operation.requires_owner_retention:
+            borrow.close()
+            self._active_uploads.pop(id(active))
+            raise StateError("File-effect gate setup was not dispatched")
+        observed = result.observation
+        if (
+            not normal
+            or result.runtime_prerequisite.state is not RuntimePrerequisiteState.READY
+            or observed is None
+            or observed.state is not GateControlObservationState.RESOLVED
+            or observed.binding is None
+        ):
+            raise GateControlMutationUncertain("file-effect gate setup was not acknowledged")
+        bound = replace(binding, effect_gate=observed.binding)
+        self._publish_retained(active, self._obligation(FileCallFamily.UPLOAD, bound, token=token))
+        prepared = _prepare_upload_from_binding(
+            operation,
+            source=source,
+            deadline=deadline,
+            inputs=(bound, canonical_condition, canonical_metadata),
+            token=token,
+        )
+        active.binding = bound
+        active.prepared = prepared
+        return self._run_prepared_upload(active, prepared)
+
+    def _run_prepared_upload(self, active: _ActiveFileUpload, prepared: _PreparedUpload) -> FileUploadOutcome:
         try:
             outcome = prepared.run()
         except BaseException as control:
@@ -529,7 +653,6 @@ class FileOperation:
                 except BaseException:
                     raise control from fact
             raise
-
         self._capture_upload(active, outcome)
         return outcome
 

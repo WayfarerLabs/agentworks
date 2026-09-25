@@ -11,10 +11,21 @@ from pathlib import Path
 import pytest
 
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
-from agentworks.errors import ValidationError
-from agentworks.execution import _file_effect_gate, _file_gate_setup, _file_publication_exchange, _file_stage_exchange
+from agentworks.errors import StateError, ValidationError
+from agentworks.execution import (
+    _file_effect_gate,
+    _file_effect_gate_exchange,
+    _file_gate_setup,
+    _file_operation,
+    _file_publication_exchange,
+    _file_stage_exchange,
+)
 from agentworks.execution._file_effect_gate import advance_file_effect_gate, setup_file_effect_gate
-from agentworks.execution._file_gate_setup import file_effect_gate_path
+from agentworks.execution._file_effect_gate_bundle import _MODULE_NAMES as GATE_MODULES
+from agentworks.execution._file_effect_gate_bundle import _PACKAGE as GATE_PACKAGE
+from agentworks.execution._file_effect_gate_exchange import GateControlMutationUncertain
+from agentworks.execution._file_gate_setup import FileEffectGateSetup, file_effect_gate_path
+from agentworks.execution._file_gate_setup_recovery import FileGateSetupRecovery
 from agentworks.execution._file_obligation import (
     FileCallFamily,
     FileCallObligationCodecError,
@@ -33,7 +44,7 @@ from agentworks.execution._runtime_prerequisite import RuntimeSelection, Runtime
 from agentworks.execution._scratch_receipt import scratch_name
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, PreparedInvocation
-from agentworks.operations import OperationOwner
+from agentworks.operations import LifecycleObligation, OperationOwner
 from tests.execution.files._file_publication_support import LocalCarrier
 from tests.execution.files._file_upload_support import BytesSource, new_metadata
 from tests.execution.files._fixed_bundle_support import fixture_file_bundle
@@ -76,11 +87,14 @@ def _install_bundle(monkeypatch: pytest.MonkeyPatch, package: str, modules: tupl
         f"VMGuestIdentity({_GUEST.instance_marker!r}, {_GUEST.boot_id!r}, {_GUEST.init_start_ticks!r})\n"
     )
     bundle = fixture_file_bundle(package, modules, guest, patch)
-    monkeypatch.setattr(
-        _file_stage_exchange if package == STAGE_PACKAGE else _file_publication_exchange,
-        "FIXED_BUNDLE",
-        bundle,
+    exchange = (
+        _file_stage_exchange
+        if package == STAGE_PACKAGE
+        else _file_publication_exchange
+        if package == PUBLICATION_PACKAGE
+        else _file_effect_gate_exchange
     )
+    monkeypatch.setattr(exchange, "FIXED_BUNDLE", bundle)
 
 
 @pytest.fixture
@@ -92,6 +106,7 @@ def context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(_file_effect_gate, "_ROOT_UID", os.geteuid())
     _install_bundle(monkeypatch, STAGE_PACKAGE, STAGE_MODULES, "_file_stage_guest")
     _install_bundle(monkeypatch, PUBLICATION_PACKAGE, PUBLICATION_MODULES, "_file_publication_guest")
+    _install_bundle(monkeypatch, GATE_PACKAGE, GATE_MODULES, "_file_effect_gate_guest")
     database = Database(tmp_path / "owner.db")
     owner = OperationOwner.acquire(
         database.operations, OperationScope(OperationResourceKind.VM, "upload-vm"), "gated-upload"
@@ -141,6 +156,166 @@ def test_single_upload_persists_gate_before_dispatch_and_stale_generation_refuse
     assert second.status is FileUploadStatus.FAILED
     assert not (root / "second").exists()
     assert second.binding.effect_gate == gate
+
+
+def test_upload_setup_promotes_one_row_before_source_read(context) -> None:
+    database, owner, operation, root, plan, gate = context
+    setup = FileEffectGateSetup(gate.path, _GUEST)
+    source = BytesSource(b"x")
+
+    class CheckingCarrier(LocalCarrier):
+        def __init__(self) -> None:
+            super().__init__()
+            self.rows: list[tuple[int, FileCallFamily, bytes, bool]] = []
+
+        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+            (row,) = database.operations.list_lifecycle_obligations(owner.ownership)
+            call = decode_file_call_obligation(row.payload)
+            self.rows.append((row.payload_revision, call.family, call.token or b"", call.gate_setup is not None))
+            if self.calls == 0:
+                assert call.gate_setup == setup and call.effect_gate is None
+                assert source.calls == 0
+            else:
+                assert call.gate_setup is None and call.effect_gate == gate
+            return super().execute(invocation, io=io, deadline=deadline)
+
+    carrier = CheckingCarrier()
+    result = operation.upload(
+        carrier,
+        trusted_root_path=str(root),
+        relative_path="target",
+        source=source,
+        size=1,
+        condition=Create(),
+        create_metadata=new_metadata(),
+        plan=plan,
+        deadline=Deadline.after(30),
+        runtime_selection=runtime_selection(sys.executable),
+        gate_setup=setup,
+    )
+    assert result.status is FileUploadStatus.COMPLETE
+    assert (root / "target").read_bytes() == b"x"
+    assert carrier.rows[0][3] and not any(row[3] for row in carrier.rows[1:])
+    assert {row[1] for row in carrier.rows} == {FileCallFamily.UPLOAD}
+    assert {row[2] for row in carrier.rows} == {result.token}
+    assert len({row[0] for row in carrier.rows}) == 2
+    assert len(database.operations.list_lifecycle_obligations(owner.ownership)) == 1
+
+
+def test_upload_setup_publication_failure_retains_source_and_bound_row(
+    context, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database, owner, operation, root, plan, gate = context
+    source = BytesSource(b"x")
+    original = LifecycleObligation.publish_payload
+
+    def lost_reply(self: LifecycleObligation, *args, **kwargs):
+        original(self, *args, **kwargs)
+        raise RuntimeError("lost publication reply")
+
+    monkeypatch.setattr(LifecycleObligation, "publish_payload", lost_reply)
+    with pytest.raises(RuntimeError, match="lost publication reply"):
+        operation.upload(
+            LocalCarrier(),
+            trusted_root_path=str(root),
+            relative_path="target",
+            source=source,
+            size=1,
+            condition=Create(),
+            create_metadata=new_metadata(),
+            plan=plan,
+            deadline=Deadline.after(30),
+            runtime_selection=runtime_selection(sys.executable),
+            gate_setup=FileEffectGateSetup(gate.path, _GUEST),
+        )
+    assert source.calls == 0
+    assert len(operation.active_uploads) == 1
+    (row,) = database.operations.list_lifecycle_obligations(owner.ownership)
+    assert decode_file_call_obligation(row.payload).effect_gate == gate
+    assert not (root / "target").exists()
+
+
+@pytest.mark.parametrize("control", [RuntimeError, KeyboardInterrupt])
+def test_recovered_setup_only_upload_inspects_without_source_replay(context, control: type[BaseException]) -> None:
+    database, owner, operation, root, plan, gate = context
+    source = BytesSource(b"x")
+
+    class LostSetupCarrier(LocalCarrier):
+        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+            super().execute(invocation, io=io, deadline=deadline)
+            raise control("lost setup reply")
+
+    with pytest.raises(control, match="lost setup reply"):
+        operation.upload(
+            LostSetupCarrier(),
+            trusted_root_path=str(root),
+            relative_path="target",
+            source=source,
+            size=1,
+            condition=Create(),
+            create_metadata=new_metadata(),
+            plan=plan,
+            deadline=Deadline.after(30),
+            runtime_selection=runtime_selection(sys.executable),
+            gate_setup=FileEffectGateSetup(gate.path, _GUEST),
+        )
+    assert source.calls == 0
+    recovered = OperationOwner.recover(database.operations, owner.ownership, "c" * 32)
+    (row,) = database.operations.list_lifecycle_obligations(recovered.ownership)
+    assert decode_file_call_obligation(row.payload).gate_setup is not None
+    result = FileGateSetupRecovery.open(
+        recovered, replace(target_for_owner(recovered), boot_id=vm_guest_boot_id(_GUEST)), row
+    ).inspect(LocalCarrier(), deadline=Deadline.after(30))
+    assert result.observation is not None and result.observation.binding == gate
+    assert (
+        database.operations.list_lifecycle_obligations(recovered.ownership)[0].state
+        is LifecycleObligationState.RESOLVED
+    )
+    assert source.calls == 0
+    assert not (root / "target").exists()
+
+
+@pytest.mark.parametrize("failure", ["promotion", "unsafe_gate"])
+def test_upload_setup_failure_keeps_custody_without_source_read(
+    context, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    database, owner, operation, root, plan, gate = context
+    source = BytesSource(b"x")
+    if failure == "promotion":
+
+        def stop_promotion(*args, **kwargs):
+            raise RuntimeError("promotion stopped")
+
+        monkeypatch.setattr(_file_operation, "_prepare_upload_from_binding", stop_promotion)
+    else:
+        Path(gate.path).unlink()
+        Path(gate.path).touch(mode=0o600)
+    expected = RuntimeError if failure == "promotion" else GateControlMutationUncertain
+    with pytest.raises(expected):
+        operation.upload(
+            LocalCarrier(),
+            trusted_root_path=str(root),
+            relative_path="target",
+            source=source,
+            size=1,
+            condition=Create(),
+            create_metadata=new_metadata(),
+            plan=plan,
+            deadline=Deadline.after(30),
+            runtime_selection=runtime_selection(sys.executable),
+            gate_setup=FileEffectGateSetup(gate.path, _GUEST),
+        )
+    assert source.calls == 0
+    assert not (root / "target").exists()
+    assert len(operation.active_uploads) == 1
+    (row,) = database.operations.list_lifecycle_obligations(owner.ownership)
+    call = decode_file_call_obligation(row.payload)
+    if failure == "promotion":
+        assert call.effect_gate == gate
+    else:
+        assert call.gate_setup == FileEffectGateSetup(gate.path, _GUEST)
+    with pytest.raises(StateError):
+        owner.close()
 
 
 def test_package_persists_exact_gate_for_each_child_before_dispatch(context) -> None:

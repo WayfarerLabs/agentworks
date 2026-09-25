@@ -338,6 +338,20 @@ def _prepare_upload_borrowed(
     return _PreparedUpload(binding, state, workflow)
 
 
+def _prepare_upload_from_binding(
+    operation: BorrowedFixedHelperCarrier,
+    *,
+    source: ByteSource,
+    deadline: Deadline,
+    inputs: tuple[FileUploadBinding, Create | Replace | Match, NewMetadata | None],
+    token: bytes,
+) -> _PreparedUpload:
+    """Promote validated inputs under the setup attempt's token and borrow."""
+    binding, condition, metadata = inputs
+    state = _WorkingState(binding, token, operation)
+    return _PreparedUpload(binding, state, _UploadWorkflow(operation, source, condition, metadata, deadline, state))
+
+
 @dataclass(slots=True, repr=False)
 class _PreparedUpload:
     """Validated upload state attachable to core custody before dispatch."""
