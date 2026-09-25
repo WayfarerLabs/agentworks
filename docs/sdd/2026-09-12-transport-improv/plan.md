@@ -1569,6 +1569,13 @@ native delivery or public JobAccess.
       No operation silently downgrades. `ProvisionRequest.instance_marker` remains creation
       evidence; this hook alone does not establish the private guest observation/composition
       checkpoint below or third-party managed target identity.
+- [ ] Settle Proxmox restore/rollback incarnation policy before replacing its unavailable locator. A
+      candidate combines the observed cluster CA fingerprint, VMID and current SMBIOS UUID, but a
+      default restore can preserve those values and the guest marker. Prove the selected policy on
+      PVE 8 and 9 with the intended restricted token, including `VM.Audit`, `current=1`, ordinary
+      recreation, restore and rollback; absent or malformed evidence must refuse without dispatch.
+      The [prior-art finding](prior-art-research.md) does not authorize a positive locator or
+      recovery cutover by itself.
 - [ ] Complete and prove Linux supervisor launch through SSH and native QGA: protected identity,
       secret/source delivery, privilege changes, foreground wait, independent launch, output
       retention and terminal evidence. No workload code runs before boundary entry.

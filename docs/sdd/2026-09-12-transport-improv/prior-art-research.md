@@ -687,6 +687,22 @@ not such an identity. Do not infer one from SMBIOS UUID or VM generation ID with
 adoption/uniqueness policy and native proof; until then the Proxmox locator stays unavailable and
 recovery remains fail-closed.
 
+A narrower candidate is the exact cluster CA fingerprint from the read-only
+[`certificates/info` endpoint](https://github.com/proxmox/pve-manager/blob/master/PVE/API2/Certificates.pm),
+VMID, and the current VM configuration's SMBIOS UUID. The cluster CA is separate from a replaceable
+API leaf certificate; the node must remain a route, not part of the identity. However, the
+[clone implementation](https://github.com/proxmox/qemu-server/blob/master/src/PVE/API2/Qemu.pm)
+generates a fresh SMBIOS UUID while the
+[restore implementation](https://github.com/proxmox/qemu-server/blob/master/src/PVE/QemuServer.pm)
+can preserve it without the `unique` option. Restoring the same VMID can also restore our guest
+marker, so comparing those values cannot by itself distinguish the restored state or safely
+reconcile old jobs. The configuration read must request `current=1` to avoid treating pending
+configuration as the running VM's identity; it requires `VM.Audit`, which the intended restricted
+token must prove on PVE 8 and 9. The certificate endpoint can omit a failed certificate read from an
+otherwise successful response, so absence of exactly one valid cluster CA entry is failed evidence,
+not an unavailable locator. Until restore/rollback incarnation policy and native proof are settled,
+no positive Proxmox locator is enabled from this candidate.
+
 ### Decisions still required
 
 The new-guest package and preinstalled macOS host runtime choices are settled, but their
