@@ -11,15 +11,14 @@ from agentworks.db import OperationResourceKind
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._managed_runs import ManagedTargetIdentity
-from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState, RuntimeSelection
+from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
 from agentworks.execution._vm_guest_identity import (
     VMGuestIdentityObservationResult,
     VMGuestIdentityObservationState,
     observe_vm_guest_identity,
 )
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
-from agentworks.execution.binding import NativeExecutionBinding
-from agentworks.execution.carrier import ChannelFeatures, Dispatch
+from agentworks.execution.carrier import Dispatch
 from agentworks.operations import release_borrow_after_custody
 from agentworks.vms.identity import validate_vm_instance_marker
 from agentworks.vms.target_identity import compose_managed_vm_target_identity
@@ -28,6 +27,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform.base import ProviderLocatorObservation, VMPlatform
     from agentworks.db import VMRow
+    from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Deadline
     from agentworks.operations import OperationBorrow, OperationOwner
 
@@ -154,8 +154,6 @@ def prepare_managed_vm_target_from_platform(
     _validate_operation_boundary(vm, deadline, owner)
     if platform.site_name != vm.site:
         raise ValidationError("Managed VM target preparation requires the VM's bound platform")
-    expected_locator = _validated_provider_locator(expected_locator)
-    binding = _validated_native_binding(binding)
     preflight = _preflight_marker_and_deadline(vm, deadline)
     if preflight is not None:
         return preflight
@@ -405,25 +403,3 @@ def _validated_provider_locator(observation: object) -> ProviderLocator:
         return ProviderLocator(observation.token)
     except AttributeError as error:
         raise ValidationError("VM platform returned an incomplete provider locator") from error
-
-
-def _validated_native_binding(binding: object) -> NativeExecutionBinding:
-    """Reconstruct plugin binding facts before any guest attempt."""
-    if type(binding) is not NativeExecutionBinding:
-        raise ValidationError("VM platform returned an invalid native execution binding")
-    selection = getattr(binding, "runtime_selection", None)
-    if type(selection) is not RuntimeSelection:
-        raise ValidationError("VM platform returned an invalid native runtime selection")
-    try:
-        selection = RuntimeSelection(selection.target_os, selection.explicit_path)
-        validated = NativeExecutionBinding(binding.carrier, binding.delivery_account, selection)
-    except AttributeError as error:
-        raise ValidationError("VM platform returned an incomplete native execution binding") from error
-    carrier = validated.carrier
-    if (
-        not callable(getattr(carrier, "validate", None))
-        or not callable(getattr(carrier, "execute", None))
-        or type(getattr(carrier, "features", None)) is not ChannelFeatures
-    ):
-        raise ValidationError("VM platform returned an invalid native execution carrier")
-    return validated

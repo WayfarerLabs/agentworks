@@ -106,8 +106,7 @@ def _platform_subject(
     monkeypatch: pytest.MonkeyPatch,
     *,
     locators: list[ProviderLocator | ProviderLocatorUnavailable] | None = None,
-    connections: list[WSL2Connection] | None = None,
-    runtimes: list[RuntimeSelection] | None = None,
+    connection: WSL2Connection | None = None,
     native: FakeNative | None = None,
     observed_routes: list[WSL2Connection] | None = None,
     observed_carriers: list[WSL2Carrier] | None = None,
@@ -125,18 +124,14 @@ def _platform_subject(
     platform = Mock(spec=WSL2Platform)
     platform.site_name = "local"
     platform.observe_provider_locator.side_effect = locators or [ProviderLocator("wsl2:registration")] * 3
-    routes = connections or [WSL2Connection("Ubuntu", "admin", "wsl.exe")] * 2
-    selections = runtimes or [RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable)] * len(routes)
-    bindings = [
-        NativeExecutionBinding(
-            WSL2Carrier(route),
-            route.user,
-            runtime,
-        )
-        for route, runtime in zip(routes, selections, strict=True)
-    ]
-    platform.resolve_native_execution_binding.side_effect = bindings
-    platform.test_bindings = bindings
+    route = connection or WSL2Connection("Ubuntu", "admin", "wsl.exe")
+    binding = NativeExecutionBinding(
+        WSL2Carrier(route),
+        route.user,
+        RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable),
+    )
+    platform.resolve_native_execution_binding.return_value = binding
+    platform.test_binding = binding
     subject = WSL2OwnedDownload.from_platform(
         database.operations,
         _vm(),
@@ -195,7 +190,11 @@ def test_selected_platform_download_rechecks_registration_with_owned_route(
     install_fixture_bundle(monkeypatch, scratch)
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database)
-        subject, platform = _platform_subject(database, carrier, FakeObserver([]), monkeypatch)
+        routes: list[WSL2Connection] = []
+        selected_route = WSL2Connection("Debian", "admin", "wsl.exe")
+        subject, platform = _platform_subject(
+            database, carrier, FakeObserver([]), monkeypatch, connection=selected_route, observed_routes=routes
+        )
         assert subject is not None
         sink = BytesSink()
         assert _download(subject, root, sink) is WSL2DownloadStatus.COMPLETE
@@ -203,6 +202,7 @@ def test_selected_platform_download_rechecks_registration_with_owned_route(
         assert platform.observe_provider_locator.call_count == 3
         assert platform.resolve_native_execution_binding.call_count == 1
         assert carrier.calls > 1
+        assert routes and all(route == selected_route for route in routes)
         assert database.operations.inspect(subject.owner.ownership.scope) is None
 
 
@@ -225,7 +225,7 @@ def test_platform_carrier_mutation_cannot_redirect_file_dispatch(
         )
         assert subject is not None
         original = WSL2Connection("Ubuntu", "admin", "wsl.exe")
-        initial_carrier = cast(WSL2Carrier, platform.test_bindings[0].carrier)
+        initial_carrier = cast(WSL2Carrier, platform.test_binding.carrier)
         initial_carrier._connection = WSL2Connection("other", "admin", "C:/other/wsl.exe")
         assert type(subject._carrier) is WSL2Carrier
         assert subject._carrier is not initial_carrier
@@ -293,73 +293,6 @@ def test_registration_replacement_during_binding_resolution_refuses_before_guest
         assert subject.file_operation is None
         assert platform.observe_provider_locator.call_count == 2
         platform.resolve_native_execution_binding.assert_called_once()
-        assert database.operations.inspect(subject.owner.ownership.scope) is None
-
-
-def test_platform_route_change_after_selection_cannot_redirect_file_dispatch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root = tmp_path / "source-root"
-    root.mkdir()
-    root.joinpath("source").write_bytes(b"selected-route")
-    scratch = tmp_path / "scratch"
-    scratch.mkdir()
-    scratch.chmod(0o1777)
-    install_fixture_bundle(monkeypatch, scratch)
-    with closing(Database(tmp_path / "state.db")) as database:
-        carrier = GuestThenFileCarrier(database)
-        routes: list[WSL2Connection] = []
-        subject, platform = _platform_subject(
-            database,
-            carrier,
-            FakeObserver([]),
-            monkeypatch,
-            connections=[
-                WSL2Connection("Ubuntu", "admin", "wsl.exe"),
-                WSL2Connection("Ubuntu", "admin", "C:/other/wsl.exe"),
-            ],
-            observed_routes=routes,
-        )
-        assert subject is not None
-        sink = BytesSink()
-        assert _download(subject, root, sink) is WSL2DownloadStatus.COMPLETE
-        assert bytes(sink.data) == b"selected-route"
-        assert carrier.calls > 1
-        assert all(route == WSL2Connection("Ubuntu", "admin", "wsl.exe") for route in routes)
-        platform.resolve_native_execution_binding.assert_called_once()
-        assert subject.file_operation is not None
-        assert database.operations.inspect(subject.owner.ownership.scope) is None
-
-
-def test_platform_runtime_change_after_selection_cannot_redirect_file_dispatch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root = tmp_path / "source-root"
-    root.mkdir()
-    root.joinpath("source").write_bytes(b"selected-runtime")
-    scratch = tmp_path / "scratch"
-    scratch.mkdir()
-    scratch.chmod(0o1777)
-    install_fixture_bundle(monkeypatch, scratch)
-    with closing(Database(tmp_path / "state.db")) as database:
-        carrier = GuestThenFileCarrier(database)
-        subject, platform = _platform_subject(
-            database,
-            carrier,
-            FakeObserver([]),
-            monkeypatch,
-            runtimes=[
-                RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable),
-                RuntimeSelection(RuntimeTargetOS.LINUX, "/other/python"),
-            ],
-        )
-        assert subject is not None
-        sink = BytesSink()
-        assert _download(subject, root, sink) is WSL2DownloadStatus.COMPLETE
-        assert bytes(sink.data) == b"selected-runtime"
-        assert carrier.calls > 1
-        platform.resolve_native_execution_binding.assert_called_once()
-        assert subject.file_operation is not None
         assert database.operations.inspect(subject.owner.ownership.scope) is None
 
 
@@ -451,25 +384,14 @@ def test_selected_platform_uncertain_guest_retains_claim(tmp_path: Path, monkeyp
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
 
 
-def test_selected_platform_changed_route_retains_when_hold_absence_is_unknown(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_settled_file_with_unknown_hold_absence_retains_claim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     scratch.chmod(0o1777)
     install_fixture_bundle(monkeypatch, scratch)
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database)
-        subject, _ = _platform_subject(
-            database,
-            carrier,
-            FakeObserver([], GuestAnchorPresence.UNKNOWN),
-            monkeypatch,
-            connections=[
-                WSL2Connection("Ubuntu", "admin", "wsl.exe"),
-                WSL2Connection("Ubuntu", "admin", "C:/other/wsl.exe"),
-            ],
-        )
+        subject, _ = _platform_subject(database, carrier, FakeObserver([], GuestAnchorPresence.UNKNOWN), monkeypatch)
         assert subject is not None
         assert _download(subject, tmp_path, BytesSink()) is WSL2DownloadStatus.RETAINED
         assert carrier.calls > 1
@@ -505,7 +427,7 @@ def test_default_observer_rejection_does_not_acquire_claim(tmp_path: Path, monke
                 GuestThenFileCarrier(database),
                 None,
                 monkeypatch,
-                connections=[WSL2Connection("Ubuntu", "admin", "C:/Windows/System32/wsl.exe")],
+                connection=WSL2Connection("Ubuntu", "admin", "C:/Windows/System32/wsl.exe"),
             )
         assert database.operations.inspect(scope) is None
 

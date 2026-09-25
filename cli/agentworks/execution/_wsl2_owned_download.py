@@ -81,7 +81,6 @@ class WSL2OwnedDownload:
         self._repository = repository
         self._vm = vm
         self._locator = locator
-        self._connection = connection
         self._carrier = selected_carrier
         self._binding = selected_binding
         self._runtime = selected_runtime

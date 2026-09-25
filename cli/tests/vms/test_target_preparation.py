@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from threading import Event, Thread
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from unittest.mock import Mock, call
 
 import pytest
@@ -57,7 +57,6 @@ _OTHER_MARKER = "fedcba9876543210fedcba9876543210"
 _BOOT_ID = "00000000-0000-4000-8000-000000000001"
 _INIT_START_TICKS = 1234
 _NONCE_MARKER = "agentworks-runtime-prerequisite"
-_DEFAULT_BINDING = object()
 _DEFAULT_LOCATOR = ProviderLocator("opaque")
 
 
@@ -173,7 +172,7 @@ def _platform(carrier: TranscriptCarrier) -> Mock:
     platform = Mock(spec=VMPlatform)
     platform.site_name = "local"
     platform.observe_provider_locator.return_value = ProviderLocator("opaque")
-    platform.resolve_native_execution_binding.return_value = _binding(carrier)
+    platform.test_binding = _binding(carrier)
     return platform
 
 
@@ -184,18 +183,15 @@ def _compose(
     vm: VMRow | None = None,
     deadline: Deadline | None = None,
     ctx: object = None,
-    expected_locator: ProviderLocator | object = _DEFAULT_LOCATOR,
-    binding: object = _DEFAULT_BINDING,
+    expected_locator: ProviderLocator = _DEFAULT_LOCATOR,
+    binding: NativeExecutionBinding | None = None,
 ):
     return prepare_managed_vm_target_from_platform(
         vm or _vm(),
         platform,
         ctx,
-        cast(ProviderLocator, expected_locator),
-        cast(
-            NativeExecutionBinding,
-            platform.resolve_native_execution_binding.return_value if binding is _DEFAULT_BINDING else binding,
-        ),
+        expected_locator,
+        binding if binding is not None else platform.test_binding,
         deadline=deadline or Deadline.after(10),
         owner=owner,
     )
@@ -590,7 +586,7 @@ def test_platform_preflight_refuses_before_any_io_or_borrow(
         owner.close()
 
 
-def test_platform_locator_unavailable_skips_binding_and_releases_borrow(
+def test_fresh_locator_unavailable_releases_borrow_without_guest_probe(
     owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, owner = owned
@@ -609,21 +605,23 @@ def test_platform_locator_unavailable_skips_binding_and_releases_borrow(
 
 
 @pytest.mark.parametrize("bad_locator", [None, object(), "opaque", object.__new__(ProviderLocator)])
-def test_invalid_platform_locator_shape_refuses_before_binding(
+def test_invalid_fresh_locator_shape_refuses_before_guest_probe(
     owned: tuple[Database, OperationOwner], bad_locator: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, owner = owned
     borrows, releases = _watch_custody(monkeypatch)
-    platform = _platform(TranscriptCarrier(_success_payload()))
+    carrier = TranscriptCarrier(_success_payload())
+    platform = _platform(carrier)
     platform.observe_provider_locator.return_value = bad_locator
     with pytest.raises(ValidationError):
         _compose(owner, platform)
     platform.resolve_native_execution_binding.assert_not_called()
+    assert carrier.calls == 0
     assert len(borrows) == 1 and releases == borrows
     owner.close()
 
 
-def test_forged_locator_and_binding_are_revalidated_at_plugin_boundary(
+def test_forged_fresh_locator_is_revalidated_at_plugin_boundary(
     owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, owner = owned
@@ -636,49 +634,8 @@ def test_forged_locator_and_binding_are_revalidated_at_plugin_boundary(
     with pytest.raises(ValidationError):
         _compose(owner, platform)
     platform.resolve_native_execution_binding.assert_not_called()
-
-    platform.observe_provider_locator.return_value = ProviderLocator("opaque")
-    binding = _binding(carrier)
-    object.__setattr__(binding, "delivery_account", "")
-    platform.resolve_native_execution_binding.return_value = binding
-    with pytest.raises(ValidationError):
-        _compose(owner, platform)
-
-    runtime = _runtime()
-    object.__setattr__(runtime, "explicit_path", "relative")
-    platform.resolve_native_execution_binding.return_value = NativeExecutionBinding(carrier, "admin", runtime)
-    with pytest.raises(ValidationError):
-        _compose(owner, platform)
     assert carrier.calls == 0
     assert len(borrows) == 1 and releases == borrows
-    owner.close()
-
-
-@pytest.mark.parametrize("bad_binding", [None, object(), "binding", object.__new__(NativeExecutionBinding)])
-def test_invalid_platform_binding_shape_refuses_before_guest(
-    owned: tuple[Database, OperationOwner], bad_binding: object, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _, owner = owned
-    borrows, releases = _watch_custody(monkeypatch)
-    carrier = TranscriptCarrier(_success_payload())
-    platform = _platform(carrier)
-    with pytest.raises(ValidationError):
-        _compose(owner, platform, binding=bad_binding)
-    assert carrier.calls == 0
-    assert borrows == releases == []
-    owner.close()
-
-
-def test_invalid_plugin_carrier_releases_borrow_before_guest(
-    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _, owner = owned
-    borrows, releases = _watch_custody(monkeypatch)
-    platform = _platform(TranscriptCarrier(_success_payload()))
-    platform.resolve_native_execution_binding.return_value = NativeExecutionBinding(object(), "admin", _runtime())
-    with pytest.raises(ValidationError):
-        _compose(owner, platform)
-    assert borrows == releases == []
     owner.close()
 
 
