@@ -13,6 +13,7 @@ from agentworks.db import Database, LifecycleObligationState, OperationResourceK
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _file_effect_gate_exchange, _file_gate_setup, _file_operation
 from agentworks.execution._file_download import FileDownloadOutcome
+from agentworks.execution._file_effect_gate import inspect_file_effect_gate, setup_file_effect_gate
 from agentworks.execution._file_effect_gate_bundle import _MODULE_NAMES, _PACKAGE
 from agentworks.execution._file_effect_gate_exchange import GateControlMutationUncertain
 from agentworks.execution._file_gate_setup import FileEffectGateSetup
@@ -152,6 +153,64 @@ def test_acknowledged_setup_promotes_one_row_and_borrow_before_snapshot(
         owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
+    finally:
+        database.close()
+
+
+def test_two_downloads_adopt_same_gate_at_current_generation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source, gate_root = _fixture(monkeypatch, tmp_path)
+    database = Database(tmp_path / "state.db")
+    owner, operation, setup = _context(database, gate_root)
+    try:
+        first = _call(operation, LocalCarrier(), source, setup)
+        current = inspect_file_effect_gate(setup.path, _GUEST, os.geteuid(), "core-file-vm", lambda: _GUEST)
+        second = _call(operation, LocalCarrier(), source, setup)
+        assert first.binding.effect_gate == current
+        assert second.binding.effect_gate == current
+        assert second.binding.effect_gate is not None
+        assert (second.binding.effect_gate.device, second.binding.effect_gate.inode) == (
+            current.device,
+            current.inode,
+        )
+        assert len(database.operations.list_lifecycle_obligations(owner.ownership)) == 2
+        assert all(
+            row.state is LifecycleObligationState.RESOLVED
+            for row in database.operations.list_lifecycle_obligations(owner.ownership)
+        )
+        owner.seal_lifecycle_obligations()
+        owner.record_effects_resolved()
+        owner.close()
+    finally:
+        database.close()
+
+
+@pytest.mark.parametrize("existing", ["incomplete", "wrong_epoch", "wrong_scope"])
+def test_existing_unsafe_gate_refuses_before_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing: str
+) -> None:
+    source, gate_root = _fixture(monkeypatch, tmp_path)
+    database = Database(tmp_path / "state.db")
+    owner, operation, setup = _context(database, gate_root)
+    if existing == "incomplete":
+        Path(setup.path).touch(mode=0o600)
+    elif existing == "wrong_epoch":
+        other = replace(_GUEST, init_start_ticks=11)
+        setup_file_effect_gate(setup.path, other, os.geteuid(), "core-file-vm", lambda: other)
+    else:
+        setup_file_effect_gate(setup.path, _GUEST, os.geteuid(), "other-vm", lambda: _GUEST)
+    before = Path(setup.path).stat()
+    carrier = _InspectingCarrier(database, owner)
+    try:
+        with pytest.raises(GateControlMutationUncertain):
+            _call(operation, carrier, source, setup)
+        after = Path(setup.path).stat()
+        assert (after.st_dev, after.st_ino, after.st_size) == (before.st_dev, before.st_ino, before.st_size)
+        assert carrier.calls == 1
+        assert len(operation.active_downloads) == 1
+        rows = database.operations.list_lifecycle_obligations(owner.ownership)
+        assert len(rows) == 1 and rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+        with pytest.raises(StateError):
+            owner.close()
     finally:
         database.close()
 

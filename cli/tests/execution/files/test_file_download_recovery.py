@@ -30,7 +30,7 @@ from agentworks.execution._file_effect_gate import (
     FileEffectGateBinding,
     FileEffectGateError,
     advance_file_effect_gate,
-    initialize_file_effect_gate,
+    setup_file_effect_gate,
 )
 from agentworks.execution._file_gate_setup import FileEffectGateSetup
 from agentworks.execution._file_obligation import (
@@ -915,9 +915,7 @@ def test_gated_recovery_of_recovery_retries_interrupted_exact_cleanup(
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     scratch.chmod(0o1777)
-    binding = initialize_file_effect_gate(
-        str(tmp_path / "effect.db"), _GUEST, os.geteuid(), "download-vm", lambda: _GUEST
-    )
+    binding = setup_file_effect_gate(str(tmp_path / "effect.db"), _GUEST, os.geteuid(), "download-vm", lambda: _GUEST)
     database_path = tmp_path / "state.db"
     journal_path = tmp_path / "helpers.jsonl"
     data_unlinked_path = tmp_path / "data-unlinked"

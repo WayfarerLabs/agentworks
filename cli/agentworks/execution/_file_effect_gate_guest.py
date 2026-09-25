@@ -10,8 +10,8 @@ from ._file_effect_gate import (
     FileEffectGateBinding,
     FileEffectGateError,
     advance_file_effect_gate,
-    initialize_file_effect_gate,
     inspect_file_effect_gate,
+    setup_file_effect_gate,
 )
 from ._file_effect_gate_protocol import (
     MAX_REQUEST_BYTES,
@@ -58,7 +58,7 @@ def _operate(request: GateControlRequest, expires_at: float | None) -> FileEffec
     if expires_at is not None and time.monotonic() >= expires_at:
         raise TimeoutError
     if request.operation is GateControlOperation.SETUP:
-        return initialize_file_effect_gate(
+        return setup_file_effect_gate(
             request.path, request.guest, request.euid, request.scope_name, _identity, expires_at=expires_at
         )
     if request.operation is GateControlOperation.INSPECT:

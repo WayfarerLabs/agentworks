@@ -1,6 +1,6 @@
 """Local flock effect fence and SQLite generation for one Linux guest identity.
 
-Initialization is an explicit setup action. Effect requests only open an
+Gate setup is an explicit action. Effect requests only open an
 existing gate and hold its inode lock until their work is complete.
 """
 
@@ -301,7 +301,7 @@ def _observe_setup_guest(guest: VMGuestIdentity, observe_guest: Callable[[], VMG
         raise FileEffectGateError("file-effect gate guest identity changed")
 
 
-def initialize_file_effect_gate(
+def setup_file_effect_gate(
     path: str,
     guest: VMGuestIdentity,
     euid: int,
@@ -310,7 +310,7 @@ def initialize_file_effect_gate(
     *,
     expires_at: float | None = None,
 ) -> FileEffectGateBinding:
-    """Create a new gate during explicit setup, never during an effect request."""
+    """Create or adopt the exact existing gate, never repairing an incomplete one."""
     try:
         import sqlite3
     except ImportError:
@@ -322,6 +322,10 @@ def initialize_file_effect_gate(
     _require_before_deadline(expires_at)
     try:
         descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | _open_flags(), 0o600)
+    except FileExistsError:
+        # Another setup may still hold this inode. Inspection waits for its
+        # flock, then accepts only one complete matching record.
+        return inspect_file_effect_gate(path, guest, euid, scope_name, observe_guest, expires_at=expires_at)
     except OSError:
         raise FileEffectGateError("file-effect gate setup failed") from None
     try:

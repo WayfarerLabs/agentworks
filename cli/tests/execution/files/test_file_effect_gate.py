@@ -27,8 +27,8 @@ from agentworks.execution._file_effect_gate import (
     decode_file_effect_gate,
     encode_file_effect_gate,
     hold_file_effect_gate,
-    initialize_file_effect_gate,
     inspect_file_effect_gate,
+    setup_file_effect_gate,
 )
 from agentworks.execution._file_obligation import (
     FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
@@ -93,7 +93,7 @@ def _hold_until_released(binding: FileEffectGateBinding, entered: str, release: 
 
 def _gate(tmp_path: Path) -> FileEffectGateBinding:
     gate = tmp_path / "effect.db"
-    return initialize_file_effect_gate(str(gate), _GUEST, os.geteuid(), "gate-vm", _observe_guest)
+    return setup_file_effect_gate(str(gate), _GUEST, os.geteuid(), "gate-vm", _observe_guest)
 
 
 def _call(binding: FileEffectGateBinding, root: Path) -> FileCallObligation:
@@ -218,12 +218,12 @@ def test_setup_observes_live_guest_before_creating_gate(tmp_path: Path) -> None:
         return replace(_GUEST, init_start_ticks=11)
 
     with pytest.raises(FileEffectGateError):
-        initialize_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", stale_guest)
+        setup_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", stale_guest)
     assert observed == [False]
     assert not path.exists()
 
     with pytest.raises(FileEffectGateError):
-        initialize_file_effect_gate(str(path), _GUEST, os.geteuid(), "", _observe_guest)
+        setup_file_effect_gate(str(path), _GUEST, os.geteuid(), "", _observe_guest)
     assert not path.exists()
 
 
@@ -256,7 +256,7 @@ def test_setup_rejects_oversize_linux_uid_before_observation_or_creation(
 
     monkeypatch.setattr(_file_effect_gate.os, "geteuid", lambda: 1 << 32)
     with pytest.raises(FileEffectGateError):
-        initialize_file_effect_gate(str(path), _GUEST, 1 << 32, "gate-vm", observe)
+        setup_file_effect_gate(str(path), _GUEST, 1 << 32, "gate-vm", observe)
     assert not observed
     assert not path.exists()
 
@@ -278,13 +278,13 @@ def test_setup_deadline_prevents_gate_creation_before_and_after_guest_observatio
         return _GUEST
 
     with pytest.raises(FileEffectGateError):
-        initialize_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", observe, expires_at=1.0)
+        setup_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", observe, expires_at=1.0)
     assert observations == 0
     assert not path.exists()
 
     now[0] = 0.0
     with pytest.raises(FileEffectGateError):
-        initialize_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", observe, expires_at=1.0)
+        setup_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", observe, expires_at=1.0)
     assert observations == 1
     assert not path.exists()
 
@@ -304,7 +304,7 @@ def test_setup_deadline_before_commit_retains_incomplete_inode(tmp_path: Path, m
 
     monkeypatch.setattr(_file_effect_gate, "_connect", slow_connect)
     with pytest.raises(FileEffectGateError):
-        initialize_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", _observe_guest, expires_at=1.0)
+        setup_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", _observe_guest, expires_at=1.0)
     assert path.exists()
     inode = path.stat().st_ino
     with pytest.raises(FileEffectGateError):
@@ -328,20 +328,106 @@ def test_lost_setup_reply_can_inspect_exact_complete_gate_without_advancing(tmp_
         pass
 
 
-def test_bookworm_python_can_initialize_and_inspect_gate(tmp_path: Path) -> None:
+def test_setup_adopts_exact_existing_gate_at_its_current_generation(tmp_path: Path) -> None:
+    original = _gate(tmp_path)
+    advanced = advance_file_effect_gate(replace(original, proposed_generation=b"c" * 16), _observe_guest)
+    adopted = setup_file_effect_gate(original.path, _GUEST, os.geteuid(), "gate-vm", _observe_guest)
+    assert adopted == advanced
+    assert (adopted.device, adopted.inode, adopted.instance, adopted.generation) == (
+        advanced.device,
+        advanced.inode,
+        advanced.instance,
+        advanced.generation,
+    )
+
+
+@pytest.mark.parametrize("existing", ["incomplete", "wrong_epoch", "wrong_scope"])
+def test_setup_never_repairs_or_replaces_unacceptable_existing_gate(tmp_path: Path, existing: str) -> None:
+    path = tmp_path / "effect.db"
+    if existing == "incomplete":
+        path.touch(mode=0o600)
+    elif existing == "wrong_epoch":
+        guest = replace(_GUEST, init_start_ticks=11)
+        setup_file_effect_gate(str(path), guest, os.geteuid(), "gate-vm", lambda: guest)
+    else:
+        setup_file_effect_gate(str(path), _GUEST, os.geteuid(), "other-vm", _observe_guest)
+    before = path.stat()
+    with pytest.raises(FileEffectGateError):
+        setup_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", _observe_guest)
+    after = path.stat()
+    assert (after.st_dev, after.st_ino, after.st_size) == (before.st_dev, before.st_ino, before.st_size)
+
+
+def test_setup_does_not_inspect_after_nonexistence_unrelated_open_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentworks.execution import _file_effect_gate
+
+    path = tmp_path / "effect.db"
+    original_open = os.open
+    inspections = 0
+
+    def denied_open(candidate: str, flags: int, mode: int = 0o777) -> int:
+        if candidate == str(path):
+            raise PermissionError
+        return original_open(candidate, flags, mode)
+
+    def unexpected_inspection(*args: object, **kwargs: object) -> FileEffectGateBinding:
+        nonlocal inspections
+        inspections += 1
+        raise AssertionError("non-EEXIST setup failure must not inspect")
+
+    monkeypatch.setattr(_file_effect_gate.os, "open", denied_open)
+    monkeypatch.setattr(_file_effect_gate, "inspect_file_effect_gate", unexpected_inspection)
+    with pytest.raises(FileEffectGateError):
+        setup_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", _observe_guest)
+    assert inspections == 0
+    assert not path.exists()
+
+
+def test_concurrent_setup_adopts_one_complete_inode(tmp_path: Path) -> None:
+    path = tmp_path / "effect.db"
+    start = threading.Barrier(3)
+    bindings: list[FileEffectGateBinding] = []
+    errors: list[BaseException] = []
+
+    def setup() -> None:
+        try:
+            start.wait(timeout=10)
+            bindings.append(setup_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", _observe_guest))
+        except BaseException as error:
+            errors.append(error)
+
+    workers = [threading.Thread(target=setup, daemon=True) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+    start.wait(timeout=10)
+    for worker in workers:
+        worker.join(timeout=10)
+    assert not any(worker.is_alive() for worker in workers)
+    # An inspector may win the tiny create-before-flock window and refuse the
+    # incomplete inode. It must never create a second one or repair the first.
+    assert len(bindings) >= 1
+    assert len(bindings) + len(errors) == 2
+    assert all(isinstance(error, FileEffectGateError) for error in errors)
+    assert all(binding == bindings[0] for binding in bindings)
+    assert inspect_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", _observe_guest) == bindings[0]
+
+
+def test_bookworm_python_can_setup_and_inspect_gate(tmp_path: Path) -> None:
     python = Path("/usr/bin/python3.11")
     if not python.is_file():
         pytest.skip("Bookworm Python 3.11 is unavailable on this host")
     source = """
 import os
 import sys
-from agentworks.execution._file_effect_gate import initialize_file_effect_gate, inspect_file_effect_gate
+from agentworks.execution._file_effect_gate import setup_file_effect_gate, inspect_file_effect_gate
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 
 guest = VMGuestIdentity('a' * 32, '123e4567-e89b-12d3-a456-426614174000', 10)
 def observe_guest():
     return guest
-binding = initialize_file_effect_gate(sys.argv[1], guest, os.geteuid(), 'gate-vm', observe_guest)
+binding = setup_file_effect_gate(sys.argv[1], guest, os.geteuid(), 'gate-vm', observe_guest)
 assert inspect_file_effect_gate(sys.argv[1], guest, os.geteuid(), 'gate-vm', observe_guest) == binding
 """
     result = subprocess.run(
@@ -368,7 +454,7 @@ def test_inspection_refuses_absent_incomplete_and_unsafe_gate(tmp_path: Path) ->
     with pytest.raises(FileEffectGateError):
         inspect()
     with pytest.raises(FileEffectGateError):
-        initialize_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", _observe_guest)
+        setup_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", _observe_guest)
     assert path.stat().st_size == 0
 
     path.rename(tmp_path / "incomplete.db")
