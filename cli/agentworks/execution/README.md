@@ -287,8 +287,11 @@ lifetime. A production observer, crash recovery factory, activation, platform wi
 identity and RunContext integration remain open gates.
 
 `_wsl2_guest_query.py` is a private no-staging source and strict response reducer for that exact
-epoch-bound identity. It does not dispatch a WSL client or provide a production guest observer;
-observer custody, recovery drain and native acceptance remain open.
+epoch-bound identity. `_wsl2_guest_observer.py` owns an ordinary-path query through a separate
+fresh native WSL client. It retains that client before dispatch, retries local settlement before
+another query, and accepts absence only after a complete exact response, zero client exit, live
+deadline and settled local handles. This private observer does not provide controller-death
+recovery or production wiring; recovery drain and native Windows/WSL2 acceptance remain open.
 
 ## Observation and guest lifetime
 
