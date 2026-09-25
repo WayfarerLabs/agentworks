@@ -22,7 +22,11 @@ from agentworks.execution._file_gate_setup import FileEffectGateSetup
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
-from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, encode_vm_guest_identity_success
+from agentworks.execution._vm_guest_identity_protocol import (
+    VMGuestIdentity,
+    encode_vm_guest_identity_success,
+    vm_guest_boot_id,
+)
 from agentworks.execution._wsl2_lifecycle import GuestAnchorPresence
 from agentworks.execution._wsl2_owned_download import WSL2DownloadStatus, WSL2OwnedDownload
 from agentworks.execution.binding import NativeExecutionBinding
@@ -40,7 +44,6 @@ from agentworks.execution.carrier import (
     SinkOutput,
 )
 from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
-from agentworks.vms.target_identity import vm_guest_boot_id
 from tests.execution.files._file_download_support import BytesSink, LostCallStdoutCarrier
 from tests.execution.files._file_snapshot_support import LocalCarrier, install_fixture_bundle
 from tests.execution.files._fixed_bundle_support import fixture_file_bundle

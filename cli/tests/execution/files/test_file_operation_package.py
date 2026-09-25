@@ -17,7 +17,7 @@ from agentworks.execution import _file_operation
 from agentworks.execution._file_obligation import FileCallFamily, decode_file_call_obligation
 from agentworks.execution._file_operation import FileOperation, PackageUploadMember
 from agentworks.execution._file_publication import Create
-from agentworks.execution._file_upload import FileUploadBinding, FileUploadOutcome, FileUploadStatus
+from agentworks.execution._file_upload import FileUploadBinding, FileUploadOutcome, FileUploadStatus, _PreparedUpload
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution.carrier import CarrierIO, CarrierReport, ChannelFeatures, Deadline, PreparedInvocation
@@ -465,6 +465,7 @@ def test_retention_failure_preserves_package_control_and_attached_child(
         )
     assert caught.value is control
     active = next(iter(operation._active_package_uploads.values()))  # noqa: SLF001
+    assert isinstance(active.prepared, _PreparedUpload)
     assert active.prepared.workflow._source is source  # noqa: SLF001
     with pytest.raises(StateError):
         owner.close()

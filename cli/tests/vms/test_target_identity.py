@@ -10,10 +10,9 @@ from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLo
 from agentworks.db import VMRow
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._managed_runs import ManagedTargetKind
-from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 from agentworks.vms.target_identity import (
     compose_managed_vm_target_identity,
-    vm_guest_boot_id,
     vm_incarnation_fingerprint,
 )
 

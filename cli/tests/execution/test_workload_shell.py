@@ -123,7 +123,7 @@ def test_guest_refuses_unsupported_and_missing_shell() -> None:
 def test_guest_reads_current_effective_user_shell() -> None:
     with patch("pwd.getpwuid") as lookup:
         lookup.return_value.pw_shell = "/bin/sh"
-        with patch.object(guest.os, "stat") as stat_path, patch.object(guest.os, "access", return_value=True):
+        with patch.object(os, "stat") as stat_path, patch.object(os, "access", return_value=True):
             stat_path.return_value.st_mode = 0o100755
             assert guest._shell().shell == "/bin/sh"
         lookup.assert_called_once_with(os.geteuid())
@@ -132,10 +132,10 @@ def test_guest_reads_current_effective_user_shell() -> None:
 def test_guest_refuses_non_executable_or_missing_object() -> None:
     with patch("pwd.getpwuid") as lookup:
         lookup.return_value.pw_shell = "/bin/sh"
-        with patch.object(guest.os, "stat") as stat_path, patch.object(guest.os, "access", return_value=False):
+        with patch.object(os, "stat") as stat_path, patch.object(os, "access", return_value=False):
             stat_path.return_value.st_mode = 0o100644
             assert guest._shell().failure is WorkloadShellFailure.UNSUPPORTED
-        with patch.object(guest.os, "stat", side_effect=FileNotFoundError):
+        with patch.object(os, "stat", side_effect=FileNotFoundError):
             assert guest._shell().failure is WorkloadShellFailure.MISSING
 
 

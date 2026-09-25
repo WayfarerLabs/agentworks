@@ -42,6 +42,7 @@ from agentworks.execution._file_upload import (
     FileUploadControlFact,
     FileUploadFailure,
     FileUploadStatus,
+    _PreparedUpload,
 )
 from agentworks.execution._file_upload import (
     _WorkingState as _UploadWorkingState,
@@ -915,6 +916,7 @@ def test_ownership_result_is_attached_before_failed_settlement_and_outcome_alloc
             )
 
         active = operation.active_uploads[0]
+        assert isinstance(active.prepared, _PreparedUpload)
         result = active.prepared.state.ownership_result
         assert result is not None and result.observation is not None
         assert active.prepared.state.operation.has_outstanding_attempt
@@ -952,6 +954,7 @@ def test_upload_retention_failure_preserves_original_control_and_attached_source
         fact = raised.value.__cause__
         assert isinstance(fact, FileUploadControlFact)
         active = operation.active_uploads[0]
+        assert isinstance(active.prepared, _PreparedUpload)
         assert active.outcome is fact.outcome is captured[0].outcome
         assert active.prepared.workflow._source is source  # noqa: SLF001
         assert active.prepared.state.token == fact.outcome.token
@@ -1001,6 +1004,7 @@ def test_upload_allocation_failure_cannot_reuse_source_exception_cause(
         assert allocation_causes == [prior_fact]
         assert raised.value is control and raised.value.__cause__ is None
         active = operation.active_uploads[0]
+        assert isinstance(active.prepared, _PreparedUpload)
         assert active.outcome is None
         assert active.prepared.state.token != previous.token
         assert operation.unfinished_uploads == ()
