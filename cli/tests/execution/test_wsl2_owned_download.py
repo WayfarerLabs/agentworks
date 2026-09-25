@@ -84,15 +84,6 @@ class GuestThenFileCarrier:
         )
 
 
-class RoutedGuestCarrier(WSL2Carrier):
-    def __init__(self, connection: WSL2Connection, guest: GuestThenFileCarrier) -> None:
-        super().__init__(connection)
-        self.guest = guest
-
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-        return self.guest.execute(invocation, io=io, deadline=deadline)
-
-
 def _plan() -> IdentityPlan:
     gid = os.getegid()
     return IdentityPlan(
@@ -100,48 +91,56 @@ def _plan() -> IdentityPlan:
     )
 
 
-def _subject(database: Database, carrier: GuestThenFileCarrier, observer: FakeObserver) -> WSL2OwnedDownload:
-    return WSL2OwnedDownload(
-        database.operations,
-        _vm(),
-        ProviderLocator("wsl2:opaque-test-registration"),
-        WSL2Connection("Ubuntu", "admin", "wsl.exe"),
-        native=FakeNative([]),
-        observer=observer,
-        carrier=carrier,
-        runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable),
-    )
+def _subject(
+    database: Database, carrier: GuestThenFileCarrier, observer: FakeObserver, monkeypatch: pytest.MonkeyPatch
+) -> WSL2OwnedDownload:
+    subject, _ = _platform_subject(database, carrier, observer, monkeypatch)
+    assert subject is not None
+    return subject
 
 
 def _platform_subject(
     database: Database,
     carrier: GuestThenFileCarrier,
-    observer: FakeObserver,
+    observer: FakeObserver | None,
+    monkeypatch: pytest.MonkeyPatch,
     *,
     locators: list[ProviderLocator | ProviderLocatorUnavailable] | None = None,
     connections: list[WSL2Connection] | None = None,
     runtimes: list[RuntimeSelection] | None = None,
+    native: FakeNative | None = None,
+    observed_routes: list[WSL2Connection] | None = None,
 ) -> tuple[WSL2OwnedDownload | None, Mock]:
+    def execute(
+        selected: WSL2Carrier, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline
+    ) -> CarrierReport:
+        if observed_routes is not None:
+            observed_routes.append(selected.connection)
+        return carrier.execute(invocation, io=io, deadline=deadline)
+
+    monkeypatch.setattr(WSL2Carrier, "execute", execute)
     platform = Mock(spec=WSL2Platform)
     platform.site_name = "local"
     platform.observe_provider_locator.side_effect = locators or [ProviderLocator("wsl2:registration")] * 3
     routes = connections or [WSL2Connection("Ubuntu", "admin", "wsl.exe")] * 2
     selections = runtimes or [RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable)] * len(routes)
-    platform.resolve_native_execution_binding.side_effect = [
+    bindings = [
         NativeExecutionBinding(
-            RoutedGuestCarrier(route, carrier),
+            WSL2Carrier(route),
             route.user,
             runtime,
         )
         for route, runtime in zip(routes, selections, strict=True)
     ]
+    platform.resolve_native_execution_binding.side_effect = bindings
+    platform.test_bindings = bindings
     subject = WSL2OwnedDownload.from_platform(
         database.operations,
         _vm(),
         platform,
         cast(RunContext, object()),
         deadline=Deadline.after(30),
-        native=FakeNative([]),
+        native=FakeNative([]) if native is None else native,
         observer=observer,
     )
     return subject, platform
@@ -171,7 +170,7 @@ def test_complete_download_uses_one_owner_and_releases_after_exact_guest_absence
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database)
         observer = FakeObserver([])
-        subject = _subject(database, carrier, observer)
+        subject = _subject(database, carrier, observer, monkeypatch)
         sink = BytesSink()
         assert _download(subject, root, sink) is WSL2DownloadStatus.COMPLETE
         assert bytes(sink.data) == b"held-wsl-download"
@@ -193,7 +192,7 @@ def test_selected_platform_download_rechecks_registration_and_route(
     install_fixture_bundle(monkeypatch, scratch)
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database)
-        subject, platform = _platform_subject(database, carrier, FakeObserver([]))
+        subject, platform = _platform_subject(database, carrier, FakeObserver([]), monkeypatch)
         assert subject is not None
         sink = BytesSink()
         assert _download(subject, root, sink) is WSL2DownloadStatus.COMPLETE
@@ -204,9 +203,36 @@ def test_selected_platform_download_rechecks_registration_and_route(
         assert database.operations.inspect(subject.owner.ownership.scope) is None
 
 
+def test_platform_carrier_mutation_cannot_redirect_file_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "source-root"
+    root.mkdir()
+    root.joinpath("source").write_bytes(b"held-wsl-download")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    scratch.chmod(0o1777)
+    install_fixture_bundle(monkeypatch, scratch)
+    with closing(Database(tmp_path / "state.db")) as database:
+        carrier = GuestThenFileCarrier(database)
+        routes: list[WSL2Connection] = []
+        subject, platform = _platform_subject(database, carrier, FakeObserver([]), monkeypatch, observed_routes=routes)
+        assert subject is not None
+        original = WSL2Connection("Ubuntu", "admin", "wsl.exe")
+        initial_carrier = cast(WSL2Carrier, platform.test_bindings[0].carrier)
+        initial_carrier._connection = WSL2Connection("other", "admin", "C:/other/wsl.exe")
+        assert type(subject._carrier) is WSL2Carrier
+        assert subject._carrier is not initial_carrier
+        sink = BytesSink()
+        assert _download(subject, root, sink) is WSL2DownloadStatus.COMPLETE
+        assert bytes(sink.data) == b"held-wsl-download"
+        assert len(routes) > 1 and all(route == original for route in routes)
+        assert database.operations.inspect(subject.owner.ownership.scope) is None
+
+
 @pytest.mark.parametrize("later", [ProviderLocator("wsl2:changed"), ProviderLocatorUnavailable()])
 def test_selected_platform_changed_or_missing_locator_refuses_before_guest_or_file(
-    tmp_path: Path, later: ProviderLocator | ProviderLocatorUnavailable
+    tmp_path: Path, later: ProviderLocator | ProviderLocatorUnavailable, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database)
@@ -214,6 +240,7 @@ def test_selected_platform_changed_or_missing_locator_refuses_before_guest_or_fi
             database,
             carrier,
             FakeObserver([]),
+            monkeypatch,
             locators=[ProviderLocator("wsl2:registration"), later],
         )
         assert subject is not None
@@ -223,13 +250,16 @@ def test_selected_platform_changed_or_missing_locator_refuses_before_guest_or_fi
         assert database.operations.inspect(subject.owner.ownership.scope) is None
 
 
-def test_selected_platform_changed_route_refuses_before_file_dispatch(tmp_path: Path) -> None:
+def test_selected_platform_changed_route_refuses_before_file_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database)
         subject, _ = _platform_subject(
             database,
             carrier,
             FakeObserver([]),
+            monkeypatch,
             connections=[
                 WSL2Connection("Ubuntu", "admin", "wsl.exe"),
                 WSL2Connection("Ubuntu", "admin", "C:/other/wsl.exe"),
@@ -243,13 +273,16 @@ def test_selected_platform_changed_route_refuses_before_file_dispatch(tmp_path: 
         assert database.operations.inspect(subject.owner.ownership.scope) is None
 
 
-def test_selected_platform_changed_runtime_refuses_before_file_dispatch(tmp_path: Path) -> None:
+def test_selected_platform_changed_runtime_refuses_before_file_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database)
         subject, _ = _platform_subject(
             database,
             carrier,
             FakeObserver([]),
+            monkeypatch,
             runtimes=[
                 RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable),
                 RuntimeSelection(RuntimeTargetOS.LINUX, "/other/python"),
@@ -262,11 +295,13 @@ def test_selected_platform_changed_runtime_refuses_before_file_dispatch(tmp_path
         assert database.operations.inspect(subject.owner.ownership.scope) is None
 
 
-def test_selected_platform_unavailable_locator_does_not_acquire(tmp_path: Path) -> None:
+def test_selected_platform_unavailable_locator_does_not_acquire(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database)
         subject, platform = _platform_subject(
-            database, carrier, FakeObserver([]), locators=[ProviderLocatorUnavailable()]
+            database, carrier, FakeObserver([]), monkeypatch, locators=[ProviderLocatorUnavailable()]
         )
         assert subject is None
         platform.resolve_native_execution_binding.assert_not_called()
@@ -275,12 +310,11 @@ def test_selected_platform_unavailable_locator_does_not_acquire(tmp_path: Path) 
 
 def test_selected_platform_invalid_binding_does_not_acquire(tmp_path: Path) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
-        carrier = GuestThenFileCarrier(database)
         platform = Mock(spec=WSL2Platform)
         platform.site_name = "local"
         platform.observe_provider_locator.return_value = ProviderLocator("wsl2:registration")
         platform.resolve_native_execution_binding.return_value = NativeExecutionBinding(
-            RoutedGuestCarrier(WSL2Connection("Ubuntu", "admin", "wsl.exe"), carrier),
+            WSL2Carrier(WSL2Connection("Ubuntu", "admin", "wsl.exe")),
             "different-account",
             RuntimeSelection(RuntimeTargetOS.LINUX),
         )
@@ -295,10 +329,34 @@ def test_selected_platform_invalid_binding_does_not_acquire(tmp_path: Path) -> N
         assert database.operations.inspect(OperationScope(OperationResourceKind.VM, "box")) is None
 
 
-def test_selected_platform_uncertain_guest_retains_claim(tmp_path: Path) -> None:
+def test_selected_platform_subclass_carrier_does_not_acquire(tmp_path: Path) -> None:
+    class SubclassCarrier(WSL2Carrier):
+        pass
+
+    with closing(Database(tmp_path / "state.db")) as database:
+        platform = Mock(spec=WSL2Platform)
+        platform.site_name = "local"
+        platform.observe_provider_locator.return_value = ProviderLocator("wsl2:registration")
+        platform.resolve_native_execution_binding.return_value = NativeExecutionBinding(
+            SubclassCarrier(WSL2Connection("Ubuntu", "admin", "wsl.exe")),
+            "admin",
+            RuntimeSelection(RuntimeTargetOS.LINUX),
+        )
+        with pytest.raises(ValidationError):
+            WSL2OwnedDownload.from_platform(
+                database.operations,
+                _vm(),
+                platform,
+                cast(RunContext, object()),
+                deadline=Deadline.after(30),
+            )
+        assert database.operations.inspect(OperationScope(OperationResourceKind.VM, "box")) is None
+
+
+def test_selected_platform_uncertain_guest_retains_claim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database, init_ticks=4097)
-        subject, _ = _platform_subject(database, carrier, FakeObserver([], GuestAnchorPresence.UNKNOWN))
+        subject, _ = _platform_subject(database, carrier, FakeObserver([], GuestAnchorPresence.UNKNOWN), monkeypatch)
         assert subject is not None
         assert _download(subject, tmp_path, BytesSink()) is WSL2DownloadStatus.RETAINED
         assert carrier.calls == 1
@@ -306,13 +364,16 @@ def test_selected_platform_uncertain_guest_retains_claim(tmp_path: Path) -> None
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
 
 
-def test_selected_platform_changed_route_retains_when_hold_absence_is_unknown(tmp_path: Path) -> None:
+def test_selected_platform_changed_route_retains_when_hold_absence_is_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database)
         subject, _ = _platform_subject(
             database,
             carrier,
             FakeObserver([], GuestAnchorPresence.UNKNOWN),
+            monkeypatch,
             connections=[
                 WSL2Connection("Ubuntu", "admin", "wsl.exe"),
                 WSL2Connection("Ubuntu", "admin", "C:/other/wsl.exe"),
@@ -335,7 +396,7 @@ def test_missing_source_resolves_file_and_hold_obligations(tmp_path: Path, monke
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database)
         observer = FakeObserver([])
-        subject = _subject(database, carrier, observer)
+        subject = _subject(database, carrier, observer, monkeypatch)
         sink = BytesSink()
         assert _download(subject, root, sink) is WSL2DownloadStatus.REFUSED
         assert sink.data == b"" and carrier.calls > 1
@@ -344,49 +405,50 @@ def test_missing_source_resolves_file_and_hold_obligations(tmp_path: Path, monke
         assert database.operations.inspect(subject.owner.ownership.scope) is None
 
 
-def test_default_observer_rejection_does_not_acquire_claim(tmp_path: Path) -> None:
+def test_default_observer_rejection_does_not_acquire_claim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
         scope = OperationScope(OperationResourceKind.VM, "box")
         with pytest.raises(ValidationError):
-            WSL2OwnedDownload(
-                database.operations,
-                _vm(),
-                ProviderLocator("wsl2:opaque-test-registration"),
-                WSL2Connection("Ubuntu", "admin", "C:/Windows/System32/wsl.exe"),
-                native=FakeNative([]),
+            _platform_subject(
+                database,
+                GuestThenFileCarrier(database),
+                None,
+                monkeypatch,
+                connections=[WSL2Connection("Ubuntu", "admin", "C:/Windows/System32/wsl.exe")],
             )
         assert database.operations.inspect(scope) is None
 
 
-def test_failed_inert_hold_construction_abandons_reserved_claim(tmp_path: Path) -> None:
+def test_failed_inert_hold_construction_abandons_reserved_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
         scope = OperationScope(OperationResourceKind.VM, "box")
         native = FakeNative([], snapshot_failure_at=1, snapshot_error=RuntimeError("snapshot failed"))
         with pytest.raises(RuntimeError, match="snapshot failed"):
-            WSL2OwnedDownload(
-                database.operations,
-                _vm(),
-                ProviderLocator("wsl2:opaque-test-registration"),
-                WSL2Connection("Ubuntu", "admin", "wsl.exe"),
+            _platform_subject(
+                database,
+                GuestThenFileCarrier(database),
+                FakeObserver([]),
+                monkeypatch,
                 native=native,
-                observer=FakeObserver([]),
             )
         assert database.operations.inspect(scope) is None
 
 
-def test_ready_epoch_mismatch_refuses_before_file_dispatch(tmp_path: Path) -> None:
+def test_ready_epoch_mismatch_refuses_before_file_dispatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database, init_ticks=4097)
-        subject = _subject(database, carrier, FakeObserver([]))
+        subject = _subject(database, carrier, FakeObserver([]), monkeypatch)
         assert _download(subject, tmp_path, BytesSink()) is WSL2DownloadStatus.REFUSED
         assert carrier.calls == 1
         assert database.operations.inspect(subject.owner.ownership.scope) is None
 
 
-def test_uncertain_guest_absence_retains_claim(tmp_path: Path) -> None:
+def test_uncertain_guest_absence_retains_claim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
         carrier = GuestThenFileCarrier(database, init_ticks=4097)
-        subject = _subject(database, carrier, FakeObserver([], GuestAnchorPresence.UNKNOWN))
+        subject = _subject(database, carrier, FakeObserver([], GuestAnchorPresence.UNKNOWN), monkeypatch)
         assert _download(subject, tmp_path, BytesSink()) is WSL2DownloadStatus.RETAINED
         assert carrier.calls == 1
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
@@ -406,7 +468,7 @@ def test_unresolved_file_exchange_retains_claim_and_hold(tmp_path: Path, monkeyp
         carrier = GuestThenFileCarrier(database)
         carrier.file_carrier = LostCallStdoutCarrier(3)
         observer = FakeObserver([])
-        subject = _subject(database, carrier, observer)
+        subject = _subject(database, carrier, observer, monkeypatch)
         assert _download(subject, root, BytesSink()) is WSL2DownloadStatus.RETAINED
         assert carrier.calls > 1 and observer.events == []
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
