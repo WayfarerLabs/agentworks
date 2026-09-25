@@ -1087,6 +1087,17 @@ debt. Do not use stream EOF, controller death, a local process join or a blind t
 evidence. An absent/replaced gate, irreconcilable token mismatch, uncertain target identity or
 unavailable helper retains ownership for manual recovery when exact revalidation cannot resolve it.
 
+A confirmed advance proves a narrower fact than helper termination: after the flock is released, no
+earlier-generation fixed file helper can start or continue guest filesystem effects through that
+gate. The helper may still be alive, blocked in transport output, or delivering bytes it produced
+before the advance. This guest-effect proof does not stop an old controller from writing a local
+download sink or performing another non-gated side effect. Production takeover must separately
+establish predecessor-controller loss or fence those local effects before it resolves the whole
+operation or releases the VM claim. The local journal's helper-exit proof is conservative test
+evidence, not a requirement that SSH, QGA and WSL synthesize remote-exit evidence after a confirmed
+gate advance. The production evidence type must make this split explicit and refuse if any affected
+helper identity or non-gated effect remains unaccounted for.
+
 The gate file must never be unlinked/recreated within an unresolved target epoch: replacing a locked
 path creates two independent lock domains, and matching database bytes alone do not establish inode
 continuity. A service or login-session cleanup must not own this namespace's lifetime. All setup,

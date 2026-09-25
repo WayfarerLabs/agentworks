@@ -1939,6 +1939,10 @@ and a production drain-evidence producer remain unproved.
       helper journal is not a substitute. Prove core Linux guest setup and lifetime of the
       `/run/agentworks/file-gates-v1` namespace, its local mount and common visibility across all
       helper routes before native acceptance; never substitute account-home or `/dev/shm` silently.
+      Treat confirmed generation advance as guest-file-effect fencing, not proof that the remote
+      helper exited or that an old controller stopped writing a local download sink. The production
+      recovery evidence and takeover path must separately account for predecessor-controller
+      liveness or fence its non-gated effects before whole-operation resolution and claim release.
       Keep the public FileAccess and ownership release gates open until this and the concrete
       recovery handoff are proved.
 
