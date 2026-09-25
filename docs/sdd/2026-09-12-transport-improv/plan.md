@@ -1959,8 +1959,9 @@ discovered gate binding to that row before file effects. `FileOperation.download
 installs its row after receiving a gate binding, so the admission and handoff must move earlier;
 adding only a setup call before `download()` would leave it untracked. Allocate the download token
 before setup, reserve all later binding, proposal and recovery growth within the 8,192-byte payload
-cap, and define version compatibility for existing rows. Do not add a second generic row or a phase
-enum.
+cap, and keep existing version-1 rows byte-for-byte valid. A new optional setup descriptor may
+remain version 1 only if older readers refuse it safely and old downloads without a gate never
+acquire setup meaning. Do not add a second generic row or a phase enum.
 
 The private local setup/inspection substrate at `1040c8d1` validates identity and independently
 observes the live guest epoch before exclusive creation. Inspection opens only existing state under
@@ -1986,6 +1987,11 @@ representative complete demoted-identity QGA body is 47,023 bytes with a 32 KiB 
 unchanged 65,536-byte limit. The helper executes under distribution Python 3.11. These are local
 protocol and delivery checks only: the production obligation handoff, guest namespace, native route
 visibility, helper quiescence and recovery integration remain open.
+
+The private numeric-bound correction at `69cc281d4` limits gate UIDs to Linux's 32-bit range and
+device/inode identities to unsigned 64-bit values. This makes their encoded growth finite for the
+future 8,192-byte admission reserve; a short canonical production gate path and the exact reserve
+calculation remain open. The gate, recovery and fixed-delivery focused selection passes 109 tests.
 
 - [ ] Use the owned snapshot/chunk download for general in-memory reads, preserving caller byte
       bounds independently of QGA's single-response capacity. Keep the no-staging readiness read

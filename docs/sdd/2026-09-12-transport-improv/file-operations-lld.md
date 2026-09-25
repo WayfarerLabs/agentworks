@@ -953,14 +953,16 @@ The three durable states follow from the gate value itself: a setup descriptor, 
 an exact binding with a proposed generation. No independent phase enum is needed. Allocate the
 download token before setup and retain one whole-call borrow and obligation across control, snapshot
 and cleanup. The initial admission must reserve the largest reachable `file-call` payload under the
-8,192-byte database cap, including the eventual binding, proposal and download recovery facts. Bound
-the device, inode, effective identity and canonical gate path on the wire before calculating that
-reserve; the present local binding accepts unbounded positive integers. Define payload-version
-compatibility so existing persisted rows are not reinterpreted as setup-pending. The raw guest
-triple must remain tied to the verified managed target through publication and recovery. A bound row
-permits file dispatch but does not itself prove that a snapshot ran; recovery must still retain
-uncertainty conservatively and must not route setup-only work through snapshot recovery that assumes
-no gate. These codec and custody changes remain unimplemented.
+8,192-byte database cap, including the eventual binding, proposal and download recovery facts. The
+local binding now bounds Linux UIDs to 32 bits and device/inode values to 64 bits; constrain the
+production canonical gate path and include its worst-case encoding before calculating the reserve.
+An additive closed setup descriptor may retain payload version 1 only if absent fields leave older
+rows byte-for-byte valid, older readers safely refuse the new field, and an old DOWNLOAD without a
+gate is never reinterpreted as setup-pending. The raw guest triple must remain tied to the verified
+managed target through publication and recovery. A bound row permits file dispatch but does not
+itself prove that a snapshot ran; recovery must still retain uncertainty conservatively and must not
+route setup-only work through snapshot recovery that assumes no gate. These codec and custody
+changes remain unimplemented.
 
 The production control path uses one private fixed-helper family for setup, non-creating inspection
 and generation advance. It follows the file-object family's closed, bounded request and sequenced
