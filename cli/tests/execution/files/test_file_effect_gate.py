@@ -6,6 +6,7 @@ import multiprocessing
 import os
 import secrets
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -25,6 +26,7 @@ from agentworks.execution._file_effect_gate import (
     encode_file_effect_gate,
     hold_file_effect_gate,
     initialize_file_effect_gate,
+    inspect_file_effect_gate,
 )
 from agentworks.execution._file_obligation import (
     FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
@@ -89,7 +91,7 @@ def _hold_until_released(binding: FileEffectGateBinding, entered: str, release: 
 
 def _gate(tmp_path: Path) -> FileEffectGateBinding:
     gate = tmp_path / "effect.db"
-    return initialize_file_effect_gate(str(gate), _GUEST, os.geteuid(), "gate-vm")
+    return initialize_file_effect_gate(str(gate), _GUEST, os.geteuid(), "gate-vm", _observe_guest)
 
 
 def _call(binding: FileEffectGateBinding, root: Path) -> FileCallObligation:
@@ -203,6 +205,139 @@ def test_binding_codec_and_exact_file_call_row_survive_reopen(tmp_path: Path) ->
             )
     finally:
         database.close()
+
+
+def test_setup_observes_live_guest_before_creating_gate(tmp_path: Path) -> None:
+    path = tmp_path / "effect.db"
+    observed: list[bool] = []
+
+    def stale_guest() -> VMGuestIdentity:
+        observed.append(path.exists())
+        return replace(_GUEST, init_start_ticks=11)
+
+    with pytest.raises(FileEffectGateError):
+        initialize_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", stale_guest)
+    assert observed == [False]
+    assert not path.exists()
+
+    with pytest.raises(FileEffectGateError):
+        initialize_file_effect_gate(str(path), _GUEST, os.geteuid(), "", _observe_guest)
+    assert not path.exists()
+
+
+def test_lost_setup_reply_can_inspect_exact_complete_gate_without_advancing(tmp_path: Path) -> None:
+    binding = _gate(tmp_path)
+    inspected = inspect_file_effect_gate(binding.path, _GUEST, os.geteuid(), "gate-vm", _observe_guest)
+    assert inspected == binding
+    assert (binding.device, binding.inode) == (
+        Path(binding.path).stat().st_dev,
+        Path(binding.path).stat().st_ino,
+    )
+
+    proposed = replace(binding, proposed_generation=secrets.token_bytes(16))
+    advanced = advance_file_effect_gate(proposed, _observe_guest)
+    assert inspect_file_effect_gate(binding.path, _GUEST, os.geteuid(), "gate-vm", _observe_guest) == advanced
+    with hold_file_effect_gate(advanced, _observe_guest):
+        pass
+
+
+def test_bookworm_python_can_initialize_and_inspect_gate(tmp_path: Path) -> None:
+    python = Path("/usr/bin/python3.11")
+    if not python.is_file():
+        pytest.skip("Bookworm Python 3.11 is unavailable on this host")
+    source = """
+import os
+import sys
+from agentworks.execution._file_effect_gate import initialize_file_effect_gate, inspect_file_effect_gate
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
+
+guest = VMGuestIdentity('a' * 32, '123e4567-e89b-12d3-a456-426614174000', 10)
+def observe_guest():
+    return guest
+binding = initialize_file_effect_gate(sys.argv[1], guest, os.geteuid(), 'gate-vm', observe_guest)
+assert inspect_file_effect_gate(sys.argv[1], guest, os.geteuid(), 'gate-vm', observe_guest) == binding
+"""
+    result = subprocess.run(
+        [str(python), "-c", source, str(tmp_path / "effect.db")],
+        check=False,
+        capture_output=True,
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[3])},
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+
+
+def test_inspection_refuses_absent_incomplete_and_unsafe_gate(tmp_path: Path) -> None:
+    path = tmp_path / "effect.db"
+
+    def inspect() -> FileEffectGateBinding:
+        return inspect_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", _observe_guest)
+
+    with pytest.raises(FileEffectGateError):
+        inspect()
+    assert not path.exists()
+
+    path.touch(mode=0o600)
+    with pytest.raises(FileEffectGateError):
+        inspect()
+    with pytest.raises(FileEffectGateError):
+        initialize_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", _observe_guest)
+    assert path.stat().st_size == 0
+
+    path.rename(tmp_path / "incomplete.db")
+    binding = _gate(tmp_path)
+    os.link(path, tmp_path / "other-link.db")
+    with pytest.raises(FileEffectGateError):
+        inspect()
+    (tmp_path / "other-link.db").unlink()
+    path.rename(tmp_path / "original.db")
+    path.symlink_to(tmp_path / "original.db")
+    with pytest.raises(FileEffectGateError):
+        inspect()
+    path.unlink()
+    (tmp_path / "original.db").rename(path)
+    with pytest.raises(FileEffectGateError):
+        inspect_file_effect_gate(binding.path, _GUEST, os.geteuid(), "wrong-vm", _observe_guest)
+    with pytest.raises(FileEffectGateError):
+        inspect_file_effect_gate(
+            binding.path,
+            _GUEST,
+            os.geteuid(),
+            "gate-vm",
+            lambda: replace(_GUEST, init_start_ticks=11),
+        )
+    assert inspect() == binding
+
+
+def test_inspection_waits_for_same_flock_and_respects_deadline(tmp_path: Path) -> None:
+    binding = _gate(tmp_path)
+    entered = tmp_path / "entered"
+    release = tmp_path / "release"
+    helper = multiprocessing.get_context("spawn").Process(
+        target=_hold_until_released, args=(binding, str(entered), str(release))
+    )
+    helper.start()
+    try:
+        until = time.monotonic() + 10
+        while not entered.exists() and time.monotonic() < until:
+            time.sleep(0.01)
+        assert entered.exists()
+        with pytest.raises(FileEffectGateError):
+            inspect_file_effect_gate(
+                binding.path,
+                _GUEST,
+                os.geteuid(),
+                "gate-vm",
+                _observe_guest,
+                expires_at=time.monotonic() + 0.05,
+            )
+        release.touch()
+        helper.join(10)
+        assert helper.exitcode == 0
+        assert inspect_file_effect_gate(binding.path, _GUEST, os.geteuid(), "gate-vm", _observe_guest) == binding
+    finally:
+        release.touch()
+        helper.join(10)
 
 
 def test_fixed_snapshot_survives_controller_loss_and_is_fenced_before_recovery(

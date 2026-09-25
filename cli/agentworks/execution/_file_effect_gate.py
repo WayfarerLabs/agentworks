@@ -152,22 +152,30 @@ def _open_flags() -> int:
     return os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
 
 
-def _check_inode(binding: FileEffectGateBinding, descriptor: int) -> None:
-    """Verify both the held descriptor and its still-named path."""
+def _check_inode(
+    path: str,
+    euid: int,
+    descriptor: int,
+    expected: tuple[int, int] | None = None,
+) -> os.stat_result:
+    """Verify the held regular inode still names the same safe gate path."""
     try:
         held = os.fstat(descriptor)
-        named = os.stat(binding.path, follow_symlinks=False)
+        named = os.stat(path, follow_symlinks=False)
     except OSError:
         raise FileEffectGateError("file-effect gate is unavailable") from None
     for metadata in (held, named):
         if (
             not stat.S_ISREG(metadata.st_mode)
             or metadata.st_nlink != 1
-            or metadata.st_uid != binding.euid
+            or metadata.st_uid != euid
             or stat.S_IMODE(metadata.st_mode) != 0o600
-            or (metadata.st_dev, metadata.st_ino) != (binding.device, binding.inode)
+            or (metadata.st_dev, metadata.st_ino) != (held.st_dev, held.st_ino)
+            or expected is not None
+            and (metadata.st_dev, metadata.st_ino) != expected
         ):
             raise FileEffectGateError("file-effect gate inode changed or is unsafe")
+    return held
 
 
 def _acquire_flock(descriptor: int, expires_at: float | None) -> None:
@@ -203,31 +211,32 @@ def _locked_gate(binding: FileEffectGateBinding, expires_at: float | None) -> It
     except OSError:
         raise FileEffectGateError("file-effect gate is unavailable") from None
     try:
-        _check_inode(binding, descriptor)
+        expected = (binding.device, binding.inode)
+        _check_inode(binding.path, binding.euid, descriptor, expected)
         _acquire_flock(descriptor, expires_at)
-        _check_inode(binding, descriptor)
+        _check_inode(binding.path, binding.euid, descriptor, expected)
         yield descriptor
     finally:
         os.close(descriptor)
 
 
-def _connect(binding: FileEffectGateBinding, descriptor: int) -> Connection:
+def _connect(path: str, euid: int, descriptor: int, expected: tuple[int, int]) -> Connection:
     """Open only while the caller owns the independent flock descriptor."""
     try:
         import sqlite3
     except ImportError:
         raise FileEffectGateError("file-effect gate requires Python sqlite3") from None
 
-    _check_inode(binding, descriptor)
+    _check_inode(path, euid, descriptor, expected)
     connection: Connection | None = None
     try:
         connection = sqlite3.connect(
-            f"file:{quote(binding.path, safe='/')}?mode=rw",
+            f"file:{quote(path, safe='/')}?mode=rw",
             uri=True,
             isolation_level=None,
             timeout=0.0,
         )
-        _check_inode(binding, descriptor)
+        _check_inode(path, euid, descriptor, expected)
         if connection.execute("PRAGMA journal_mode").fetchone() != ("delete",):
             raise FileEffectGateError("file-effect gate requires rollback journaling")
         connection.execute("PRAGMA synchronous=FULL")
@@ -239,37 +248,74 @@ def _connect(binding: FileEffectGateBinding, descriptor: int) -> Connection:
 
 
 def _record(connection: Connection, binding: FileEffectGateBinding) -> bytes:
-    row = connection.execute(
-        "SELECT instance, generation, marker, boot_id, init_ticks, euid, scope_name FROM gate WHERE id = 1"
-    ).fetchone()
-    if (
-        row is None
-        or row[0] != binding.instance
-        or row[2:]
-        != (
-            binding.guest.instance_marker,
-            binding.guest.boot_id,
-            str(binding.guest.init_start_ticks),
-            binding.euid,
-            binding.scope_name,
-        )
-    ):
+    instance, generation = _inspect_record(connection, binding.guest, binding.euid, binding.scope_name)
+    if instance != binding.instance:
         raise FileEffectGateError("file-effect gate binding changed")
-    generation = row[1]
-    if type(generation) is not bytes or len(generation) != _TOKEN_BYTES:
-        raise FileEffectGateError("file-effect gate generation is invalid")
     return generation
 
 
-def initialize_file_effect_gate(path: str, guest: VMGuestIdentity, euid: int, scope_name: str) -> FileEffectGateBinding:
+def _inspect_record(connection: Connection, guest: VMGuestIdentity, euid: int, scope_name: str) -> tuple[bytes, bytes]:
+    rows = connection.execute(
+        "SELECT id, instance, generation, marker, boot_id, init_ticks, euid, scope_name FROM gate LIMIT 2"
+    ).fetchall()
+    if len(rows) != 1:
+        raise FileEffectGateError("file-effect gate record is incomplete")
+    row = rows[0]
+    if (
+        type(row[0]) is not int
+        or row[0] != 1
+        or type(row[1]) is not bytes
+        or len(row[1]) != _TOKEN_BYTES
+        or type(row[2]) is not bytes
+        or len(row[2]) != _TOKEN_BYTES
+        or row[3:]
+        != (
+            guest.instance_marker,
+            guest.boot_id,
+            str(guest.init_start_ticks),
+            euid,
+            scope_name,
+        )
+    ):
+        raise FileEffectGateError("file-effect gate record is incomplete or changed")
+    return row[1], row[2]
+
+
+def _check_setup_identity(path: str, guest: VMGuestIdentity, euid: int, scope_name: str) -> None:
+    if (
+        not _valid_path(path)
+        or type(guest) is not VMGuestIdentity
+        or type(euid) is not int
+        or euid < 0
+        or os.geteuid() != euid
+        or not _valid_scope_name(scope_name)
+    ):
+        raise FileEffectGateError("file-effect gate setup identity is invalid")
+
+
+def _observe_setup_guest(guest: VMGuestIdentity, observe_guest: Callable[[], VMGuestIdentity]) -> None:
+    if not callable(observe_guest):
+        raise FileEffectGateError("file-effect gate requires a live guest observer")
+    observed = observe_guest()
+    if type(observed) is not VMGuestIdentity or observed != guest:
+        raise FileEffectGateError("file-effect gate guest identity changed")
+
+
+def initialize_file_effect_gate(
+    path: str,
+    guest: VMGuestIdentity,
+    euid: int,
+    scope_name: str,
+    observe_guest: Callable[[], VMGuestIdentity],
+) -> FileEffectGateBinding:
     """Create a new gate during explicit setup, never during an effect request."""
     try:
         import sqlite3
     except ImportError:
         raise FileEffectGateError("file-effect gate requires Python sqlite3") from None
 
-    if os.geteuid() != euid:
-        raise FileEffectGateError("file-effect gate setup identity mismatch")
+    _check_setup_identity(path, guest, euid, scope_name)
+    _observe_setup_guest(guest, observe_guest)
     try:
         descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | _open_flags(), 0o600)
     except OSError:
@@ -288,7 +334,7 @@ def initialize_file_effect_gate(path: str, guest: VMGuestIdentity, euid: int, sc
             metadata.st_ino,
         )
         _acquire_flock(descriptor, None)
-        with closing(_connect(binding, descriptor)) as connection:
+        with closing(_connect(path, euid, descriptor, (binding.device, binding.inode))) as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 "CREATE TABLE gate (id INTEGER PRIMARY KEY CHECK (id = 1), instance BLOB NOT NULL, "
@@ -317,6 +363,48 @@ def initialize_file_effect_gate(path: str, guest: VMGuestIdentity, euid: int, sc
     return binding
 
 
+def inspect_file_effect_gate(
+    path: str,
+    guest: VMGuestIdentity,
+    euid: int,
+    scope_name: str,
+    observe_guest: Callable[[], VMGuestIdentity],
+    *,
+    expires_at: float | None = None,
+) -> FileEffectGateBinding:
+    """Discover a complete existing gate after a lost setup reply, without creating or advancing it."""
+    try:
+        import sqlite3
+    except ImportError:
+        raise FileEffectGateError("file-effect gate requires Python sqlite3") from None
+
+    _check_setup_identity(path, guest, euid, scope_name)
+    try:
+        descriptor = os.open(path, os.O_RDONLY | _open_flags())
+    except OSError:
+        raise FileEffectGateError("file-effect gate is unavailable") from None
+    try:
+        metadata = _check_inode(path, euid, descriptor)
+        expected = (metadata.st_dev, metadata.st_ino)
+        _acquire_flock(descriptor, expires_at)
+        _check_inode(path, euid, descriptor, expected)
+        _observe_setup_guest(guest, observe_guest)
+        _require_before_deadline(expires_at)
+        with closing(_connect(path, euid, descriptor, expected)) as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                instance, generation = _inspect_record(connection, guest, euid, scope_name)
+                _require_before_deadline(expires_at)
+                connection.commit()
+            except (sqlite3.Error, FileEffectGateError):
+                connection.rollback()
+                raise FileEffectGateError("file-effect gate inspection is uncertain") from None
+        _check_inode(path, euid, descriptor, expected)
+        return FileEffectGateBinding(path, instance, generation, guest, euid, scope_name, *expected)
+    finally:
+        os.close(descriptor)
+
+
 def advance_file_effect_gate(
     binding: FileEffectGateBinding,
     observe_guest: Callable[[], VMGuestIdentity],
@@ -336,7 +424,7 @@ def advance_file_effect_gate(
         if observe_guest() != binding.guest:
             raise FileEffectGateError("file-effect gate guest identity changed")
         _require_before_deadline(expires_at)
-        with closing(_connect(binding, descriptor)) as connection:
+        with closing(_connect(binding.path, binding.euid, descriptor, (binding.device, binding.inode))) as connection:
             try:
                 connection.execute("BEGIN IMMEDIATE")
                 current = _record(connection, binding)
@@ -381,7 +469,7 @@ def hold_file_effect_gate(
         if observe_guest() != binding.guest:
             raise FileEffectGateError("file-effect gate guest identity changed")
         _require_before_deadline(expires_at)
-        with closing(_connect(binding, descriptor)) as connection:
+        with closing(_connect(binding.path, binding.euid, descriptor, (binding.device, binding.inode))) as connection:
             try:
                 connection.execute("BEGIN IMMEDIATE")
                 if _record(connection, binding) != binding.generation:
