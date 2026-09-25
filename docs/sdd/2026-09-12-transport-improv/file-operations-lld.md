@@ -916,14 +916,14 @@ a separate open descriptor for that same inode is the **sole effect-coordination
 stores the generation in transactions, but its POSIX locks do not span filesystem effects. The
 record has a random gate-instance identifier, a current never-reused generation token and the bound
 guest marker/epoch. The exact gate identity, device/inode and token must be durable in the
-`file-call` obligation before any effect dispatch; the request carries them to the fixed helper. A
-gate is initialized and acknowledged before effect admission. After an admitted effect, an absent,
-replaced or unreadable gate in the same target epoch is uncertainty, never permission to initialize
-a replacement. A new target epoch requires explicit revalidation/adoption and cannot silently
-inherit the old gate. The proposed Linux VM destination selects a core-provisioned, boot-local
-`/run/agentworks/file-gates-v1` namespace with separate access for each effective helper identity.
-Setup and initialization precede effect admission; neither happens in the no-write, no-state
-readiness path or as a side effect of an effect request. Before exclusive creation, setup
+`file-call` obligation before any file effect dispatch; the request carries them to the fixed
+helper. A gate is initialized and acknowledged before effect admission. After an admitted effect, an
+absent, replaced or unreadable gate in the same target epoch is uncertainty, never permission to
+initialize a replacement. A new target epoch requires explicit revalidation/adoption and cannot
+silently inherit the old gate. The proposed Linux VM destination selects a core-provisioned,
+boot-local `/run/agentworks/file-gates-v1` namespace with separate access for each effective helper
+identity. Setup and initialization precede effect admission; neither happens in the no-write,
+no-state readiness path or as a side effect of an effect request. Before exclusive creation, setup
 independently observes the live guest marker/epoch and effective identity, refusing a delayed
 old-epoch request before it creates a file. One `O_EXCL` creation wins for the canonical path. If
 its reply is lost, core performs a non-creating inspection under the same flock. Before any effect
@@ -939,15 +939,28 @@ to initialize again.
 
 Setup itself is a remote control-state mutation, so it does not bypass the operation owner's
 possible-dispatch rule. The production composition arms one `file-call` obligation under its serial
-borrow before the first setup attempt, initially recording the deterministic path, selected
-identity, verified raw guest epoch and setup phase without claiming an exact gate binding. It
+borrow before the first setup attempt, initially recording the deterministic path, selected identity
+and verified raw guest epoch in a setup descriptor without claiming an exact gate binding. It
 publishes the binding discovered by setup or non-creating inspection to that same row before any
 file effect. Recovery persists a proposed generation there before advance and publishes the
 confirmed generation before another file effect; it never substitutes a second generic dispatch row.
 A lost control response retains the row and ownership until reconciliation provides the required
 no-further-effects evidence. The current `FileOperation.download()` installs its row only after
-receiving a binding; production composition must move admission earlier. This setup phase and
+receiving a binding; production composition must move admission earlier. This setup descriptor and
 handoff are not implemented by the local gate primitive or fixed helper.
+
+The three durable states follow from the gate value itself: a setup descriptor, an exact binding, or
+an exact binding with a proposed generation. No independent phase enum is needed. Allocate the
+download token before setup and retain one whole-call borrow and obligation across control, snapshot
+and cleanup. The initial admission must reserve the largest reachable `file-call` payload under the
+8,192-byte database cap, including the eventual binding, proposal and download recovery facts. Bound
+the device, inode, effective identity and canonical gate path on the wire before calculating that
+reserve; the present local binding accepts unbounded positive integers. Define payload-version
+compatibility so existing persisted rows are not reinterpreted as setup-pending. The raw guest
+triple must remain tied to the verified managed target through publication and recovery. A bound row
+permits file dispatch but does not itself prove that a snapshot ran; recovery must still retain
+uncertainty conservatively and must not route setup-only work through snapshot recovery that assumes
+no gate. These codec and custody changes remain unimplemented.
 
 The production control path uses one private fixed-helper family for setup, non-creating inspection
 and generation advance. It follows the file-object family's closed, bounded request and sequenced

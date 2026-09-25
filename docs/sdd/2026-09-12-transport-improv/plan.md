@@ -1954,10 +1954,13 @@ must still sequence setup, durable proposal, confirmed advance and DOWNLOAD disp
 
 Setup is itself a remote control-state mutation, so the current possible-dispatch rule applies
 before its first attempt. The first production composition must arm one `file-call` row with a setup
-phase and deterministic identity/path under the existing serial borrow, then publish the discovered
-gate binding to that row before file effects. `FileOperation.download()` currently installs its row
-after receiving a gate binding, so the admission and handoff must move earlier; adding only a setup
-call before `download()` would leave it untracked. Do not add a second generic row.
+descriptor and deterministic identity/path under the existing serial borrow, then publish the
+discovered gate binding to that row before file effects. `FileOperation.download()` currently
+installs its row after receiving a gate binding, so the admission and handoff must move earlier;
+adding only a setup call before `download()` would leave it untracked. Allocate the download token
+before setup, reserve all later binding, proposal and recovery growth within the 8,192-byte payload
+cap, and define version compatibility for existing rows. Do not add a second generic row or a phase
+enum.
 
 The private local setup/inspection substrate at `1040c8d1` validates identity and independently
 observes the live guest epoch before exclusive creation. Inspection opens only existing state under
