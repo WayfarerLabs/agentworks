@@ -42,6 +42,10 @@ _MAX_INPUT_BYTES = 65_536
 # Older supported PVE 8 HTTP servers limit the complete POST, independently
 # of the guest-agent input field. Include argv and JSON escaping in this bound.
 _MAX_REQUEST_BYTES = 65_536
+# The worker caps the entire status JSON at 8 MiB. Reserve room for JSON
+# escaping (up to six bytes per ASCII control byte), stderr and fixed fields.
+# Native QGA/PVE capture acceptance still needs its own route proof.
+_MAX_COMPLETE_STDOUT_BYTES = 1_048_576
 
 
 @dataclass(frozen=True)
@@ -167,6 +171,12 @@ class ProxmoxCarrier:
     def _request_body(invocation: PreparedInvocation, io: CarrierIO) -> bytes:
         if isinstance(io.input, LiveInput) or isinstance(io.output, SinkOutput) and io.output.require_live:
             raise ValidationError("Proxmox does not support live standard I/O")
+        if (
+            isinstance(io.output, SinkOutput)
+            and io.output.required_complete_stdout_bytes is not None
+            and io.output.required_complete_stdout_bytes > _MAX_COMPLETE_STDOUT_BYTES
+        ):
+            raise ValidationError("Proxmox cannot fit the required complete stdout response")
         input_data = io.input.data if isinstance(io.input, FiniteInput) else b""
         if not input_data.isascii() or any(not arg.isascii() for arg in invocation.argv):
             raise ValidationError("Proxmox proof delivery requires ASCII-armored preparation")

@@ -82,6 +82,15 @@ are different facts: a buffered QGA response can feed the common collector witho
 stdio. `require_live=True` demands the channel's live feature and refuses before dispatch when it is
 absent. Public direct-streaming requests set it; internal control collection does not.
 
+The private no-staging file read adds an optional `required_complete_stdout_bytes` capacity
+requirement to `SinkOutput`. It bounds the successful runtime and `AGWF1` transcript, not actual
+stderr or a truncation allowance. `Carrier.validate` refuses a finite-buffer route that cannot
+support the declared size before any dispatch; `execute` repeats validation. Proxmox applies a
+conservative local 1 MiB stdout budget under its separate 8 MiB whole-HTTP-response reader bound.
+The buffer and native QGA/PVE capture behavior still need native proof. WSL2 streams to its local
+sink, while the current buffered SSH adapter rejects sink output entirely. This does not cap general
+snapshot/chunk reads or enable live I/O.
+
 Sensitivity still prohibits retained raw carrier bytes. An explicit public live-presentation request
 is a separate preparation decision; a control collector is not consent to show secret-bearing
 output. Reports need an explicit delivered retention value rather than claiming that bytes passed to

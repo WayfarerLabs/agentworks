@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import pytest
 
 from agentworks.errors import ValidationError
-from agentworks.execution._file_read import read_file
+from agentworks.execution._file_read import _max_success_stdout_bytes, read_file
 from agentworks.execution._file_read_bundle import FIXED_BUNDLE
 from agentworks.execution._file_read_protocol import (
     FileReadFailure,
@@ -17,8 +17,16 @@ from agentworks.execution._file_read_protocol import (
     decode_file_read_request,
     encode_file_read_request,
 )
+from agentworks.execution._file_wire import (
+    MAX_RECORD_BODY_BYTES,
+    MAX_RECORD_BYTES,
+    FileRecord,
+    FileRecordKind,
+    encode_file_record,
+)
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._runtime_prerequisite import MAX_RUNTIME_RECORD_BYTES
 from agentworks.execution.carrier import (
     CapturedOutput,
     CarrierIO,
@@ -29,6 +37,7 @@ from agentworks.execution.carrier import (
     ExitStatus,
     PreparedInvocation,
     Retention,
+    SinkOutput,
 )
 from tests.execution.files._runtime_support import runtime_selection
 
@@ -147,6 +156,31 @@ def test_validation_precedes_the_single_carrier_attempt(plan: IdentityPlan) -> N
         )
 
     assert carrier.calls == 0
+
+
+@pytest.mark.parametrize("size", [0, 1, 4_095, 4_096, 4_097, 9 * 4_096, 10 * 4_096, 11 * 4_096])
+def test_success_stdout_budget_covers_data_frames_and_terminal_records(size: int) -> None:
+    nonce = "0" * 32
+    chunks = [min(MAX_RECORD_BODY_BYTES, size - offset) for offset in range(0, size, MAX_RECORD_BODY_BYTES)]
+    data_frames = sum(
+        len(encode_file_record(nonce, FileRecord(index, FileRecordKind.DATA, b"x" * chunk)))
+        for index, chunk in enumerate(chunks)
+    )
+    budget = _max_success_stdout_bytes(size)
+    assert budget >= MAX_RUNTIME_RECORD_BYTES + data_frames + 2 * MAX_RECORD_BYTES
+    assert budget - (MAX_RUNTIME_RECORD_BYTES + data_frames + 2 * MAX_RECORD_BYTES) <= 3 * len(chunks)
+
+
+def test_sink_complete_stdout_capacity_requires_a_positive_integer() -> None:
+    class Sink:
+        def try_write(self, data: memoryview) -> int:
+            return len(data)
+
+    sink = Sink()
+    for invalid in (0, -1, True, 1.5, "1024"):
+        with pytest.raises(ValidationError):
+            SinkOutput(sink, sink, required_complete_stdout_bytes=invalid)  # type: ignore[arg-type]
+    assert SinkOutput(sink, sink, required_complete_stdout_bytes=1).required_complete_stdout_bytes == 1
 
 
 def test_invalid_request_exception_does_not_retain_raw_manifest_fields() -> None:

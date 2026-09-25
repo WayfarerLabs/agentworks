@@ -688,6 +688,14 @@ immutable snapshot. It checks expiry before reporting either a snapshot or absen
 emitting file bytes. There is no reusable prepared-read object or readiness-time setup. The budget
 bounds cooperative checks, not an individual blocked filesystem system call.
 
+Before dispatch, the host bounds the complete successful runtime and `AGWF1` stdout transcript from
+the caller's byte limit and asks the selected carrier to validate that capacity requirement. Proxmox
+accepts at most a 1 MiB declared stdout budget, leaving room for JSON escaping and the remaining
+HTTP response inside its 8 MiB reader limit. This is a route-specific preflight, not a global
+file-size limit or native QGA capture proof. Buffered SSH still refuses sink output; WSL2 delivers
+it through a local streaming pipe. A failed or truncated response cannot become a read result, and
+the direct read does not retry through staging.
+
 An exceptional exit clears collector-owned response state and the reader's partial record before
 propagating the exception. This is not secure erasure of Python memory or traceback locals; callers
 must not render private frame locals. Snapshot bytes and metadata remain hidden from result

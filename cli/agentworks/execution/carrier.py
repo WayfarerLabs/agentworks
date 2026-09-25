@@ -127,11 +127,22 @@ class ByteSink(Protocol):
 
 @dataclass(frozen=True)
 class SinkOutput:
-    """Deliver raw carrier streams without retaining them in the report."""
+    """Deliver raw streams; preflight an optional successful-stdout bound.
+
+    The bound is a capacity requirement, not a truncation permission or a
+    promise that a failed command will emit no stderr. A carrier with finite
+    buffering must reject a requirement it cannot support before dispatch.
+    """
 
     stdout: ByteSink = field(repr=False)
     stderr: ByteSink = field(repr=False)
     require_live: bool = False
+    required_complete_stdout_bytes: int | None = None
+
+    def __post_init__(self) -> None:
+        bound = self.required_complete_stdout_bytes
+        if bound is not None and (type(bound) is not int or bound <= 0):
+            raise ValidationError("Complete stdout capacity must be a positive integer")
 
 
 @dataclass(frozen=True)

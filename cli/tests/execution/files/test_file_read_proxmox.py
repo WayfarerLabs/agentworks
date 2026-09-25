@@ -10,18 +10,67 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.errors import ValidationError
 from agentworks.execution._file_read import FileReadObservationState, read_file
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
-from agentworks.execution.carrier import Deadline, Dispatch, ExitStatus
-from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
+from agentworks.execution.carrier import CarrierIO, Deadline, Dispatch, ExitStatus, PreparedInvocation, SinkOutput
+from agentworks.execution.carriers._proxmox_http import _MAX_RESPONSE_BYTES
+from agentworks.execution.carriers.proxmox import (
+    _MAX_COMPLETE_STDOUT_BYTES,
+    ProxmoxCarrier,
+    ProxmoxConnection,
+)
 from tests.execution.files._runtime_support import runtime_selection
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the file-read guest requires Linux")
+
+
+class _Sink:
+    def try_write(self, data: memoryview) -> int:
+        return len(data)
+
+
+def test_proxmox_capacity_budget_rejects_before_provider_dispatch() -> None:
+    carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.invalid", "node1", 101, "token", "synthetic"))
+    invocation = PreparedInvocation(("/bin/true",))
+    sink = _Sink()
+    carrier.validate(
+        invocation,
+        io=CarrierIO(output=SinkOutput(sink, sink, required_complete_stdout_bytes=_MAX_COMPLETE_STDOUT_BYTES)),
+    )
+    with pytest.raises(ValidationError, match="complete stdout"):
+        carrier.validate(
+            invocation,
+            io=CarrierIO(output=SinkOutput(sink, sink, required_complete_stdout_bytes=_MAX_COMPLETE_STDOUT_BYTES + 1)),
+        )
+    worst_case_status = json.dumps(
+        {"data": {"exited": True, "exitcode": 0, "out-data": "\0" * _MAX_COMPLETE_STDOUT_BYTES, "err-data": ""}}
+    ).encode("ascii")
+    assert len(worst_case_status) + 1_048_576 < _MAX_RESPONSE_BYTES
+
+
+def test_file_read_rejects_unfit_proxmox_response_before_post(monkeypatch: pytest.MonkeyPatch) -> None:
+    carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.invalid", "node1", 101, "token", "synthetic"))
+
+    def unexpected_request(*args: object, **kwargs: object) -> dict[str, object]:
+        raise AssertionError("provider request after failed capacity preflight")
+
+    monkeypatch.setattr(carrier._wire, "request", unexpected_request)
+    with pytest.raises(ValidationError, match="complete stdout"):
+        read_file(
+            carrier,
+            trusted_root_path="/tmp",
+            relative_path="file",
+            max_bytes=1_048_576,
+            plan=IdentityPlan(IdentityExpectation(1001, 1001, (1001,)), IdentityMode.DIRECT),
+            deadline=Deadline.after(10),
+            runtime_selection=runtime_selection(sys.executable),
+        )
 
 
 @pytest.mark.parametrize("fault", [None, "truncated", "stdout_noise", "stderr_noise"])

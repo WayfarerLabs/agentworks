@@ -2091,6 +2091,15 @@ tests pass 62/62; this does not supply native drain evidence or finish recovery 
       bounds independently of QGA's single-response capacity. Keep the no-staging readiness read
       separately bound before dispatch; prove its complete encoded response fits the selected route.
       Do not retry a failed direct read through staging after uncertain observation.
+
+The private no-staging read now calculates a conservative complete successful stdout bound from the
+caller limit and asks the selected carrier to validate it before dispatch. Proxmox rejects a
+declared bound above 1 MiB before POST, reserving response-envelope space under its 8 MiB HTTP
+reader limit; WSL2's local sink remains streaming and buffered SSH still refuses sink output. Local
+boundary and refusal tests are not native QGA/PVE capture evidence. The unchecked item still
+requires native maximum-response acceptance, an explicit readiness consumer and integration with the
+production route selection; ordinary in-memory FileAccess reads continue through owned chunks.
+
 - [x] Implement the private in-memory adapter over the owned snapshot/chunk download. Preserve the
       exact download outcome, expose bytes only after complete verified transfer and cleanup, and
       discard partial buffers on normal or exceptional exit. Local tests cover empty, multi-chunk,

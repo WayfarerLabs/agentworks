@@ -22,12 +22,15 @@ from agentworks.execution._file_read_protocol import (
     parse_file_read_result,
 )
 from agentworks.execution._file_wire import (
+    MAX_RECORD_BODY_BYTES,
+    MAX_RECORD_BYTES,
     FileRecord,
     FileRecordKind,
     FileRecordReader,
     FileWireError,
 )
 from agentworks.execution._runtime_prerequisite import (
+    MAX_RUNTIME_RECORD_BYTES,
     RuntimePrefixSink,
     RuntimePrerequisiteObservation,
     RuntimePrerequisiteState,
@@ -236,6 +239,37 @@ def _validate_text(value: object) -> str:
     return value
 
 
+def _decimal_sequence_bytes(count: int) -> int:
+    """Bound the decimal sequence fields of records zero through count minus one."""
+    total = 0
+    start = 0
+    width = 1
+    while start < count:
+        next_start = 10 if start == 0 else start * 10
+        total += (min(count, next_start) - start) * width
+        start = next_start
+        width += 1
+    return total
+
+
+def _max_success_stdout_bytes(max_bytes: int) -> int:
+    """Bound one successful AGWF1 read, including runtime and terminal records."""
+    full, tail = divmod(max_bytes, MAX_RECORD_BODY_BYTES)
+    data_records = full + int(tail > 0)
+    full_armor = 4 * ((MAX_RECORD_BODY_BYTES + 2) // 3)
+    tail_armor = 4 * ((tail + 2) // 3) if tail else 0
+    # A DATA header is at most 51 fixed bytes plus its sequence digits;
+    # RESULT and FINISHED each fit the shared maximum record size.
+    return (
+        MAX_RUNTIME_RECORD_BYTES
+        + 2 * MAX_RECORD_BYTES
+        + 51 * data_records
+        + _decimal_sequence_bytes(data_records)
+        + full * full_armor
+        + tail_armor
+    )
+
+
 def read_file(
     carrier: Carrier,
     *,
@@ -276,10 +310,16 @@ def read_file(
     invocation = PreparedInvocation(fixed_argv)
     io = CarrierIO(
         input=FiniteInput(FIXED_BUNDLE.prefix + request_data, sensitive=True),
-        output=SinkOutput(runtime, stderr, require_live=False),
+        output=SinkOutput(
+            runtime,
+            stderr,
+            require_live=False,
+            required_complete_stdout_bytes=_max_success_stdout_bytes(max_bytes),
+        ),
         sensitive=True,
     )
     try:
+        carrier.validate(invocation, io=io)
         report = carrier.execute(invocation, io=io, deadline=deadline)
         runtime_prerequisite = runtime.observation
         if runtime_prerequisite.state is RuntimePrerequisiteState.READY:
