@@ -2050,6 +2050,15 @@ account creation/reinit must install/apply persistent per-UID rules; account del
 must preserve outstanding gate obligations before retirement. That lifecycle, a production
 RunContext factory, native delivery drain and recovery remain open.
 
+- [ ] Complete the managed-agent gate namespace lifecycle before admitting agent-UID file effects.
+      Install/apply a persistent target-owned UID directory rule at account creation or reinit and
+      prove reconstruction after reboot. Account deletion and UID reuse must coordinate with the
+      same VM operation ownership used by file effects and refuse while an old helper or retained
+      gate obligation can still act; only a proved quiescent path may retire the rule and directory.
+      The existing `native_mutation_guard` serializes legacy native setup separately and is not
+      evidence of that `OperationOwner` exclusion. Cover interrupted provisioning, repeated reinit,
+      retained work, deletion and numeric UID reuse without repairing or replacing a live gate file.
+
 - [ ] Use the owned snapshot/chunk download for general in-memory reads, preserving caller byte
       bounds independently of QGA's single-response capacity. Keep the no-staging readiness read
       separately bound before dispatch; prove its complete encoded response fits the selected route.

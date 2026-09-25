@@ -982,6 +982,13 @@ Agent deletion and UID reuse must preserve outstanding gate obligations before r
 directory. This later account lifecycle and native boot/replay proof remain open; no file operation
 receives an implicit root fallback.
 
+The current legacy `native_mutation_guard` around agent lifecycle is a separate local file lock; it
+does not acquire the new VM-scoped `OperationOwner`. A future agent-UID provisioner cannot infer
+exclusion from that guard alone. Before enabling agent-UID file operations, account creation,
+deletion and UID reuse must share the VM ownership boundary with file effects and retain the per-UID
+rule while an old gate helper or obligation can still act. Numeric UID reuse is the relevant
+identity hazard even when agent names differ.
+
 The private guest gate now validates a canonical `/<euid>/<64-lowercase-hex>.db` path under that
 namespace and walks each ancestor without following symlinks before setup, inspection, advance or
 hold. `/run` and both Agentworks anchors must be root-owned and not group/other writable; the UID
