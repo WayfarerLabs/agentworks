@@ -2011,10 +2011,10 @@ proven `NOT_SENT` and pre-registration refusal release unused custody. The scope
 55 tests, with Ruff, targeted mypy and diff checks green. Independent project and complexity reviews
 found no blocker for this narrow slice. It handles only acknowledged first-time exclusive setup:
 existing-gate inspection/adoption, lost-response reconciliation, selected-route guest proof,
-root-owned `/run/agentworks/file-gates-v1/<euid>` provisioning each boot, native helper quiescence,
-and production recovery remain open. A target-user file helper cannot create that namespace; core
-must establish the private UID directory through a trusted guest setup path before target-UID gate
-setup, without elevating the file operation itself.
+root-owned anchors and target-owned `/run/agentworks/file-gates-v1/<euid>` provisioning each boot,
+native helper quiescence, and production recovery remain open. A target-user file helper cannot
+create that namespace; core must establish the private UID directory through a trusted guest setup
+path before target-UID gate setup, without elevating the file operation itself.
 
 The private repeat-use correction at `bf8fdad41` closes that normal existing-gate gap. `SETUP` still
 creates with `O_EXCL`; only `EEXIST` adopts an existing complete matching gate through the
@@ -2031,9 +2031,24 @@ the durable READY hold epoch. It carries the managed target and requested effect
 same selected carrier/runtime into the one-row gate setup and download. Separate tests cover lost
 setup and later snapshot responses without releasing the owner or hold. The 19 focused WSL2 tests,
 Ruff, targeted mypy and diff checks pass, and independent reviews found no remaining finding. This
-path still has no root-owned guest gate namespace provisioner, production RunContext factory, native
-Windows/WSL2 delivery-drain evidence or production recovery; portable fixture success does not
-establish a live WSL2 pass.
+path at that checkpoint still lacked a guest gate namespace provisioner, production RunContext
+factory, native Windows/WSL2 delivery-drain evidence and production recovery; portable fixture
+success does not establish a live WSL2 pass.
+
+The private shared Debian bootstrap at `fc5004cbf` now installs non-cleaning boot-time `d` rules for
+protected root-owned `/run/agentworks` anchors and target-owned `0700` root/admin UID directories,
+then applies them after admin account creation. Its immediate replay refuses unexpected existing
+directory metadata; boot-time `systemd-tmpfiles` may restore directory metadata, but the rules never
+descend into or clean gate database files. A focused generated-shell test passes on Linux, including
+replay preservation and unsafe-ancestor refusal. The guest-side validator at `92e995092` separately
+rejects invalid gate names, symlinked/unsafe ancestors, absent or unowned UID directories and ACL
+attributes before setup, inspection, advance or hold. The maximum synthetic snapshot QGA request is
+64,582 bytes against the fixed 65,536-byte limit, leaving only 954 bytes; further bundle growth
+requires renewed fit proof. These private pieces do not establish native boot/replay behavior or the
+common namespace mount across SSH, QGA and WSL2. Managed agent UIDs arise after VM bootstrap, so
+account creation/reinit must install/apply persistent per-UID rules; account deletion and UID reuse
+must preserve outstanding gate obligations before retirement. That lifecycle, a production
+RunContext factory, native delivery drain and recovery remain open.
 
 - [ ] Use the owned snapshot/chunk download for general in-memory reads, preserving caller byte
       bounds independently of QGA's single-response capacity. Keep the no-staging readiness read

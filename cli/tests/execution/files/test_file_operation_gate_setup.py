@@ -11,7 +11,7 @@ import pytest
 
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
-from agentworks.execution import _file_effect_gate_exchange, _file_gate_setup, _file_operation
+from agentworks.execution import _file_effect_gate, _file_effect_gate_exchange, _file_gate_setup, _file_operation
 from agentworks.execution._file_download import FileDownloadOutcome
 from agentworks.execution._file_effect_gate import inspect_file_effect_gate, setup_file_effect_gate
 from agentworks.execution._file_effect_gate_bundle import _MODULE_NAMES, _PACKAGE
@@ -71,9 +71,11 @@ class _InspectingCarrier(LocalCarrier):
 
 
 def _fixture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Path]:
-    gate_root = tmp_path / "gates"
-    gate_root.mkdir()
+    gate_root = tmp_path / "run" / "agentworks" / "file-gates-v1"
+    gate_root.mkdir(parents=True)
     monkeypatch.setattr(_file_gate_setup, "_NAMESPACE", str(gate_root))
+    monkeypatch.setattr(_file_effect_gate, "_GATE_NAMESPACE", str(gate_root))
+    monkeypatch.setattr(_file_effect_gate, "_ROOT_UID", os.geteuid())
     guest_patch = (
         "from _agw_file_snapshot._vm_guest_identity_protocol import VMGuestIdentity\n"
         f"guest._identity=lambda: VMGuestIdentity({_GUEST.instance_marker!r}, {_GUEST.boot_id!r}, "
@@ -83,7 +85,11 @@ def _fixture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Pat
     scratch.mkdir()
     scratch.chmod(0o1777)
     install_fixture_bundle(monkeypatch, scratch, guest_patch)
-    gate_patch = guest_patch.replace("_agw_file_snapshot", "_agw_file_effect_gate")
+    gate_patch = (
+        f"import os,sys\ngate=sys.modules[{(_PACKAGE + '._file_effect_gate')!r}]\n"
+        f"gate._GATE_NAMESPACE={str(gate_root)!r}\n"
+        "gate._ROOT_UID=os.geteuid()\n" + guest_patch.replace("_agw_file_snapshot", "_agw_file_effect_gate")
+    )
     monkeypatch.setattr(
         _file_effect_gate_exchange,
         "FIXED_BUNDLE",
@@ -126,7 +132,7 @@ def _context(database: Database, gate_root: Path) -> tuple[OperationOwner, FileO
     target = target_for_owner(owner)
     operation = FileOperation(owner, target)
     setup = FileEffectGateSetup.for_target(target, os.geteuid(), _GUEST)
-    Path(setup.path).parent.mkdir(parents=True)
+    Path(setup.path).parent.mkdir(parents=True, mode=0o700)
     assert str(gate_root) in setup.path
     return owner, operation, setup
 

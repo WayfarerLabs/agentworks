@@ -22,6 +22,7 @@ import pytest
 
 from agentworks.db import Database, LifecycleObligation, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError
+from agentworks.execution import _file_effect_gate
 from agentworks.execution._file_download_recovery import (
     FileDownloadRecovery,
     _DownloadDrainEvidence,
@@ -471,6 +472,13 @@ guest._operate=_fixture_tracked_operate
     )
 
 
+def _fixture_gate_namespace(binding: FileEffectGateBinding | None) -> None:
+    """Carry the test-only namespace into spawned recovery controllers."""
+    if binding is not None:
+        _file_effect_gate._GATE_NAMESPACE = str(Path(binding.path).parent.parent)
+        _file_effect_gate._ROOT_UID = os.geteuid()
+
+
 def _crash_controller_after_completed_snapshot(
     database_path: str,
     root_path: str,
@@ -480,6 +488,7 @@ def _crash_controller_after_completed_snapshot(
 ) -> None:
     from agentworks.execution import _file_snapshot_exchange
 
+    _fixture_gate_namespace(binding)
     _file_snapshot_exchange.FIXED_BUNDLE = _tracking_bundle(  # type: ignore[attr-defined]
         scratch_path, journal_path, binding=binding
     )
@@ -552,6 +561,7 @@ def _crash_recovery_controller(
     call = decode_file_call_obligation(persisted.payload)
     token = call.token
     assert token is not None
+    _fixture_gate_namespace(call.effect_gate)
     _file_snapshot_exchange.FIXED_BUNDLE = _tracking_bundle(  # type: ignore[attr-defined]
         scratch_path,
         journal_path,
@@ -915,7 +925,17 @@ def test_gated_recovery_of_recovery_retries_interrupted_exact_cleanup(
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     scratch.chmod(0o1777)
-    binding = setup_file_effect_gate(str(tmp_path / "effect.db"), _GUEST, os.geteuid(), "download-vm", lambda: _GUEST)
+    gate_root = tmp_path / "run" / "agentworks" / "file-gates-v1"
+    (gate_root / str(os.geteuid())).mkdir(parents=True, mode=0o700)
+    monkeypatch.setattr(_file_effect_gate, "_GATE_NAMESPACE", str(gate_root))
+    monkeypatch.setattr(_file_effect_gate, "_ROOT_UID", os.geteuid())
+    binding = setup_file_effect_gate(
+        str(gate_root / str(os.geteuid()) / ("a" * 64 + ".db")),
+        _GUEST,
+        os.geteuid(),
+        "download-vm",
+        lambda: _GUEST,
+    )
     database_path = tmp_path / "state.db"
     journal_path = tmp_path / "helpers.jsonl"
     data_unlinked_path = tmp_path / "data-unlinked"

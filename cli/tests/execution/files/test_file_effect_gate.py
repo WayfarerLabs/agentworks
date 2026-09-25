@@ -256,7 +256,12 @@ def test_gate_binding_numeric_wire_bounds_round_trip_and_reject_oversize(tmp_pat
 
     for field, oversize in (("euid", 1 << 32), ("device", 1 << 64), ("inode", 1 << 64)):
         with pytest.raises(FileEffectGateError):
-            replace(maximum, **{field: oversize})
+            if field == "euid":
+                replace(maximum, euid=oversize)
+            elif field == "device":
+                replace(maximum, device=oversize)
+            else:
+                replace(maximum, inode=oversize)
         malformed = dict(encoded)
         malformed[field] = oversize
         with pytest.raises(FileEffectGateError):

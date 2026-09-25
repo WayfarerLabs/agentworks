@@ -967,16 +967,27 @@ inspection used by explicit `INSPECT`. It neither repairs an incomplete inode no
 one. A lost setup reply remains unresolved until recovery combines separate non-creating inspection
 with native no-further-effects evidence; the acknowledged repeat-use path does not itself settle
 that case. Neither a target-user helper nor the existing `SETUP` exchange can create the root-owned
-`/run/agentworks/file-gates-v1` namespace from scratch. Core must provision the anchor and private
-per-UID directory through a trusted guest setup path for each boot, then run the gate helper and
-file operation as the target UID. This is infrastructure setup, not elevation of an individual file
-operation.
+`/run/agentworks/file-gates-v1` anchor from scratch. Core provisions that anchor and a target-owned
+private `0700` per-UID directory through a trusted guest setup path for each boot, then runs the
+gate helper and file operation as the target UID. This is infrastructure setup, not elevation of an
+individual file operation.
 
-The shared Debian VM bootstrap can install a boot-time `systemd-tmpfiles` rule for the root-owned
-anchor across supported VM platforms. It knows the admin account but not agent UIDs created later,
-so it cannot create every private UID directory ahead of time. Core must establish each required UID
-directory through a separately owned runtime/provisioning path, including after guest reboot.
-Neither the shared bootstrap change nor that runtime path is implemented by the private gate proof.
+The private shared Debian VM bootstrap now installs persistent, non-cleaning `systemd-tmpfiles` `d`
+rules for the root-owned `/run` anchors and the root/admin UID directories, then applies them after
+the admin account exists. Replaying this privileged bootstrap or the boot rule may restore directory
+metadata, but neither descends into nor rewrites gate database files. It knows the admin account but
+not agent UIDs created later, so account creation/reinit must install each managed agent's
+target-owned UID rule and apply it before gate use; the boot rule must recreate it after reboot.
+Agent deletion and UID reuse must preserve outstanding gate obligations before retiring that rule or
+directory. This later account lifecycle and native boot/replay proof remain open; no file operation
+receives an implicit root fallback.
+
+The private guest gate now validates a canonical `/<euid>/<64-lowercase-hex>.db` path under that
+namespace and walks each ancestor without following symlinks before setup, inspection, advance or
+hold. `/run` and both Agentworks anchors must be root-owned and not group/other writable; the UID
+directory must be owned by the target UID with mode `0700`. Access/default ACL attributes refuse for
+the protected chain. This does not protect against a malicious process already running as the same
+target UID, and pathname checks still require native shared-mount and lifecycle proof.
 
 The private WSL2 owned-download composition now derives the setup descriptor only after the selected
 platform locator, held READY epoch and independently prepared managed VM guest agree. It uses that
