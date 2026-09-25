@@ -65,20 +65,11 @@ def _json_bytes(value: object) -> bytes:
     return json.dumps(value, allow_nan=False, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("ascii")
 
 
-def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError
-        result[key] = value
-    return result
-
-
 def _decode_object(data: bytes, *, maximum_bytes: int) -> dict[str, Any]:
     if type(data) is not bytes or len(data) > maximum_bytes:
         raise GateControlProtocolError("invalid gate-control body")
     try:
-        value = json.loads(data.decode("ascii"), object_pairs_hook=_unique_object, parse_constant=lambda _: _reject())
+        value = json.loads(data.decode("ascii"), parse_constant=lambda _: _reject())
         canonical = _json_bytes(value)
     except (UnicodeDecodeError, ValueError, TypeError, RecursionError):
         raise GateControlProtocolError("invalid gate-control body") from None
@@ -203,8 +194,6 @@ def parse_gate_control_result(body: bytes, request: GateControlRequest) -> FileE
         )
     except FileEffectGateError:
         raise GateControlProtocolError("invalid gate-control result") from None
-    if binding.proposed_generation is not None:
-        raise GateControlProtocolError("invalid gate-control result")
     return binding
 
 

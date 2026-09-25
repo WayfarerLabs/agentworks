@@ -25,9 +25,9 @@ from agentworks.execution._file_effect_gate_protocol import (
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, FileRecordReader
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
-from agentworks.execution._runtime_prerequisite import build_runtime_identity_helper_argv
+from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState, build_runtime_identity_helper_argv
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
-from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, PreparedInvocation
+from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, Dispatch, PreparedInvocation, SinkOutput
 from agentworks.execution.carriers.ssh.connection import SSHConnection, build_ssh_argv
 from tests.execution.files._file_snapshot_support import LocalCarrier
 from tests.execution.files._fixed_bundle_support import fixture_file_bundle
@@ -183,6 +183,19 @@ class _LostOutputCarrier(LocalCarrier):
         return replace(report, stdout=replace(report.stdout, complete=False))
 
 
+class _BlackholeSink:
+    def try_write(self, data: memoryview) -> int:
+        return len(data)
+
+
+class _LostCompleteOutputCarrier(LocalCarrier):
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        assert isinstance(io.output, SinkOutput)
+        dropped = replace(io, output=replace(io.output, stdout=_BlackholeSink()))
+        report = super().execute(invocation, io=dropped, deadline=deadline)
+        return replace(report, stdout=replace(report.stdout, complete=False))
+
+
 def test_lost_setup_output_remains_uncertain_until_noncreating_inspection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -202,6 +215,18 @@ def test_lost_setup_output_remains_uncertain_until_noncreating_inspection(
     assert setup.observation is not None
     assert setup.observation.state is GateControlObservationState.UNCERTAIN
     assert setup.observation.binding is None
+    lost_inspection = exchange_file_effect_gate(
+        _LostCompleteOutputCarrier(),
+        operation=GateControlOperation.INSPECT,
+        path=str(path),
+        guest=_GUEST,
+        scope_name="vm-a",
+        plan=_plan(),
+        deadline=Deadline.after(10),
+        runtime_selection=runtime_selection("/usr/bin/python3"),
+    )
+    assert lost_inspection.runtime_prerequisite.state is RuntimePrerequisiteState.UNKNOWN
+    assert lost_inspection.observation is None
     inspection = exchange_file_effect_gate(
         LocalCarrier(),
         operation=GateControlOperation.INSPECT,
@@ -215,6 +240,94 @@ def test_lost_setup_output_remains_uncertain_until_noncreating_inspection(
     assert inspection.observation is not None
     assert inspection.observation.state is GateControlObservationState.RESOLVED
     assert inspection.observation.binding is not None
+
+
+def test_complete_runtime_prefix_loss_after_setup_is_explicitly_uncertain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fixture(monkeypatch)
+    path = tmp_path / "gate.db"
+    setup = exchange_file_effect_gate(
+        _LostCompleteOutputCarrier(),
+        operation=GateControlOperation.SETUP,
+        path=str(path),
+        guest=_GUEST,
+        scope_name="vm-a",
+        plan=_plan(),
+        deadline=Deadline.after(10),
+        runtime_selection=runtime_selection("/usr/bin/python3"),
+    )
+    assert path.is_file()
+    assert setup.dispatch is Dispatch.SENT
+    assert setup.carrier_completion is not None and setup.carrier_completion.code == 0
+    assert setup.carrier_failure is None
+    assert setup.runtime_prerequisite.state is RuntimePrerequisiteState.UNKNOWN
+    assert setup.observation is not None
+    assert setup.observation.state is GateControlObservationState.UNCERTAIN
+    assert setup.observation.binding is None
+    inspection = exchange_file_effect_gate(
+        LocalCarrier(),
+        operation=GateControlOperation.INSPECT,
+        path=str(path),
+        guest=_GUEST,
+        scope_name="vm-a",
+        plan=_plan(),
+        deadline=Deadline.after(10),
+        runtime_selection=runtime_selection("/usr/bin/python3"),
+    )
+    assert inspection.observation is not None
+    assert inspection.observation.state is GateControlObservationState.RESOLVED
+
+
+def test_complete_runtime_prefix_loss_after_advance_is_explicitly_uncertain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fixture(monkeypatch)
+    path = tmp_path / "gate.db"
+    setup = exchange_file_effect_gate(
+        LocalCarrier(),
+        operation=GateControlOperation.SETUP,
+        path=str(path),
+        guest=_GUEST,
+        scope_name="vm-a",
+        plan=_plan(),
+        deadline=Deadline.after(10),
+        runtime_selection=runtime_selection("/usr/bin/python3"),
+    )
+    assert setup.observation is not None
+    binding = setup.observation.binding
+    assert binding is not None
+    proposed = replace(binding, proposed_generation=b"c" * 16)
+    advance = exchange_file_effect_gate(
+        _LostCompleteOutputCarrier(),
+        operation=GateControlOperation.ADVANCE,
+        path=str(path),
+        guest=_GUEST,
+        scope_name="vm-a",
+        plan=_plan(),
+        deadline=Deadline.after(10),
+        runtime_selection=runtime_selection("/usr/bin/python3"),
+        binding=proposed,
+    )
+    assert advance.dispatch is Dispatch.SENT
+    assert advance.carrier_completion is not None and advance.carrier_completion.code == 0
+    assert advance.carrier_failure is None
+    assert advance.runtime_prerequisite.state is RuntimePrerequisiteState.UNKNOWN
+    assert advance.observation is not None
+    assert advance.observation.state is GateControlObservationState.UNCERTAIN
+    assert advance.observation.binding is None
+    inspection = exchange_file_effect_gate(
+        LocalCarrier(),
+        operation=GateControlOperation.INSPECT,
+        path=str(path),
+        guest=_GUEST,
+        scope_name="vm-a",
+        plan=_plan(),
+        deadline=Deadline.after(10),
+        runtime_selection=runtime_selection("/usr/bin/python3"),
+    )
+    assert inspection.observation is not None
+    assert inspection.observation.binding == replace(binding, generation=b"c" * 16)
 
 
 @pytest.mark.parametrize(

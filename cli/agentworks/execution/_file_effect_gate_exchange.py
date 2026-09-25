@@ -14,7 +14,6 @@ from agentworks.execution._file_effect_gate_protocol import (
     GateControlOperation,
     GateControlProtocolError,
     GateControlRequest,
-    decode_gate_control_request,
     encode_gate_control_request,
     parse_gate_control_failure,
     parse_gate_control_finished,
@@ -139,13 +138,6 @@ class _Collector:
 
     def _matches(self, binding: FileEffectGateBinding) -> bool:
         request = self.request
-        if (
-            binding.path != request.path
-            or binding.guest != request.guest
-            or binding.euid != request.euid
-            or binding.scope_name != request.scope_name
-        ):
-            return False
         if request.operation is not GateControlOperation.ADVANCE:
             return True
         old = request.binding
@@ -231,22 +223,20 @@ def exchange_file_effect_gate(
         plan, selection=runtime_selection, fixed_source=FIXED_BUNDLE.bootstrap, nonce=nonce
     )
     try:
-        manifest = encode_gate_control_request(
-            GateControlRequest(
-                nonce,
-                operation,
-                path,
-                guest,
-                plan.expected.euid,
-                scope_name,
-                plan.expected,
-                deadline.remaining(),
-                binding,
-            )
+        request = GateControlRequest(
+            nonce,
+            operation,
+            path,
+            guest,
+            plan.expected.euid,
+            scope_name,
+            plan.expected,
+            deadline.remaining(),
+            binding,
         )
+        manifest = encode_gate_control_request(request)
     except GateControlProtocolError:
         raise ValidationError("File-gate control request is invalid or exceeds its 32768-byte bound") from None
-    request = decode_gate_control_request(manifest)
     collector = _Collector(request)
     reader = FileRecordReader(nonce, collector.accept)
     runtime = RuntimePrefixSink(nonce, candidates, reader, system_shim)
@@ -259,6 +249,7 @@ def exchange_file_effect_gate(
     try:
         report = carrier.execute(PreparedInvocation(fixed_argv), io=io, deadline=deadline)
         prerequisite = runtime.observation
+        observation: GateControlObservation | None
         if prerequisite.state is RuntimePrerequisiteState.READY:
             reader.finish()
             delivered = (
@@ -274,7 +265,16 @@ def exchange_file_effect_gate(
         else:
             reader.abort()
             collector.abort()
-            observation = None
+            observation = (
+                GateControlObservation(
+                    GateControlObservationState.UNCERTAIN,
+                    error=GateControlObservationError.CARRIER,
+                )
+                if prerequisite.state is RuntimePrerequisiteState.UNKNOWN
+                and operation is not GateControlOperation.INSPECT
+                and report.dispatch is not Dispatch.NOT_SENT
+                else None
+            )
         return GateControlCandidateResult(
             report.dispatch, report.completion, report.local_status, report.failure, prerequisite, observation
         )
