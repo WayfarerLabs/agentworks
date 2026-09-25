@@ -101,6 +101,27 @@ class Database:
             try:
                 connection = _connect_ro(ro_uri, timeout=timeout)
                 row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
+                current = row[0]
+                if current is None:
+                    current = 0
+                elif type(current) is not int or current < 0:
+                    raise StateError("state database schema version is invalid", entity_kind="database")
+                if current > LATEST_VERSION:
+                    raise StateError(
+                        f"state database schema is newer than this release ({current}/{LATEST_VERSION})",
+                        entity_kind="database",
+                        hint="Use a release that understands this database schema.",
+                    )
+                if current != LATEST_VERSION:
+                    raise StateError(
+                        f"state database schema is outdated ({current}/{LATEST_VERSION})",
+                        entity_kind="database",
+                        hint="Run a normal Agentworks command to initialize or migrate the state database.",
+                    )
+                _validate_consolidated_transport_schema(connection, current)
+                connection.row_factory = sqlite3.Row
+                connection.execute("PRAGMA foreign_keys = ON")
+                self._conn = connection
             except sqlite3.DatabaseError as error:
                 if connection is not None:
                     connection.close()
@@ -111,34 +132,10 @@ class Database:
                     entity_kind="database",
                     hint="Run a normal Agentworks command to initialize or repair the state database.",
                 ) from error
-            current = row[0]
-            if current is None:
-                current = 0
-            elif type(current) is not int or current < 0:
-                connection.close()
-                raise StateError("state database schema version is invalid", entity_kind="database")
-            if current > LATEST_VERSION:
-                connection.close()
-                raise StateError(
-                    f"state database schema is newer than this release ({current}/{LATEST_VERSION})",
-                    entity_kind="database",
-                    hint="Use a release that understands this database schema.",
-                )
-            if current != LATEST_VERSION:
-                connection.close()
-                raise StateError(
-                    f"state database schema is outdated ({current}/{LATEST_VERSION})",
-                    entity_kind="database",
-                    hint="Run a normal Agentworks command to initialize or migrate the state database.",
-                )
-            try:
-                _validate_consolidated_transport_schema(connection, current)
             except BaseException:
-                connection.close()
+                if connection is not None:
+                    connection.close()
                 raise
-            self._conn = connection
-            self._conn.row_factory = sqlite3.Row
-            self._conn.execute("PRAGMA foreign_keys = ON")
             return
         db_path.parent.mkdir(parents=True, exist_ok=True)
         from agentworks.db.backup import (

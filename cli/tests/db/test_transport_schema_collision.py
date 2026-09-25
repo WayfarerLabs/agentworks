@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import Database, SchemaState, inspect_schema, prepare_database_open
+from agentworks.db import Database, SchemaState, inspect_schema, open_completion_database, prepare_database_open
 from agentworks.errors import StateError
 from tests.database_support import build_schema
 
@@ -45,6 +45,35 @@ def test_read_only_open_refuses_reused_current_schema_number(tmp_path: Path) -> 
 
     with pytest.raises(StateError):
         Database(path, read_only=True)
+
+
+def test_completion_quietly_refuses_lock_acquired_during_schema_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentworks.db import backup as backup_module
+
+    path = tmp_path / "state.db"
+    build_schema(path, 41)
+    validate = backup_module._validate_consolidated_transport_schema
+    calls = 0
+    locker: sqlite3.Connection | None = None
+
+    def lock_after_version_read(connection: sqlite3.Connection, version: int) -> None:
+        nonlocal calls, locker
+        calls += 1
+        if calls == 2:
+            locker = sqlite3.connect(path)
+            locker.execute("BEGIN EXCLUSIVE")
+        validate(connection, version)
+
+    monkeypatch.setattr(backup_module, "_validate_consolidated_transport_schema", lock_after_version_read)
+    try:
+        assert open_completion_database(path) is None
+    finally:
+        if locker is not None:
+            locker.rollback()
+            locker.close()
+    assert calls == 2
 
 
 @pytest.mark.parametrize("version", (39, 40, 41))
