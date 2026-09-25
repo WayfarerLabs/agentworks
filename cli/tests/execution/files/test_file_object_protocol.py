@@ -159,6 +159,7 @@ def test_stat_request_round_trips_explicit_unbounded_duration() -> None:
         lambda value: value.update(extra=1),
         lambda value: value.update(version=True),
         lambda value: value.update(remaining_seconds=1),
+        lambda value: value.update(remaining_seconds=-1.0),
         lambda value: value.update(remaining_seconds=True),
         lambda value: value.update(remaining_seconds=float("nan")),
         lambda value: value.update(remaining_seconds=float("inf")),

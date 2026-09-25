@@ -182,6 +182,7 @@ def test_request_refuses_empty_self_or_nonnormal_relative_destination(path: str)
         lambda value: value.update(version=True),
         lambda value: value.update(operation="unknown"),
         lambda value: value.update(remaining_seconds=1),
+        lambda value: value.update(remaining_seconds=-1.0),
         lambda value: value.update(remaining_seconds=float("nan")),
         lambda value: value.update(token=base64.b64encode(b"short").decode("ascii")),
         lambda value: value.update(path=base64.b64encode(b".").decode("ascii")),

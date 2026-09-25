@@ -168,12 +168,23 @@ def test_request_roundtrip_is_canonical_and_binds_reference_token_context_and_pa
         lambda value: {**value, "path": ""},
         lambda value: {**value, "token": "FF" * 16},
         lambda value: {**value, "operation": "unknown"},
+        lambda value: {**value, "remaining_seconds": 1},
+        lambda value: {**value, "remaining_seconds": True},
+        lambda value: {**value, "remaining_seconds": -1.0},
+        lambda value: {**value, "remaining_seconds": float("nan")},
+        lambda value: {**value, "remaining_seconds": float("inf")},
     ],
 )
 def test_request_decoder_rejects_extra_malformed_and_rebound_fields(plan: IdentityPlan, mutate: object) -> None:
     value = json.loads(encode_file_publication_request(_requests(plan)[0]))
     changed = mutate(value)  # type: ignore[operator]
-    encoded = json.dumps(changed, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("ascii")
+    encoded = json.dumps(
+        changed,
+        allow_nan=True,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("ascii")
     with pytest.raises(FilePublicationRequestError):
         decode_file_publication_request(encoded)
 

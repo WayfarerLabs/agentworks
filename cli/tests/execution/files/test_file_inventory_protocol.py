@@ -174,6 +174,7 @@ def test_request_round_trips_exact_closed_limits_and_unbounded_duration() -> Non
         ("max_encoded_bytes", 0),
         ("max_encoded_bytes", MAX_ENCODED_BYTES + 1),
         ("remaining_seconds", 1),
+        ("remaining_seconds", -1.0),
         ("remaining_seconds", True),
         ("remaining_seconds", float("nan")),
         ("remaining_seconds", float("inf")),
