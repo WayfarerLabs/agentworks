@@ -1392,6 +1392,14 @@ connection and trust only. Before broader lifecycle implementation, complete the
       exact run ID, then bind the reservation to owned launch custody. The adapter alone does not
       prove that reservation is residue-free on refusal or establish SSH/QGA and live lifecycle
       behavior.
+- [x] Add a private fixed guest observation of the destination account's default shell after the
+      selected workload identity transition. The helper verifies actual UID/GID/groups first,
+      reports only a supported sh/bash executable or typed refusal, and checks the configured path
+      is a regular executable object. A nonce-bound 256-byte response is separate from the bounded
+      identity-bearing request, runtime readiness and carrier facts. The managed controller still
+      rechecks that same account shell before application launch, so a changed default refuses
+      instead of substituting an interpreter. This hermetic and local Python 3.11 proof does not
+      establish live sudo/demotion, production owner composition, or SSH/QGA behavior.
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared
       create bootstrap. Migration 41 leaves legacy rows NULL; ordinary existing-VM operations never

@@ -30,8 +30,9 @@ a smaller direct envelope during pure validation. Large-request staging or fallb
 the protocol's own asset ceiling is not a promise that every carrier can deliver it directly.
 Possible dispatch is recorded durably before the sole carrier effect. An exact launch fact can
 confirm a receipt independently of the systemd client exit, while acknowledgement also requires
-trusted complete helper/carrier evidence and a zero client outcome. This private slice does not
-provide stop/dispose, public jobs, live target-marker rereads or production SSH/QGA proof.
+trusted complete helper/carrier evidence and a zero client outcome. Separate private stop and
+disposal exchanges exist, but none of these slices provides public jobs, live target-marker rereads
+or production SSH/QGA proof.
 
 `_managed_start_operation.py` adds temporary exact-VM operation custody for one already reserved
 independent start. Its `managed-start` obligation stores only the canonical run ID. The existing
@@ -42,6 +43,14 @@ Missing receipt, uncertain dispatch and interrupted admission after arming retai
 interrupted preflight or refused admission resolves an unused registered obligation. This private
 kernel does not acquire or close the outer owner, reserve runs, recover an interrupted launch,
 compose production bindings or perform later job actions.
+
+`_managed_request_adapter.py` converts finite `Command` or `Script` values, input, environment and
+output policy into the existing independent managed request before a run is reserved. It verifies
+the caller's explicit shell choice against a supplied resolved shell identity and suppresses output
+retention for sensitive input. `_workload_shell.py` observes a supported `USER_DEFAULT` shell after
+the selected workload identity transition, with a fixed Python 3.11 guest helper and a bounded
+nonce-bound response. The controller rechecks that account shell before application launch. No
+production caller yet composes these steps or preflights the carrier before reservation.
 
 `models.py` defines immutable literal commands and scripts with explicit `Shell.SH`, `Shell.BASH` or
 `Shell.USER_DEFAULT` selection and separate startup flags. It also defines finite `Input`, bounded
