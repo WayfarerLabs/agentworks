@@ -361,6 +361,65 @@ def test_wait_expiry_returns_partial_evidence_without_repoll(tmp_path: Path, mon
         database.close()
 
 
+def test_wait_expiry_at_next_poll_admission_keeps_last_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database, repository, owner = _confirmed(tmp_path)
+    carrier = ScriptedCarrier(lambda request: _reply(request, wait=None, boundary=False, ends=()))
+    deadline = Deadline.after(10)
+    real_collect = result_module.collect_bound_managed_result
+    collections = 0
+
+    def collect(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        nonlocal collections
+        collections += 1
+        if collections == 2:
+            object.__setattr__(deadline, "expires_at", 0.0)
+        return real_collect(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(result_module, "collect_bound_managed_result", collect)
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    try:
+        outcome = wait_bound_managed_result(
+            repository,
+            RUN,
+            **_options(owner, carrier, deadline=deadline),  # type: ignore[arg-type]
+        )
+        assert collections == 2
+        assert carrier.calls == 1
+        assert outcome.result.failure is ExecutionFailure.DEADLINE
+        assert outcome.result.deadline_exceeded
+        assert outcome.result.application_state is ApplicationState.UNKNOWN
+        assert len(outcome.attempts) == 1
+    finally:
+        database.close()
+
+
+def test_wait_nonzero_main_exit_still_observes_boundary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    database, repository, owner = _confirmed(tmp_path)
+    observations = 0
+
+    def reply(request):  # type: ignore[no-untyped-def]
+        nonlocal observations
+        if request.operation is ManagedOperation.OBSERVE:
+            observations += 1
+            if observations == 1:
+                return _reply(request, wait=7, boundary=False, ends=())
+        return _reply(request, wait=7)
+
+    carrier = ScriptedCarrier(reply)
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    try:
+        outcome = wait_bound_managed_result(repository, RUN, **_options(owner, carrier))  # type: ignore[arg-type]
+        assert observations == 2
+        assert outcome.result.status == ExitCode(7)
+        assert outcome.result.owned_cleanup_confirmed
+        assert outcome.result.failure is None
+        assert not outcome.result.ok
+    finally:
+        database.close()
+
+
 def test_wait_does_not_retry_uncertain_observation(tmp_path: Path) -> None:
     database, repository, owner = _confirmed(tmp_path)
     carrier = ScriptedCarrier(lambda request: _reply(request), dispatch=Dispatch.UNKNOWN, code=None)

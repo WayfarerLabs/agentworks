@@ -558,9 +558,11 @@ streams or boundary proof is not successful. Expiry before a later read's admiss
 deadline evidence only for the distinct pre-borrow deadline refusal; unrelated validation failures
 still escape with custody. Interrupted admitted attempts carry aggregate custody. The separate
 private bounded wait repeats this collection only after a clean, settled observation with missing
-facts, under the original finite deadline and VM owner. Expiry returns partial evidence without
-stopping the workload. Neither path clears prior start obligations, releases the owner, proves
-production routing or provides public JobAccess.
+facts, under the original finite deadline and VM owner. A nonzero main-process exit may still need
+stream-end and descendant-boundary evidence; it is never re-executed or reported as success. Expiry,
+including at the next poll's admission, returns the latest partial evidence without stopping the
+workload. Neither path clears prior start obligations, releases the owner, proves production routing
+or provides public JobAccess.
 
 `_managed_stop_exchange.py` supplies the separate private stop attempt over the same carrier
 interface. Its fixed Python 3.11 Linux root helper revalidates the exact launch, publishes the

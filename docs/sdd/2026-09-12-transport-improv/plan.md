@@ -1572,11 +1572,13 @@ and whitespace checks pass. Live SSH/QGA and production route tests remain open.
 
 - [x] Add a private bounded wait above the one-shot collector. Poll only clean, settled observations
       whose missing facts may progress, keeping the original finite deadline and exact VM owner;
-      never replay the launch or retry uncertain delivery, invalid output, truncation or a terminal
-      nonzero workload. A distinct pre-borrow deadline refusal may return partial evidence, but an
-      unrelated validation failure still escapes with accumulated custody. This private wait does
-      not establish production route freshness, recovery takeover, OPERATION lifetime, native
-      SSH/QGA acceptance or public JobAccess.
+      never replay the launch or retry uncertain delivery, invalid output, truncation or a fully
+      observed terminal outcome. A nonzero main-process exit may still need boundary and stream-end
+      evidence. A distinct pre-borrow deadline refusal, including at the next poll's admission,
+      returns the latest partial evidence when available; an unrelated validation failure still
+      escapes with accumulated custody. This private wait does not establish production route
+      freshness, recovery takeover, OPERATION lifetime, native SSH/QGA acceptance or public
+      JobAccess.
 
 - [x] Generate one core-owned VM instance marker before new-VM provider dispatch, retain it on the
       provisional row and install that same non-secret 32-lowercase-hex value through every shared

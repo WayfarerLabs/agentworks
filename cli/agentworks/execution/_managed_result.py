@@ -87,20 +87,27 @@ def wait_bound_managed_result(
     or uncertain attempt returns immediately with its exact custody; earlier
     settled observations need no retained attempt ledger.
     """
+    previous: ManagedResultOutcome | None = None
     while True:
-        outcome = collect_bound_managed_result(
-            repository,
-            identity,
-            target=target,
-            guest=guest,
-            root_plan=root_plan,
-            carrier=carrier,
-            runtime_selection=runtime_selection,
-            deadline=deadline,
-            owner=owner,
-        )
+        try:
+            outcome = collect_bound_managed_result(
+                repository,
+                identity,
+                target=target,
+                guest=guest,
+                root_plan=root_plan,
+                carrier=carrier,
+                runtime_selection=runtime_selection,
+                deadline=deadline,
+                owner=owner,
+            )
+        except ManagedDeadlineExpired as error:
+            if previous is None or error.__cause__ is not None:
+                raise
+            return _expired(previous)
         if not outcome.awaiting_facts:
             return outcome
+        previous = outcome
         remaining = deadline.remaining()
         if remaining is None:
             raise ValidationError("Managed wait requires a finite deadline")

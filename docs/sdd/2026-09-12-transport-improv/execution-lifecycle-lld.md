@@ -511,10 +511,12 @@ preserves the original exception with aggregate attempt facts.
 The private bounded wait repeatedly invokes that collector only while its last observation is
 complete, valid and settled, the carrier has no failure, and missing run/stream/boundary facts may
 still progress. Every poll uses the original finite deadline and caller-held exact VM owner. It does
-not retry a launch, an ambiguous observation, refused output, truncation, or a terminal nonzero
-workload. Expiry between polls returns the latest partial evidence with a deadline flag; it never
-claims termination or clears an earlier start obligation. This is a private lifecycle step, not
-public `JobAccess`, production routing, recovery takeover or native carrier acceptance.
+not retry a launch, an ambiguous observation, refused output, truncation, or a fully observed
+terminal outcome. A nonzero main-process exit can still be polled for missing descendant-boundary
+and stream-end facts; it is never re-executed or reported as success. Expiry between polls or at the
+next poll's admission returns the latest partial evidence with a deadline flag; it never claims
+termination or clears an earlier start obligation. This is a private lifecycle step, not public
+`JobAccess`, production routing, recovery takeover or native carrier acceptance.
 
 At the first production later-action caller, bind route freshness at the borrowed fixed helper's
 actual carrier boundary. An optional internal check supplied by that caller runs after the exact
