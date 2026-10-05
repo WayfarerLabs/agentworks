@@ -229,7 +229,7 @@ def test_session_inspection_uses_runtime_diamond_order(db: Database, unhandled: 
     from agentworks.artifacts.inspection import inspect_artifacts
     from agentworks.harness_setup.inputs import SetupInputs
     from agentworks.harness_setup.model import NativeSetupState, SetupRecord
-    from agentworks.harness_setup.state import write_native_setup
+    from agentworks.harness_setup.state import read_native_setup, write_native_setup
     from agentworks.schema import CapabilityConfig
     from agentworks.secrets.orchestration import SecretTarget
     from tests.artifacts.test_routing import graph
@@ -270,6 +270,18 @@ def test_session_inspection_uses_runtime_diamond_order(db: Database, unhandled: 
     assert tuple(item.reason for item in integration.recorded_deferred) == tuple(
         item.reason for item in record.deferred
     )
+    agent_record = read_native_setup(db, "agent", "agent").records[0]
+    write_native_setup(
+        db,
+        "agent",
+        "agent",
+        NativeSetupState(records=(agent_record.model_copy(update={"complete": False}),)),
+        operation="fixture",
+    )
+    blocked = inspect_artifacts(db, fixture.registry, session_name="review")
+    assert blocked.owners[1].integrations[0].status == "incomplete"
+    assert blocked.owners[-1].integrations[0].status == "unavailable"
+    assert "agent/agent" in blocked.owners[-1].integrations[0].reason
 
 
 def test_worked_manifests_build_without_acquiring_their_sources(tmp_path, monkeypatch) -> None:
@@ -322,6 +334,7 @@ def test_integration_config_values_are_excluded_from_both_outputs(db: Database, 
     write_native_setup(db, "agent", "agent", NativeSetupState(records=(record,)), operation="fixture")
     result = inspect_artifacts(db, fixture.registry, agent_name="agent")
     assert result.owners[-1].integrations[0].status == "stale"
+    assert "private_setting" in result.owners[-1].integrations[0].reason
     assert confidential not in json.dumps(inspection_data(result))
     render_artifacts(result)
     assert confidential not in capsys.readouterr().out

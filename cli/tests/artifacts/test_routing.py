@@ -167,6 +167,7 @@ def test_newly_inherited_vm_inputs_require_active_user_setup(db):
         db, fixture.registry, fixture.owners["agent"], "shell", inherited={inherited.owner: inherited}
     )
     assert view.status == "stale"
+    assert "vm-0" in view.reason
     with pytest.raises(StateError):
         fixture.route()
     assert read_native_setup(db, "agent", "agent").records == (previous,)
@@ -303,9 +304,21 @@ def test_workspace_only_vm_change_does_not_stale_user_branch(db):
 def test_config_and_env_freshness_still_apply(db):
     fixture = graph(db, active=("agent",))
     fixture.save("agent")
-    changed = replace(fixture.owners["agent"], target=SecretTarget(vm={}, agent={"A": EnvEntry.model_validate("new")}))
+    changed = replace(
+        fixture.owners["agent"],
+        target=SecretTarget(vm={}, agent={"ENV_KEY_NEVER": EnvEntry.model_validate("operator-private-value")}),
+    )
     view = inspect_owner_artifacts(db, fixture.registry, changed, "shell")
     assert view.status == "stale"
+    assert "ENV_KEY_NEVER" in view.reason
+    assert "operator-private-value" not in view.reason
+
+
+def test_inactive_session_does_not_inherit_an_unrelated_artifact_gap(db):
+    fixture = graph(db)
+    owner = SetupInputs("session", "review", "session", {}, SecretTarget(vm={}, session={}))
+    view = inspect_owner_artifacts(db, fixture.registry, owner, "shell", inherited=None)
+    assert view.status == "inactive"
 
 
 @pytest.mark.parametrize("active_vm", [False, True])

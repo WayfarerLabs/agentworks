@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from agentworks import output
@@ -262,13 +262,20 @@ def inspect_artifacts(
             views: dict[ArtifactComponent, ArtifactOwnerView] = {}
             for owner in owners:
                 inherited: dict[ArtifactOwner, ArtifactGroup] | None = {}
+                blocker: ArtifactOwnerView | None = None
                 if owner.component in ("admin", "agent", "workspace"):
                     inherited = deferred_inputs(views["vm"], "workspace" if owner.component == "workspace" else "user")
                 elif owner.component == "session":
-                    inherited = session_inherited_inputs(
-                        views["vm"], views["admin" if context.admin else "agent"], views["workspace"]
-                    )
+                    ancestors = (views["vm"], views["admin" if context.admin else "agent"], views["workspace"])
+                    blocker = next((view for view in ancestors if view.status not in ("current", "inactive")), None)
+                    inherited = session_inherited_inputs(*ancestors)
                 view = inspect_owner_artifacts(db, registry, owner, name, inherited=inherited)
+                if owner.component == "session" and view.status == "unavailable" and blocker is not None:
+                    source = blocker.owner
+                    view = replace(
+                        view,
+                        reason=f"Blocked by {source.component}/{source.name} ({blocker.status}): {blocker.reason}",
+                    )
                 views[owner.component] = view
                 integrations[owner.component].append(_integration_metadata(owner, name, view))
         projected = []
