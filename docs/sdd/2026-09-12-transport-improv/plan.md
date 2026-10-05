@@ -73,6 +73,11 @@ associated pending acceptance gates are superseded by this ruling.
       and shared platform-host resources without splitting ownership by transport route or identity.
       Retire superseded local harness coordination during consumer migration, not through a second
       competing new-stack lock.
+- [ ] Establish one platform-neutral VM availability boundary around every new-stack VM operation,
+      entered after core admits the operation but before activation and retained through route, body
+      and teardown. Prove no-op platforms and stateful holds with the same caller contract; each
+      stateful hold contributes exact lifecycle evidence before whole-operation release. Cover file,
+      execution, recovery and later job actions, not only foreground command paths.
 - [ ] Cover pre-context activation and nested teardown when wiring ownership. At `806741ca`,
       `gated_vm_boundary` enters `activation_gate` before assembling its ordinary operation context,
       and `LiveVMNode` constructs a separate gate context. Context factories, harness setup's
@@ -528,11 +533,12 @@ supported-workstation or production FileAccess acceptance; the checkbox stays op
       download, upload and JSON and removed duplicate control-flow branches. Admission-driven
       timeout regressions replace a reproduced startup-timing assumption; both fail against the old
       settlement behavior and pass under concurrent stress.
-- [ ] Settle explicit local download creation/replacement and metadata semantics before implementing
-      the local staging writer. The operator question distinguishes required create/replace choice
-      from a create-only default; neither imports guest ownership into the workstation. Complete
-      native local publication, cleanup and public result conversion remain required, including
-      propagation of timing failure alongside proved operation facts.
+- [ ] Implement local download publication with create-only default and explicit replace-existing
+      selection, as directed on 2026-10-05. Settle and prove workstation metadata/ACL handling,
+      ordinary-file refusal, full-transfer verification and cleanup before publishing either form;
+      never import guest ownership into the workstation or silently strip local metadata. Complete
+      native local publication and public result conversion remain required, including propagation
+      of timing failure alongside proved operation facts.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
       access. The models-only checkpoint is not additive-surface completion.
 
@@ -1633,6 +1639,13 @@ and whitespace checks pass. Live SSH/QGA and production route tests remain open.
       prove the platform's actual start/status/stop and disconnected-operation recovery, not a
       generic Linux-equivalent MANAGED profile. Workstation SSH evidence is insufficient; report
       cleanup uncertainty without dropping required platform operations.
+- [ ] Before advertising `INDEPENDENT` on a VM platform that can idle-stop, prove a recoverable
+      resource-owned availability hold covering the active job beyond its initiating command and
+      surviving observer loss. WSL2's current command-scoped hold is not this proof. Bind the hold
+      to exact VM/job identity, retain uncertainty on controller loss or boot change, and release it
+      only after terminal cleanup evidence. Refuse `INDEPENDENT` on that platform until proved; test
+      explicit VM stop/reboot and terminal-record observation separately. A no-op hold is valid only
+      where platform lifecycle evidence proves idle shutdown cannot end active work.
 - [ ] Prove a distribution-scoped WSL2 boot fence before production managed-run adoption. The kernel
       boot UUID alone survives a distribution stop and restart inside the same utility VM. The
       private guest probe now combines that UUID with PID 1 start ticks; validate stable identity
@@ -2541,13 +2554,10 @@ sequence is migrations 39 (owners, claims and obligations), 40 (managed runs) an
 instance marker). No released database contains the former 39-44 sequence, so the consolidation does
 not add an upgrade path or change the recovery contract described above.
 
-The round-7 integration report found that older branch-built databases stamped 39-41 could otherwise
-pass ordinary open and later fail when ownership tables were used. Direct opens validate the
-completed schema for those reused numbers before migration. The safe opener validates stale versions
-39-40 under the migration lock and reaches the same direct-open guard for current version 41; the
-version-only inspector retains its existing classification and race semantics. Branch-built
-databases fail closed rather than receiving an implicit upgrade. The released v38 upgrade path and
-canonical 39-41 schemas remain supported.
+The round-7 branch-specific schema guard was later superseded by the 2026-10-05 operator ruling:
+remove that special guard without adding unconditional canonical-schema validation on ordinary open.
+Retain known development-only databases pending separate deletion approval. The existing
+released-v38 migration and interrupted-migration recovery remain required and separately tested.
 
 Final project and correctness re-reviews are clean at `f7a2ecac`; the final complexity review's two
 material simplifications are incorporated, and its optional duplicate wrapper check is removed at

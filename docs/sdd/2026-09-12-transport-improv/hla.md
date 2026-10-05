@@ -38,14 +38,14 @@ and [migration gates](migration-strategy.md#sequence-and-cutover-gates) define t
 
 ## Components and ownership
 
-| Component                  | Owns                                                                                                                    | Does not own                                                           |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Operation composition root | VM selection, canonical/native route policy, guest identity, environment policy, secrets, activation and route lifetime | Shell quoting or provider payload encoding                             |
-| `RunContext`               | Delivery of already-bound targets, descriptive scope, scoped secret reader                                              | Connections, route selection, target construction, or resource cleanup |
-| Execution target           | Consistent command/script, file, and job operations; optional-feature description; bound identity                       | VM lookup, secret resolution, or implicit elevation/fallback           |
-| Shared execution helpers   | Shell preparation, input delivery, staging, safe diagnostics, file publication, job records and observation             | Infrastructure orchestration or application-specific retries           |
-| Delivery adapter           | Dispatch and observation over SSH, Lima, remote Lima, WSL2, or Proxmox QGA; provider limits and optional I/O            | Workspace policy or business operations                                |
-| Owning resource operation  | Retention and lifecycle of a job beyond the initiating call                                                             | Reusing a transport after its route or VM hold closes                  |
+| Component                  | Owns                                                                                                                           | Does not own                                                           |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| Operation composition root | VM selection, canonical/native route policy, guest identity, environment policy, secrets, activation and availability lifetime | Shell quoting or provider payload encoding                             |
+| `RunContext`               | Delivery of already-bound targets, descriptive scope, scoped secret reader                                                     | Connections, route selection, target construction, or resource cleanup |
+| Execution target           | Consistent command/script, file, and job operations; optional-feature description; bound identity                              | VM lookup, secret resolution, or implicit elevation/fallback           |
+| Shared execution helpers   | Shell preparation, input delivery, staging, safe diagnostics, file publication, job records and observation                    | Infrastructure orchestration or application-specific retries           |
+| Delivery adapter           | Dispatch and observation over SSH, Lima, remote Lima, WSL2, or Proxmox QGA; provider limits and optional I/O                   | Workspace policy or business operations                                |
+| Owning resource operation  | Retention and lifecycle of a job beyond the initiating call                                                                    | Reusing a transport after its route or VM hold closes                  |
 
 These are responsibilities, not a requirement for six class hierarchies. The target composes a
 carrier and small shared helpers. New core adapters live under `agentworks.execution`; new
@@ -373,13 +373,18 @@ I/O/evidence. A wait timeout is not stop. Stop verifies ownership and descendant
 the main PID's exit. References survive connections, but require newly authorized targets for later
 observation. Retention and abandoned-work cleanup remain the resource owner's responsibility.
 
-Platform power lifetime remains separate. WSL2 holds, platform-owned macOS host workflows and early
-bootstrap need their own measured acceptance cases. Mac hosts do not inherit a blanket guest MANAGED
-requirement; platforms own resource lifecycle and recovery without a new weak profile or a
-hostile-platform isolation claim. Required operations cannot simply be dropped. The guest lifecycle
-proof gates include lost launch acknowledgment, observer loss, anchor death, stale identity,
-descendant cleanup and containment escape paths. The accepted buffered PoC does not establish those
-guarantees.
+Platform availability is a separate, platform-owned boundary around every VM operation, acquired
+before activation and retained through routing, body and teardown. The boundary can be a no-op on
+platforms that need no active hold. `INDEPENDENT` work on a platform that can idle-stop the VM
+requires a resource-owned, recoverable availability hold lasting until that job is terminal; a
+command-scoped hold does not satisfy it. If the platform cannot prove that guarantee, refuse
+`INDEPENDENT` there rather than advertising weaker behavior. This does not override explicit VM
+stop, reboot or host loss. WSL2, platform-owned macOS host workflows and early bootstrap need their
+own measured acceptance cases. Mac hosts do not inherit a blanket guest MANAGED requirement;
+platforms own resource lifecycle and recovery without a new weak profile or a hostile-platform
+isolation claim. Required operations cannot simply be dropped. The guest lifecycle proof gates
+include lost launch acknowledgment, observer loss, anchor death, stale identity, descendant cleanup
+and containment escape paths. The accepted buffered PoC does not establish those guarantees.
 
 ## RunContext integration
 

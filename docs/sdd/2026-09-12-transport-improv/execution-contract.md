@@ -113,15 +113,15 @@ execution identity, not the workstation SSH process. A deadline is one monotonic
 preparation and observation; omission follows the explicitly bound operation policy, not a
 carrier-selected timeout or retry default.
 
-| Surface                                                                       | Proposed behavior                                                                                                                       |
-| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `features`, identity/route metadata                                           | Passive values from the bound target; no connection or authority discovery.                                                             |
-| `read_file`, `stat`, `write_file`, `upload`, `download`                       | Bounded bytes or explicit paths, metadata and publication policy; file reads are separately granted.                                    |
-| `upload_directory`, `download_directory`                                      | Explicit merge/replace choice, confined paths and extraction; no implicit recursive deletion.                                           |
-| `update_json`, `list_directory`, `ensure_directory`, `set_metadata`, `remove` | Structured updates, bounded inventory and filesystem lifecycle under core-approved paths/actions; no command grant required.            |
-| `observe`, `read_output`, `wait`                                              | Separate status, bounded cursor-based output reads, and waiting for a known job; observing never deletes its records.                   |
-| `stop`, `dispose`                                                             | Request owned-workload termination with truthful confirmation, or dispose terminal-job artifacts; neither guesses authority from a PID. |
-| Terminal I/O and `attach(job, terminal=...)`                                  | Optional terminal launch/attachment, distinct from lifetime, shell startup and authorization to launch additional work.                 |
+| Surface                                                                       | Proposed behavior                                                                                                                                           |
+| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `features`, identity/route metadata                                           | Passive values from the bound target; no connection or authority discovery.                                                                                 |
+| `read_file`, `stat`, `write_file`, `upload`, `download`                       | Bounded bytes or explicit paths, metadata and publication policy; download has explicit local create/replace choice, and file reads are separately granted. |
+| `upload_directory`, `download_directory`                                      | Explicit merge/replace choice, confined paths and extraction; no implicit recursive deletion.                                                               |
+| `update_json`, `list_directory`, `ensure_directory`, `set_metadata`, `remove` | Structured updates, bounded inventory and filesystem lifecycle under core-approved paths/actions; no command grant required.                                |
+| `observe`, `read_output`, `wait`                                              | Separate status, bounded cursor-based output reads, and waiting for a known job; observing never deletes its records.                                       |
+| `stop`, `dispose`                                                             | Request owned-workload termination with truthful confirmation, or dispose terminal-job artifacts; neither guesses authority from a PID.                     |
+| Terminal I/O and `attach(job, terminal=...)`                                  | Optional terminal launch/attachment, distinct from lifetime, shell startup and authorization to launch additional work.                                     |
 
 `ExecutionResult` carries available guest exit status, byte output and completeness, and the outcome
 facts needed to distinguish failure, timeout, and uncertainty. A typed execution error carries the

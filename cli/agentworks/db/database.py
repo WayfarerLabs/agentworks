@@ -93,7 +93,7 @@ class Database:
         db_path = (path or _db.DB_PATH).resolve()
         self.path = db_path
         if read_only:
-            from agentworks.db.backup import _connect_ro, _is_busy, _validate_consolidated_transport_schema
+            from agentworks.db.backup import _connect_ro, _is_busy
             from agentworks.errors import BusyStateError, StateError
 
             connection: sqlite3.Connection | None = None
@@ -118,7 +118,6 @@ class Database:
                         entity_kind="database",
                         hint="Run a normal Agentworks command to initialize or migrate the state database.",
                     )
-                _validate_consolidated_transport_schema(connection, current)
                 connection.row_factory = sqlite3.Row
                 connection.execute("PRAGMA foreign_keys = ON")
                 self._conn = connection
@@ -324,8 +323,7 @@ class Database:
         )
 
     def _reject_incompatible_schema(self) -> None:
-        """Refuse future or incompatible pre-release transport schemas."""
-        from agentworks.db.backup import _validate_consolidated_transport_schema
+        """Refuse a database whose schema version this release cannot open."""
         from agentworks.errors import StateError
 
         entry = self._conn.execute("SELECT type FROM sqlite_master WHERE name = 'schema_version'").fetchone()
@@ -344,7 +342,6 @@ class Database:
                 f"state database schema is newer than this release ({current}/{LATEST_VERSION})",
                 hint="Use `agw database backup` to preserve it, then use a compatible release.",
             )
-        _validate_consolidated_transport_schema(self._conn, current)
 
     def _migrate(self) -> None:
         self._conn.execute(

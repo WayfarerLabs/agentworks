@@ -120,7 +120,7 @@ def stat(path: PurePosixPath, *, sudo: bool = False) -> FileMetadata | None: ...
 def list_directory(path: PurePosixPath, *, limit: DirectoryLimit, sudo: bool = False) -> tuple[DirectoryEntry, ...]: ...
 def write_file(path, data, *, condition, create_metadata, sudo=False) -> MutationResult: ...
 def upload(path, source, *, size, condition, create_metadata, sudo=False) -> MutationResult: ...
-def download(path, destination, *, max_bytes=None, sudo=False) -> FileMetadata: ...
+def download(path, destination, *, local_condition=Create(), max_bytes=None, sudo=False) -> FileMetadata: ...
 def update_json(path, document, *, strategy, create, create_metadata, max_bytes=DEFAULT_JSON_MAX_BYTES, max_depth=DEFAULT_JSON_MAX_DEPTH, sudo=False) -> MutationResult: ...
 def ensure_directory(path: PurePosixPath, *, metadata: NewMetadata, sudo: bool = False) -> MutationResult: ...
 def set_metadata(path: PurePosixPath, *, owner: str, group: str, mode: int, sudo: bool = False) -> MutationResult: ...
@@ -129,9 +129,15 @@ def remove(path: PurePosixPath, *, expected_kind: FileKind, expected: Revision, 
 
 `sudo=True` requests the implementation privilege already bound to this `FileAccess`; it never
 creates authority. `upload` consumes exactly `size` bytes and rejects early EOF or excess input.
-`download.max_bytes` is an optional caller safety bound, not a core file-size cap. JSON byte/depth
-limits bound the source, existing snapshot, and result; defaults are caller-overridable, not
-authorization or a universal file ceiling.
+`download.local_condition` accepts explicit `Create` or `Replace` only; it governs the workstation
+destination, not guest publication. The default create-only choice cannot overwrite an existing
+path, while explicit replace requires an existing ordinary regular destination. The local staging
+writer must finish and verify the full transfer before publication, refuse symlinks and hard links,
+and specify how existing local ACLs, modes and other metadata survive replacement or produce an
+explicit unsupported refusal. It must not silently strip them. `download.max_bytes` is an optional
+caller safety bound, not a core file-size cap. JSON byte/depth limits bound the source, existing
+snapshot, and result; defaults are caller-overridable, not authorization or a universal file
+ceiling.
 
 Paths are absolute, normalized POSIX paths without NUL, empty, `.` or `..` components. A write does
 not create parents. `ensure_directory` creates exactly one missing final component with restrictive
@@ -1385,7 +1391,8 @@ The following are not established by source inspection and must remain open in t
   participating writers share database-level operation ownership and recovery;
 - prove unique-sibling atomic rename and the required creation/update owner, mode, and ACL semantics
   on every supported filesystem, refusing unsupported metadata before publication;
-- decide the supported macOS minimum and Windows-local download publication design;
+- prove local create and explicit replace publication, including metadata/ACL handling, failure
+  cleanup and the supported macOS/Windows filesystem behavior;
 - complete directory transfer/confined extraction before claiming full R7;
 - inventory the exact future core catalog and recipient subsets before removal; and
 - obtain operator disposition for any required destination that cannot meet atomic rename, metadata

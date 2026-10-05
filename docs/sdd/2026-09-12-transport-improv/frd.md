@@ -215,6 +215,31 @@ exclusion of malicious target-user processes and the guest MANAGED lifecycle req
 The [coordination extension design](hla.md#operation-coordination-and-hierarchical-extension) and
 [explicit follow-up scope](plan.md#hierarchical-coordination-follow-up-377) record the response.
 
+#### Availability, local download, and development-schema rulings, 2026-10-05
+
+On VM and independent-job availability, the operator clarified:
+
+<!-- cspell:ignore availabilty -->
+
+> So this seems fishy. Don't we want to force WSL to stay awake through a job?
+>
+> And this really shouldn't be wsl specific. We generally want to ensure vm availabilty for all
+> platforms. For most that's a no-op but no harm in wrapping everything we do.
+
+Every VM operation therefore enters a platform-owned availability boundary. An independent job
+cannot claim disconnect survival on a platform that can idle-stop its VM unless a recoverable
+availability hold covers that job's active lifetime. Explicit stop, reboot and host loss remain
+outside that promise. A platform unable to prove the hold refuses that lifetime; it does not weaken
+the meaning of `INDEPENDENT`.
+
+For local download destinations, the operator chose explicit replacement in the first version, in
+addition to create-only publication. Local replacement and metadata semantics remain a design and
+proof gate; this choice does not authorize deleting existing local data implicitly.
+
+For the unreleased transport migrations 39–41, the operator directed removal of the special
+branch-built-schema guard. Known development databases are retained until separate approval for any
+deletion. Ordinary released-database migration and interrupted-migration recovery remain required.
+
 ### Implementation scope
 
 In scope for the eventual implementation:
@@ -375,7 +400,10 @@ operational cancellation contract, not containment of a malicious process that e
 
 Disconnect survival assumes the VM remains running. Detached work does not promise survival of
 reboot, VM stop, or host shutdown, and cannot override an operator's explicit stop. Platform holds
-must cover an active operation; releasing a client context must not masquerade as stopping its job.
+must cover an active operation. On a platform that can idle-stop its VM, a recoverable hold must
+also cover an independent job's active lifetime, not merely its initiating call, or that lifetime is
+unavailable there. Every VM operation uses the platform availability boundary, which may be a no-op
+where no hold is needed. Releasing a client context must not masquerade as stopping its job.
 
 ### R7. Files
 
@@ -387,6 +415,10 @@ access. These are required file semantics on supported VM targets, not SSH-only 
 Regular-file operations reject special objects rather than block opening a pipe. Session owners can
 remove an exact stale socket only after establishing runtime absence; the file API does not perform
 that liveness check, create sockets or provide FIFO creation.
+
+A download to a local path supports an explicit create-only or replace-existing choice. Replacement
+must not silently discard local metadata or turn a failed transfer into a successful publication;
+the exact local publication and metadata rules are settled before implementation.
 
 Callers select ordinary or elevated placement without hand-writing copy, chmod, or sudo wrappers.
 Elevation covers staging, publication and metadata under the bound file grant, not general admin
