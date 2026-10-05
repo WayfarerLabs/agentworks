@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
 
-from ._managed_bound_run import preflight_bound_run
+from ._managed_bound_run import ManagedDeadlineExpired, preflight_bound_run
 from ._managed_job_protocol import (
     BoundaryEmptyFact,
     ManagedJobFactError,
@@ -53,6 +54,7 @@ class ManagedResultOutcome:
 
     result: ExecutionResult
     attempts: tuple[ManagedObserveOutcome, ...]
+    awaiting_facts: bool = False
 
     @property
     def requires_owner_retention(self) -> bool:
@@ -65,6 +67,53 @@ class ManagedResultControlFact(Exception):
     def __init__(self, attempts: tuple[ManagedObserveOutcome, ...]) -> None:
         self.attempts = attempts
         super().__init__("managed result collection stopped with operation state")
+
+
+def wait_bound_managed_result(
+    repository: ManagedRunRepository,
+    identity: ManagedRunIdentity,
+    *,
+    target: ManagedTargetIdentity,
+    guest: VMGuestIdentity,
+    root_plan: IdentityPlan,
+    carrier: Carrier,
+    runtime_selection: RuntimeSelection,
+    deadline: Deadline,
+    owner: OperationOwner,
+) -> ManagedResultOutcome:
+    """Poll only a clean, settled pending run under one finite deadline.
+
+    Each poll is a new read-only observation, never a launch retry. A failed
+    or uncertain attempt returns immediately with its exact custody; earlier
+    settled observations need no retained attempt ledger.
+    """
+    while True:
+        outcome = collect_bound_managed_result(
+            repository,
+            identity,
+            target=target,
+            guest=guest,
+            root_plan=root_plan,
+            carrier=carrier,
+            runtime_selection=runtime_selection,
+            deadline=deadline,
+            owner=owner,
+        )
+        if not outcome.awaiting_facts:
+            return outcome
+        remaining = deadline.remaining()
+        if remaining is None:
+            raise ValidationError("Managed wait requires a finite deadline")
+        if remaining <= 0:
+            return _expired(outcome)
+        time.sleep(min(0.1, remaining))
+        if deadline.expired:
+            return _expired(outcome)
+
+
+def _expired(outcome: ManagedResultOutcome) -> ManagedResultOutcome:
+    result = replace(outcome.result, failure=ExecutionFailure.DEADLINE, deadline_exceeded=True)
+    return ManagedResultOutcome(result, outcome.attempts)
 
 
 def collect_bound_managed_result(
@@ -161,6 +210,7 @@ def _reduce(
     state = ApplicationState.COMPLETED if status is not None else ApplicationState.UNKNOWN
     outputs: dict[Stream, ExecutionOutput] = {}
     output_failure: ExecutionFailure | None = None
+    refused_read = False
     for stream in Stream:
         end_name = FactName.STDOUT_END if stream is Stream.STDOUT else FactName.STDERR_END
         observed_end = facts.get(end_name)
@@ -187,11 +237,11 @@ def _reduce(
                 deadline=deadline,
                 owner=owner,
             )
-        except ValidationError as error:
+        except ManagedDeadlineExpired as error:
             # The bound reader refuses an expired deadline before borrowing.
             # Preserve the prior observation as a partial result in that case;
             # a failure carrying borrowed custody must still escape.
-            if not deadline.expired or error.__cause__ is not None:
+            if error.__cause__ is not None:
                 raise
             break
         attempts.append(read.attempt)
@@ -217,6 +267,8 @@ def _reduce(
                 outputs[stream] = ExecutionOutput(b"", True, Retention.DISCARDED)
             elif read.disposition is StreamDisposition.SUPPRESSED:
                 outputs[stream] = ExecutionOutput(b"", True, Retention.SUPPRESSED)
+        else:
+            refused_read = True
         if (
             read.attempt.requires_owner_retention
             or read.attempt.pending_remote_effects
@@ -262,7 +314,19 @@ def _reduce(
         owned_cleanup_confirmed=boundary is not None and settled,
         deadline_exceeded=deadline_exceeded,
     )
-    return ManagedResultOutcome(result, tuple(attempts))
+    awaiting_facts = (
+        candidate is not None
+        and candidate.carrier_failure is None
+        and observation is not None
+        and observation.state is ManagedObservationState.OBSERVED
+        and settled
+        and not deadline_exceeded
+        and not refused_read
+        and (status is not None or boundary is None)
+        and (status is None or boundary is None or len(outputs) != 2)
+        and output_failure is None
+    )
+    return ManagedResultOutcome(result, tuple(attempts), awaiting_facts)
 
 
 def _fact(

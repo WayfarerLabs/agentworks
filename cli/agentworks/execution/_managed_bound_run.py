@@ -23,6 +23,10 @@ from ._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 from .carrier import Deadline
 
 
+class ManagedDeadlineExpired(ValidationError):
+    """A bound managed read was refused before borrowing because time elapsed."""
+
+
 def preflight_bound_run(
     repository: ManagedRunRepository,
     identity: ManagedRunIdentity,
@@ -35,6 +39,10 @@ def preflight_bound_run(
     owner: OperationOwner,
 ) -> tuple[ManagedRunRecord, bytes]:
     """Inspect one exact row before borrow; derive launch only from that row."""
+    if type(deadline) is not Deadline or deadline.expires_at is None:
+        raise ValidationError("Managed access requires a finite deadline")
+    if deadline.expired:
+        raise ManagedDeadlineExpired("Managed access deadline expired before admission")
     if (
         type(identity) is not ManagedRunIdentity
         or type(target) is not ManagedTargetIdentity
@@ -43,9 +51,6 @@ def preflight_bound_run(
         or target.boot_id != vm_guest_boot_id(guest)
         or type(runtime_selection) is not RuntimeSelection
         or runtime_selection.target_os is not RuntimeTargetOS.LINUX
-        or type(deadline) is not Deadline
-        or deadline.expires_at is None
-        or deadline.expired
         or not isinstance(owner, OperationOwner)
         or owner.ownership.scope.resource_kind is not OperationResourceKind.VM
         or owner.ownership.scope.resource_name != target.name

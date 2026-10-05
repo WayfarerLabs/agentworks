@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,11 @@ from agentworks.execution import _managed_result as result_module
 from agentworks.execution._managed_job_store import FactName, Stream
 from agentworks.execution._managed_observation_protocol import ManagedOperation, ManagedResultControl
 from agentworks.execution._managed_observe_access import read_bound_managed_output
-from agentworks.execution._managed_result import ManagedResultControlFact, collect_bound_managed_result
+from agentworks.execution._managed_result import (
+    ManagedResultControlFact,
+    collect_bound_managed_result,
+    wait_bound_managed_result,
+)
 from agentworks.execution._managed_runs import (
     ManagedLaunchObservation,
     ManagedOutputMode,
@@ -270,5 +275,121 @@ def test_deadline_crossing_before_output_admission_returns_partial_result(
         assert not outcome.requires_owner_retention
         assert len(outcome.attempts) == 1
         assert carrier.calls == 1
+    finally:
+        database.close()
+
+
+def test_unrelated_admission_refusal_is_not_rewritten_as_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database, repository, owner = _confirmed(tmp_path)
+    carrier = ScriptedCarrier(lambda request: _reply(request))
+    deadline = Deadline.after(10)
+    real_inspect = repository.inspect
+    inspected = 0
+
+    def inspect(identity):  # type: ignore[no-untyped-def]
+        nonlocal inspected
+        inspected += 1
+        if inspected == 3:
+            object.__setattr__(deadline, "expires_at", 0.0)
+            return None
+        return real_inspect(identity)
+
+    monkeypatch.setattr(repository, "inspect", inspect)
+    try:
+        with pytest.raises(ValidationError) as raised:
+            collect_bound_managed_result(
+                repository,
+                RUN,
+                **_options(owner, carrier, deadline=deadline),  # type: ignore[arg-type]
+            )
+        assert isinstance(raised.value.__cause__, ManagedResultControlFact)
+        assert len(raised.value.__cause__.attempts) == 1
+        assert carrier.calls == 1
+    finally:
+        database.close()
+
+
+def test_wait_polls_only_clean_pending_facts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    database, repository, owner = _confirmed(tmp_path)
+    observations = 0
+
+    def reply(request):  # type: ignore[no-untyped-def]
+        nonlocal observations
+        if request.operation is ManagedOperation.OBSERVE:
+            observations += 1
+            if observations == 1:
+                return _reply(request, wait=None, boundary=False, ends=())
+        return _reply(request)
+
+    carrier = ScriptedCarrier(reply)
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    try:
+        outcome = wait_bound_managed_result(repository, RUN, **_options(owner, carrier))  # type: ignore[arg-type]
+        assert observations == 2
+        assert carrier.calls == 4
+        assert outcome.result.ok
+        assert not outcome.awaiting_facts
+        assert not outcome.requires_owner_retention
+    finally:
+        database.close()
+
+
+def test_wait_expiry_returns_partial_evidence_without_repoll(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    database, repository, owner = _confirmed(tmp_path)
+    carrier = ScriptedCarrier(lambda request: _reply(request, wait=None, boundary=False, ends=()))
+    deadline = Deadline.after(10)
+
+    def expire(seconds: float) -> None:
+        object.__setattr__(deadline, "expires_at", 0.0)
+
+    monkeypatch.setattr(time, "sleep", expire)
+    try:
+        outcome = wait_bound_managed_result(
+            repository,
+            RUN,
+            **_options(owner, carrier, deadline=deadline),  # type: ignore[arg-type]
+        )
+        assert carrier.calls == 1
+        assert outcome.result.failure is ExecutionFailure.DEADLINE
+        assert outcome.result.deadline_exceeded
+        assert outcome.result.application_state is ApplicationState.UNKNOWN
+        assert not outcome.requires_owner_retention
+        assert not outcome.awaiting_facts
+    finally:
+        database.close()
+
+
+def test_wait_does_not_retry_uncertain_observation(tmp_path: Path) -> None:
+    database, repository, owner = _confirmed(tmp_path)
+    carrier = ScriptedCarrier(lambda request: _reply(request), dispatch=Dispatch.UNKNOWN, code=None)
+    try:
+        outcome = wait_bound_managed_result(repository, RUN, **_options(owner, carrier))  # type: ignore[arg-type]
+        assert carrier.calls == 1
+        assert outcome.requires_owner_retention
+        assert not outcome.awaiting_facts
+    finally:
+        database.close()
+
+
+@pytest.mark.parametrize(
+    ("wait", "disposition", "failure"),
+    [
+        (7, "complete-capture", None),
+        (0, "truncated-capture", ExecutionFailure.OUTPUT_LIMIT),
+    ],
+)
+def test_wait_does_not_retry_terminal_outcomes(
+    tmp_path: Path, wait: int, disposition: str, failure: ExecutionFailure | None
+) -> None:
+    database, repository, owner = _confirmed(tmp_path)
+    carrier = ScriptedCarrier(lambda request: _reply(request, wait=wait, disposition=disposition))
+    try:
+        outcome = wait_bound_managed_result(repository, RUN, **_options(owner, carrier))  # type: ignore[arg-type]
+        assert carrier.calls == 3
+        assert outcome.result.status == ExitCode(wait)
+        assert outcome.result.failure is failure
+        assert not outcome.awaiting_facts
     finally:
         database.close()

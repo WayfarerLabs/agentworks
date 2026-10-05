@@ -486,26 +486,35 @@ host-bound adapters; those private guest fences likewise do not establish a prod
 route.
 
 A separate private observe-and-reconcile action may update a `POSSIBLE_DISPATCH` run only after one
-complete, validated observation contains its exact launch receipt. It uses the persisted row and
-the repository's idempotent reconciliation transition, treating the historical launch dispatch as
-unknown rather than borrowing the later observation's carrier status. A missing, refused, invalid
-or incomplete observation never proves `NOT_LAUNCHED`. Receipt reconciliation does not settle an
+complete, validated observation contains its exact launch receipt. It uses the persisted row and the
+repository's idempotent reconciliation transition, treating the historical launch dispatch as
+unknown rather than borrowing the later observation's carrier status. A missing, refused, invalid or
+incomplete observation never proves `NOT_LAUNCHED`. Receipt reconciliation does not settle an
 earlier start attempt or obligation, release a retained operation owner, prove route freshness, or
 imply workload completion; those remain independent evidence and recovery gates.
 
-The private one-shot result collector requires a reconciled launch receipt before attempting
-another carrier call. It observes once, then reads only streams whose exact end facts were present
-in that observation, under the original finite deadline and caller-held VM claim. The later
-observation's carrier dispatch is not reused as the historical launch dispatch: the result retains
-`UNKNOWN`. A launch receipt alone leaves application state unknown; only a validated `wait` fact
-gives exit or signal status. Each stream's admitted output, complete or truncated disposition, and
-positive `boundary-empty` remain separate. A zero exit cannot make the result successful without
-both requested streams, boundary emptiness and settled current collection custody. That boundary
-and custody govern the result's `owned_cleanup_confirmed` flag; neither settles an earlier
+The private one-shot result collector requires a reconciled launch receipt before attempting another
+carrier call. It observes once, then reads only streams whose exact end facts were present in that
+observation, under the original finite deadline and caller-held VM claim. The later observation's
+carrier dispatch is not reused as the historical launch dispatch: the result retains `UNKNOWN`. A
+launch receipt alone leaves application state unknown; only a validated `wait` fact gives exit or
+signal status. Each stream's admitted output, complete or truncated disposition, and positive
+`boundary-empty` remain separate. A zero exit cannot make the result successful without both
+requested streams, boundary emptiness and settled current collection custody. That boundary and
+custody govern the result's `owned_cleanup_confirmed` flag; neither settles an earlier
 `managed-start` obligation. The collector does not poll, stop, dispose, replay start, release its
-owner or establish production route freshness. Deadline expiry before a later stream read is
-admitted returns a partial deadline result with the already observed facts; an interrupted attempt
-that acquired custody instead preserves the original exception with aggregate attempt facts.
+owner or establish production route freshness. A distinct pre-borrow deadline refusal before a later
+stream read returns a partial deadline result with the already observed facts; unrelated validation
+refusal is never relabeled as a deadline. An interrupted attempt that acquired custody instead
+preserves the original exception with aggregate attempt facts.
+
+The private bounded wait repeatedly invokes that collector only while its last observation is
+complete, valid and settled, the carrier has no failure, and missing run/stream/boundary facts may
+still progress. Every poll uses the original finite deadline and caller-held exact VM owner. It does
+not retry a launch, an ambiguous observation, refused output, truncation, or a terminal nonzero
+workload. Expiry between polls returns the latest partial evidence with a deadline flag; it never
+claims termination or clears an earlier start obligation. This is a private lifecycle step, not
+public `JobAccess`, production routing, recovery takeover or native carrier acceptance.
 
 At the first production later-action caller, bind route freshness at the borrowed fixed helper's
 actual carrier boundary. An optional internal check supplied by that caller runs after the exact
