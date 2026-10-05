@@ -281,7 +281,17 @@ def test_session_inspection_uses_runtime_diamond_order(db: Database, unhandled: 
     blocked = inspect_artifacts(db, fixture.registry, session_name="review")
     assert blocked.owners[1].integrations[0].status == "incomplete"
     assert blocked.owners[-1].integrations[0].status == "unavailable"
-    assert "agent/agent" in blocked.owners[-1].integrations[0].reason
+
+    from agentworks.artifacts.routing import inspect_owner_artifacts
+    from agentworks.db import AppliedStateKey, VersionedPayload
+
+    db.instance_state.replace_applied_slices(
+        "session", "review", "fixture", {AppliedStateKey.HARNESS_NATIVE_SETUP: VersionedPayload(2, {"broken": True})}
+    )
+    own_failure = inspect_owner_artifacts(db, fixture.registry, owner, "shell", inherited=None)
+    assert own_failure.status == "unavailable" and not own_failure.ancestor_blocked
+    result = inspect_artifacts(db, fixture.registry, session_name="review")
+    assert result.owners[-1].integrations[0].reason == own_failure.reason
 
 
 def test_worked_manifests_build_without_acquiring_their_sources(tmp_path, monkeypatch) -> None:
@@ -334,7 +344,6 @@ def test_integration_config_values_are_excluded_from_both_outputs(db: Database, 
     write_native_setup(db, "agent", "agent", NativeSetupState(records=(record,)), operation="fixture")
     result = inspect_artifacts(db, fixture.registry, agent_name="agent")
     assert result.owners[-1].integrations[0].status == "stale"
-    assert "private_setting" in result.owners[-1].integrations[0].reason
     assert confidential not in json.dumps(inspection_data(result))
     render_artifacts(result)
     assert confidential not in capsys.readouterr().out

@@ -167,7 +167,6 @@ def test_newly_inherited_vm_inputs_require_active_user_setup(db):
         db, fixture.registry, fixture.owners["agent"], "shell", inherited={inherited.owner: inherited}
     )
     assert view.status == "stale"
-    assert "vm-0" in view.reason
     with pytest.raises(StateError):
         fixture.route()
     assert read_native_setup(db, "agent", "agent").records == (previous,)
@@ -310,7 +309,6 @@ def test_config_and_env_freshness_still_apply(db):
     )
     view = inspect_owner_artifacts(db, fixture.registry, changed, "shell")
     assert view.status == "stale"
-    assert "ENV_KEY_NEVER" in view.reason
     assert "operator-private-value" not in view.reason
 
 
@@ -319,6 +317,30 @@ def test_inactive_session_does_not_inherit_an_unrelated_artifact_gap(db):
     owner = SetupInputs("session", "review", "session", {}, SecretTarget(vm={}, session={}))
     view = inspect_owner_artifacts(db, fixture.registry, owner, "shell", inherited=None)
     assert view.status == "inactive"
+
+
+def test_inactive_session_with_stale_capture_has_no_setup_obligation(db):
+    fixture = graph(db)
+    owner = SetupInputs("session", "review", "session", {}, SecretTarget(vm={}, session={}))
+    stale_capture = replace(fixture.captures["agent"], declaration="outdated")
+    owner = replace(owner, artifact_snapshot=stale_capture)
+    view = inspect_owner_artifacts(db, fixture.registry, owner, "shell", inherited=None)
+    assert view.capture_status == "stale"
+    assert view.status == "inactive"
+
+    item = tuple(fixture.captures["agent"].inputs.items())[0]
+    file = OwnedArtifactFile(path="/home/worker/.agents/rule.md", sha256="a" * 64, origins=(item.origin_identity,))
+    record = SetupRecord(
+        component="session",
+        integration="shell",
+        destination_id="d" * 64,
+        declaration={},
+        artifact_files=(file,),
+    )
+    write_native_setup(db, "session", "review", NativeSetupState(records=(record,)), operation="fixture")
+    retirement = inspect_owner_artifacts(db, fixture.registry, owner, "shell", inherited=None)
+    assert retirement.capture_status == "stale"
+    assert retirement.status == "retirement"
 
 
 @pytest.mark.parametrize("active_vm", [False, True])

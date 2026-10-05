@@ -36,6 +36,7 @@ class ArtifactOwnerView:
     reason: str = ""
     record: SetupRecord | None = None
     prepared: ArtifactInputs | None = None
+    ancestor_blocked: bool = False
 
 
 @dataclass(frozen=True)
@@ -85,8 +86,6 @@ def inspect_owner_artifacts(
             return ArtifactOwnerView(
                 inputs, captured, capture_status, "unavailable", "The owner's integration state is unavailable."
             )
-    if capture_status != "current":
-        return ArtifactOwnerView(inputs, captured, capture_status, capture_status, reason, record)
     block = inputs.activations.get(integration_name) if integration_name is not None else None
     if inputs.component == "session" and integration_name is not None and block is None:
         if record is not None and record.artifact_files:
@@ -99,6 +98,8 @@ def inspect_owner_artifacts(
                 record,
             )
         return ArtifactOwnerView(inputs, captured, capture_status, "inactive", record=record)
+    if capture_status != "current":
+        return ArtifactOwnerView(inputs, captured, capture_status, capture_status, reason, record)
     if inherited is None:
         return ArtifactOwnerView(
             inputs,
@@ -107,6 +108,7 @@ def inspect_owner_artifacts(
             "unavailable",
             "An ancestor's artifact routing result is unavailable.",
             record,
+            ancestor_blocked=True,
         )
     local = captured.inputs if captured is not None else None
     prepared = ArtifactInputs(local=local, deferred=inherited)

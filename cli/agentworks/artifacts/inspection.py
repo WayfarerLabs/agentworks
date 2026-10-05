@@ -270,7 +270,7 @@ def inspect_artifacts(
                     blocker = next((view for view in ancestors if view.status not in ("current", "inactive")), None)
                     inherited = session_inherited_inputs(*ancestors)
                 view = inspect_owner_artifacts(db, registry, owner, name, inherited=inherited)
-                if owner.component == "session" and view.status == "unavailable" and blocker is not None:
+                if view.ancestor_blocked and blocker is not None:
                     source = blocker.owner
                     view = replace(
                         view,
