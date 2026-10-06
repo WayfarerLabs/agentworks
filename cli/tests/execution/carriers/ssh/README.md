@@ -140,6 +140,18 @@ The signal case confines real repeated SIGINT to an owned subprocess. It holds c
 interrupts the main thread while waiting, and proves the caller waits for worker completion,
 restoration and shared-owner settlement while preserving the first control exception. Synthetic
 cases separately cover interrupted worker start and process admission, and restoration uncertainty.
+Acquisition composition cases fail after the raw-mode effect, then independently fail restoration or
+owned descriptor closure. They prove ordinary observation failure or preserved control identity with
+safe cleanup evidence, and repair and verify the owned fixtures after removing fault injections.
+Native primitive cases preserve the prior cause and context; public relay cases suppress raw cleanup
+chains. Clean acquisition rollback and pre-effect refusal retain their distinct failure categories.
+
+Linux post-exit cases hold inherited stdout/stderr writers while the two borrowed sinks stall in
+turn. They prove pending bytes survive those stalls, collection remains bounded after client exit,
+and both a held writer and a continuous writer produce incomplete output evidence. A disposable
+subprocess adopts and explicitly kills/reaps its synthetic descendant, closes its own PTYs and
+independently checks client reaping and borrowed mode restoration. These cases add no macOS proof.
+
 Supply an explicit temporary root in the developer or review worktree for these runs. An owning
 process/job timeout bounds fixture hangs; thread status after interrupted join is not a completion
 fact. Native macOS/Windows, real SSH terminal delivery and emulator sanitation require separate
