@@ -85,9 +85,10 @@ Native paired SSH throughput and heap/retention evidence remain open.
 
 The lead's separate shared native-stdin candidate at `7059b8a83` passes 104 adjacent process tests
 with one skip, the full local non-integration suite (14,226 passed, 50 skipped), strict mypy (1,198
-sources), Ruff/format and file/SDD/Rulesync/website gates. Independent review and actual SSH/Windows
-terminal proof remain pending; those local gates neither publish the contract nor complete terminal
-delivery. The hardened-guest bootstrap is a separate private prototype with explicit root entry and
+sources), Ruff/format and file/SDD/Rulesync/website gates. All three independent private review lanes
+clear that exact candidate. Actual SSH/Windows terminal proof remains pending; those local gates
+neither publish the contract nor complete terminal delivery. The hardened-guest bootstrap is a
+separate private prototype with explicit root entry and
 exact target credentials, not a completed body fence or permission-policy surface. No production
 consumer uses that entry yet and no database data has been deleted.
 
