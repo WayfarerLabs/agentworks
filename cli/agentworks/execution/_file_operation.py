@@ -146,6 +146,15 @@ class _PendingDownloadSetup:
     operation: BorrowedFixedHelperCarrier
 
 
+@dataclass(slots=True, repr=False)
+class _LocalDownloadCall:
+    """The one public local download's serial borrow and finalization custody."""
+
+    borrow: OperationBorrow
+    remote_requires_owner_retention: bool = False
+    finalization_failed: bool = False
+
+
 type _ActiveFileDownload = _ActiveFileCall[
     FileDownloadBinding, _PreparedDownload | _PendingDownloadSetup, FileDownloadOutcome
 ]
@@ -258,6 +267,7 @@ class FileOperation:
         self._active_downloads: dict[int, _ActiveFileDownload] = {}
         self._unfinished_downloads: list[UnfinishedFileDownload] = []
         self._unfinished_local_download: LocalDownloadStage | None = None
+        self._local_download_call: _LocalDownloadCall | None = None
         self._active_uploads: dict[int, _ActiveFileUpload] = {}
         self._unfinished_uploads: list[UnfinishedFileUpload] = []
         self._active_package_uploads: dict[int, _ActiveFileUpload] = {}
@@ -279,9 +289,34 @@ class FileOperation:
         return tuple(self._unfinished_downloads)
 
     @property
-    def unfinished_local_download(self) -> LocalDownloadStage | None:
+    def retained_local_download_stage(self) -> LocalDownloadStage | None:
         """The one workstation stage still held by this in-memory operation."""
         return self._unfinished_local_download
+
+    def begin_local_download(self) -> _LocalDownloadCall:
+        """Acquire whole-call serial admission before workstation effects."""
+        borrow = self._owner.borrow()
+        try:
+            call = _LocalDownloadCall(borrow)
+        except BaseException:
+            borrow.close()
+            raise
+        self._local_download_call = call
+        return call
+
+    def finish_local_download(self, call: _LocalDownloadCall) -> None:
+        """Release only after local custody and public reduction have settled."""
+        if self._local_download_call is not call:
+            raise StateError("Local download call is not active")
+        if any(active.borrow is call.borrow for active in self._active_downloads.values()):
+            call.finalization_failed = True
+            raise StateError("Local download remote custody is still active")
+        try:
+            release_borrow_after_custody(call.borrow, retain_effect=call.remote_requires_owner_retention)
+        except BaseException:
+            call.finalization_failed = True
+            raise
+        self._local_download_call = None
 
     def retain_local_download_stage(self, stage: LocalDownloadStage) -> None:
         """Keep local cleanup custody separate from persisted remote obligations."""
@@ -289,8 +324,10 @@ class FileOperation:
             raise StateError("A local download stage already requires cleanup")
         self._unfinished_local_download = stage
 
-    def retry_local_download_cleanup(self) -> bool:
+    def retry_local_download_cleanup(self, call: _LocalDownloadCall) -> bool:
         """Retry exact known cleanup before another local download is admitted."""
+        if self._local_download_call is not call:
+            raise StateError("Local download cleanup requires its active serial borrow")
         stage = self._unfinished_local_download
         if stage is None:
             return True
@@ -356,8 +393,11 @@ class FileOperation:
         runtime_selection: RuntimeSelection,
         effect_gate: FileEffectGateBinding | None = None,
         gate_setup: FileEffectGateSetup | None = None,
+        local_call: _LocalDownloadCall | None = None,
     ) -> FileDownloadOutcome:
         """Run and capture one concrete download under a whole-call borrow."""
+        if local_call is not None and (self._local_download_call is not local_call or gate_setup is not None):
+            raise StateError("Local download requires its active serial borrow")
         if gate_setup is not None:
             return self._download_with_gate_setup(
                 carrier,
@@ -375,7 +415,7 @@ class FileOperation:
             self._target.kind is not ManagedTargetKind.VM or effect_gate.scope_name != self._target.name
         ):
             raise ValidationError("Download effect gate must match the managed target")
-        borrow = self._owner.borrow()
+        borrow = self._owner.borrow() if local_call is None else local_call.borrow
         try:
             prepared = _prepare_download(
                 carrier,
@@ -394,17 +434,19 @@ class FileOperation:
                 carrier, prepared.binding, borrow, prepared, admission.obligation_id
             )
         except BaseException:
-            borrow.close()
+            if local_call is None:
+                borrow.close()
             raise
 
         try:
             self._active_downloads[id(active)] = active
         except BaseException:
-            borrow.close()
+            if local_call is None:
+                borrow.close()
             raise
-        self._install(active, admission, self._active_downloads)
+        self._install(active, admission, self._active_downloads, close_borrow_on_refusal=local_call is None)
 
-        return self._run_prepared_download(active, prepared)
+        return self._run_prepared_download(active, prepared, local_call=local_call)
 
     def _download_with_gate_setup(
         self,
@@ -495,7 +537,9 @@ class FileOperation:
         active.prepared = prepared
         return self._run_prepared_download(active, prepared)
 
-    def _run_prepared_download(self, active: _ActiveFileDownload, prepared: _PreparedDownload) -> FileDownloadOutcome:
+    def _run_prepared_download(
+        self, active: _ActiveFileDownload, prepared: _PreparedDownload, *, local_call: _LocalDownloadCall | None = None
+    ) -> FileDownloadOutcome:
         """Complete one already attached download through the shared custody path."""
         try:
             outcome = prepared.run()
@@ -503,11 +547,11 @@ class FileOperation:
             fact = control.__cause__
             if isinstance(fact, FileDownloadControlFact):
                 try:
-                    self._capture(active, fact.outcome)
+                    self._capture(active, fact.outcome, local_call=local_call)
                 except BaseException:
                     raise control from fact
             raise
-        self._capture(active, outcome)
+        self._capture(active, outcome, local_call=local_call)
         return outcome
 
     def upload(
@@ -1313,6 +1357,8 @@ class FileOperation:
         active: _ActiveFileCall[BindingT, PreparedT, OutcomeT],
         admission: _FileCallAdmission,
         active_records: dict[int, _ActiveFileCall[BindingT, PreparedT, OutcomeT]],
+        *,
+        close_borrow_on_refusal: bool = True,
     ) -> None:
         try:
             active.obligation = active.borrow.install_dispatch_obligation(
@@ -1322,7 +1368,8 @@ class FileOperation:
                 payload=admission.payload,
             )
         except _PreRegistrationClosingRefusal:
-            active.borrow.close()
+            if close_borrow_on_refusal:
+                active.borrow.close()
             active_records.pop(id(active))
             raise
 
@@ -1481,7 +1528,9 @@ class FileOperation:
             )
         release_borrow_after_custody(active.borrow, retain_effect=outcome.requires_owner_retention)
 
-    def _capture(self, active: _ActiveFileDownload, outcome: FileDownloadOutcome) -> None:
+    def _capture(
+        self, active: _ActiveFileDownload, outcome: FileDownloadOutcome, *, local_call: _LocalDownloadCall | None = None
+    ) -> None:
         active.outcome = outcome
         prepared = active.prepared
         assert isinstance(prepared, _PreparedDownload)
@@ -1505,7 +1554,10 @@ class FileOperation:
                 ),
             )
             self._retain_unfinished(UnfinishedFileDownload(active.carrier, active.binding, outcome))
-        release_borrow_after_custody(active.borrow, retain_effect=outcome.requires_owner_retention)
+        if local_call is None:
+            release_borrow_after_custody(active.borrow, retain_effect=outcome.requires_owner_retention)
+        else:
+            local_call.remote_requires_owner_retention = outcome.requires_owner_retention
         self._active_downloads.pop(id(active))
 
     def _retain_unfinished(self, download: UnfinishedFileDownload) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, cast
 
@@ -16,6 +17,7 @@ from ._file_local_download import FileLocalDownloadControlFact, FileLocalDownloa
 from ._file_operation import FileOperation
 from ._file_paths import normalized_relative_path, normalized_root
 from ._file_result import (
+    _raise_reason,
     reduce_file_inventory,
     reduce_file_metadata,
     reduce_file_remove,
@@ -32,11 +34,14 @@ from ._json import serialize_json_source, validate_json_object
 from ._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from .carrier import Deadline
 from .files import (
+    Change,
     Create,
     DirectoryEntry,
     DirectoryLimit,
+    FileFailureReason,
     FileKind,
     FileMetadata,
+    FileOperationPhase,
     JsonObject,
     JsonStrategy,
     MutationResult,
@@ -354,69 +359,91 @@ class FileAccess:
         if max_bytes is not None and (type(max_bytes) is not int or not 0 < max_bytes <= _MAX_DOWNLOAD_SIZE):
             raise ValidationError("File download requires a positive representable byte bound")
         root, leaf, plan, deadline = self._request(path, sudo)
-        if self._operation.unfinished_local_download is not None:
-            try:
-                cleaned = self._operation.retry_local_download_cleanup()
-            except BaseException as control:
-                stage = self._operation.unfinished_local_download
-                assert stage is not None
-                raise control from FileLocalDownloadControlFact(
-                    FileLocalDownloadOutcome(
-                        None,
-                        published=stage.published,
-                        publication_uncertain=stage.publication_uncertain,
-                        cleanup_uncertain=stage.cleanup_uncertain,
-                        cleanup_failed=True,
-                        unfinished_stage=stage,
-                    )
-                )
+        if deadline.expired:
+            return reduce_file_local_download(
+                FileLocalDownloadOutcome(None, deadline_exceeded=True),
+                entity_kind=self._entity_kind,
+                entity_name=self._entity_name,
+            )
+        call = self._operation.begin_local_download()
+        outcome: FileLocalDownloadOutcome | None = None
+        try:
+            stage = self._operation.retained_local_download_stage
+            cleaned = True
+            if stage is not None:
+                try:
+                    cleaned = self._operation.retry_local_download_cleanup(call)
+                except BaseException as control:
+                    raise control from FileLocalDownloadControlFact(self._retained_local_outcome())
             if not cleaned:
-                stage = self._operation.unfinished_local_download
-                assert stage is not None
-                reduce_file_local_download(
-                    FileLocalDownloadOutcome(
-                        None,
-                        published=stage.published,
-                        publication_uncertain=stage.publication_uncertain,
-                        cleanup_uncertain=stage.cleanup_uncertain,
-                        cleanup_failed=True,
-                        unfinished_stage=stage,
-                    ),
+                outcome = self._retained_local_outcome()
+                result = reduce_file_local_download(
+                    outcome,
                     entity_kind=self._entity_kind,
                     entity_name=self._entity_name,
                 )
+            else:
+                try:
+                    outcome = download_to_local_file(
+                        self._carrier,
+                        trusted_root_path=root,
+                        relative_path=leaf,
+                        destination=destination,
+                        max_bytes=_MAX_DOWNLOAD_SIZE if max_bytes is None else max_bytes,
+                        plan=plan,
+                        deadline=deadline,
+                        runtime_selection=self._runtime_selection,
+                        operation=self._operation,
+                        condition=local_condition,
+                        local_call=call,
+                    )
+                except BaseException as control:
+                    fact = control.__cause__
+                    if not isinstance(fact, FileLocalDownloadControlFact):
+                        raise
+                    outcome = fact.outcome
+                    if not isinstance(control, Exception):
+                        raise
+                    result = reduce_file_local_download(
+                        outcome,
+                        entity_kind=self._entity_kind,
+                        entity_name=self._entity_name,
+                        failure=control,
+                    )
+                else:
+                    result = reduce_file_local_download(
+                        outcome, entity_kind=self._entity_kind, entity_name=self._entity_name
+                    )
+        except BaseException:
+            # Core keeps the call and its borrow on failed finalization.
+            with suppress(BaseException):
+                self._operation.finish_local_download(call)
+            raise
         try:
-            outcome = download_to_local_file(
-                self._carrier,
-                trusted_root_path=root,
-                relative_path=leaf,
-                destination=destination,
-                max_bytes=_MAX_DOWNLOAD_SIZE if max_bytes is None else max_bytes,
-                plan=plan,
-                deadline=deadline,
-                runtime_selection=self._runtime_selection,
-                operation=self._operation,
-                condition=local_condition,
-            )
-        except BaseException as control:
-            fact = control.__cause__
-            if not isinstance(fact, FileLocalDownloadControlFact):
-                raise
-            self._retain_local_download(fact.outcome)
-            if not isinstance(control, Exception):
-                raise
-            return reduce_file_local_download(
-                fact.outcome,
+            self._operation.finish_local_download(call)
+        except Exception:
+            _raise_reason(
+                FileOperationPhase.CLEANUP,
+                FileFailureReason.COORDINATION,
                 entity_kind=self._entity_kind,
                 entity_name=self._entity_name,
-                failure=control,
+                effect=Change.CHANGED if outcome is not None and outcome.published else None,
             )
-        self._retain_local_download(outcome)
-        return reduce_file_local_download(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
+        except BaseException as control:
+            raise control from FileLocalDownloadControlFact(outcome or FileLocalDownloadOutcome(None))
+        return result
 
-    def _retain_local_download(self, outcome: FileLocalDownloadOutcome) -> None:
-        if outcome.unfinished_stage is not None:
-            self._operation.retain_local_download_stage(outcome.unfinished_stage)
+    def _retained_local_outcome(self) -> FileLocalDownloadOutcome:
+        stage = self._operation.retained_local_download_stage
+        assert stage is not None
+        return FileLocalDownloadOutcome(
+            None,
+            published=stage.published,
+            publication_uncertain=stage.publication_uncertain,
+            cleanup_uncertain=stage.cleanup_uncertain,
+            cleanup_failed=True,
+            unfinished_stage=stage,
+        )
 
     def update_json(
         self,

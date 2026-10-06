@@ -22,7 +22,7 @@ _CREATE = Create()
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from agentworks.execution._file_operation import FileOperation
+    from agentworks.execution._file_operation import FileOperation, _LocalDownloadCall
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution._runtime_prerequisite import RuntimeSelection
     from agentworks.execution.carrier import Carrier, Deadline
@@ -75,6 +75,7 @@ def download_to_local_file(
     runtime_selection: RuntimeSelection,
     operation: FileOperation,
     condition: Create | Replace = _CREATE,
+    local_call: _LocalDownloadCall | None = None,
 ) -> FileLocalDownloadOutcome:
     """Stage one download and publish only after remote cleanup and verification.
 
@@ -103,6 +104,7 @@ def download_to_local_file(
                 plan=plan,
                 deadline=deadline,
                 runtime_selection=runtime_selection,
+                local_call=local_call,
             )
             if _ready_to_publish(download, deadline):
                 revision = download.source_revision

@@ -12,21 +12,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.db import Database, OperationResourceKind, OperationScope
-from agentworks.errors import ConflictError, ExternalError, StateError, UncertainOutcomeError, ValidationError
-from agentworks.execution import access as access_module
-from agentworks.execution._file_local_download import (
-    FileLocalDownloadControlFact,
-    FileLocalDownloadOutcome,
-    download_to_local_file,
-)
+from agentworks.errors import ExternalError, StateError, ValidationError
 from agentworks.execution._file_operation import FileOperation
-from agentworks.execution._file_result_transfer import reduce_file_local_download
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
-from agentworks.execution._local_download_stage import (
-    LocalDownloadCleanupUncertainError,
-    LocalDownloadUnsupportedError,
-)
 from agentworks.execution.access import FileAccess
 from agentworks.execution.carrier import (
     CarrierIO,
@@ -41,17 +30,16 @@ from agentworks.execution.files import (
     Change,
     Create,
     DirectoryLimit,
-    FileFailureReason,
     FileKind,
-    FileOperationPhase,
     JsonStrategy,
     Match,
     NewMetadata,
     Replace,
 )
 from agentworks.operations import OperationOwner
+from tests.execution.files._file_access_support import bound_access as bound_access
+from tests.execution.files._file_access_support import plan as plan
 from tests.execution.files._file_read_support import LocalCarrier
-from tests.execution.files._file_snapshot_support import install_fixture_bundle
 from tests.execution.files._runtime_support import runtime_selection
 from tests.execution.files._target_support import target_for_owner
 
@@ -246,216 +234,11 @@ class DescriptorUploadSource:
 
 
 @pytest.fixture
-def plan() -> IdentityPlan:
-    gid = os.getegid()
-    groups = tuple(sorted(set(os.getgroups()) | {gid}))
-    return IdentityPlan(IdentityExpectation(os.geteuid(), gid, groups), IdentityMode.DIRECT)
-
-
-@pytest.fixture
 def metadata() -> NewMetadata:
     import grp
     import pwd
 
     return NewMetadata(pwd.getpwuid(os.geteuid()).pw_name, grp.getgrgid(os.getegid()).gr_name, 0o640)
-
-
-@pytest.fixture
-def bound_access(tmp_path: Path, plan: IdentityPlan, monkeypatch: pytest.MonkeyPatch):
-    root = tmp_path / "approved"
-    root.mkdir()
-    scratch = tmp_path / "scratch"
-    scratch.mkdir()
-    scratch.chmod(0o1777)
-    install_fixture_bundle(monkeypatch, scratch)
-    database = Database(tmp_path / "state.db")
-    owner = OperationOwner.acquire(
-        database.operations,
-        OperationScope(OperationResourceKind.VM, "file-access-vm"),
-        "file-access",
-    )
-    access = FileAccess(
-        FileOperation(owner, target_for_owner(owner)),
-        LocalCarrier(),
-        trusted_root=PurePosixPath(root),
-        runtime_selection=runtime_selection(sys.executable),
-        ordinary_plan=plan,
-        elevated_plan=plan,
-        entity_kind="file",
-        entity_name="configuration",
-        deadline=lambda: Deadline.after(30),
-    )
-    try:
-        yield access, root, owner, database
-    finally:
-        database.close()
-
-
-def test_download_publishes_held_snapshot_and_reports_source_metadata(
-    bound_access: tuple[FileAccess, Path, OperationOwner, Database], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    access, root, _owner, _database = bound_access
-    source = root / "source"
-    source.write_bytes(b"payload")
-    destination = root.parent / "local-download"
-    observed_bounds: list[int] = []
-    original = download_to_local_file
-
-    def recording_download(*args: object, **kwargs: object):
-        observed_bounds.append(kwargs["max_bytes"])  # type: ignore[arg-type]
-        return original(*args, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(access_module, "download_to_local_file", recording_download)
-    metadata = access.download(PurePosixPath(source), destination)
-    assert observed_bounds == [(1 << 63) - 1]
-    assert metadata.size == 7
-    assert destination.read_bytes() == b"payload"
-    with pytest.raises(ConflictError) as existing:
-        access.download(PurePosixPath(source), destination)
-    assert existing.value.details is not None
-    assert existing.value.details.reason is FileFailureReason.CONFLICT
-    assert destination.read_bytes() == b"payload"
-    source.write_bytes(b"updated")
-    replaced = access.download(PurePosixPath(source), destination, local_condition=Replace())
-    assert replaced.size == 7
-    assert destination.read_bytes() == b"updated"
-    with pytest.raises(StateError) as absent:
-        access.download(PurePosixPath(root / "absent"), root.parent / "absent-local")
-    assert absent.value.details is not None
-    assert absent.value.details.reason is FileFailureReason.NOT_FOUND
-    assert not (root.parent / "absent-local").exists()
-
-
-def test_download_retains_failed_local_cleanup_and_retries_before_next_stage(
-    bound_access: tuple[FileAccess, Path, OperationOwner, Database], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    access, root, _owner, _database = bound_access
-    source = root / "source"
-    source.write_bytes(b"payload")
-    destination = root.parent / "local-download"
-
-    class Stage:
-        published = False
-        publication_uncertain = False
-        cleanup_uncertain = False
-
-        def __init__(self) -> None:
-            self.aborts = 0
-
-        def abort(self) -> None:
-            self.aborts += 1
-            if self.aborts == 1:
-                raise OSError("private local pathname")
-
-        def try_write(self, data: memoryview) -> int:
-            return len(data)
-
-        def commit(self, *, verified_complete: bool, size: int, sha256: str, deadline: Deadline | None = None) -> None:
-            del verified_complete, size, sha256, deadline
-
-    stage = Stage()
-    original = download_to_local_file
-    calls = 0
-
-    def first_fails(*args: object, **kwargs: object):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            return FileLocalDownloadOutcome(None, cleanup_failed=True, unfinished_stage=stage)
-        return original(*args, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(access_module, "download_to_local_file", first_fails)
-    with pytest.raises(ExternalError) as failed:
-        access.download(PurePosixPath(source), destination)
-    assert failed.value.details is not None
-    assert failed.value.details.reason is FileFailureReason.CLEANUP
-    assert access._operation.unfinished_local_download is stage
-    assert calls == 1 and stage.aborts == 0
-    with pytest.raises(ExternalError):
-        access.download(PurePosixPath(source), destination)
-    assert access._operation.unfinished_local_download is stage
-    assert calls == 1 and stage.aborts == 1
-    metadata = access.download(PurePosixPath(source), destination)
-    assert metadata.size == 7 and destination.read_bytes() == b"payload"
-    assert stage.aborts == 2 and calls == 2
-    assert access._operation.unfinished_local_download is None
-
-
-def test_download_preserves_interrupt_and_attached_local_custody(
-    bound_access: tuple[FileAccess, Path, OperationOwner, Database], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    access, root, _owner, _database = bound_access
-    source = root / "source"
-    source.write_bytes(b"payload")
-
-    class Stage:
-        published = False
-        publication_uncertain = False
-        cleanup_uncertain = True
-
-        def __init__(self) -> None:
-            self.known_cleanup_done = False
-            self.aborts = 0
-
-        def abort(self) -> None:
-            self.aborts += 1
-            self.known_cleanup_done = True
-            raise LocalDownloadCleanupUncertainError("ambiguous close remains")
-
-        def try_write(self, data: memoryview) -> int:
-            return len(data)
-
-        def commit(self, *, verified_complete: bool, size: int, sha256: str, deadline: Deadline | None = None) -> None:
-            del verified_complete, size, sha256, deadline
-
-    stage = Stage()
-    facts = FileLocalDownloadOutcome(None, cleanup_uncertain=True, cleanup_failed=True, unfinished_stage=stage)
-    interrupt = KeyboardInterrupt()
-
-    def interrupted(*args: object, **kwargs: object):
-        raise interrupt from FileLocalDownloadControlFact(facts)
-
-    monkeypatch.setattr(access_module, "download_to_local_file", interrupted)
-    with pytest.raises(KeyboardInterrupt) as stopped:
-        access.download(PurePosixPath(source), root.parent / "local-download")
-    assert stopped.value is interrupt
-    assert isinstance(stopped.value.__cause__, FileLocalDownloadControlFact)
-    assert stopped.value.__cause__.outcome is facts
-    assert access._operation.unfinished_local_download is stage
-    with pytest.raises(ExternalError):
-        access.download(PurePosixPath(source), root.parent / "second-download")
-    assert stage.known_cleanup_done and stage.aborts == 1
-    assert access._operation.unfinished_local_download is stage
-
-
-def test_download_reduces_local_failures_without_path_details(
-    bound_access: tuple[FileAccess, Path, OperationOwner, Database], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    access, root, _owner, _database = bound_access
-    source = PurePosixPath(root / "source")
-    private_path = str(root.parent / "private-destination")
-
-    def refused(*args: object, **kwargs: object):
-        raise LocalDownloadUnsupportedError(private_path) from FileLocalDownloadControlFact(
-            FileLocalDownloadOutcome(None)
-        )
-
-    monkeypatch.setattr(access_module, "download_to_local_file", refused)
-    with pytest.raises(StateError) as raised:
-        access.download(source, root.parent / "destination")
-    assert raised.value.details is not None
-    assert raised.value.details.phase is FileOperationPhase.PUBLICATION
-    assert raised.value.details.reason is FileFailureReason.UNSUPPORTED
-    assert private_path not in str(raised.value)
-
-    with pytest.raises(UncertainOutcomeError) as uncertain:
-        reduce_file_local_download(
-            FileLocalDownloadOutcome(None, publication_uncertain=True),
-            entity_kind="file",
-            entity_name="configuration",
-        )
-    assert uncertain.value.details is not None
-    assert uncertain.value.details.phase is FileOperationPhase.PUBLICATION
 
 
 def test_real_bound_methods_preserve_exact_public_values(

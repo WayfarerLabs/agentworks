@@ -106,8 +106,9 @@ class _FakeOperation:
         plan: IdentityPlan,
         deadline: Deadline,
         runtime_selection: RuntimeSelection,
+        local_call: object | None = None,
     ) -> FileDownloadOutcome:
-        del carrier, trusted_root_path, relative_path, max_bytes, plan, runtime_selection
+        del carrier, trusted_root_path, relative_path, max_bytes, plan, runtime_selection, local_call
         self.calls += 1
         self.deadline = deadline
         if self.outcome.status is not FileDownloadStatus.ABSENT:
@@ -717,7 +718,7 @@ def test_local_stage_is_retained_before_final_outcome_allocation(
                 runtime_selection=_RUNTIME,
                 operation=operation,
             )
-        assert operation.unfinished_local_download is stage
+        assert operation.retained_local_download_stage is stage
         assert stage.aborts == (0 if construction_failure else 1)
     finally:
         database.close()
