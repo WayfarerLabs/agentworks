@@ -805,6 +805,22 @@ registration; this remains a production-factory independence gate, not waived by
 Whole-unit private reviews and final lead gates remain pending. Native PVE behavior, startup,
 provider freshness, account-probe guest fencing and complete availability/RunContext remain open.
 
+The first review pass at `dbf833f96` clears project and generic correctness, with 347 and 169
+focused/adjacent cases respectively. Complexity's baseline, deletion and restored selections each
+pass 115 cases; removing account observations fails four custody regressions. The lead accepts its
+ten-line deletion of redundant concrete Proxmox producer revalidation. Project review also confirms
+an existing adjacent guest-preparation defect: a borrow-release error could replace the original
+locator control. The new composition uses that seam, so the lead includes the bounded correction
+under the existing primary-control contract rather than expanding recovery semantics.
+
+Worker correction `6104ace26` preserves original control plus conservative guest facts across SQLite
+release failures before/after commit and removes the redundant checks. Its focused
+Proxmox/preparation/identity/WSL selection passes 235 cases, with owned typing/style and whitespace
+checks passing. The lead's pre-correction full suite passes 15,341 cases with 49 skips and 27
+existing fork warnings; complete static, file, Rulesync and website gates pass. Those baseline
+results do not accept the corrected source. Corrected whole-unit private reviews and complete lead
+gates remain pending. No public round, native gate or broader checklist is closed by this record.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
