@@ -461,6 +461,140 @@ def test_prepared_views_share_claim_and_clean_teardown(
         assert record.identity_plan.expected.euid == os.geteuid()
 
 
+@pytest.mark.parametrize("script", [False, True])
+def test_actual_native_bound_managed_start_and_normal_close(
+    database: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, script: bool
+) -> None:
+    from agentworks.execution._wsl2_binding import _build_wsl2_native_binding
+    from agentworks.execution.models import Lifetime, Script, Shell
+    from tests.execution.test_managed_execution_access import Delivery
+
+    platform = WSL2Platform("wsl2", {})
+    route, native, observer = _install_route(database, platform, monkeypatch)
+    binding = _build_wsl2_native_binding(
+        WSL2Connection("Ubuntu", "admin", "wsl.exe"), RuntimeSelection(RuntimeTargetOS.LINUX)
+    )
+    monkeypatch.setattr(platform, "resolve_native_execution_binding", lambda *args, **kwargs: binding)
+    managed = Delivery()
+    carriers = []
+
+    def execute(selected, invocation, *, io, deadline, custody):
+        try:
+            managed.selected(io)
+        except (AssertionError, AttributeError):
+            return route.execute(selected, invocation, io=io, deadline=deadline, custody=custody)
+        carriers.append(selected)
+        return managed.execute(invocation, io=io, deadline=deadline, custody=custody)
+
+    monkeypatch.setattr(WSL2Carrier, "execute", execute)
+    with native_vm_operation(
+        database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=_root(tmp_path)
+    ) as views:
+        invocation = Script("printf managed", Shell.SH) if script else Command(["/bin/true"])
+        reference = views.execution.start(invocation, profile=Protection.MANAGED, lifetime=Lifetime.OPERATION)
+        (run,) = views.execution_operation.managed_runs
+        assert reference.run_id == run.receipt.identity.run_id and run.acknowledged
+        actual_binding = views.execution_operation._native_binding
+        assert actual_binding is not None
+        binding = actual_binding
+        assert run._carrier is binding.carrier
+        assert run.keeper._carrier is not binding.carrier
+        assert isinstance(run.keeper._carrier, WSL2Carrier) and isinstance(binding.carrier, WSL2Carrier)
+        assert run.keeper._carrier.connection is binding.carrier.connection
+        assert database.operations.inspect(_scope()) is not None
+        assert not observer.events
+    assert database.operations.inspect(_scope()) is None
+    assert managed.start.calls == 1 and managed.stop.calls == managed.observe.calls == 1
+    assert observer.events == ["observe"] and native.events
+    assert any(carrier is binding.carrier for carrier in carriers)
+    assert any(carrier is run.keeper._carrier for carrier in carriers)
+
+
+def test_same_kind_foreign_hold_debt_prevents_owned_hold_release(
+    database: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentworks.execution._wsl2_platform_hold import OBLIGATION_KIND, PAYLOAD_VERSION
+
+    platform = WSL2Platform("wsl2", {})
+    _, _, observer = _install_route(database, platform, monkeypatch)
+    with (
+        pytest.raises(StateError) as raised,
+        native_vm_operation(
+            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=_root(tmp_path)
+        ) as views,
+    ):
+        (held_row,) = (
+            row for row in views.owner.list_lifecycle_obligations() if row.obligation_kind == OBLIGATION_KIND
+        )
+        foreign = views.owner.register_lifecycle_obligation(
+            OBLIGATION_KIND,
+            payload_version=PAYLOAD_VERSION,
+            payload=held_row.payload,
+        )
+        foreign.mark_possible_effect()
+    assert not observer.events
+    assert database.operations.inspect(_scope()) is not None
+    fact = raised.value.__cause__
+    assert isinstance(fact, NativeVMOperationControlFact)
+    foreign.resolve()
+    fact.retry_cleanup(Deadline.after(5))
+    assert observer.events == ["observe"] and database.operations.inspect(_scope()) is None
+
+
+@pytest.mark.parametrize("route", ["changed", "unconfirmed", "interrupted", "failed"])
+def test_managed_route_guard_retains_exact_start_debt_before_delivery(
+    database: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, route: str
+) -> None:
+    from agentworks.db import LifecycleObligationState
+    from agentworks.execution._execution_operation import ManagedExecutionControlFact
+    from agentworks.execution._wsl2_owned_operation import WSL2RouteRefusal
+    from agentworks.execution.models import Lifetime
+    from tests.execution.test_managed_execution_access import Delivery
+
+    platform = WSL2Platform("wsl2", {})
+    ordinary, _, observer = _install_route(database, platform, monkeypatch)
+    managed = Delivery()
+
+    def execute(selected, invocation, *, io, deadline, custody):
+        try:
+            managed.selected(io)
+        except (AssertionError, AttributeError):
+            return ordinary.execute(selected, invocation, io=io, deadline=deadline, custody=custody)
+        return managed.execute(invocation, io=io, deadline=deadline, custody=custody)
+
+    monkeypatch.setattr(WSL2Carrier, "execute", execute)
+    control = KeyboardInterrupt("route interrupted") if route == "interrupted" else RuntimeError("provider failed")
+    with (
+        pytest.raises(StateError),
+        native_vm_operation(
+            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=_root(tmp_path)
+        ) as views,
+    ):
+
+        def observe(*args, **kwargs):
+            if route in {"interrupted", "failed"}:
+                raise control
+            return ProviderLocator("wsl2:replacement") if route == "changed" else None
+
+        monkeypatch.setattr(platform, "observe_provider_locator", observe)
+        expected = type(control) if route in {"interrupted", "failed"} else WSL2RouteRefusal
+        with pytest.raises(expected) as caught:
+            views.execution.start(Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION)
+        if route in {"interrupted", "failed"}:
+            assert caught.value is control
+        assert isinstance(caught.value.__cause__, ManagedExecutionControlFact)
+        (run,) = views.execution_operation.managed_runs
+        assert run.reserved is not None and run.keeper.obligation is not None
+        assert not run.acknowledged and run.keeper._worker is None
+        assert any(
+            row.obligation_kind == "managed-start" and row.state is LifecycleObligationState.POSSIBLE_EFFECT
+            for row in views.owner.list_lifecycle_obligations()
+        )
+        assert managed.clock.calls == 1 and managed.start.calls == 0
+    assert not observer.events
+    assert database.operations.inspect(_scope()) is not None
+
+
 @pytest.mark.parametrize("uncertain_hold", [False, True])
 @pytest.mark.parametrize("missing_account", [False, True])
 def test_missing_root_plan_refuses_before_views_and_preserves_hold_custody(

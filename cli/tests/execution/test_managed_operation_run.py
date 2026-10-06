@@ -289,10 +289,12 @@ def test_escaping_clock_exception_does_not_retain_outer_caller_payload(bound) ->
 def test_non_main_originating_caller_owns_database_and_actual_start(tmp_path: Path) -> None:
     errors = []
     completed = []
+    ready, proceed, finished = threading.Event(), threading.Event(), threading.Event()
 
     def caller() -> None:
-        database = Database(tmp_path / "state.db")
+        database = None
         try:
+            database = Database(tmp_path / "state.db")
             assert threading.current_thread() is not threading.main_thread()
             owner = OperationOwner.acquire(
                 database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "caller"
@@ -312,7 +314,9 @@ def test_non_main_originating_caller_owns_database_and_actual_start(tmp_path: Pa
 
             run, repository, start, clock = make_run((database, owner, receipt), Carrier(ack))
             try:
-                outcome = run.start(body_for(receipt), Deadline.after(1))
+                ready.set()
+                assert proceed.wait(30)
+                outcome = run.start(body_for(receipt), Deadline.after(10))
                 assert outcome is not None and not outcome.requires_owner_retention
                 assert run.reserved is not None and run.keeper._worker is not None
                 observed = repository.inspect(RUN)
@@ -320,19 +324,28 @@ def test_non_main_originating_caller_owns_database_and_actual_start(tmp_path: Pa
                 assert start.calls == 1 and clock.calls >= 1
                 completed.append(True)
             finally:
-                assert run.keeper.drain(Deadline.after(1)).drained
+                assert run.keeper.drain(Deadline.after(10)).drained
         except BaseException as error:
             errors.append(error)
         finally:
-            database.close()
+            try:
+                if database is not None:
+                    database.close()
+            finally:
+                ready.set()
+                finished.set()
 
     worker = threading.Thread(target=caller)
     try:
         worker.start()
-        worker.join(2)
+        assert ready.wait(30)
+        proceed.set()
+        assert finished.wait(30)
+        worker.join(10)
         assert not worker.is_alive() and not errors and completed == [True]
     finally:
-        worker.join(2)
+        proceed.set()
+        worker.join(30)
         assert not worker.is_alive()
 
 

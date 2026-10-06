@@ -24,6 +24,21 @@ class Lifetime(Enum):
     INDEPENDENT = "independent"
 
 
+@dataclass(frozen=True, slots=True)
+class JobRef:
+    """Credential-free reference to one exact persisted managed run."""
+
+    run_id: str
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.run_id) is not str
+            or len(self.run_id) != 32
+            or any(character not in "0123456789abcdef" for character in self.run_id)
+        ):
+            raise ValidationError("Job reference requires a canonical run identity")
+
+
 @dataclass(frozen=True, repr=False)
 class Input:
     """Finite application input; empty bytes represent explicit EOF."""

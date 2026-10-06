@@ -59,6 +59,20 @@ class ManagedJobShellRefusal(Exception):
         super().__init__("managed job shell was not resolved")
 
 
+def _explicit_managed_shell(invocation: Command | Script) -> ManagedShellIdentity:
+    """Resolve only caller-selected fixed shells without guest effects."""
+    if isinstance(invocation, Command):
+        return ManagedShellIdentity(None, None)
+    if invocation.shell is Shell.USER_DEFAULT:
+        raise ValidationError("Managed operation requires an explicit script shell")
+    return ManagedShellIdentity(
+        invocation.shell,
+        {Shell.SH: "/bin/sh", Shell.BASH: "/bin/bash"}[invocation.shell],
+        invocation.login,
+        invocation.interactive,
+    )
+
+
 def start_bound_managed_job(
     repository: ManagedRunRepository,
     invocation: Command | Script,
@@ -172,10 +186,12 @@ def start_bound_managed_job(
                 raise ManagedJobShellRefusal(fact)
             resolved = observed.shell
         else:
-            resolved = {Shell.SH: "/bin/sh", Shell.BASH: "/bin/bash"}[invocation.shell]
+            explicit = _explicit_managed_shell(invocation)
+            assert explicit.resolved_executable is not None
+            resolved = explicit.resolved_executable
         shell = ManagedShellIdentity(invocation.shell, resolved, invocation.login, invocation.interactive)
     else:
-        shell = ManagedShellIdentity(None, None)
+        shell = _explicit_managed_shell(invocation)
 
     spec = ManagedRunSpec(target, workload, shell, run_owner, ManagedRunLifetime.INDEPENDENT)
     request, policy = compose_managed_request(

@@ -13,11 +13,16 @@ from typing import TYPE_CHECKING
 from agentworks.errors import StateError, ValidationError
 
 from ._managed_job_protocol import encode_managed_job_fact
+from ._managed_job_store import FactName
+from ._managed_observation_exchange import ManagedObservationState
+from ._managed_observation_protocol import ControllerState
 from ._managed_operation_keeper import ManagedOperationKeeper
 from ._managed_request_adapter import _ManagedBody
 from ._managed_runs import ManagedLaunchState
 from ._managed_start_exchange import ManagedStartState, prepare_managed_start
 from ._managed_start_operation import ManagedStartControlFact, ManagedStartOutcome, start_owned_managed_run
+from ._managed_stop_exchange import ManagedStopState
+from .carrier import Dispatch, ExitStatus
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -84,6 +89,103 @@ class ManagedOperationRun:
         self.start_outcome: ManagedStartOutcome | None = None
         self.control_escaped = False
         self._prepared: _PreparedAttempt | None = None
+        self.cleanup_complete = False
+
+    @property
+    def acknowledged(self) -> bool:
+        outcome = self.start_outcome
+        attempt = outcome.attempt if outcome is not None else None
+        observation = attempt.candidate.observation if attempt is not None else None
+        return bool(
+            outcome is not None
+            and attempt is not None
+            and observation is not None
+            and observation.state is ManagedStartState.ACKNOWLEDGED
+            and observation.launch_fact == self._expected_launch
+            and observation.issue is None
+            and attempt.record.identity == self.receipt.identity
+            and attempt.record.spec == self.receipt.spec
+            and attempt.record.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
+            and outcome.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
+            and attempt.candidate.dispatch is Dispatch.SENT
+            and attempt.candidate.carrier_completion == ExitStatus(0)
+            and attempt.candidate.carrier_failure is None
+            and not outcome.deadline_exceeded
+            and not outcome.pending_remote_effects
+            and not outcome.coordination_uncertain
+            and not outcome.requires_owner_retention
+        )
+
+    def finish_cleanup(self, deadline: Deadline) -> None:
+        """Settle only this run after its keeper's separate local drain.
+
+        Original uncertain start debt is never resolved here. Store termination
+        facts and native controller termination remain independent requirements.
+        """
+        obligation = self.keeper.obligation
+        if self.reservation_uncertain or self.keeper.admission_uncertain:
+            raise StateError("Managed run admission remains uncertain")
+        if not self.keeper.registration_started and self.start_outcome is None:
+            self.cleanup_complete = True
+        if not self.cleanup_complete and not self.acknowledged:
+            record = self._repository.inspect(self.receipt.identity)
+            clock = self.keeper.last_clock
+            if (
+                record is not None
+                and record.launch_state
+                in {
+                    ManagedLaunchState.RESERVED,
+                    ManagedLaunchState.NOT_LAUNCHED,
+                }
+                and (
+                    not self.keeper._initial_started  # noqa: SLF001
+                    or (
+                        clock is not None
+                        and (
+                            clock.dispatch is Dispatch.NOT_SENT
+                            or (clock.dispatch is Dispatch.SENT and clock.carrier_completion == ExitStatus(0))
+                        )
+                    )
+                )
+            ):
+                self.cleanup_complete = True
+        if not self.cleanup_complete:
+            stop = self.keeper.last_stop
+            if (
+                stop is None
+                or stop.observation is None
+                or stop.observation.state
+                not in {
+                    ManagedStopState.ACCEPTED,
+                    ManagedStopState.TERMINATED,
+                }
+            ):
+                stop = self.keeper.request_stop(deadline)
+            if stop.observation is None or stop.observation.state not in {
+                ManagedStopState.ACCEPTED,
+                ManagedStopState.TERMINATED,
+            }:
+                raise StateError("Managed run permanent mutation closure is unproved")
+            observation = self.keeper.observe_cleanup(deadline).observation
+            required = {
+                FactName.LAUNCH,
+                FactName.WAIT,
+                FactName.STDOUT_END,
+                FactName.STDERR_END,
+                FactName.BOUNDARY_EMPTY,
+            }
+            if (
+                not self.acknowledged
+                or observation is None
+                or observation.state is not ManagedObservationState.OBSERVED
+                or {name for name, _ in observation.facts} != required
+                or observation.controller is None
+                or observation.controller.state not in {ControllerState.EXITED, ControllerState.ABSENT}
+            ):
+                raise StateError("Managed run workload, streams or controller remain unproved")
+            self.cleanup_complete = True
+        if obligation is not None:
+            obligation.resolve()
 
     def _matches_reservation(self, record: ManagedRunRecord, body: _ManagedBody) -> bool:
         return (

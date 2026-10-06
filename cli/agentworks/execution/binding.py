@@ -9,6 +9,8 @@ from agentworks.errors import ValidationError
 from agentworks.execution._runtime_prerequisite import RuntimeSelection
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution.carrier import Carrier
 
@@ -30,6 +32,7 @@ class NativeExecutionBinding:
     delivery_account: str
     runtime_selection: RuntimeSelection
     _early_guest_facts_route: _EarlyGuestFactsRoute | None = field(default=None, repr=False)
+    _new_managed_delivery: Callable[[], Carrier] | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.delivery_account, str) or not self.delivery_account or "\0" in self.delivery_account:

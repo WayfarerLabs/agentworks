@@ -107,6 +107,11 @@ def test_wsl2_binding_is_passive_and_uses_recorded_distribution_and_admin(
     assert early.root_entry.mode is IdentityMode.DIRECT
     assert early.root_entry.expected.euid == 0
     assert "_early_guest_facts_route" not in repr(binding)
+    assert binding._new_managed_delivery is not None
+    first, second = binding._new_managed_delivery(), binding._new_managed_delivery()
+    assert isinstance(first, WSL2Carrier) and isinstance(second, WSL2Carrier)
+    assert first is not second and first is not binding.carrier
+    assert first.connection is second.connection is connection
 
 
 def test_wsl2_binding_imports_without_retired_execution_modules() -> None:
@@ -186,6 +191,12 @@ def test_proxmox_binding_uses_scoped_secret_platform_metadata_and_verified_conne
     assert binding.delivery_account == "root"
     assert binding.runtime_selection == RuntimeSelection(RuntimeTargetOS.LINUX)
     assert binding._early_guest_facts_route is None
+    assert binding._new_managed_delivery is not None
+    first, second = binding._new_managed_delivery(), binding._new_managed_delivery()
+    assert isinstance(first, ProxmoxCarrier) and isinstance(second, ProxmoxCarrier)
+    assert first is not second and first is not binding.carrier
+    assert first._wire._connection is second._wire._connection is connection
+    assert secrets.requests == ["native-binding-token"]
 
 
 def test_proxmox_binding_uses_system_trust_when_ca_bundle_is_omitted() -> None:

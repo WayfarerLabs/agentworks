@@ -9,15 +9,30 @@ from uuid import uuid4
 
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
+from agentworks.execution._helper_launcher import _validate_plan
 from agentworks.execution._inline import (
     InlineCandidateResult,
     PreparedInlineCandidate,
     execute_inline_candidate,
     prepare_inline_candidate,
 )
-from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTargetKind
+from agentworks.execution._managed_job_access import _explicit_managed_shell
+from agentworks.execution._managed_operation_run import ManagedOperationRun
+from agentworks.execution._managed_request_adapter import compose_managed_body
+from agentworks.execution._managed_runs import (
+    ManagedRunIdentity,
+    ManagedRunLifetime,
+    ManagedRunOwner,
+    ManagedRunOwnerKind,
+    ManagedRunReceipt,
+    ManagedRunRepository,
+    ManagedRunSpec,
+    ManagedTargetIdentity,
+    ManagedTargetKind,
+)
 from agentworks.execution._vm_guest_identity_protocol import vm_guest_boot_id
 from agentworks.execution.carrier import Dispatch, ExitStatus
+from agentworks.execution.models import JobRef
 from agentworks.operations import LifecycleObligation, OperationAttempt, release_borrow_after_custody
 
 if TYPE_CHECKING:
@@ -25,8 +40,10 @@ if TYPE_CHECKING:
 
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution._runtime_prerequisite import RuntimeSelection, _NumericGuestBootstrap
+    from agentworks.execution._wsl2_owned_operation import WSL2OwnedOperation
+    from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Carrier, Deadline
-    from agentworks.execution.models import Command, Script
+    from agentworks.execution.models import Command, Input, Output, Script
     from agentworks.operations import OperationBorrow, OperationOwner
 
 
@@ -53,6 +70,14 @@ class InlineExecutionControlFact(Exception):
     def __init__(self, outcome: OwnedInlineOutcome) -> None:
         self.outcome = outcome
         super().__init__("private inline execution stopped with retained operation state")
+
+
+class ManagedExecutionControlFact(Exception):
+    """An exact run reference, not successful launch or aggregate completion."""
+
+    def __init__(self, reference: JobRef) -> None:
+        self.reference = reference
+        super().__init__("Managed start retained its originating operation")
 
 
 @dataclass(slots=True, repr=False)
@@ -84,6 +109,9 @@ class ExecutionOperation:
         target: ManagedTargetIdentity,
         *,
         bootstrap: _NumericGuestBootstrap | None = None,
+        managed_repository: ManagedRunRepository | None = None,
+        native_binding: NativeExecutionBinding | None = None,
+        wsl2_route: WSL2OwnedOperation | None = None,
     ) -> None:
         """Bind inline calls to one exact owner scope and selected target."""
         scope = owner.ownership.scope
@@ -98,7 +126,12 @@ class ExecutionOperation:
         ):
             raise ValidationError("Numeric execution bootstrap must match the selected VM boot")
         self._owner = owner
+        self._target = target
         self._bootstrap = bootstrap
+        self._managed_repository = managed_repository
+        self._native_binding = native_binding
+        self._wsl2_route = wsl2_route
+        self._managed_runs: list[ManagedOperationRun] = []
         self._active_inline_calls: dict[int, _ActiveInlineCall] = {}
         self._unfinished_inline_executions: list[UnfinishedInlineExecution] = []
         self._admission_guard = Lock()
@@ -106,6 +139,84 @@ class ExecutionOperation:
         self._finished = False
         self._dispatch_id: str | None = None
         self._dispatch_obligation: LifecycleObligation | None = None
+
+    @property
+    def managed_runs(self) -> tuple[ManagedOperationRun, ...]:
+        return tuple(self._managed_runs)
+
+    def start_managed(
+        self,
+        carrier: Carrier,
+        invocation: Command | Script,
+        *,
+        plan: IdentityPlan,
+        runtime_selection: RuntimeSelection,
+        deadline: Deadline,
+        input: Input,
+        output: Output,
+        env: Mapping[str, str] | None,
+        cwd: str | None,
+        sensitive: bool,
+    ) -> JobRef:
+        """Freeze a body, retain its run, then reserve and start exactly once."""
+        with self._admission_guard:
+            binding, repository, bootstrap = self._native_binding, self._managed_repository, self._bootstrap
+            if self._finishing or self._finished:
+                raise StateError("Execution operation is closing")
+            with self._owner._guard:  # noqa: SLF001
+                self._owner._require_dispatch_admission_locked()  # noqa: SLF001
+            if binding is None or binding._new_managed_delivery is None or repository is None or bootstrap is None:
+                raise StateError("Managed delivery is unavailable for this bound operation")
+            if carrier is not binding.carrier or runtime_selection != binding.runtime_selection:
+                raise ValidationError("Managed start requires the selected native binding")
+            identity = ManagedRunIdentity(uuid4().hex)
+            spec = ManagedRunSpec(
+                self._target,
+                _validate_plan(plan),
+                _explicit_managed_shell(invocation),
+                ManagedRunOwner(ManagedRunOwnerKind.OPERATION, self._owner.ownership.operation_id),
+                ManagedRunLifetime.OPERATION,
+            )
+            body = compose_managed_body(
+                invocation,
+                input=input,
+                output=output,
+                env=env,
+                cwd=cwd,
+                sensitive=sensitive,
+                identity=identity,
+                spec=spec,
+            )
+            receipt = ManagedRunReceipt(identity, "agw-managed-" + identity.run_id + ".service", spec)
+            run = ManagedOperationRun(
+                repository,
+                receipt,
+                carrier,
+                binding._new_managed_delivery(),
+                owner=self._owner,
+                start_obligation_id=uuid4().hex,
+                keeper_obligation_id=uuid4().hex,
+                target=self._target,
+                guest=bootstrap.guest,
+                root_plan=bootstrap.root_entry,
+                runtime_selection=runtime_selection,
+            )
+            self._managed_runs.append(run)
+            reference = JobRef(identity.run_id)
+            try:
+                route = self._wsl2_route
+                run.start(
+                    body,
+                    deadline,
+                    before_dispatch=(lambda: route.require_selected_route(deadline)) if route is not None else None,
+                )
+            except BaseException as control:
+                fact = ManagedExecutionControlFact(reference)
+                fact.__cause__ = control.__cause__
+                raise control from fact
+            if not run.acknowledged:
+                raise StateError("Managed start was not acknowledged") from ManagedExecutionControlFact(reference)
+            return reference
 
     @property
     def active_inline_calls(self) -> tuple[_ActiveInlineCall, ...]:

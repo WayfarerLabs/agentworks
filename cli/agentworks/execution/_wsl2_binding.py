@@ -30,4 +30,10 @@ def _build_wsl2_native_binding(
         IdentityPlan(IdentityExpectation(0, 0, (0,)), IdentityMode.DIRECT),
         connection.user,
     )
-    return NativeExecutionBinding(WSL2Carrier(connection), connection.user, runtime_selection, early)
+    return NativeExecutionBinding(
+        WSL2Carrier(connection),
+        connection.user,
+        runtime_selection,
+        early,
+        _new_managed_delivery=lambda: WSL2Carrier(connection),
+    )

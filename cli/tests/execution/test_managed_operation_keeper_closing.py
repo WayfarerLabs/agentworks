@@ -154,6 +154,11 @@ def test_interrupted_closing_helper_retains_store_until_explicit_redrain(bound, 
         with pytest.raises(StateError):
             keeper.observe_cleanup(Deadline.after(1))
         assert keeper.drain(Deadline.after(1)).drained
+        assert keeper.closing_exchange_pending
+        calls = carrier.calls
+        with pytest.raises(StateError):
+            keeper.request_stop(Deadline.after(1))
+        assert carrier.calls == calls
     finally:
         assert keeper.drain(Deadline.after(1)).drained
 

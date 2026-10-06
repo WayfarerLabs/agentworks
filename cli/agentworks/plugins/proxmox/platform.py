@@ -637,10 +637,12 @@ class ProxmoxPlatform(VMPlatform):
         from agentworks.execution.carriers.proxmox import ProxmoxCarrier
 
         del deadline, config
+        connection = self._execution_connection(vm, ctx)
         return NativeExecutionBinding(
-            ProxmoxCarrier(self._execution_connection(vm, ctx)),
+            ProxmoxCarrier(connection),
             "root",
             RuntimeSelection(RuntimeTargetOS.LINUX),
+            _new_managed_delivery=lambda: ProxmoxCarrier(connection),
         )
 
     def observe_execution_power(

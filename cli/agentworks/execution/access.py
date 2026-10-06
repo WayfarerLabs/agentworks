@@ -56,7 +56,7 @@ from .files import (
     _private_json_strategy,
     _private_write_condition,
 )
-from .models import Command, Input, Lifetime, Output, Script
+from .models import Command, Input, JobRef, Lifetime, Output, Script
 from .profiles import Protection
 
 if TYPE_CHECKING:
@@ -111,6 +111,54 @@ class ExecutionAccess:
         self._entity_kind = entity_kind
         self._entity_name = entity_name
         self._deadline = deadline
+
+    def start(
+        self,
+        request: Command | Script,
+        *,
+        profile: Protection,
+        lifetime: Lifetime,
+        sudo: bool = False,
+        env: Mapping[str, str] | None = None,
+        cwd: str | None = None,
+        stdin: Input = _DEFAULT_INPUT,
+        output: Output = _DEFAULT_OUTPUT,
+        sensitive: bool = False,
+        deadline: Deadline | None = None,
+    ) -> JobRef:
+        """Start one private operation-lifetime managed command or explicit script."""
+        if profile is not Protection.MANAGED or lifetime is not Lifetime.OPERATION:
+            raise ValidationError("Managed start requires explicit MANAGED and OPERATION choices")
+        if self._runtime_selection.target_os is not RuntimeTargetOS.LINUX:
+            raise StateError("Managed execution is unavailable on this runtime")
+        if type(request) not in {Command, Script} or type(stdin) is not Input or type(output) is not Output:
+            raise ValidationError("Managed start requires finite invocation, input and output values")
+        if type(sudo) is not bool or type(sensitive) is not bool:
+            raise ValidationError("Managed execution flags must be booleans")
+        if sudo and self._elevated_plan is None:
+            raise StateError("Execution elevation is unavailable for this bound access")
+        selected = self._deadline()
+        if type(selected) is not Deadline or selected.expires_at is None or selected.expired:
+            raise ValidationError("Managed start requires a live finite composition deadline")
+        if deadline is not None:
+            if type(deadline) is not Deadline or deadline.expires_at is None or deadline.expired:
+                raise ValidationError("Managed start requires a live finite deadline")
+            if deadline.expires_at < selected.expires_at:
+                selected = deadline
+        plan = self._elevated_plan if sudo else self._ordinary_plan
+        assert plan is not None
+        return self._operation.start_managed(
+            self._carrier,
+            request,
+            plan=plan,
+            runtime_selection=self._runtime_selection,
+            deadline=selected,
+            input=stdin,
+            output=output,
+            env=env,
+            cwd=cwd,
+            sensitive=sensitive or stdin.is_sensitive,
+        )
 
     def run(
         self,

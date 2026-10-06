@@ -18,6 +18,7 @@ from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._execution_operation import ExecutionOperation
 from agentworks.execution._file_operation import FileOperation
 from agentworks.execution._file_paths import normalized_root
+from agentworks.execution._managed_runs import ManagedRunRepository
 from agentworks.execution._proxmox_activation import (
     ActivationObservation,
     ProxmoxActivation,
@@ -176,6 +177,7 @@ class _Workflow:
             or files.unfinished_owned_files
             or execution.active_inline_calls
             or execution.unfinished_inline_executions
+            or any(not run.cleanup_complete for run in execution.managed_runs)
         )
 
     def close(self, *, cleanup_deadline: Deadline | None = None) -> None:
@@ -184,15 +186,39 @@ class _Workflow:
             self.owner.close()
             return
         self.owner.stop_admission()
-        if self.views is not None:
-            self.views.execution_operation.finish()
         budget = self.deadline if cleanup_deadline is None else cleanup_deadline
+        if self.views is not None:
+            drained = True
+            interrupted: BaseException | None = None
+            for run in self.views.execution_operation.managed_runs:
+                try:
+                    if not run.keeper.drain(budget).drained or run.keeper.closing_exchange_pending:
+                        drained = False
+                except BaseException as control:
+                    drained = False
+                    if interrupted is None:
+                        interrupted = control
+            if interrupted is not None:
+                raise interrupted
+            if not drained:
+                raise StateError("Native VM managed keeper drain remains unsettled")
+            self.views.execution_operation.finish()
         if not self.local_delivery.close(budget) or not self.owner.close_local_delivery(budget):
             raise StateError("Native VM operation retains unsettled local delivery")
+        if self.views is not None:
+            for run in self.views.execution_operation.managed_runs:
+                run.finish_cleanup(budget)
         if not self._components_settled():
             raise StateError("Native VM operation retains unsettled work")
-        hold_settled = self._hold_settled(budget)
         activation_settled = self._activation_settled(budget)
+        if not activation_settled:
+            raise StateError("Native VM activation remains unsettled")
+        obligations = self.owner.list_lifecycle_obligations()
+        hold = self.selected.hold.obligation if self.selected is not None else None
+        held_row = hold._persisted_obligation if hold is not None else None  # noqa: SLF001
+        if any(row.state is not LifecycleObligationState.RESOLVED and row != held_row for row in obligations):
+            raise StateError("Native VM lifecycle obligations remain unsettled")
+        hold_settled = self._hold_settled(budget)
         obligations = self.owner.list_lifecycle_obligations()
         if (
             hold_settled
@@ -438,7 +464,14 @@ def _prepare(
         raise StateError("Native VM account preparation is unavailable", entity_kind="vm", entity_name=vm_name)
     bootstrap = _NumericGuestBootstrap(identity.elevated_plan, guest)
     file_operation = FileOperation(workflow.owner, target, bootstrap=bootstrap)
-    execution_operation = ExecutionOperation(workflow.owner, target, bootstrap=bootstrap)
+    execution_operation = ExecutionOperation(
+        workflow.owner,
+        target,
+        bootstrap=bootstrap,
+        managed_repository=ManagedRunRepository(db),
+        native_binding=binding,
+        wsl2_route=workflow.selected,
+    )
 
     def selected_deadline() -> Deadline:
         return workflow.deadline

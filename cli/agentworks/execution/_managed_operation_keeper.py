@@ -81,8 +81,13 @@ class _ClosingCarrier:
         self._keeper._carrier.validate(invocation, io=io)
 
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-        self._keeper._require_cleanup(deadline)
-        return self._keeper._carrier.execute(invocation, io=io, deadline=deadline, custody=self._keeper._custody)
+        keeper = self._keeper
+        keeper._require_cleanup(deadline)
+        keeper._closing_delivery = None
+        keeper._closing_pending = True
+        report = keeper._carrier.execute(invocation, io=io, deadline=deadline, custody=keeper._custody)
+        keeper._closing_delivery = (report.dispatch, report.completion)
+        return report
 
 
 class _LeaseCarrier:
@@ -173,11 +178,24 @@ class ManagedOperationKeeper:
         self._worker_permission = False
         self._startup_failed = False
         self._drained = False
+        self._closing_pending = False
+        self._closing_delivery: tuple[Dispatch, ExitStatus | None] | None = None
 
     @property
     def obligation(self) -> LifecycleObligation | None:
         """Retained handle, including an uncertain admission, for core disposition."""
         return self._obligation
+
+    @property
+    def closing_exchange_pending(self) -> bool:
+        """Remote closing-helper uncertainty, independent of local drain facts."""
+        return self._closing_pending
+
+    def _closing_terminated(self) -> bool:
+        report = self._closing_delivery
+        return report is not None and (
+            report[0] is Dispatch.NOT_SENT or (report[0] is Dispatch.SENT and report[1] == ExitStatus(0))
+        )
 
     def admit(self) -> None:
         """Register before ordinary borrowing, retaining the handle before arming."""
@@ -368,15 +386,26 @@ class ManagedOperationKeeper:
         settled = self._custody.settled
         if not active and not pending:
             settled = self._custody.close(deadline)
+            if settled and self._closing_terminated():
+                self._closing_pending = False
         facts = KeeperDrain(active, pending, settled)
         self._drained = facts.drained
         return facts
 
     def _require_cleanup(self, deadline: Deadline) -> None:
         self._finite(deadline)
+        self._settle_closing(deadline)
         if not self._drained or not self._stop.is_set() or deadline.expired or not self._custody.settled:
             raise StateError("Operation keeper cleanup requires completed local drain and live budget")
         self._check_binding()
+
+    def _settle_closing(self, deadline: Deadline) -> None:
+        if not self._closing_pending:
+            return
+        if self._closing_terminated() and self._custody.close(deadline):
+            self._closing_pending = False
+        if self._closing_pending:
+            raise StateError("Operation keeper closing helper termination is unknown")
 
     def request_stop(self, deadline: Deadline) -> ManagedStopCandidate:
         """Attempt only this run's permanent mutation closure after local drain."""
@@ -390,6 +419,7 @@ class ManagedOperationKeeper:
                 runtime_selection=self._runtime,
                 guest=self._guest,
             )
+            self._settle_closing(deadline)
             return self.last_stop
         except BaseException:
             self.failed = True
@@ -407,6 +437,7 @@ class ManagedOperationKeeper:
                 runtime_selection=self._runtime,
                 guest=self._guest,
             )
+            self._settle_closing(deadline)
             return self.last_cleanup
         except BaseException:
             self.failed = True
