@@ -28,6 +28,22 @@ This candidate copies initial geometry but stops with observation failure when g
 shared owner cannot yet notify its exact client. It is not enabled by `SSHCarrier`; actual resize,
 real SSH integration, native workstations and presentation policy remain required.
 
+The private `_terminal_windows` resource layer translates supplied CRT descriptors to borrowed
+native console handles. It admits readable console input without consuming events and queries the
+explicit output viewport. One retained non-main worker clears processed, line and echo input,
+requires virtual terminal input and verifies the resulting mode before returning. Unsupported modes
+refuse and attempt restoration. Release attempts the exact original input mode once and returns
+restoration uncertainty; it never closes borrowed handles or changes output modes, code pages or
+descriptor flags. This resource starts no reader or client. Native Windows launch, byte delivery,
+resize, interruption and restoration acceptance remain required before terminal enablement.
+
+The input policy follows Microsoft's
+[console mode definitions](https://learn.microsoft.com/en-us/windows/console/setconsolemode).
+[Input-event counting](https://learn.microsoft.com/en-us/windows/console/getnumberofconsoleinputevents)
+admits readable input-buffer kind separately from mode queries, which also accept output buffers.
+Geometry comes from the supplied output's
+[screen buffer viewport](https://learn.microsoft.com/en-us/windows/console/getconsolescreenbufferinfo).
+
 ## Connection policy
 
 `SSHConnection` selects a literal host, port, POSIX account, identity, trust, optional lookup alias
