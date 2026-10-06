@@ -171,6 +171,15 @@ ordinary file and command delivery remains unchanged. This supersedes the earlie
 same-carrier probe/dispatch composition. Integration review, complete gates and native acceptance
 remain pending; ordinary file/service body fencing and production composition remain open.
 
+The private follow-up at `807637168` rejects unsupported WSL runtime selections in the shared
+binding factory before hold custody is constructed. The normal platform resolver already selects
+Linux system Python; directly constructed operations now refuse outside that same domain before
+activation. Composition fixtures distinguish the initial root route from ordinary account,
+command and file delivery without depending on uncompressed source text. The worker's affected
+and adjacent selection passes 277 tests with no skips; full integration gates and independent
+re-review remain pending. Neither synthetic dispatch nor runtime readiness establishes successful
+native credential transition.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
