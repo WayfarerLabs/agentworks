@@ -77,7 +77,7 @@ def _has_extended_acl(fd: int) -> bool:
     try:
         entry = ctypes.c_void_p()
         ctypes.set_errno(0)
-        result = get_entry(acl, 0, ctypes.byref(entry))  # ACL_FIRST_ENTRY.
+        result = get_entry(acl, 0, ctypes.byref(entry))  # Inspect the first indexed entry.
         if result == 0:
             return True
         if ctypes.get_errno() == errno.EINVAL:
@@ -383,6 +383,8 @@ class MacOSLocalDownloadPublication:
         if deadline is not None and deadline.expired:
             raise TimeoutError("Local download deadline expired during replacement")
         self._close_target()
+        if deadline is not None and deadline.expired:
+            raise TimeoutError("Local download deadline expired during replacement")
         self.published = True
         self.publication_uncertain = False
 

@@ -12,6 +12,10 @@ from types import SimpleNamespace
 import pytest
 
 from agentworks.execution import _local_download_publication_macos as local
+from agentworks.execution._local_download_publication import (
+    LocalDownloadCleanupUncertainError,
+    LocalDownloadUnsupportedError,
+)
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.files import Create, Replace
 
@@ -19,7 +23,7 @@ from agentworks.execution.files import Create, Replace
 @pytest.fixture(autouse=True)
 def emulate_darwin_inspection(monkeypatch: pytest.MonkeyPatch) -> None:
     if sys.platform != "darwin":
-        monkeypatch.setattr(local.sys, "platform", "darwin")
+        monkeypatch.setattr(sys, "platform", "darwin")
         monkeypatch.setattr(local, "_bsd_flags", lambda observed: 0)
         monkeypatch.setattr(local, "_has_extended_acl", lambda fd: False)
         monkeypatch.setattr(local, "_has_xattrs", lambda fd: False)
@@ -117,7 +121,7 @@ def test_replace_refuses_xattrs_before_mutation(tmp_path: Path, monkeypatch: pyt
     except OSError:
         pytest.skip("Test filesystem cannot set an extended attribute")
     monkeypatch.setattr(local, "_has_xattrs", lambda fd: bool(os.listxattr(fd)))
-    with pytest.raises(local.LocalDownloadUnsupportedError):
+    with pytest.raises(LocalDownloadUnsupportedError):
         local.MacOSLocalDownloadPublication(destination, condition=Replace())
     assert destination.read_bytes() == b"old"
     assert not list(tmp_path.glob(".agw-download-*"))
@@ -169,7 +173,7 @@ def test_replace_refuses_unsupported_access_state_before_stage(
         monkeypatch.setattr(local, "_bsd_flags", lambda observed: int(stat.S_ISREG(observed.st_mode)))
     else:
         destination.chmod(0o4750)
-    with pytest.raises(local.LocalDownloadUnsupportedError):
+    with pytest.raises(LocalDownloadUnsupportedError):
         local.MacOSLocalDownloadPublication(destination, condition=Replace())
     assert destination.read_bytes() == b"old"
     assert not list(tmp_path.glob(".agw-download-*"))
@@ -193,7 +197,7 @@ def test_partial_write_retains_possible_local_change(tmp_path: Path, monkeypatch
             raise OSError("injected local write failure")
         return original_write(fd, data)
 
-    monkeypatch.setattr(local.os, "write", partial_write)
+    monkeypatch.setattr(os, "write", partial_write)
     try:
         with pytest.raises(OSError):
             _commit(writer, b"new data")
@@ -223,7 +227,7 @@ def test_deadline_after_first_write_retains_possible_local_change(
             deadline.expired = True
         return result
 
-    monkeypatch.setattr(local.os, "write", expire_after_write)
+    monkeypatch.setattr(os, "write", expire_after_write)
     try:
         with pytest.raises(TimeoutError):
             writer.commit(
@@ -253,18 +257,53 @@ def test_close_failure_after_replace_retains_uncertainty(tmp_path: Path, monkeyp
             raise OSError("injected ambiguous close")
         original_close(fd)
 
-    monkeypatch.setattr(local.os, "close", failed_close)
+    monkeypatch.setattr(os, "close", failed_close)
     with pytest.raises(OSError):
         _commit(writer, b"new")
     assert writer.local_mutation_started
     assert writer.publication_uncertain
     assert writer.cleanup_uncertain
-    with pytest.raises(local.LocalDownloadCleanupUncertainError):
+    with pytest.raises(LocalDownloadCleanupUncertainError):
         writer.abort()
     assert not list(tmp_path.glob(".agw-download-*"))
-    monkeypatch.setattr(local.os, "close", original_close)
+    monkeypatch.setattr(os, "close", original_close)
     if target_fd is not None:
         original_close(target_fd)
+
+
+def test_deadline_after_target_close_retains_possible_local_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    destination = tmp_path / "download"
+    destination.write_bytes(b"old")
+    writer = local.MacOSLocalDownloadPublication(destination, condition=Replace())
+    writer.try_write(memoryview(b"new"))
+    deadline = SimpleNamespace(expired=False)
+    target_fd = writer._target_fd
+    original_close = os.close
+
+    def expire_after_close(fd: int) -> None:
+        original_close(fd)
+        if fd == target_fd:
+            deadline.expired = True
+
+    monkeypatch.setattr(os, "close", expire_after_close)
+    try:
+        with pytest.raises(TimeoutError):
+            writer.commit(
+                verified_complete=True,
+                size=3,
+                sha256=hashlib.sha256(b"new").hexdigest(),
+                deadline=deadline,
+            )
+        assert writer.local_mutation_started
+        assert writer.publication_uncertain
+        assert not writer.published
+        assert not writer.cleanup_uncertain
+        assert destination.read_bytes() == b"new"
+    finally:
+        writer.abort()
+    assert not list(tmp_path.glob(".agw-download-*"))
 
 
 def test_rejects_symlink_ancestor_and_world_writable_parent(tmp_path: Path) -> None:
@@ -276,7 +315,7 @@ def test_rejects_symlink_ancestor_and_world_writable_parent(tmp_path: Path) -> N
         local.MacOSLocalDownloadPublication(alias / "download", condition=Create())
     actual.chmod(0o777)
     try:
-        with pytest.raises(local.LocalDownloadUnsupportedError):
+        with pytest.raises(LocalDownloadUnsupportedError):
             local.MacOSLocalDownloadPublication(actual / "download")
     finally:
         actual.chmod(0o700)
@@ -285,6 +324,6 @@ def test_rejects_symlink_ancestor_and_world_writable_parent(tmp_path: Path) -> N
 
 def test_rejects_acl_ancestor_before_stage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(local, "_has_extended_acl", lambda fd: os.fstat(fd).st_ino == tmp_path.stat().st_ino)
-    with pytest.raises(local.LocalDownloadUnsupportedError):
+    with pytest.raises(LocalDownloadUnsupportedError):
         local.MacOSLocalDownloadPublication(tmp_path / "download")
     assert not list(tmp_path.iterdir())
