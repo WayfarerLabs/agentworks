@@ -31,6 +31,22 @@ plugin initialization in a test is not proof of that independence.
 This refresh supplements the release-behavior baseline below. It does not mark any consumer migrated
 or establish the new lifecycle/file guarantees.
 
+### Full registration dependency audit, 2026-10-06
+
+Static inspection at `06e4e41fb` distinguishes plugin class registration from platform construction
+and later binding resolution. Eager retired imports occur in the AWS, Azure, GCP and Lima class
+modules and shared `tailscale_join.py`. Full shipped-plugin registration also loads retired file or
+SSH helpers through `_harness_native/native.py`, `codex/artifacts.py`, `artifacts/native/probe.py`
+and `claude/artifacts.py`. A cloud-only import correction therefore cannot establish whole-plugin
+independence. Move operation-specific imports to their still-legacy operations during coexistence;
+new factories must independently prepare provider endpoint/account facts and must not call those old
+operations. Concrete Proxmox and WSL2 resolvers already construct new carriers directly, while AWS,
+Azure, GCP and Lima still inherit the base resolver's refusal. Cloud constructors currently lack
+explicit known-hosts inputs, and remote Lima's ambient SSH alias and login-shell path cannot supply
+the new carrier's explicit connection/trust facts. Those are remaining production composition and
+SSH-policy dependencies, not solved by lazy imports. This is a read-only source inventory, not
+runtime independence or native acceptance.
+
 ### Additive implementation checkpoint, 2026-09-22
 
 The dated inventory above describes the state immediately after #830, not the current candidate. The

@@ -3692,7 +3692,10 @@ intermediate public API.
       already-imported native hooks. The first-binding audit at `6149cf06` found that VM-platform
       package initialization imports Lima's legacy dependencies, while plugin initialization imports
       providers that still load legacy transports. Keep this initializer work with the complete
-      platform/factory composition gate; concrete hook independence does not complete it.
+      platform/factory composition gate; concrete hook independence does not complete it. The
+      [full registration audit](migration-strategy.md#full-registration-dependency-audit-2026-10-06)
+      adds harness file/SSH import edges; include those in the fresh-process proof without routing
+      any new workflow through old operations.
 
 The private WSL2 import checkpoint at `acc1fdec` moves concrete built-ins into one explicit registry
 and loads the legacy SSH error type only when command checks run. A fresh subprocess blocks the six
