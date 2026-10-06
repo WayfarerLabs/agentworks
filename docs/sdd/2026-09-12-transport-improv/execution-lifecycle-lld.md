@@ -765,15 +765,14 @@ native object represent its lifetime; holding the serial recovery-dispatch guard
 lifetime would incorrectly exclude the preparation and file attempts it supports.
 
 The private owner/repository now implement atomic support admission while ordinary registration
-remains sealed. The private WSL2 hold's explicit recovery startup consumes that admission and
-reuses its existing single-use anchor, transition lock, READY publication and exact release.
-Intentional live custody belongs to the row and retained native object, not a finite recovery
-attempt or another coordinator state. If takeover follows admission but precedes launch, the
-already admitted effect remains inherited debt and stale publication/resolution refuse; an extra
-in-process check would not establish a remote fence. Core awaits durable READY before fixed
-preparation and keeps the hold through its final recovery action. This is not a complete recovery
-path: outer renewed-availability composition, recovery-specific preparation, predecessor drain and
-native acceptance remain open.
+remains sealed. The private WSL2 hold's explicit recovery startup consumes that admission and reuses
+its existing single-use anchor, transition lock, READY publication and exact release. Intentional
+live custody belongs to the row and retained native object, not a finite recovery attempt or another
+coordinator state. If takeover follows admission but precedes launch, the already admitted effect
+remains inherited debt and stale publication/resolution refuse; an extra in-process check would not
+establish a remote fence. Core awaits durable READY before fixed preparation and keeps the hold
+through its final recovery action. This is not a complete recovery path: outer renewed-availability
+composition, recovery-specific preparation, predecessor drain and native acceptance remain open.
 
 That contract uses a distinct internal recovery-dispatch object, not a recovery mode on the ordinary
 borrow. Admission requires the sealed recovery owner, its exact current generation, a
