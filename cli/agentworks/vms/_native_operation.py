@@ -50,6 +50,20 @@ class NativeVMOperation:
     execution_operation: ExecutionOperation
 
 
+class NativeVMOperationControlFact(Exception):
+    """Safe handoff of exact in-memory cleanup custody after failed teardown."""
+
+    def __init__(self, workflow: _Workflow) -> None:
+        self._workflow = workflow
+        super().__init__("native VM operation retains cleanup custody")
+
+    def retry_cleanup(self, deadline: Deadline) -> None:
+        """Retry only aggregate cleanup under a fresh finite observation budget."""
+        if type(deadline) is not Deadline or deadline.expires_at is None or deadline.expired:
+            raise ValidationError("Native VM cleanup requires a live finite deadline")
+        self._workflow.close(cleanup_deadline=deadline)
+
+
 @dataclass
 class _Workflow:
     owner: OperationOwner
@@ -59,8 +73,9 @@ class _Workflow:
     preparation_fact: VMTargetPreparation | None = None
     identity: TargetIdentityPreparation | None = None
     views: NativeVMOperation | None = None
+    closed: bool = False
 
-    def _hold_settled(self) -> bool:
+    def _hold_settled(self, cleanup_deadline: Deadline) -> bool:
         selected = self.selected
         if selected is None or not self.start_attempted:
             return True
@@ -71,7 +86,7 @@ class _Workflow:
             evidence = hold.evidence
         else:
             try:
-                evidence = hold.release(self.deadline)
+                evidence = hold.release(cleanup_deadline)
             except Exception:
                 return False
         if selected.ready is not None and evidence.identity != selected.ready.identity:
@@ -119,17 +134,20 @@ class _Workflow:
             or execution.unfinished_inline_executions
         )
 
-    def close(self) -> None:
+    def close(self, *, cleanup_deadline: Deadline | None = None) -> None:
         """Stop body admission, then release only on aggregate exact settlement."""
+        if self.closed:
+            return
         self.owner.stop_admission()
         if not self._components_settled():
             raise StateError("Native VM operation retains unsettled work")
-        hold_settled = self._hold_settled()
+        hold_settled = self._hold_settled(self.deadline if cleanup_deadline is None else cleanup_deadline)
         obligations = self.owner.list_lifecycle_obligations()
         if hold_settled and all(row.state is LifecycleObligationState.RESOLVED for row in obligations):
             self.owner.seal_lifecycle_obligations()
             self.owner.record_effects_resolved()
             self.owner.close()
+            self.closed = True
             return
         raise StateError("Native VM operation retains unsettled work")
 
@@ -279,7 +297,12 @@ def native_vm_operation(
     finally:
         try:
             workflow.close()
-        except BaseException:
+        except BaseException as cleanup:
+            fact = NativeVMOperationControlFact(workflow)
             if primary is None:
-                raise
+                fact.__cause__ = cleanup.__cause__
+                raise cleanup from fact
             primary.add_note("Native VM operation teardown retained unresolved custody")
+            fact.__cause__ = primary.__cause__
+            primary.__cause__ = fact
+            primary.__suppress_context__ = True

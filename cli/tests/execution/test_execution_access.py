@@ -159,6 +159,70 @@ def test_script_binary_stdin_discard_and_sensitive_suppression(
     owner.close()
 
 
+@pytest.mark.parametrize("override_seconds", [300, None])
+@_LINUX_ONLY
+def test_longer_or_unbounded_override_keeps_composition_budget(bound: Bound, override_seconds: float | None) -> None:
+    _, owner, _, carrier, access, composition = bound
+    override = Deadline.after(override_seconds)
+    result = access.run(Command(("/bin/true",)), profile=Protection.DIRECT, deadline=override)
+    assert result.status == ExitCode(0)
+    assert carrier.deadlines == [composition]
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+@_LINUX_ONLY
+def test_stricter_request_uses_its_exact_deadline(bound: Bound) -> None:
+    _, owner, _, carrier, access, _ = bound
+    requested = Deadline.after(5)
+    result = access.run(Command(("/bin/true",)), profile=Protection.DIRECT, deadline=requested)
+    assert result.status == ExitCode(0)
+    assert carrier.deadlines == [requested]
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+@pytest.mark.parametrize("override_seconds", [300, None])
+@_LINUX_ONLY
+def test_expired_composition_refuses_even_with_live_override(bound: Bound, override_seconds: float | None) -> None:
+    _, owner, _, carrier, access, composition = bound
+    object.__setattr__(composition, "expires_at", 0.0)
+    override = Deadline.after(override_seconds)
+    with pytest.raises(ValidationError):
+        access.run(Command(("/bin/true",)), profile=Protection.DIRECT, deadline=override)
+    assert carrier.calls == 0
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+@pytest.mark.parametrize("override", [Deadline.after(0), "invalid"])
+@_LINUX_ONLY
+def test_invalid_or_expired_request_refuses_before_dispatch(bound: Bound, override: object) -> None:
+    _, owner, _, carrier, access, _ = bound
+    with pytest.raises(ValidationError):
+        access.run(Command(("/bin/true",)), profile=Protection.DIRECT, deadline=override)  # type: ignore[arg-type]
+    assert carrier.calls == 0
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+@_LINUX_ONLY
+def test_finite_request_shortens_unbounded_composition(bound: Bound) -> None:
+    _, owner, operation, carrier, _, _ = bound
+    access = _access(operation, carrier, Deadline(None))
+    requested = Deadline.after(5)
+    result = access.run(Command(("/bin/true",)), profile=Protection.DIRECT, deadline=requested)
+    assert result.status == ExitCode(0)
+    assert carrier.deadlines == [requested]
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
 @_LINUX_ONLY
 def test_checked_nonzero_uses_bound_diagnostic_identity(
     bound: Bound,

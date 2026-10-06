@@ -144,9 +144,17 @@ class ExecutionAccess:
             raise ValidationError("Foreground execution flags must be booleans")
         if sudo and self._elevated_plan is None:
             raise StateError("Execution elevation is unavailable for this bound access")
-        selected_deadline = self._deadline() if deadline is None else deadline
-        if type(selected_deadline) is not Deadline or selected_deadline.expired:
+        composition_deadline = self._deadline()
+        if type(composition_deadline) is not Deadline or composition_deadline.expired:
             raise ValidationError("Foreground execution requires a live deadline")
+        if deadline is not None and (type(deadline) is not Deadline or deadline.expired):
+            raise ValidationError("Foreground execution requires a live deadline")
+        selected_deadline = composition_deadline
+        if deadline is not None and (
+            composition_deadline.expires_at is None
+            or (deadline.expires_at is not None and deadline.expires_at < composition_deadline.expires_at)
+        ):
+            selected_deadline = deadline
         plan = self._elevated_plan if sudo else self._ordinary_plan
         assert plan is not None
         effective_sensitive = sensitive or stdin.is_sensitive
