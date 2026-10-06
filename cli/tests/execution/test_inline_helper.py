@@ -90,6 +90,23 @@ class LocalCarrier:
         return report
 
 
+def test_local_proof_carrier_forwards_exact_external_custody() -> None:
+    carrier = LocalCarrier()
+    external = LocalDeliveryCustody()
+    try:
+        report = carrier.execute(
+            PreparedInvocation((sys.executable, "-c", "pass")),
+            io=CarrierIO(),
+            deadline=Deadline.after(3),
+            custody=external,
+        )
+        assert report.completion == ExitStatus(code=0)
+        assert external._owner is not None and external.settled
+        assert carrier.custody._owner is None
+    finally:
+        assert external.close(Deadline.after(3))
+
+
 @pytest.fixture(scope="module", params=[Path(sys.executable), PYTHON_311], ids=["current", "distribution-3.11"])
 def helper_runtime(request: pytest.FixtureRequest) -> str:
     runtime: Path = request.param
