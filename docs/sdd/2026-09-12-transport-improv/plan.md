@@ -561,9 +561,11 @@ supported-workstation or production FileAccess acceptance; the checkbox stays op
       retain uncertainty after local writes, truncation, flush, close or deadline failure. Separate
       ambiguous handle closes so they do not suppress unrelated cleanup. Portable macOS fault tests
       and Windows-marked tests exist; native filesystem/ACL acceptance remains unproved.
-- [ ] Compose the selected workstation publisher with the existing owned snapshot download under one
+- [x] Compose the selected workstation publisher with the existing owned snapshot download under one
       deadline. Preserve remote verification and cleanup before local publication, unsupported host
-      refusal before remote dispatch, and local publication/cleanup facts on exceptional exits.
+      refusal before remote dispatch, and local publication/cleanup facts on exceptional exits. This
+      is private host selection; native macOS/Windows acceptance and public result conversion remain
+      required below.
 - [ ] Complete local download publication with create-only default and explicit replace-existing
       selection, as directed on 2026-10-05. Settle and prove workstation metadata/ACL handling,
       ordinary-file refusal, full-transfer verification and cleanup before publishing either form;
