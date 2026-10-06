@@ -547,18 +547,41 @@ class RecoveredLifecycleObligation:
 
     _owner: OperationOwner
     _obligation: PersistedLifecycleObligation
+    _local_dispatch: RecoveryDispatch | None = field(default=None, init=False)
 
     def open_dispatch(self) -> RecoveryDispatch:
         """Reserve this owner for one recovery dispatcher without mutation."""
         owner = self._owner
         with owner._guard:  # noqa: SLF001
+            # A refused new opening must not retain an earlier caller's handle.
+            self._local_dispatch = None
             owner._require_no_active_work_locked()  # noqa: SLF001
             if owner._transition_uncertain:  # noqa: SLF001
                 owner._reconcile_transition_locked()  # noqa: SLF001
             owner._require_dispatch_admission_locked()  # noqa: SLF001
             dispatch = RecoveryDispatch(owner, self._obligation)
+            self._local_dispatch = dispatch
             owner._active_recovery_dispatch = dispatch  # noqa: SLF001
             return dispatch
+
+    def _close_retained_dispatch(self) -> None:
+        """Clean up a fresh, exclusively retained binding's unreturned open.
+
+        No concrete dispatch may have escaped. Only this opening's retained
+        candidate may close, with no outstanding attempt or conflicting
+        dispatcher. This supplies no remote proof.
+        """
+        owner = self._owner
+        with owner._guard:  # noqa: SLF001
+            dispatch = self._local_dispatch
+            if dispatch is None:
+                owner._require_no_active_work_locked()  # noqa: SLF001
+                return
+            if owner._active_recovery_dispatch is None:  # noqa: SLF001
+                owner._require_no_active_work_locked()  # noqa: SLF001
+                dispatch._closed = True  # noqa: SLF001
+                return
+        dispatch.close()
 
 
 @dataclass(slots=True, repr=False)
@@ -573,6 +596,7 @@ class RecoveryDispatch:
     _owner: OperationOwner
     _obligation: PersistedLifecycleObligation
     _closed: bool = field(default=False, init=False)
+    _close_started: bool = field(default=False, init=False)
 
     @property
     def ownership(self) -> OperationOwnership:
@@ -605,16 +629,23 @@ class RecoveryDispatch:
             return attempt
 
     def close(self) -> None:
-        """Release only in-memory recovery custody after a settled attempt."""
+        """Release settled local custody, retrying only this exact close."""
         owner = self._owner
         with owner._guard:  # noqa: SLF001
-            self._require_active_locked()
+            active = owner._active_recovery_dispatch  # noqa: SLF001
+            if active is not self and (active is not None or not self._close_started):
+                raise StateError(
+                    "recovery dispatch has no exact local close custody",
+                    entity_kind=self.ownership.scope.resource_kind,
+                    entity_name=self.ownership.scope.resource_name,
+                )
             if owner._outstanding_attempt is not None:  # noqa: SLF001
                 raise StateError(
                     "recovery dispatch has an outstanding attempt",
                     entity_kind=self.ownership.scope.resource_kind,
                     entity_name=self.ownership.scope.resource_name,
                 )
+            self._close_started = True
             owner._active_recovery_dispatch = None  # noqa: SLF001
             self._closed = True
 

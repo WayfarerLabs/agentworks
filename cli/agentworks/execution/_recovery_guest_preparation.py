@@ -41,7 +41,13 @@ if TYPE_CHECKING:
         Deadline,
         PreparedInvocation,
     )
-    from agentworks.operations import LifecycleObligation, OperationOwner, RecoveryAttempt, RecoveryDispatch
+    from agentworks.operations import (
+        LifecycleObligation,
+        OperationOwner,
+        RecoveredLifecycleObligation,
+        RecoveryAttempt,
+        RecoveryDispatch,
+    )
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -145,11 +151,12 @@ class RecoveryGuestPreparationBatch:
         self._obligation_id = obligation_id
         self._started = False
         self._obligation: LifecycleObligation | None = None
+        self._recovered: RecoveredLifecycleObligation | None = None
         self._dispatch: RecoveryDispatch | None = None
         self._attempt: RecoveryAttempt | None = None
         self._pending_remote_effects = False
         self._coordination_uncertain = False
-        self._resolution_ready = False
+        self._queries_accounted_for = False
         self._resolved = False
         self._guest: VMTargetPreparation | None = None
         self._identity: TargetIdentityPreparation | None = None
@@ -243,16 +250,20 @@ class RecoveryGuestPreparationBatch:
             self._obligation = self._owner.admit_recovery_support_obligation(
                 "carrier-dispatch", payload_version=1, payload=b"", obligation_id=self._obligation_id
             )
-            recovered = self._owner.rebind_possible_effect_lifecycle_obligation(
+            self._recovered = self._owner.rebind_possible_effect_lifecycle_obligation(
                 self._obligation_id,
                 "carrier-dispatch",
                 payload_version=1,
                 payload=b"",
                 payload_revision=self._obligation.payload_revision,
             )
-            self._dispatch = recovered.open_dispatch()
+            self._dispatch = self._recovered.open_dispatch()
         except BaseException:
             self._coordination_uncertain = True
+            if self._recovered is not None:
+                # Opening has no carrier action. Retain its exact binding for
+                # cleanup of an activation whose handle did not reach us.
+                self._queries_accounted_for = True
             raise
 
     def _finish_settled_batch(self) -> None:
@@ -262,26 +273,31 @@ class RecoveryGuestPreparationBatch:
         obligation = self._obligation
         if dispatch is None or obligation is None:
             return
+        self._queries_accounted_for = True
         try:
             dispatch.close()
-            self._dispatch = None
-            self._resolution_ready = True
             obligation.resolve()
             self._resolved = True
+            self._dispatch = None
         except BaseException:
             self._coordination_uncertain = True
             raise
 
     def retry_resolution(self) -> RecoveryGuestPreparation:
         """Reconcile only a stopped, settled batch's exact durable resolution."""
-        if not self._resolution_ready or self._obligation is None:
+        if not self._queries_accounted_for or self._obligation is None or self._recovered is None:
             raise StateError("Recovery guest preparation lacks settled batch resolution evidence")
         if not self._resolved:
             try:
+                if self._dispatch is None:
+                    self._recovered._close_retained_dispatch()  # noqa: SLF001
+                else:
+                    self._dispatch.close()
                 self._obligation.resolve()
             except BaseException as control:
                 self._coordination_uncertain = True
                 raise control from RecoveryGuestPreparationControlFact(self.preparation)
             self._resolved = True
+            self._dispatch = None
             self._coordination_uncertain = False
         return self.preparation

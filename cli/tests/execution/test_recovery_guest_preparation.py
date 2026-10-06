@@ -7,8 +7,11 @@ discovery, availability or drain evidence.
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import replace
 from pathlib import Path
+from types import FrameType
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -363,7 +366,7 @@ def test_interrupted_bookkeeping_retains_and_resolution_retry_never_replays(
         "resolve": ["guest", "admin", "root"],
     }[transition]
     assert carrier.calls == expected
-    if transition == "resolve":
+    if transition in ("open", "close", "resolve"):
         assert not batch.retry_resolution().requires_owner_retention
         assert _row(owner).state is LifecycleObligationState.RESOLVED
         assert carrier.calls == expected
@@ -501,3 +504,87 @@ def test_numeric_observations_survive_settlement_interruption(recovery, monkeypa
     assert observation is not None and observation.observation is not None
     assert observation.observation.identity == carrier.identities[account]
     assert fact.coordination_uncertain and fact.requires_owner_retention
+
+
+@pytest.mark.parametrize("transition", ["open_candidate", "partial_close"])
+def test_partial_local_transition_retries_resolution_without_probes(recovery, transition):
+    _, owner, _, _ = recovery
+    carrier = FixedCarrier()
+    batch = _batch(owner, carrier)
+
+    def interrupt(frame: FrameType, event: str, arg: object) -> Any:
+        del arg
+        if event != "line":
+            return interrupt
+        if transition == "open_candidate" and frame.f_code is RecoveredLifecycleObligation.open_dispatch.__code__:
+            binding = batch._recovered  # noqa: SLF001
+            if binding is not None and binding._local_dispatch is not None and owner._active_recovery_dispatch is None:  # noqa: SLF001
+                raise KeyboardInterrupt
+        if transition == "partial_close" and frame.f_code is RecoveryDispatch.close.__code__:
+            dispatch = batch._dispatch  # noqa: SLF001
+            if dispatch is not None and dispatch._close_started and owner._active_recovery_dispatch is None:  # noqa: SLF001
+                raise KeyboardInterrupt
+        return interrupt
+
+    sys.settrace(interrupt)
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            _prepare(batch)
+    finally:
+        sys.settrace(None)
+    expected = [] if transition == "open_candidate" else ["guest", "admin", "root"]
+    assert carrier.calls == expected
+    assert batch.preparation.requires_owner_retention
+    assert not batch.retry_resolution().requires_owner_retention
+    assert _row(owner).state is LifecycleObligationState.RESOLVED
+    assert carrier.calls == expected
+
+
+def test_interrupted_unreturned_open_cleanup_keeps_exact_custody(recovery, monkeypatch):
+    _, owner, _, _ = recovery
+    carrier = FixedCarrier()
+    batch = _batch(owner, carrier)
+    original_open = RecoveredLifecycleObligation.open_dispatch
+    original_cleanup = RecoveredLifecycleObligation._close_retained_dispatch  # noqa: SLF001
+
+    def open_then_interrupt(self):
+        original_open(self)
+        raise ControlStop
+
+    def cleanup_then_interrupt(self):
+        original_cleanup(self)
+        raise ControlStop
+
+    with monkeypatch.context() as patch:
+        patch.setattr(RecoveredLifecycleObligation, "open_dispatch", open_then_interrupt)
+        with pytest.raises(ControlStop):
+            _prepare(batch)
+        patch.setattr(RecoveredLifecycleObligation, "_close_retained_dispatch", cleanup_then_interrupt)
+        with pytest.raises(ControlStop):
+            batch.retry_resolution()
+    assert batch.preparation.coordination_uncertain
+    assert _row(owner).state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert not batch.retry_resolution().requires_owner_retention
+    assert carrier.calls == []
+
+
+def test_local_close_retry_cannot_resolve_after_takeover(recovery, monkeypatch):
+    database, owner, _, _ = recovery
+    carrier = FixedCarrier()
+    batch = _batch(owner, carrier)
+    original = RecoveryDispatch.close
+
+    def close_then_interrupt(self):
+        original(self)
+        raise ControlStop
+
+    with monkeypatch.context() as patch:
+        patch.setattr(RecoveryDispatch, "close", close_then_interrupt)
+        with pytest.raises(ControlStop):
+            _prepare(batch)
+    successor = OperationOwner.recover(database.operations, owner.ownership, "f" * 32)
+    with pytest.raises(StateError):
+        batch.retry_resolution()
+    assert batch.preparation.requires_owner_retention
+    assert _row(successor).state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert carrier.calls == ["guest", "admin", "root"]
