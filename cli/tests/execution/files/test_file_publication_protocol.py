@@ -15,8 +15,11 @@ from agentworks.errors import ValidationError
 from agentworks.execution._file_publication import (
     Create,
     CreateMetadata,
+    Match,
     PublicationCleanupDebt,
 )
+from agentworks.execution._file_publication_bundle import _MODULE_NAMES as PUBLICATION_MODULES
+from agentworks.execution._file_publication_bundle import _PACKAGE as PUBLICATION_PACKAGE
 from agentworks.execution._file_publication_bundle import FIXED_BUNDLE
 from agentworks.execution._file_publication_exchange import (
     FilePublicationObservationError,
@@ -54,6 +57,7 @@ from agentworks.execution._file_publication_wire import (
 )
 from agentworks.execution._file_stat import FileRevision, FileStat
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, encode_file_record
+from agentworks.execution._helper_bundle import RootGuestDelivery, build_root_guest_program
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._publication_receipt import (
@@ -65,10 +69,16 @@ from agentworks.execution._publication_receipt import (
 from agentworks.execution._publication_receipt import (
     _Identity as PublicationIdentity,
 )
-from agentworks.execution._runtime_prerequisite import build_runtime_identity_helper_argv
+from agentworks.execution._runtime_prerequisite import (
+    RuntimeSelection,
+    RuntimeTargetOS,
+    build_root_guest_bootstrap_argv,
+    build_runtime_identity_helper_argv,
+)
 from agentworks.execution._scratch import ScratchReference
 from agentworks.execution._scratch_receipt import ScratchOwnership
 from agentworks.execution._scratch_receipt import _Identity as ScratchIdentity
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 from agentworks.execution.carrier import (
     CapturedOutput,
     CarrierIO,
@@ -83,6 +93,7 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
+from agentworks.execution.carriers import proxmox as proxmox_module
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 from agentworks.execution.carriers.ssh.connection import SSHConnection, build_ssh_argv
 from tests.execution.files._runtime_support import runtime_ready_record, runtime_selection
@@ -686,3 +697,105 @@ def test_aggregate_oversize_refuses_before_proxmox_wire(plan: IdentityPlan, monk
 class _NullSink:
     def try_write(self, data: memoryview) -> int:
         return len(data)
+
+
+def _root_publication_invocation(
+    target: IdentityExpectation,
+    *,
+    root_mode: IdentityMode = IdentityMode.DIRECT,
+) -> tuple[PreparedInvocation, bytes]:
+    program = build_root_guest_program(
+        PUBLICATION_PACKAGE,
+        PUBLICATION_MODULES,
+        "_file_publication_guest",
+        delivery=RootGuestDelivery.FIXED_PREFIX,
+    )
+    root = IdentityPlan(IdentityExpectation(0, 0, (0,)), root_mode)
+    guest = VMGuestIdentity("a" * 32, "123e4567-e89b-12d3-a456-426614174000", 1234)
+    argv, _, _ = build_root_guest_bootstrap_argv(
+        root,
+        target,
+        selection=RuntimeSelection(RuntimeTargetOS.LINUX),
+        program=program,
+        nonce="0" * 32,
+        expected_guest=guest,
+    )
+    return PreparedInvocation(argv), program.prefix
+
+
+@pytest.mark.parametrize("root_mode", [IdentityMode.DIRECT, IdentityMode.SUDO_ROOT])
+@pytest.mark.parametrize("operation", ["publish", "reconcile", "cleanup"])
+def test_two_phase_root_publication_long_path_body_fits(
+    plan: IdentityPlan,
+    root_mode: IdentityMode,
+    operation: str,
+) -> None:
+    reference = _reference(plan)
+    common = ("0" * 32, _TOKEN, "/" + "r" * 4094, "p" * 4096, reference)
+    request: FilePublicationRequest
+    if operation == "publish":
+        request = FilePublishRequest(
+            *common,
+            _DIGEST,
+            Match(_revision()),
+            CreateMetadata(1001, 1002, 0o600),
+            plan.expected,
+            1.0,
+        )
+    elif operation == "reconcile":
+        request = FilePublicationReconcileRequest(*common, plan.expected, 1.0)
+    else:
+        request = FilePublicationCleanupRequest(*common, _receipt_debt(reference), plan.expected, 1.0)
+    manifest = encode_file_publication_request(request)
+    invocation, prefix = _root_publication_invocation(plan.expected, root_mode=root_mode)
+    io = CarrierIO(
+        input=FiniteInput(prefix + manifest, sensitive=True),
+        output=SinkOutput(_NullSink(), _NullSink(), require_live=False),
+        sensitive=True,
+    )
+    body = ProxmoxCarrier._request_body(invocation, io)
+    assert len(body) < 65_536
+
+
+def test_two_phase_root_publication_valid_near_ceiling_refuses_before_wire(monkeypatch: pytest.MonkeyPatch) -> None:
+    target = IdentityExpectation(1001, 1002, tuple(range(1002, 4302)))
+    reference = _reference(IdentityPlan(target, IdentityMode.DIRECT))
+    request = FilePublishRequest(
+        "0" * 32,
+        _TOKEN,
+        "/" + "r" * 4094,
+        "p" * 4096,
+        reference,
+        _DIGEST,
+        Match(_revision()),
+        CreateMetadata(1001, 1002, 0o600),
+        target,
+        1.0,
+    )
+    manifest = encode_file_publication_request(request)
+    assert 28_000 < len(manifest) <= 32_768
+    invocation, prefix = _root_publication_invocation(target)
+    io = CarrierIO(
+        input=FiniteInput(prefix + manifest, sensitive=True),
+        output=SinkOutput(_NullSink(), _NullSink(), require_live=False),
+        sensitive=True,
+    )
+    carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.example:8006", "node-a", 101, "root@pam!token", "secret"))
+    serialized_lengths: list[int] = []
+    original_dumps = proxmox_module.json.dumps
+
+    def measure_body(value: object) -> str:
+        encoded = original_dumps(value)
+        serialized_lengths.append(len(encoded.encode("ascii")))
+        return encoded
+
+    monkeypatch.setattr(proxmox_module.json, "dumps", measure_body)
+
+    def unexpected_wire(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("oversized request reached provider")
+
+    monkeypatch.setattr(carrier._wire, "request", unexpected_wire)
+    with pytest.raises(ValidationError):
+        carrier.execute(invocation, io=io, deadline=Deadline.after(1))
+    assert len(serialized_lengths) == 1
+    assert serialized_lengths[0] > 65_536
