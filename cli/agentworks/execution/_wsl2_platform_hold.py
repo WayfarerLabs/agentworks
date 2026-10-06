@@ -219,6 +219,24 @@ class WSL2PlatformHold:
         finally:
             self._transition_lock.release()
 
+    def start_recovery(self, deadline: Deadline, *, obligation_id: str) -> WSL2AnchorEvidence:
+        """Admit one support row under recovery ownership, then launch once.
+
+        Core retains the ID and this hold before calling. Successful startup
+        includes durable READY publication before subsequent recovery work.
+        The live anchor's custody is its row and native object, not a finite
+        recovery attempt whose settlement would require termination.
+        """
+        if not _hex(obligation_id, 32):
+            raise ValidationError("WSL2 recovery hold requires a retained obligation ID")
+        self._acquire_transition(deadline, "start")
+        try:
+            if deadline.expired:
+                raise TimeoutError("WSL2 hold start deadline expired waiting for transition")
+            return self._start_locked(deadline, recovery_obligation_id=obligation_id)
+        finally:
+            self._transition_lock.release()
+
     def _acquire_transition(self, deadline: Deadline, action: str) -> None:
         """Bound entry to one hold transition by its caller's finite deadline."""
         if type(deadline) is not Deadline or deadline.expires_at is None:
@@ -235,7 +253,7 @@ class WSL2PlatformHold:
                 return
             first_attempt = False
 
-    def _start_locked(self, deadline: Deadline) -> WSL2AnchorEvidence:
+    def _start_locked(self, deadline: Deadline, *, recovery_obligation_id: str | None = None) -> WSL2AnchorEvidence:
         if self._attempted:
             raise ValidationError("WSL2 platform hold was already started")
         if (
@@ -274,11 +292,20 @@ class WSL2PlatformHold:
         self._payload = payload
         encoded = encode_hold_payload(payload)
         self._registration_uncertain = True
-        self._obligation = self._owner.register_lifecycle_obligation(
-            OBLIGATION_KIND, payload_version=PAYLOAD_VERSION, payload=encoded
-        )
+        if recovery_obligation_id is None:
+            self._obligation = self._owner.register_lifecycle_obligation(
+                OBLIGATION_KIND, payload_version=PAYLOAD_VERSION, payload=encoded
+            )
+        else:
+            self._obligation = self._owner.admit_recovery_support_obligation(
+                OBLIGATION_KIND,
+                payload_version=PAYLOAD_VERSION,
+                payload=encoded,
+                obligation_id=recovery_obligation_id,
+            )
         self._registration_uncertain = False
-        self._obligation.mark_possible_effect()
+        if recovery_obligation_id is None:
+            self._obligation.mark_possible_effect()
         try:
             evidence = self._anchor.start(deadline, nonce=payload.nonce)
         except BaseException as primary:
