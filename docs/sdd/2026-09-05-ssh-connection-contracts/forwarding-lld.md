@@ -1,10 +1,10 @@
 # Owned SSH Local Forwarding
 
-- Status: Implementation design; installed-server/platform acceptance remains open
+- Status: Implementation design; retained cleanup adaptation and platform acceptance remain open
 - Requirements: [FRD R2](frd.md#r2-isolated-connection-and-authentication-policy) and
   [R4](frd.md#r4-one-attempt-byte-safe-io-and-truthful-evidence)
 
-## Surface and ownership
+## Current surface and ownership
 
 `open_local_forwards(connection, forwards, deadline=...)` opens explicitly requested local TCP
 forwards using one owned foreground client process. A `LocalForward` contains a numeric local bind
@@ -110,6 +110,36 @@ startup fails before readiness. After stopping pipe use it must support serializ
 retries, retaining pending or lost ownership. Adding retries only to an already returned resource
 leaves failed startup unresolved. This remains an implementation/design gate; no second native owner
 or cleanup capability inside reports or exceptions is introduced.
+
+### Proposed caller-held forwarding interface
+
+This API revision awaits the operator's decision and is not implemented. Reuse `OwnedForwarding` as
+the passive resource held before startup, with one explicit start operation:
+
+```text
+OwnedForwarding(connection: SSHConnection, forwards: Sequence[LocalForward])
+OwnedForwarding.start(deadline: Deadline, custody: LocalDeliveryCustody) -> None
+OwnedForwarding.close(deadline: Deadline) -> bool
+```
+
+The constructor validates and retains settings without trust-file admission, client discovery,
+thread startup or listener creation. Startup uses the caller's discovery storage and the resource's
+existing shared native owner; it never allocates a replacement forwarding owner. Successful start
+establishes readiness. Failure or interruption leaves the same resource with its caller, including
+when readiness was never reached. The separate discovery storage also remains caller-held until its
+own settlement.
+
+Closing permanently prevents new startup, bounds drainer shutdown and stops all pipe use before
+asking that owner for bounded cleanup. Incomplete drainer or native settlement returns incomplete
+cleanup without releasing ownership. An explicit later close may retry through the same native
+owner. Natural-exit observation and context cleanup must preserve this retained lifetime; neither
+may turn an incomplete close into released ownership. The startup deadline still does not limit a
+successfully held session's lifetime. This replaces factory startup before the caller receives
+ownership without adding a second forwarding coordinator or changing the raw carrier contract.
+
+Startup and cleanup preserve original control exceptions without placing resource capabilities in
+their causes. Context cleanup requires a finite observation budget and cannot silently replace
+explicit retry after incomplete cleanup.
 
 ## Evidence
 
