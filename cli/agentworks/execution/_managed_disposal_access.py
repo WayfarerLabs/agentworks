@@ -6,14 +6,15 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
-from agentworks.operations import _PreRegistrationClosingRefusal, release_borrow_after_custody
+from agentworks.operations import _PreRegistrationClosingRefusal
 
 from ._fixed_helper_operation import BorrowedFixedHelperCarrier
+from ._managed_action_custody import ManagedActionCustody
 from ._managed_bound_run import preflight_bound_run
 from ._managed_disposal_exchange import DisposalCandidate, DisposalState, dispose_managed_run
 from ._managed_run_obligation import decode_managed_run_obligation, encode_managed_run_obligation
 from ._managed_runs import ManagedLaunchState, ManagedRunIdentity, ManagedRunRepository, ManagedTargetIdentity
-from .carrier import Deadline, Dispatch, ExitStatus
+from .carrier import Deadline, Dispatch
 
 if TYPE_CHECKING:
     from agentworks.operations import OperationOwner
@@ -97,16 +98,11 @@ def dispose_bound_managed_run(
     payload = encode_managed_disposal_obligation(record.identity.run_id)
     borrow = owner.borrow()
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
+    custody = ManagedActionCustody(borrow, operation)
     candidate: DisposalCandidate | None = None
-    registration_started = False
-    release_attempted = False
     try:
-        registration_started = True
-        borrow.install_dispatch_obligation(
-            obligation_id,
-            MANAGED_DISPOSAL_OBLIGATION_KIND,
-            payload_version=MANAGED_DISPOSAL_PAYLOAD_VERSION,
-            payload=payload,
+        custody.register(
+            obligation_id, MANAGED_DISPOSAL_OBLIGATION_KIND, payload, payload_version=MANAGED_DISPOSAL_PAYLOAD_VERSION
         )
         candidate = dispose_managed_run(
             operation,
@@ -116,45 +112,29 @@ def dispose_bound_managed_run(
             runtime_selection=runtime_selection,
             guest=guest,
         )
-        operation.settle(candidate.dispatch, candidate.carrier_completion)
         state = candidate.observation.state if candidate.observation is not None else None
-        proved = candidate.dispatch is Dispatch.NOT_SENT or (
-            candidate.dispatch is Dispatch.SENT
-            and candidate.carrier_completion == ExitStatus(code=0)
-            and state in (DisposalState.NOT_READY, DisposalState.DISPOSED)
+        custody_fact = custody.settle_and_release(
+            candidate.dispatch,
+            candidate.carrier_completion,
+            accepted_response=state in (DisposalState.NOT_READY, DisposalState.DISPOSED),
         )
-        resolved = proved and not operation.requires_owner_retention
-        retained = not resolved
-        outcome = ManagedDisposalOutcome(
+        return ManagedDisposalOutcome(
             candidate,
-            state if resolved and candidate.dispatch is Dispatch.SENT else None,
-            operation.pending_remote_effects or (borrow.dispatch_obligation_may_be_armed and retained),
-            operation.coordination_uncertain,
-            retained,
+            state if not custody_fact.requires_owner_retention and candidate.dispatch is Dispatch.SENT else None,
+            custody_fact.pending_remote_effects,
+            custody_fact.coordination_uncertain,
+            custody_fact.requires_owner_retention,
         )
-        release_attempted = True
-        release_borrow_after_custody(borrow, retain_effect=retained)
-        return outcome
     except _PreRegistrationClosingRefusal:
-        borrow.close()
+        custody.close_pre_registration_refusal()
         raise
     except BaseException as control:
-        armed = borrow.dispatch_obligation_may_be_armed
-        uncertain_registration = registration_started and not borrow.has_installed_dispatch_obligation
-        release_failed = release_attempted
-        if not release_attempted:
-            try:
-                release_borrow_after_custody(borrow, retain_effect=armed)
-            except BaseException:
-                release_failed = True
+        custody_fact = custody.escaped()
         fact = ManagedDisposalOutcome(
             candidate,
             None,
-            operation.pending_remote_effects or armed,
-            operation.coordination_uncertain
-            or operation.has_outstanding_attempt
-            or uncertain_registration
-            or release_failed,
-            armed or operation.requires_owner_retention or uncertain_registration or release_failed,
+            custody_fact.pending_remote_effects,
+            custody_fact.coordination_uncertain,
+            custody_fact.requires_owner_retention,
         )
         raise control from ManagedDisposalControlFact(fact)

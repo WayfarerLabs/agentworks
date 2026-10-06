@@ -9,7 +9,7 @@ import pytest
 
 from agentworks.db import LifecycleObligationState
 from agentworks.errors import ValidationError
-from agentworks.execution import _managed_stop_access as access
+from agentworks.execution import _managed_action_custody as access
 from agentworks.execution._managed_job_store import FactName
 from agentworks.execution._managed_runs import (
     ManagedLaunchObservation,
