@@ -276,11 +276,12 @@ class ExecutionOperation:
         except BaseException as control:
             self._raise_control(control, active, operation, deadline)
 
-        try:
-            self._capture(active, outcome)
-        except BaseException:
-            active.bookkeeping_retained = True
-            raise
+        with self._admission_guard:
+            try:
+                self._capture(active, outcome)
+            except BaseException:
+                active.bookkeeping_retained = True
+                raise
         return outcome
 
     def _outcome(
@@ -306,20 +307,21 @@ class ExecutionOperation:
         operation: BorrowedFixedHelperCarrier,
         deadline: Deadline,
     ) -> None:
-        active.bookkeeping_retained = True
-        try:
-            outcome = self._outcome(active, operation, deadline, include_candidate=False)
-            retryable = (active.candidate is not None and self._known_termination(active.candidate)) or (
-                operation.coordination_uncertain and not operation.pending_remote_effects
-            )
-            if active.armed and not retryable:
-                self._capture(active, outcome)
-            else:
-                outcome = replace(outcome, coordination_uncertain=True, requires_owner_retention=True)
-                active.outcome = outcome
-            fact = InlineExecutionControlFact(outcome)
-        except BaseException:
-            raise control from None
+        with self._admission_guard:
+            active.bookkeeping_retained = True
+            try:
+                outcome = self._outcome(active, operation, deadline, include_candidate=False)
+                retryable = (active.candidate is not None and self._known_termination(active.candidate)) or (
+                    operation.coordination_uncertain and not operation.pending_remote_effects
+                )
+                if active.armed and not retryable:
+                    self._capture(active, outcome)
+                else:
+                    outcome = replace(outcome, coordination_uncertain=True, requires_owner_retention=True)
+                    active.outcome = outcome
+                fact = InlineExecutionControlFact(outcome)
+            except BaseException:
+                raise control from None
         raise control from fact
 
     def _capture(self, active: _ActiveInlineCall, outcome: OwnedInlineOutcome) -> None:

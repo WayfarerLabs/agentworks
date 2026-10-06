@@ -5,14 +5,14 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from threading import Thread
+from threading import Event, Lock, Thread, current_thread
 from uuid import uuid4
 
 import pytest
 
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
-from agentworks.execution._execution_operation import ExecutionOperation
+from agentworks.execution._execution_operation import ExecutionOperation, InlineExecutionControlFact
 from agentworks.execution._file_operation import FileOperation
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
@@ -329,3 +329,110 @@ def test_stale_takeover_prevents_lifetime_resolution(owned, monkeypatch: pytest.
         operation.finish()
     rows = database.operations.list_lifecycle_obligations(recovery.ownership)
     assert len(rows) == 1 and rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+
+
+@pytest.mark.parametrize("cleanup", ["finish", "retry"])
+@pytest.mark.parametrize("terminal", ["control", "capture_failure"])
+def test_terminal_capture_serializes_concurrent_bookkeeping(
+    owned, monkeypatch: pytest.MonkeyPatch, cleanup: str, terminal: str
+) -> None:
+    _, _, operation = owned
+    _patch_candidate_execution(monkeypatch)
+    paused = Event()
+    resume = Event()
+    cleanup_entered = Event()
+    cleanup_acquired = []
+    controls = []
+    cleanup_errors = []
+    control = ValidationError("validation refusal") if terminal == "control" else KeyboardInterrupt("handoff reply")
+
+    class ObservedGuard:
+        """Expose the cleanup thread's first acquisition without timed guesses."""
+
+        def __init__(self) -> None:
+            self.lock = Lock()
+
+        def __enter__(self):
+            if current_thread().name == "inline-cleanup":
+                acquired = self.lock.acquire(blocking=False)
+                cleanup_acquired.append(acquired)
+                cleanup_entered.set()
+                if not acquired:
+                    self.lock.acquire()
+            else:
+                self.lock.acquire()
+            return self
+
+        def __exit__(self, *args):
+            self.lock.release()
+
+    monkeypatch.setattr(operation, "_admission_guard", ObservedGuard())
+    if terminal == "control":
+        original = operation._outcome
+
+        def pause_control(*args, **kwargs):
+            if not kwargs["include_candidate"]:
+                paused.set()
+                assert resume.wait(5)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(operation, "_outcome", pause_control)
+
+        class RefusingCarrier(RecordingCarrier):
+            def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+                raise control
+
+        carrier = RefusingCarrier()
+    else:
+        original_handoff = OperationBorrow.handoff_retained_effect
+
+        def pause_failed_capture(self):
+            original_handoff(self)
+            if current_thread().name == "inline-caller":
+                paused.set()
+                assert resume.wait(5)
+                raise control
+
+        monkeypatch.setattr(OperationBorrow, "handoff_retained_effect", pause_failed_capture)
+        carrier = RecordingCarrier(CarrierReport(Dispatch.NOT_SENT))
+
+    def run() -> None:
+        try:
+            _run(operation, carrier)
+        except BaseException as error:
+            controls.append(error)
+
+    def reconcile() -> None:
+        try:
+            if cleanup == "finish":
+                operation.finish()
+            else:
+                operation.retry_inline_bookkeeping()
+        except BaseException as error:
+            cleanup_errors.append(error)
+
+    caller = Thread(target=run, name="inline-caller")
+    cleaner = Thread(target=reconcile, name="inline-cleanup")
+    caller.start()
+    try:
+        assert paused.wait(5)
+        cleaner.start()
+        assert cleanup_entered.wait(5)
+        # The terminal phase retains exclusive custody until it publishes its
+        # outcome or failed-capture flag, so cleanup cannot consume it early.
+        assert cleanup_acquired == [False]
+    finally:
+        resume.set()
+        caller.join(5)
+        if cleaner.ident is not None:
+            cleaner.join(5)
+    assert not caller.is_alive() and not cleaner.is_alive()
+    assert controls == [control]
+    assert not cleanup_errors
+    if terminal == "control":
+        assert isinstance(control.__cause__, InlineExecutionControlFact)
+        assert not control.__cause__.outcome.requires_owner_retention
+    assert operation.active_inline_calls == ()
+    assert not operation.unfinished_inline_executions
+    assert carrier.calls == (0 if terminal == "control" else 1)
+    operation.finish()
