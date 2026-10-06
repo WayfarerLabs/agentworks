@@ -160,6 +160,17 @@ subsequent collateral review. Initial hold/query/probe, durable launch/body acco
 transitions and complete production fencing remain open. This leaf completes no public operation,
 permission boundary or feedback/fix round.
 
+The private early-consumer units at `6e4712729` and `9dea16be7` adopt named admission for the WSL
+hold, query and initial canonical guest probe. The first worker's focused selection passes 222 tests
+plus 74 adjacent tests; the second passes 246 focused tests. Both affected static selections exit 0.
+Generated bodies run on Python 3.11 with mocked successful credentials; actual non-root entry
+produces runtime readiness followed by refusal, not guest evidence. New version-4 hold records
+separate root launch and named body accounts, while canonical version-3 recovery preserves its
+former route and version. The initial probe uses a separate carrier under the existing borrow;
+ordinary file and command delivery remains unchanged. This supersedes the earlier private
+same-carrier probe/dispatch composition. Integration review, complete gates and native acceptance
+remain pending; ordinary file/service body fencing and production composition remain open.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
@@ -1884,7 +1895,7 @@ and whitespace checks pass. Live SSH/QGA and production route tests remain open.
       launch: the claim must stay unresolved. Establish which acknowledged launches can be recovered
       safely, and retain pre-`READY` ambiguity unless a stronger fence is proved. Distribution
       termination alone is not a drain proof or permission to disrupt unrelated work.
-- [ ] Implement recovery handling for version 3's one-way guest-query admission marker. A later
+- [ ] Implement recovery handling for the versioned one-way guest-query admission marker. A later
       controller must retain any marked obligation unless every earlier admitted query can be
       accounted for or an independent service-side dispatch drain is proved; a fresh absence query
       alone cannot discharge it. Preserve the ordinary controller's ability to resolve on one

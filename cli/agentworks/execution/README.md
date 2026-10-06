@@ -351,11 +351,15 @@ acknowledged guest identity. It does not close the outer owner or keep a borrow 
 lifetime. A production observer, crash recovery factory, activation, platform wiring, target
 identity and RunContext integration remain open gates.
 
-The private payload is version 3. Before an ordinary guest query, the hold durably publishes a
-one-way `query_may_have_been_admitted` marker alongside the exact guest identity. A failed READY
-publication can be reconciled by that combined compare-and-swap only if the earlier publication did
-not advance the row; a committed publication with a lost reply refuses on the stale revision without
-dispatching a query. The marker does not itself prove that a query actually ran or drained.
+New private hold payloads use version 4: `launch_user` is root and `user` is the configured body
+account. Existing version-3 records retain their same-user launch and query meaning. Recovery checks
+the envelope against the canonical payload and preserves that version through rebind and
+publication; it neither rewrites old records nor falls back from a failed root-entry query. Before
+an ordinary guest query, the hold durably publishes a one-way `query_may_have_been_admitted` marker
+alongside the exact guest identity. A failed READY publication can be reconciled by that combined
+compare-and-swap only if the earlier publication did not advance the row; a committed publication
+with a lost reply refuses on the stale revision without dispatching a query. The marker does not
+itself prove that a query actually ran or drained.
 
 `_wsl2_guest_query.py` is a private no-staging source and strict response reducer for that exact
 epoch-bound identity. `_wsl2_guest_observer.py` owns an ordinary-path query through a separate fresh
@@ -366,6 +370,13 @@ after its Windows client settles. A clean absence requires a complete exact resp
 exit, live deadline and settled local handles. This private observer alone does not provide
 controller-death recovery or production wiring; recovery drain and native Windows/WSL2 acceptance
 remain open.
+
+New hold and query helpers enter through the fixed named-account bootstrap. They open the bounded
+PID 1 descriptor before dropping to the configured account, then make fresh reads through that
+descriptor without reopening the privileged path. Anchor process observation and the hold's stdin
+wait occur under the admitted account. Runtime prerequisite output is consumed separately before
+guest READY or query evidence; it does not prove credential admission or guest identity. Recovery of
+version-3 records keeps the former same-user observer and its conservative uncertainty rules.
 
 `_wsl2_platform_hold_recovery.py` now privately consumes one exact persisted hold obligation after
 generic takeover. A registered row resolves without launch. A possible-effect row with durable
@@ -388,12 +399,16 @@ Portable SQLite tests cover this sequence, not native locator-to-registration bi
 behavior, WSLService drain, crash recovery, activation or RunContext wiring. Its private
 `from_platform` path uses the selected WSL2 platform to observe registration and resolve the native
 route under the already-acquired VM claim, then re-observes registration under the hold during
-target preparation. It copies the selected route into one core-owned carrier used for both the guest
-probe and file dispatch. A changed registration refuses before file dispatch, and invalid route or
-runtime facts refuse before hold activation without closing the caller's owner. Replacement between
-the pre-probe observation and guest dispatch can still send the read-only probe to a changed
-registration; post-probe confirmation suppresses file dispatch in that case. This is not an atomic
-registration guarantee or a production factory.
+target preparation. A shared passive binding factory copies the selected distribution and executable
+into ordinary admin delivery and a separate private initial guest-facts route. The initial probe
+enters as root, resolves the configured account and drops to it before loading the canonical
+identity helper. That helper binds the held PID 1 reader before entering its body. The probe stays
+under the same operation borrow; file dispatch retains the admin delivery carrier. A changed
+registration refuses before file dispatch, and invalid route or runtime facts refuse before hold
+activation without closing the caller's owner. Replacement between the pre-probe observation and
+guest dispatch can still send the read-only probe to a changed registration; post-probe confirmation
+suppresses file dispatch in that case. This is not an atomic registration guarantee or a production
+factory.
 
 `_wsl2_owned_operation.py` now shares selected-route copying, the caller's VM owner, the WSL2 hold,
 exact target preparation and hold-only settlement between that download path and the private
@@ -720,8 +735,9 @@ retains root as a fallback. An explicitly configured account resolving to UID 0 
 authority; this is not a claim of demotion or confinement. Named and numeric construction share the
 system-Python, compressed-launch and capability-clearing wrapper, but the numeric path still
 requires the full expected guest. This leaf is not a plugin execution surface or a permission grant.
-Early hold/query/probe wiring, durable launch/body account identity and successful native
-transitions remain separate gates.
+The private WSL hold, query and initial probe select named admission with distinct launch and body
+accounts. Ordinary file and execution helpers do not automatically select this path. Successful
+native transitions, complete guest fencing and production adoption remain separate gates.
 
 `_account.resolve_account` discovers a core-bound account's UID, primary GID and normalized groups
 through one read-only carrier attempt under the delivery identity. `RuntimeSelection` explicitly

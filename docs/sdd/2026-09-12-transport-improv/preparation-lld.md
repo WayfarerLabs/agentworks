@@ -830,10 +830,19 @@ bootstrap's root credentials; an explicit target resolving to UID 0 retains its 
 without a demotion or confinement claim. This does not make the numeric path's mandatory full guest
 optional or expose arbitrary plugin source through a privileged entry.
 
-These are private implementation increments, not production adoption. Early WSL hold/query/probe
-wiring and durable launch/body account composition remain open; ordinary helper and later service
-entry still need production guest fencing and durable cleanup composition. Native post-drop init
-reads, credential transitions and complete workflows remain acceptance gates.
+These are private implementation increments, not production adoption. Ordinary helper and later
+service entry still need production guest fencing and durable cleanup composition. Native post-drop
+init reads, credential transitions and complete workflows remain acceptance gates.
+
+The private adoption separates the initial fixed guest-facts route from ordinary delivery. WSL binds
+that route to root in the same selected distribution and executable, while the named bootstrap
+selects the configured body account. The ordinary binding remains the admin carrier. Initial
+preparation wraps the selected probe carrier in the existing operation borrow; it does not execute
+directly, replay or fall back to the ordinary route. A loader-only canonical identity bundle binds
+the held reader before entering its existing `main` once. Hold and query consumers admit the runtime
+record separately from READY or query evidence. New hold payloads distinguish launch and body
+accounts; old payloads retain their original same-user semantics and version during recovery. This
+sequencing does not close the native or full production-fencing gates.
 
 ## Public result and check behavior
 

@@ -426,6 +426,13 @@ file or execution consumers. It returns a `NativeExecutionBinding` containing th
 carrier, its actual delivery account name and explicit runtime selection. Constructing that value
 and the resulting RunContext views remains passive.
 
+The private WSL composition also binds a separate core-owned initial guest-facts route. It selects
+root entry and the configured named body account for the fixed canonical probe, without changing
+ordinary delivery or providing a consumer-facing root carrier. Core wraps that route in the same
+preparation borrow and requires separate runtime and guest evidence. The route supplies no arbitrary
+source callback, fallback or permission grant. Other platforms' adoption remains part of the
+complete factory gate.
+
 Core acquires operation ownership before activation, enters the platform-owned route lifetime, then
 invokes resolution with one preparation deadline before constructing the target views. Cloud
 platforms may need bounded provider reads to resolve a current endpoint: AWS, Azure and GCP obtain

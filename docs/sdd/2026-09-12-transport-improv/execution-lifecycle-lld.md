@@ -604,29 +604,31 @@ and one caller-owned native binding. It validates owner, marker and deadline bef
 one serial borrow it validates a fresh plugin locator and compares it to that expected value, probes
 the guest through the supplied binding and confirms the locator afterward. It never resolves another
 binding. The resolving caller must use the same deadline, validate and retain the selected route,
-and refuse a late resolver result. WSL2's private factory copies the selected route into one
-core-owned carrier used for both probe and file dispatch. A registration replacement during
-resolution is detected before the probe; one between the pre-probe observation and dispatch may
-still receive the read-only probe, but a changed post-probe locator suppresses file dispatch.
-Unavailable or invalid confirmation is unconfirmed; two valid unequal locators establish change.
-Release failure suppresses the target and attaches an uncertain custody fact with guest evidence.
-The private WSL2 owned-operation extraction now shares this selected route, VM owner, durable hold,
-prepared target and exact release with download and independent managed start. The managed caller
-checks a fresh locator, connection and runtime, then confirms the locator after resolving the
-binding immediately before entering the bound-start composition. It does not automatically release
-the hold after start. Exact hold settlement and whole-owner closure are separate: unresolved
-managed-start custody can retain VM ownership after the guest anchor is gone. A second route check
-now follows durable managed-start obligation arming and precedes the run's possible-dispatch record
-and carrier attempt. A valid changed route and an unconfirmed observation are distinguished; a
-post-arm refusal retains the exact `RESERVED` run as a one-shot tombstone and keeps owner custody.
-Exceptional observation propagates its original control exception. This narrows the dispatch gap but
-cannot make locator observation atomic with carrier delivery; this sibling has no production caller
-or native WSL2 proof. Production still needs an owner before activation, a locator-bound route
-lifetime, typed whole-span cleanup evidence and native proof. WSL2 supplies the first positive
-locator and binding pair; Proxmox returns locator unavailable, while SSH-backed cloud and Lima
-bindings remain later work. Malicious or engineered A-B-A host behavior is outside this checkpoint's
-threat scope. Future hierarchical admission replaces exact-VM equality with a core-owned coverage
-decision rather than a target-local ancestry guess.
+and refuse a late resolver result. WSL2's private factory copies the selected distribution and
+executable into separate ordinary-delivery and initial fixed guest-facts carriers. The probe uses
+root entry and named admission to the configured account under the same operation borrow; file
+dispatch retains ordinary admin delivery. A registration replacement during resolution is detected
+before the probe; one between the pre-probe observation and dispatch may still receive the read-only
+probe, but a changed post-probe locator suppresses file dispatch. Unavailable or invalid
+confirmation is unconfirmed; two valid unequal locators establish change. Release failure suppresses
+the target and attaches an uncertain custody fact with guest evidence. The private WSL2
+owned-operation extraction now shares this selected route, VM owner, durable hold, prepared target
+and exact release with download and independent managed start. The managed caller checks a fresh
+locator, connection and runtime, then confirms the locator after resolving the binding immediately
+before entering the bound-start composition. It does not automatically release the hold after start.
+Exact hold settlement and whole-owner closure are separate: unresolved managed-start custody can
+retain VM ownership after the guest anchor is gone. A second route check now follows durable
+managed-start obligation arming and precedes the run's possible-dispatch record and carrier attempt.
+A valid changed route and an unconfirmed observation are distinguished; a post-arm refusal retains
+the exact `RESERVED` run as a one-shot tombstone and keeps owner custody. Exceptional observation
+propagates its original control exception. This narrows the dispatch gap but cannot make locator
+observation atomic with carrier delivery; this sibling has no production caller or native WSL2
+proof. Production still needs an owner before activation, a locator-bound route lifetime, typed
+whole-span cleanup evidence and native proof. WSL2 supplies the first positive locator and binding
+pair; Proxmox returns locator unavailable, while SSH-backed cloud and Lima bindings remain later
+work. Malicious or engineered A-B-A host behavior is outside this checkpoint's threat scope. Future
+hierarchical admission replaces exact-VM equality with a core-owned coverage decision rather than a
+target-local ancestry guess.
 
 New VM creation generates and persists one non-secret marker before provider dispatch. The marker is
 exactly 32 lowercase hexadecimal characters and the shared create bootstrap writes that same value
@@ -806,7 +808,13 @@ in-progress startup. A caller's finite deadline also bounds entry to either tran
 leaves the obligation unresolved. It accepts only bare `wsl` or `wsl.exe` case-insensitively,
 resolved by the native owner through the trusted Windows system directory, rather than persisting an
 executable path. Registration, mark and publication uncertainty retain the caller-owned hold without
-replay. Before an ordinary guest query, the hold durably CAS-publishes version 3's one-way
+replay. New version-4 payloads explicitly distinguish root launch from the configured body account.
+Existing version-3 records retain their former same-user launch and query meaning. Recovery rejects
+an envelope/body version mismatch and preserves the decoded version on rebind and publication; it
+does not rewrite records or treat a failed root-entry query as permission for another route. New
+hold and query bodies use fresh reads from the bootstrap-held PID 1 descriptor after named
+admission. Runtime readiness is consumed separately and establishes neither guest identity nor
+credential admission. Before an ordinary guest query, the hold durably CAS-publishes the one-way
 `query_may_have_been_admitted` marker with the exact guest identity. A failed READY publication
 whose row did not advance can be followed by this combined publication; a committed publication with
 a lost reply leaves a stale revision, so admission refuses without querying or resolving. Ordinary
