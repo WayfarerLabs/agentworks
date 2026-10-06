@@ -791,6 +791,10 @@ part of the open workflow gate, with this exact-pin native vector evidence avail
 
 ## Workstation download transport refresh
 
+The later [shared terminal dependency adoption](terminal-results.md) records transport `d9315847`
+and SSH's explicit stdin adaptation. Its shared terminal types do not enable SSH terminal delivery;
+actual relay, resize, native ownership and production workflow acceptance remain open.
+
 SSH code head `1de533873f13f6cef363ea252b05c6e7dd724f65` rebases all 88 SSH commits onto transport
 `a274a6264cd6b2ea3ced4864b52a8fcdad96bf80`. The transport increment selects private Linux, macOS and
 Windows local download publishers. It retains caller-private Create and implements the approved

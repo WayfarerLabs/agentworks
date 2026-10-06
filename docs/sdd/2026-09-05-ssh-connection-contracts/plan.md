@@ -188,8 +188,9 @@ The [implementation progress record](phase2-results.md) pins the completed indep
 local validation separately from the remaining shared integration and platform acceptance.
 
 Shared subprocess adoption introduces an implementation dependency on transport #833. Current
-integration uses `08bf36fd6ce270862ceceb3450e6a282039faaa2`, including the shared structural
-preflight contract, private managed-start caller and native workstation download publishers. The
+integration uses `d9315847cd2c2d6300bc90f9cf3d20789ac6b973`, adding shared terminal input and
+explicit borrowed native stdin to the shared structural preflight, managed-start and download
+mechanisms. The
 [Windows ancestor-sharing correction](phase2-results.md#windows-ancestor-sharing-correction) records
 that rebase and its remaining limits. The earlier
 [local-download stack refresh](phase2-results.md#private-local-download-stack-refresh) and
@@ -211,10 +212,17 @@ work is proceeding in parallel in the transport lane, as confirmed by the operat
 
 Transport's
 [launch-boundary response](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6009186902)
-confirms that it owns the borrowed native-stdin addition to the existing held process owner. No
-usable terminal endpoint or native-stdin shared pin is published at this checkpoint. SSH will adapt
-after the reviewed green pin is available, retaining its PTY slave until launcher/client settlement
-and keeping the native resource worker through interrupted waits and relay cleanup. The
+confirms that it owns the borrowed native-stdin addition to the existing held process owner. Its
+[published dependency checkpoint](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6010031679)
+now supplies the privately reviewed shared types and launch option. The
+[terminal implementation record](terminal-results.md) separates their adoption from actual relay and
+native acceptance. SSH retains its PTY slave until launcher/client settlement and keeps the native
+resource worker through interrupted waits and relay cleanup. An
+[owner-mediated resize boundary](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6010061812)
+is now
+[accepted by transport](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6010143834),
+with its reviewed pin still pending. SSH does not access a private client PID or add a second
+process owner. The
 [SSH reading](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6009208568) records
 the current resource increment and remaining proof separately from that planned shared seam.
 
