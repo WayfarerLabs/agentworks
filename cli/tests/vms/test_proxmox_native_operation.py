@@ -35,7 +35,7 @@ from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution.binding import NativeExecutionBinding
 from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, FiniteInput, PreparedInvocation
-from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
+from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection, _ProxmoxWire
 from agentworks.execution.models import Command
 from agentworks.execution.profiles import Protection
 from agentworks.execution.result import CheckedExecutionError
@@ -131,6 +131,8 @@ def _install(database: Database, monkeypatch: pytest.MonkeyPatch) -> tuple[Proxm
 
 def test_running_views_share_owner_bootstrap_and_settle(database, tmp_path, monkeypatch):
     platform, route = _install(database, monkeypatch)
+    monkeypatch.setattr(_ProxmoxWire, "request_vm_start", lambda *args, **kwargs: pytest.fail("running VM started"))
+    monkeypatch.setattr(_ProxmoxWire, "request_guest_info", lambda *args, **kwargs: pytest.fail("running VM waited"))
     database.set_operator_stopped("box", True)
     root = tmp_path / "files"
     root.mkdir()
@@ -183,8 +185,18 @@ def test_running_views_share_owner_bootstrap_and_settle(database, tmp_path, monk
     assert database.operations.inspect(_scope()) is None
 
 
-@pytest.mark.parametrize("power", [VMStatus.STOPPED, VMStatus.UNKNOWN, VMStatus.DEALLOCATED, "starting"])
-@pytest.mark.parametrize("intent", [False, True])
+@pytest.mark.parametrize(
+    "power,intent",
+    [
+        (VMStatus.STOPPED, True),
+        (VMStatus.UNKNOWN, False),
+        (VMStatus.UNKNOWN, True),
+        (VMStatus.DEALLOCATED, False),
+        (VMStatus.DEALLOCATED, True),
+        ("starting", False),
+        ("starting", True),
+    ],
+)
 def test_nonrunning_refuses_before_route(database, tmp_path, monkeypatch, power, intent):
     platform, route = _install(database, monkeypatch)
     database.set_operator_stopped("box", intent)
@@ -557,7 +569,7 @@ def guarded_import(name, *args, **kwargs):
         raise AssertionError(name)
     return original_import(name, *args, **kwargs)
 builtins.__import__ = guarded_import
-platform.observe_execution_power = lambda *args, **kwargs: VMStatus.STOPPED
+platform.observe_execution_power = lambda *args, **kwargs: VMStatus.UNKNOWN
 with closing(Database(Path(sys.argv[2]) / 'state.db')) as db:
     db.insert_vm('box', 'pve', '101', admin_username='admin', instance_marker='a'*32)
     try:

@@ -34,6 +34,7 @@ class _Endpoint(StrEnum):
     CURRENT_CONFIG = "current-config"
     VM_START = "vm-start"
     TASK_STATUS = "task-status"
+    GUEST_INFO = "guest-info"
 
 
 def _valid_control_timeout(value: object) -> bool:
@@ -99,10 +100,15 @@ def _request(payload: dict[str, Any]) -> bytes:
         ):
             raise ValueError("Guest execution requires a fixed method, route and body")
         url = f"{base}/agent/{suffix}"
-    elif endpoint in (_Endpoint.POWER, _Endpoint.CURRENT_CONFIG):
+    elif endpoint in (_Endpoint.POWER, _Endpoint.CURRENT_CONFIG, _Endpoint.GUEST_INFO):
         if suffix is not None or method != "GET" or body is not None:
             raise ValueError("Provider observation requires a fixed body-free GET")
-        url = f"{base}/status/current" if endpoint is _Endpoint.POWER else f"{base}/config?current=1"
+        route = {
+            _Endpoint.POWER: "status/current",
+            _Endpoint.CURRENT_CONFIG: "config?current=1",
+            _Endpoint.GUEST_INFO: "agent/info",
+        }[endpoint]
+        url = f"{base}/{route}"
     elif endpoint is _Endpoint.VM_START:
         if suffix is not None or method != "POST" or body is not None:
             raise ValueError("VM start requires a fixed body-free POST")
@@ -111,7 +117,9 @@ def _request(payload: dict[str, Any]) -> bytes:
         if method != "GET" or body is not None:
             raise ValueError("Task status requires a fixed body-free GET")
         url = f"{node_base}/tasks/{_task_component(suffix)}/status"
-    if endpoint in (_Endpoint.VM_START, _Endpoint.TASK_STATUS) and not _valid_control_timeout(payload["timeout"]):
+    if endpoint in (_Endpoint.VM_START, _Endpoint.TASK_STATUS, _Endpoint.GUEST_INFO) and not _valid_control_timeout(
+        payload["timeout"]
+    ):
         raise ValueError("VM control requires a positive finite timeout")
     request = urllib.request.Request(
         url, data=body.encode("ascii") if body is not None else None, method=payload["method"]

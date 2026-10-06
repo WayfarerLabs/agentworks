@@ -135,6 +135,12 @@ class _ProxmoxWire:
             raise ValidationError("Proxmox task status requires a bounded identifier and positive finite timeout")
         return self._request(_Endpoint.TASK_STATUS, "GET", upid, body=None, timeout=timeout)
 
+    def request_guest_info(self, *, timeout: float) -> dict[str, object]:
+        """Read guest-agent information through one fixed, body-free endpoint."""
+        if not _valid_control_timeout(timeout):
+            raise ValidationError("Proxmox guest information requires a positive finite timeout")
+        return self._request(_Endpoint.GUEST_INFO, "GET", None, body=None, timeout=timeout)
+
     def _request(
         self,
         endpoint: _Endpoint,

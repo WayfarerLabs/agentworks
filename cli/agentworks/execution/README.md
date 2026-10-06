@@ -18,7 +18,7 @@ be reconciled without another POST. Exact known receipts permit read-only observ
 finite deadline after ordinary owner admission stops. Matching stopped ordinary start workers settle
 only that request when the provider reports `OK` or supported warnings. Unknown results and HA
 handoff tasks retain custody. These facts neither admit guest work nor prove route freshness,
-incarnation safety or general provider drain. Native integration and acceptance remain open.
+incarnation safety or general provider drain. Native acceptance remains open.
 
 `Carrier.validate` is a pure structural preflight on the prepared invocation and I/O shape, not a
 delivery attempt. It rejects only deterministic local incompatibility, including a carrier's smaller
@@ -123,17 +123,25 @@ required before that public surface exists.
 numeric bootstrap must match that VM's derived boot identity; platform-host targets cannot select
 it. The operation forwards its immutable context before preparation and borrowing, while each call
 keeps its explicit body identity. The private native VM factory constructs the shared bootstrap from
-its prepared elevated plan and actual full guest for WSL2 and already-running Proxmox VMs. WSL2
-retains its actual platform hold; Proxmox needs no idle-stop hold and refuses stopped activation.
-Both retain the same exact owner through preparation, file and DIRECT operation execution, and
-aggregate cleanup. Proxmox retains one selected QGA binding and checks its locator before and after
-target preparation. The bounded read-only account probe is not itself guest-fenced; account facts
-grant no body authority without the prepared full guest and numeric identity checks at each body
-helper. Per-dispatch provider-route freshness, complete availability, public RunContext composition
-and native acceptance remain unproved. The native operation module imports without retired execution
-packages; fresh system-plugin registration still imports unrelated legacy SSH code. Identity
-preparation retains completed or partial account evidence and conservative custody on borrow-release
-failure, preserving original escaping control. No target or root identity is inferred as a fallback.
+its prepared elevated plan and actual full guest for WSL2 and Proxmox VMs. WSL2 retains its actual
+platform hold; Proxmox needs no idle-stop hold. For a stopped Proxmox VM without operator-stopped
+intent, the private factory retains the selected locator and root QGA binding before one activation
+attempt. Only successful ordinary request settlement permits a fresh running-power read and bounded
+passive guest-agent responsiveness wait through fixed body-free `GET /agent/info`. Required
+guest-info shape confirms only that channel, followed by the existing full guest and account
+preparation. Boot waiting dispatches no guest helper. Failed startup retains exact cleanup custody
+when unresolved; fresh cleanup retries only ledger bookkeeping and known-task observation, never
+activation or preparation. Normal teardown leaves an activated VM running. Already-running VMs skip
+activation and the new responsiveness wait. Both retain the same exact owner through preparation,
+file and DIRECT operation execution, and aggregate cleanup. Proxmox retains one selected QGA binding
+and checks its locator before and after target preparation. The bounded read-only account probe is
+not itself guest-fenced; account facts grant no body authority without the prepared full guest and
+numeric identity checks at each body helper. Per-dispatch provider-route freshness, complete
+availability, public RunContext composition and native acceptance remain unproved. The native
+operation module imports without retired execution packages; fresh system-plugin registration still
+imports unrelated legacy SSH code. Identity preparation retains completed or partial account
+evidence and conservative custody on borrow-release failure, preserving original escaping control.
+No target or root identity is inferred as a fallback.
 
 One shared `ExecutionOperation` keeps one lazily registered empty carrier-dispatch row for its
 lifetime, rather than consuming a row per clean command. Every call still uses a fresh serial

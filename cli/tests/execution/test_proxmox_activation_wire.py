@@ -73,6 +73,8 @@ def activation_endpoint(endpoint: _Endpoint) -> Iterator[_ActivationEndpoint]:
 
 
 def _call(wire: _ProxmoxWire, route: str, *, timeout: float = 30):
+    if route == "info":
+        return wire.request_guest_info(timeout=timeout)
     return (
         wire.request_vm_start(timeout=timeout) if route == "start" else wire.request_task_status(_UPID, timeout=timeout)
     )
@@ -112,7 +114,7 @@ def test_literal_task_id_is_one_encoded_component(activation_endpoint: _Activati
     assert value.requests[0][0] == "GET" and value.requests[0][2] == b""
 
 
-@pytest.mark.parametrize("route", ["start", "task"])
+@pytest.mark.parametrize("route", ["start", "task", "info"])
 @pytest.mark.parametrize("timeout", [None, 0, -1, float("inf"), float("-inf"), float("nan"), True, "1", 10**1000])
 def test_invalid_timeout_refuses_before_worker(monkeypatch: pytest.MonkeyPatch, route: str, timeout) -> None:
     spawn = MagicMock()
@@ -143,7 +145,7 @@ def test_unretainable_start_reply_is_generic_failure_after_one_request(
     assert payload["endpoint"] == "vm-start" and payload["method"] == "POST" and payload["body"] is None
 
 
-@pytest.mark.parametrize("route", ["start", "task"])
+@pytest.mark.parametrize("route", ["start", "task", "info"])
 @pytest.mark.parametrize("reply", [b"invalid", b"[]", b"{}", b'{"data":null}', b'{"data":[]}'])
 def test_missing_or_malformed_data_never_establishes_wire_reply(
     monkeypatch: pytest.MonkeyPatch, route: str, reply: bytes
@@ -167,7 +169,7 @@ def test_scalar_and_dictionary_envelopes_are_distinct(monkeypatch: pytest.Monkey
         _call(_ProxmoxWire(connection()), route, timeout=1)
 
 
-@pytest.mark.parametrize("route", ["start", "task"])
+@pytest.mark.parametrize("route", ["start", "task", "info"])
 def test_startup_consumes_worker_budget_and_credentials_stay_on_stdin(monkeypatch: pytest.MonkeyPatch, route: str):
     now = [100.0]
     monkeypatch.setattr("time.monotonic", lambda: now[0])
@@ -186,7 +188,7 @@ def test_startup_consumes_worker_budget_and_credentials_stay_on_stdin(monkeypatc
     assert "secret-canary" not in repr(factory.call_args)
 
 
-@pytest.mark.parametrize("route", ["start", "task"])
+@pytest.mark.parametrize("route", ["start", "task", "info"])
 @pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit, GeneratorExit])
 def test_control_interrupt_kills_and_reaps_without_replay(monkeypatch: pytest.MonkeyPatch, route: str, interruption):
     process = stub_process(monkeypatch, b"")
@@ -201,7 +203,7 @@ def test_control_interrupt_kills_and_reaps_without_replay(monkeypatch: pytest.Mo
 
 
 @pytest.mark.windows
-@pytest.mark.parametrize("route", ["start", "task"])
+@pytest.mark.parametrize("route", ["start", "task", "info"])
 @pytest.mark.parametrize("status", [301, 302, 303, 307, 308, 401, 500])
 def test_tls_http_failure_never_replays_or_discloses_provider_text(
     activation_endpoint: _ActivationEndpoint, route: str, status: int
@@ -215,7 +217,7 @@ def test_tls_http_failure_never_replays_or_discloses_provider_text(
 
 
 @pytest.mark.windows
-@pytest.mark.parametrize("route", ["start", "task"])
+@pytest.mark.parametrize("route", ["start", "task", "info"])
 @pytest.mark.parametrize("trust", ["unknown-ca", "wrong-host"])
 def test_activation_tls_refuses_untrusted_peer_before_http(
     activation_endpoint: _ActivationEndpoint, endpoint: _Endpoint, route: str, trust: str
@@ -245,6 +247,10 @@ def test_activation_tls_refuses_untrusted_peer_before_http(
         ("guest-agent", "POST", "../status/start", "{}"),
         ("guest-agent", "GET", "exec-status?pid=42&extra=1", None),
         ("guest-agent", "GET", "exec", None),
+        ("guest-info", "POST", None, None),
+        ("guest-info", "GET", "ping", None),
+        ("guest-info", "GET", None, "{}"),
+        ("guest-info", "GET", "../exec", None),
         ("unknown", "GET", None, None),
     ],
 )
@@ -267,7 +273,10 @@ def test_worker_rejects_old_endpoint_switch(monkeypatch: pytest.MonkeyPatch):
     build.assert_not_called()
 
 
-@pytest.mark.parametrize("endpoint,method,suffix", [("vm-start", "POST", None), ("task-status", "GET", _UPID)])
+@pytest.mark.parametrize(
+    "endpoint,method,suffix",
+    [("vm-start", "POST", None), ("task-status", "GET", _UPID), ("guest-info", "GET", None)],
+)
 @pytest.mark.parametrize("timeout", [None, 0, -1, float("inf"), float("nan")])
 def test_worker_rejects_invalid_control_budget_before_network(
     monkeypatch: pytest.MonkeyPatch, endpoint, method, suffix, timeout
@@ -297,7 +306,10 @@ def test_worker_rejects_unretainable_task_before_network(monkeypatch: pytest.Mon
     build.assert_not_called()
 
 
-@pytest.mark.parametrize("endpoint,method,suffix", [("vm-start", "POST", None), ("task-status", "GET", _UPID)])
+@pytest.mark.parametrize(
+    "endpoint,method,suffix",
+    [("vm-start", "POST", None), ("task-status", "GET", _UPID), ("guest-info", "GET", None)],
+)
 def test_worker_retains_whole_reply_bound(monkeypatch: pytest.MonkeyPatch, endpoint, method, suffix):
     monkeypatch.setattr("agentworks.execution.carriers._proxmox_http._MAX_RESPONSE_BYTES", 10)
     response = io.BytesIO(b"x" * 11)
@@ -307,3 +319,18 @@ def test_worker_retains_whole_reply_bound(monkeypatch: pytest.MonkeyPatch, endpo
     with pytest.raises(ValueError):
         _request({**worker_payload(), "endpoint": endpoint, "method": method, "suffix": suffix, "body": None})
     assert response.closed
+
+
+@pytest.mark.windows
+def test_owned_tls_guest_info_is_fixed_readonly(activation_endpoint, monkeypatch):
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+    monkeypatch.setenv("https_proxy", "http://127.0.0.1:1")
+    monkeypatch.setenv("NO_PROXY", "")
+    monkeypatch.setenv("no_proxy", "")
+    value = activation_endpoint
+    response = {"result": {"version": "9.0", "supported_commands": []}}
+    value.response = json.dumps({"data": response}).encode()
+    assert value.wire.request_guest_info(timeout=30) == response
+    assert value.requests == [
+        ("GET", "/api2/json/nodes/node1/qemu/123/agent/info", b"", "PVEAPIToken=user@pve!token=secret-canary")
+    ]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -16,6 +17,11 @@ from agentworks.execution._account_protocol import AccountRequest, AccountReques
 from agentworks.execution._execution_operation import ExecutionOperation
 from agentworks.execution._file_operation import FileOperation
 from agentworks.execution._file_paths import normalized_root
+from agentworks.execution._proxmox_activation import (
+    ActivationObservation,
+    ProxmoxActivation,
+    TaskPhase,
+)
 from agentworks.execution._runtime_prerequisite import _NumericGuestBootstrap
 from agentworks.execution._target_identity import (
     TargetIdentityControlFact,
@@ -27,6 +33,7 @@ from agentworks.execution._wsl2_lifecycle import GuestAnchorPresence, HostClient
 from agentworks.execution._wsl2_owned_operation import WSL2OwnedOperation
 from agentworks.execution.access import ExecutionAccess, FileAccess
 from agentworks.execution.carrier import Deadline
+from agentworks.execution.carriers.proxmox import ProxmoxCarrier
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
 from agentworks.operations import OperationOwner
 from agentworks.vms.identity import validate_vm_instance_marker
@@ -79,9 +86,36 @@ class _Workflow:
     preparation_fact: VMTargetPreparation | None = None
     selected_locator: ProviderLocator | None = None
     selected_binding: NativeExecutionBinding | None = None
+    activation: ProxmoxActivation | None = None
+    activation_observation: ActivationObservation | None = None
     identity: TargetIdentityPreparation | None = None
     views: NativeVMOperation | None = None
     finalizing: bool = False
+
+    def _activation_settled(self, deadline: Deadline) -> bool:
+        activation = self.activation
+        if activation is None:
+            return True
+        rows = self.owner.list_lifecycle_obligations()
+        row = next((row for row in rows if row.obligation_id == activation.obligation_id), None)
+        obligation = activation.obligation
+        if row is None and obligation is None:
+            # No POST can precede a returned registration handle and durable arm.
+            return True
+        if (
+            obligation is not None
+            and row is not None
+            and row == obligation._persisted_obligation  # noqa: SLF001
+            and row.state is LifecycleObligationState.RESOLVED
+        ):
+            return True
+        activation.reconcile(deadline)
+        if activation.obligation is not None and activation.obligation.state is LifecycleObligationState.RESOLVED:
+            return True
+        if activation.payload.upid is not None:
+            _wait_activation(self, deadline)
+            return True
+        return False
 
     def _hold_settled(self, cleanup_deadline: Deadline) -> bool:
         selected = self.selected
@@ -152,9 +186,15 @@ class _Workflow:
             self.views.execution_operation.finish()
         if not self._components_settled():
             raise StateError("Native VM operation retains unsettled work")
-        hold_settled = self._hold_settled(self.deadline if cleanup_deadline is None else cleanup_deadline)
+        budget = self.deadline if cleanup_deadline is None else cleanup_deadline
+        hold_settled = self._hold_settled(budget)
+        activation_settled = self._activation_settled(budget)
         obligations = self.owner.list_lifecycle_obligations()
-        if hold_settled and all(row.state is LifecycleObligationState.RESOLVED for row in obligations):
+        if (
+            hold_settled
+            and activation_settled
+            and all(row.state is LifecycleObligationState.RESOLVED for row in obligations)
+        ):
             self.owner.seal_lifecycle_obligations()
             self.owner.record_effects_resolved()
             # A release may commit before its reply is interrupted. Retry the
@@ -188,20 +228,97 @@ def _require_vm_row(db: Database, vm_name: str, platform: VMPlatform, ctx: RunCo
     return vm
 
 
-def _prepare_running_proxmox(
+def _remaining(deadline: Deadline) -> float:
+    remaining = deadline.remaining()
+    assert remaining is not None
+    if remaining <= 0:
+        raise StateError("Native Proxmox startup exceeded its deadline")
+    return remaining
+
+
+def _pause(deadline: Deadline) -> None:
+    time.sleep(min(0.1, _remaining(deadline)))
+    _remaining(deadline)
+
+
+def _wait_activation(workflow: _Workflow, deadline: Deadline) -> None:
+    activation = workflow.activation
+    assert activation is not None
+    while True:
+        _remaining(deadline)
+        try:
+            observation = activation.observe(deadline)
+        except Exception:
+            raise StateError("Native Proxmox activation observation is unavailable") from None
+        workflow.activation_observation = observation
+        if observation.request_settled:
+            return
+        if observation.ha_handoff or observation.phase is not TaskPhase.RUNNING:
+            raise StateError("Native Proxmox activation remains unsettled")
+        _pause(deadline)
+
+
+def _guest_info_responded(data: dict[str, object]) -> bool:
+    """Validate the required external guest-info shape, without capability claims."""
+    result = data.get("result")
+    if type(result) is not dict or type(result.get("version")) is not str:
+        return False
+    commands = result.get("supported_commands")
+    return type(commands) is list and all(
+        type(command) is dict
+        and type(command.get("name")) is str
+        and type(command.get("enabled")) is bool
+        and ("success-response" not in command or type(command["success-response"]) is bool)
+        for command in commands
+    )
+
+
+def _activate_proxmox(
+    workflow: _Workflow, vm: VMRow, binding: NativeExecutionBinding, locator: ProviderLocator
+) -> None:
+    carrier = binding.carrier
+    if type(carrier) is not ProxmoxCarrier or binding.delivery_account != "root":
+        raise StateError("Native Proxmox activation requires the selected root route")
+    wire = carrier._wire  # noqa: SLF001
+    workflow.activation = ProxmoxActivation(workflow.owner, vm.name, wire._connection, locator)  # noqa: SLF001
+    try:
+        workflow.activation.start(workflow.deadline)
+    except Exception:
+        raise StateError("Native Proxmox activation request is unavailable") from None
+    _wait_activation(workflow, workflow.deadline)
+    try:
+        power = wire.request_power(timeout=_remaining(workflow.deadline))
+    except Exception:
+        raise StateError("Native Proxmox current power is unavailable") from None
+    _remaining(workflow.deadline)
+    if power.get("status") != "running":
+        raise StateError("Native Proxmox activation did not establish running power")
+    while True:
+        workflow.owner.list_lifecycle_obligations()
+        try:
+            info = wire.request_guest_info(timeout=_remaining(workflow.deadline))
+        except Exception:
+            info = {}
+        _remaining(workflow.deadline)
+        workflow.owner.list_lifecycle_obligations()
+        if _guest_info_responded(info):
+            _remaining(workflow.deadline)
+            return
+        _pause(workflow.deadline)
+
+
+def _prepare_proxmox(
     workflow: _Workflow, vm: VMRow, platform: VMPlatform, ctx: RunContext, power: VMStatus
 ) -> tuple[NativeExecutionBinding, VMTargetPreparation, VMGuestIdentity | None]:
-    """Prepare an existing running QGA route without an activation effect.
+    """Select one QGA route, activate if needed, then prepare the exact guest.
 
     Proxmox has no idle-stop hold. The exact VM owner still covers preparation,
-    child obligations and aggregate teardown; stopped activation is unavailable.
+    child obligations and aggregate teardown. Startup does not admit a body.
     """
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
     if type(platform) is not ProxmoxPlatform:
         raise StateError("Native VM operation is unavailable on this platform", entity_kind="vm", entity_name=vm.name)
-    if power is not VMStatus.RUNNING:
-        raise StateError("Native Proxmox activation is unavailable", entity_kind="vm", entity_name=vm.name)
     locator = platform.observe_provider_locator(vm, ctx, deadline=workflow.deadline)
     if workflow.deadline.expired:
         raise StateError("Native VM locator observation exceeded its deadline", entity_kind="vm", entity_name=vm.name)
@@ -212,6 +329,8 @@ def _prepare_running_proxmox(
     if workflow.deadline.expired:
         raise StateError("Native VM binding resolution exceeded its deadline", entity_kind="vm", entity_name=vm.name)
     workflow.selected_binding = binding
+    if power is VMStatus.STOPPED:
+        _activate_proxmox(workflow, vm, binding, locator)
     try:
         preparation = prepare_managed_vm_target_from_platform(
             vm, platform, ctx, locator, binding, deadline=workflow.deadline, owner=workflow.owner
@@ -264,7 +383,7 @@ def _prepare(
         preparation = selected.preparation
         binding = selected.binding
     else:
-        binding, preparation, guest = _prepare_running_proxmox(workflow, vm, platform, ctx, power)
+        binding, preparation, guest = _prepare_proxmox(workflow, vm, platform, ctx, power)
     if guest is None or preparation is None or preparation.status is not VMTargetPreparationStatus.PREPARED:
         raise StateError(
             "Native VM target preparation did not establish an exact guest", entity_kind="vm", entity_name=vm_name
