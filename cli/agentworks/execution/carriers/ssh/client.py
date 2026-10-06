@@ -13,8 +13,11 @@ from agentworks.execution.carrier import (
     CarrierReport,
     ChannelFeatures,
     Dispatch,
+    EndOfInput,
     ExitStatus,
     Failure,
+    FiniteInput,
+    LiveInput,
     Provenance,
 )
 from agentworks.execution.carriers._subprocess import output_retention
@@ -45,7 +48,9 @@ class SSHCarrier:
         return ChannelFeatures(live_stdio=True)
 
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
-        """Accept the shared prepared shapes without effectful SSH admission."""
+        """Refuse input this adapter cannot deliver before effectful SSH admission."""
+        if not isinstance(io.input, EndOfInput | FiniteInput | LiveInput):
+            raise ValidationError("SSH byte delivery requires EOF, finite or live byte input")
 
     def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
         """Validate locally, then spend the remaining original budget on one attempt."""
