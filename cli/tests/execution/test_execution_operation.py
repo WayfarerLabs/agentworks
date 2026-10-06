@@ -38,6 +38,7 @@ from agentworks.execution.carrier import (
 )
 from agentworks.execution.models import Command
 from agentworks.operations import OperationOwner
+from tests.execution.files._target_support import target_for_owner
 
 
 @dataclass
@@ -97,7 +98,7 @@ def operation(
         "inline-operation",
     )
     try:
-        yield database, owner, execution_operation.ExecutionOperation(owner)
+        yield database, owner, execution_operation.ExecutionOperation(owner, target_for_owner(owner))
     finally:
         database.close()
 

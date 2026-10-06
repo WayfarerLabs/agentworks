@@ -218,7 +218,7 @@ def _prepared_accesses(
     assert accounts.ordinary_plan is not None
     assert accounts.ordinary_plan.expected.euid == os.geteuid()
     execution = ExecutionAccess(
-        ExecutionOperation(owner),
+        ExecutionOperation(owner, prepared.target),
         binding.carrier,
         runtime_selection=binding.runtime_selection,
         ordinary_plan=accounts.ordinary_plan,

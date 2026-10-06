@@ -13,13 +13,15 @@ from agentworks.execution._inline import (
     execute_inline_candidate,
     prepare_inline_candidate,
 )
+from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTargetKind
+from agentworks.execution._vm_guest_identity_protocol import vm_guest_boot_id
 from agentworks.operations import release_borrow_after_custody
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.execution._helper_launcher import IdentityPlan
-    from agentworks.execution._runtime_prerequisite import RuntimeSelection
+    from agentworks.execution._runtime_prerequisite import RuntimeSelection, _NumericGuestBootstrap
     from agentworks.execution.carrier import Carrier, Deadline
     from agentworks.execution.models import Command, Script
     from agentworks.operations import OperationBorrow, OperationOwner
@@ -69,8 +71,27 @@ class UnfinishedInlineExecution:
 class ExecutionOperation:
     """Run one foreground inline candidate under an existing operation owner."""
 
-    def __init__(self, owner: OperationOwner) -> None:
+    def __init__(
+        self,
+        owner: OperationOwner,
+        target: ManagedTargetIdentity,
+        *,
+        bootstrap: _NumericGuestBootstrap | None = None,
+    ) -> None:
+        """Bind inline calls to one exact owner scope and selected target."""
+        scope = owner.ownership.scope
+        if (
+            type(target) is not ManagedTargetIdentity
+            or target.kind.value != scope.resource_kind.value
+            or target.name != scope.resource_name
+        ):
+            raise ValidationError("Execution operation target must match its owner scope")
+        if bootstrap is not None and (
+            target.kind is not ManagedTargetKind.VM or vm_guest_boot_id(bootstrap.guest) != target.boot_id
+        ):
+            raise ValidationError("Numeric execution bootstrap must match the selected VM boot")
         self._owner = owner
+        self._bootstrap = bootstrap
         self._active_inline_calls: dict[int, _ActiveInlineCall] = {}
         self._unfinished_inline_executions: list[UnfinishedInlineExecution] = []
 
@@ -108,6 +129,7 @@ class ExecutionOperation:
             capture_limit=capture_limit,
             sensitive=sensitive,
             runtime_selection=runtime_selection,
+            bootstrap=self._bootstrap,
         )
         if deadline.expired:
             raise ValidationError("Inline execution deadline expired during preparation")

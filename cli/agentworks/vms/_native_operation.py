@@ -237,7 +237,7 @@ def _prepare(
     if identity.status is not TargetIdentityStatus.PREPARED or identity.ordinary_plan is None:
         raise StateError("Native VM account preparation is unavailable", entity_kind="vm", entity_name=vm_name)
     file_operation = FileOperation(workflow.owner, target)
-    execution_operation = ExecutionOperation(workflow.owner)
+    execution_operation = ExecutionOperation(workflow.owner, target)
 
     def selected_deadline() -> Deadline:
         return workflow.deadline

@@ -32,6 +32,7 @@ from agentworks.execution.models import Command, Input, Lifetime, Output, Script
 from agentworks.execution.profiles import Protection
 from agentworks.execution.result import CheckedExecutionError, ExitCode
 from agentworks.operations import OperationOwner
+from tests.execution.files._target_support import target_for_owner
 
 _LINUX_ONLY = pytest.mark.skipif(sys.platform != "linux", reason="inline execution requires Linux")
 type Bound = tuple[Database, OperationOwner, ExecutionOperation, "LocalCarrier", ExecutionAccess, Deadline]
@@ -109,7 +110,7 @@ def bound(tmp_path: Path) -> Iterator[Bound]:
         OperationScope(OperationResourceKind.VM, "execution-access-vm"),
         "execution-access",
     )
-    operation = ExecutionOperation(owner)
+    operation = ExecutionOperation(owner, target_for_owner(owner))
     carrier = LocalCarrier()
     deadline = Deadline.after(30)
     access = _access(operation, carrier, deadline)
