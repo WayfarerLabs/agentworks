@@ -305,6 +305,28 @@ never moves it backward, and checks its remembered expiry before accepting anoth
 and explicit stop permanently close renewal admission for that controller; no late record revives a
 stopped run. Disposal accounts for only this fixed control leaf and recognized private stages.
 
+Lease publication, exact stop publication and disposal share one cooperative mutation barrier on the
+retained per-run directory inode. Each section independently opens that directory and attempts one
+exclusive non-blocking Linux `flock`; contention or error retains uncertainty rather than waiting
+indefinitely or retrying implicitly. After acquisition, publication checks exact binding, sample
+freshness and both permanent closure records before creating a stage or accepting a duplicate.
+Initial publication checks the staged request binding before launch; renewal requires the immutable
+launch binding. Exact stop holds the barrier through durable `request-stop` publication, but not
+through controller observation. Disposal holds it through inventory, receipt commitment and cleanup;
+the permanent `disposal` receipt replaces stop intent before its removal. The boot-local run
+directory must remain the same inode, never be removed and recreated while delayed helpers exist.
+
+This barrier fences lease mutations, not every store writer or guest process. A delayed publisher
+can remain alive, but after confirmed closure it cannot create a stage or replace a lease. The
+keeper may settle that publication effect with positive exact closure evidence without claiming
+process exit. Lost closure acknowledgments require the existing exact stop or disposal
+reconciliation; expiry, boundary emptiness or local client cleanup alone do not prove the fence.
+Original start, controller, immutable-publication and capture custody must settle independently
+before disposal or owner release. This is Linux guest cooperation, not a machine-wide host lock,
+hostile-user containment or a general filesystem locking framework. The
+[Linux lock semantics](https://man7.org/linux/man-pages/man2/flock.2.html) distinguish independent
+opens from duplicated descriptors; native filesystem and interruption proofs remain required.
+
 The controller checks the lease at its existing bounded polling interval. Expiry follows the same
 stop path as explicit intent: close remaining input, give the initial child the existing two-second
 grace, then kill the owned cgroup and use the existing five-second cleanup observation bound. Only
@@ -324,9 +346,11 @@ fencing.
 
 Renewal is not a second public command borrowing the owner's ordinary serial-use boundary. The
 support effect has two closed phases: LIVE admits only the bound clock/renewal exchanges; CLOSING
-admits only exact-run stop and observation after draining renewal. Neither permits arbitrary calls
-or reopens ordinary admission. Prove this composition against an ordinary long-running command
-rather than relaxing serialization globally. A wait timeout does not end the keeper or stop the job.
+admits only exact-run stop and observation after draining the local renewal worker and delivery. An
+unresolved guest publication does not prevent the exact stop that establishes its permanent mutation
+fence. Neither phase permits arbitrary calls or reopens ordinary admission. Prove this composition
+against an ordinary long-running command rather than relaxing serialization globally. A wait timeout
+does not end the keeper or stop the job.
 
 The proposed internal policy gives each clock-plus-publication cycle one total five-second delivery
 budget and nominal ten-second start-to-start cadence, without catch-up bursts. This budget is
@@ -352,10 +376,11 @@ the existing exact-run stop and observes cleanup under an explicit cleanup budge
 admission has already closed: use the support effect's already-admitted exact-run cleanup custody,
 not a new public borrow. Closing a borrowed view or returning from `start` does none of those
 things. Keeper loss, database takeover or a partition stops renewal, and the guest independently
-reaches expiry. Boundary emptiness alone does not drain an admitted publisher: uncertain publication
-and support-worker custody must also settle before whole-owner release or disposal. Outstanding
-ordinary dispatch debt remains separate and cannot be cleared by keeper settlement. Platform
-availability remains a separate held effect.
+reaches expiry. Boundary emptiness alone does not settle an admitted publisher: uncertain lease
+mutation must have positive settlement or permanent-fence evidence, and local support-worker custody
+must drain before whole-owner release or disposal. A mutation fence does not prove guest process
+exit or settle other writers. Outstanding ordinary dispatch debt remains separate and cannot be
+cleared by keeper settlement. Platform availability remains a separate held effect.
 
 The first proof must cover initial expiry before launch and between placement/release, renewal
 during ordinary serialized work, normal scope close, wait timeout, host death, partition, controller
