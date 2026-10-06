@@ -1,0 +1,285 @@
+"""Private core-owned existing-VM native operation and availability boundary."""
+
+from __future__ import annotations
+
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import PurePosixPath
+from typing import TYPE_CHECKING
+
+from agentworks.capabilities.base import RunContext, ScopeLevel
+from agentworks.capabilities.vm_platform.base import VMPlatform
+from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope, VMStatus
+from agentworks.errors import NotFoundError, StateError, ValidationError
+from agentworks.execution._execution_operation import ExecutionOperation
+from agentworks.execution._file_operation import FileOperation
+from agentworks.execution._file_paths import normalized_root
+from agentworks.execution._target_identity import (
+    TargetIdentityControlFact,
+    TargetIdentityPreparation,
+    TargetIdentityStatus,
+    prepare_target_identity,
+)
+from agentworks.execution._wsl2_lifecycle import GuestAnchorPresence, HostClientStatus, WSL2AnchorEvidence
+from agentworks.execution._wsl2_owned_operation import WSL2OwnedOperation
+from agentworks.execution.access import ExecutionAccess, FileAccess
+from agentworks.execution.carrier import Deadline
+from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
+from agentworks.operations import OperationOwner
+from agentworks.vms.target_preparation import (
+    VMTargetPreparation,
+    VMTargetPreparationControlFact,
+    VMTargetPreparationStatus,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from agentworks.db import VMRow
+
+
+@dataclass(frozen=True, slots=True)
+class NativeVMOperation:
+    """Two private bound views sharing one exact VM claim and deadline."""
+
+    owner: OperationOwner
+    files: FileAccess
+    execution: ExecutionAccess
+    file_operation: FileOperation
+    execution_operation: ExecutionOperation
+
+
+@dataclass
+class _Workflow:
+    owner: OperationOwner
+    deadline: Deadline
+    selected: WSL2OwnedOperation | None = None
+    start_attempted: bool = False
+    preparation_fact: VMTargetPreparation | None = None
+    identity: TargetIdentityPreparation | None = None
+    views: NativeVMOperation | None = None
+
+    def _hold_settled(self) -> bool:
+        selected = self.selected
+        if selected is None or not self.start_attempted:
+            return True
+        hold = selected.hold
+        if hold.registration_uncertain:
+            return False
+        if hold.payload is None:
+            evidence = hold.evidence
+        else:
+            try:
+                evidence = hold.release(self.deadline)
+            except Exception:
+                return False
+        if selected.ready is not None and evidence.identity != selected.ready.identity:
+            return False
+        return _exact_hold_release(evidence)
+
+    def _components_settled(self) -> bool:
+        selected = self.selected
+        preparation = selected.preparation if selected is not None else None
+        if preparation is None:
+            preparation = self.preparation_fact
+        if preparation is not None and (
+            preparation.pending_remote_effects
+            or preparation.coordination_uncertain
+            or preparation.requires_owner_retention
+        ):
+            return False
+        identity = self.identity
+        if identity is not None and (
+            identity.pending_remote_effects or identity.coordination_uncertain or identity.requires_owner_retention
+        ):
+            return False
+        views = self.views
+        if views is None:
+            return True
+        files = views.file_operation
+        execution = views.execution_operation
+        return not (
+            files.active_downloads
+            or files.unfinished_downloads
+            or files.has_unfinished_local_download_call
+            or files.retained_local_download_stage is not None
+            or files.active_uploads
+            or files.active_package_uploads
+            or files.unfinished_uploads
+            or files.unfinished_package_uploads
+            or files.active_json_updates
+            or files.unfinished_json_updates
+            or files.active_stats
+            or files.active_inventories
+            or files.active_removals
+            or files.active_metadata
+            or files.unfinished_owned_files
+            or execution.active_inline_calls
+            or execution.unfinished_inline_executions
+        )
+
+    def close(self) -> None:
+        """Stop body admission, then release only on aggregate exact settlement."""
+        self.owner.stop_admission()
+        if not self._components_settled():
+            raise StateError("Native VM operation retains unsettled work")
+        hold_settled = self._hold_settled()
+        obligations = self.owner.list_lifecycle_obligations()
+        if hold_settled and all(row.state is LifecycleObligationState.RESOLVED for row in obligations):
+            self.owner.seal_lifecycle_obligations()
+            self.owner.record_effects_resolved()
+            self.owner.close()
+            return
+        raise StateError("Native VM operation retains unsettled work")
+
+
+def _exact_hold_release(evidence: WSL2AnchorEvidence) -> bool:
+    """Use native settlement plus no-client creation or exact guest absence."""
+    if not evidence.local.settled:
+        return False
+    if evidence.local.host_client_status is HostClientStatus.NOT_CREATED:
+        return True
+    return evidence.identity is not None and evidence.guest_anchor_presence is GuestAnchorPresence.ABSENT_CONFIRMED
+
+
+def _require_vm_row(db: Database, vm_name: str, platform: VMPlatform, ctx: RunContext) -> VMRow:
+    vm = db.get_vm(vm_name)
+    if vm is None:
+        raise NotFoundError("Native VM operation requires an existing VM", entity_kind="vm", entity_name=vm_name)
+    if vm.site != platform.site_name:
+        raise StateError(
+            "Native VM operation platform does not match the VM site", entity_kind="vm", entity_name=vm_name
+        )
+    scope = ctx.operation_scope
+    if scope is not None and (scope.level is not ScopeLevel.VM or scope.vm != vm_name):
+        raise ValidationError("Native VM operation requires the selected VM context")
+    return vm
+
+
+def _prepare(
+    workflow: _Workflow,
+    db: Database,
+    vm_name: str,
+    platform: VMPlatform,
+    ctx: RunContext,
+    trusted_root: PurePosixPath,
+) -> NativeVMOperation:
+    vm = _require_vm_row(db, vm_name, platform, ctx)
+    power = platform.observe_execution_power(vm, ctx, deadline=workflow.deadline)
+    if workflow.deadline.expired:
+        raise StateError("Native VM power observation exceeded its deadline", entity_kind="vm", entity_name=vm_name)
+    if type(power) is not VMStatus or power not in {VMStatus.RUNNING, VMStatus.STOPPED}:
+        raise StateError("Native VM power cannot authorize activation", entity_kind="vm", entity_name=vm_name)
+    if power is VMStatus.STOPPED and vm.operator_stopped:
+        raise StateError("Operator-stopped VM cannot be started automatically", entity_kind="vm", entity_name=vm_name)
+    if type(platform) is not WSL2Platform:
+        raise StateError("Native VM operation is unavailable on this platform", entity_kind="vm", entity_name=vm_name)
+
+    selected = WSL2OwnedOperation.from_platform(
+        vm, platform, ctx, owner=workflow.owner, deadline=workflow.deadline, config=ctx.config
+    )
+    if selected is None:
+        raise StateError("Native VM route is unavailable", entity_kind="vm", entity_name=vm_name)
+    workflow.selected = selected
+    workflow.start_attempted = True
+    try:
+        guest = selected.start_and_prepare(workflow.deadline)
+    except BaseException as control:
+        if isinstance(control.__cause__, VMTargetPreparationControlFact):
+            workflow.preparation_fact = control.__cause__.preparation
+        raise
+    preparation = selected.preparation
+    if guest is None or preparation is None or preparation.status is not VMTargetPreparationStatus.PREPARED:
+        raise StateError(
+            "Native VM target preparation did not establish an exact guest", entity_kind="vm", entity_name=vm_name
+        )
+    target = preparation.target
+    assert target is not None
+
+    binding = selected.binding
+    try:
+        identity = prepare_target_identity(
+            binding.carrier,
+            delivery_account=binding.delivery_account,
+            workload_account=vm.admin_username,
+            include_elevated=True,
+            runtime_selection=binding.runtime_selection,
+            deadline=workflow.deadline,
+            owner=workflow.owner,
+        )
+    except BaseException as control:
+        if isinstance(control.__cause__, TargetIdentityControlFact):
+            workflow.identity = control.__cause__.preparation
+        raise
+    workflow.identity = identity
+    if identity.status is not TargetIdentityStatus.PREPARED or identity.ordinary_plan is None:
+        raise StateError("Native VM account preparation is unavailable", entity_kind="vm", entity_name=vm_name)
+    file_operation = FileOperation(workflow.owner, target)
+    execution_operation = ExecutionOperation(workflow.owner)
+
+    def selected_deadline() -> Deadline:
+        return workflow.deadline
+
+    files = FileAccess(
+        file_operation,
+        binding.carrier,
+        trusted_root=trusted_root,
+        runtime_selection=binding.runtime_selection,
+        ordinary_plan=identity.ordinary_plan,
+        elevated_plan=identity.elevated_plan,
+        entity_kind="vm",
+        entity_name=vm_name,
+        deadline=selected_deadline,
+    )
+    execution = ExecutionAccess(
+        execution_operation,
+        binding.carrier,
+        runtime_selection=binding.runtime_selection,
+        ordinary_plan=identity.ordinary_plan,
+        elevated_plan=identity.elevated_plan,
+        entity_kind="vm",
+        entity_name=vm_name,
+        deadline=selected_deadline,
+    )
+    views = NativeVMOperation(workflow.owner, files, execution, file_operation, execution_operation)
+    workflow.views = views
+    return views
+
+
+@contextmanager
+def native_vm_operation(
+    db: Database,
+    vm_name: str,
+    platform: VMPlatform,
+    ctx: RunContext,
+    *,
+    deadline: Deadline,
+    trusted_root: PurePosixPath,
+) -> Iterator[NativeVMOperation]:
+    """Claim, admit, prepare and close one administrative native VM operation."""
+    if type(db) is not Database or not isinstance(platform, VMPlatform):
+        raise ValidationError("Native VM operation requires core database and platform values")
+    if type(ctx) is not RunContext or type(deadline) is not Deadline or deadline.expires_at is None or deadline.expired:
+        raise ValidationError("Native VM operation requires context and a live finite deadline")
+    validate_name(vm_name, max_length=MAX_VM_NAME_LENGTH)
+    if type(trusted_root) is not PurePosixPath or not normalized_root(str(trusted_root)):
+        raise ValidationError("Native VM operation requires a trusted normalized file root")
+
+    owner = OperationOwner.acquire(
+        db.operations, OperationScope(OperationResourceKind.VM, vm_name), "native-vm-operation"
+    )
+    workflow = _Workflow(owner, deadline)
+    primary: BaseException | None = None
+    try:
+        yield _prepare(workflow, db, vm_name, platform, ctx, trusted_root)
+    except BaseException as control:
+        primary = control
+        raise
+    finally:
+        try:
+            workflow.close()
+        except BaseException:
+            if primary is None:
+                raise
+            primary.add_note("Native VM operation teardown retained unresolved custody")

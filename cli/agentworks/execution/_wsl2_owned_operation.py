@@ -109,6 +109,11 @@ class WSL2OwnedOperation:
         self._used = False
         self._hold_released = False
 
+    @property
+    def binding(self) -> NativeExecutionBinding:
+        """Return the copied route selected under this owner's VM claim."""
+        return self._binding
+
     @classmethod
     def from_platform(
         cls,
