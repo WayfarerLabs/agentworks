@@ -104,6 +104,35 @@ class LiveInput:
 
 
 @dataclass(frozen=True)
+class TerminalInput:
+    """Borrow explicit Python terminal descriptors after bootstrap handoff.
+
+    Adapter-author callers can be outside static typing. Construction checks
+    only shape; native handle admission belongs to a terminal carrier.
+    """
+
+    input_fd: int
+    output_fd: int
+    term: str = field(repr=False)
+    bootstrap: ByteSource = field(repr=False)
+    sensitive: bool = False
+
+    def __post_init__(self) -> None:
+        if type(self.input_fd) is not int or self.input_fd < 0 or type(self.output_fd) is not int or self.output_fd < 0:
+            raise ValidationError("Terminal descriptors must be nonnegative Python file descriptors")
+        if type(self.term) is not str or not self.term or "\0" in self.term:
+            raise ValidationError("Terminal type must be nonempty UTF-8 without NUL")
+        try:
+            self.term.encode("utf-8")
+        except UnicodeEncodeError:
+            raise ValidationError("Terminal type must be nonempty UTF-8 without NUL") from None
+        if not callable(getattr(self.bootstrap, "try_read", None)):
+            raise ValidationError("Terminal bootstrap must be a byte source")
+        if type(self.sensitive) is not bool:
+            raise ValidationError("Terminal sensitivity must be a boolean")
+
+
+@dataclass(frozen=True)
 class Capture:
     """Maximum retained bytes per carrier stream, not a truncation permission."""
 
@@ -149,16 +178,18 @@ class SinkOutput:
 class CarrierIO:
     """The sole input owner and borrowed-output selection for one attempt."""
 
-    input: EndOfInput | FiniteInput | LiveInput = field(default_factory=EndOfInput)
+    input: EndOfInput | FiniteInput | LiveInput | TerminalInput = field(default_factory=EndOfInput)
     output: Capture | Discard | SinkOutput = field(default_factory=Capture)
     sensitive: bool = False
 
     def __post_init__(self) -> None:
-        if not isinstance(self.input, EndOfInput | FiniteInput | LiveInput) or not isinstance(
+        if not isinstance(self.input, EndOfInput | FiniteInput | LiveInput | TerminalInput) or not isinstance(
             self.output, Capture | Discard | SinkOutput
         ):
             raise ValidationError("Carrier I/O requires one supported input and output mode")
-        if isinstance(self.input, FiniteInput | LiveInput) and self.input.sensitive:
+        if isinstance(self.input, TerminalInput) and not isinstance(self.output, SinkOutput):
+            raise ValidationError("Terminal input requires trusted sink output")
+        if isinstance(self.input, FiniteInput | LiveInput | TerminalInput) and self.input.sensitive:
             object.__setattr__(self, "sensitive", True)
 
 

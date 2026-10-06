@@ -16,6 +16,7 @@ from agentworks.execution.carrier import (
     LiveInput,
     Provenance,
     SinkOutput,
+    TerminalInput,
 )
 from agentworks.execution.carriers._subprocess import run_process
 
@@ -65,7 +66,9 @@ class WSL2Carrier:
         return ChannelFeatures()
 
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
-        """Reject only unsupported live I/O without starting a WSL client."""
+        """Reject unsupported input and live output without starting WSL."""
+        if isinstance(io.input, TerminalInput):
+            raise ValidationError("WSL2 does not support terminal input")
         if isinstance(io.input, LiveInput) or isinstance(io.output, SinkOutput) and io.output.require_live:
             raise ValidationError("WSL2 does not support live standard I/O")
 

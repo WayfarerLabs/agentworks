@@ -27,6 +27,7 @@ from agentworks.execution.carrier import (
     LiveInput,
     Retention,
     SinkOutput,
+    TerminalInput,
 )
 
 if TYPE_CHECKING:
@@ -89,6 +90,8 @@ def run_process(
     live_stdio: bool = False,
 ) -> ProcessResult:
     """Map carrier policy around one stdlib-only owned-process attempt."""
+    if isinstance(io.input, TerminalInput):
+        raise ValidationError("Generic subprocess delivery does not support terminal input")
     requires_live = isinstance(io.input, LiveInput) or (isinstance(io.output, SinkOutput) and io.output.require_live)
     if requires_live and not live_stdio:
         raise ValidationError("Live carrier I/O is unavailable on this channel")

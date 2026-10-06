@@ -43,6 +43,7 @@ from agentworks.execution._terminal_handoff import (
     TerminalHandoffFailure,
     prepare_terminal_handoff,
 )
+from agentworks.execution.carrier import SinkOutput, TerminalInput
 
 
 class CollectSink:
@@ -105,6 +106,39 @@ def _prepared(presentation: CollectSink | None = None) -> tuple[PreparedTerminal
         runtime_selection=_RUNTIME_SELECTION,
     )
     return prepared, selected
+
+
+def test_carrier_io_binds_existing_two_gate_endpoints_and_trusted_sinks() -> None:
+    prepared, presentation = _prepared(CollectSink(max_write=2))
+    diagnostics = CollectSink()
+    io = prepared.carrier_io(input_fd=0, output_fd=1, term="xterm", diagnostics=diagnostics, sensitive=True)
+
+    assert isinstance(io.input, TerminalInput)
+    assert isinstance(io.output, SinkOutput)
+    assert io.input.bootstrap is prepared.bootstrap
+    assert io.output.stdout is prepared.stdout
+    assert io.output.stderr is diagnostics
+    assert not io.output.require_live
+    assert io.sensitive
+    assert io.input.bootstrap.try_read(4) is None
+    _admit_runtime(prepared)
+    assert io.input.bootstrap.try_read(4) is None
+    marker = _marker(prepared, PAYLOAD_READY)
+    assert io.output.stdout.try_write(memoryview(marker)) == len(marker)
+    payload = _drain_bootstrap(prepared)
+    assert payload.startswith(FRAME_MAGIC)
+    assert io.input.bootstrap.try_read(4) is None
+    marker = _marker(prepared, INTERACTIVE_READY)
+    assert io.output.stdout.try_write(memoryview(marker + b"show")) == len(marker) + 2
+    assert io.input.bootstrap.try_read(4) == b""
+    assert prepared.handed_off
+    assert bytes(presentation.data) == b"sh"
+
+
+def test_carrier_io_requires_diagnostic_sink() -> None:
+    prepared, _ = _prepared()
+    with pytest.raises(ValidationError):
+        prepared.carrier_io(input_fd=0, output_fd=1, term="xterm", diagnostics=object())  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("uppercase", [False, True], ids=["canonical", "uppercase"])

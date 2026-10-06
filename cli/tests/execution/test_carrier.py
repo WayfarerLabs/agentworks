@@ -14,6 +14,7 @@ from agentworks.execution.carrier import (
     CarrierIO,
     CarrierReport,
     Deadline,
+    Discard,
     Dispatch,
     EndOfInput,
     ExitStatus,
@@ -22,6 +23,7 @@ from agentworks.execution.carrier import (
     PreparedInvocation,
     Retention,
     SinkOutput,
+    TerminalInput,
 )
 
 
@@ -89,6 +91,73 @@ def test_live_endpoint_representations_are_hidden_and_sensitivity_is_promoted() 
     assert io.sensitive
     for value in (io.input, io.output, io):
         assert "secret-endpoint-canary" not in repr(value)
+
+
+def test_terminal_input_construction_is_passive_and_promotes_sensitivity() -> None:
+    class Source:
+        def __repr__(self) -> str:
+            return "secret-source-canary"
+
+        def try_read(self, limit: int) -> bytes | None:
+            raise AssertionError("construction read bootstrap")
+
+    class Sink:
+        def try_write(self, data: memoryview) -> int:
+            return len(data)
+
+    terminal = TerminalInput(0, 1, "secret-term-canary", Source(), sensitive=True)
+    io = CarrierIO(input=terminal, output=SinkOutput(Sink(), Sink()))
+    assert (terminal.input_fd, terminal.output_fd, terminal.term) == (0, 1, "secret-term-canary")
+    assert io.sensitive
+    assert "secret" not in repr(terminal)
+    assert "secret" not in repr(io)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("input_fd", -1),
+        ("input_fd", True),
+        ("input_fd", 1.0),
+        ("output_fd", -1),
+        ("output_fd", False),
+        ("output_fd", "1"),
+        ("term", ""),
+        ("term", "x\0secret"),
+        ("term", "secret\ud800"),
+        ("term", b"x"),
+        ("bootstrap", object()),
+        ("sensitive", 1),
+        ("sensitive", "false"),
+    ],
+)
+def test_terminal_input_rejects_invalid_boundary_values(field: str, value: object) -> None:
+    class Source:
+        def try_read(self, limit: int) -> bytes | None:
+            return None
+
+    fields: dict[str, object] = {
+        "input_fd": 0,
+        "output_fd": 1,
+        "term": "xterm-256color",
+        "bootstrap": Source(),
+        "sensitive": False,
+    }
+    fields[field] = value
+    with pytest.raises(ValidationError) as raised:
+        TerminalInput(**fields)  # type: ignore[arg-type]
+    assert "secret" not in repr(raised.value)
+    assert raised.value.__cause__ is None
+
+
+@pytest.mark.parametrize("output", [Capture(), Discard()])
+def test_terminal_input_requires_sink_output(output: Capture | Discard) -> None:
+    class Source:
+        def try_read(self, limit: int) -> bytes | None:
+            return None
+
+    with pytest.raises(ValidationError):
+        CarrierIO(input=TerminalInput(0, 1, "xterm", Source()), output=output)
 
 
 @pytest.mark.parametrize("field", ["input", "output"])

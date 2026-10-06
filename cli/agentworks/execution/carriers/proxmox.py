@@ -36,6 +36,7 @@ from agentworks.execution.carrier import (
     Provenance,
     Retention,
     SinkOutput,
+    TerminalInput,
 )
 
 _MAX_INPUT_BYTES = 65_536
@@ -169,6 +170,8 @@ class ProxmoxCarrier:
 
     @staticmethod
     def _request_body(invocation: PreparedInvocation, io: CarrierIO) -> bytes:
+        if isinstance(io.input, TerminalInput):
+            raise ValidationError("Proxmox does not support terminal input")
         if isinstance(io.input, LiveInput) or isinstance(io.output, SinkOutput) and io.output.require_live:
             raise ValidationError("Proxmox does not support live standard I/O")
         if (

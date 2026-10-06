@@ -27,7 +27,7 @@ from agentworks.execution._terminal_guest import (
     PAYLOAD_READY,
     READINESS_MAGIC,
 )
-from agentworks.execution.carrier import ByteSink, PreparedInvocation
+from agentworks.execution.carrier import ByteSink, CarrierIO, PreparedInvocation, SinkOutput, TerminalInput
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -254,6 +254,23 @@ class PreparedTerminalHandoff:
     nonce: str
     _state: _State = field(repr=False)
     _claimed: bool = field(default=False, init=False, repr=False)
+
+    def carrier_io(
+        self,
+        *,
+        input_fd: int,
+        output_fd: int,
+        term: str,
+        diagnostics: ByteSink,
+        sensitive: bool = False,
+    ) -> CarrierIO:
+        """Bind the existing two-gate endpoints to one terminal carrier attempt."""
+        if not callable(getattr(diagnostics, "try_write", None)):
+            raise ValidationError("Terminal handoff requires a trusted diagnostic sink")
+        return CarrierIO(
+            input=TerminalInput(input_fd, output_fd, term, self.bootstrap, sensitive=sensitive),
+            output=SinkOutput(self.stdout, diagnostics),
+        )
 
     def claim(self) -> None:
         """Reject reuse of this preparation object; dispatch remains caller-owned."""
