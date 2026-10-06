@@ -918,6 +918,18 @@ responsiveness and one exact guest/numeric preparation, with aggregate cleanup a
 recovery. Whole-unit composition reviews, complete lead gates and native PVE acceptance remain
 pending. The adapter is not yet published; no public round or broader checklist is closed.
 
+Stopped-VM composition worker `a9369907b` now retains the selected root QGA connection and adapter
+before one activation attempt, waits for exact successful ordinary settlement, reads fresh power and
+polls only fixed passive guest information before one exact guest/account preparation. Failed paths
+retain unresolved custody and original control; fresh cleanup performs only bookkeeping and known
+task observation. Proven absence of the exact registration row before a returned handle permits
+pre-POST cleanup, while a committed row follows adapter reconciliation. Normal teardown leaves the
+VM running. The worker passes 891 focused/adjacent cases, including 39 stopped-workflow and 147 wire
+cases, six-file typing/style, repository file quality and whitespace checks. Provider/account facts
+are scripted and packed Linux bodies run locally. Whole-unit private reviews and complete lead gates
+remain pending; native PVE, Windows-native, HA, generation/drain and complete RunContext remain open.
+This source is integrated privately without a handoff signal or completion checkbox.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
