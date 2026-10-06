@@ -32,6 +32,7 @@ from agentworks.execution.carrier import (
     Dispatch,
     ExitStatus,
     Failure,
+    PreparedInvocation,
     SinkOutput,
 )
 from tests.execution.files._file_deadline_support import AdmittedTimeoutCarrier
@@ -95,6 +96,117 @@ def test_real_helper_downloads_verified_content_and_cleans_snapshot(
         operation_owner.seal_lifecycle_obligations()
         operation_owner.record_effects_resolved()
         operation_owner.close()
+    finally:
+        database.close()
+
+
+class _RecordingLiveCarrier(LocalCarrier):
+    def __init__(self) -> None:
+        super().__init__(live_stdio=True)
+        self.live_requests: list[bool] = []
+
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        assert isinstance(io.output, SinkOutput)
+        self.live_requests.append(io.output.require_live)
+        return super().execute(invocation, io=io, deadline=deadline)
+
+
+class _LostLiveCompletionCarrier(_RecordingLiveCarrier):
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        report = super().execute(invocation, io=io, deadline=deadline)
+        if self.calls == 2:
+            return replace(report, completion=None)
+        return report
+
+
+class _LostLiveCleanupCarrier(_RecordingLiveCarrier):
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        report = super().execute(invocation, io=io, deadline=deadline)
+        if self.calls == 3:
+            return replace(report, completion=None)
+        return report
+
+
+class _CountingSink:
+    def __init__(self) -> None:
+        self.digest = hashlib.sha256()
+        self.total = 0
+        self.maximum_write = 0
+        self.calls = 0
+
+    def try_write(self, data: memoryview) -> int:
+        self.calls += 1
+        self.maximum_write = max(self.maximum_write, len(data))
+        self.digest.update(data)
+        self.total += len(data)
+        return len(data)
+
+
+@pytest.mark.parametrize("size", [0, 52_000, 2 * 1024 * 1024])
+def test_live_stdio_download_uses_one_bounded_stream_between_begin_and_cleanup(
+    tmp_path: Path, roots: tuple[Path, Path], plan: IdentityPlan, size: int
+) -> None:
+    source, scratch = roots
+    content = (bytes(range(256)) * ((size + 255) // 256))[:size]
+    (source / "source").write_bytes(content)
+    database = Database(tmp_path / "state.db")
+    operation_owner = owner(database)
+    borrow = operation_owner.borrow()
+    carrier = _RecordingLiveCarrier()
+    sink = _CountingSink()
+    try:
+        outcome = download(borrow, source, sink, max(1, size), plan, carrier=carrier)
+        assert outcome.status is FileDownloadStatus.COMPLETE
+        assert outcome.stream_verified and outcome.accepted_bytes == size
+        assert sink.total == size and sink.digest.digest() == hashlib.sha256(content).digest()
+        assert sink.maximum_write <= 4_096
+        assert carrier.calls == 3 and carrier.live_requests == [False, True, False]
+        assert not tuple(scratch.iterdir()) and outcome.cleanup_debt is None
+    finally:
+        database.close()
+
+
+def test_live_stream_requires_normal_completion_before_cleanup(
+    tmp_path: Path, roots: tuple[Path, Path], plan: IdentityPlan
+) -> None:
+    source, scratch = roots
+    (source / "source").write_bytes(b"private" * 2_000)
+    database = Database(tmp_path / "state.db")
+    operation_owner = owner(database)
+    borrow = operation_owner.borrow()
+    carrier = _LostLiveCompletionCarrier()
+    sink = _CountingSink()
+    try:
+        outcome = download(borrow, source, sink, 20_000, plan, carrier=carrier)
+        assert sink.total == 14_000
+        assert outcome.status is FileDownloadStatus.UNCERTAIN
+        assert outcome.failure is FileDownloadFailure.TERMINATION
+        assert outcome.failure_phase is FileDownloadFailurePhase.SNAPSHOT_STREAM
+        assert outcome.cleanup_debt is not None and outcome.pending_remote_effects
+        assert outcome.requires_owner_retention and tuple(scratch.iterdir())
+        assert carrier.calls == 2 and carrier.live_requests == [False, True]
+    finally:
+        database.close()
+
+
+def test_live_stream_lost_cleanup_confirmation_retains_exact_debt(
+    tmp_path: Path, roots: tuple[Path, Path], plan: IdentityPlan
+) -> None:
+    source, scratch = roots
+    (source / "source").write_bytes(b"private" * 2_000)
+    database = Database(tmp_path / "state.db")
+    operation_owner = owner(database)
+    borrow = operation_owner.borrow()
+    carrier = _LostLiveCleanupCarrier()
+    sink = _CountingSink()
+    try:
+        outcome = download(borrow, source, sink, 20_000, plan, carrier=carrier)
+        assert sink.total == 14_000 and outcome.stream_verified
+        assert outcome.status is FileDownloadStatus.UNCERTAIN
+        assert outcome.failure is FileDownloadFailure.CLEANUP
+        assert outcome.cleanup_debt is not None and outcome.requires_owner_retention
+        assert carrier.calls == 3 and carrier.live_requests == [False, True, False]
+        assert not tuple(scratch.iterdir())
     finally:
         database.close()
 
@@ -197,12 +309,14 @@ class _CarrierFactInjector:
     ],
     ids=["zero", "oversized", "exception"],
 )
+@pytest.mark.parametrize("live_stdio", [False, True], ids=["buffered", "live-stream"])
 def test_bad_sink_is_sanitized_and_snapshot_is_cleaned(
     tmp_path: Path,
     roots: tuple[Path, Path],
     plan: IdentityPlan,
     sink,
     failure: FileDownloadFailure,
+    live_stdio: bool,
 ) -> None:
     source, scratch = roots
     source.joinpath("source").write_bytes(b"secret-payload")
@@ -210,7 +324,7 @@ def test_bad_sink_is_sanitized_and_snapshot_is_cleaned(
     operation_owner = owner(database)
     borrow = operation_owner.borrow()
     try:
-        outcome = download(borrow, source, sink, 64, plan)
+        outcome = download(borrow, source, sink, 64, plan, carrier=LocalCarrier(live_stdio=live_stdio))
 
         assert outcome.status is FileDownloadStatus.FAILED
         assert outcome.failure is failure and outcome.accepted_bytes == 0
@@ -228,10 +342,12 @@ def test_bad_sink_is_sanitized_and_snapshot_is_cleaned(
         database.close()
 
 
+@pytest.mark.parametrize("live_stdio", [False, True], ids=["buffered", "live-stream"])
 def test_sink_control_flow_propagates_with_bounded_clean_state(
     tmp_path: Path,
     roots: tuple[Path, Path],
     plan: IdentityPlan,
+    live_stdio: bool,
 ) -> None:
     source, scratch = roots
     source.joinpath("source").write_bytes(b"payload")
@@ -240,17 +356,21 @@ def test_sink_control_flow_propagates_with_bounded_clean_state(
     borrow = operation_owner.borrow()
     try:
         with pytest.raises(KeyboardInterrupt) as raised:
-            download(borrow, source, _CancelingSink(), 64, plan)
+            download(borrow, source, _CancelingSink(), 64, plan, carrier=LocalCarrier(live_stdio=live_stdio))
 
         fact = raised.value.__cause__
         assert isinstance(fact, FileDownloadControlFact)
-        assert fact.outcome.cleanup_debt is None
-        assert fact.outcome.accepted_bytes == 0 and not fact.outcome.requires_owner_retention
-        assert not tuple(scratch.iterdir())
-        borrow.close()
-        operation_owner.seal_lifecycle_obligations()
-        operation_owner.record_effects_resolved()
-        operation_owner.close()
+        assert fact.outcome.accepted_bytes == 0
+        if live_stdio:
+            assert fact.outcome.cleanup_debt is not None and fact.outcome.requires_owner_retention
+            assert fact.outcome.pending_remote_effects and tuple(scratch.iterdir())
+        else:
+            assert fact.outcome.cleanup_debt is None and not fact.outcome.requires_owner_retention
+            assert not tuple(scratch.iterdir())
+            borrow.close()
+            operation_owner.seal_lifecycle_obligations()
+            operation_owner.record_effects_resolved()
+            operation_owner.close()
     finally:
         database.close()
 
@@ -290,17 +410,19 @@ def test_real_carrier_timeout_records_deadline_with_unresolved_begin(
         database.close()
 
 
+@pytest.mark.parametrize("live_stdio", [False, True], ids=["buffered", "live-stream"])
 def test_expired_deadline_before_dispatch_has_no_exchange_facts(
     tmp_path: Path,
     roots: tuple[Path, Path],
     plan: IdentityPlan,
+    live_stdio: bool,
 ) -> None:
     source, _ = roots
     source.joinpath("source").write_bytes(b"payload")
     database = Database(tmp_path / "state.db")
     operation_owner = owner(database)
     borrow = operation_owner.borrow()
-    carrier = LocalCarrier()
+    carrier = LocalCarrier(live_stdio=live_stdio)
     try:
         outcome = download(
             borrow,
@@ -323,10 +445,12 @@ def test_expired_deadline_before_dispatch_has_no_exchange_facts(
         database.close()
 
 
+@pytest.mark.parametrize("live_stdio", [False, True], ids=["buffered", "live-stream"])
 def test_deadline_during_sink_stall_retains_exact_cleanup_debt(
     tmp_path: Path,
     roots: tuple[Path, Path],
     plan: IdentityPlan,
+    live_stdio: bool,
 ) -> None:
     source, scratch = roots
     source.joinpath("source").write_bytes(b"payload")
@@ -335,7 +459,9 @@ def test_deadline_during_sink_stall_retains_exact_cleanup_debt(
     borrow = operation_owner.borrow()
     sink = _StalledSink()
     try:
-        outcome = download(borrow, source, sink, 64, plan, deadline=Deadline.after(0.5))
+        outcome = download(
+            borrow, source, sink, 64, plan, deadline=Deadline.after(0.5), carrier=LocalCarrier(live_stdio=live_stdio)
+        )
 
         assert outcome.failure is FileDownloadFailure.DEADLINE
         assert outcome.deadline_exceeded and outcome.cleanup_debt is not None

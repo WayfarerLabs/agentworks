@@ -50,6 +50,7 @@ _LOWER_HEX = frozenset("0123456789abcdef")
 _COMMON_FIELDS = frozenset({"identity", "nonce", "operation", "remaining_seconds", "token", "version"})
 _BEGIN_FIELDS = _COMMON_FIELDS | {"max_bytes", "path", "root"}
 _CHUNK_FIELDS = _COMMON_FIELDS | {"length", "offset", "ready"}
+_STREAM_FIELDS = _COMMON_FIELDS | {"ready"}
 _RECONCILE_FIELDS = _COMMON_FIELDS
 _CLEANUP_FIELDS = _COMMON_FIELDS | {"cleanup"}
 
@@ -57,6 +58,7 @@ _CLEANUP_FIELDS = _COMMON_FIELDS | {"cleanup"}
 class FileSnapshotOperation(StrEnum):
     BEGIN = "snapshot_begin"
     CHUNK = "snapshot_chunk"
+    STREAM = "snapshot_stream"
     RECONCILE = "snapshot_reconcile"
     CLEANUP = "snapshot_cleanup"
 
@@ -122,6 +124,20 @@ class FileSnapshotChunkRequest:
 
 
 @dataclass(frozen=True, slots=True, repr=False)
+class FileSnapshotStreamRequest:
+    nonce: str
+    token: bytes
+    ready: ReadyScratchReference
+    identity: IdentityExpectation
+    remaining_seconds: float | None
+    effect_gate: FileEffectGateBinding | None = None
+
+    @property
+    def operation(self) -> FileSnapshotOperation:
+        return FileSnapshotOperation.STREAM
+
+
+@dataclass(frozen=True, slots=True, repr=False)
 class FileSnapshotReconcileRequest:
     nonce: str
     token: bytes
@@ -149,7 +165,11 @@ class FileSnapshotCleanupRequest:
 
 
 FileSnapshotRequest = (
-    FileSnapshotBeginRequest | FileSnapshotChunkRequest | FileSnapshotReconcileRequest | FileSnapshotCleanupRequest
+    FileSnapshotBeginRequest
+    | FileSnapshotChunkRequest
+    | FileSnapshotStreamRequest
+    | FileSnapshotReconcileRequest
+    | FileSnapshotCleanupRequest
 )
 
 
@@ -325,6 +345,11 @@ def encode_file_snapshot_request(request: FileSnapshotRequest) -> bytes:
                     "ready": encode_ready_scratch_reference(request.ready),
                 }
             )
+        elif isinstance(request, FileSnapshotStreamRequest):
+            reference = request.ready._reference._ownership
+            if reference._token != request.token or reference._context != snapshot_context(request.identity):
+                raise ScratchWireError
+            common["ready"] = encode_ready_scratch_reference(request.ready)
         elif isinstance(request, FileSnapshotReconcileRequest):
             pass
         elif isinstance(request, FileSnapshotCleanupRequest):
@@ -374,6 +399,7 @@ def decode_file_snapshot_request(data: bytes) -> FileSnapshotRequest:
     expected_fields = {
         FileSnapshotOperation.BEGIN: _BEGIN_FIELDS,
         FileSnapshotOperation.CHUNK: _CHUNK_FIELDS,
+        FileSnapshotOperation.STREAM: _STREAM_FIELDS,
         FileSnapshotOperation.RECONCILE: _RECONCILE_FIELDS,
         FileSnapshotOperation.CLEANUP: _CLEANUP_FIELDS,
     }[operation]
@@ -429,6 +455,8 @@ def decode_file_snapshot_request(data: bytes) -> FileSnapshotRequest:
         failed = True
     if failed or ready is None:
         raise _invalid_request()
+    if operation is FileSnapshotOperation.STREAM:
+        return FileSnapshotStreamRequest(nonce, token, ready, identity, remaining, effect_gate)
     offset = _bounded_request_integer(value["offset"], _MAX_LENGTH)
     length = _bounded_request_integer(value["length"], MAX_SNAPSHOT_CHUNK_BYTES)
     declared_length = ready._reference._ownership._length
@@ -543,6 +571,41 @@ def parse_file_snapshot_chunk_result(
     if not hmac.compare_digest(hashlib.sha256(data).digest(), digest):
         raise FileSnapshotControlError
     return FileSnapshotChunkResult(requested_offset, requested_length, data, digest)
+
+
+def encode_file_snapshot_stream_result(length: int, digest: bytes) -> bytes:
+    if type(length) is not int or not 0 <= length <= _MAX_LENGTH or type(digest) is not bytes or len(digest) != 32:
+        raise FileSnapshotControlError
+    return _json_bytes({"length": length, "sha256": digest.hex()})
+
+
+def parse_file_snapshot_stream_result(
+    body: bytes,
+    expected_length: int,
+    expected_digest: bytes,
+    observed_length: int,
+    observed_digest: bytes,
+) -> None:
+    value = _load_json(body, request=False)
+    try:
+        canonical = _json_bytes(value)
+    except (TypeError, ValueError):
+        raise FileSnapshotControlError from None
+    digest = value.get("sha256")
+    if (
+        canonical != body
+        or set(value) != {"length", "sha256"}
+        or type(value["length"]) is not int
+        or value["length"] != expected_length
+        or value["length"] != observed_length
+        or type(digest) is not str
+        or len(digest) != 64
+        or any(character not in _LOWER_HEX for character in digest)
+    ):
+        raise FileSnapshotControlError
+    decoded = bytes.fromhex(digest)
+    if not hmac.compare_digest(decoded, expected_digest) or not hmac.compare_digest(decoded, observed_digest):
+        raise FileSnapshotControlError
 
 
 def encode_file_snapshot_reconcile_result(

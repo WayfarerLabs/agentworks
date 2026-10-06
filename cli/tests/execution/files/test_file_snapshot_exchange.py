@@ -19,6 +19,7 @@ from agentworks.execution._file_snapshot_exchange import (
     snapshot_chunk,
     snapshot_cleanup,
     snapshot_reconcile,
+    snapshot_stream,
 )
 from agentworks.execution._file_snapshot_protocol import (
     MAX_SNAPSHOT_CHUNK_BYTES,
@@ -28,10 +29,12 @@ from agentworks.execution._file_snapshot_protocol import (
     FileSnapshotFailureCode,
     FileSnapshotFailureControl,
     FileSnapshotRequest,
+    FileSnapshotStreamRequest,
     decode_file_snapshot_request,
     empty_file_snapshot_body,
     encode_file_snapshot_chunk_result,
     encode_file_snapshot_failure,
+    encode_file_snapshot_stream_result,
     snapshot_context,
 )
 from agentworks.execution._file_spool import SpoolSnapshotFailureKind
@@ -69,6 +72,13 @@ from tests.execution.files._runtime_support import (
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the private snapshot helper requires Linux")
 
 _TOKEN = bytes(range(16))
+
+
+def _collect(received: bytearray, block: bytes) -> bool:
+    received.extend(block)
+    return True
+
+
 _FINAL_DEADLINE_PATCH = """
 clock=[guest.time.monotonic()]
 def controlled_monotonic():
@@ -442,6 +452,63 @@ def test_changed_scratch_is_refused_with_exact_cleanup_debt(
     assert failure is not None and failure.scratch_kind is ScratchFailureKind.CONFLICT
     assert failure.cleanup_debt == _cleanup_debt(snapshot.ready)
 
+    received = bytearray()
+    streamed = snapshot_stream(
+        LocalCarrier(live_stdio=True),
+        token=_TOKEN,
+        ready=snapshot.ready,
+        write_data=lambda block: _collect(received, block),
+        plan=plan,
+        deadline=Deadline.after(15),
+        runtime_selection=runtime_selection(sys.executable),
+    )
+    streamed_observation = streamed.observation
+    assert streamed_observation is not None
+    assert streamed_observation.state is FileSnapshotObservationState.REFUSED
+    assert streamed_observation.failure is not None
+    assert streamed_observation.failure.scratch_kind is ScratchFailureKind.CONFLICT
+    assert streamed_observation.failure.cleanup_debt == _cleanup_debt(snapshot.ready)
+    assert received == bytearray()
+
+
+def test_partial_guest_stream_failure_never_verifies_bytes_and_retains_cleanup(
+    tmp_path: Path, scratch_root: Path, plan: IdentityPlan, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    (source_root / "payload").write_bytes(b"private payload")
+    patch = """
+scratch=sys.modules['_agw_file_snapshot._scratch']
+def partial_stream(parent_fd, ready, emit, *, expires_at=None):
+ emit(b'partial')
+ raise scratch.ScratchTransferError(
+  scratch.ScratchFailureKind.IO, scratch.ScratchPhase.READ, cleanup_debt=scratch._cleanup_debt(ready)
+ )
+guest.stream_ready_scratch=partial_stream
+"""
+    install_fixture_bundle(monkeypatch, scratch_root, patch)
+    _, begun = _begin(source_root, "payload", 64, plan)
+    assert begun.observation is not None and begun.observation.snapshot is not None
+    ready = begun.observation.snapshot.ready
+    received = bytearray()
+
+    result = snapshot_stream(
+        LocalCarrier(live_stdio=True),
+        token=_TOKEN,
+        ready=ready,
+        write_data=lambda block: _collect(received, block),
+        plan=plan,
+        deadline=Deadline.after(15),
+        runtime_selection=runtime_selection(sys.executable),
+    )
+
+    assert received == b"partial"
+    assert result.observation is not None
+    assert result.observation.state is FileSnapshotObservationState.REFUSED
+    assert result.observation.failure is not None
+    assert result.observation.failure.scratch_kind is ScratchFailureKind.IO
+    assert result.observation.failure.cleanup_debt == _cleanup_debt(ready)
+
 
 def test_identity_refusal_precedes_source_or_scratch_access(
     tmp_path: Path,
@@ -533,10 +600,11 @@ class TranscriptCarrier:
     build: object
     calls: int = 0
     io: CarrierIO | None = None
+    live_stdio: bool = False
 
     @property
     def features(self) -> ChannelFeatures:
-        return ChannelFeatures()
+        return ChannelFeatures(live_stdio=self.live_stdio)
 
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         del invocation, io
@@ -606,6 +674,95 @@ def _failure_records(request: FileSnapshotRequest, failure: FileSnapshotFailureC
         request.nonce,
         FileRecord(1, FileRecordKind.FINISHED, empty_file_snapshot_body()),
     )
+
+
+def _stream_records(
+    request: FileSnapshotRequest, data: bytes, *, final: bool = True, digest: bytes | None = None
+) -> bytes:
+    assert isinstance(request, FileSnapshotStreamRequest)
+    records = []
+    for sequence, offset in enumerate(range(0, len(data), 4_096)):
+        records.append(
+            encode_file_record(request.nonce, FileRecord(sequence, FileRecordKind.DATA, data[offset : offset + 4_096]))
+        )
+    sequence = len(records)
+    terminal_digest = digest if digest is not None else hashlib.sha256(data).digest()
+    records.append(
+        encode_file_record(
+            request.nonce,
+            FileRecord(
+                sequence,
+                FileRecordKind.RESULT,
+                encode_file_snapshot_stream_result(len(data), terminal_digest),
+            ),
+        )
+    )
+    if final:
+        records.append(
+            encode_file_record(
+                request.nonce, FileRecord(sequence + 1, FileRecordKind.FINISHED, empty_file_snapshot_body())
+            )
+        )
+    return b"".join(records)
+
+
+def test_stream_requires_actual_live_capability_before_dispatch(plan: IdentityPlan) -> None:
+    data = b"private"
+    carrier = TranscriptCarrier(lambda request, raw: _stream_records(request, data))
+    with pytest.raises(ValidationError):
+        snapshot_stream(
+            carrier,
+            token=_TOKEN,
+            ready=_ready(plan, length=len(data), digest=hashlib.sha256(data).digest()),
+            write_data=lambda block: True,
+            plan=plan,
+            deadline=Deadline.after(15),
+            runtime_selection=runtime_selection(),
+        )
+    assert carrier.calls == 0
+
+
+@pytest.mark.parametrize("fault", ["none", "short", "extra", "corrupt", "nonce", "sequence", "terminal"])
+def test_stream_collector_bounds_data_and_requires_exact_closed_observation(plan: IdentityPlan, fault: str) -> None:
+    data = b"private-binary\x00\xff" * 500
+    ready = _ready(plan, length=len(data), digest=hashlib.sha256(data).digest())
+    received = bytearray()
+
+    def records(request: FileSnapshotRequest, raw: bytes) -> bytes:
+        del raw
+        transcript = _stream_records(
+            request,
+            data[:-1] if fault == "short" else data + b"x" if fault == "extra" else data,
+            final=fault != "terminal",
+            digest=b"0" * 32 if fault == "corrupt" else None,
+        )
+        if fault == "nonce":
+            transcript = transcript.replace(request.nonce.encode("ascii"), b"0" * 32)
+        elif fault == "sequence":
+            transcript = transcript.replace(b" 1 DATA ", b" 3 DATA ", 1)
+        return transcript
+
+    carrier = TranscriptCarrier(records, live_stdio=True)
+    result = snapshot_stream(
+        carrier,
+        token=_TOKEN,
+        ready=ready,
+        write_data=lambda block: _collect(received, block),
+        plan=plan,
+        deadline=Deadline.after(15),
+        runtime_selection=runtime_selection(),
+    )
+    observation = result.observation
+    assert carrier.calls == 1 and carrier.io is not None
+    assert isinstance(carrier.io.output, SinkOutput) and carrier.io.output.require_live
+    assert observation is not None
+    if fault == "none":
+        assert observation.state is FileSnapshotObservationState.STREAM
+        assert bytes(received) == data
+    else:
+        assert observation.state is FileSnapshotObservationState.UNCERTAIN
+        assert observation.error is not None
+    assert repr(data) not in repr(result)
 
 
 @pytest.mark.parametrize(

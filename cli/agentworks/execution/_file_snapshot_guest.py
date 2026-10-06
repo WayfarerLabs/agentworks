@@ -21,6 +21,7 @@ from ._file_snapshot_protocol import (
     FileSnapshotReconcileRequest,
     FileSnapshotRequest,
     FileSnapshotRequestError,
+    FileSnapshotStreamRequest,
     decode_file_snapshot_request,
     empty_file_snapshot_body,
     encode_file_snapshot_begin_result,
@@ -28,6 +29,7 @@ from ._file_snapshot_protocol import (
     encode_file_snapshot_cleanup_result,
     encode_file_snapshot_failure,
     encode_file_snapshot_reconcile_result,
+    encode_file_snapshot_stream_result,
     snapshot_context,
 )
 from ._file_spool import SpoolSnapshot, SpoolSnapshotError, SpoolSnapshotFailureKind, spool_snapshot
@@ -41,6 +43,7 @@ from ._scratch import (
     cleanup_scratch,
     read_scratch_range,
     reconcile_scratch_ownership,
+    stream_ready_scratch,
 )
 from ._scratch_receipt import ScratchHistoricalOwnership, ScratchOwnershipUncertainty
 from ._scratch_root import ScratchRootError, ScratchRootFailureKind, open_scratch_root
@@ -88,11 +91,12 @@ def _deadline_failure(
         )
     phase = {
         FileSnapshotChunkRequest: ScratchPhase.READ,
+        FileSnapshotStreamRequest: ScratchPhase.READ,
         FileSnapshotReconcileRequest: ScratchPhase.RECONCILE,
         FileSnapshotCleanupRequest: ScratchPhase.CLEANUP,
     }[type(request)]
     debt = None
-    if isinstance(request, FileSnapshotChunkRequest):
+    if isinstance(request, FileSnapshotChunkRequest | FileSnapshotStreamRequest):
         debt = _cleanup_debt(request.ready)
     elif isinstance(request, FileSnapshotCleanupRequest):
         debt = request.cleanup_debt
@@ -158,6 +162,8 @@ def _operate(request: FileSnapshotRequest, expires_at: float | None) -> _Operati
                 request.length,
                 expires_at=expires_at,
             )
+        if isinstance(request, FileSnapshotStreamRequest):
+            raise AssertionError("Stream emission requires the held-gate path")
         if isinstance(request, FileSnapshotReconcileRequest):
             return reconcile_scratch_ownership(
                 scratch_fd,
@@ -170,6 +176,38 @@ def _operate(request: FileSnapshotRequest, expires_at: float | None) -> _Operati
             raise _SafeFailure(_deadline_failure(request, None))
         cleanup_scratch(scratch_fd, request.cleanup_debt)
         return None
+    except ScratchTransferError as error:
+        raise _SafeFailure(
+            FileSnapshotFailureControl(
+                FileSnapshotFailureCode.SCRATCH,
+                scratch_kind=error.kind,
+                scratch_phase=error.phase,
+                cleanup_debt=error.cleanup_debt,
+            )
+        ) from None
+    finally:
+        with suppress(OSError):
+            os.close(scratch_fd)
+
+
+def _operate_stream(request: FileSnapshotStreamRequest, writer: FileRecordWriter, expires_at: float | None) -> int:
+    """Keep the one gate across held-scratch read, DATA and terminal emission."""
+    try:
+        scratch_fd = open_scratch_root(expires_at=expires_at)
+    except ScratchRootError as error:
+        if error.kind is ScratchRootFailureKind.DEADLINE:
+            raise _SafeFailure(_deadline_failure(request, None)) from None
+        raise _SafeFailure(FileSnapshotFailureControl(FileSnapshotFailureCode.SCRATCH_ROOT_REFUSED)) from None
+    try:
+
+        def emit(block: bytes) -> None:
+            for offset in range(0, len(block), MAX_RECORD_BODY_BYTES):
+                writer.write(FileRecordKind.DATA, block[offset : offset + MAX_RECORD_BODY_BYTES])
+
+        length, digest = stream_ready_scratch(scratch_fd, request.ready, emit, expires_at=expires_at)
+        writer.write(FileRecordKind.RESULT, encode_file_snapshot_stream_result(length, digest))
+        writer.write(FileRecordKind.FINISHED, empty_file_snapshot_body())
+        return 0
     except ScratchTransferError as error:
         raise _SafeFailure(
             FileSnapshotFailureControl(
@@ -238,6 +276,16 @@ def main(nonce: str) -> int:
     expires_at = _expires_at(request.remaining_seconds)
     if _expired(expires_at):
         return _finish_failure(writer, _deadline_failure(request, None))
+    if isinstance(request, FileSnapshotStreamRequest):
+        try:
+            if request.effect_gate is None:
+                return _operate_stream(request, writer, expires_at)
+            with hold_file_effect_gate(request.effect_gate, _identity, expires_at=expires_at):
+                return _operate_stream(request, writer, expires_at)
+        except _SafeFailure as error:
+            return _finish_failure(writer, error.failure)
+        except (FileEffectGateError, _GuestRefusal):
+            return _finish_failure(writer, FileSnapshotFailureControl(FileSnapshotFailureCode.EFFECT_GATE_REFUSED))
     failure: FileSnapshotFailureControl | None = None
     result: _OperationResult = None
     try:

@@ -31,6 +31,7 @@ from agentworks.execution._file_snapshot_protocol import (
     FileSnapshotFailureControl,
     FileSnapshotReconcileRequest,
     FileSnapshotRequestError,
+    FileSnapshotStreamRequest,
     decode_file_snapshot_request,
     empty_file_snapshot_body,
     encode_file_snapshot_begin_result,
@@ -39,12 +40,14 @@ from agentworks.execution._file_snapshot_protocol import (
     encode_file_snapshot_failure,
     encode_file_snapshot_reconcile_result,
     encode_file_snapshot_request,
+    encode_file_snapshot_stream_result,
     parse_empty_file_snapshot_body,
     parse_file_snapshot_begin_result,
     parse_file_snapshot_chunk_result,
     parse_file_snapshot_cleanup_result,
     parse_file_snapshot_failure,
     parse_file_snapshot_reconcile_result,
+    parse_file_snapshot_stream_result,
     snapshot_context,
 )
 from agentworks.execution._file_spool import SpoolSnapshot, SpoolSnapshotFailureKind
@@ -143,6 +146,18 @@ def _chunk(**changes: object) -> FileSnapshotChunkRequest:
     return FileSnapshotChunkRequest(**values)  # type: ignore[arg-type]
 
 
+def _stream(**changes: object) -> FileSnapshotStreamRequest:
+    values: dict[str, object] = {
+        "nonce": _NONCE,
+        "token": _TOKEN,
+        "ready": _ready(),
+        "identity": _IDENTITY,
+        "remaining_seconds": 1.25,
+    }
+    values.update(changes)
+    return FileSnapshotStreamRequest(**values)  # type: ignore[arg-type]
+
+
 def _reconcile() -> FileSnapshotReconcileRequest:
     return FileSnapshotReconcileRequest(_NONCE, _TOKEN, _IDENTITY, 1.25)
 
@@ -198,7 +213,7 @@ assert all(sys.modules[name] is None for name in blocked)
     assert completed.returncode == 0, completed.stderr.decode(errors="replace")
 
 
-@pytest.mark.parametrize("snapshot_request", [_begin(), _chunk(), _reconcile(), _cleanup()])
+@pytest.mark.parametrize("snapshot_request", [_begin(), _chunk(), _stream(), _reconcile(), _cleanup()])
 def test_requests_round_trip_without_exposing_paths_or_private_values(snapshot_request) -> None:
     encoded = encode_file_snapshot_request(snapshot_request)
     decoded = decode_file_snapshot_request(encoded)
@@ -225,7 +240,7 @@ def test_only_begin_request_carries_source_selectors_and_token_is_hex() -> None:
     }
     assert begin["token"] == _TOKEN.hex()
 
-    for request in (_chunk(), _reconcile(), _cleanup()):
+    for request in (_chunk(), _stream(), _reconcile(), _cleanup()):
         value = json.loads(encode_file_snapshot_request(request))
         assert "root" not in value and "path" not in value
 
@@ -274,6 +289,8 @@ def test_chunk_request_refuses_ready_reference_outside_snapshot_core_binding() -
     for ready in (wrong_token, wrong_operation):
         with pytest.raises(FileSnapshotRequestError):
             encode_file_snapshot_request(_chunk(ready=ready))
+        with pytest.raises(FileSnapshotRequestError):
+            encode_file_snapshot_request(_stream(ready=ready))
 
 
 def test_cleanup_request_refuses_debt_outside_original_token_and_identity() -> None:
@@ -489,6 +506,16 @@ def test_chunk_result_binds_range_length_content_and_digest() -> None:
 
     assert decoded == result
     assert repr(_CONTENT) not in repr(decoded)
+
+
+def test_stream_result_requires_exact_terminal_length_and_digest() -> None:
+    body = encode_file_snapshot_stream_result(len(_CONTENT), _DIGEST)
+    parse_file_snapshot_stream_result(body, len(_CONTENT), _DIGEST, len(_CONTENT), _DIGEST)
+    for observed_length, observed_digest in ((len(_CONTENT) - 1, _DIGEST), (len(_CONTENT), b"x" * 32)):
+        with pytest.raises(FileSnapshotControlError):
+            parse_file_snapshot_stream_result(body, len(_CONTENT), _DIGEST, observed_length, observed_digest)
+    with pytest.raises(FileSnapshotControlError):
+        parse_file_snapshot_stream_result(b'{"length":0,"sha256":"bad"}', len(_CONTENT), _DIGEST, 0, _DIGEST)
 
 
 @pytest.mark.parametrize(

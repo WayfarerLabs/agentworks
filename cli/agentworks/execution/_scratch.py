@@ -55,7 +55,7 @@ from ._scratch_receipt import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 _DATA_NAME = _RECEIPT_DATA_NAME
 _OBJECT_MODE = _RECEIPT_DATA_MODE
@@ -492,6 +492,51 @@ def iter_ready_scratch(
         yield block
         offset += len(block)
     _check_reference_deadline(ready._reference, expires_at, ScratchPhase.READ)
+
+
+def stream_ready_scratch(
+    parent_fd: int,
+    ready: ReadyScratchReference,
+    emit: Callable[[bytes], None],
+    *,
+    expires_at: float | None = None,
+) -> tuple[int, bytes]:
+    """Emit one READY object from a single held descriptor in bounded pieces."""
+    reference = ready._reference
+    _check_reference_deadline(reference, expires_at, ScratchPhase.READ)
+    opened: _OpenedScratch | None = None
+    failure: ScratchTransferError | None = None
+    control: BaseException | None = None
+    close_control: BaseException | None = None
+    digest = hashlib.sha256()
+    total = 0
+    try:
+        opened = _open_scratch(parent_fd, reference, writable=False, phase=ScratchPhase.READ, expires_at=expires_at)
+        _require_ready_stat(opened.object_stat, ready)
+        length = reference._ownership._length
+        while total < length:
+            _check_deadline(expires_at, ScratchPhase.READ)
+            try:
+                block = os.read(opened.object_fd, min(_MAX_CHUNK_BYTES, length - total))
+            except OSError:
+                raise ScratchTransferError(ScratchFailureKind.IO, ScratchPhase.READ) from None
+            if not block:
+                raise ScratchTransferError(ScratchFailureKind.CONFLICT, ScratchPhase.READ)
+            emit(block)
+            digest.update(block)
+            total += len(block)
+        _require_ready_stat(_fstat(opened.object_fd, ScratchPhase.READ), ready)
+        if not hmac.compare_digest(digest.digest(), ready._digest):
+            raise ScratchTransferError(ScratchFailureKind.INTEGRITY, ScratchPhase.READ)
+    except ScratchTransferError as error:
+        failure = error
+    except BaseException as error:
+        control = error
+    finally:
+        if opened is not None:
+            close_control = opened.close()
+    _finish_operation(reference, ScratchPhase.READ, failure, control, close_control, expires_at)
+    return total, digest.digest()
 
 
 def cleanup_scratch(

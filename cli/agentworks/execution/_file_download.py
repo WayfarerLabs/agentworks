@@ -19,6 +19,7 @@ from agentworks.execution._file_snapshot_exchange import (
     snapshot_chunk,
     snapshot_cleanup,
     snapshot_reconcile,
+    snapshot_stream,
 )
 from agentworks.execution._file_snapshot_protocol import (
     MAX_PATH_BYTES,
@@ -89,6 +90,7 @@ class FileDownloadFailurePhase(StrEnum):
 
     SNAPSHOT_BEGIN = "snapshot_begin"
     SNAPSHOT_CHUNK = "snapshot_chunk"
+    SNAPSHOT_STREAM = "snapshot_stream"
     SNAPSHOT_RECONCILE = "snapshot_reconcile"
     SNAPSHOT_CLEANUP = "snapshot_cleanup"
 
@@ -420,6 +422,75 @@ class _DownloadWorkflow:
         return False
 
     def _transfer(self) -> bool:
+        if self._carrier.features.live_stdio:
+            return self._transfer_stream()
+        return self._transfer_chunks()
+
+    def _transfer_stream(self) -> bool:
+        revision = self._state.source_revision
+        ready = self._state.ready
+        assert revision is not None and revision.digest is not None and ready is not None
+        digest = hashlib.sha256()
+
+        def write_data(data: bytes) -> bool:
+            return self._write_chunk(data, digest)
+
+        result = snapshot_stream(
+            self._carrier,
+            token=self._state.token,
+            ready=ready,
+            write_data=write_data,
+            plan=self._state.binding.identity_plan,
+            deadline=self._deadline,
+            runtime_selection=self._state.binding.runtime_selection,
+            effect_gate=self._state.binding.effect_gate,
+        )
+        observation = result.observation
+        if result.dispatch is not Dispatch.NOT_SENT:
+            self._record_runtime(result.runtime_prerequisite)
+        if result.dispatch is not Dispatch.NOT_SENT and observation is not None:
+            self._record_observation(
+                observation,
+                phase=FileDownloadFailurePhase.SNAPSHOT_STREAM,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
+            )
+        normal = self._settle(result.dispatch, result.carrier_completion)
+        if not normal:
+            self._state.fail(
+                FileDownloadFailure.OBSERVATION
+                if result.dispatch is Dispatch.NOT_SENT
+                else FileDownloadFailure.TERMINATION,
+                phase=FileDownloadFailurePhase.SNAPSHOT_STREAM,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
+            )
+            return False
+        if self._runtime_refused(result.runtime_prerequisite):
+            self._state.fail(
+                FileDownloadFailure.RUNTIME_PREREQUISITE,
+                phase=FileDownloadFailurePhase.SNAPSHOT_STREAM,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
+            )
+            return False
+        if observation is None or observation.state is not FileSnapshotObservationState.STREAM:
+            self._state.fail(
+                FileDownloadFailure.SNAPSHOT
+                if observation is not None and observation.state is FileSnapshotObservationState.REFUSED
+                else FileDownloadFailure.OBSERVATION,
+                phase=FileDownloadFailurePhase.SNAPSHOT_STREAM,
+                dispatch=result.dispatch,
+                carrier_failure=result.carrier_failure,
+            )
+            return False
+        if self._state.accepted_bytes != revision.stat.size or digest.digest() != revision.digest:
+            self._state.fail(FileDownloadFailure.INTEGRITY, phase=FileDownloadFailurePhase.SNAPSHOT_STREAM)
+            return False
+        self._state.stream_verified = True
+        return True
+
+    def _transfer_chunks(self) -> bool:
         revision = self._state.source_revision
         ready = self._state.ready
         assert revision is not None and revision.digest is not None and ready is not None

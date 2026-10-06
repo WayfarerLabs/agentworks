@@ -44,6 +44,7 @@ from agentworks.execution._file_snapshot_exchange import (
     snapshot_begin,
     snapshot_cleanup,
     snapshot_reconcile,
+    snapshot_stream,
 )
 from agentworks.execution._file_snapshot_protocol import FileSnapshotFailureCode
 from agentworks.execution._helper_identity import IdentityExpectation
@@ -928,6 +929,26 @@ def test_fixed_snapshot_helper_checks_independent_guest_and_fences_cleanup(
     cleanup_debt = _cleanup_debt(begun.observation.snapshot.ready)
     proposed = replace(binding, proposed_generation=secrets.token_bytes(16))
     advanced = advance_file_effect_gate(proposed, _observe_guest)
+    received = bytearray()
+
+    def collect(block: bytes) -> bool:
+        received.extend(block)
+        return True
+
+    refused_stream = snapshot_stream(
+        LocalCarrier(live_stdio=True),
+        token=token,
+        ready=begun.observation.snapshot.ready,
+        write_data=collect,
+        plan=plan,
+        deadline=Deadline.after(30),
+        runtime_selection=runtime_selection(sys.executable),
+        effect_gate=binding,
+    )
+    assert refused_stream.observation is not None
+    assert refused_stream.observation.failure is not None
+    assert refused_stream.observation.failure.code is FileSnapshotFailureCode.EFFECT_GATE_REFUSED
+    assert received == bytearray() and tuple(scratch.iterdir())
     delayed = begin(binding)
     assert delayed.observation is not None
     assert delayed.observation.failure is not None
