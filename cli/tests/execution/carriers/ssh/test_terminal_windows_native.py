@@ -1,4 +1,8 @@
-"""One owned hidden console proves native resource and record-poll primitives."""
+"""One owned hidden console proves native resource and record-poll primitives.
+
+On Windows, run this file with ``-rP`` to display passing comparison output.
+Private record measurements require that report; a captured green run is not evidence.
+"""
 
 from __future__ import annotations
 
@@ -466,7 +470,8 @@ def _owned_console_case(tmp_path: Path) -> None:
     assert result["window_cleanup"] in ("observed_absent", "observed_identity_changed")
     records = result["records"]
     assert isinstance(records, list)
-    identity, measurements, cleanup = records
+    identity, *observations, measurements, cleanup = records
+    assert len(observations) == 48 and all(value["phase"] == "input_comparison" for value in observations)
     assert identity["pid"] == result["child_pid"]
     assert identity["console_pids"] == [result["child_pid"]]
     probe._check_candidate_identity(identity["interpreter"], result["expected_interpreter"])
@@ -481,6 +486,7 @@ def _owned_console_case(tmp_path: Path) -> None:
         assert case["empty_count"] == case["after_non_key_count"] == 0
         assert 4 in case["non_key_types"] and 8 in case["non_key_types"]
         assert case["unicode_units"] == [0x0041, 0x03A9, 0xD83D, 0xDE03]
+    print(json.dumps({"phase": "injected_input_comparison_report", "observations": observations}), flush=True)
 
 
 @pytest.mark.windows

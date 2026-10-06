@@ -10,6 +10,7 @@ import ctypes
 import hashlib
 import json
 import os
+import runpy
 import sys
 import sysconfig
 from pathlib import Path
@@ -398,6 +399,10 @@ def main() -> None:
             assert input_fd is not None and output_fd is not None
             for custom in (False, True):
                 cases.append(_case(native, input_fd, output_fd, custom))
+            # Isolated startup deliberately omits checkout import paths. Load
+            # the sibling measurement by its exact path without changing them.
+            comparison = runpy.run_path(str(Path(__file__).with_name("windows_input_comparison.py")))
+            comparison["compare"](native, input_handle, _key_record, _emit)
 
         # The parent owns the process timeout. Never release fds while a native
         # borrower may remain active, even if that means the parent must kill us.
