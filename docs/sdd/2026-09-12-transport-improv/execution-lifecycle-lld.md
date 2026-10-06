@@ -263,6 +263,74 @@ target controller and private observation helper bundle those sources verbatim. 
 uses the same portable codec. Host reservation/output-policy reduction, target controller
 production, cgroup/systemd launch, carrier proof and live validation remain open.
 
+### Operation lifetime implementation path
+
+This is the next implementation path, not delivered behavior. Host admission continues to refuse
+MANAGED plus OPERATION until the target protocol, keeper, aggregate cleanup and native proof below
+are complete. Reuse the existing per-run controller and stop path; do not add another supervisor or
+make the observation deadline a job lifetime.
+
+Use one bounded lease for each operation-owned run, within its existing protected run directory. The
+lease binds the exact immutable launch digest and guest boot identity. Its expiry is an integer
+nanosecond value on the guest's `CLOCK_BOOTTIME`, not a host timestamp or wall clock. Python 3.11
+provides this suspend-aware monotonic clock on Linux; absence refuses this combination. This clock
+choice comes from the
+[Python time documentation](https://docs.python.org/3.11/library/time.html#time.CLOCK_BOOTTIME), not
+a proof of VM pause/resume behavior on any platform.
+
+Core first makes a fixed, read-only guest clock observation under the exact prepared guest identity.
+It derives an expiry 60 seconds after that observed value and supplies it with the operation-owned
+start request. Admission checks expiry before staging or starting systemd; the controller checks it
+again before releasing the child. A delayed request cannot acquire a fresh lifetime merely because
+its helper finally runs. Independent starts have no lease and retain their current behavior.
+
+Renewal uses the same two steps: observe the guest clock, then publish that observation plus the
+fixed 60-second window for the exact run. The guest publisher never substitutes its execution time
+for the supplied observation. It rejects wrong launch/boot identity, overflow, a future clock
+observation or an already expired proposed value. A late queued publication therefore cannot grant
+more time than the earlier observation allowed. Core normally renews every 10 seconds; those are one
+internal policy, not new plugin or configuration knobs.
+
+The lease is mutable control, not immutable completion evidence. Publish a complete bounded record
+using a conflict-free stage and same-directory replacement in the protected core store. This does
+not change caller-file write semantics or introduce a machine-wide filesystem lock. There is one
+publisher and at most one in-flight exchange per keeper; a missing, malformed or unavailable record
+does not extend the last accepted expiry. The controller remembers only a later accepted expiry,
+never moves it backward, and checks its remembered expiry before accepting another record. Expiry
+and explicit stop permanently close renewal admission for that controller; no late record revives a
+stopped run. Disposal accounts for only this fixed control leaf and recognized private stages.
+
+The controller checks the lease at its existing bounded polling interval. Expiry follows the same
+stop path as explicit intent: close remaining input, give the initial child the existing two-second
+grace, then kill the owned cgroup and use the existing five-second cleanup observation bound. Only
+the existing positive boundary-empty observation proves cleanup; expiry, a publication reply or a
+systemd state does not. Uninterruptible work, controller failure or missing evidence remains
+uncertain. A stalled controller cannot promise a wall-clock cleanup bound.
+
+Core owns the keeper as an already admitted lifecycle effect, like a retained platform hold. It
+registers and arms exact run custody before first possible publication, owns its background worker
+and separate fixed-helper delivery, and checks current database generation before each renewal.
+Renewal is not a second public command borrowing the owner's ordinary serial-use boundary. This does
+not permit concurrent arbitrary calls: the keeper can only observe the bound guest clock and renew
+this exact run's lease, and retains each uncertain exchange before doing anything further. Prove
+this support-effect composition against an ordinary long-running command rather than relaxing
+serialization globally. A wait timeout does not end the keeper or stop the job.
+
+Ending the owning operation stops new keeper work, drains its local worker/exchange, requests the
+existing exact-run stop and observes cleanup under an explicit cleanup budget. Closing a borrowed
+view or returning from `start` does none of those things. Keeper loss, database takeover or a
+partition stops renewal, and the guest independently reaches expiry. Recovery may stop/observe the
+old run but never resumes its keeper or renews an old lease. Boundary emptiness alone does not drain
+an admitted publisher: uncertain publication and support-worker custody must also settle before
+whole-owner release or disposal. Platform availability remains a separate held effect.
+
+The first proof must cover initial expiry before launch and between placement/release, renewal
+during ordinary serialized work, normal scope close, wait timeout, host death, partition, controller
+death, suspend/boot changes, delayed/duplicate publications, wrong run/boot/launch, interrupted
+publication and disposal. Tests use controlled clocks; native Linux SSH/QGA proof must independently
+observe body admission, descendant cleanup and retained uncertainty. Keep public exposure and
+broader completion checkboxes open until these obligations are proved.
+
 ### First private managed service
 
 The first production-shaped service slice is Linux-only, `MANAGED` and `INDEPENDENT`. It does not

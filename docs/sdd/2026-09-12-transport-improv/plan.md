@@ -2660,6 +2660,18 @@ does not enable a production target/RunContext, settle old debts or complete the
 - [ ] Prove lost-acknowledgment reconciliation, wait timeout versus stop, observer-loss cleanup,
       runtime-anchor death, concurrent forks, stale identity and independently verified emptiness.
       Settle the OPERATION liveness/lease protocol before offering target-side cleanup.
+- [ ] Implement the
+      [operation lifetime path](execution-lifecycle-lld.md#operation-lifetime-implementation-path)
+      with its first controller consumer: fixed guest-clock observation, exact launch/boot-bound
+      bounded lease control, initial-expiry admission, monotonic renewal and irreversible expiry
+      through the existing stop kernel. Preserve independent jobs and refusal at the host boundary
+      until the keeper and aggregate lifecycle are delivered; no disconnected protocol scaffold is a
+      completed slice.
+- [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
+      serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one
+      in-flight exchange, exact uncertainty retention and drain before release/disposal. Bind it to
+      the actual owning operation, not a borrowed view or a wait deadline. Keep native SSH/QGA,
+      controller death, partition, suspend/boot and body-admission proof open until measured.
 - [ ] Reconcile #770's historical escape/relaunch proposal against the later exclusion of malicious
       target-user containment. Deliver DIRECT/MANAGED without a CONTAINED profile or
       per-run-user/jail implementation; retain future profile extensibility. Prove trusted
