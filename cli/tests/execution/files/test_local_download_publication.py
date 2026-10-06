@@ -49,9 +49,10 @@ def test_rejects_unsafe_ancestor_even_when_parent_is_private(tmp_path: Path) -> 
         shared.chmod(0o700)
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="search-only permission evidence requires an ordinary caller")
 @pytest.mark.parametrize("condition", [Create(), Replace()])
 def test_search_only_ancestor_allows_known_destination(tmp_path: Path, condition: Create | Replace) -> None:
+    if os.geteuid() == 0:
+        pytest.skip("search-only permission evidence requires an ordinary caller")
     ancestor = tmp_path / "search-only"
     ancestor.mkdir()
     parent = ancestor / "writable"
