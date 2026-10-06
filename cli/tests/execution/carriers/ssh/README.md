@@ -29,13 +29,20 @@ physical keyboard translation, virtual terminal key sequences, keyboard cancella
 pseudoconsole preparation and the complete Windows workflow still require separate proof.
 
 The parent retains and reaps exactly its child, with a 120-second execution timeout and a 10-second
-reaping timeout. The child releases the resource, restores its fixture modes and code pages, closes
-its descriptors and detaches its console in cleanup. The parent observes only that reported console
-window for up to 10 seconds; missing or unresolved window evidence fails the native case. It never
-scans or terminates unrelated console hosts. JSON observations and stderr remain under the test's
-owned temporary directory, including parent cleanup evidence. This is a native local primitive
-fixture for ordinary Windows CI, with no network, credentials or caller-console access; report its
-actual native result separately from synthetic passes and skips.
+reaping timeout. It launches the real CPython interpreter directly using the
+[multiprocessing venv launch mechanism](https://github.com/python/cpython/blob/4061bc4c35f7c26f25264666d4ba083b93d2f6f9/Lib/multiprocessing/popen_spawn_win32.py#L60-L79):
+child-only `__PYVENV_LAUNCHER__` retains the candidate environment while `-I` isolates startup. This
+avoids a venv launcher process sharing the fixture console. Before opening descriptors, the child
+checks its executable, base executable, environment prefixes, SSH resource import and isolation
+against the parent candidate, and requires itself to be the console's sole client. Synthetic tests
+check launch/environment preservation and refusal before descriptor effects. The child releases the
+resource, restores its fixture modes and code pages, closes its descriptors and detaches its console
+in cleanup. The parent observes only that reported console window for up to 10 seconds; missing or
+unresolved window evidence fails the native case. It never scans or terminates unrelated console
+hosts. JSON observations and stderr remain under the test's owned temporary directory, including
+parent cleanup evidence. This is a native local primitive fixture for ordinary Windows CI, with no
+network, credentials or caller-console access; report its actual native result separately from
+synthetic passes and skips.
 
 On failure, pytest also displays the controlled child stdout, stderr traceback and parent
 observations as an exception note. Each displayed log is bounded to 64 KiB; its complete contents

@@ -10,9 +10,10 @@ import ctypes
 import json
 import os
 import sys
+from pathlib import Path
 from threading import Condition, Event, Thread
 from time import perf_counter
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from agentworks.execution.carriers.ssh._terminal_windows import WindowsTerminal, _ScreenBufferInfo
 
@@ -321,6 +322,21 @@ def _case(native: _Native, input_fd: int, output_fd: int, custom: bool) -> dict[
     }
 
 
+def _interpreter_identity() -> dict[str, str]:
+    resource = sys.modules[WindowsTerminal.__module__].__file__
+    assert resource is not None
+    return {
+        name: os.path.normcase(str(Path(value).resolve()))
+        for name, value in {
+            "executable": sys.executable,
+            "base_executable": cast("str", vars(sys)["_base_executable"]),
+            "prefix": sys.prefix,
+            "base_prefix": sys.base_prefix,
+            "resource_file": resource,
+        }.items()
+    }
+
+
 def main() -> None:
     if sys.platform != "win32":
         raise OSError("This native fixture requires Windows")
@@ -340,6 +356,10 @@ def main() -> None:
             "window_pid": window_pid.value,
             "window_visible": bool(native.user.IsWindowVisible(window)) if window else None,
             "console_pids": list(processes[:count]),
+            "interpreter": _interpreter_identity(),
+            "isolated": sys.flags.isolated,
+            "ignore_environment": sys.flags.ignore_environment,
+            "no_user_site": sys.flags.no_user_site,
         }
     )
     input_fd = output_fd = None
@@ -348,6 +368,8 @@ def main() -> None:
     try:
         assert count == 1 and processes[0] == os.getpid()
         assert window and not native.user.IsWindowVisible(window)
+        assert _interpreter_identity() == json.loads(sys.argv[1])
+        assert sys.flags.isolated == sys.flags.ignore_environment == sys.flags.no_user_site == 1
         input_fd = os.open("CONIN$", os.O_RDWR | os.O_BINARY)
         output_fd = os.open("CONOUT$", os.O_RDWR | os.O_BINARY)
         input_handle, output_handle = native.handle(input_fd), native.handle(output_fd)

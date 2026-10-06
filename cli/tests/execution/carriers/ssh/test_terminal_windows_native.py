@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import io
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -166,8 +167,19 @@ def test_failing_owned_child_exposes_controlled_evidence_after_reaping(
             return self.returncode
 
     child = Child()
+    monkeypatch.setenv("__PYVENV_LAUNCHER__", "prior-synthetic-launcher")
+    parent_env = os.environ.copy()
+    expected = probe._interpreter_identity()
 
     def create(*args: object, **kwargs: object) -> Child:
+        command = args[0]
+        assert isinstance(command, list)
+        assert command[:3] == [expected["base_executable"], "-I", "-u"]
+        assert command[3] == str(Path(probe.__file__).resolve())
+        assert json.loads(command[4]) == expected
+        assert kwargs["env"] == parent_env | {"__PYVENV_LAUNCHER__": "synthetic"}
+        assert kwargs["creationflags"] == 16
+        assert kwargs["close_fds"] is True
         return child
 
     def observe(value: dict[str, object]) -> str:
@@ -197,6 +209,7 @@ def test_failing_owned_child_exposes_controlled_evidence_after_reaping(
     with pytest.raises((AssertionError, BaseExceptionGroup)) as raised:
         test_owned_console_resource_and_nowait_records(tmp_path)
     assert timeouts == [120, 10]
+    assert os.environ == parent_env
     assert child.stdout.closed and child.stderr.closed
     assert (tmp_path / "stdout.jsonl").read_bytes() == stdout
     assert (tmp_path / "stderr.log").read_bytes() == stderr
@@ -206,6 +219,7 @@ def test_failing_owned_child_exposes_controlled_evidence_after_reaping(
     assert measurement["returncode"] == 1
     assert measurement["window_cleanup"] == "unobservable"
     assert measurement["records"] == [identity]
+    assert measurement["expected_interpreter"] == expected
     if observer_failed:
         error = raised.value
         assert isinstance(error, BaseExceptionGroup)
@@ -220,6 +234,72 @@ def test_failing_owned_child_exposes_controlled_evidence_after_reaping(
     assert stdout.decode() in notes
     assert stderr.decode() in notes
     assert parent in notes
+
+
+@pytest.mark.parametrize("mismatch", ["prefix", "resource_file", "isolated", "console_pid", None])
+def test_child_admits_candidate_identity_before_descriptor_effects(
+    monkeypatch: pytest.MonkeyPatch, mismatch: str | None
+) -> None:
+    # Native boundaries are entirely fake. Failed identity or isolation must
+    # detach the owned console without opening descriptors or admitting a worker.
+    identity = {"prefix": "candidate-venv", "resource_file": "candidate-resource"}
+    expected = identity.copy()
+    if mismatch in ("prefix", "resource_file"):
+        expected[mismatch] = "different-candidate"
+    flags = SimpleNamespace(isolated=int(mismatch != "isolated"), ignore_environment=1, no_user_site=1)
+    module = sys.modules[probe.__name__]
+    monkeypatch.setattr(
+        module, "sys", SimpleNamespace(platform="win32", flags=flags, argv=["probe", json.dumps(expected)])
+    )
+    monkeypatch.setattr(probe, "_interpreter_identity", lambda: identity)
+    records: list[dict[str, object]] = []
+    monkeypatch.setattr(probe, "_emit", records.append)
+    order: list[str] = []
+    descriptor_boundary = OSError()
+
+    def open_descriptor(*args: object) -> int:
+        order.append("open")
+        raise descriptor_boundary
+
+    class Native:
+        def __init__(self) -> None:
+            self.kernel = SimpleNamespace(
+                GetConsoleWindow=lambda: 0 if "detach" in order else 9181,
+                GetConsoleProcessList=self.processes,
+                FreeConsole=self.detach,
+            )
+            self.user = SimpleNamespace(GetWindowThreadProcessId=self.window_pid, IsWindowVisible=lambda window: False)
+
+        def check(self, value: object) -> None:
+            assert value
+
+        def window_pid(self, window: int, pid: object) -> int:
+            pointer = ctypes.cast(pid, ctypes.POINTER(ctypes.c_uint32))
+            pointer.contents.value = os.getpid()
+            return 1
+
+        def processes(self, processes: object, count: int) -> int:
+            pointer = ctypes.cast(processes, ctypes.POINTER(ctypes.c_uint32))
+            pointer[0] = os.getpid() + int(mismatch == "console_pid")
+            return 1
+
+        def detach(self) -> int:
+            order.append("detach")
+            return 1
+
+    monkeypatch.setattr(probe, "_Native", Native)
+    monkeypatch.setattr(os, "O_BINARY", 0x8000, raising=False)
+    monkeypatch.setattr(os, "open", open_descriptor)
+    with pytest.raises(BaseExceptionGroup) as raised:
+        probe.main()
+    assert records[0]["interpreter"] == identity
+    assert records[1]["closed_descriptors"] == []
+    assert order == (["open", "detach"] if mismatch is None else ["detach"])
+    if mismatch is None:
+        assert raised.value.exceptions == (descriptor_boundary,)
+    else:
+        assert len(raised.value.exceptions) == 1
+        assert isinstance(raised.value.exceptions[0], AssertionError)
 
 
 def _window_cleanup(identity: dict[str, object]) -> str:
@@ -255,14 +335,20 @@ def _run_owned_child(logs: Path) -> dict[str, object]:
     startup = subprocess.STARTUPINFO()
     startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     startup.wShowWindow = subprocess.SW_HIDE
+    identity = probe._interpreter_identity()
+    # CPython multiprocessing uses this launch shape to bypass the Windows venv
+    # redirector while retaining its venv identity, even with isolated startup.
+    env = os.environ.copy()
+    env["__PYVENV_LAUNCHER__"] = sys.executable
     process = subprocess.Popen(
-        [sys.executable, "-I", "-u", str(Path(probe.__file__).resolve())],
+        [identity["base_executable"], "-I", "-u", str(Path(probe.__file__).resolve()), json.dumps(identity)],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         startupinfo=startup,
         creationflags=subprocess.CREATE_NEW_CONSOLE,
         close_fds=True,
+        env=env,
     )
     stdout = stderr = b""
     errors: list[BaseException] = []
@@ -303,6 +389,7 @@ def _run_owned_child(logs: Path) -> dict[str, object]:
         "returncode": process.returncode,
         "window_cleanup": cleanup,
         "records": records,
+        "expected_interpreter": identity,
         "parent_error_types": [type(error).__name__ for error in errors],
     }
     (logs / "parent.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -350,6 +437,8 @@ def _owned_console_case(tmp_path: Path) -> None:
     identity, measurements, cleanup = records
     assert identity["pid"] == result["child_pid"]
     assert identity["console_pids"] == [result["child_pid"]]
+    assert identity["interpreter"] == result["expected_interpreter"]
+    assert identity["isolated"] == identity["ignore_environment"] == identity["no_user_site"] == 1
     assert identity["window"] and identity["window_pid"]
     assert identity["window_visible"] is False
     assert cleanup["error_types"] == []
