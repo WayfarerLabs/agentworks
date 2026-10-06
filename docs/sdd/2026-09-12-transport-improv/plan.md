@@ -702,6 +702,21 @@ that uncertain execution refuses finish. Existing dispatch, file and ownership a
 This failed baseline is not a green gate or correction proof; final combined reviews and full gates
 remain required.
 
+Whole-unit review at `3f9e90d73` finds one supported retry gap: the second possible-effect write,
+inside attempt admission, can lose its reply before the carrier is entered. Retry relinquishes its
+local call without reconciling owner uncertainty, preventing another command. Project reproduces
+that path with real SQLite and zero carrier calls, alongside 454 passing adjacent cases. Generic
+passes 273 cases without another finding. Complexity passes 168 restored cases and verifies that
+deleting explicit arming or fresh root-identity comparison breaks their regressions. Its accepted
+deletion removes only an interior borrow-owner comparison, not the lock or current local-state read.
+Worker correction `3eb00371e` reconciles the fenced owner before relinquishing the unreturned
+attempt. Seven new cases cover second-write failure before/after commit, failed observation, stale
+takeover and successor custody. The worker passes 228 cases, complete strict mypy (1,231 files),
+Ruff/format, full file quality and whitespace gates, exit 0. The lead also corrects a test-only type
+annotation and formats the new evidence paragraph. Corrected whole-unit re-review and exact final
+lead gates remain pending; no native, RunContext, broader plan or public-round completion is
+claimed.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
