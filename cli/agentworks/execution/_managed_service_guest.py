@@ -1,4 +1,4 @@
-"""Fixed Linux service main for one independent managed run.
+"""Fixed Linux service main for one managed run and its optional operation lease.
 
 The fixed service entry receives the derived run ID and bounded controller/guest
 admission facts. Workload request material stays in protected assets and child
@@ -23,6 +23,8 @@ from typing import TYPE_CHECKING, cast
 
 from . import _helper_identity, _managed_job_request, _managed_job_wire
 from ._managed_job_store import FactName, ManagedJobStore, Stream
+from ._managed_lease_controller import LeaseControl
+from ._managed_lease_wire import boottime_ns, checked_lease
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -259,6 +261,11 @@ def _serve(
     if store.read_fact(FactName.LAUNCH) is not None:
         raise ControllerError("run already launched")
     digest = _managed_job_wire.launch_sha256(launch)
+    lease = request.operation_lease
+    control = None
+    if lease is not None:
+        checked_lease(lease, request.launch, boottime_ns())
+        control = LeaseControl(request.launch, lease.expires_ns)
     placed_r, placed_w = os.pipe()
     release_r, release_w = os.pipe()
     ready_r, ready_w = os.pipe()
@@ -278,6 +285,8 @@ def _serve(
     writers: list[CaptureWriter] = []
     try:
         boundary.place(pid)
+        if lease is not None:
+            checked_lease(lease, request.launch, boottime_ns())
         os.write(placed_w, b"1")
         if not select.select([ready_r], [], [], 5.0)[0] or os.read(ready_r, 1) != b"1":
             raise ControllerError("child setup failed")
@@ -293,13 +302,15 @@ def _serve(
             states.append(_StreamState(stream, fd, writer))
         store.publish_fact(FactName.LAUNCH, request.launch)
         notify()
+        if lease is not None:
+            checked_lease(lease, request.launch, boottime_ns())
         if store.read_stop_request():
             _close(release_w)
             release_w = -1
         else:
             os.write(release_w, b"1")
         launched = True
-        _observe(run_id, digest, request, store, boundary, pid, input_w, exec_r, states)
+        _observe(run_id, digest, request, store, boundary, pid, input_w, exec_r, states, control)
     finally:
         for fd in (placed_w, release_w, ready_r, input_w, output_r, error_r, exec_r):
             _close(fd)
@@ -323,6 +334,7 @@ def _observe(
     input_fd: int,
     exec_fd: int,
     states: list[_StreamState],
+    lease_control: LeaseControl | None = None,
 ) -> None:
     selector = selectors.DefaultSelector()
     os.set_blocking(exec_fd, False)
@@ -354,7 +366,11 @@ def _observe(
                         deadline = time.monotonic() + _CLEANUP_SECONDS
                         with suppress(OSError):
                             boundary.kill()
-            if stop_deadline is None and store.read_stop_request():
+            if stop_deadline is None and (
+                store.read_stop_request() or (lease_control is not None and lease_control.stop_due(store))
+            ):
+                if lease_control is not None:
+                    lease_control.closed = True
                 if input_open:
                     if input_fd in selector.get_map():
                         selector.unregister(input_fd)

@@ -20,6 +20,8 @@ from ._managed_job_store import (
     _open_leaf,
     _read_all,
 )
+from ._managed_lease_store import LEASE_LEAF, LEASE_STAGE
+from ._managed_lease_wire import MAX_LEASE_BYTES, LeaseError, checked_lease, decode_lease
 from ._managed_observation_protocol import ManagedObservationError, checked_fact, checked_launch
 
 if TYPE_CHECKING:
@@ -51,8 +53,10 @@ def _inventory(directory: int, owner: int) -> dict[str, _Leaf]:
         request = name in RequestAsset._value2member_map_ or name == StopAsset.REQUEST.value
         stage_fact = _FACT_STAGE.fullmatch(name) is not None
         stage_request = _REQUEST_STAGE.fullmatch(name) is not None
+        lease = name == LEASE_LEAF
+        stage_lease = LEASE_STAGE.fullmatch(name) is not None
         spool = name in Stream._value2member_map_
-        if not (fact or request or stage_fact or stage_request or spool or name == "disposal"):
+        if not (fact or request or stage_fact or stage_request or spool or lease or stage_lease or name == "disposal"):
             raise StoreError("unknown run object")
         fd = _open_leaf(directory, name, 0o600 if spool else 0o400, owner, links=(1, 2, 3))
         if fd is None:
@@ -65,6 +69,14 @@ def _inventory(directory: int, owner: int) -> dict[str, _Leaf]:
                 data = _read_all(fd, 0)
             elif request:
                 data = _read_all(fd, _REQUEST_BOUNDS[RequestAsset(name)])
+            elif lease:
+                if info.st_nlink != 1:
+                    raise StoreError("unsafe lease link")
+                data = _read_all(fd, MAX_LEASE_BYTES)
+            elif stage_lease:
+                if info.st_nlink != 1 or info.st_size > MAX_LEASE_BYTES:
+                    raise StoreError("unsafe lease stage")
+                data = None
             else:
                 data = None
             result[name] = _Leaf(name, info.st_dev, info.st_ino, info.st_nlink, data)
@@ -133,6 +145,12 @@ def _validate_facts(inventory: dict[str, _Leaf], expected: bytes) -> bool:
 def _validate_request_finals(inventory: dict[str, _Leaf], expected: bytes, run_id: str) -> None:
     """Validate present final leaves without requiring a complete request set."""
     assets: dict[str, bytes] = {}
+    lease = inventory.get(LEASE_LEAF)
+    if lease is not None:
+        try:
+            checked_lease(decode_lease(lease.data), expected)  # type: ignore[arg-type]
+        except LeaseError:
+            raise StoreError("invalid operation lease") from None
     try:
         for name in RequestAsset:
             leaf = inventory.get(name.value)

@@ -9,6 +9,7 @@ FIXED_BUNDLE = build_file_helper_bundle(
     (
         "_helper_identity",
         "_managed_job_wire",
+        "_managed_lease_wire",
         "_managed_job_request",
         "_managed_job_store",
         "_file_wire",

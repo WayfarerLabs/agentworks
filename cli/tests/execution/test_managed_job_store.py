@@ -367,7 +367,14 @@ def test_exact_source_bundle_without_installed_agentworks(interpreter: Path, tmp
 
     script = (
         build_helper_modules(
-            "_agw_store", ("_helper_identity", "_managed_job_wire", "_managed_job_request", "_managed_job_store")
+            "_agw_store",
+            (
+                "_helper_identity",
+                "_managed_job_wire",
+                "_managed_lease_wire",
+                "_managed_job_request",
+                "_managed_job_store",
+            ),
         )
         + """
 import os

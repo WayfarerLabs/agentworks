@@ -10,8 +10,10 @@ from ._managed_service_bundle import FIXED_SOURCE as SERVICE_SOURCE
 _MODULES = (
     "_helper_identity",
     "_managed_job_wire",
+    "_managed_lease_wire",
     "_managed_job_request",
     "_managed_job_store",
+    "_managed_lease_store",
     "_file_wire",
     "_vm_guest_identity_protocol",
     "_vm_guest_identity_guest",

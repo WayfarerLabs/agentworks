@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, cast
 from ._file_wire import FileRecordKind, FileRecordWriter
 from ._helper_identity import matches_current_identity
 from ._managed_job_store import FactName, ManagedJobStore, RequestAsset, StoreError
+from ._managed_lease_store import publish_lease
+from ._managed_lease_wire import boottime_ns, checked_lease
 from ._managed_service_bundle import FIXED_SOURCE
 from ._managed_start_protocol import (
     MAX_REQUEST_BYTES,
@@ -137,7 +139,12 @@ def _prepare_start(
     ):
         raise ManagedStartError("managed start already staged")
     argv = _service_argv(run_id, python, request.identity, request.guest)
+    if request.job.operation_lease is not None:
+        checked_lease(request.job.operation_lease, request.job.launch, boottime_ns())
     store.publish_request(request.job)
+    if request.job.operation_lease is not None:
+        publish_lease(store, request.job.launch, request.job.operation_lease)
+        checked_lease(request.job.operation_lease, request.job.launch, boottime_ns())
     status = runner(argv)
     if status is not None and (type(status) is not int or not -255 <= status <= 255):
         raise ManagedStartError("invalid systemd client outcome")

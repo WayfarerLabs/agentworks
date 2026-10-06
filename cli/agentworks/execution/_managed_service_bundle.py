@@ -1,17 +1,17 @@
-"""Exact first-party source for the private independent managed service."""
+"""Exact first-party derived source for the private managed service."""
 
 from __future__ import annotations
-
-import base64
-import bz2
 
 from ._helper_bundle import RootGuestDelivery, build_helper_modules, build_root_guest_program
 
 _MODULES = (
     "_helper_identity",
     "_managed_job_wire",
+    "_managed_lease_wire",
     "_managed_job_request",
     "_managed_job_store",
+    "_managed_lease_store",
+    "_managed_lease_controller",
     "_managed_service_guest",
 )
 
@@ -19,7 +19,9 @@ _PROGRAM = build_root_guest_program(
     "_agw_managed_service", _MODULES, "_managed_service_guest", delivery=RootGuestDelivery.INLINE
 )
 _ADMISSION = "_agw_managed_service_admission"
-_ENTRY = build_helper_modules(_ADMISSION, ("_helper_identity", "_vm_guest_identity_protocol", "_guest_bootstrap")) + (
+_ENTRY = build_helper_modules(
+    _ADMISSION, ("_helper_identity", "_vm_guest_identity_protocol", "_guest_bootstrap"), compact=True
+) + (
     "def _agw_service_entry():\n"
     " try:\n"
     "  if len(sys.argv)!=3 or len(sys.argv[2])>65536:raise ValueError\n"
@@ -39,8 +41,4 @@ _ENTRY = build_helper_modules(_ADMISSION, ("_helper_identity", "_vm_guest_identi
     "  (expected.instance_marker,expected.boot_id,expected.init_start_ticks))\n"
     "raise SystemExit(_agw_service_entry())\n"
 )
-_PAYLOAD = base64.b64encode(bz2.compress(_ENTRY.encode("utf-8"))).decode("ascii")
-FIXED_SOURCE = (
-    "import base64,bz2\n"
-    f"exec(compile(bz2.decompress(base64.b64decode({_PAYLOAD!r})),'<agentworks-managed-service>','exec'))\n"
-)
+FIXED_SOURCE = _ENTRY

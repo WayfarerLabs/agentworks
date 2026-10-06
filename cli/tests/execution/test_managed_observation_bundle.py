@@ -79,6 +79,7 @@ def test_exact_source_codec_parity(interpreter: str, tmp_path: Path) -> None:
         (
             "_helper_identity",
             "_managed_job_wire",
+            "_managed_lease_wire",
             "_managed_job_request",
             "_managed_job_store",
             "_file_wire",

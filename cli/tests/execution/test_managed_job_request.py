@@ -221,7 +221,7 @@ def test_exact_source_is_portable_without_installed_package(tmp_path: Path, pyth
     package.mkdir()
     (package / "__init__.py").touch()
     source = Path(request_wire.__file__).parent
-    for module in ("_managed_job_request", "_managed_job_wire", "_helper_identity"):
+    for module in ("_managed_job_request", "_managed_job_wire", "_managed_lease_wire", "_helper_identity"):
         shutil.copyfile(source / f"{module}.py", package / f"{module}.py")
     control = request_wire.encode_request(_request())["request-control"]
     code = (
