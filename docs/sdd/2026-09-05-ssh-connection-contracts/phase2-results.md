@@ -759,6 +759,27 @@ expansion-enabled 10.x client, plus supported Linux/macOS workstations, before c
 delivery complete. Any urgent compatibility correction to the legacy path requires its own native
 reproduction and disposition; no legacy runtime correction is made in this increment.
 
+## Workstation download transport refresh
+
+SSH code head `1de533873f13f6cef363ea252b05c6e7dd724f65` rebases all 88 SSH commits onto transport
+`a274a6264cd6b2ea3ced4864b52a8fcdad96bf80`. The transport increment selects private Linux, macOS and
+Windows local download publishers. It retains caller-private Create and implements the approved
+macOS/Windows Replace against a held existing file, with unsupported metadata refused before
+mutation and later local effects reported separately from remote transfer and cleanup. These are
+transport-owned candidate mechanisms, not public FileAccess or native acceptance.
+
+The rebase needed no SSH source, fixture or contract adaptation. The combined non-integration suite
+passed **14,333 tests with 50 skips** in 216.40 seconds. Full Ruff and format checks passed on 1,243
+files, and mypy passed 1,206 source files. All four SSH conformance cases passed again, including
+exact environment delivery through the owned Linux OpenSSH peer. Installed-peer file read and stage
+round-trip cases also passed. The snapshot case skipped because this environment's `/tmp` has mode
+1777 but owner UID 65534, whereas the helper requires root ownership. This result does not repeat
+the earlier snapshot acceptance.
+
+Earlier hosted and native evidence retains its recorded heads. Terminal delivery, additive
+RunContext/SSHSettings composition, supported-workstation file publication and complete SSH workflow
+acceptance remain open.
+
 ## Remaining integration and acceptance
 
 Earlier integration `fefc2b9e` uses transport `f3339f3d3cccace129be58711dc7eeb30ec66dc2`, which adds
