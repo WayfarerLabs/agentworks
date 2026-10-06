@@ -196,7 +196,7 @@ partial-update custody. Production writer coexistence and rollback through both 
 paths still require transport composition and native acceptance.
 
 Shared subprocess adoption introduces an implementation dependency on transport #833. Current
-integration uses `73ac89eef2367d1ab3a5d5b81c57d50a1903c172`. Its shared carrier, process,
+integration uses `3dce50474f6d4d349d411d379fc5174be1ae241c`. Its shared carrier, process,
 preparation and terminal-input interfaces remain unchanged from the preceding SSH integration.
 Private execution binds the selected owner scope and bootstrap boot; the WSL2 native factory
 requires both prepared identity plans and shares one elevated-plan/full-guest bootstrap between file
@@ -205,20 +205,35 @@ version. New private recovery/lifecycle candidates and fixed body-free Proxmox g
 observation advance transport's composition, with source and faked-provider evidence recorded in its
 plan. Its latest private already-running Proxmox composition retains one VM owner and numeric
 bootstrap, while account and guest preparation preserve observed facts and original interruption
-when borrow release fails. Its private HTTP worker now supplies fixed start/task-status methods;
-activation custody and production callers remain pending. A pre/post read does not establish atomic
-stale-request prevention or queued-request drain. Stopped startup still refuses. Native recovery,
-provider freshness at dispatch, fencing/drain, complete platform availability, Windows terminal
-delivery and additive RunContext remain open. These private increments supply no new SSH terminal or
-production acceptance. Earlier rebased code pin `e38f5fcff35bd85d099129fdbe5dd8480017c007` passes
-15,768 non-integration tests with 51 skips and 27 warnings, full Ruff/format, strict mypy (1,277
-sources), exact CI typer isolation, file quality, locked-SDD, Rulesync and whitespace checks.
-Website validation passes 160 Python and 103 Node tests, four builds and both deterministic
-comparisons. The first build target was refused inside the checkout; corrected external owned output
-roots pass. No SSH code changes or native acceptance follow from that dependency refresh.
+when borrow release fails. Its private stopped-Proxmox composition now retains the selected VM owner
+and root-QGA route before one durably armed start request. Only a fully matching successful ordinary
+task settles that request; unknown acknowledgments, errors and HA handoffs retain custody without
+replay. Fresh running-power and passive guest-info observations precede exact guest/account
+preparation, and normal teardown leaves the VM running. Plugin registration now imports without the
+retirement roots; old operation imports remain local to their legacy callers. These source and
+scripted-provider results do not prove native startup, atomic stale-request prevention or
+queued-request drain. Native recovery, provider freshness at dispatch, fencing/drain, complete
+platform availability, Windows terminal delivery and additive RunContext remain open. These private
+increments supply no new SSH terminal or production acceptance. Earlier rebased code pin
+`e38f5fcff35bd85d099129fdbe5dd8480017c007` passes 15,768 non-integration tests with 51 skips and 27
+warnings, full Ruff/format, strict mypy (1,277 sources), exact CI typer isolation, file quality,
+locked-SDD, Rulesync and whitespace checks. Website validation passes 160 Python and 103 Node tests,
+four builds and both deterministic comparisons. The first build target was refused inside the
+checkout; corrected external owned output roots pass. No SSH code changes or native acceptance
+follow from that dependency refresh.
 
-The latest code pin `7e88676faaf5566f9f7b75a394e6e94ac4c6ab9d` preserves every SSH source and test
-byte from published `f4dccab54`. Its complete suite passes 15,881 non-integration tests with 51
+The current combined code pin `a38e5814fd180fe65899001d5a74426c4587dcf0` preserves all 64 Python
+files in the SSH contribution, including retained deletions, from published `47013bcf2`. Its full
+suite passes 16,046 non-integration tests with 51 skips and 27 warnings, exit 0 in 251.43 seconds.
+Full Ruff/format (1,320 files), strict mypy (1,283 sources), exact CI typer isolation, file quality,
+locked-SDD, Rulesync and whitespace checks pass. Fresh website checks pass 160 Python and 103 Node
+tests, four builds and both deterministic comparisons. Exact settled test/build roots have no
+same-user live cwd/fd references and are removed; logs remain retained. All 25 completed records
+remain unchanged and this SDD remains unlocked. This dependency refresh adds no native SSH terminal,
+authentication, trust or production RunContext acceptance.
+
+The preceding code pin `7e88676faaf5566f9f7b75a394e6e94ac4c6ab9d` preserves every SSH source and
+test byte from published `f4dccab54`. Its complete suite passes 15,881 non-integration tests with 51
 skips and 27 warnings, exit 0 in 257.82 seconds. Full Ruff/format (1,316 files), strict mypy (1,279
 sources), exact CI typer isolation, file quality, locked-SDD, Rulesync and whitespace checks pass.
 Website validation passes 160 Python and 103 Node tests, four builds and both deterministic
