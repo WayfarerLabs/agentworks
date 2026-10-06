@@ -726,6 +726,14 @@ checkpoint remain body failures. Existing ordinary helpers do not select this bu
 Native hardened-guest behavior, complete body fencing, recovery and production consumer wiring
 remain unproved.
 
+Gate-control and snapshot exchanges have an explicit private numeric-bootstrap option. It binds the
+prepared root-entry plan and full observed guest while leaving the request's body identity separate.
+The exchange selects matching fixed argv and stdin prefix, refuses conflicting guest facts before
+dispatch and preserves the body's fresh gate observations through the bound reader. All snapshot
+operations forward the same context. Existing context-free private candidates remain unchanged;
+production VM composition has not yet bound this option through operation state, continuations or
+recovery. Other file families, inline execution and later service entry still need adoption.
+
 The separate private `build_named_guest_bootstrap_argv` handles early fixed guest operations before
 numeric account preparation. It resolves a core-bound account name through the system account
 database, normalizes its groups and uses the same fixed descriptor and verified credential

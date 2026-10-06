@@ -844,18 +844,18 @@ record separately from READY or query evidence. New hold payloads distinguish la
 accounts; old payloads retain their original same-user semantics and version during recovery. This
 sequencing does not close the native or full production-fencing gates.
 
-Later numeric helper preparation binds the verified full guest and the prepared root-entry plan
-in one core-owned context, independently of each request's body identity. The existing admin
-carrier can use its fixed noninteractive sudo entry; root delivery can use direct entry. Neither
-choice retargets ordinary delivery or changes a plugin's exposed authorization. The numeric
-bootstrap then switches to the selected body's exact credentials before loading its family.
-Gate-control and snapshot exchanges now accept this private context and select matching fixed
-argv and stdin prefixes, refusing competing guest facts before dispatch. Canonical reader binding
-also preserves each body's fresh effect checks rather than replacing them with cached evidence.
-Production VM composition must bind the context once in operation-owned state and retain it through
-all continuations and recovery. Optional context-free private candidates are not a production VM
-fallback. Other file families, inline execution and the separately launched service boundary still
-need adoption; this two-family leaf does not complete those gates.
+Later numeric helper preparation binds the verified full guest and the prepared root-entry plan in
+one core-owned context, independently of each request's body identity. The existing admin carrier
+can use its fixed non-interactive sudo entry; root delivery can use direct entry. Neither choice
+changes ordinary delivery or a plugin's exposed authorization. The numeric bootstrap then switches
+to the selected body's exact credentials before loading its family. Gate-control and snapshot
+exchanges now accept this private context and select matching fixed argv and stdin prefixes,
+refusing competing guest facts before dispatch. Canonical reader binding also preserves each body's
+fresh effect checks rather than replacing them with cached evidence. Production VM composition must
+bind the context once in operation-owned state and retain it through all continuations and recovery.
+Optional context-free private candidates are not a production VM fallback. Other file families,
+inline execution and the separately launched service boundary still need adoption; this two-family
+leaf does not complete those gates.
 
 ## Public result and check behavior
 
