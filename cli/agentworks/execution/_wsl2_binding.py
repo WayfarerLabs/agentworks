@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from agentworks.errors import ValidationError
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._runtime_prerequisite import _SYSTEM_LINUX_PYTHON, RuntimeTargetOS
 from agentworks.execution.binding import NativeExecutionBinding, _EarlyGuestFactsRoute
 from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
 
@@ -17,6 +19,11 @@ def _build_wsl2_native_binding(
     connection: WSL2Connection, runtime_selection: RuntimeSelection
 ) -> NativeExecutionBinding:
     """Retain ordinary delivery while binding one initial root-to-named probe."""
+    if runtime_selection.target_os is not RuntimeTargetOS.LINUX or runtime_selection.explicit_path not in (
+        None,
+        _SYSTEM_LINUX_PYTHON,
+    ):
+        raise ValidationError("WSL2 native binding requires Linux system Python")
     root_connection = WSL2Connection(connection.distribution, "root", connection.wsl_executable)
     early = _EarlyGuestFactsRoute(
         WSL2Carrier(root_connection),

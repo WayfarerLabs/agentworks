@@ -15,7 +15,14 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
-from agentworks.db import Database, OperationOwnership, OperationResourceKind, OperationScope, VMStatus
+from agentworks.db import (
+    Database,
+    OperationClaimState,
+    OperationOwnership,
+    OperationResourceKind,
+    OperationScope,
+    VMStatus,
+)
 from agentworks.db.operations import OperationRepository
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _wsl2_owned_operation
@@ -24,7 +31,7 @@ from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution._wsl2_lifecycle import GuestAnchorPresence
 from agentworks.execution.binding import NativeExecutionBinding
-from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, FiniteInput, PreparedInvocation
+from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, EndOfInput, FiniteInput, PreparedInvocation
 from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
 from agentworks.execution.models import Command
 from agentworks.execution.profiles import Protection
@@ -193,11 +200,23 @@ class _RouteCarrier:
         self.accounts = SyntheticCarrier({"admin": identity, "root": IdentityExpectation(0, 0, (0,))})
         self.local = LocalCarrier()
         self.local_deadlines: list[Deadline] = []
+        self.routes: list[WSL2Connection] = []
+        self.ownership: OperationOwnership | None = None
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-        assert self.guest.database.operations.inspect(_scope()) is not None
-        if self.guest.calls == 0:
+    def execute(
+        self, carrier: WSL2Carrier, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline
+    ) -> CarrierReport:
+        claim = self.guest.database.operations.inspect(_scope())
+        assert claim is not None and claim.state is OperationClaimState.POSSIBLE_DISPATCH
+        if self.ownership is None:
+            self.ownership = claim.ownership
+        assert claim.ownership == self.ownership
+        self.routes.append(carrier.connection)
+        assert carrier.connection.distribution == "Ubuntu" and carrier.connection.wsl_executable == "wsl.exe"
+        if carrier.connection.user == "root":
+            assert self.guest.calls == 0 and isinstance(io.input, EndOfInput)
             return self.guest.execute(invocation, io=io, deadline=deadline)
+        assert carrier.connection.user == "admin" and self.guest.calls == 1
         if isinstance(io.input, FiniteInput):
             try:
                 request = json.loads(io.input.data)
@@ -216,9 +235,7 @@ def _install_route(
     native = FakeNative([])
     observer = FakeObserver([])
     connection = WSL2Connection("Ubuntu", "admin", "wsl.exe")
-    binding = NativeExecutionBinding(
-        WSL2Carrier(connection), "admin", RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable)
-    )
+    binding = NativeExecutionBinding(WSL2Carrier(connection), "admin", RuntimeSelection(RuntimeTargetOS.LINUX))
     monkeypatch.setattr(platform, "observe_execution_power", lambda vm, ctx, *, deadline: VMStatus.RUNNING)
     monkeypatch.setattr(
         platform, "observe_provider_locator", lambda vm, ctx, *, deadline: ProviderLocator("wsl2:registration")
@@ -229,7 +246,7 @@ def _install_route(
     monkeypatch.setattr(
         WSL2Carrier,
         "execute",
-        lambda selected, invocation, *, io, deadline: route.execute(invocation, io=io, deadline=deadline),
+        lambda selected, invocation, *, io, deadline: route.execute(selected, invocation, io=io, deadline=deadline),
     )
     return route, native, observer
 
@@ -265,8 +282,12 @@ def test_prepared_views_share_claim_and_clean_teardown(
     assert views is not None
     assert native.events and "dispatch" in native.events
     assert route.guest.owner_id == views.owner.ownership.operation_id
-    assert route.accounts.calls
+    assert route.ownership == views.owner.ownership
+    assert route.guest.calls == 1
+    assert route.accounts.calls == ["admin", "root"]
     assert route.local.calls
+    assert route.routes[0] == WSL2Connection("Ubuntu", "root", "wsl.exe")
+    assert all(connection == WSL2Connection("Ubuntu", "admin", "wsl.exe") for connection in route.routes[1:])
     assert observer.events == ["observe"]
     assert database.operations.inspect(_scope()) is None
     with pytest.raises(StateError):

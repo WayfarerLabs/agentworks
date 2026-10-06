@@ -15,6 +15,7 @@ from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import ValidationError
+from agentworks.execution import _wsl2_owned_operation
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution._wsl2_owned_download import WSL2OwnedDownload
 from agentworks.execution._wsl2_owned_managed_job import WSL2OwnedManagedJob
@@ -109,8 +110,13 @@ def test_factory_exception_preserves_unsealed_caller_claim(tmp_path: Path) -> No
 @pytest.mark.skipif(sys.platform != "linux", reason="the private WSL fixture requires Linux")
 @pytest.mark.parametrize("composition", [WSL2OwnedDownload, WSL2OwnedManagedJob])
 @pytest.mark.parametrize("entry", ["constructor", "factory"])
+@pytest.mark.parametrize("runtime_path", [None, "/usr/bin/python3"])
 def test_hold_reads_and_settles_only_supplied_owners_database(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, composition: type[WSL2OwnedOperation], entry: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    composition: type[WSL2OwnedOperation],
+    entry: str,
+    runtime_path: str | None,
 ) -> None:
     with (
         closing(Database(tmp_path / "owner.db")) as database,
@@ -132,7 +138,7 @@ def test_hold_reads_and_settles_only_supplied_owners_database(
         platform.site_name = "local"
         locator = ProviderLocator("wsl2:registration")
         connection = WSL2Connection("Ubuntu", "admin", "wsl.exe")
-        runtime = RuntimeSelection(RuntimeTargetOS.LINUX)
+        runtime = RuntimeSelection(RuntimeTargetOS.LINUX, runtime_path)
         platform.observe_provider_locator.return_value = locator
         platform.resolve_native_execution_binding.return_value = NativeExecutionBinding(
             WSL2Carrier(connection), connection.user, runtime
@@ -183,3 +189,65 @@ def test_hold_reads_and_settles_only_supplied_owners_database(
         assert not other_owner.list_lifecycle_obligations()
         _close_owner(owner)
         _close_owner(other_owner)
+
+
+@pytest.mark.parametrize("composition", [WSL2OwnedDownload, WSL2OwnedManagedJob])
+@pytest.mark.parametrize("entry", ["constructor", "factory"])
+@pytest.mark.parametrize(
+    "runtime",
+    [RuntimeSelection(RuntimeTargetOS.LINUX, "/custom/python3"), RuntimeSelection(RuntimeTargetOS.DARWIN)],
+)
+def test_unsupported_runtime_refuses_before_hold_construction_or_native_activation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    composition: type[WSL2OwnedOperation],
+    entry: str,
+    runtime: RuntimeSelection,
+) -> None:
+    with closing(Database(tmp_path / "state.db")) as database:
+        owner = _acquire_owner(database)
+        platform = Mock(spec=WSL2Platform)
+        platform.site_name = "local"
+        locator = ProviderLocator("wsl2:registration")
+        connection = WSL2Connection("Ubuntu", "admin", "wsl.exe")
+        platform.observe_provider_locator.return_value = locator
+        platform.resolve_native_execution_binding.return_value = NativeExecutionBinding(
+            WSL2Carrier(connection), connection.user, runtime
+        )
+        native = FakeNative([])
+        observer = FakeObserver([])
+        hold = Mock(side_effect=AssertionError("hold constructed for unsupported runtime"))
+        monkeypatch.setattr(_wsl2_owned_operation, "WSL2PlatformHold", hold)
+
+        with pytest.raises(ValidationError):
+            if entry == "constructor":
+                composition(
+                    _vm(),
+                    platform,
+                    RunContext(),
+                    locator,
+                    connection,
+                    runtime,
+                    owner=owner,
+                    native=native,
+                    observer=observer,
+                )
+            else:
+                composition.from_platform(
+                    _vm(),
+                    platform,
+                    RunContext(),
+                    owner=owner,
+                    deadline=Deadline.after(30),
+                    native=native,
+                    observer=observer,
+                )
+
+        hold.assert_not_called()
+        assert native.events == observer.events == []
+        assert not owner.list_lifecycle_obligations()
+        claim = database.operations.inspect(owner.ownership.scope)
+        assert claim is not None and claim.ownership == owner.ownership
+        follow_up = owner.register_lifecycle_obligation("caller-next-step", payload_version=1, payload=b"next")
+        follow_up.resolve()
+        _close_owner(owner)
