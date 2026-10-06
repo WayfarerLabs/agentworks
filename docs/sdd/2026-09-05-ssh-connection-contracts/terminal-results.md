@@ -255,3 +255,31 @@ and 103 Node tests; four builds and both deterministic comparisons exit 0. All 2
 records remain unchanged. The owned suite/build roots are independently verified unused and removed
 after terminal completion. Publication follows these local gates; hosted Windows diagnostics and
 native authentication/POSIX execution remain separate pending evidence.
+
+## Direct Windows fixture interpreter
+
+Hosted CI at `0b0232cb3d8369e531dbd02e3f74d0fdf67f2947` passes all Linux Python 3.12/3.13/3.14 and
+other gate jobs. Its
+[Windows job](https://github.com/WayfarerLabs/agentworks/actions/runs/37432194171/job/112165424223)
+fails only the owned-console case, with 815 passed and 59 skipped. The new diagnostics expose a
+parent-launched PID distinct from the interpreter PID and two console members. The assertion fails
+before opening native descriptors or executing either primitive measurement case. Window absence is
+independently observed; console API behavior is still unproved.
+
+CPython's Windows virtual-environment launcher spawns the interpreter and waits for it. The fixture
+correction uses CPython's existing
+[multiprocessing launch shape](https://github.com/python/cpython/blob/4061bc4c35f7c26f25264666d4ba083b93d2f6f9/Lib/multiprocessing/popen_spawn_win32.py#L60-L79):
+direct base interpreter with a child-only launcher variable preserving virtual-environment identity.
+It retains isolated startup and checks executable/base executable, both prefixes, imported resource
+path and isolation flags before descriptor effects. Exact sole-console-client, PID, reaping and
+window cleanup assertions remain. No second process owner, package loader or broader PID admission
+is added.
+
+All three source lanes clear final `01becba6f8062aeffa46b058ed03121298814102`. Generic review
+identifies inherited environment values in fake-test assertion operands at the initial correction;
+the final test uses only synthetic environment data, closing that diagnostic exposure. The lead
+measures **420 non-integration SSH tests passed with 6 skips**, full Ruff/format (1,288 files),
+strict mypy (1,251 sources) and selected strict Windows typing (four files), all exit 0. Production
+source is unchanged from the preceding full-suite/CI pin. The previous full-suite and website counts
+retain their earlier scope. Native Windows startup, import identity and primitive acceptance require
+the next hosted run; neither source verification nor synthetic checks establish them.
