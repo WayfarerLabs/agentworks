@@ -281,6 +281,13 @@ completed-carrier and supported-workstation gates below are unchanged.
       supported Linux/macOS workstations. Private Linux candidate proof does not close this
       production/native gate or fix callers still using the legacy path.
 
+The [native environment report](phase2-results.md#native-environment-delivery-on-four-clients) now
+proves all 14 synthetic cases through private preparation and SSH carrier composition at `4e32a9f9`,
+on Linux 9.2p1, Windows 9.5p2/10.0p2 and macOS 10.2p1 clients. Production RunContext delivery
+remains open. Its unchanged production-path comparison reproduces expansion failures on 10.x and
+exact delivery on 9.x; the original Windows 11 executable remains unconfirmed. No legacy fix or
+completion checkbox follows from that evidence.
+
 The
 [native managed-lifecycle report](phase2-results.md#native-managed-lifecycle-on-the-composed-ssh-branch)
 adds test-scoped Linux/GCE evidence on the #833 + #832 composition. The
