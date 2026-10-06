@@ -11,6 +11,7 @@ import pytest
 from agentworks.db import Database
 from agentworks.errors import ConflictError, ExternalError, StateError, UncertainOutcomeError
 from agentworks.execution import _file_local_download as local_download_module
+from agentworks.execution import _file_operation as file_operation_module
 from agentworks.execution import access as access_module
 from agentworks.execution._file_local_download import (
     FileLocalDownloadControlFact,
@@ -27,7 +28,7 @@ from agentworks.execution._local_download_stage import (
 from agentworks.execution.access import FileAccess
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.files import Change, Create, FileFailureReason, FileOperationPhase, Replace
-from agentworks.operations import OperationBorrow, OperationOwner
+from agentworks.operations import OperationBorrow, OperationOwner, release_borrow_after_custody
 from tests.execution.files._file_access_support import bound_access as bound_access
 from tests.execution.files._file_access_support import plan as plan
 
@@ -414,7 +415,7 @@ def test_failed_local_download_finalization_retains_call_and_error_priority(
         assert failed.value.details.reason is FileFailureReason.COORDINATION
         assert failed.value.details.effect is Change.CHANGED
     call = access._operation._local_download_call
-    assert call is not None and call.finalization_failed
+    assert call is not None
     with pytest.raises(StateError):
         access.stat(PurePosixPath(source))
 
@@ -438,4 +439,128 @@ def test_finalization_interrupt_is_preserved_with_safe_outcome(
     assert isinstance(stopped.value.__cause__, FileLocalDownloadControlFact)
     assert stopped.value.__cause__.outcome.published
     call = access._operation._local_download_call
-    assert call is not None and call.finalization_failed
+    assert call is not None
+
+
+def test_closed_then_interrupted_borrow_keeps_old_call_and_refuses_new_stage_or_retry(
+    bound_access: tuple[FileAccess, Path, OperationOwner, Database], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    access, root, _owner, _database = bound_access
+    source = root / "source"
+    source.write_bytes(b"payload")
+    interrupt = KeyboardInterrupt()
+    original_close = OperationBorrow.close
+    original_publisher = local_download_module._publisher_for_host
+    stage_calls = 0
+
+    def close_then_interrupt(borrow: OperationBorrow) -> None:
+        original_close(borrow)
+        raise interrupt
+
+    def publisher(path: Path, condition: Create | Replace):
+        nonlocal stage_calls
+        stage_calls += 1
+        return original_publisher(path, condition)
+
+    class RetainedStage:
+        published = False
+        publication_uncertain = False
+        cleanup_uncertain = False
+        aborts = 0
+
+        def abort(self) -> None:
+            self.aborts += 1
+
+        def try_write(self, data: memoryview) -> int:
+            return len(data)
+
+        def commit(self, *, verified_complete: bool, size: int, sha256: str, deadline: Deadline | None = None) -> None:
+            del verified_complete, size, sha256, deadline
+
+    monkeypatch.setattr(OperationBorrow, "close", close_then_interrupt)
+    monkeypatch.setattr(local_download_module, "_publisher_for_host", publisher)
+    with pytest.raises(KeyboardInterrupt) as stopped:
+        access.download(PurePosixPath(source), root.parent / "local-download")
+    assert stopped.value is interrupt
+    assert isinstance(stopped.value.__cause__, FileLocalDownloadControlFact)
+    assert stopped.value.__cause__.outcome.published
+    old_call = access._operation._local_download_call
+    assert old_call is not None
+
+    stage = RetainedStage()
+    access._operation.retain_local_download_stage(stage)
+    with pytest.raises(StateError):
+        access.download(PurePosixPath(source), root.parent / "second-download")
+    assert access._operation._local_download_call is old_call
+    assert access._operation.retained_local_download_stage is stage
+    assert stage_calls == 1 and stage.aborts == 0
+
+
+def test_release_return_window_refuses_next_call_before_retained_cleanup_retry(
+    bound_access: tuple[FileAccess, Path, OperationOwner, Database], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    access, root, _owner, _database = bound_access
+    source = root / "source"
+    source.write_bytes(b"payload")
+    entered = Event()
+    proceed = Event()
+    returned: list[BaseException] = []
+    stage_calls = 0
+    original_release = release_borrow_after_custody
+
+    class FailedAbortStage:
+        published = False
+        publication_uncertain = False
+        cleanup_uncertain = False
+        aborts = 0
+
+        def try_write(self, data: memoryview) -> int:
+            return len(data)
+
+        def commit(self, *, verified_complete: bool, size: int, sha256: str, deadline: Deadline | None = None) -> None:
+            del verified_complete, size, sha256, deadline
+            self.published = True
+
+        def abort(self) -> None:
+            self.aborts += 1
+            raise OSError("owned stage cleanup failed")
+
+    stage = FailedAbortStage()
+
+    def publisher(path: Path, condition: Create | Replace) -> FailedAbortStage:
+        nonlocal stage_calls
+        del path, condition
+        stage_calls += 1
+        return stage
+
+    def paused_release(borrow: OperationBorrow, *, retain_effect: bool = False) -> None:
+        original_release(borrow, retain_effect=retain_effect)
+        entered.set()
+        assert proceed.wait(10)
+
+    def run_first() -> None:
+        try:
+            access.download(PurePosixPath(source), root.parent / "local-download")
+        except BaseException as exc:
+            returned.append(exc)
+
+    monkeypatch.setattr(local_download_module, "_publisher_for_host", publisher)
+    monkeypatch.setattr(file_operation_module, "release_borrow_after_custody", paused_release)
+    worker = Thread(target=run_first, daemon=True)
+    worker.start()
+    try:
+        assert entered.wait(10)
+        old_call = access._operation._local_download_call
+        assert old_call is not None
+        assert access._operation.retained_local_download_stage is stage
+        with pytest.raises(StateError):
+            access.download(PurePosixPath(source), root.parent / "second-download")
+        assert access._operation._local_download_call is old_call
+        assert stage_calls == 1 and stage.aborts == 1
+    finally:
+        proceed.set()
+        worker.join(10)
+    assert not worker.is_alive()
+    assert len(returned) == 1 and isinstance(returned[0], ExternalError)
+    assert access._operation._local_download_call is None
+    assert access._operation.retained_local_download_stage is stage

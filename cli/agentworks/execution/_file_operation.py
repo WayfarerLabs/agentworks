@@ -152,7 +152,6 @@ class _LocalDownloadCall:
 
     borrow: OperationBorrow
     remote_requires_owner_retention: bool = False
-    finalization_failed: bool = False
 
 
 type _ActiveFileDownload = _ActiveFileCall[
@@ -295,6 +294,8 @@ class FileOperation:
 
     def begin_local_download(self) -> _LocalDownloadCall:
         """Acquire whole-call serial admission before workstation effects."""
+        if self._local_download_call is not None:
+            raise StateError("A local download call still holds core custody")
         borrow = self._owner.borrow()
         try:
             call = _LocalDownloadCall(borrow)
@@ -309,13 +310,8 @@ class FileOperation:
         if self._local_download_call is not call:
             raise StateError("Local download call is not active")
         if any(active.borrow is call.borrow for active in self._active_downloads.values()):
-            call.finalization_failed = True
             raise StateError("Local download remote custody is still active")
-        try:
-            release_borrow_after_custody(call.borrow, retain_effect=call.remote_requires_owner_retention)
-        except BaseException:
-            call.finalization_failed = True
-            raise
+        release_borrow_after_custody(call.borrow, retain_effect=call.remote_requires_owner_retention)
         self._local_download_call = None
 
     def retain_local_download_stage(self, stage: LocalDownloadStage) -> None:
