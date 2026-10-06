@@ -78,7 +78,7 @@ def test_constructor_refuses_mismatch_before_borrow(
 
     monkeypatch.setattr(OperationOwner, "borrow", refuse_borrow)
     with pytest.raises(ValidationError):
-        ExecutionOperation(operation_owner, target, bootstrap=_CONTEXT)
+        ExecutionOperation(operation_owner, target, bootstrap=None if mismatch == "kind" else _CONTEXT)
     claim = database.operations.inspect(operation_owner.ownership.scope)
     assert claim is not None and claim.state is OperationClaimState.RESERVED
     assert database.operations.list_lifecycle_obligations(operation_owner.ownership) == ()
