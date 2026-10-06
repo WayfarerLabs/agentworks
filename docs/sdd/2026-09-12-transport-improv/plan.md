@@ -174,11 +174,22 @@ remain pending; ordinary file/service body fencing and production composition re
 The private follow-up at `807637168` rejects unsupported WSL runtime selections in the shared
 binding factory before hold custody is constructed. The normal platform resolver already selects
 Linux system Python; directly constructed operations now refuse outside that same domain before
-activation. Composition fixtures distinguish the initial root route from ordinary account,
-command and file delivery without depending on uncompressed source text. The worker's affected
-and adjacent selection passes 277 tests with no skips; full integration gates and independent
-re-review remain pending. Neither synthetic dispatch nor runtime readiness establishes successful
-native credential transition.
+activation. Composition fixtures distinguish the initial root route from ordinary account, command
+and file delivery without depending on uncompressed source text. The worker's affected and adjacent
+selection passes 277 tests with no skips; full integration gates and independent re-review remain
+pending. Neither synthetic dispatch nor runtime readiness establishes successful native credential
+transition.
+
+The integrated early-consumer candidate at `651a81bf8` passes 14,429 non-integration tests with 50
+skips. All three independent private lanes clear the correction and retain their whole-unit
+verdicts; the project and complexity lanes each independently pass the 52 changed-module tests, and
+the generic lane passes 63 focused tests. Removing the runtime guard makes all eight refusal cases
+fail. Complete strict mypy passes 1,213 source and test files; the local static, file, SDD,
+Rulesync, typer-isolation and website gates exit 0. Website tests pass 160 Python and 103 Node
+cases, and both site bases pass deterministic double-build comparisons. The subsequent evidence edit
+changes no Python bytes. Native successful transitions, ordinary file/service fencing, all-platform
+availability and complete additive RunContext composition remain open. This draft checkpoint does
+not close public feedback/fix round 1 or request merge readiness; no database data was removed.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
