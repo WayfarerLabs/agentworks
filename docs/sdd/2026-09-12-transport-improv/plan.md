@@ -579,6 +579,17 @@ passes hosted CI and CodeQL. Outer retained availability, fresh version-two file
 native predecessor drain and full integration acceptance remain open. Publication is draft WIP; no
 ready/review-requested signal, broader completion checkbox or public round closure is claimed.
 
+The private passive Proxmox power unit at `d820fd0d3` adds one fixed body-free provider
+`GET /status/current` route to the existing owned HTTP worker and shares verified connection
+preparation with the new native resolver. It preserves QGA and legacy behavior, uses configured
+trust/token authority and recorded node/VMID, never starts a VM or probes its guest, and rejects
+late observations. Exact status values establish power; malformed or unavailable reads are UNKNOWN.
+Local configuration/secret resolution is checked against the budget but not hard-preemptible. The
+worker passes 369 focused/adjacent cases, scoped strict mypy, Ruff/format, full file quality and
+whitespace gates, exit 0. Integrated private reviews and lead gates remain pending. Provider-locator
+composition, whole-operation availability and native acceptance remain open; no completion checkbox
+or public round closes.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
