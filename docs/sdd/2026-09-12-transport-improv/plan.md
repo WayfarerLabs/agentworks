@@ -2724,17 +2724,23 @@ caller-held carrier custody, Proxmox/keeper integration, native acceptance or fu
 The matching permanent execution documentation now distinguishes first-close evidence from later
 cleanup settlement and retains caller-owned descriptors through pending construction.
 
-The next coupled source unit adds mandatory raw carrier custody, existing ordinary/recovery attempt
-storage, bound helper typing and explicit pre-target provider-query storage. Shared worker
-`726ed8526` passes 750 focused cases with one skip, including actual distribution Python 3.11, and
-scoped static gates; buffered worker `d8f033727` passes 233 cases with five skips and scoped static
-gates. Those are their own pinned results, not evidence for the complete integrated head. The lead's
-seven new ownership cases include actual delayed-constructor children under ordinary, recovery and
-pre-target workflows. Local cleanup leaves remote debt intact. A private composition finding moved
-the local-settlement guard into the positive remote-termination branch so unknown remote completion
-still records remote uncertainty while local cleanup is pending. Production-only strict typing
-passes 590 sources; test-fixture migration, full gates, whole-unit private reviews and native
-acceptance remain open. No public completion or new RunContext enablement is claimed.
+The coupled source unit now passes caller-held delivery through raw carriers, ordinary/recovery
+attempts, bound helpers and pre-target provider queries. The lead's seven aggregate ownership cases
+include actual delayed-constructor children under ordinary, recovery and pre-target workflows.
+Cleanup leaves remote debt intact. Unknown remote completion still records remote uncertainty while
+local cleanup is pending. A separate actual-child race proof prevents late local settlement from
+rewriting the pump's immutable pending-constructor observation as `NOT_SENT` in buffered SSH or WSL.
+The shared process owner also waits for explicit cleanup retry after an already known exit instead
+of spinning on that exit. Concrete helper fixtures retain external owners through pending assertions
+and drain standalone custody before treating cached results as usable. The package-recovery
+correction at worker `54518ebb7` retains every original recovered owner before opening dispatch and
+drains those owners before database closure, using the existing holding fixture rather than another
+registry. Its actual-child negative changes a silently passing test into a cleanup teardown failure.
+The local full suite at `c12eefd5` passes 15,801 tests with 50 skips; strict mypy passes 1,255 sources.
+The later composition-fixture and package-recovery corrections still need final integrated gates and
+whole-unit private review. Native acceptance, keeper/recovery composition, complete RunContext and
+the public feedback round remain open. No new RunContext enablement or full-scope completion is
+claimed.
 
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
       serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one
