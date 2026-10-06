@@ -283,3 +283,27 @@ strict mypy (1,251 sources) and selected strict Windows typing (four files), all
 source is unchanged from the preceding full-suite/CI pin. The previous full-suite and website counts
 retain their earlier scope. Native Windows startup, import identity and primitive acceptance require
 the next hosted run; neither source verification nor synthetic checks establish them.
+
+## Numeric-helper dependency rebase
+
+Transport publishes private numeric gate/snapshot bootstrap context and payload-free conformance
+diagnostics at `a128c09eb37986ba4264ce041d39d5b2f5fbebaa`. GitHub reports #832 as conflicting after
+the dependency advances, and no hosted run is created for the directly launched interpreter
+publication `d70d9ffb7240f01f2ecf3f36ae123f0f49830483`. No native result exists at that pin.
+
+All 127 SSH commits rebase onto the new dependency at `95323caecb567a6a4c5d046ed1716193e0ffacdc`.
+The sole conflict in SSH conformance combines transport's payload-free diagnostic canary with SSH's
+literal-environment tests and imports. All three independent source lanes clear that exact
+integration: both tests retain their assertions and deadlines, production SSH is unchanged and the
+Windows correction files are identical to their previously reviewed versions. Fresh combined gates
+and publication follow; native Windows startup and primitive measurements remain unproved. The
+numeric context does not complete operation-owned binding, other helper families, native credential
+transitions or additive RunContext.
+
+Complete combined validation at `95323caecb567a6a4c5d046ed1716193e0ffacdc` passes **14,841
+non-integration tests with 51 skips** (exit 0), Ruff/format (1,289 files), strict mypy (1,252
+sources), typer isolation, file quality, locked-SDD and Rulesync. Website gates measure 160 Python
+and 103 Node tests; four builds and both deterministic comparisons exit 0. All 25 completed plan
+records remain unchanged. Owned suite/build roots are independently checked for remaining process
+and descriptor use and removed after completion. The publication adds only SSH evidence to this
+Python tree; new-head hosted/native results remain pending.
