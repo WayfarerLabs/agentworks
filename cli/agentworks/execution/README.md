@@ -269,6 +269,17 @@ DNS, TLS and response delivery. An expired or late observation refuses, and cont
 kill and reap the worker before propagating. This is passive power evidence, not guest identity,
 availability custody, provider-locator acceptance or a complete platform operation.
 
+The private Proxmox provider-locator hook uses the same worker for one fixed body-free
+`GET /config?current=1`. It hashes a versioned tuple of the exact configured HTTPS origin, VMID and
+normalized nonzero current `vmgenid` UUID. Node is only a route; credentials and CA paths are not
+incarnation components. No address normalization or alias discovery occurs, so changing the
+configured origin spelling requires explicit re-adoption. Missing, disabled, nil or malformed
+generation refuses with a state error; failed provider observation raises a sanitized connectivity
+error. An attempted lookup never becomes a deliberate locator-unavailable result. Deadline checks
+surround local preparation and worker delivery, with the same local-preparation limitation as power
+observation. This supplies private source mechanics, not native PVE 8/9 generation-policy proof,
+guest identity, predecessor drain or production RunContext composition.
+
 `binding.py` carries a native carrier, its actual delivery account and explicit runtime selection.
 The private platform resolver is an explicit preparation operation with a required deadline, so a
 provider can bound any endpoint reads before constructing passive target views. Proxmox and WSL2
@@ -586,12 +597,12 @@ post-probe locator confirmation; it never resolves another route. An unequal pre
 refuses before guest dispatch, and an unequal post-probe locator suppresses the target. Unavailable
 or invalid confirmation is unconfirmed, not evidence of a changed locator. Release failure retains a
 target-suppressed custody fact. The resolving caller validates and retains the selected binding
-under the same deadline. WSL2 currently supplies both hooks for a positive private path; Proxmox
-returns locator unavailable, and SSH-backed cloud and Lima bindings remain future work. This seam
-has hermetic coverage only. A later use still needs a locator-bound platform hold and binding;
-malicious or engineered A-B-A host behavior is outside this checkpoint's threat scope. Production
-activation, hold, route and teardown, live WSL/SSH/QGA proof, recovery drain, adoption and public
-RunContext composition remain open.
+under the same deadline. WSL2 and Proxmox now supply positive private observation hooks when their
+required facts are available; SSH-backed cloud and Lima bindings remain future work. This seam has
+hermetic coverage only. A later use still needs a locator-bound platform hold and binding; malicious
+or engineered A-B-A host behavior is outside this checkpoint's threat scope. Production activation,
+hold, route and teardown, live WSL/SSH/QGA proof, recovery drain, adoption and public RunContext
+composition remain open.
 
 `vms/_recovery_vm_span.py` supplies private caller-retained availability under an existing sealed
 recovery owner, without acquiring another VM claim. Its first factory explicitly supports only

@@ -733,6 +733,18 @@ and inline-lifetime mechanisms, not native privilege/fencing/drain, production r
 job availability, remaining platform factories or complete additive RunContext. Draft WIP
 publication closes no public round or broader plan gate; no database data or SSH branch changes.
 
+The next private increment integrates Proxmox worker commits `c5f266597` and `4d93e9562`. One fixed
+current-config GET shares the existing verified, deadline-owned HTTP worker; the platform hook
+derives a bounded opaque token from the exact configured origin, VMID and current nonzero generation
+UUID. Attempted provider failure raises a sanitized connectivity error; unusable generation raises a
+state refusal, preserving the shared deliberate-unavailable contract. Node, credentials and CA paths
+are excluded from incarnation identity. The preceding sequencing response at `70cd90300` makes
+source implementation available for native proof without waiving that proof. The worker reports 405
+focused/adjacent tests, complete strict mypy (1,234 files), owned-file style, file quality and
+whitespace gates, exit 0. Combined source review and final lead gates remain pending. This is not
+native PVE 8/9 acceptance, disabled-generation/adoption policy, request drain, production target
+composition or a completed plan checkbox.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
