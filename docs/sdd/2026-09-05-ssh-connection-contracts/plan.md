@@ -210,6 +210,11 @@ work is proceeding in parallel in the transport lane, as confirmed by the operat
 
 ### Complete the carrier and migration
 
+The [POSIX resource implementation](terminal-lld.md#posix-resource-implementation) advances native
+terminal acquisition and restoration independently of the shared input and process-owner work. It is
+a private resource increment, with acquisition-custody and full terminal delivery still open; the
+completed-carrier and supported-workstation gates below are unchanged.
+
 - [x] Adopt transport #833's shared finite-input subprocess pump at `e85e9f5c` while preserving SSH
       environment policy and report provenance. Integration code `1b2c6832` passes the combined
       execution and full local suites, recorded in

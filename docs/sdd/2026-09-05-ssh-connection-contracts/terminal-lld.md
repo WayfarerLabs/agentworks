@@ -29,6 +29,11 @@ terminal handles, the agreed pairing and presentation policy, and the ordinary S
 policy before dispatch. The caller retains handle lifetime; the carrier never closes those handles.
 Terminal presentation combines output rather than claiming separate byte-exact guest streams.
 
+The POSIX resource layer treats input as readable native terminal input and output as an explicit
+geometry source. Geometry queries do not require write access; presentation uses the supplied sink.
+Preparation grants the endpoint pairing. No same-device check is inferred from descriptor device
+numbers, which cannot establish identity across `/dev/tty` aliases and PTY masters.
+
 For POSIX, snapshot the supplied terminal, then copy its original modes and geometry to an owned PTY
 slave. Put the supplied terminal into raw mode before launching SSH and let the preparation source
 withhold its keyboard bytes until the remote interactive handoff. SSH receives the owned slave as
@@ -203,6 +208,29 @@ not a production terminal carrier or shared-type acceptance. Native workstations
 restoration failure, emulator sanitation and production completion reporting remain open. The
 restricted namespace could not complete server PTY setup; both successful runs used the approved
 host fixture without changing host configuration.
+
+## POSIX resource implementation
+
+The private `_terminal_posix.PosixTerminal` implements native descriptor admission, owned PTY setup,
+mode copying, raw borrowed input, output-driven geometry refresh and one-shot resource release. It
+starts no process or relay and introduces no substitute shared terminal type. Release requires all
+descriptor users to have stopped, restores with `TCSANOW` and returns every cleanup failure,
+including control-flow interruptions. Acquisition preserves the primary exception and prior
+cause/context when cleanup also fails. An uncertain close is never retried against a possibly reused
+descriptor number.
+
+The isolated implementation at `2307b75ed41b36db4b28a4b4537fb4b6cee9e847` passes 28 local Linux PTY
+cases and the broader SSH suite (299 passed, 5 skipped), plus Ruff, format, relevant mypy and file
+quality checks. These cases cover original nondefault modes, geometry from a distinct read-only
+endpoint, queued input, borrowed flags/lifetime, resize, admission refusal, interrupted effects and
+restoration/close failure. They establish resource behavior after known acquisition, not actual
+client delivery or native macOS/Windows acceptance.
+
+Pure Python `os.openpty()` does not establish custody for an arbitrary asynchronous interruption
+between its native return and Python descriptor assignment. Production composition must settle that
+acquisition boundary alongside client launch ownership before enabling terminal support. The shared
+process owner still needs native stdin support; the actual relay, cleanup reduction, presentation
+sanitation and native acceptance remain open.
 
 ## Remaining proof
 
