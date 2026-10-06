@@ -60,7 +60,7 @@ class OperationOwner:
         self._effects_resolved = False
         self._obligations_sealed = False
         self._transition_uncertain = False
-        self._close_requested = False
+        self._close_requested = threading.Event()
         self._release_may_have_committed = False
         self._released = False
         self._recovery_owner = False
@@ -107,9 +107,8 @@ class OperationOwner:
         return self._ownership
 
     def stop_admission(self) -> None:
-        """Refuse new ordinary work without deciding whether effects are resolved."""
-        with self._guard:
-            self._close_requested = True
+        """Publish close intent without waiting for admitted work or proving quiescence."""
+        self._close_requested.set()
 
     def close_local_delivery(self, deadline: Deadline) -> bool:
         """Drain the held attempt without reopening dispatch or resolving effects.
@@ -340,8 +339,8 @@ class OperationOwner:
         the borrow. Later close calls require the caller to record
         whole-operation no-further-effects evidence before finalization.
         """
+        self._close_requested.set()
         with self._guard:
-            self._close_requested = True
             self._require_no_active_work_locked()
             self._finalize_close_locked()
 
@@ -408,7 +407,7 @@ class OperationOwner:
             )
 
     def _require_dispatch_admission_locked(self) -> None:
-        if self._close_requested or self._released:
+        if self._close_requested.is_set() or self._released:
             raise StateError(
                 "operation ownership is closing",
                 entity_kind=self._ownership.scope.resource_kind,
@@ -784,18 +783,17 @@ class OperationBorrow:
             self._require_active_locked()
             if owner._transition_uncertain:  # noqa: SLF001
                 owner._reconcile_transition_locked()  # noqa: SLF001
-            if (
-                (self._closing or owner._close_requested)  # noqa: SLF001
-                and self._supplied_dispatch is None
-                and self._dispatch_obligation is None
-                and self._dispatch_obligation_id is None
-            ):
-                raise _PreRegistrationClosingRefusal(
-                    "operation borrow is closing",
-                    entity_kind=self.ownership.scope.resource_kind,
-                    entity_name=self.ownership.scope.resource_name,
-                )
-            if self._closing or owner._close_requested:  # noqa: SLF001
+            if self._closing or owner._close_requested.is_set():  # noqa: SLF001
+                if (
+                    self._supplied_dispatch is None
+                    and self._dispatch_obligation is None
+                    and self._dispatch_obligation_id is None
+                ):
+                    raise _PreRegistrationClosingRefusal(
+                        "operation borrow is closing",
+                        entity_kind=self.ownership.scope.resource_kind,
+                        entity_name=self.ownership.scope.resource_name,
+                    )
                 raise StateError(
                     "operation borrow is closing",
                     entity_kind=self.ownership.scope.resource_kind,
@@ -891,7 +889,7 @@ class OperationBorrow:
                     entity_kind=self.ownership.scope.resource_kind,
                     entity_name=self.ownership.scope.resource_name,
                 )
-            if owner._close_requested:  # noqa: SLF001
+            if owner._close_requested.is_set():  # noqa: SLF001
                 raise StateError(
                     "operation ownership is closing",
                     entity_kind=self.ownership.scope.resource_kind,

@@ -198,7 +198,7 @@ def test_pre_registration_closing_refusal_closes_borrow_without_control_fact(
         payload_version: int,
         payload: bytes,
     ) -> LifecycleObligation:
-        self._owner._close_requested = True  # noqa: SLF001
+        self._owner.stop_admission()  # noqa: SLF001
         return original_install(
             self,
             obligation_id,
