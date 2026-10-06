@@ -18,6 +18,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from agentworks.errors import ValidationError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import CarrierIO, Deadline, Dispatch, ExitStatus, Failure, PreparedInvocation
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection, _ProxmoxWire, _WireFailure
 
@@ -162,7 +163,7 @@ def _execute(url: str, ca_bundle: Path | None):
     # Trust decisions need two real worker starts on loaded CI, not a speed assertion.
     # Deadline enforcement is exercised separately in test_proxmox.py.
     return ProxmoxCarrier(connection).execute(
-        PreparedInvocation(("/bin/true",)), io=CarrierIO(), deadline=Deadline.after(30)
+        PreparedInvocation(("/bin/true",)), io=CarrierIO(), deadline=Deadline.after(30), custody=LocalDeliveryCustody()
     )
 
 
@@ -184,14 +185,14 @@ def test_passive_provider_observation_preserves_ca_and_hostname_policy(
     observe = wire.request_current_config if current_config else wire.request_power
     if trust == "matching":
         expected = {"vmgenid": "613ea898-8445-4e6e-82c7-f6e9ae8d7235"} if current_config else {"status": "running"}
-        assert observe(timeout=30) == expected
+        assert observe(timeout=30, custody=LocalDeliveryCustody()) == expected
         route = "config?current=1" if current_config else "status/current"
         assert endpoint.requests == [
             ("GET", f"/api2/json/nodes/node1/qemu/123/{route}", f"PVEAPIToken=test@pve!token={_TOKEN}")
         ]
     else:
         with pytest.raises(_WireFailure) as raised:
-            observe(timeout=30)
+            observe(timeout=30, custody=LocalDeliveryCustody())
         assert _TOKEN not in str(raised.value)
         assert endpoint.requests == []
 

@@ -33,6 +33,7 @@ from agentworks.execution.carrier import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.carrier import CarrierIO, Deadline
 
 
@@ -86,6 +87,7 @@ def run_process(
     *,
     io: CarrierIO,
     deadline: Deadline,
+    custody: LocalDeliveryCustody,
     env: Mapping[str, str] | None = None,
     live_stdio: bool = False,
 ) -> ProcessResult:
@@ -102,6 +104,8 @@ def run_process(
         input=_carrier_input(io),
         output=_carrier_output(io, retention),
         deadline=_Deadline(deadline.expires_at),
+        owner=custody.begin_process(),
+        cleanup_allowance=0.5,
         env=env,
     )
     return ProcessResult(

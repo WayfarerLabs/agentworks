@@ -18,6 +18,7 @@ import pytest
 
 from agentworks.errors import ValidationError
 from agentworks.execution import _process as process_core
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import (
     Capture,
     CarrierIO,
@@ -70,6 +71,7 @@ def execute(
         deadline=Deadline.after(seconds),
         env=env,
         live_stdio=live_stdio,
+        custody=LocalDeliveryCustody(),
     )
 
 
@@ -160,11 +162,12 @@ def test_ignored_sigchld_in_fresh_process_never_becomes_exit_zero() -> None:
 import json, signal, sys
 from agentworks.execution.carrier import CarrierIO, Deadline
 from agentworks.execution.carriers._subprocess import run_process
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 signal.signal(signal.SIGCHLD, signal.SIG_IGN)
 result = run_process(
     [sys.executable, '-c', 'import sys; sys.exit(42)'],
     io=CarrierIO(), deadline=Deadline(None),
-)
+custody=LocalDeliveryCustody(), )
 print(json.dumps([result.local_status, result.exit_status, result.failure]))
 """
     )
@@ -179,6 +182,7 @@ def test_competing_reaper_in_fresh_process_loses_status_without_guessing() -> No
 import json, os, subprocess, sys, threading
 from agentworks.execution.carrier import CarrierIO, Deadline
 from agentworks.execution.carriers._subprocess import run_process
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 original_popen = subprocess.Popen
 reaped = []
 kill_attempted = False
@@ -200,7 +204,7 @@ os.kill = forbidden_kill
 result = run_process(
     [sys.executable, '-c', 'import sys,time; time.sleep(.1); sys.exit(42)'],
     io=CarrierIO(), deadline=Deadline(None),
-)
+custody=LocalDeliveryCustody(), )
 subprocess.Popen = original_popen
 print(json.dumps([result.local_status, result.exit_status, result.failure,
                   os.waitstatus_to_exitcode(reaped[0]), kill_attempted]))
@@ -622,6 +626,7 @@ def test_deadline_preserves_partial_evidence_and_reaps(
         ],
         io=CarrierIO(),
         deadline=deadline,
+        custody=LocalDeliveryCustody(),
     )
     assert observed == markers
     assert result.failure == Failure.DEADLINE
@@ -657,6 +662,7 @@ def test_deadline_budget_includes_process_startup(
         [sys.executable, "-c", "import time; time.sleep(30)"],
         io=CarrierIO(),
         deadline=deadline,
+        custody=LocalDeliveryCustody(),
     )
     assert result.started
     assert result.failure == Failure.DEADLINE
