@@ -22,16 +22,29 @@ from agentworks.execution._file_read_bundle import _MODULE_NAMES as READ_MODULE_
 from agentworks.execution._file_read_bundle import _PACKAGE as READ_PACKAGE
 from agentworks.execution._file_read_bundle import FIXED_BUNDLE as READ_BUNDLE
 from agentworks.execution._file_read_protocol import parse_file_read_failure
+from agentworks.execution._file_snapshot_bundle import _MODULE_NAMES as SNAPSHOT_MODULE_NAMES
+from agentworks.execution._file_snapshot_bundle import _PACKAGE as SNAPSHOT_PACKAGE
 from agentworks.execution._file_snapshot_bundle import FIXED_BUNDLE as SNAPSHOT_BUNDLE
 from agentworks.execution._file_snapshot_host import parse_file_snapshot_failure
 from agentworks.execution._file_stage_bundle import FIXED_BUNDLE as STAGE_BUNDLE
 from agentworks.execution._file_stage_protocol import parse_file_stage_failure
 from agentworks.execution._file_wire import FileRecord, FileRecordKind
 from agentworks.execution._file_wire_reader import FileRecordReader
-from agentworks.execution._helper_bundle import FixedFileHelperBundle, _build_file_helper_bundle
+from agentworks.execution._helper_bundle import (
+    FixedFileHelperBundle,
+    RootGuestDelivery,
+    _build_file_helper_bundle,
+    build_root_guest_program,
+)
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
-from agentworks.execution._runtime_prerequisite import build_runtime_identity_helper_argv
+from agentworks.execution._runtime_prerequisite import (
+    RuntimeSelection,
+    RuntimeTargetOS,
+    build_root_guest_bootstrap_argv,
+    build_runtime_identity_helper_argv,
+)
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 from agentworks.execution.carrier import CarrierIO, Deadline, FiniteInput, PreparedInvocation, SinkOutput
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 from agentworks.execution.carriers.ssh.connection import SSHConnection, build_ssh_argv
@@ -283,6 +296,34 @@ def test_complete_provider_body_fits_and_oversize_refuses_before_wire(
     )
     with pytest.raises(ValidationError):
         carrier.execute(invocation, io=io, deadline=Deadline.after(1))
+
+
+@pytest.mark.parametrize("root_mode", [IdentityMode.DIRECT, IdentityMode.SUDO_ROOT])
+def test_two_phase_snapshot_complete_provider_body_fits(root_mode: IdentityMode) -> None:
+    program = build_root_guest_program(
+        SNAPSHOT_PACKAGE,
+        SNAPSHOT_MODULE_NAMES,
+        "_file_snapshot_guest",
+        delivery=RootGuestDelivery.FIXED_PREFIX,
+    )
+    root = IdentityPlan(IdentityExpectation(0, 0, (0,)), root_mode)
+    target = IdentityExpectation(1001, 1001, (1001,))
+    guest = VMGuestIdentity("a" * 32, "123e4567-e89b-12d3-a456-426614174000", 1234)
+    argv, _, _ = build_root_guest_bootstrap_argv(
+        root,
+        target,
+        selection=RuntimeSelection(RuntimeTargetOS.LINUX),
+        program=program,
+        nonce=_NONCE,
+        expected_guest=guest,
+    )
+    io = CarrierIO(
+        input=FiniteInput(program.prefix + b"x" * 32_768, sensitive=True),
+        output=SinkOutput(_Sink(), _Sink(), require_live=False),
+        sensitive=True,
+    )
+    body = ProxmoxCarrier._request_body(PreparedInvocation(argv), io)
+    assert len(body) < 65_536
 
 
 @pytest.mark.parametrize(("family", "bundle"), _BUNDLES)

@@ -100,7 +100,10 @@ def _run(
         except BaseException:
             raise _BootstrapRefusal from None
         scope["_agw_load_remaining"]()
-        return scope["_agw_enter_body"]()
+        result = scope["_agw_enter_body"]()
+        if type(result) is not int:
+            raise TypeError("fixed helper returned an invalid exit status")
+        return result
     finally:
         with suppress(OSError):
             os.close(descriptor)

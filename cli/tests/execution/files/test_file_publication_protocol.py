@@ -93,7 +93,6 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
-from agentworks.execution.carriers import proxmox as proxmox_module
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 from agentworks.execution.carriers.ssh.connection import SSHConnection, build_ssh_argv
 from tests.execution.files._runtime_support import runtime_ready_record, runtime_selection
@@ -782,14 +781,14 @@ def test_two_phase_root_publication_valid_near_ceiling_refuses_before_wire(monke
     )
     carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.example:8006", "node-a", 101, "root@pam!token", "secret"))
     serialized_lengths: list[int] = []
-    original_dumps = proxmox_module.json.dumps
+    original_dumps = json.dumps
 
     def measure_body(value: object) -> str:
-        encoded = original_dumps(value)
+        encoded: str = original_dumps(value)
         serialized_lengths.append(len(encoded.encode("ascii")))
         return encoded
 
-    monkeypatch.setattr(proxmox_module.json, "dumps", measure_body)
+    monkeypatch.setattr(json, "dumps", measure_body)
 
     def unexpected_wire(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("oversized request reached provider")
