@@ -10,7 +10,7 @@ import ctypes
 import json
 import os
 import sys
-from threading import Event, Thread
+from threading import Condition, Event, Thread
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
@@ -158,6 +158,63 @@ def _emit(value: dict[str, object]) -> None:
     print(json.dumps(value), flush=True)
 
 
+class _FixtureWorker:
+    """Admit fixture effects only after start returns; settle every borrower."""
+
+    def __init__(self, work: Callable[[], None]) -> None:
+        self._work = work
+        self._condition = Condition()
+        self._admitted = False
+        self._cancelled = False
+        self._done = Event()
+        self._errors: list[BaseException] = []
+        self._worker = Thread(target=self._entry)
+
+    def run(self) -> None:
+        try:
+            self._worker.start()
+            with self._condition:
+                self._admitted = True
+                self._condition.notify_all()
+            self._done.wait()
+        except BaseException as error:
+            self._errors.append(error)
+        finally:
+            # A failed start can leave a late native tail. Cancel it while inert;
+            # admitted work must finish before caller cleanup can touch its fds.
+            while True:
+                try:
+                    with self._condition:
+                        self._cancelled = True
+                        admitted = self._admitted
+                        self._condition.notify_all()
+                    break
+                except BaseException as error:
+                    self._errors.append(error)
+            if admitted:
+                while True:
+                    try:
+                        if self._done.wait(0.05):
+                            break
+                    except BaseException as error:
+                        self._errors.append(error)
+        if self._errors:
+            raise BaseExceptionGroup("Owned fixture worker failed", self._errors)
+
+    def _entry(self) -> None:
+        try:
+            with self._condition:
+                while not self._admitted and not self._cancelled:
+                    self._condition.wait()
+                if not self._admitted:
+                    return
+            self._work()
+        except BaseException as error:
+            self._errors.append(error)
+        finally:
+            self._done.set()
+
+
 def _case(native: _Native, input_fd: int, output_fd: int, custom: bool) -> dict[str, object]:
     input_handle, output_handle = native.handle(input_fd), native.handle(output_fd)
     assert input_handle != output_handle
@@ -295,29 +352,16 @@ def main() -> None:
         output_fd = os.open("CONOUT$", os.O_RDWR | os.O_BINARY)
         input_handle, output_handle = native.handle(input_fd), native.handle(output_fd)
         baseline = native.mode(input_handle), native.mode(output_handle), native.pages()
-        done = Event()
         cases: list[dict[str, object]] = []
 
         def work() -> None:
-            try:
-                assert input_fd is not None and output_fd is not None
-                for custom in (False, True):
-                    cases.append(_case(native, input_fd, output_fd, custom))
-            except BaseException as error:
-                errors.append(error)
-            finally:
-                done.set()
+            assert input_fd is not None and output_fd is not None
+            for custom in (False, True):
+                cases.append(_case(native, input_fd, output_fd, custom))
 
-        worker = Thread(target=work)
-        worker.start()
         # The parent owns the process timeout. Never release fds while a native
         # borrower may remain active, even if that means the parent must kill us.
-        while not done.is_set():
-            try:
-                done.wait()
-            except BaseException as error:
-                errors.append(error)
-        worker.join()
+        _FixtureWorker(work).run()
         _emit({"phase": "measurements", "cases": cases})
     except BaseException as error:
         errors.append(error)
