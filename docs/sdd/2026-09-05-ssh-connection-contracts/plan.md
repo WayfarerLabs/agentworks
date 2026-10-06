@@ -188,11 +188,12 @@ The [implementation progress record](phase2-results.md) pins the completed indep
 local validation separately from the remaining shared integration and platform acceptance.
 
 Shared subprocess adoption introduces an implementation dependency on transport #833. Current
-integration uses `1dbb6245d96cf7dc76299c57088602b52d2cf60d`, including the shared structural
-preflight contract, private managed-start caller and private Linux download composition. The
-[local-download stack refresh](phase2-results.md#private-local-download-stack-refresh) records this
-rebase and its remaining limits; earlier records, including the
-[advanced-stack refresh](phase2-results.md#advanced-transport-stack-refresh), retain the pins they
+integration uses `08bf36fd6ce270862ceceb3450e6a282039faaa2`, including the shared structural
+preflight contract, private managed-start caller and native workstation download publishers. The
+[Windows ancestor-sharing correction](phase2-results.md#windows-ancestor-sharing-correction) records
+that rebase and its remaining limits. The earlier
+[local-download stack refresh](phase2-results.md#private-local-download-stack-refresh) and
+[advanced-stack refresh](phase2-results.md#advanced-transport-stack-refresh) retain the pins they
 validated. The
 [structural preflight integration](phase2-results.md#structural-preflight-integration) records the
 combined SSH result. The
@@ -207,6 +208,15 @@ measured composition and mechanism scope. #832 stacks on transport's implementat
 transport lands first. Buffered adapter validation does not close the shared launch-interruption
 gate, live I/O native acceptance, terminal preparation or additive RunContext delivery. Terminal/PTY
 work is proceeding in parallel in the transport lane, as confirmed by the operator.
+
+Transport's
+[launch-boundary response](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6009186902)
+confirms that it owns the borrowed native-stdin addition to the existing held process owner. No
+usable terminal endpoint or native-stdin shared pin is published at this checkpoint. SSH will adapt
+after the reviewed green pin is available, retaining its PTY slave until launcher/client settlement
+and keeping the native resource worker through interrupted waits and relay cleanup. The
+[SSH reading](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6009208568) records
+the current resource increment and remaining proof separately from that planned shared seam.
 
 ### Complete the carrier and migration
 
