@@ -331,6 +331,15 @@ have no node identities or traces and remain unclassified. Independent review an
 pending. Operation-owned execution context, fresh recovery, service entry and native production
 proof remain open. No public handoff or feedback/fix round closes here.
 
+Project and generic review clear the first inline pin `79dda7ae8`. Project passes 21 focused and 357
+adjacent cases; generic passes the focused cases. The accepted complexity correction removes
+positional AST extraction and split execution from the test mock. A one-shot profile observer now
+substitutes only admission at bootstrap entry, then disables itself and runs the delivered program
+intact. An inert wrapper statement produces thirteen failures with the former mock and none with the
+corrected mock. The owner passes all 390 focused/related cases and all 21 perturbed-wrapper cases,
+complete strict mypy and scoped/file gates; production bytes are unchanged. Corrected integrated
+re-review and lead gates remain pending, without any native or production adoption claim.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
