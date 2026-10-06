@@ -10,10 +10,14 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
+from threading import Event
 from typing import Literal
 
 import pytest
+
+from tests.execution.carriers.ssh.fixture_worker import FixtureWorker, fixture_call
 
 
 @dataclass(frozen=True)
@@ -62,49 +66,76 @@ def owned_agent(keys: tuple[Path, ...]) -> Iterator[str]:
         root = Path(directory)
         root.chmod(0o700)
         socket = root / "agent"
-        with (root / "agent.log").open("wb") as log:
-            agent = subprocess.Popen(
-                [agent_binary, "-D", "-a", str(socket)],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=log,
-                env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
-            )
-            try:
-                until = time.monotonic() + 3
-                while not socket.is_socket():
-                    if agent.poll() is not None:
-                        pytest.fail("Owned SSH agent exited before socket publication")
-                    if time.monotonic() >= until:
-                        pytest.fail("Owned SSH agent did not publish its socket")
-                    time.sleep(0.01)
-                for key in keys:
-                    subprocess.run(
-                        [add_binary, str(key)],
-                        check=True,
-                        timeout=10,
-                        stdin=subprocess.DEVNULL,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        env={"SSH_AUTH_SOCK": str(socket), "PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+        with (keys[0].parent / "agent.log").open("wb") as log:
+            agents: list[subprocess.Popen[bytes]] = []
+
+            ready = Event()
+
+            def lifetime(stop: Event) -> None:
+                try:
+                    agents.append(
+                        subprocess.Popen(
+                            [agent_binary, "-D", "-a", str(socket)],
+                            stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL,
+                            stderr=log,
+                            env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+                        )
                     )
-                inventory = subprocess.run(
-                    [add_binary, "-L"],
-                    check=True,
-                    timeout=10,
-                    stdin=subprocess.DEVNULL,
-                    capture_output=True,
-                    env={"SSH_AUTH_SOCK": str(socket), "PATH": "/usr/bin:/bin", "LC_ALL": "C"},
-                )
-                observed = {tuple(line.split()[:2]) for line in inventory.stdout.decode("ascii").splitlines()}
-                assert observed == {public_key(key.with_suffix(".pub")) for key in keys}
-                yield str(socket)
+                    ready.set()
+                    if not stop.wait(120):
+                        raise TimeoutError("Owned agent fixture lifetime exceeded its bound")
+                finally:
+                    if agents:
+                        agent = agents[0]
+                        if agent.poll() is None:
+                            agent.kill()
+                        agent.wait(timeout=3)
+                        assert agent.returncode is not None
+
+            try:
+                with FixtureWorker(lifetime) as worker:
+                    worker.start()
+                    until = time.monotonic() + 3
+                    while not ready.wait(0.01):
+                        if worker.done or time.monotonic() >= until:
+                            pytest.fail("Owned SSH agent constructor did not publish")
+                    agent = agents[0]
+                    until = time.monotonic() + 3
+                    while not socket.is_socket():
+                        if agent.poll() is not None:
+                            pytest.fail("Owned SSH agent exited before socket publication")
+                        if time.monotonic() >= until:
+                            pytest.fail("Owned SSH agent did not publish its socket")
+                        time.sleep(0.01)
+                    for key in keys:
+                        fixture_call(
+                            partial(
+                                subprocess.run,
+                                [add_binary, str(key)],
+                                check=True,
+                                timeout=10,
+                                stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                env={"SSH_AUTH_SOCK": str(socket), "PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+                            )
+                        )
+                    inventory = fixture_call(
+                        lambda: subprocess.run(
+                            [add_binary, "-L"],
+                            check=True,
+                            timeout=10,
+                            stdin=subprocess.DEVNULL,
+                            capture_output=True,
+                            env={"SSH_AUTH_SOCK": str(socket), "PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+                        )
+                    )
+                    observed = {tuple(line.split()[:2]) for line in inventory.stdout.decode("ascii").splitlines()}
+                    assert observed == {public_key(key.with_suffix(".pub")) for key in keys}
+                    yield str(socket)
             finally:
-                if agent.poll() is None:
-                    agent.kill()
-                agent.wait(timeout=3)
-                assert agent.poll() is not None
-                # The killed foreground agent may leave its owned socket inode.
+                # Foreground settlement precedes socket and directory removal.
                 socket.unlink(missing_ok=True)
         assert not socket.exists()
     assert not root.exists()
