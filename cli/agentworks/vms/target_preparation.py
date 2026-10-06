@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLocatorUnavailable
 from agentworks.db import OperationResourceKind
 from agentworks.errors import StateError, ValidationError
-from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
+from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier, FixedObservationCarrier
 from agentworks.execution._managed_runs import ManagedTargetIdentity
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
 from agentworks.execution._vm_guest_identity import (
@@ -103,7 +103,7 @@ class VMTargetPreparationControlFact(Exception):
 
 @dataclass(slots=True, repr=False)
 class _State:
-    operation: BorrowedFixedHelperCarrier
+    operation: FixedObservationCarrier
     guest_result: VMGuestIdentityObservationResult | None = None
     target: ManagedTargetIdentity | None = None
     failure: VMTargetPreparationFailure | None = None
@@ -180,6 +180,24 @@ def _prepare_selected_platform_with_borrow(
     deadline: Deadline,
     borrow: OperationBorrow,
 ) -> VMTargetPreparation:
+    early = binding._early_guest_facts_route
+    operation = BorrowedFixedHelperCarrier(binding.carrier if early is None else early.carrier, borrow)
+    return _prepare_selected_platform_observations(
+        vm, platform, ctx, expected_locator, binding, operation, deadline=deadline
+    )
+
+
+def _prepare_selected_platform_observations(
+    vm: VMRow,
+    platform: VMPlatform,
+    ctx: RunContext,
+    expected_locator: ProviderLocator,
+    binding: NativeExecutionBinding,
+    operation: FixedObservationCarrier,
+    *,
+    deadline: Deadline,
+) -> VMTargetPreparation:
+    """Confirm the selected locator around a caller-owned fixed guest probe."""
     locator = platform.observe_provider_locator(vm, ctx, deadline=deadline)
     if deadline.expired:
         return _failed(VMTargetPreparationFailure.DEADLINE, deadline_exceeded=True)
@@ -189,9 +207,7 @@ def _prepare_selected_platform_with_borrow(
     if locator != expected_locator:
         return _failed(VMTargetPreparationFailure.LOCATOR_CHANGED)
 
-    preparation = _prepare_managed_vm_target_with_borrow(
-        vm, expected_locator, binding, deadline=deadline, borrow=borrow
-    )
+    preparation = _prepare_managed_vm_target_observations(vm, expected_locator, binding, operation, deadline=deadline)
     if preparation.status is not VMTargetPreparationStatus.PREPARED:
         return preparation
 
@@ -259,6 +275,19 @@ def _prepare_managed_vm_target_with_borrow(
     """Run one guest attempt under custody acquired by either entry point."""
     early = binding._early_guest_facts_route
     operation = BorrowedFixedHelperCarrier(binding.carrier if early is None else early.carrier, borrow)
+    return _prepare_managed_vm_target_observations(vm, locator, binding, operation, deadline=deadline)
+
+
+def _prepare_managed_vm_target_observations(
+    vm: VMRow,
+    locator: ProviderLocatorObservation,
+    binding: NativeExecutionBinding,
+    operation: FixedObservationCarrier,
+    *,
+    deadline: Deadline,
+) -> VMTargetPreparation:
+    """Classify guest observations before settling the concrete attempt."""
+    early = binding._early_guest_facts_route
     state = _State(operation)
     try:
         result = observe_vm_guest_identity(

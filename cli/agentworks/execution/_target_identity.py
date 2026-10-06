@@ -13,7 +13,7 @@ from agentworks.execution._account import (
     resolve_account,
 )
 from agentworks.execution._account_protocol import AccountRequest, AccountRequestError, encode_account_request
-from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
+from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier, FixedObservationCarrier
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import (
     RuntimePrerequisiteState,
@@ -72,7 +72,7 @@ class TargetIdentityControlFact(Exception):
 
 @dataclass(slots=True, repr=False)
 class _State:
-    operation: BorrowedFixedHelperCarrier
+    operation: FixedObservationCarrier
     ordinary_plan: IdentityPlan | None = None
     elevated_plan: IdentityPlan | None = None
     delivery_result: AccountResolutionResult | None = None
@@ -113,7 +113,7 @@ class _State:
 class _Composer:
     def __init__(
         self,
-        operation: BorrowedFixedHelperCarrier,
+        operation: FixedObservationCarrier,
         *,
         delivery_account: str,
         workload_account: str,
@@ -273,6 +273,29 @@ def prepare_target_identity(
 
     borrow = owner.borrow()
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
+    try:
+        return _prepare_target_identity_observations(
+            operation,
+            delivery_account=delivery_account,
+            workload_account=workload_account,
+            include_elevated=include_elevated,
+            runtime_selection=runtime_selection,
+            deadline=deadline,
+        )
+    finally:
+        release_borrow_after_custody(borrow)
+
+
+def _prepare_target_identity_observations(
+    operation: FixedObservationCarrier,
+    *,
+    delivery_account: str,
+    workload_account: str,
+    include_elevated: bool,
+    runtime_selection: RuntimeSelection,
+    deadline: Deadline,
+) -> TargetIdentityPreparation:
+    """Compose numeric plans using one caller-owned fixed observation boundary."""
     state = _State(operation)
     composer = _Composer(
         operation,
@@ -284,15 +307,12 @@ def prepare_target_identity(
         state=state,
     )
     try:
-        try:
-            return composer.run()
-        except BaseException as control:
-            state.deadline_exceeded = state.deadline_exceeded or deadline.expired
-            if state.deadline_exceeded:
-                state.fail(TargetIdentityFailure.DEADLINE)
-            raise control from TargetIdentityControlFact(state.finish())
-    finally:
-        release_borrow_after_custody(borrow)
+        return composer.run()
+    except BaseException as control:
+        state.deadline_exceeded = state.deadline_exceeded or deadline.expired
+        if state.deadline_exceeded:
+            state.fail(TargetIdentityFailure.DEADLINE)
+        raise control from TargetIdentityControlFact(state.finish())
 
 
 def _validate_inputs(

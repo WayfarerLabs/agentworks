@@ -1,22 +1,36 @@
-"""Concrete carrier admission for fixed helpers borrowing one core operation."""
+"""Fixed-observation custody and ordinary borrowed carrier admission."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
-from agentworks.execution.carrier import CarrierIO, Dispatch, ExitStatus
+from agentworks.execution.carrier import Carrier, CarrierIO, Dispatch, ExitStatus
 from agentworks.operations import release_borrow_after_custody
 
 if TYPE_CHECKING:
     from agentworks.execution.carrier import (
-        Carrier,
         CarrierReport,
         ChannelFeatures,
         Deadline,
         PreparedInvocation,
     )
     from agentworks.operations import OperationAttempt, OperationBorrow
+
+
+class FixedObservationCarrier(Carrier, Protocol):
+    """Concrete fixed-observation dispatch and its local custody facts."""
+
+    @property
+    def pending_remote_effects(self) -> bool: ...
+
+    @property
+    def coordination_uncertain(self) -> bool: ...
+
+    @property
+    def requires_owner_retention(self) -> bool: ...
+
+    def settle(self, dispatch: Dispatch, completion: ExitStatus | None) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
