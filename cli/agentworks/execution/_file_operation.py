@@ -148,7 +148,7 @@ class _PendingDownloadSetup:
 
 @dataclass(slots=True, repr=False)
 class _LocalDownloadCall:
-    """The one public local download's serial borrow and finalization custody."""
+    """One local download's serial borrow and finalization custody."""
 
     borrow: OperationBorrow
     remote_requires_owner_retention: bool = False

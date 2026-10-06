@@ -130,16 +130,22 @@ remote effects or active permission grants.
 `access.py` composes a bound `FileAccess` from an already-acquired `FileOperation`, one carrier,
 trusted root, selected runtime, ordinary identity plan, optional elevated plan, safe logical
 diagnostic identity, and a composition-owned deadline factory. It provides bounded reads, stat,
-inventory, finite byte-value publication, caller-owned streaming upload, JSON updates, directory
-convergence, metadata convergence and conditional removal through the retained private custody and
-result reducers. `UploadSource.read` receives a positive request no larger than the private stage
-chunk bound; `None` is retried under the original deadline, `b""` is EOF, and `FileAccess` never
-closes, seeks or retains the source. Exact uploads consume the declared size and perform one-byte
-excess detection. `sudo=True` selects only the already bound elevated plan and refuses before source
-validation or dispatch when absent. Every target is a normalized absolute POSIX path confined to the
-trusted root; the service rejects the filesystem root because the helper requires a nonempty leaf.
-It has no public download, directory transfer, production factory or RunContext accessor. This bound
-assembly does not activate recipient grants or the core allowlist during coexistence.
+inventory, finite byte-value publication, caller-owned streaming upload, local-file download, JSON
+updates, directory convergence, metadata convergence and conditional removal through the retained
+private custody and result reducers. `UploadSource.read` receives a positive request no larger than
+the private stage chunk bound; `None` is retried under the original deadline, `b""` is EOF, and
+`FileAccess` never closes, seeks or retains the source. Exact uploads consume the declared size and
+perform one-byte excess detection. `sudo=True` selects only the already bound elevated plan and
+refuses before source validation or dispatch when absent. Every target is a normalized absolute
+POSIX path confined to the trusted root; the service rejects the filesystem root because the helper
+requires a nonempty leaf. The bound `download()` requires a concrete workstation `Path`, defaults to
+create-only `Create`, and permits explicit `Replace`. An optional positive byte limit bounds the
+held remote snapshot; `None` uses the snapshot protocol's representable size rather than a separate
+source-stat race or an application file-size ceiling. Only a verified transfer with settled remote
+cleanup may publish locally. Success returns the verified source metadata; absence and failures use
+the shared typed file errors without exposing partial content or raw local exceptions. The view
+remains private: there is no directory transfer, production factory or RunContext accessor. This
+bound assembly does not activate recipient grants or the core allowlist during coexistence.
 
 ## File-call custody
 
@@ -867,8 +873,8 @@ from cleanup, so a cleanup error cannot turn a changed destination into an uncha
 interrupted close retains `cleanup_uncertain` without retrying a descriptor number that may have
 been reused. If construction itself leaves unfinished cleanup, its typed exception retains the stage
 for an explicit retry and reports any close uncertainty. The stage does not consume a guest result
-or establish the caller's deadline and ownership facts. It is not wired to public
-`FileAccess.download`, and Windows and macOS local publication remain unaccepted.
+or establish the caller's deadline and ownership facts. The bound file view composes it through the
+selected-host coordinator below; native Windows and macOS publication acceptance remains open.
 
 The private macOS and Windows stages implement the same local publication boundary. Create publishes
 caller-private access without overwriting an existing entry: mode 0600 on Linux/macOS and a
@@ -884,8 +890,16 @@ and composes it with the owned snapshot download. Unsupported hosts are refused 
 dispatch. It uses one deadline, admits publication only after complete verified transfer and remote
 cleanup, and retains remote outcome, local publication, local cleanup and timing as separate facts.
 A failed or absent remote transfer leaves the local destination unpublished. Exceptional control
-flow retains both sides of the operation in a safe attached fact. This is not public
-`FileAccess.download` or native macOS/Windows acceptance.
+flow retains both sides of the operation in a safe attached fact.
+
+The private bound `FileAccess.download()` supplies this coordinator with the operation's single
+serial borrow. Custody begins before retrying known cleanup debt or creating the local stage and
+continues through result reduction and finalization. A retained call is checked after acquiring the
+borrow, so another call cannot overwrite interrupted finalization custody. Known local cleanup debt
+must settle before another local download allocates a stage; uncertain cleanup refuses. The
+operation retains unfinished remote and local facts before reporting an exception. These are
+in-memory custody primitives, not production teardown or durable workstation-path recovery. Core
+factory teardown and native macOS/Windows acceptance remain open.
 
 ## Private terminal handoff preparation
 
@@ -1349,6 +1363,7 @@ Reconciliation recovers cleanup ownership only, never ready content or proof tha
 has stopped. Known cleanup debt survives deadline failure. Cleanup accepts the original token and
 identity-bound objects; delayed chunks refuse after receipt removal. The caller must serialize the
 complete logical operation and retain its token and known references. `_file_download.py` supplies
-that private composition; local publication exists only as a separate Linux primitive and public
-FileAccess remains unimplemented. Local helper tests and serialized request-size measurements do not
+that private composition, and `_file_local_download.py` adds selected-host publication for the
+private bound file view. Production FileAccess composition, core teardown and native workstation
+acceptance remain separate gates. Local helper tests and serialized request-size measurements do not
 establish native carrier acceptance.

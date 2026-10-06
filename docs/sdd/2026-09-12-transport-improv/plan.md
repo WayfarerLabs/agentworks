@@ -566,6 +566,15 @@ supported-workstation or production FileAccess acceptance; the checkbox stays op
       refusal before remote dispatch, and local publication/cleanup facts on exceptional exits. This
       is private host selection; native macOS/Windows acceptance and public result conversion remain
       required below.
+- [x] Bind private `FileAccess.download()` to selected-host publication and typed result reduction.
+      Require a concrete workstation path, create-only default and explicit Replace; support an
+      optional positive byte bound, with None using the held snapshot protocol's representable size.
+      Keep one serial borrow from retained-cleanup retry through stage construction, transfer,
+      publication, result reduction and finalization. Retain unfinished facts before exceptional
+      allocation and check interrupted call custody only after acquiring the borrow. All three
+      private lanes accept `d764a3da2`; deterministic delayed-borrow regressions fail against the
+      old custody boundary. Core teardown consumption, native workstation acceptance and production
+      wiring remain open.
 - [ ] Complete local download publication with create-only default and explicit replace-existing
       selection, as directed on 2026-10-05. Settle and prove workstation metadata/ACL handling,
       ordinary-file refusal, full-transfer verification and cleanup before publishing either form;

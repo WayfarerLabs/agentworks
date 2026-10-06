@@ -541,9 +541,10 @@ The private download coordinator composes snapshot creation, verified bounded ch
 scratch cleanup under one borrowed core operation. It reuses the concrete file dispatch gate used by
 upload and JSON; it does not introduce another claim or release ownership between chunks. One
 original deadline covers the whole transfer and any follow-on cleanup. The initial private entry
-requires a finite positive source bound supported by the snapshot protocol. Public `max_bytes=None`
-still needs composition with source-size observation; a private required bound must not become an
-undocumented public file-size ceiling.
+requires a finite positive source bound supported by the snapshot protocol. The private bound
+FileAccess view maps `max_bytes=None` to the protocol's representable size. The held snapshot then
+supplies the actual transfer size before chunks are requested; there is no separate pathname stat
+race or undocumented application file-size ceiling.
 
 The coordinator writes only complete, verified chunk observations to a borrowed byte sink, handling
 short writes and temporary stalls without retaining the whole file. It tracks accepted bytes and the
@@ -573,15 +574,25 @@ The private memory-read adapter uses the shared `FileOperation` download boundar
 unfinished facts before final byte/result allocation. Failed allocation discards the temporary
 buffer without discarding the already-retained download outcome or inventing a second claim.
 
-This is private composition, not public download or Windows/macOS acceptance. The local-file adapter
-selects the workstation's Linux, macOS or Windows publication stage through one private protocol and
-refuses unsupported hosts before remote dispatch. It composes the owned snapshot result and selected
-stage under one deadline, keeping remote status and cleanup debt separate from local publication,
-local cleanup and late-deadline facts, including on exceptional exits. A complete verified transfer
-with settled remote cleanup is the only publication input; confirmed absence, remote failure or
-retained remote obligations cannot publish. The Linux stage uses same-directory publication; macOS
-and Windows use the approved held-file in-place Replace. This adapter does not settle public result
-conversion or native macOS/Windows filesystem acceptance.
+This is private composition, not production download or Windows/macOS acceptance. The local-file
+adapter selects the workstation's Linux, macOS or Windows publication stage through one private
+protocol and refuses unsupported hosts before remote dispatch. It composes the owned snapshot result
+and selected stage under one deadline, keeping remote status and cleanup debt separate from local
+publication, local cleanup and late-deadline facts, including on exceptional exits. A complete
+verified transfer with settled remote cleanup is the only publication input; confirmed absence,
+remote failure or retained remote obligations cannot publish. The Linux stage uses same-directory
+publication; macOS and Windows use the approved held-file in-place Replace.
+
+The private bound `FileAccess.download()` now composes this adapter with typed result reduction. One
+serial operation borrow covers known local-cleanup retry, stage construction, transfer, publication
+or abort, public-model reduction and finalization. The retained-call check runs after borrow
+acquisition, preventing a competing call from replacing interrupted finalization custody. Remote
+obligations and local stage facts are retained before exceptional result allocation. Known local
+cleanup debt must settle before a new local download creates a stage; uncertain cleanup refuses.
+Sanitized typed failures preserve established change, publication uncertainty, cleanup and timing
+facts; exceptional control flow retains its identity and safe attached facts. No workstation paths
+are persisted for recovery. Native filesystem acceptance, core teardown consumption and complete
+production access wiring remain required.
 
 ### No-staging readiness gate
 
