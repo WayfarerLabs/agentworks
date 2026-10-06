@@ -27,6 +27,7 @@ from ._file_result import (
 from ._file_spool import SpoolSnapshotFailureKind
 from ._file_stage_protocol import FileStageFailureCode, FileStageFailureControl
 from ._file_upload import FileUploadFailure, FileUploadFailurePhase, FileUploadOutcome, FileUploadStatus
+from ._local_download_stage import LocalDownloadUnsupportedError
 from ._scratch import ScratchFailureKind
 from .carrier import Dispatch
 from .files import (
@@ -40,6 +41,7 @@ from .files import (
 )
 
 if TYPE_CHECKING:
+    from ._file_local_download import FileLocalDownloadOutcome
     from ._file_memory_read import FileMemoryReadOutcome
     from ._runtime_prerequisite import RuntimePrerequisiteObservation
 
@@ -61,6 +63,83 @@ def reduce_file_download(
             _raise_download_failure(outcome, entity_kind=entity_kind, entity_name=entity_name)
         return None
     _raise_download_failure(outcome, entity_kind=entity_kind, entity_name=entity_name)
+
+
+def reduce_file_local_download(
+    outcome: FileLocalDownloadOutcome,
+    *,
+    entity_kind: str,
+    entity_name: str,
+    failure: Exception | None = None,
+) -> FileMetadata:
+    """Return source metadata only after both remote and local settlement."""
+    if outcome.publication_uncertain:
+        _raise_uncertain(
+            FileOperationPhase.PUBLICATION,
+            FileFailureReason.IO,
+            entity_kind=entity_kind,
+            entity_name=entity_name,
+            dispatch=None,
+        )
+    if outcome.cleanup_failed or outcome.cleanup_uncertain or outcome.unfinished_stage is not None:
+        _raise_reason(
+            FileOperationPhase.CLEANUP,
+            FileFailureReason.CLEANUP,
+            entity_kind=entity_kind,
+            entity_name=entity_name,
+            effect=Change.CHANGED if outcome.published else None,
+        )
+    if outcome.published and outcome.deadline_exceeded:
+        _raise_reason(
+            FileOperationPhase.PUBLICATION,
+            FileFailureReason.DEADLINE,
+            entity_kind=entity_kind,
+            entity_name=entity_name,
+            effect=Change.CHANGED,
+        )
+    download = outcome.download
+    if download is not None:
+        metadata = reduce_file_download(download, entity_kind=entity_kind, entity_name=entity_name)
+        if metadata is None:
+            _raise_reason(
+                FileOperationPhase.OBSERVATION,
+                FileFailureReason.NOT_FOUND,
+                entity_kind=entity_kind,
+                entity_name=entity_name,
+            )
+    else:
+        metadata = None
+    if outcome.deadline_exceeded:
+        _raise_reason(
+            FileOperationPhase.PUBLICATION if outcome.published else FileOperationPhase.TRANSFER,
+            FileFailureReason.DEADLINE,
+            entity_kind=entity_kind,
+            entity_name=entity_name,
+            effect=Change.CHANGED if outcome.published else None,
+        )
+    if failure is not None:
+        reason = (
+            FileFailureReason.CONFLICT
+            if isinstance(failure, (FileExistsError, FileNotFoundError))
+            else FileFailureReason.UNSUPPORTED
+            if isinstance(failure, LocalDownloadUnsupportedError)
+            else FileFailureReason.IO
+        )
+        _raise_reason(
+            FileOperationPhase.PUBLICATION,
+            reason,
+            entity_kind=entity_kind,
+            entity_name=entity_name,
+            effect=Change.CHANGED if outcome.published else None,
+        )
+    if metadata is None or not outcome.published:
+        _raise_reason(
+            FileOperationPhase.PUBLICATION,
+            FileFailureReason.INCOMPLETE_RESPONSE,
+            entity_kind=entity_kind,
+            entity_name=entity_name,
+        )
+    return metadata
 
 
 def reduce_file_memory_read(

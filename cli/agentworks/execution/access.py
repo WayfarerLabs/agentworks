@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, cast
 
 from agentworks.errors import StateError, ValidationError
@@ -12,6 +12,7 @@ from . import _file_memory_read
 from ._diagnostic_values import validate_logical_entity_value
 from ._execution_operation import ExecutionOperation
 from ._execution_result import check_owned_inline_result, reduce_owned_inline_result
+from ._file_local_download import FileLocalDownloadControlFact, FileLocalDownloadOutcome, download_to_local_file
 from ._file_operation import FileOperation
 from ._file_paths import normalized_relative_path, normalized_root
 from ._file_result import (
@@ -20,12 +21,18 @@ from ._file_result import (
     reduce_file_remove,
     reduce_file_stat,
 )
-from ._file_result_transfer import reduce_file_json, reduce_file_memory_read, reduce_file_upload
+from ._file_result_transfer import (
+    reduce_file_json,
+    reduce_file_local_download,
+    reduce_file_memory_read,
+    reduce_file_upload,
+)
 from ._helper_launcher import IdentityPlan
 from ._json import serialize_json_source, validate_json_object
 from ._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from .carrier import Deadline
 from .files import (
+    Create,
     DirectoryEntry,
     DirectoryLimit,
     FileKind,
@@ -35,6 +42,7 @@ from .files import (
     MutationResult,
     NewMetadata,
     ReadResult,
+    Replace,
     Revision,
     UploadSource,
     WriteCondition,
@@ -55,6 +63,8 @@ if TYPE_CHECKING:
 _DEFAULT_JSON_MAX_BYTES = 64 * 1_024
 _DEFAULT_JSON_MAX_DEPTH = 64
 _MAX_UPLOAD_SIZE = (1 << 63) - 1
+_MAX_DOWNLOAD_SIZE = (1 << 63) - 1
+_DEFAULT_LOCAL_CONDITION = Create()
 _DEFAULT_INPUT = Input.eof()
 _DEFAULT_OUTPUT = Output.capture()
 
@@ -326,6 +336,87 @@ class FileAccess:
             runtime_selection=self._runtime_selection,
         )
         return reduce_file_upload(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
+
+    def download(
+        self,
+        path: PurePosixPath,
+        destination: Path,
+        *,
+        local_condition: Create | Replace = _DEFAULT_LOCAL_CONDITION,
+        max_bytes: int | None = None,
+        sudo: bool = False,
+    ) -> FileMetadata:
+        """Publish one verified remote snapshot to a local regular file."""
+        if not isinstance(destination, Path):
+            raise ValidationError("File download requires a concrete local path")
+        if type(local_condition) not in (Create, Replace):
+            raise ValidationError("File download requires Create or Replace")
+        if max_bytes is not None and (type(max_bytes) is not int or not 0 < max_bytes <= _MAX_DOWNLOAD_SIZE):
+            raise ValidationError("File download requires a positive representable byte bound")
+        root, leaf, plan, deadline = self._request(path, sudo)
+        if self._operation.unfinished_local_download is not None:
+            try:
+                cleaned = self._operation.retry_local_download_cleanup()
+            except BaseException as control:
+                stage = self._operation.unfinished_local_download
+                assert stage is not None
+                raise control from FileLocalDownloadControlFact(
+                    FileLocalDownloadOutcome(
+                        None,
+                        published=stage.published,
+                        publication_uncertain=stage.publication_uncertain,
+                        cleanup_uncertain=stage.cleanup_uncertain,
+                        cleanup_failed=True,
+                        unfinished_stage=stage,
+                    )
+                )
+            if not cleaned:
+                stage = self._operation.unfinished_local_download
+                assert stage is not None
+                reduce_file_local_download(
+                    FileLocalDownloadOutcome(
+                        None,
+                        published=stage.published,
+                        publication_uncertain=stage.publication_uncertain,
+                        cleanup_uncertain=stage.cleanup_uncertain,
+                        cleanup_failed=True,
+                        unfinished_stage=stage,
+                    ),
+                    entity_kind=self._entity_kind,
+                    entity_name=self._entity_name,
+                )
+        try:
+            outcome = download_to_local_file(
+                self._carrier,
+                trusted_root_path=root,
+                relative_path=leaf,
+                destination=destination,
+                max_bytes=_MAX_DOWNLOAD_SIZE if max_bytes is None else max_bytes,
+                plan=plan,
+                deadline=deadline,
+                runtime_selection=self._runtime_selection,
+                operation=self._operation,
+                condition=local_condition,
+            )
+        except BaseException as control:
+            fact = control.__cause__
+            if not isinstance(fact, FileLocalDownloadControlFact):
+                raise
+            self._retain_local_download(fact.outcome)
+            if not isinstance(control, Exception):
+                raise
+            return reduce_file_local_download(
+                fact.outcome,
+                entity_kind=self._entity_kind,
+                entity_name=self._entity_name,
+                failure=control,
+            )
+        self._retain_local_download(outcome)
+        return reduce_file_local_download(outcome, entity_kind=self._entity_kind, entity_name=self._entity_name)
+
+    def _retain_local_download(self, outcome: FileLocalDownloadOutcome) -> None:
+        if outcome.unfinished_stage is not None:
+            self._operation.retain_local_download_stage(outcome.unfinished_stage)
 
     def update_json(
         self,

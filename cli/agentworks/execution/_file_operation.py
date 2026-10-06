@@ -90,6 +90,7 @@ if TYPE_CHECKING:
     from agentworks.execution._file_publication_wire import BoundPublicationCleanupDebt
     from agentworks.execution._file_stat import FileRevision
     from agentworks.execution._helper_launcher import IdentityPlan
+    from agentworks.execution._local_download_stage import LocalDownloadStage
     from agentworks.execution._runtime_prerequisite import RuntimeSelection
     from agentworks.execution._scratch import ScratchReference
     from agentworks.execution._scratch_receipt import ScratchCleanupDebt
@@ -256,6 +257,7 @@ class FileOperation:
         self._target = target
         self._active_downloads: dict[int, _ActiveFileDownload] = {}
         self._unfinished_downloads: list[UnfinishedFileDownload] = []
+        self._unfinished_local_download: LocalDownloadStage | None = None
         self._active_uploads: dict[int, _ActiveFileUpload] = {}
         self._unfinished_uploads: list[UnfinishedFileUpload] = []
         self._active_package_uploads: dict[int, _ActiveFileUpload] = {}
@@ -275,6 +277,33 @@ class FileOperation:
     @property
     def unfinished_downloads(self) -> tuple[UnfinishedFileDownload, ...]:
         return tuple(self._unfinished_downloads)
+
+    @property
+    def unfinished_local_download(self) -> LocalDownloadStage | None:
+        """The one workstation stage still held by this in-memory operation."""
+        return self._unfinished_local_download
+
+    def retain_local_download_stage(self, stage: LocalDownloadStage) -> None:
+        """Keep local cleanup custody separate from persisted remote obligations."""
+        if self._unfinished_local_download is not None and self._unfinished_local_download is not stage:
+            raise StateError("A local download stage already requires cleanup")
+        self._unfinished_local_download = stage
+
+    def retry_local_download_cleanup(self) -> bool:
+        """Retry exact known cleanup before another local download is admitted."""
+        stage = self._unfinished_local_download
+        if stage is None:
+            return True
+        if stage.cleanup_uncertain:
+            return False
+        try:
+            stage.abort()
+        except Exception:
+            return False
+        if stage.cleanup_uncertain:
+            return False
+        self._unfinished_local_download = None
+        return True
 
     @property
     def active_uploads(self) -> tuple[_ActiveFileUpload, ...]:
