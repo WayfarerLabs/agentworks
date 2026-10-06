@@ -2758,8 +2758,28 @@ until its actual keeper/recovery consumer is composed.
 Read-only recovery scouting also reproduces a late publisher creating a private stage after disposal
 has returned success. Local client cleanup and the old-authority lease ceiling establish neither
 guest publisher exit nor absence of further mutations. The keeper/recovery unit must settle or
-cooperatively fence this separate publication effect before release/disposal; its exact mechanism
-and native proof remain open. No machine-wide lock or hostile-user containment is implied.
+cooperatively fence this separate publication effect before release/disposal. The following private
+unit supplies the mechanism, with native proof still open. No machine-wide lock or hostile-user
+containment is implied.
+
+At `0c079a6e1`, the shared retained-directory barrier covers lease publication, exact stop
+publication and disposal with one exclusive non-blocking attempt. Initial and renewal entrypoints
+share replacement, with the final clock check after persisted reads. All three independent private
+lanes clear the whole helper/barrier unit: project passes 470 cases, complexity passes 187 cases and
+1,555 protocol sequences, and generic correctness passes 253 cases, 3,106 protocol vectors and 12
+cleanup/control probes. Each exits 0 at that exact pin. The lead's final full suite passes 15,855
+tests with 50 skips and 27 existing fork warnings, exit 0; strict mypy passes 1,258 sources.
+Negative experiments independently restore the original publication race, early clock checks and
+packed controller release ordering. Removing redundant helper cleanup preserves unconditional outer
+cleanup. The mechanism remains private pending its keeper/recovery consumer; no native acceptance or
+public operation-lifetime enablement is established.
+
+Controller scouting confirms that terminal capture facts follow spool closure and prevent later
+appends, but the final fact can be visible before its stage-unlink/directory-sync tail completes.
+The current observation helper does not query controller termination. Whole-owner settlement will
+use an exact same-boot controller observation, not broader store locking or a claim that terminal
+artifact safety means every process exited. Retained and collected units both need native proof;
+original activation reconciliation and workload emptiness remain separate obligations.
 
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
       serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one
@@ -2768,6 +2788,12 @@ and native proof remain open. No machine-wide lock or hostile-user containment i
       same-boot clock plus fixed-window ceiling without per-renewal database payload writes; initial
       start and renewal both need the post-clock generation fence. Keep native SSH/QGA, controller
       death, partition, suspend/boot and body-admission proof open until measured.
+- [ ] Extend the existing managed observation with exact same-boot controller-termination evidence.
+      Validate the derived unit and native response; distinguish running, positive termination and
+      unknown. A missing or collected unit needs an authentic exact launch and reconciled one-start
+      admission, not a generic query failure or `MainPID=0`. Prove retained and collected cases,
+      delayed activation, unavailable metadata and exhausted budgets before whole-owner release.
+      Keep capture closure, workload emptiness and empty-cgroup directory removal distinct.
 - [ ] Prove separate keeper delivery and exchange custody alongside an ordinary borrow, without
       background access to thread-affine database/context dependencies. Account for Proxmox's raw
       worker construction before its cleanup guard and unbounded post-kill `communicate()`; delivery

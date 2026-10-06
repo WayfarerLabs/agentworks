@@ -327,6 +327,20 @@ hostile-user containment or a general filesystem locking framework. The
 [Linux lock semantics](https://man7.org/linux/man-pages/man2/flock.2.html) distinguish independent
 opens from duplicated descriptors; native filesystem and interruption proofs remain required.
 
+Whole-owner settlement also requires an independently validated controller-termination observation
+through the existing managed observation helper. Derive the unit from the exact launch and retain
+the prepared guest/boot binding. Native metadata must distinguish a running controller, positive
+termination and unknown; a failed query or `MainPID=0` alone is not termination. Because `--collect`
+can remove execution metadata, a positively absent unit may establish termination only alongside the
+authentic exact launch and reconciliation ruling out a later admitted activation. Do not require
+retained exit status or add another completion receipt. The
+[systemd unit collection rules](https://raw.githubusercontent.com/systemd/systemd/v252/man/systemd.unit.xml)
+and
+[process properties](https://raw.githubusercontent.com/systemd/systemd/v252/man/org.freedesktop.systemd1.xml)
+describe the native evidence; retained and collected units both need platform proof. Controller
+termination settles neither original dispatch debt nor workload emptiness, and does not promise that
+removing its empty cgroup directory succeeded. No broader store-locking policy is introduced.
+
 The controller checks the lease at its existing bounded polling interval. Expiry follows the same
 stop path as explicit intent: close remaining input, give the initial child the existing two-second
 grace, then kill the owned cgroup and use the existing five-second cleanup observation bound. Only
