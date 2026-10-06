@@ -135,6 +135,28 @@ def test_execute_validates_before_connection_or_process_work(
     assert synthetic.calls == []
 
 
+@pytest.mark.parametrize("seconds", [0, 10])
+def test_unsupported_input_refuses_before_connection_or_process_work(
+    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, seconds: int
+) -> None:
+    io = CarrierIO()
+    # Model a shared input extension before this pipe adapter implements it.
+    object.__setattr__(io, "input", object())
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("unsupported input performed SSH admission or process work")
+
+    monkeypatch.setattr(client, "admit_connection", forbidden)
+    monkeypatch.setattr(client, "build_ssh_argv", forbidden)
+    monkeypatch.setattr(client, "check_client_version", forbidden)
+    monkeypatch.setattr(client, "run_process", forbidden)
+    with pytest.raises(ValidationError):
+        synthetic.carrier.validate(PreparedInvocation(("/prepared/bootstrap",)), io=io)
+    with pytest.raises(ValidationError):
+        synthetic.execute(io, seconds=seconds)
+    assert synthetic.calls == []
+
+
 @pytest.mark.parametrize("code", [0, 1, 23, 254, 255])
 def test_status_and_raw_stream_evidence(synthetic: SyntheticSSH, code: int) -> None:
     synthetic.command = (

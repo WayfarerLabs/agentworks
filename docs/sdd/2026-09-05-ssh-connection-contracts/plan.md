@@ -240,6 +240,10 @@ work is proceeding in parallel in the transport lane, as confirmed by the operat
       [file-workflow record](phase2-results.md#owned-upload-delivery-over-ssh) scopes this to the
       private composition; production FileAccess, recovery faults and native platform acceptance
       remain open.
+- [x] Refuse input unsupported by SSH's byte adapter before trust admission, installed-client
+      probing or dispatch, including an already expired operation. This prepares for transport's
+      terminal input extension without mapping it to pipe EOF. The synthetic extension regression
+      proves passive refusal; native terminal implementation and proof remain open.
 - [ ] Finish the SSH LLD for R1-R5: complete connection validation, installed-client/path policy,
       config schema and conversion, trust preservation/enrollment/refusal, process/terminal and
       forwarding lifetimes, diagnostics and acceptance fixtures. Name the authority and refresh
