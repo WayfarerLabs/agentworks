@@ -32,7 +32,7 @@ from agentworks.execution.models import Command, Input, Lifetime, Output, Script
 from agentworks.execution.profiles import Protection
 from agentworks.execution.result import CheckedExecutionError, ExitCode
 from agentworks.operations import OperationOwner
-from tests.execution._bound_carrier_support import run_fixture_process
+from tests.execution._bound_carrier_support import fixture_dispatch, run_fixture_process
 from tests.execution.files._target_support import target_for_owner
 
 _LINUX_ONLY = pytest.mark.skipif(sys.platform != "linux", reason="inline execution requires Linux")
@@ -78,7 +78,7 @@ class LocalCarrier:
                 else ExitStatus(code=result.exit_status)
             )
         return CarrierReport(
-            Dispatch.SENT if result.started else Dispatch.NOT_SENT,
+            fixture_dispatch(result),
             completion,
             result.local_status,
             result.stdout,

@@ -37,7 +37,7 @@ from agentworks.execution.carrier import (
 )
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 from tests.execution._bound_carrier_support import bind_carrier as bind_carrier
-from tests.execution._bound_carrier_support import run_fixture_process
+from tests.execution._bound_carrier_support import fixture_dispatch, run_fixture_process
 from tests.execution.files._fixed_bundle_support import fixture_file_bundle
 from tests.execution.files._runtime_support import runtime_selection
 
@@ -87,7 +87,7 @@ class LocalCarrier:
                 else ExitStatus(code=result.exit_status)
             )
         return CarrierReport(
-            Dispatch.SENT if result.started else Dispatch.NOT_SENT,
+            fixture_dispatch(result),
             completion,
             result.local_status,
             result.stdout,

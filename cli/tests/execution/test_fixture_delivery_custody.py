@@ -6,7 +6,7 @@ import pytest
 
 from agentworks.execution import _process
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
-from agentworks.execution.carrier import CapturedOutput, CarrierIO, Deadline, PreparedInvocation
+from agentworks.execution.carrier import CapturedOutput, CarrierIO, Deadline, Dispatch, Failure, PreparedInvocation
 from agentworks.execution.carriers._subprocess import ProcessResult
 from tests.execution import _bound_carrier_support, test_account_resolution, test_execution_access, test_target_identity
 from tests.execution.files import (
@@ -33,6 +33,43 @@ _CARRIERS = (
     test_file_metadata_helper.LocalCarrier,
     test_file_object_helper.LocalCarrier,
 )
+
+
+@pytest.mark.parametrize("factory", _CARRIERS, ids=lambda factory: factory.__module__)
+def test_external_late_cleanup_preserves_original_admission_uncertainty(factory, monkeypatch):
+    carrier = factory()
+    custody = LocalDeliveryCustody()
+
+    def pending_then_cleaned(argv, **kwargs):
+        assert kwargs["custody"] is custody
+        custody.begin_process()
+        assert not custody.settled
+        result = ProcessResult(False, None, None, CapturedOutput(), CapturedOutput(), Failure.OBSERVATION)
+        assert custody.close(Deadline.after(3))
+        return result
+
+    monkeypatch.setattr(_bound_carrier_support, "run_process", pending_then_cleaned)
+    try:
+        report = carrier.execute(
+            PreparedInvocation((sys.executable, "-c", "pass")),
+            io=CarrierIO(),
+            deadline=Deadline.after(3),
+            custody=custody,
+        )
+        assert custody.settled
+        assert report.dispatch is Dispatch.UNKNOWN
+        assert report.failure is Failure.OBSERVATION
+    finally:
+        assert custody.close(Deadline.after(3))
+
+
+@pytest.mark.parametrize(
+    ("started", "failure", "expected"),
+    [(True, Failure.OBSERVATION, Dispatch.SENT), (False, None, Dispatch.NOT_SENT)],
+)
+def test_fixture_dispatch_preserves_positive_admission_facts(started, failure, expected):
+    result = ProcessResult(started, None, None, CapturedOutput(), CapturedOutput(), failure)
+    assert _bound_carrier_support.fixture_dispatch(result) is expected
 
 
 def test_later_cleanup_does_not_make_an_initially_pending_report_usable(monkeypatch):

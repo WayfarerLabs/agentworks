@@ -15,11 +15,10 @@ from agentworks.execution.carrier import (
     CarrierReport,
     ChannelFeatures,
     Deadline,
-    Dispatch,
     ExitStatus,
     PreparedInvocation,
 )
-from tests.execution._bound_carrier_support import run_fixture_process
+from tests.execution._bound_carrier_support import fixture_dispatch, run_fixture_process
 from tests.execution.files._fixed_bundle_support import fixture_file_bundle
 
 if TYPE_CHECKING:
@@ -94,7 +93,7 @@ class LocalCarrier:
                 else ExitStatus(code=result.exit_status)
             )
         return CarrierReport(
-            Dispatch.SENT if result.started else Dispatch.NOT_SENT,
+            fixture_dispatch(result),
             completion,
             result.local_status,
             result.stdout,

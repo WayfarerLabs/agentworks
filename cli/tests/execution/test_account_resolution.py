@@ -61,7 +61,7 @@ from agentworks.execution.carrier import (
     SinkOutput,
 )
 from agentworks.execution.models import Command
-from tests.execution._bound_carrier_support import run_fixture_process
+from tests.execution._bound_carrier_support import fixture_dispatch, run_fixture_process
 
 _HOST_TARGET = RuntimeTargetOS.DARWIN if sys.platform == "darwin" else RuntimeTargetOS.LINUX
 
@@ -305,7 +305,7 @@ class LocalCarrier:
                 else ExitStatus(code=result.exit_status)
             )
         return CarrierReport(
-            Dispatch.SENT if result.started else Dispatch.NOT_SENT,
+            fixture_dispatch(result),
             completion,
             result.local_status,
             result.stdout,

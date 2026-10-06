@@ -11,10 +11,19 @@ from agentworks.execution.carrier import (
     CarrierReport,
     ChannelFeatures,
     Deadline,
+    Dispatch,
+    Failure,
     PreparedInvocation,
 )
 from agentworks.execution.carriers._subprocess import ProcessResult, run_process
 from agentworks.operations import OperationOwner
+
+
+def fixture_dispatch(result: ProcessResult) -> Dispatch:
+    """Preserve immutable admission uncertainty despite later local cleanup."""
+    if result.started:
+        return Dispatch.SENT
+    return Dispatch.UNKNOWN if result.failure is Failure.OBSERVATION else Dispatch.NOT_SENT
 
 
 def run_fixture_process(

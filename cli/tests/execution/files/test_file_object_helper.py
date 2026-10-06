@@ -39,7 +39,7 @@ from agentworks.execution.carrier import (
 )
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 from tests.execution._bound_carrier_support import bind_carrier as bind_carrier
-from tests.execution._bound_carrier_support import run_fixture_process
+from tests.execution._bound_carrier_support import fixture_dispatch, run_fixture_process
 from tests.execution.files._runtime_support import runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the file-object helper requires Linux")
@@ -86,7 +86,7 @@ class LocalCarrier:
                 else ExitStatus(code=result.exit_status)
             )
         return CarrierReport(
-            Dispatch.SENT if result.started else Dispatch.NOT_SENT,
+            fixture_dispatch(result),
             completion,
             result.local_status,
             result.stdout,
