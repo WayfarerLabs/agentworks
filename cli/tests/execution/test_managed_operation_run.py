@@ -4,17 +4,25 @@ from __future__ import annotations
 
 import threading
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
-from agentworks.db import LifecycleObligationState
+from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _managed_operation_keeper as keeper_module
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, encode_file_record
 from agentworks.execution._managed_job_store import FactName
 from agentworks.execution._managed_operation_run import ManagedOperationRun
 from agentworks.execution._managed_request_adapter import _ManagedBody, compose_managed_body
-from agentworks.execution._managed_runs import ManagedLaunchState, ManagedRunRepository
+from agentworks.execution._managed_runs import (
+    ManagedLaunchState,
+    ManagedRunLifetime,
+    ManagedRunOwner,
+    ManagedRunOwnerKind,
+    ManagedRunReceipt,
+    ManagedRunRepository,
+)
 from agentworks.execution._managed_start_protocol import ManagedStartResult, encode_result
 from agentworks.execution._vm_guest_identity_protocol import vm_guest_boot_id
 from agentworks.execution.carrier import Deadline, Dispatch
@@ -23,7 +31,7 @@ from agentworks.operations import OperationOwner
 
 from . import test_managed_operation_keeper as keeper_tests
 from .test_managed_lease_exchange import PLAN, RUNTIME, ScriptedCarrier, _success
-from .test_managed_start_operation import GUEST, Carrier, _records
+from .test_managed_start_operation import GUEST, RUN, Carrier, _records, _spec
 
 bound = keeper_tests.bound
 # Reservation fences, start custody and renewal threads must also run on Windows.
@@ -187,7 +195,7 @@ def test_invalid_body_preparation_has_no_reservation_or_clock_effect(bound, faul
         assert run.keeper.drain(Deadline.after(1)).drained
 
 
-def test_start_requires_main_thread_before_any_effect(bound) -> None:
+def test_start_requires_originating_caller_thread_before_any_effect(bound) -> None:
     run, repository, start, clock = make_run(bound)
     errors = []
 
@@ -208,6 +216,56 @@ def test_start_requires_main_thread_before_any_effect(bound) -> None:
         worker.join(1)
         assert not worker.is_alive()
         assert run.keeper.drain(Deadline.after(1)).drained
+
+
+def test_non_main_originating_caller_owns_database_and_actual_start(tmp_path: Path) -> None:
+    errors = []
+    completed = []
+
+    def caller() -> None:
+        database = Database(tmp_path / "state.db")
+        try:
+            assert threading.current_thread() is not threading.main_thread()
+            owner = OperationOwner.acquire(
+                database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "caller"
+            )
+            spec = replace(
+                _spec(),
+                lifetime=ManagedRunLifetime.OPERATION,
+                owner=ManagedRunOwner(ManagedRunOwnerKind.OPERATION, owner.ownership.operation_id),
+            )
+            receipt = ManagedRunReceipt(RUN, RUN.unit_name, spec)
+            caller_id = threading.get_ident()
+
+            def ack(request):
+                assert threading.get_ident() == caller_id
+                assert request.job.operation_lease is not None
+                return _records(request, receipt=True)
+
+            run, repository, start, clock = make_run((database, owner, receipt), Carrier(ack))
+            try:
+                outcome = run.start(body_for(receipt), Deadline.after(1))
+                assert outcome is not None and not outcome.requires_owner_retention
+                assert run.reserved is not None and run.keeper._worker is not None
+                observed = repository.inspect(RUN)
+                assert observed is not None and observed.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
+                assert start.calls == 1 and clock.calls >= 1
+                completed.append(True)
+            finally:
+                assert run.keeper.drain(Deadline.after(1)).drained
+        except BaseException as error:
+            errors.append(error)
+        finally:
+            database.close()
+
+    worker = threading.Thread(target=caller)
+    try:
+        worker.start()
+        worker.join(2)
+        assert not worker.is_alive() and not errors and completed == [True]
+    finally:
+        worker.join(2)
+        assert not worker.is_alive()
 
 
 def test_post_reserve_carrier_refusal_retains_tombstone_and_clock(bound, monkeypatch) -> None:
@@ -351,8 +409,6 @@ def test_wrong_binding_refuses_before_reservation_and_clock(bound, fault) -> Non
     _, owner, receipt = bound
     options = {}
     if fault == "owner":
-        from agentworks.execution._managed_runs import ManagedRunOwner, ManagedRunOwnerKind
-
         receipt = replace(
             receipt, spec=replace(receipt.spec, owner=ManagedRunOwner(ManagedRunOwnerKind.OPERATION, "f" * 32))
         )
