@@ -110,8 +110,6 @@ def check_client_version(
     )
     if version.failure is not None:
         return version.failure
-    if not custody.settled:
-        return Failure.OBSERVATION
     match = _VERSION.match(version.stderr.data)
     if version.exit_status != 0 or match is None or tuple(map(int, match.groups())) < (8, 5):
         return Failure.DISPATCH

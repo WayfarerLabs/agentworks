@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field, replace
 from ipaddress import IPv4Address, IPv6Address
 from pathlib import Path
@@ -49,11 +50,14 @@ class SyntheticForwarding:
     version: str = "import sys; sys.stderr.write('OpenSSH_9.2p1\\n')"
     children: list[subprocess.Popen[bytes]] = field(default_factory=list)
     calls: list[list[str]] = field(default_factory=list)
+    resources: list[forwarding.OwnedForwarding] = field(default_factory=list)
 
     def open(self, seconds: float | None = 5) -> forwarding.OwnedForwarding:
-        return open_local_forwards(
+        resource = open_local_forwards(
             self.connection, [_forward()], deadline=Deadline.after(seconds), custody=self.custody
         )
+        self.resources.append(resource)
+        return resource
 
     def assert_closed(self) -> None:
         for child in self.children:
@@ -61,8 +65,8 @@ class SyntheticForwarding:
             assert all(pipe is None or pipe.closed for pipe in (child.stdin, child.stdout, child.stderr))
 
 
-@pytest.fixture
-def synthetic(
+@contextmanager
+def _synthetic(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
 ) -> Iterator[SyntheticForwarding]:
     tmp_path = tmp_path.resolve()
@@ -86,8 +90,50 @@ def synthetic(
         return child
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
-    yield value
-    assert custody.close(Deadline.after(3))
+    try:
+        yield value
+    finally:
+        try:
+            with ExitStack() as cleanup:
+                for resource in value.resources:
+                    cleanup.callback(resource.close)
+        finally:
+            assert custody.close(Deadline.after(3))
+        value.assert_closed()
+
+
+@pytest.fixture
+def synthetic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
+) -> Iterator[SyntheticForwarding]:
+    with _synthetic(tmp_path, monkeypatch, custody) as value:
+        yield value
+
+
+@pytest.mark.parametrize("cleanup_failure", [False, True])
+def test_fixture_teardown_closes_retained_sessions_after_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody, cleanup_failure: bool
+) -> None:
+    failure = RuntimeError("fixture failure")
+    with (
+        pytest.raises(RuntimeError) as caught,
+        _synthetic(tmp_path, monkeypatch, custody) as value,
+    ):
+        first = value.open()
+        second = value.open()
+        if cleanup_failure:
+            close = second.close
+
+            def fail_after_close() -> None:
+                close()
+                raise failure
+
+            monkeypatch.setattr(second, "close", fail_after_close)
+        else:
+            raise failure
+    assert caught.value is failure
+    assert not first._thread.is_alive() and not second._thread.is_alive()
+    assert custody.settled
     value.assert_closed()
 
 

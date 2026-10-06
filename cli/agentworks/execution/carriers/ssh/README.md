@@ -119,28 +119,30 @@ acceptance still requires native validation; POSIX permissions do not establish 
 
 ## New-resource enrollment
 
-The `enrollment` module provides `SSHCreationProvenance`, `enroll_new_target` and
-`recover_enrollment`. Only trusted creation-flow composition may assert a genuine new provider
-resource and its canonical endpoint. Ordinary carrier execution never enrolls. The new composition
-binding is still required before this maintenance API enables production use.
+The `enrollment` module declares `SSHCreationProvenance`, `enroll_new_target` and
+`recover_enrollment`, but the maintenance entry points are currently unusable: their probes have not
+adopted mandatory caller-held delivery custody. Production creation-flow binding is also
+unavailable. Ordinary carrier execution never enrolls.
 
-Enrollment requires a managed bundle and a finite deadline. It reserves one private candidate
-beneath that bundle for the stable creation ID, records the endpoint and current generation, and
-creates the primary known-host file exclusively. It makes one first-contact acknowledgment using
-`accept-new`, followed by a separate strict acknowledgment to verify retained trust. Both consume
-the same deadline and perform no requested application work; account startup hooks can still have
-side effects. Successful authentication alone does not prove OpenSSH saved the host key.
+Enrollment adoption requires an enclosing resource lifetime that retains the candidate-file lock
+until the exact native client settles, including pending construction and cleanup. Candidate bytes
+must receive their final flush after native settlement; an earlier flush can be followed by late
+client writes. Retaining process custody alone does not keep that lock held or establish durable
+candidate evidence. Do not use these entry points until that resource lifetime is implemented.
 
-Every failed or interrupted attempt retains its directory and any learned key. An existing candidate
-can only use strict recovery against the recorded active generation. Blocked or changed policy,
-missing metadata and unknown keys refuse. Keep the original bundle and creation ID during recovery;
-changing them to obtain another first-contact attempt is not recovery.
+The enrollment contract requires trusted creation provenance, a managed bundle and a finite
+deadline. One private candidate belongs to the stable creation ID and records the endpoint and base
+policy generation. First contact uses `accept-new`; a separate strict acknowledgment must verify
+retained trust before it becomes publishable evidence. Both probes share the deadline and perform no
+requested application work, though account startup hooks can have side effects. Authentication alone
+does not prove that OpenSSH saved a host key.
 
-A successful `SSHEnrollmentCandidate` is verified evidence awaiting explicit complete-policy
-import/refresh, using its expected generation. It is not an enabled connection. Include every
-applicable existing CA/revocation source when publishing, reconcile stale policy explicitly and keep
-ordinary connections on the managed reference. Never replace that reference with cached generation
-paths. The candidate remains after publication as evidence.
+Failed or interrupted enrollment must retain the directory and any learned key. An existing
+candidate permits only strict recovery against its recorded active generation. Keep the original
+bundle and creation ID; changing them to obtain another first-contact attempt is not recovery.
+Verified candidate evidence still requires explicit complete-policy import or refresh, including
+applicable CA and revocation sources and the expected generation. Ordinary connections stay on the
+managed trust reference. Candidate publication does not authorize deleting the retained evidence.
 
 ## Delivery and forwarding
 
