@@ -2692,8 +2692,18 @@ preceded the protected-store stop-intent read. The check now follows that read i
 affirmative gate release. Both packed Python 3.11/3.12 regressions fail at the old pin by observing
 actual body markers; corrected cases prove no entry, retained launch evidence and exact setup-child
 reaping. Delayed stop intent still closes the gate through the existing cleanup path. This removes
-avoidable intervening I/O, not arbitrary CPU-preemption races. Corrected whole-unit review and full
-validation remain required before publication.
+avoidable intervening I/O, not arbitrary CPU-preemption races.
+
+All three independent whole-unit lanes clear `a2d27446c`: project passes 322 focused cases,
+complexity passes 848 and generic correctness passes 897, each with exit 0 in its own tree. Both
+original delayed-read probes now pass. The complexity lane also restores the old release ordering
+and observes both packed Python regressions fail before restoring the reviewed source. The complete
+lead suite at that pin passes 15,709 tests with 49 skips and 27 existing fork warnings, exit 0. Full
+Ruff/format (1,285 files), strict mypy (1,249 sources), exact CI typer isolation, file quality,
+locked-SDD checks against fresh main `cea5e8523`, Rulesync and whitespace all exit 0. Website Python
+(160 tests), Node (103 tests), all four builds and both deterministic comparisons also exit 0. These
+are local source and protocol results, not native cgroup, SSH or QGA acceptance. The keeper,
+recovery, complete RunContext and full-scope public feedback round remain open.
 
 The latest hosted Windows failure stopped at the migration fixture's five-second child-commit
 barrier before its database assertions. The private fixture correction uses generous finite
