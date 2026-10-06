@@ -782,7 +782,9 @@ Every LIVE clock or publication repeats the existing lifecycle admission fence a
 refreshed exact row without changing its payload. A renewal cycle shares one five-second delivery
 budget, uses the sampled guest expiry and starts at nominal ten-second intervals without catch-up
 bursts. Only an exact clean acknowledged start with settled delivery permits one renewal worker;
-unknown starts, clocks or publications never replay or obtain further renewal authority.
+unknown starts, clocks or publications never replay or obtain further renewal authority. The keeper
+retains a failure flag, not exception objects whose tracebacks could retain caller input. Original
+exceptions still escape unchanged on the caller path.
 
 The owning composition publishes ordinary close intent before draining the keeper and before any
 guarded owner bookkeeping. Drain requires independent worker-completion evidence before closing
