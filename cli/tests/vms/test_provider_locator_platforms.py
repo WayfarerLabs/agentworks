@@ -13,7 +13,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLocatorUnavailable
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
-from agentworks.errors import ConnectivityError, LimitExceededError, StateError
+from agentworks.errors import ConfigError, ConnectivityError, LimitExceededError, StateError
 from agentworks.execution.carrier import Deadline
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
@@ -47,14 +47,12 @@ def test_lima_locator_is_unavailable_without_provider_lookup(monkeypatch: pytest
     )
 
 
-def test_proxmox_locator_is_unavailable_without_provider_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_proxmox_locator_requires_scoped_configuration_without_legacy_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
     platform = _proxmox()
     monkeypatch.setattr(platform, "_api", lambda _ctx: pytest.fail("unexpected lookup"))
 
-    assert (
+    with pytest.raises(ConfigError):
         platform.observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))
-        == ProviderLocatorUnavailable()
-    )
 
 
 def test_wsl2_locator_uses_one_bounded_registration_probe(monkeypatch: pytest.MonkeyPatch) -> None:

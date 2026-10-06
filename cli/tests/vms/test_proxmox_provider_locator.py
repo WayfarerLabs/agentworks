@@ -1,0 +1,304 @@
+"""Live generation observation boundaries without provider access."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
+from unittest.mock import MagicMock
+
+import pytest
+
+from agentworks.capabilities.base import RunContext
+from agentworks.capabilities.vm_platform.base import ProviderLocator
+from agentworks.db import VMRow
+from agentworks.errors import (
+    AuthorizationError,
+    ConfigError,
+    ConnectivityError,
+    LimitExceededError,
+    StateError,
+    ValidationError,
+)
+from agentworks.execution.carrier import Deadline
+from agentworks.execution.carriers.proxmox import ProxmoxConnection, _ProxmoxWire
+from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+
+_GENERATION = "613ea898-8445-4e6e-82c7-f6e9ae8d7235"
+
+
+def _vm() -> VMRow:
+    return cast(VMRow, SimpleNamespace(name="test-vm", platform_metadata={"vmid": "123", "node": "node1"}))
+
+
+def _platform(**overrides: object) -> ProxmoxPlatform:
+    return ProxmoxPlatform(
+        "proxmox",
+        {"api_url": "https://pve.example:8006", "node": "node1", "token_id": "user@pve!token", **overrides},
+    )
+
+
+@pytest.fixture
+def observation(monkeypatch: pytest.MonkeyPatch) -> tuple[ProxmoxPlatform, MagicMock]:
+    platform = _platform()
+    connection = ProxmoxConnection("https://pve.example:8006", "node1", 123, "user@pve!token", "secret-canary")
+    monkeypatch.setattr(platform, "_execution_connection", lambda *_args: connection)
+    for name in ("_api", "start", "native_transport"):
+        monkeypatch.setattr(platform, name, MagicMock(side_effect=AssertionError("unexpected legacy or start call")))
+    monkeypatch.setattr(_ProxmoxWire, "request", MagicMock(side_effect=AssertionError("unexpected QGA request")))
+    response = MagicMock(return_value={"vmgenid": _GENERATION})
+    monkeypatch.setattr(_ProxmoxWire, "request_current_config", response)
+    return platform, response
+
+
+def test_generation_is_live_bounded_and_opaque(observation: tuple[ProxmoxPlatform, MagicMock]) -> None:
+    platform, request = observation
+    result = platform.observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))
+    assert isinstance(result, ProviderLocator)
+    assert len(result.token.encode()) < 4096
+    assert all(value not in result.token for value in (_GENERATION, "pve.example", "secret-canary"))
+    request.assert_called_once()
+    assert 0 < request.call_args.kwargs["timeout"] <= 10
+    request.return_value = {"vmgenid": "7884ca9f-9142-4bc9-a6d5-5a47d7358fe1"}
+    assert platform.observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10)) != result
+
+
+@pytest.mark.parametrize(
+    "generation",
+    [
+        None,
+        "",
+        "0",
+        "1",
+        0,
+        1,
+        False,
+        [],
+        {},
+        "not-a-uuid",
+        "00000000-0000-0000-0000-000000000000",
+        _GENERATION.replace("-", ""),
+        "{" + _GENERATION + "}",
+        " " + _GENERATION,
+        _GENERATION + "\n",
+    ],
+)
+def test_missing_disabled_or_noncanonical_generation_is_failed_evidence(
+    observation: tuple[ProxmoxPlatform, MagicMock], generation: object
+) -> None:
+    platform, request = observation
+    request.return_value = {} if generation is None else {"vmgenid": generation}
+    with pytest.raises(StateError):
+        platform.observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))
+
+
+def test_uuid_case_normalizes(observation: tuple[ProxmoxPlatform, MagicMock]) -> None:
+    platform, request = observation
+    first = platform.observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))
+    request.return_value = {"vmgenid": _GENERATION.upper()}
+    assert platform.observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10)) == first
+
+
+@pytest.mark.parametrize("field", ["node", "ca_bundle", "token_id", "token_secret", "api_url", "vmid"])
+def test_namespace_uses_only_exact_origin_vmid_and_generation(
+    observation: tuple[ProxmoxPlatform, MagicMock], monkeypatch: pytest.MonkeyPatch, field: str
+) -> None:
+    platform, _request = observation
+    connection = ProxmoxConnection("https://pve.example:8006", "node1", 123, "user@pve!token", "secret-canary")
+    first = platform.observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))
+    values: dict[str, object] = {
+        "node": "node2",
+        "ca_bundle": Path("rotated-ca.pem"),
+        "token_id": "other@pve!token",
+        "token_secret": "rotated-secret",
+        "api_url": "https://pve.example:8006/",
+        "vmid": 124,
+    }
+    changed = replace(connection, **{field: values[field]})
+    monkeypatch.setattr(platform, "_execution_connection", lambda *_args: changed)
+    second = platform.observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))
+    assert (second == first) == (field not in ("api_url", "vmid"))
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://PVE.example:8006",
+        "https://pve.example:8006/",
+        "https://alias.example:8006",
+        "https://pve.example",
+        "https://pve.example:443",
+        "https://" + "a" * 5000 + ".example",
+    ],
+)
+def test_exact_configured_origin_remains_a_distinct_bounded_namespace(
+    monkeypatch: pytest.MonkeyPatch, origin: str
+) -> None:
+    request = MagicMock(return_value={"vmgenid": _GENERATION})
+    monkeypatch.setattr(_ProxmoxWire, "request_current_config", request)
+    ctx = RunContext(secrets=SimpleNamespace(get=lambda _name: "secret-canary"))
+    vm = _vm()
+    metadata = dict(vm.platform_metadata)
+    initial = _platform().observe_provider_locator(vm, ctx, deadline=Deadline.after(10))
+    changed = _platform(api_url=origin).observe_provider_locator(vm, ctx, deadline=Deadline.after(10))
+    assert isinstance(changed, ProviderLocator)
+    assert changed != initial
+    assert len(changed.token.encode()) < 4096
+    assert vm.platform_metadata == metadata
+
+
+def test_actual_connection_and_fixed_request_use_scoped_token_without_legacy_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform = _platform(token_secret="locator-token", node="configured-node")
+    for method in ("_api", "native_transport", "status", "start"):
+        monkeypatch.setattr(platform, method, MagicMock(side_effect=AssertionError("unexpected legacy or active call")))
+    process = MagicMock(returncode=0)
+    process.communicate.return_value = (json.dumps({"data": {"vmgenid": _GENERATION}}).encode(), None)
+    spawn = MagicMock(return_value=process)
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    secret = MagicMock(return_value="secret-canary")
+    ctx = RunContext(secrets=SimpleNamespace(get=secret))
+    result = platform.observe_provider_locator(_vm(), ctx, deadline=Deadline.after(10))
+    assert isinstance(result, ProviderLocator)
+    payload = json.loads(process.communicate.call_args.args[0])
+    assert payload["current_config"] is True
+    assert payload["method"] == "GET" and payload["suffix"] is None and payload["body"] is None
+    assert payload["connection"]["api_url"] == platform.config.api_url
+    assert payload["connection"]["node"] == "node1"
+    assert payload["connection"]["vmid"] == 123
+    assert payload["connection"]["token_secret"] == "secret-canary"
+    secret.assert_called_once_with("locator-token")
+    spawn.assert_called_once()
+    assert "secret-canary" not in repr(spawn.call_args)
+    assert 0 < process.communicate.call_args.kwargs["timeout"] <= payload["timeout"] <= 10
+
+
+@pytest.mark.parametrize(
+    "body", [b"secret-canary", b"[]", b'{"data":null}', b'{"data":[]}', b'{"data":"secret-canary"}']
+)
+def test_invalid_provider_envelope_is_sanitized_without_retry(monkeypatch: pytest.MonkeyPatch, body: bytes) -> None:
+    process = MagicMock(returncode=0)
+    process.communicate.return_value = (body, None)
+    spawn = MagicMock(return_value=process)
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    ctx = RunContext(secrets=SimpleNamespace(get=lambda _name: "secret-canary"))
+    with pytest.raises(ConnectivityError) as raised:
+        _platform().observe_provider_locator(_vm(), ctx, deadline=Deadline.after(10))
+    spawn.assert_called_once()
+    assert "secret-canary" not in str(raised.value)
+    assert raised.value.__cause__ is None and raised.value.__context__ is None
+
+
+@pytest.mark.parametrize(
+    "deadline",
+    [Deadline(None), Deadline(-1.0), cast(Deadline, SimpleNamespace(expires_at=1e10, remaining=lambda: 1.0))],
+)
+def test_invalid_or_expired_budget_never_prepares_secrets(monkeypatch: pytest.MonkeyPatch, deadline: Deadline) -> None:
+    platform = _platform()
+    prepare = MagicMock(side_effect=AssertionError("unexpected secret preparation"))
+    monkeypatch.setattr(platform, "_execution_connection", prepare)
+    with pytest.raises((ValidationError, LimitExceededError)):
+        platform.observe_provider_locator(_vm(), RunContext(), deadline=deadline)
+    prepare.assert_not_called()
+
+
+@pytest.mark.parametrize("expire_at", [2, 3, 4])
+def test_expiry_after_preparation_or_response_refuses_observation(
+    observation: tuple[ProxmoxPlatform, MagicMock], monkeypatch: pytest.MonkeyPatch, expire_at: int
+) -> None:
+    platform, request = observation
+    checks = 0
+
+    def remaining(*_args: object, **_kwargs: object) -> float:
+        nonlocal checks
+        checks += 1
+        if checks == expire_at:
+            raise LimitExceededError("expired")
+        return 1
+
+    monkeypatch.setattr("agentworks.plugins.proxmox.platform.provider_locator_remaining", remaining)
+    with pytest.raises(LimitExceededError):
+        platform.observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))
+    assert request.call_count == (0 if expire_at == 2 else 1)
+
+
+@pytest.mark.parametrize("expired", [False, True])
+def test_secret_resolution_consumes_the_original_deadline(monkeypatch: pytest.MonkeyPatch, expired: bool) -> None:
+    now = [100.0]
+    monkeypatch.setattr("time.monotonic", lambda: now[0])
+
+    def secret(_name: str) -> str:
+        now[0] = 106.0 if expired else 102.0
+        return "secret-canary"
+
+    request = MagicMock(return_value={"vmgenid": _GENERATION})
+    monkeypatch.setattr(_ProxmoxWire, "request_current_config", request)
+    ctx = RunContext(secrets=SimpleNamespace(get=secret))
+    if expired:
+        with pytest.raises(LimitExceededError):
+            _platform().observe_provider_locator(_vm(), ctx, deadline=Deadline(105))
+        request.assert_not_called()
+    else:
+        assert isinstance(_platform().observe_provider_locator(_vm(), ctx, deadline=Deadline(105)), ProviderLocator)
+        assert request.call_args.kwargs["timeout"] == 3
+
+
+@pytest.mark.parametrize("failure", [OSError, TimeoutError])
+def test_late_provider_failure_still_checks_deadline(
+    observation: tuple[ProxmoxPlatform, MagicMock], monkeypatch: pytest.MonkeyPatch, failure: type[Exception]
+) -> None:
+    platform, request = observation
+    request.side_effect = failure("secret-canary")
+    checks = MagicMock(side_effect=[1.0, 1.0, LimitExceededError("expired")])
+    monkeypatch.setattr("agentworks.plugins.proxmox.platform.provider_locator_remaining", checks)
+    with pytest.raises(LimitExceededError):
+        platform.observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))
+    assert checks.call_count == 3
+
+
+def test_unverified_configuration_never_prepares_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    secret = MagicMock(side_effect=AssertionError("unexpected secret access"))
+    monkeypatch.setattr(RunContext, "secret", secret)
+    with pytest.raises(ConfigError):
+        _platform(verify_ssl=False).observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))
+    secret.assert_not_called()
+
+
+@pytest.mark.parametrize("error_type", [ConfigError, AuthorizationError])
+def test_configuration_and_secret_refusal_preserve_original_error(
+    monkeypatch: pytest.MonkeyPatch, error_type: type[Exception]
+) -> None:
+    platform = _platform()
+    error = error_type("refused")
+    secret = MagicMock(side_effect=error)
+    request = MagicMock(side_effect=AssertionError("unexpected request"))
+    monkeypatch.setattr(RunContext, "secret", secret)
+    monkeypatch.setattr(_ProxmoxWire, "request_current_config", request)
+    with pytest.raises(error_type) as raised:
+        platform.observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))
+    assert raised.value is error
+    request.assert_not_called()
+
+
+def test_provider_failure_is_sanitized(observation: tuple[ProxmoxPlatform, MagicMock]) -> None:
+    platform, request = observation
+    request.side_effect = OSError("secret-canary")
+    with pytest.raises(ConnectivityError) as raised:
+        platform.observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))
+    assert "secret-canary" not in str(raised.value)
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+
+
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit, GeneratorExit])
+def test_control_flow_propagates(
+    observation: tuple[ProxmoxPlatform, MagicMock], interruption: type[BaseException]
+) -> None:
+    platform, request = observation
+    request.side_effect = interruption
+    with pytest.raises(interruption):
+        platform.observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))

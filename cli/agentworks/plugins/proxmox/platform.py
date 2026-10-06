@@ -3,6 +3,8 @@ via the Proxmox REST API."""
 
 from __future__ import annotations
 
+import hashlib
+import json
 import sys
 import time
 import urllib.parse
@@ -14,12 +16,13 @@ from pydantic import Field, model_validator
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import (
+    ProviderLocator,
     ProviderLocatorObservation,
-    ProviderLocatorUnavailable,
     ProvisionRequest,
     ProvisionResult,
     VMPlatform,
     execution_power_remaining,
+    provider_locator_remaining,
 )
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
@@ -28,7 +31,7 @@ from agentworks.capabilities.vm_platform.debian_release import (
 )
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import ConfigError, ProvisioningError, StateError
+from agentworks.errors import ConfigError, ConnectivityError, ProvisioningError, StateError
 from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
 from agentworks.plugins.proxmox.teardown import (
     rollback_create_on_interrupt,
@@ -564,9 +567,59 @@ class ProxmoxPlatform(VMPlatform):
         *,
         deadline: Deadline,
     ) -> ProviderLocatorObservation:
-        """PVE exposes no stable cluster namespace for an opaque locator."""
-        del vm, ctx, deadline
-        return ProviderLocatorUnavailable()
+        """Observe current generation under the exact configured verified authority.
+
+        Node is a route, not incarnation identity. A different origin spelling
+        requires explicit re-adoption. This observation does not establish guest
+        identity, predecessor drain or cancellation of queued requests.
+        Local configuration and secret preparation are checked against the
+        deadline, but cannot themselves be preempted by this hook.
+        """
+        from agentworks.execution.carriers.proxmox import _ProxmoxWire
+
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        connection = self._execution_connection(vm, ctx)
+        timeout = provider_locator_remaining(deadline, vm_name=vm.name)
+        try:
+            response = _ProxmoxWire(connection).request_current_config(timeout=timeout)
+        except Exception:
+            response = None
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        if response is None:
+            raise ConnectivityError(
+                f"Could not observe Proxmox generation for VM '{vm.name}'",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+
+        # UUID parsing accepts braces and raw hex; only canonical hyphenated
+        # provider strings establish generation evidence at this boundary.
+        generation = response.get("vmgenid")
+        parsed_generation = None
+        if type(generation) is str:
+            try:
+                candidate = uuid.UUID(generation)
+                if candidate.int != 0 and str(candidate) == generation.lower():
+                    parsed_generation = str(candidate)
+            except ValueError:
+                pass
+        if parsed_generation is None:
+            raise StateError(
+                f"Proxmox VM '{vm.name}' has no usable current generation",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+
+        # A versioned JSON array frames fields independently without exposing
+        # provider facts or restricting the configured namespace's length.
+        framed = json.dumps(
+            ("agentworks.proxmox.provider-locator.v1", connection.api_url, connection.vmid, parsed_generation),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        locator = ProviderLocator("proxmox:v1:" + hashlib.sha256(framed).hexdigest())
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        return locator
 
     def resolve_native_execution_binding(
         self,
