@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import sys
 from collections.abc import Iterator
 from dataclasses import replace
@@ -92,7 +93,7 @@ class SyntheticCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         del invocation, io
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         del invocation, io
         self.calls += 1
@@ -764,7 +765,7 @@ def test_owner_close_during_dispatch_retains_the_interrupted_attempt(
     _, owner, borrow = owned
 
     class ClosingCarrier(SyntheticCarrier):
-        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
             self.validate(invocation, io=io)
             del invocation, io, deadline
             self.calls += 1

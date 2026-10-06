@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import os
 import sys
 from dataclasses import dataclass
@@ -270,7 +271,7 @@ class _PreHelperFailureCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         pass
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         del io, deadline
         self.calls += 1

@@ -7,6 +7,7 @@ server compatibility or live SSH delivery.
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import subprocess
 import sys
 from pathlib import Path
@@ -73,7 +74,7 @@ def test_framing_failure_diagnostics_do_not_include_payloads() -> None:
         def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
             del invocation, io
 
-        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
             del invocation, io, deadline
             return CarrierReport(
                 Dispatch.SENT,

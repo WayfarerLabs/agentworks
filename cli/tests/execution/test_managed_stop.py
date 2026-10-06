@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import hashlib
 import json
 import os
@@ -138,7 +139,7 @@ class Carrier:
         self.validations += 1
         assert isinstance(io.input, FiniteInput) and io.input.data.startswith(FIXED_BUNDLE.prefix)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.calls += 1
         assert isinstance(io.input, FiniteInput) and isinstance(io.output, SinkOutput)
         request = decode_request(io.input.data[len(FIXED_BUNDLE.prefix) :])

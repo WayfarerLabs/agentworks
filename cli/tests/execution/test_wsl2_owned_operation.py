@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import sys
 from contextlib import closing
 from pathlib import Path
@@ -162,10 +163,10 @@ def test_hold_reads_and_settles_only_supplied_owners_database(
         carrier = GuestThenFileCarrier(database)
 
         def execute(
-            selected: WSL2Carrier, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline
+            selected: WSL2Carrier, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None
         ) -> CarrierReport:
             assert selected.connection == WSL2Connection("Ubuntu", "root", "wsl.exe")
-            return carrier.execute(invocation, io=io, deadline=deadline)
+            return carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
 
         monkeypatch.setattr(WSL2Carrier, "execute", execute)
         platform = Mock(spec=WSL2Platform)

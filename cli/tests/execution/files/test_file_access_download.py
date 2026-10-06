@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import sys
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
@@ -57,12 +58,12 @@ def test_live_stream_file_access_reduction_preserves_typed_failure_and_remote_cu
         def __init__(self) -> None:
             super().__init__(live_stdio=True)
 
-        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
             if self.calls == 1 and fault == "scratch_refusal":
                 held = tuple(scratch.iterdir())
                 assert len(held) == 1
                 (held[0] / "data").write_bytes(b"changed-scratch-canary")
-            report = super().execute(invocation, io=io, deadline=deadline)
+            report = super().execute(invocation, io=io, deadline=deadline, custody=custody)
             if self.calls == 2 and fault == "missing_completion":
                 return replace(report, completion=None)
             if self.calls == 3 and fault == "scratch_refusal":

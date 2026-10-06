@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import json
 import os
 import socket
@@ -44,6 +45,7 @@ pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the metadata he
 
 class LocalCarrier:
     def __init__(self, *, guest_deadline_grace: bool = False) -> None:
+        self.local_delivery = LocalDeliveryCustody()
         self.calls = 0
         self.invocation: PreparedInvocation | None = None
         self.io: CarrierIO | None = None
@@ -56,13 +58,13 @@ class LocalCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         del invocation, io
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
         self.invocation = invocation
         self.io = io
         process_deadline = Deadline.after(2) if self._guest_deadline_grace else deadline
-        result = run_process(list(invocation.argv), io=io, deadline=process_deadline)
+        result = run_process(list(invocation.argv), io=io, deadline=process_deadline, custody=custody if custody is not None else self.local_delivery)
         completion = None
         if result.exit_status is not None:
             completion = (

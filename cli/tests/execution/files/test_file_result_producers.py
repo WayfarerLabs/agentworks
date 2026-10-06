@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import os
 import stat
 import sys
@@ -58,10 +59,10 @@ class _ReturnedReportCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self._carrier.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
-        report = self._carrier.execute(invocation, io=io, deadline=deadline)
+        report = self._carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
         if self.calls == self._expiry_call:
             object.__setattr__(deadline, "expires_at", 0.0)
         if self.calls == self._missing_completion_call:

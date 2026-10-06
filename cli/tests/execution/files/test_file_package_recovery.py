@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import os
 import sys
 from dataclasses import replace
@@ -131,8 +132,8 @@ def test_lost_advance_reply_reuses_durable_proposal(context) -> None:
     recovered, fence = _recover(context, row, "b" * 32)
 
     class LostReply(LocalCarrier):
-        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-            super().execute(invocation, io=io, deadline=deadline)
+        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+            super().execute(invocation, io=io, deadline=deadline, custody=custody)
             raise RuntimeError("lost advance reply")
 
     with pytest.raises(RuntimeError, match="lost advance reply"):

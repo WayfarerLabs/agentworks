@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -247,7 +248,7 @@ def test_carrier_exception_preserves_original_with_custody_fact(tmp_path: Path) 
     failure = KeyboardInterrupt("carrier interrupted")
 
     class InterruptedCarrier(ExchangeCarrier):
-        def execute(self, invocation, *, io, deadline):  # type: ignore[no-untyped-def]
+        def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None):  # type: ignore[no-untyped-def]
             self.calls += 1
             raise failure
 

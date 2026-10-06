@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -137,7 +138,7 @@ class TranscriptCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         del invocation, io
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         del deadline
         self.calls += 1
@@ -797,7 +798,7 @@ def test_control_interruption_propagates_with_operation_specific_uncertainty(
         def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
             del invocation, io
 
-        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
             self.validate(invocation, io=io)
             del invocation, io, deadline
             raise KeyboardInterrupt

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from dataclasses import replace
 from pathlib import Path
 
@@ -396,10 +397,10 @@ def test_user_default_shell_is_observed_before_reservation(tmp_path: Path) -> No
     owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "start")
 
     class DualCarrier(Carrier):
-        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
             assert isinstance(io.input, FiniteInput)
             if io.input.data.startswith(FIXED_BUNDLE.prefix):
-                return super().execute(invocation, io=io, deadline=deadline)
+                return super().execute(invocation, io=io, deadline=deadline, custody=custody)
             self.calls += 1
             assert isinstance(io.output, SinkOutput)
             nonce = invocation.argv[invocation.argv.index("agentworks-runtime-prerequisite") + 1]

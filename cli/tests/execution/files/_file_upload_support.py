@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import os
 import sys
 from typing import TYPE_CHECKING
@@ -69,18 +70,18 @@ class LostCallStdoutCarrier:
     def validate(self, invocation, *, io) -> None:
         self._carrier.validate(invocation, io=io)
 
-    def execute(self, invocation, *, io, deadline) -> CarrierReport:
+    def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
         if self.calls != self._lost_call:
-            return self._carrier.execute(invocation, io=io, deadline=deadline)
+            return self._carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
         assert isinstance(io.output, SinkOutput)
         hidden = CarrierIO(
             input=io.input,
             output=SinkOutput(_DiscardSink(), io.output.stderr, require_live=False),
             sensitive=io.sensitive,
         )
-        return self._carrier.execute(invocation, io=hidden, deadline=deadline)
+        return self._carrier.execute(invocation, io=hidden, deadline=deadline, custody=custody)
 
 
 def owner(database: Database) -> OperationOwner:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import os
 import sys
 from pathlib import Path
@@ -49,7 +50,7 @@ class InterruptingCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         del invocation, io
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         del invocation, io, deadline
         self.calls += 1
@@ -77,7 +78,7 @@ class ReentrantCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self.inner.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         if self.calls == 0:
             with pytest.raises(StateError):
@@ -93,7 +94,7 @@ class ReentrantCarrier:
                 )
             self.rejected = True
         self.calls += 1
-        return self.inner.execute(invocation, io=io, deadline=deadline)
+        return self.inner.execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 class BlockingCarrier:
@@ -110,14 +111,14 @@ class BlockingCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self.inner.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         if self.calls == 0:
             self.entered.set()
             if not self.release.wait(timeout=10):
                 raise RuntimeError("timed out waiting to release the attached call")
         self.calls += 1
-        return self.inner.execute(invocation, io=io, deadline=deadline)
+        return self.inner.execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 class ObligationInspectingCarrier:
@@ -134,12 +135,12 @@ class ObligationInspectingCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self._inner.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         rows = self._database.operations.list_lifecycle_obligations(self._owner.ownership)
         assert len(rows) == 1
         self.payloads.append(decode_file_call_obligation(rows[0].payload))
-        return self._inner.execute(invocation, io=io, deadline=deadline)
+        return self._inner.execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 class ClosingLostCarrier:
@@ -156,13 +157,13 @@ class ClosingLostCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self._inner.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
         if self.calls == self._lost_call:
             with pytest.raises(StateError):
                 self._owner.close()
-        return self._inner.execute(invocation, io=io, deadline=deadline)
+        return self._inner.execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 @pytest.fixture

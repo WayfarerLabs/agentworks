@@ -6,6 +6,7 @@ are mocked. Native credential transitions and root-owned scratch are not proved.
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import gc
 import json
 import os
@@ -256,7 +257,7 @@ class _PackedCarrier:
         self.observed = VMGuestIdentity(_MARKER, BOOT, 4096)
         self.scratch: Path | None = None
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         assert isinstance(io.input, FiniteInput) and isinstance(io.output, SinkOutput)
         self.calls += 1
         nonce = invocation.argv[invocation.argv.index("agentworks-runtime-prerequisite") + 1]
@@ -299,7 +300,7 @@ class _RouteCarrier:
         self.prepared_guest: VMGuestIdentity | None = None
 
     def execute(
-        self, carrier: WSL2Carrier, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline
+        self, carrier: WSL2Carrier, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None
     ) -> CarrierReport:
         claim = self.guest.database.operations.inspect(_scope())
         assert claim is not None and claim.state is OperationClaimState.POSSIBLE_DISPATCH
@@ -310,7 +311,7 @@ class _RouteCarrier:
         assert carrier.connection.distribution == "Ubuntu" and carrier.connection.wsl_executable == "wsl.exe"
         if carrier.connection.user == "root":
             assert self.guest.calls == 0 and isinstance(io.input, EndOfInput)
-            return self.guest.execute(invocation, io=io, deadline=deadline)
+            return self.guest.execute(invocation, io=io, deadline=deadline, custody=custody)
         assert carrier.connection.user == "admin" and self.guest.calls == 1
         if isinstance(io.input, FiniteInput):
             try:
@@ -318,13 +319,13 @@ class _RouteCarrier:
             except (TypeError, ValueError):
                 request = None
             if isinstance(request, dict) and "account" in request:
-                return self.accounts.execute(invocation, io=io, deadline=deadline)
+                return self.accounts.execute(invocation, io=io, deadline=deadline, custody=custody)
         self.local_deadlines.append(deadline)
         for row in self.guest.database.operations.list_lifecycle_obligations(claim.ownership):
             if row.obligation_kind == "file-call":
                 assert row.payload_version == 2
                 self.file_records.append(row.payload)
-        return self.local.execute(invocation, io=io, deadline=deadline)
+        return self.local.execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 def _install_route(

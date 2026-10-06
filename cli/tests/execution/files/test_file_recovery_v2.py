@@ -7,6 +7,7 @@ not prove native privilege transitions, guest effects or predecessor drain.
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from dataclasses import replace
 from typing import Any
 from unittest.mock import Mock
@@ -158,8 +159,8 @@ def _run(adapter, family: str, deadline: Deadline, *carrier):
 def _wire(monkeypatch, context) -> FileWire:
     wire = FileWire(context)
 
-    def execute(self, invocation, *, io, deadline):
-        return wire.execute(invocation, io=io, deadline=deadline)
+    def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None):
+        return wire.execute(invocation, io=io, deadline=deadline, custody=custody)
 
     monkeypatch.setattr(WSL2Carrier, "execute", execute)
     return wire

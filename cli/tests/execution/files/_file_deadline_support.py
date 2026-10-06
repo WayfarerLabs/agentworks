@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import threading
 import time
 from typing import TYPE_CHECKING
@@ -83,7 +84,7 @@ class AdmittedTimeoutCarrier:
         invocation: PreparedInvocation,
         *,
         io: CarrierIO,
-        deadline: Deadline,
+        deadline: Deadline, custody: LocalDeliveryCustody | None = None,
     ) -> CarrierReport:
         self.validate(invocation, io=io)
         if self._startup_delay:
@@ -103,4 +104,4 @@ class AdmittedTimeoutCarrier:
             ),
             sensitive=io.sensitive,
         )
-        return self._carrier.execute(invocation, io=wrapped, deadline=deadline)
+        return self._carrier.execute(invocation, io=wrapped, deadline=deadline, custody=custody)

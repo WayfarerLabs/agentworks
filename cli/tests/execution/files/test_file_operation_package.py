@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import os
 import secrets
 import sqlite3
@@ -46,13 +47,13 @@ class RowCheckingCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self._inner.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         (row,) = self._database.operations.list_lifecycle_obligations(self._owner.ownership)
         call = decode_file_call_obligation(row.payload)
         assert call.family is FileCallFamily.PACKAGE_UPLOAD
         assert call.batch_index == self.expected_index
         assert call.token is not None
-        return self._inner.execute(invocation, io=io, deadline=deadline)
+        return self._inner.execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 class InterruptCarrier:
@@ -67,7 +68,7 @@ class InterruptCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self._inner.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         raise self._control
 
 

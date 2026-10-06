@@ -6,6 +6,7 @@ with fixture admission, so these tests do not prove native root or PVE behavior.
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import builtins
 import json
 import os
@@ -81,7 +82,7 @@ class _Route:
         self.ownership: OperationOwnership | None = None
         self.deadlines: list[Deadline] = []
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         claim = self.database.operations.inspect(_scope())
         assert claim is not None and claim.state is OperationClaimState.POSSIBLE_DISPATCH
         if self.ownership is None:
@@ -89,15 +90,15 @@ class _Route:
         assert claim.ownership == self.ownership
         self.deadlines.append(deadline)
         if self.guest.calls == 0:
-            return self.guest.execute(invocation, io=io, deadline=deadline)
+            return self.guest.execute(invocation, io=io, deadline=deadline, custody=custody)
         if isinstance(io.input, FiniteInput):
             try:
                 request = json.loads(io.input.data)
             except ValueError:
                 request = None
             if isinstance(request, dict) and "account" in request:
-                return self.accounts.execute(invocation, io=io, deadline=deadline)
-        return self.local.execute(invocation, io=io, deadline=deadline)
+                return self.accounts.execute(invocation, io=io, deadline=deadline, custody=custody)
+        return self.local.execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 def _install(database: Database, monkeypatch: pytest.MonkeyPatch) -> tuple[ProxmoxPlatform, _Route]:

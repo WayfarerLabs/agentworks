@@ -6,6 +6,7 @@ discovery, availability or drain evidence.
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import json
 import sys
 from dataclasses import replace
@@ -96,7 +97,7 @@ class FixedCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         pass
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         nonce = invocation.argv[invocation.argv.index("agentworks-runtime-prerequisite") + 1]
         account = json.loads(io.input.data)["account"] if isinstance(io.input, FiniteInput) else "guest"
         self.calls.append(account)

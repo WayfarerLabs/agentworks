@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import json
 import os
 import subprocess
@@ -117,7 +118,7 @@ class TranscriptCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         pass
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         del deadline
         self.calls += 1
@@ -140,22 +141,22 @@ class TranscriptCarrier:
 
 
 class ReplyCarrier(TranscriptCarrier):
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         nonce = _nonce(invocation)
         self.transcript = encode_account_identity(nonce, IdentityExpectation(1001, 1002, (1002, 1003)))
-        return super().execute(invocation, io=io, deadline=deadline)
+        return super().execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 class RefusalCarrier(TranscriptCarrier):
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.transcript = encode_account_failure(_nonce(invocation), AccountFailure.MISSING)
-        return super().execute(invocation, io=io, deadline=deadline)
+        return super().execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 class ReflectedCarrier(TranscriptCarrier):
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.transcript = json.dumps(
             {
@@ -168,35 +169,35 @@ class ReflectedCarrier(TranscriptCarrier):
             separators=(",", ":"),
             sort_keys=True,
         ).encode("ascii")
-        return super().execute(invocation, io=io, deadline=deadline)
+        return super().execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 class OwnershipReplyCarrier(TranscriptCarrier):
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.transcript = encode_file_ownership_success(_nonce(invocation), FileOwnership(1001, 2003))
-        return super().execute(invocation, io=io, deadline=deadline)
+        return super().execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 class OwnershipRefusalCarrier(TranscriptCarrier):
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.transcript = encode_file_ownership_failure(
             _nonce(invocation),
             FileOwnershipFailure.MISSING_GROUP,
         )
-        return super().execute(invocation, io=io, deadline=deadline)
+        return super().execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 class WrongNonceOwnershipCarrier(TranscriptCarrier):
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.transcript = encode_file_ownership_success("f" * 32, FileOwnership(1001, 2003))
-        return super().execute(invocation, io=io, deadline=deadline)
+        return super().execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 class RaisingCarrier(TranscriptCarrier):
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         del invocation, deadline
         self.calls += 1
@@ -209,6 +210,7 @@ class RaisingCarrier(TranscriptCarrier):
 
 class LocalCarrier:
     def __init__(self) -> None:
+        self.local_delivery = LocalDeliveryCustody()
         self.calls = 0
         self.io: CarrierIO | None = None
         self.invocation: PreparedInvocation | None = None
@@ -220,12 +222,12 @@ class LocalCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         pass
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
         self.io = io
         self.invocation = invocation
-        result = run_process(list(invocation.argv), io=io, deadline=deadline)
+        result = run_process(list(invocation.argv), io=io, deadline=deadline, custody=custody if custody is not None else self.local_delivery)
         completion = None
         if result.exit_status is not None:
             completion = (
@@ -648,10 +650,10 @@ def test_unavailable_interpreter_never_yields_file_ownership() -> None:
 
 def test_complete_runtime_refusal_survives_input_failure_without_operation_observation() -> None:
     class RuntimeRefusalCarrier(TranscriptCarrier):
-        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
             self.validate(invocation, io=io)
             self.transcript = f"AGW_RUNTIME_1:{_nonce(invocation)}:missing:-\n".encode("ascii")
-            return super().execute(invocation, io=io, deadline=deadline)
+            return super().execute(invocation, io=io, deadline=deadline, custody=custody)
 
     carrier = RuntimeRefusalCarrier(
         b"",

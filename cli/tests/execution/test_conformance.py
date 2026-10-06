@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import subprocess
 import sys
 
@@ -32,7 +33,7 @@ class _LocalOracle:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         pass
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         result = subprocess.run(
             invocation.argv,
@@ -78,7 +79,7 @@ def test_harness_rejects_success_without_guest_stream_evidence() -> None:
         def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
             pass
 
-        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
             self.validate(invocation, io=io)
             return CarrierReport(Dispatch.SENT, completion=ExitStatus(code=0))
 
@@ -91,12 +92,12 @@ def test_harness_rejects_suppression_without_sensitive_payload_execution() -> No
     class EarlyShellSuccess(_LocalOracle):
         bypassed = False
 
-        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
             self.validate(invocation, io=io)
             if io.sensitive:
                 self.bypassed = True
                 invocation = PreparedInvocation(("/bin/sh", "-c", "/bin/cat >/dev/null; exit 0"))
-            return super().execute(invocation, io=io, deadline=deadline)
+            return super().execute(invocation, io=io, deadline=deadline, custody=custody)
 
     carrier = EarlyShellSuccess()
     with pytest.raises(AssertionError):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import os
 import stat
 import sys
@@ -48,7 +49,7 @@ class InterruptingCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         del invocation, io
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         del invocation, io, deadline
         self.calls += 1
@@ -69,14 +70,14 @@ class ReentrantCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self.inner.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         if self.calls == 0:
             with pytest.raises(StateError):
                 self.callback(deadline)
             self.rejected = True
         self.calls += 1
-        return self.inner.execute(invocation, io=io, deadline=deadline)
+        return self.inner.execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 @pytest.fixture

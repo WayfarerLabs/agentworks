@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import json
 import os
 import sys
@@ -91,11 +92,11 @@ class AfterCallCarrier:
         invocation: PreparedInvocation,
         *,
         io: CarrierIO,
-        deadline: Deadline,
+        deadline: Deadline, custody: LocalDeliveryCustody | None = None,
     ) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
-        report = self._carrier.execute(invocation, io=io, deadline=deadline)
+        report = self._carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
         self.after_call(self.calls, deadline)
         return report
 
@@ -117,7 +118,7 @@ class InterruptingCarrier:
         invocation: PreparedInvocation,
         *,
         io: CarrierIO,
-        deadline: Deadline,
+        deadline: Deadline, custody: LocalDeliveryCustody | None = None,
     ) -> CarrierReport:
         self.validate(invocation, io=io)
         del invocation, io
@@ -144,11 +145,11 @@ class ExpiredMissingCompletionCarrier:
         invocation: PreparedInvocation,
         *,
         io: CarrierIO,
-        deadline: Deadline,
+        deadline: Deadline, custody: LocalDeliveryCustody | None = None,
     ) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
-        report = self._carrier.execute(invocation, io=io, deadline=deadline)
+        report = self._carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
         object.__setattr__(deadline, "expires_at", 0.0)
         return replace(report, completion=None, failure=Failure.DEADLINE)
 
@@ -171,11 +172,11 @@ class ConflictThenDeadlineCarrier:
         invocation: PreparedInvocation,
         *,
         io: CarrierIO,
-        deadline: Deadline,
+        deadline: Deadline, custody: LocalDeliveryCustody | None = None,
     ) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
-        report = self._carrier.execute(invocation, io=io, deadline=deadline)
+        report = self._carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
         if self.calls == 1:
             self._target.write_text('{"concurrent":true}')
         elif self.calls == 6:

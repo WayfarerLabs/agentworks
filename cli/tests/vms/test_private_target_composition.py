@@ -7,6 +7,7 @@ restrictions cannot turn an otherwise valid local helper into a refusal.
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import os
 import sys
 from contextlib import suppress
@@ -93,6 +94,7 @@ class _LocalWSL2Dispatch:
     """Exercise a real WSL2 binding without launching a Windows client."""
 
     def __init__(self, database: Database, owner: OperationOwner) -> None:
+        self.local_delivery = LocalDeliveryCustody()
         self.inline_uncertain = False
         self.calls = 0
         self.guest_calls = 0
@@ -103,7 +105,7 @@ class _LocalWSL2Dispatch:
         self.binding: NativeExecutionBinding | None = None
 
     def execute(
-        self, carrier: WSL2Carrier, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline
+        self, carrier: WSL2Carrier, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None
     ) -> CarrierReport:
         carrier.validate(invocation, io=io)
         self.calls += 1
@@ -149,7 +151,7 @@ class _LocalWSL2Dispatch:
         if self.inline_uncertain:
             return CarrierReport(Dispatch.UNKNOWN)
         self.local_calls += 1
-        result = run_process(list(invocation.argv), io=io, deadline=deadline)
+        result = run_process(list(invocation.argv), io=io, deadline=deadline, custody=custody if custody is not None else self.local_delivery)
         completion = None if result.exit_status is None else ExitStatus(code=result.exit_status)
         return CarrierReport(
             Dispatch.SENT if result.started else Dispatch.NOT_SENT,

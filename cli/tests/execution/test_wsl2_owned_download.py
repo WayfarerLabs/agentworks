@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import os
 import sys
 from contextlib import closing
@@ -70,7 +71,7 @@ class GuestThenFileCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self.file_carrier.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.calls += 1
         claim = self.database.operations.inspect(OperationScope(OperationResourceKind.VM, "box"))
         assert claim is not None
@@ -79,7 +80,7 @@ class GuestThenFileCarrier:
             self.owner_id = current
         assert current == self.owner_id
         if self.calls != 1:
-            return self.file_carrier.execute(invocation, io=io, deadline=deadline)
+            return self.file_carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
         assert isinstance(io.output, SinkOutput)
         assert "agentworks-runtime-prerequisite" in invocation.argv
         nonce = invocation.argv[invocation.argv.index("agentworks-runtime-prerequisite") + 1]
@@ -139,13 +140,13 @@ def _platform_subject(
     observed_carriers: list[WSL2Carrier] | None = None,
 ) -> tuple[WSL2OwnedDownload | None, Mock]:
     def execute(
-        selected: WSL2Carrier, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline
+        selected: WSL2Carrier, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None
     ) -> CarrierReport:
         if observed_routes is not None:
             observed_routes.append(selected.connection)
         if observed_carriers is not None:
             observed_carriers.append(selected)
-        return carrier.execute(invocation, io=io, deadline=deadline)
+        return carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
 
     monkeypatch.setattr(WSL2Carrier, "execute", execute)
     platform = Mock(spec=WSL2Platform)

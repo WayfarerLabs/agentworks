@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import base64
 import json
 import stat
@@ -410,7 +411,7 @@ class TranscriptCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         del invocation, io
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         del deadline
         self.calls += 1
@@ -719,7 +720,7 @@ def test_control_interruption_propagates_with_safe_uncertainty(
         def validate(self, invocation: object, *, io: CarrierIO) -> None:
             del invocation, io
 
-        def execute(self, invocation: object, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        def execute(self, invocation: object, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
             self.validate(invocation, io=io)
             del invocation, io, deadline
             raise control
@@ -744,7 +745,7 @@ def test_sink_fault_propagates_with_safe_uncertainty_and_no_replay(plan: Identit
         def validate(self, invocation: object, *, io: CarrierIO) -> None:
             del invocation, io
 
-        def execute(self, invocation: object, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        def execute(self, invocation: object, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
             self.validate(invocation, io=io)
             del invocation, deadline
             self.calls += 1

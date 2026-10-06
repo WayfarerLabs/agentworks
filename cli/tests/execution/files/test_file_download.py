@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import hashlib
 import os
 import sys
@@ -105,23 +106,23 @@ class _RecordingLiveCarrier(LocalCarrier):
         super().__init__(live_stdio=True)
         self.live_requests: list[bool] = []
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         assert isinstance(io.output, SinkOutput)
         self.live_requests.append(io.output.require_live)
-        return super().execute(invocation, io=io, deadline=deadline)
+        return super().execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 class _LostLiveCompletionCarrier(_RecordingLiveCarrier):
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-        report = super().execute(invocation, io=io, deadline=deadline)
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+        report = super().execute(invocation, io=io, deadline=deadline, custody=custody)
         if self.calls == 2:
             return replace(report, completion=None)
         return report
 
 
 class _LostLiveCleanupCarrier(_RecordingLiveCarrier):
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-        report = super().execute(invocation, io=io, deadline=deadline)
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+        report = super().execute(invocation, io=io, deadline=deadline, custody=custody)
         if self.calls == 3:
             return replace(report, completion=None)
         return report
@@ -285,7 +286,7 @@ class _CarrierFactInjector:
     def validate(self, invocation, *, io) -> None:
         self.inner.validate(invocation, io=io)
 
-    def execute(self, invocation, *, io, deadline) -> CarrierReport:
+    def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
         selected_io = io
@@ -296,7 +297,7 @@ class _CarrierFactInjector:
                 output=SinkOutput(_DiscardSink(), io.output.stderr, require_live=False),
                 sensitive=io.sensitive,
             )
-        report = self.inner.execute(invocation, io=selected_io, deadline=deadline)
+        report = self.inner.execute(invocation, io=selected_io, deadline=deadline, custody=custody)
         return replace(report, failure=self.failures.get(self.calls))
 
 
@@ -791,10 +792,10 @@ class _NonzeroSecondCarrier:
     def validate(self, invocation, *, io) -> None:
         self.inner.validate(invocation, io=io)
 
-    def execute(self, invocation, *, io, deadline) -> CarrierReport:
+    def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
-        report = self.inner.execute(invocation, io=io, deadline=deadline)
+        report = self.inner.execute(invocation, io=io, deadline=deadline, custody=custody)
         if self.calls == 2:
             return replace(report, completion=self.completion)
         return report
@@ -812,10 +813,10 @@ class _NonzeroCleanupCarrier:
     def validate(self, invocation, *, io) -> None:
         self.inner.validate(invocation, io=io)
 
-    def execute(self, invocation, *, io, deadline) -> CarrierReport:
+    def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
-        report = self.inner.execute(invocation, io=io, deadline=deadline)
+        report = self.inner.execute(invocation, io=io, deadline=deadline, custody=custody)
         if self.calls == 3:
             return replace(report, completion=ExitStatus(code=9))
         return report
@@ -961,7 +962,7 @@ class _InterruptingCarrier:
     def validate(self, invocation, *, io) -> None:
         del invocation, io
 
-    def execute(self, invocation, *, io, deadline) -> CarrierReport:
+    def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         if self.expire_deadline:
             object.__setattr__(deadline, "expires_at", 0.0)

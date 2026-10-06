@@ -6,6 +6,7 @@ or root-entry proofs.
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -91,7 +92,7 @@ class EvidenceCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         del invocation, io
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         del invocation, io, deadline
         self.calls += 1
         if self.control:

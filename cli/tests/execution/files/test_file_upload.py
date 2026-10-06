@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import os
 import sys
 import time
@@ -165,10 +166,10 @@ class NonzeroCallCarrier:
     def validate(self, invocation, *, io) -> None:
         self._carrier.validate(invocation, io=io)
 
-    def execute(self, invocation, *, io, deadline) -> CarrierReport:
+    def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
-        report = self._carrier.execute(invocation, io=io, deadline=deadline)
+        report = self._carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
         if self.calls == self._nonzero_call:
             return replace(report, completion=ExitStatus(code=19))
         return report
@@ -187,10 +188,10 @@ class MissingCompletionCallCarrier:
     def validate(self, invocation, *, io) -> None:
         self._carrier.validate(invocation, io=io)
 
-    def execute(self, invocation, *, io, deadline) -> CarrierReport:
+    def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
-        report = self._carrier.execute(invocation, io=io, deadline=deadline)
+        report = self._carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
         if self.calls == self._incomplete_call:
             return replace(report, completion=None)
         return report
@@ -209,10 +210,10 @@ class ExpiringCallCarrier:
     def validate(self, invocation, *, io) -> None:
         self._carrier.validate(invocation, io=io)
 
-    def execute(self, invocation, *, io, deadline) -> CarrierReport:
+    def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
-        report = self._carrier.execute(invocation, io=io, deadline=deadline)
+        report = self._carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
         if self.calls == self._expiry_call:
             object.__setattr__(deadline, "expires_at", 0.0)
         return report
@@ -231,10 +232,10 @@ class CarrierFailuresOnCalls:
     def validate(self, invocation, *, io) -> None:
         self._carrier.validate(invocation, io=io)
 
-    def execute(self, invocation, *, io, deadline) -> CarrierReport:
+    def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
-        report = self._carrier.execute(invocation, io=io, deadline=deadline)
+        report = self._carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
         failure = self._failures.get(self.calls)
         return report if failure is None else replace(report, failure=failure)
 
@@ -252,12 +253,12 @@ class RaisingCallCarrier:
     def validate(self, invocation, *, io) -> None:
         self._carrier.validate(invocation, io=io)
 
-    def execute(self, invocation, *, io, deadline) -> CarrierReport:
+    def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
         if self.calls == self._raising_call:
             raise RuntimeError("carrier-secret-canary")
-        return self._carrier.execute(invocation, io=io, deadline=deadline)
+        return self._carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 class DeadlineInterruptingCarrier:
@@ -270,7 +271,7 @@ class DeadlineInterruptingCarrier:
     def validate(self, invocation, *, io) -> None:
         del invocation, io
 
-    def execute(self, invocation, *, io, deadline) -> CarrierReport:
+    def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         del invocation, io
         self.calls += 1
@@ -292,11 +293,11 @@ class RuntimeRefusalOnCallCarrier:
     def validate(self, invocation, *, io) -> None:
         self._carrier.validate(invocation, io=io)
 
-    def execute(self, invocation, *, io, deadline) -> CarrierReport:
+    def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
         if self.calls != self._refusal_call:
-            return self._carrier.execute(invocation, io=io, deadline=deadline)
+            return self._carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
         del deadline
         assert isinstance(io.output, SinkOutput)
         token = "-" if self._state is RuntimePrerequisiteState.MISSING else "0"
@@ -324,11 +325,11 @@ class LostThenRuntimeRefusalCarrier:
     def validate(self, invocation, *, io) -> None:
         self._carrier.validate(invocation, io=io)
 
-    def execute(self, invocation, *, io, deadline) -> CarrierReport:
+    def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
         if self.calls == 1:
-            return self._carrier.execute(invocation, io=io, deadline=deadline)
+            return self._carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
         assert isinstance(io.output, SinkOutput)
         if self.calls == 2:
             hidden = CarrierIO(
@@ -336,7 +337,7 @@ class LostThenRuntimeRefusalCarrier:
                 output=SinkOutput(_DiscardSink(), io.output.stderr, require_live=False),
                 sensitive=io.sensitive,
             )
-            return self._carrier.execute(invocation, io=hidden, deadline=deadline)
+            return self._carrier.execute(invocation, io=hidden, deadline=deadline, custody=custody)
         del deadline
         record = f"AGW_RUNTIME_1:{runtime_nonce(invocation)}:missing:-\n".encode("ascii")
         _write(io.output.stdout, record)
@@ -359,11 +360,11 @@ class ClosedFailureOnCallCarrier:
     def validate(self, invocation, *, io) -> None:
         self._carrier.validate(invocation, io=io)
 
-    def execute(self, invocation, *, io, deadline) -> CarrierReport:
+    def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
         if self.calls != self._failure_call:
-            return self._carrier.execute(invocation, io=io, deadline=deadline)
+            return self._carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
         del deadline
         assert isinstance(io.output, SinkOutput)
         nonce = runtime_nonce(invocation)
@@ -388,12 +389,12 @@ class ClaimInspectingCarrier:
     def validate(self, invocation, *, io) -> None:
         self._carrier.validate(invocation, io=io)
 
-    def execute(self, invocation, *, io, deadline) -> CarrierReport:
+    def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         claim = self._database.operations.inspect(self._scope)
         assert claim is not None and claim.state is OperationClaimState.POSSIBLE_DISPATCH
         self.calls += 1
-        return self._carrier.execute(invocation, io=io, deadline=deadline)
+        return self._carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 class RestorePublicationBundleCarrier:
@@ -411,10 +412,10 @@ class RestorePublicationBundleCarrier:
     def validate(self, invocation, *, io) -> None:
         self._carrier.validate(invocation, io=io)
 
-    def execute(self, invocation, *, io, deadline) -> CarrierReport:
+    def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
-        report = self._carrier.execute(invocation, io=io, deadline=deadline)
+        report = self._carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
         if self.calls == self._restore_after_call:
             self._monkeypatch.setattr(publication_exchange, "FIXED_BUNDLE", self._normal_bundle)
         return report

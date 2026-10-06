@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import hashlib
 import time
 from pathlib import Path
@@ -207,11 +208,11 @@ def test_second_stream_interruption_carries_all_attempt_custody(tmp_path: Path) 
     interruption = KeyboardInterrupt("second stream")
 
     class InterruptedCarrier(ScriptedCarrier):
-        def execute(self, invocation, *, io, deadline):  # type: ignore[no-untyped-def]
+        def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None):  # type: ignore[no-untyped-def]
             if self.calls == 2:
                 self.calls += 1
                 raise interruption
-            return super().execute(invocation, io=io, deadline=deadline)
+            return super().execute(invocation, io=io, deadline=deadline, custody=custody)
 
     carrier = InterruptedCarrier(lambda request: _reply(request))
     try:
@@ -231,7 +232,7 @@ def test_first_observation_interruption_uses_collector_custody_fact(tmp_path: Pa
     interruption = KeyboardInterrupt("observe interrupted")
 
     class InterruptedCarrier(ScriptedCarrier):
-        def execute(self, invocation, *, io, deadline):  # type: ignore[no-untyped-def]
+        def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None):  # type: ignore[no-untyped-def]
             self.calls += 1
             raise interruption
 

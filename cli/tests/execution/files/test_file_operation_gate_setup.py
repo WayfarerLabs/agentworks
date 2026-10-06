@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import os
 import sys
 from collections.abc import Callable
@@ -71,7 +72,7 @@ class _InspectingCarrier(LocalCarrier):
         self.payloads: list[FileCallObligation] = []
         self.borrows: list[OperationBorrow | None] = []
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         rows = self._database.operations.list_lifecycle_obligations(self._owner.ownership)
         assert len(rows) == 1 and rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
         self.payloads.append(decode_file_call_obligation(rows[0].payload))
@@ -79,7 +80,7 @@ class _InspectingCarrier(LocalCarrier):
         if self._fail_setup == "not_sent":
             self.calls += 1
             return CarrierReport(Dispatch.NOT_SENT, failure=Failure.DISPATCH)
-        result = super().execute(invocation, io=io, deadline=deadline)
+        result = super().execute(invocation, io=io, deadline=deadline, custody=custody)
         if self.calls == 1 and self._fail_setup == "lost":
             raise RuntimeError("lost setup reply")
         if self.calls == 1 and self._fail_setup == "exit1":
@@ -94,8 +95,8 @@ class _TakeoverAfterSetupCarrier(LocalCarrier):
         super().__init__()
         self._takeover = takeover
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-        result = super().execute(invocation, io=io, deadline=deadline)
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+        result = super().execute(invocation, io=io, deadline=deadline, custody=custody)
         if self.calls == 1:
             self._takeover()
         return result

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from dataclasses import dataclass, replace
 from threading import Event, Thread
 from typing import TYPE_CHECKING
@@ -126,7 +127,7 @@ class TranscriptCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         pass
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
         if self.deadlines is not None:
@@ -299,7 +300,7 @@ def test_early_route_uses_the_same_borrow_without_ordinary_replay(
     borrows, releases = _watch_custody(monkeypatch)
     original = early_carrier.execute
 
-    def execute(invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         assert len(borrows) == 1 and borrows[0].has_outstanding_attempt
         assert releases == []
         claim = database.operations.inspect(owner.ownership.scope)
@@ -444,7 +445,7 @@ def test_runtime_prerequisite_must_be_ready(owned: tuple[Database, OperationOwne
     _, owner = owned
     carrier = TranscriptCarrier()
 
-    def execute(invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         carrier.calls += 1
         assert isinstance(io.output, SinkOutput)
         nonce = _nonce(invocation)
@@ -908,7 +909,7 @@ def test_second_locator_detects_cooperative_replacement_during_probe(
     platform.observe_provider_locator.side_effect = lambda *args, **kwargs: ProviderLocator(current[0])
     original_execute = carrier.execute
 
-    def execute(invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         result = original_execute(invocation, io=io, deadline=deadline)
         current[0] = "second"
         return result

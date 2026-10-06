@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import os
 import socket
 import sys
@@ -62,14 +63,14 @@ class ReentrantCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self._inner.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
         if self.calls == 1:
             assert self.callback is not None
             with pytest.raises(StateError):
                 self.callback()
-        return self._inner.execute(invocation, io=io, deadline=deadline)
+        return self._inner.execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 class UnsettledCarrier:
@@ -83,9 +84,9 @@ class UnsettledCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self._inner.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
-        report = self._inner.execute(invocation, io=io, deadline=deadline)
+        report = self._inner.execute(invocation, io=io, deadline=deadline, custody=custody)
         return replace(report, completion=ExitStatus(code=1))
 
 
@@ -101,10 +102,10 @@ class RecordingCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self._inner.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.deadlines.append(deadline)
-        return self._inner.execute(invocation, io=io, deadline=deadline)
+        return self._inner.execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 class NoDispatchCarrier:
@@ -118,7 +119,7 @@ class NoDispatchCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         del invocation, io
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         del io, deadline
         self.invocations.append(invocation)
@@ -130,11 +131,11 @@ class FirstDispatchCarrier(NoDispatchCarrier):
         super().__init__()
         self._inner = LocalCarrier()
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         self.invocations.append(invocation)
         if len(self.invocations) == 1:
-            return self._inner.execute(invocation, io=io, deadline=deadline)
+            return self._inner.execute(invocation, io=io, deadline=deadline, custody=custody)
         return CarrierReport(dispatch=Dispatch.NOT_SENT)
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import json
 import multiprocessing
 import os
@@ -119,7 +120,7 @@ class _JournalCarrier(LocalCarrier):
         self._token = token
         self._operation = operation
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
         marker = invocation.argv.index("agentworks-runtime-prerequisite")
         _append_journal(
@@ -131,15 +132,15 @@ class _JournalCarrier(LocalCarrier):
                 "token": self._token.hex(),
             },
         )
-        return super().execute(invocation, io=io, deadline=deadline)
+        return super().execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 class _RecordedExitCarrier(_JournalCarrier):
     def __init__(self, journal_path: str, token: bytes) -> None:
         super().__init__(journal_path, token, "FileSnapshotBeginRequest")
 
-    def execute(self, invocation: PreparedInvocation, *, io, deadline) -> CarrierReport:
-        super().execute(invocation, io=io, deadline=deadline)
+    def execute(self, invocation: PreparedInvocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+        super().execute(invocation, io=io, deadline=deadline, custody=custody)
         os._exit(91)
 
 
@@ -148,8 +149,8 @@ class _CrashAfterHelperCarrier(_JournalCarrier):
         super().__init__(journal_path, token, operation)
         self._exit_code = exit_code
 
-    def execute(self, invocation: PreparedInvocation, *, io, deadline) -> CarrierReport:
-        super().execute(invocation, io=io, deadline=deadline)
+    def execute(self, invocation: PreparedInvocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+        super().execute(invocation, io=io, deadline=deadline, custody=custody)
         os._exit(self._exit_code)
 
 
@@ -158,7 +159,7 @@ class _CrashAfterDataUnlinkCarrier(_JournalCarrier):
         super().__init__(journal_path, token, "FileSnapshotCleanupRequest")
         self._data_unlinked_path = data_unlinked_path
 
-    def execute(self, invocation: PreparedInvocation, *, io, deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         def crash_after_data_unlink() -> None:
             until = time.monotonic() + 20
             while time.monotonic() < until:
@@ -168,11 +169,11 @@ class _CrashAfterDataUnlinkCarrier(_JournalCarrier):
             os._exit(94)
 
         threading.Thread(target=crash_after_data_unlink, daemon=True).start()
-        return super().execute(invocation, io=io, deadline=deadline)
+        return super().execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 class _CrashAfterActualCarrier(_RecordedExitCarrier):
-    def execute(self, invocation: PreparedInvocation, *, io, deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.validate(invocation, io=io)
 
         def crash_after_actual() -> None:
@@ -188,7 +189,7 @@ class _CrashAfterActualCarrier(_RecordedExitCarrier):
             os._exit(94)
 
         threading.Thread(target=crash_after_actual, daemon=True).start()
-        super().execute(invocation, io=io, deadline=deadline)
+        super().execute(invocation, io=io, deadline=deadline, custody=custody)
         raise AssertionError("controller should exit while the helper is blocked")
 
 
@@ -202,7 +203,7 @@ class _OriginatingDownloadCarrier(LocalCarrier):
         self._journal_path = journal_path
         self._blocked = blocked
 
-    def execute(self, invocation: PreparedInvocation, *, io, deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         rows = self._database.operations.list_lifecycle_obligations(self._owner.ownership)
         assert len(rows) == 1 and rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
         call = decode_file_call_obligation(rows[0].payload)
@@ -212,7 +213,7 @@ class _OriginatingDownloadCarrier(LocalCarrier):
             if self._blocked
             else _RecordedExitCarrier(self._journal_path, call.token)
         )
-        return carrier.execute(invocation, io=io, deadline=deadline)
+        return carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 def _start_ticks() -> str:
@@ -1543,7 +1544,7 @@ def test_recovery_dispatch_refuses_competing_payload_before_carrier_entry(
         seen_rows: list[LifecycleObligation] = []
         original_execute = carrier.execute
 
-        def execute(invocation, *, io, deadline):
+        def execute(invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None):
             carrier.validate(invocation, io=io)
             seen_rows.append(database.operations.list_lifecycle_obligations(recovered.ownership)[0])
             return original_execute(invocation, io=io, deadline=deadline)

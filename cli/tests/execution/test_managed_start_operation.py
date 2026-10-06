@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from collections.abc import Callable, Generator
 from dataclasses import replace
 from pathlib import Path
@@ -135,7 +136,7 @@ class Carrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self.validations += 1
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         self.calls += 1
         if self.error is not None:
             raise self.error

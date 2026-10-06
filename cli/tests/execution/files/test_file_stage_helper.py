@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import hashlib
 import json
 import os
@@ -185,7 +186,7 @@ class _DiscardSink:
 
 
 class _LostStdoutCarrier(LocalCarrier):
-    def execute(self, invocation, *, io, deadline):
+    def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None):
         self.validate(invocation, io=io)
         assert isinstance(io.output, SinkOutput)
         hidden = CarrierIO(
@@ -193,7 +194,7 @@ class _LostStdoutCarrier(LocalCarrier):
             output=SinkOutput(_DiscardSink(), io.output.stderr, require_live=False),
             sensitive=io.sensitive,
         )
-        return super().execute(invocation, io=hidden, deadline=deadline)
+        return super().execute(invocation, io=hidden, deadline=deadline, custody=custody)
 
 
 @pytest.mark.parametrize("runtime", [Path(sys.executable), Path("/usr/bin/python3.11")], ids=["current", "system-3.11"])

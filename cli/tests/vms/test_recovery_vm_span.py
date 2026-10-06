@@ -7,6 +7,7 @@ not proved by these tests.
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from dataclasses import replace
 from threading import Thread
 from unittest.mock import Mock
@@ -64,9 +65,9 @@ def setup(tmp_path, monkeypatch):
     carrier = FixedCarrier()
     routes = []
 
-    def execute(selected, invocation, *, io, deadline):
+    def execute(selected, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None):
         routes.append(selected.connection)
-        return carrier.execute(invocation, io=io, deadline=deadline)
+        return carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
 
     monkeypatch.setattr(WSL2Carrier, "execute", execute)
     monkeypatch.setattr(preparation_fixtures, "_GUEST", VMGuestIdentity(_MARKER, BOOT, 4096))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import json
 import os
 import subprocess
@@ -199,8 +200,8 @@ def test_stale_guest_is_refused_before_creation(tmp_path: Path, monkeypatch: pyt
 
 
 class _LostOutputCarrier(LocalCarrier):
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
-        report = super().execute(invocation, io=io, deadline=deadline)
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+        report = super().execute(invocation, io=io, deadline=deadline, custody=custody)
         return replace(report, stdout=replace(report.stdout, complete=False))
 
 
@@ -210,10 +211,10 @@ class _BlackholeSink:
 
 
 class _LostCompleteOutputCarrier(LocalCarrier):
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
         assert isinstance(io.output, SinkOutput)
         dropped = replace(io, output=replace(io.output, stdout=_BlackholeSink()))
-        report = super().execute(invocation, io=dropped, deadline=deadline)
+        report = super().execute(invocation, io=dropped, deadline=deadline, custody=custody)
         return replace(report, stdout=replace(report.stdout, complete=False))
 
 

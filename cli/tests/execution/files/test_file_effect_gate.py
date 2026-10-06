@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import multiprocessing
 import os
 import secrets
@@ -747,7 +748,7 @@ def test_real_download_persists_gate_before_dispatch_and_retains_missing_gate(
         operation = FileOperation(owner, _call(binding, root).target)
 
         class InspectingCarrier(LocalCarrier):
-            def execute(self, invocation, *, io, deadline):
+            def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None):
                 rows = tuple(
                     row
                     for row in database.operations.list_lifecycle_obligations(owner.ownership)
@@ -755,7 +756,7 @@ def test_real_download_persists_gate_before_dispatch_and_retains_missing_gate(
                 )
                 assert len(rows) == 1
                 assert decode_file_call_obligation(rows[0].payload).effect_gate == binding
-                return super().execute(invocation, io=io, deadline=deadline)
+                return super().execute(invocation, io=io, deadline=deadline, custody=custody)
 
         sink = BytesSink()
         completed = operation.download(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from dataclasses import replace
 from pathlib import Path
 
@@ -396,7 +397,7 @@ def test_carrier_base_exception_preserves_original_with_custody_fact(tmp_path: P
     interrupted = KeyboardInterrupt()
 
     class InterruptedCarrier(ScriptedCarrier):
-        def execute(self, invocation, *, io, deadline):  # type: ignore[no-untyped-def]
+        def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None):  # type: ignore[no-untyped-def]
             self.calls += 1
             raise interrupted
 
