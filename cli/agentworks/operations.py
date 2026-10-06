@@ -104,6 +104,11 @@ class OperationOwner:
     def ownership(self) -> OperationOwnership:
         return self._ownership
 
+    def list_lifecycle_obligations(self) -> tuple[PersistedLifecycleObligation, ...]:
+        """Read fenced lifecycle facts from this owner's claim and repository."""
+        with self._guard:
+            return self._repository.list_lifecycle_obligations(self._ownership)
+
     def register_lifecycle_obligation(
         self,
         obligation_kind: str,

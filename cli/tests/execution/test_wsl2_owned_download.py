@@ -167,7 +167,6 @@ def _platform_subject(
     platform.resolve_native_execution_binding.return_value = binding
     platform.test_binding = binding
     subject = WSL2OwnedDownload.from_platform(
-        database.operations,
         _vm(),
         platform,
         cast(RunContext, object()),
@@ -382,7 +381,6 @@ def test_registration_replacement_during_binding_resolution_refuses_before_guest
 
         platform.resolve_native_execution_binding.side_effect = resolve
         subject = WSL2OwnedDownload.from_platform(
-            database.operations,
             _vm(),
             platform,
             cast(RunContext, object()),
@@ -430,7 +428,6 @@ def test_selected_platform_invalid_locator_preserves_caller_owner(tmp_path: Path
         platform.observe_provider_locator.return_value = locator
         with pytest.raises(ValidationError):
             WSL2OwnedDownload.from_platform(
-                database.operations,
                 _vm(),
                 platform,
                 cast(RunContext, object()),
@@ -456,7 +453,6 @@ def test_selected_platform_invalid_binding_preserves_caller_owner(tmp_path: Path
         )
         with pytest.raises(ValidationError):
             WSL2OwnedDownload.from_platform(
-                database.operations,
                 _vm(),
                 platform,
                 cast(RunContext, object()),
@@ -484,7 +480,6 @@ def test_selected_platform_subclass_carrier_preserves_caller_owner(tmp_path: Pat
         )
         with pytest.raises(ValidationError):
             WSL2OwnedDownload.from_platform(
-                database.operations,
                 _vm(),
                 platform,
                 cast(RunContext, object()),

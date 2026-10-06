@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from contextlib import closing
 from pathlib import Path
 from typing import cast
@@ -12,16 +13,17 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
-from agentworks.db import Database, OperationResourceKind, OperationScope
+from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import ValidationError
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution._wsl2_owned_download import WSL2OwnedDownload
 from agentworks.execution._wsl2_owned_managed_job import WSL2OwnedManagedJob
 from agentworks.execution._wsl2_owned_operation import WSL2OwnedOperation
-from agentworks.execution.carrier import Deadline
-from agentworks.execution.carriers.wsl2 import WSL2Connection
+from agentworks.execution.binding import NativeExecutionBinding
+from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, PreparedInvocation
+from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
 from agentworks.operations import OperationOwner
-from tests.execution.test_wsl2_owned_download import _acquire_owner, _close_owner
+from tests.execution.test_wsl2_owned_download import GuestThenFileCarrier, _acquire_owner, _close_owner
 from tests.execution.test_wsl2_platform_hold import FakeNative, FakeObserver
 from tests.vms.test_target_preparation import _vm
 
@@ -50,7 +52,6 @@ def test_invalid_owner_refuses_before_route_selection_or_native_effects(
         with pytest.raises(ValidationError):
             if entry == "factory":
                 composition.from_platform(
-                    database.operations,
                     _vm(),
                     platform,
                     cast(RunContext, object()),
@@ -61,7 +62,6 @@ def test_invalid_owner_refuses_before_route_selection_or_native_effects(
                 )
             else:
                 composition(
-                    database.operations,
                     _vm(),
                     platform,
                     cast(RunContext, object()),
@@ -93,7 +93,6 @@ def test_factory_exception_preserves_unsealed_caller_claim(tmp_path: Path) -> No
         platform.observe_provider_locator.side_effect = original
         with pytest.raises(RuntimeError) as caught:
             WSL2OwnedDownload.from_platform(
-                database.operations,
                 _vm(),
                 platform,
                 cast(RunContext, object()),
@@ -105,3 +104,72 @@ def test_factory_exception_preserves_unsealed_caller_claim(tmp_path: Path) -> No
         obligation = owner.register_lifecycle_obligation("caller-next-step", payload_version=1, payload=b"next")
         obligation.resolve()
         _close_owner(owner)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the private WSL fixture requires Linux")
+@pytest.mark.parametrize("composition", [WSL2OwnedDownload, WSL2OwnedManagedJob])
+@pytest.mark.parametrize("entry", ["constructor", "factory"])
+def test_hold_reads_and_settles_only_supplied_owners_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, composition: type[WSL2OwnedOperation], entry: str
+) -> None:
+    with (
+        closing(Database(tmp_path / "owner.db")) as database,
+        closing(Database(tmp_path / "other.db")) as other_database,
+    ):
+        owner = _acquire_owner(database)
+        other_owner = _acquire_owner(other_database)
+        other_claim = other_database.operations.inspect(other_owner.ownership.scope)
+        carrier = GuestThenFileCarrier(database)
+
+        def execute(
+            selected: WSL2Carrier, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline
+        ) -> CarrierReport:
+            return carrier.execute(invocation, io=io, deadline=deadline)
+
+        monkeypatch.setattr(WSL2Carrier, "execute", execute)
+        platform = Mock(spec=WSL2Platform)
+        platform.site_name = "local"
+        locator = ProviderLocator("wsl2:registration")
+        connection = WSL2Connection("Ubuntu", "admin", "wsl.exe")
+        runtime = RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable)
+        platform.observe_provider_locator.return_value = locator
+        platform.resolve_native_execution_binding.return_value = NativeExecutionBinding(
+            WSL2Carrier(connection), connection.user, runtime
+        )
+        native = FakeNative([])
+        observer = FakeObserver([])
+        if entry == "factory":
+            subject = composition.from_platform(
+                _vm(),
+                platform,
+                cast(RunContext, object()),
+                owner=owner,
+                deadline=Deadline.after(30),
+                native=native,
+                observer=observer,
+            )
+            assert subject is not None
+        else:
+            subject = composition(
+                _vm(),
+                platform,
+                cast(RunContext, object()),
+                locator,
+                connection,
+                runtime,
+                owner=owner,
+                native=native,
+                observer=observer,
+            )
+
+        assert subject.start_and_prepare(Deadline.after(30)) is not None
+        assert carrier.owner_id == owner.ownership.operation_id
+        rows = owner.list_lifecycle_obligations()
+        assert rows == database.operations.list_lifecycle_obligations(owner.ownership)
+        assert any(row.state is LifecycleObligationState.POSSIBLE_EFFECT for row in rows)
+        assert subject.release_if_settled(Deadline.after(30), safe=True)
+        assert all(row.state is LifecycleObligationState.RESOLVED for row in owner.list_lifecycle_obligations())
+        assert other_database.operations.inspect(other_owner.ownership.scope) == other_claim
+        assert not other_owner.list_lifecycle_obligations()
+        _close_owner(owner)
+        _close_owner(other_owner)

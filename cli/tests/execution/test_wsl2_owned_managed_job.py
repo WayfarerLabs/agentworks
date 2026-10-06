@@ -73,7 +73,6 @@ def _subject(
     )
     platform.resolve_native_execution_binding.side_effect = bindings or [first, first]
     subject = WSL2OwnedManagedJob.from_platform(
-        database.operations,
         _vm(),
         platform,
         cast(RunContext, object()),

@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
-    from agentworks.db.operations import OperationRepository
     from agentworks.execution._wsl2_lifecycle import GuestAnchorObserver
 
 
@@ -56,7 +55,6 @@ class WSL2OwnedOperation:
 
     def __init__(
         self,
-        repository: OperationRepository,
         vm: VMRow,
         platform: WSL2Platform,
         ctx: RunContext,
@@ -88,7 +86,6 @@ class WSL2OwnedOperation:
         selected_native = WindowsWSL2HostClient() if native is None else native
         selected_observer = WSL2GuestObserver(selected_connection) if observer is None else observer
         self.owner = owner
-        self._repository = repository
         self._vm = vm
         self._locator = selected_locator
         self._connection = selected_connection
@@ -115,7 +112,6 @@ class WSL2OwnedOperation:
     @classmethod
     def from_platform(
         cls,
-        repository: OperationRepository,
         vm: VMRow,
         platform: WSL2Platform,
         ctx: RunContext,
@@ -156,7 +152,6 @@ class WSL2OwnedOperation:
         except AttributeError as error:
             raise ValidationError(f"WSL2 {purpose} requires a complete native binding") from error
         return cls(
-            repository,
             vm,
             platform,
             ctx,
@@ -219,7 +214,7 @@ class WSL2OwnedOperation:
         identity = ready.identity
         if obligation is None or identity is None:
             return False
-        rows = self._repository.list_lifecycle_obligations(self.owner.ownership)
+        rows = self.owner.list_lifecycle_obligations()
         for row in rows:
             if (
                 row.obligation_id != obligation.obligation_id
