@@ -822,7 +822,7 @@ proof.
 Close stops only span/view admission. It first permits exact settled preparation cleanup, including
 an interrupted local opening or close, then requires idle ownership before hold teardown. Unknown
 attempts and conflicting dispatch remain retained; all other possible-effect rows must resolve
-before releasing the span's hold. A known never-created hold can reconcile its own noncreation
+before releasing the span's hold. A hold known never to have launched can reconcile its own cleanup
 without resolving predecessor debt. Cleanup neither repeats preparation, stops aggregate owner
 admission nor resolves another row. Original escaping exceptions carry the actual retained span.
 SQLite and fake-native tests cover this private composition, not native availability/drain or
