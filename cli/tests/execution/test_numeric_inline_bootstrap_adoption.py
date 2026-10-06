@@ -58,7 +58,7 @@ _RUNTIME = RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3")
 # Execute the delivered compressed program. Only privileged admission and the
 # guest's external observations are mocked; the checkpoint and body run intact.
 _MOCK_ADMISSION = """
-import ast,builtins,contextlib,json,os,sys
+import builtins,contextlib,json,os,sys
 real_exec,real_read=builtins.exec,os.read
 events=[]
 observed=json.loads(sys.argv[3])
@@ -70,15 +70,12 @@ def admit(uid,gid,groups):
 def read(fd,count):
  if fd==0:events.append('request')
  return real_read(fd,count)
+def enter(frame,event,arg):
+ if event=='call' and frame.f_code.co_filename=='<agentworks-root-bootstrap>' and frame.f_code.co_name=='main':
+  frame.f_globals['_admit']=admit
+  sys.setprofile(None)
 def execute(source,scope=None,local=None):
  if scope is None:scope=sys._getframe(1).f_globals
- if getattr(source,'co_filename',None)=='<agentworks-root-bootstrap>':
-  tree=ast.parse(__import__('bz2').decompress(__import__('base64').b64decode(payload)))
-  last=tree.body.pop()
-  real_exec(compile(tree,'<mock-admission-definitions>','exec'),scope)
-  scope['_admit']=admit
-  real_exec(compile(ast.Module(body=[last],type_ignores=[]),'<mock-admission-entry>','exec'),scope)
-  return
  real_exec(source,scope,local)
  name=scope.get('__name__','')
  if name=='_agw_inline._vm_guest_identity_guest':
@@ -87,11 +84,10 @@ def execute(source,scope=None,local=None):
  elif name.startswith('_agw_inline.') and not name.endswith('_vm_guest_identity_protocol'):
   events.append('remaining')
 wrapper=sys.argv[2]
-tree=ast.parse(wrapper)
-payload=tree.body[1].value.args[0].args[0].args[0].args[0].value
 sys.argv=['fixed-helper',sys.argv[1]]
 builtins.exec=execute
 os.read=read
+sys.setprofile(enter)
 try:real_exec(compile(wrapper,'<delivered-wrapper>','exec'),{'__name__':'__main__'})
 finally:sys.stderr.write(json.dumps(events))
 """
