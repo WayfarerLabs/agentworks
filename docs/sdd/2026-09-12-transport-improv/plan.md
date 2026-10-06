@@ -761,6 +761,22 @@ whitespace checks, exit 0. The lead's pre-correction baseline passes 15,280 test
 27 existing fork warnings; it is not final correction acceptance. Corrected whole-unit reviews and
 lead gates remain pending.
 
+All three independent lanes clear the corrected whole unit at `b47c8b1f2`: project passes 418
+focused/adjacent cases and scoped style/typing; generic passes 235 cases and independently checks
+oversized decimal refusal without secret access; complexity passes 235 baseline/restored cases. Its
+extra-check experiment passes 75 locator cases, while restoring lossy VMID conversion makes three
+admission regressions fail. Review trees are restored clean at the exact pin. The final
+spelling-only correction changes no source/test bytes from `09ce9e416`.
+
+The lead's complete corrected suite passes 15,303 non-integration tests, 49 skips and 27 existing
+fork warnings, exit 0. Complete Ruff/format (1,274 files), strict mypy (1,234 files), typer
+isolation, file quality, locked-SDD, Rulesync and whitespace checks exit 0. Website gates pass 160
+Python and 103 Node cases, four builds and both deterministic comparisons. Published predecessor
+`ba7350e0e` passes hosted CI and CodeQL. These are source/local-worker results, not native PVE 8/9
+generation, restricted-token permissions, adoption, queued-request drain or production
+recovery/RunContext acceptance. Draft WIP publication closes no public round or broader checklist
+gate. No database data was deleted or SSH branch changed.
+
 A separate private Proxmox existing-VM composition unit is assigned for already-running VMs only,
 under ownership acquired before observation and shared through file/DIRECT body and cleanup. Stopped
 startup remains refused until a bounded activation producer and its acknowledgment/unknown custody
