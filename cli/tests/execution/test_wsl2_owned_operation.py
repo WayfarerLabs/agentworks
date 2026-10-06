@@ -29,6 +29,40 @@ from tests.execution.test_wsl2_platform_hold import FakeNative, FakeObserver
 from tests.vms.test_target_preparation import _vm
 
 
+def test_durable_ready_requires_the_full_selected_anchor_payload(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    from agentworks.execution._wsl2_platform_hold import decode_hold_payload, encode_hold_payload
+
+    with closing(Database(tmp_path / "state.db")) as database:
+        owner = _acquire_owner(database)
+        platform = Mock(spec=WSL2Platform)
+        platform.site_name = "local"
+        selected = WSL2OwnedOperation(
+            _vm(),
+            platform,
+            RunContext(),
+            ProviderLocator("wsl2:registration"),
+            WSL2Connection("Ubuntu", "admin", "wsl.exe"),
+            RuntimeSelection(RuntimeTargetOS.LINUX),
+            owner=owner,
+            native=FakeNative([]),
+            observer=FakeObserver([]),
+        )
+        ready = selected.hold.start(Deadline.after(10))
+        assert selected._ready_is_durable(ready)  # noqa: SLF001
+        row = owner.list_lifecycle_obligations()[0]
+        substitute = replace(decode_hold_payload(row.payload), nonce="f" * 32)
+        database.operations.publish_lifecycle_obligation_payload(
+            owner.ownership,
+            row.obligation_id,
+            expected_revision=row.payload_revision,
+            payload_version=row.payload_version,
+            payload=encode_hold_payload(substitute),
+        )
+        assert not selected._ready_is_durable(ready)  # noqa: SLF001
+
+
 @pytest.mark.parametrize("composition", [WSL2OwnedDownload, WSL2OwnedManagedJob])
 @pytest.mark.parametrize("entry", ["constructor", "factory"])
 @pytest.mark.parametrize("invalid", ["object", "subclass", "resource", "name"])

@@ -15,7 +15,13 @@ from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 from agentworks.execution._wsl2_binding import _build_wsl2_native_binding
 from agentworks.execution._wsl2_guest_observer import WSL2GuestObserver
 from agentworks.execution._wsl2_lifecycle import GuestAnchorPresence, OwnedHostClient, WSL2AnchorEvidence
-from agentworks.execution._wsl2_platform_hold import WSL2PlatformHold, decode_hold_payload, locator_digest
+from agentworks.execution._wsl2_platform_hold import (
+    OBLIGATION_KIND,
+    PAYLOAD_VERSION,
+    WSL2PlatformHold,
+    decode_hold_payload,
+    locator_digest,
+)
 from agentworks.execution._wsl2_windows import WindowsWSL2HostClient
 from agentworks.execution.binding import NativeExecutionBinding
 from agentworks.execution.carrier import Deadline
@@ -113,6 +119,11 @@ class WSL2OwnedOperation:
     def binding(self) -> NativeExecutionBinding:
         """Return the copied route selected under this owner's VM claim."""
         return self._binding
+
+    @property
+    def _selected_locator(self) -> ProviderLocator:
+        """Return the copied locator for private recovery composition."""
+        return self._locator
 
     @classmethod
     def from_platform(
@@ -224,11 +235,15 @@ class WSL2OwnedOperation:
             if (
                 row.obligation_id != obligation.obligation_id
                 or row.state is not LifecycleObligationState.POSSIBLE_EFFECT
+                or row.obligation_kind != OBLIGATION_KIND
+                or row.payload_version != PAYLOAD_VERSION
+                or row.payload_revision != obligation.payload_revision
             ):
                 continue
             payload = decode_hold_payload(row.payload)
             return (
-                payload.guest == identity
+                payload == self.hold.payload
+                and payload.guest == identity
                 and payload.locator_sha256 == locator_digest(self._locator.token)
                 and payload.instance_marker == self._vm.instance_marker
             )
