@@ -152,3 +152,21 @@ local persisted-configuration/state boundary described in the
 installed-client CA/KRL acceptance, production writer ownership/coexistence, genuine
 creation/publication, production rollback or additive RunContext use. Transport composition and
 operator-owned native acceptance remain open; no completion checkbox is changed.
+
+### Private review correction: partial publication custody
+
+Review of `265c08b21ae30366272e458c7c054cc7844a4362` found that capturing the bundle snapshot only
+after a failed refresh did not prove a partial generation existed. The regression now identifies new
+generation directories created by that failed refresh and requires retained copies of every complete
+known-host input before capturing the snapshot. The existing restoration and forward-repair checks
+then prove those partial bytes survive. Redundant pre-restoration checks of the initially admitted
+generation were removed; the dedicated managed-trust regression already covers them.
+
+A temporary isolated test plugin deleted only the failed publication directory when the missing
+revocation source raised, then propagated the error. The original regression passed both cases (exit
+0); the corrected regression failed at the new partial-evidence assertion in the blocked case, with
+the active case passing (exit 1). Production trust source hashes remained unchanged. Without the
+mutation, the corrected focused selection again passed **168 tests with 1 skip**, exit 0.
+Changed-test Ruff lint/format, strict scoped mypy and both documents' pinned formatting, Markdown
+and spelling checks pass. The original measurements above remain historical evidence; this
+correction adds the missing custody guard and does not expand the local acceptance scope.

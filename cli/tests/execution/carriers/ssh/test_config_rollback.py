@@ -133,7 +133,6 @@ def test_persisted_config_restoration_retains_current_complete_policy(tmp_path: 
     sources = SSHTrustFiles((legacy / "known-hosts", legacy / "authorities"), legacy / "revoked.krl")
     bundle = import_trust(loaded.operator.ssh.trust_store, sources=sources, authority="fixture import maintainer")
     initial = trust_status(bundle)
-    admitted = resolve_trust(bundle)
     # Opaque retained-key/KRL fixtures prove custody, not OpenSSH interpretation or enrollment.
     learned = root / "learned-known-hosts"
     learned.write_bytes(b"[new-target]:2222 ssh-ed25519 learned-fixture-key\n")
@@ -150,12 +149,8 @@ def test_persisted_config_restoration_retains_current_complete_policy(tmp_path: 
     )
     assert selected.revoked_host_keys is not None
     assert selected.revoked_host_keys.read_bytes() == revoked.read_bytes()
-    assert tuple(path.read_bytes() for path in admitted.known_hosts) == tuple(
-        original_files[path.relative_to(legacy)] for path in sources.known_hosts
-    )
-    assert admitted.revoked_host_keys is not None
-    assert admitted.revoked_host_keys.read_bytes() == original_files[Path("revoked.krl")]
     if failed_refresh:
+        generations = {path for path in directory.iterdir() if path.is_dir()}
         with pytest.raises(StateError):
             refresh_trust(
                 bundle,
@@ -164,6 +159,12 @@ def test_persisted_config_restoration_retains_current_complete_policy(tmp_path: 
                 expected_generation=current.generation,
             )
         assert trust_status(bundle) == replace(current, blocked=True)
+        partial_generations = {path for path in directory.iterdir() if path.is_dir()} - generations
+        assert any(
+            tuple((partial / path.name).read_bytes() for path in selected.known_hosts)
+            == tuple(path.read_bytes() for path in complete.known_hosts)
+            for partial in partial_generations
+        )
     retained = _bytes(directory)
     config.write_bytes(backup.read_bytes())
     assert load_config(config, warn_issues=False).operator == old.operator
