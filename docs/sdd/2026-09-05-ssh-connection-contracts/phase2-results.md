@@ -780,6 +780,26 @@ Earlier hosted and native evidence retains its recorded heads. Terminal delivery
 RunContext/SSHSettings composition, supported-workstation file publication and complete SSH workflow
 acceptance remain open.
 
+## Windows ancestor-sharing correction
+
+[Hosted Windows CI](https://github.com/WayfarerLabs/agentworks/actions/runs/37404101867) at SSH
+`e2ae6168c27846aa7a3e1a6d4dc0eaa3239f97bb` failed the inherited transport ancestor-hold regression:
+requesting DELETE access did not raise the expected sharing violation. The Windows selection
+recorded **1 failed, 803 passed and 48 skipped**. This is a native publisher failure, not SSH
+delivery evidence; the affected source and test are unchanged from transport's base.
+
+Transport correction `08bf36fd6ce270862ceceb3450e6a282039faaa2` requests ordinary directory-list
+access on held ancestors without delete sharing. It retains the DELETE-open regression, adds actual
+rename refusal and verifies rename after release. Unsupported ancestor access refuses before
+staging; no privilege is enabled. SSH code head `c4f9718185f5823eaea4feac0c6e9a5f370b87fc` rebases
+all 89 SSH commits onto that correction without SSH source or fixture adaptation.
+
+Focused local publication/coordinator tests passed **131 cases with 25 native-platform skips**. Full
+Ruff, format and mypy checks passed. The prior full Linux suite and owned SSH peer results retain
+their earlier pins; this Windows-only correction does not repeat them. Native CI for the corrected
+combined head is required before treating the sharing failure as resolved. Production and complete
+native workflow acceptance remain open.
+
 ## Remaining integration and acceptance
 
 Earlier integration `fefc2b9e` uses transport `f3339f3d3cccace129be58711dc7eeb30ec66dc2`, which adds
