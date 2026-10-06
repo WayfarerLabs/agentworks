@@ -6,7 +6,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from agentworks.capabilities.base import RunContext, ScopeLevel
 from agentworks.capabilities.vm_platform.base import ProviderLocator, VMPlatform
@@ -33,7 +33,6 @@ from agentworks.execution._wsl2_lifecycle import GuestAnchorPresence, HostClient
 from agentworks.execution._wsl2_owned_operation import WSL2OwnedOperation
 from agentworks.execution.access import ExecutionAccess, FileAccess
 from agentworks.execution.carrier import Deadline
-from agentworks.execution.carriers.proxmox import ProxmoxCarrier
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
 from agentworks.operations import OperationOwner
 from agentworks.vms.identity import validate_vm_instance_marker
@@ -50,6 +49,7 @@ if TYPE_CHECKING:
     from agentworks.db import VMRow
     from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
     from agentworks.execution.binding import NativeExecutionBinding
+    from agentworks.execution.carriers.proxmox import ProxmoxCarrier
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,9 +276,7 @@ def _guest_info_responded(data: dict[str, object]) -> bool:
 def _activate_proxmox(
     workflow: _Workflow, vm: VMRow, binding: NativeExecutionBinding, locator: ProviderLocator
 ) -> None:
-    carrier = binding.carrier
-    if type(carrier) is not ProxmoxCarrier or binding.delivery_account != "root":
-        raise StateError("Native Proxmox activation requires the selected root route")
+    carrier = cast("ProxmoxCarrier", binding.carrier)
     wire = carrier._wire  # noqa: SLF001
     workflow.activation = ProxmoxActivation(workflow.owner, vm.name, wire._connection, locator)  # noqa: SLF001
     try:

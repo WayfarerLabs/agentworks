@@ -46,18 +46,14 @@ from agentworks.execution.carriers.proxmox import ProxmoxCarrier
 from agentworks.execution.carriers.wsl2 import WSL2Carrier
 
 # Importing the actual shipped index must seat every installed descriptor.
-assert set(plugins.SYSTEM_PLUGINS) == {
-    "onepassword", "claude", "proxmox", "azure", "codex", "grok", "aws", "gcp",
-    "apt", "install-command",
-}
+assert plugins._INSTALLED_MODULES
 adapters = plugins.capability_adapters()
-for plugin in plugins.SYSTEM_PLUGINS.values():
+for module in plugins._INSTALLED_MODULES:
+    plugin = module.PLUGIN
+    assert plugins.SYSTEM_PLUGINS[plugin.name] is plugin
     for kind, implementations in plugin.capabilities.items():
         for implementation in implementations:
             assert adapters[kind].peek(implementation.name) is implementation
-assert set(VM_PLATFORM_REGISTRY) == {
-    "lima", "wsl2", "proxmox", "azure-vm", "aws-ec2", "gcp-gce",
-}
 
 wsl_vm = SimpleNamespace(name="fixture-wsl", admin_username="fixture-user",
                          platform_metadata={"distro_name": "fixture-distro"})

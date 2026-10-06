@@ -471,11 +471,11 @@ def test_read_admits_exact_captured_prefix_under_persisted_bound(
 ) -> None:
     database, repository, owner = _reserved(tmp_path, ManagedOutputPolicy(ManagedOutputMode.CAPTURE, 3))
     row = repository.inspect(RUN)
-    carrier = ScriptedCarrier(lambda request: _output_reply(request, disposition=wire_disposition, content=b"abc"))
+    carrier = ScriptedCarrier(lambda request: _output_reply(request, disposition=wire_disposition, content=b"q!z"))
     try:
         outcome = _read(repository, owner, carrier, stream=stream)
         assert outcome.accepted and outcome.disposition is expected
-        assert outcome.output == b"abc"
+        assert outcome.output == b"q!z"
         assert outcome.attempt.candidate is not None
         assert outcome.attempt.candidate.observation is not None
         assert outcome.attempt.candidate.observation.state is ManagedObservationState.AVAILABLE
@@ -483,7 +483,7 @@ def test_read_admits_exact_captured_prefix_under_persisted_bound(
         assert not outcome.attempt.requires_owner_retention
         assert carrier.calls == 1
         assert repository.inspect(RUN) == row
-        assert b"abc" not in repr(outcome).encode()
+        assert b"q!z" not in repr(outcome).encode()
     finally:
         database.close()
 
