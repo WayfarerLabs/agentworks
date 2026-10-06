@@ -216,6 +216,76 @@ def test_remembered_expiry_checked_before_new_record_and_stop_latches(
         assert control.stop_due(store)
 
 
+@pytest.mark.parametrize("fault", ["valid", "absent", "malformed", "unavailable", "clock-unavailable", "preexpired"])
+def test_read_crossing_remembered_expiry_latches_before_renewal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    receipt = launch()
+    initial = lease_wire.sampled_lease(receipt, 0)
+    renewal = lease_wire.sampled_lease(receipt, 30_000_000_000)
+    clock = [initial.expires_ns if fault == "preexpired" else 59_000_000_000]
+
+    def now() -> int:
+        if fault == "clock-unavailable" and clock[0] > initial.expires_ns:
+            raise lease_wire.LeaseError("unavailable")
+        return clock[0]
+
+    monkeypatch.setattr(controller, "boottime_ns", now)
+    real_read = store_wire.read_lease
+
+    def delayed_read(store, expected):
+        try:
+            if fault == "preexpired":
+                pytest.fail("expired control read the store")
+            if fault == "unavailable":
+                raise OSError
+            return real_read(store, expected)
+        finally:
+            clock[0] = initial.expires_ns + 1
+
+    monkeypatch.setattr(controller, "read_lease", delayed_read)
+    with _store(tmp_path) as store:
+        store.publish_request(job(0))
+        if fault != "absent":
+            store_wire.publish_lease(store, receipt, renewal)
+        if fault == "malformed":
+            leaf = tmp_path / "managed" / RUN / store_wire.LEASE_LEAF
+            os.chmod(leaf, 0o600)
+            leaf.write_bytes(b"bad")
+            os.chmod(leaf, 0o400)
+        control = controller.LeaseControl(receipt, initial.expires_ns)
+        assert control.stop_due(store) and control.closed
+        assert control.expires_ns == initial.expires_ns
+        clock[0] = 59_000_000_000
+        monkeypatch.setattr(controller, "read_lease", lambda *_: pytest.fail("closed control read again"))
+        assert control.stop_due(store)
+
+
+@pytest.mark.parametrize("sample,after,accepted", [(20, 20, True), (21, 20, False), (0, 61, False)])
+def test_read_candidate_freshness_uses_post_read_clock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sample: int, after: int, accepted: bool
+) -> None:
+    receipt = launch()
+    initial = lease_wire.sampled_lease(receipt, 10_000_000_000)
+    candidate = lease_wire.sampled_lease(receipt, sample * 1_000_000_000)
+    clock = [19_000_000_000]
+    monkeypatch.setattr(controller, "boottime_ns", lambda: clock[0])
+    real_read = store_wire.read_lease
+
+    def delayed_read(store, expected):
+        result = real_read(store, expected)
+        clock[0] = after * 1_000_000_000
+        return result
+
+    monkeypatch.setattr(controller, "read_lease", delayed_read)
+    with _store(tmp_path) as store:
+        store.publish_request(job(10_000_000_000))
+        store_wire.publish_lease(store, receipt, candidate)
+        control = controller.LeaseControl(receipt, initial.expires_ns)
+        assert not control.stop_due(store) and not control.closed
+        assert control.expires_ns == (candidate.expires_ns if accepted else initial.expires_ns)
+
+
 @pytest.mark.parametrize("after_replace", [False, True])
 def test_interrupted_replacement_leaves_bounded_recognized_custody(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, after_replace: bool
