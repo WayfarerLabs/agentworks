@@ -15,11 +15,15 @@ from typing import TYPE_CHECKING
 from agentworks.db.operations import LifecycleObligationState
 from agentworks.errors import StateError
 from agentworks.execution._file_obligation import (
-    FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
     FileCallFamily,
     FileCallObligation,
     decode_file_call_obligation,
     encode_file_call_obligation,
+)
+from agentworks.execution._file_recovery_context import (
+    recovery_delivery,
+    require_record_version,
+    require_recovery_context,
 )
 from agentworks.execution._file_snapshot_exchange import (
     FileSnapshotCandidateResult,
@@ -37,6 +41,7 @@ if TYPE_CHECKING:
     from agentworks.execution._scratch_receipt import ScratchCleanupDebt
     from agentworks.execution.carrier import Carrier, Deadline
     from agentworks.operations import OperationOwner
+    from agentworks.vms._recovery_vm_span import RecoveryVMPreparedContext
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -83,6 +88,7 @@ class FileDownloadRecovery:
     _persisted: LifecycleObligation
     _call: FileCallObligation
     _bound: RecoveredLifecycleObligation
+    _context: RecoveryVMPreparedContext | None = None
     _pending_cleanup_debt: tuple[FileCallObligation, bytes] | None = None
 
     @classmethod
@@ -92,6 +98,8 @@ class FileDownloadRecovery:
         target: ManagedTargetIdentity,
         obligation: LifecycleObligation,
         evidence: _DownloadDrainEvidence,
+        *,
+        context: RecoveryVMPreparedContext | None = None,
     ) -> FileDownloadRecovery:
         """Bind one exactly retained DOWNLOAD record after adapter drain proof."""
         try:
@@ -102,6 +110,8 @@ class FileDownloadRecovery:
                 entity_kind=owner.ownership.scope.resource_kind,
                 entity_name=owner.ownership.scope.resource_name,
             ) from None
+        require_record_version(call, obligation)
+        require_recovery_context(owner, call, context)
         evidence._require_exact(owner.ownership, obligation, call, target)
         if call.gate_setup is not None:
             raise StateError(
@@ -118,25 +128,27 @@ class FileDownloadRecovery:
         bound = owner.rebind_possible_effect_lifecycle_obligation(
             obligation.obligation_id,
             "file-call",
-            payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+            payload_version=call.payload_version,
             payload=obligation.payload,
             payload_revision=obligation.payload_revision,
         )
-        return cls(owner, obligation, call, bound)
+        return cls(owner, obligation, call, bound, context)
 
-    def reconcile(self, carrier: Carrier, *, deadline: Deadline) -> FileSnapshotCandidateResult:
+    def reconcile(self, carrier: Carrier | None = None, *, deadline: Deadline) -> FileSnapshotCandidateResult:
         """Observe retained snapshot ownership without snapshot creation."""
+        delivery, plan, bootstrap = recovery_delivery(self._owner, self._call, self._context, carrier, deadline)
         self._reconcile_pending_cleanup_debt()
         token = self._call.token
         assert token is not None
         result = self._dispatch(
             lambda: snapshot_reconcile(
-                carrier,
+                delivery,
                 token=token,
-                plan=self._call.identity_plan,
+                plan=plan,
                 deadline=deadline,
                 runtime_selection=self._call.runtime_selection,
                 effect_gate=self._call.effect_gate,
+                bootstrap=bootstrap,
             )
         )
         observation = result.observation
@@ -147,8 +159,9 @@ class FileDownloadRecovery:
             self._persist_cleanup_debt(debt)
         return result
 
-    def cleanup(self, carrier: Carrier, *, deadline: Deadline) -> FileSnapshotCandidateResult:
+    def cleanup(self, carrier: Carrier | None = None, *, deadline: Deadline) -> FileSnapshotCandidateResult:
         """Attempt exact cleanup only after reconciliation persisted its debt."""
+        delivery, plan, bootstrap = recovery_delivery(self._owner, self._call, self._context, carrier, deadline)
         self._reconcile_pending_cleanup_debt()
         debt = self._call.scratch_cleanup_debt
         if debt is None:
@@ -161,13 +174,14 @@ class FileDownloadRecovery:
         assert token is not None
         return self._dispatch(
             lambda: snapshot_cleanup(
-                carrier,
+                delivery,
                 token=token,
                 cleanup_debt=debt,
-                plan=self._call.identity_plan,
+                plan=plan,
                 deadline=deadline,
                 runtime_selection=self._call.runtime_selection,
                 effect_gate=self._call.effect_gate,
+                bootstrap=bootstrap,
             )
         )
 
@@ -208,7 +222,7 @@ class FileDownloadRecovery:
         try:
             persisted = bound.publish_payload(
                 expected_revision=self._persisted.payload_revision,
-                payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+                payload_version=self._persisted.payload_version,
                 payload=payload,
             )
         except BaseException:
@@ -256,7 +270,7 @@ class FileDownloadRecovery:
             rebound = self._owner.rebind_lifecycle_obligation(
                 self._persisted.obligation_id,
                 "file-call",
-                payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+                payload_version=self._persisted.payload_version,
                 payload=payload,
             )
             persisted = rebound._persisted_obligation
@@ -266,7 +280,7 @@ class FileDownloadRecovery:
             or persisted.obligation_id != self._persisted.obligation_id
             or persisted.obligation_kind != "file-call"
             or persisted.state is not LifecycleObligationState.POSSIBLE_EFFECT
-            or persisted.payload_version != FILE_CALL_OBLIGATION_PAYLOAD_VERSION
+            or persisted.payload_version != self._persisted.payload_version
             or persisted.payload != payload
             or persisted.payload_revision != expected_revision
         ):

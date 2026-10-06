@@ -14,10 +14,14 @@ from agentworks.execution._file_effect_gate_exchange import (
 )
 from agentworks.execution._file_effect_gate_protocol import GateControlOperation
 from agentworks.execution._file_obligation import (
-    FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
     FileCallFamily,
     FileCallObligation,
     decode_file_call_obligation,
+)
+from agentworks.execution._file_recovery_context import (
+    recovery_delivery,
+    require_record_version,
+    require_recovery_context,
 )
 from agentworks.execution._managed_runs import ManagedTargetIdentity
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
@@ -27,6 +31,7 @@ if TYPE_CHECKING:
     from agentworks.db.operations import LifecycleObligation
     from agentworks.execution.carrier import Carrier, Deadline
     from agentworks.operations import OperationOwner, RecoveredLifecycleObligation
+    from agentworks.vms._recovery_vm_span import RecoveryVMPreparedContext
 
 
 @dataclass(slots=True, repr=False)
@@ -43,6 +48,7 @@ class FileGateSetupRecovery:
     _persisted: LifecycleObligation
     _call: FileCallObligation
     _bound: RecoveredLifecycleObligation
+    _context: RecoveryVMPreparedContext | None = None
 
     @classmethod
     def open(
@@ -50,6 +56,8 @@ class FileGateSetupRecovery:
         owner: OperationOwner,
         target: ManagedTargetIdentity,
         obligation: LifecycleObligation,
+        *,
+        context: RecoveryVMPreparedContext | None = None,
     ) -> FileGateSetupRecovery:
         """Bind the exact current setup-only row under recovery ownership."""
         scope = owner.ownership.scope
@@ -61,6 +69,8 @@ class FileGateSetupRecovery:
                 entity_kind=scope.resource_kind,
                 entity_name=scope.resource_name,
             ) from None
+        require_record_version(call, obligation)
+        require_recovery_context(owner, call, context)
         if (
             obligation.ownership != owner.ownership
             or type(target) is not ManagedTargetIdentity
@@ -79,14 +89,15 @@ class FileGateSetupRecovery:
         bound = owner.rebind_possible_effect_lifecycle_obligation(
             obligation.obligation_id,
             "file-call",
-            payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+            payload_version=call.payload_version,
             payload=obligation.payload,
             payload_revision=obligation.payload_revision,
         )
-        return cls(owner, obligation, call, bound)
+        return cls(owner, obligation, call, bound, context)
 
-    def inspect(self, carrier: Carrier, *, deadline: Deadline) -> GateControlCandidateResult:
+    def inspect(self, carrier: Carrier | None = None, *, deadline: Deadline) -> GateControlCandidateResult:
         """Resolve this setup row only after a complete positive INSPECT."""
+        delivery, plan, bootstrap = recovery_delivery(self._owner, self._call, self._context, carrier, deadline)
         setup = self._call.gate_setup
         assert setup is not None
         dispatch = self._bound.open_dispatch()
@@ -94,14 +105,15 @@ class FileGateSetupRecovery:
         try:
             attempt = dispatch.begin_attempt()
             result = exchange_file_effect_gate(
-                carrier,
+                delivery,
                 operation=GateControlOperation.INSPECT,
                 path=setup.path,
                 guest=setup.guest,
                 scope_name=self._call.target.name,
-                plan=self._call.identity_plan,
+                plan=plan,
                 deadline=deadline,
                 runtime_selection=self._call.runtime_selection,
+                bootstrap=bootstrap,
             )
             terminated = result.dispatch is Dispatch.NOT_SENT or (
                 result.dispatch is Dispatch.SENT and result.carrier_completion == ExitStatus(code=0)
@@ -133,7 +145,7 @@ class FileGateSetupRecovery:
             self._owner.rebind_lifecycle_obligation(
                 self._persisted.obligation_id,
                 "file-call",
-                payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+                payload_version=self._persisted.payload_version,
                 payload=self._persisted.payload,
             ).resolve()
         return result

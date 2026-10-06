@@ -367,6 +367,31 @@ class RecoveryVMSpan:
             action.active = False
             self._transition.release()
 
+    def _require_prepared_action(
+        self, context: RecoveryVMPreparedContext, owner: OperationOwner, deadline: Deadline | None = None
+    ) -> None:
+        """Validate private adapter facts against this actual protected action."""
+        carrier = context.carrier
+        prepared, selected = self._prepared, self._selected
+        if (
+            owner is not self._owner
+            or context._span is not self
+            or prepared is None
+            or selected is None
+            or type(carrier) is not _ActionCarrier
+            or carrier._span is not self
+            or carrier._carrier is not selected.binding.carrier
+            or replace(context, carrier=prepared.carrier) != prepared
+        ):
+            raise StateError("Recovery context is not this span's prepared action")
+        carrier._require_action()
+        action = carrier._action
+        assert action is not None and action.deadline.expires_at is not None
+        budget = action.deadline if deadline is None else deadline
+        if type(budget) is not Deadline or budget.expires_at is None or budget.expires_at > action.deadline.expires_at:
+            raise ValidationError("Recovery context deadline exceeds its action budget")
+        self._revalidate_action(budget)
+
     def close(self, deadline: Deadline) -> None:
         """Stop span admission and release only settled own availability custody."""
         self._closing = True
