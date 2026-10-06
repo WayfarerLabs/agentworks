@@ -440,5 +440,12 @@ the selected owner scope and bootstrap boot, and its private WSL2 native factory
 bootstrap from the prepared elevated plan and actual full guest for both file and execution state.
 This source reconciliation supplies no native credential-transition or keyboard evidence. Fresh
 recovery, service fencing, other platform composition and complete additive RunContext remain open.
+Project source review clears dependency/evidence pin `c21919b0ce5da92141f220a15512e9ac968eb7e5`. The
+affected execution/native-operation and complete SSH fixture selection passes **546 tests with 6
+skips**, exit 0 in 9.43 seconds. Full Ruff/format (1,300 files), strict mypy (1,263 sources), file
+quality, locked-SDD, Rulesync and whitespace gates pass. This targeted validation is not a new full
+CLI or website run; their earlier complete results retain the pins recorded above. The exact settled
+fixture root is independently verified unused before removal.
+
 Publication and native comparison collection still await the operator choice above. No completed
 plan record, lockfile or public feedback round changes.
