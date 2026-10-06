@@ -8,6 +8,14 @@ Run the local tests from `cli/`:
 uv run pytest tests/execution/carriers/ssh/ -m 'not integration'
 ```
 
+`test_terminal_windows.py` uses synthetic Win32 and CRT boundaries on every host, including Windows.
+It exercises endpoint-kind refusal, raw input policy, exact restoration, viewport queries, native
+failure codes, cleanup uncertainty and same-worker lifetime without accessing a caller console or
+launching a client. These tests are selected in Windows CI but supply no native console acceptance.
+The resource does not read keyboard events, select a Windows child-terminal mechanism or enable the
+carrier's terminal feature. Native validation must use an independently cleaned owned console and
+then cover the complete supported Windows workflow.
+
 The process fixtures use synthetic Python children and temporary files. The shared conformance
 fixture substitutes a local POSIX-shell executable for SSH, exercising the real quoting and pipe
 pump without authentication or a server. SSH-boundary live-I/O regressions exercise borrowed input,
