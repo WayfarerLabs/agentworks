@@ -681,6 +681,23 @@ class ProxmoxPlatform(VMPlatform):
                 entity_name=self.site_name,
                 hint="Enable verify_ssl and configure ca_bundle when the cluster CA is not in system trust.",
             )
+        # Persisted provider metadata is external input. Never let lossy
+        # conversion select a different VM before scoped secret delivery.
+        raw_vmid: object = vm.platform_metadata.get("vmid")
+        vmid: int | None = None
+        if type(raw_vmid) is int:
+            vmid = raw_vmid
+        elif type(raw_vmid) is str and raw_vmid.isascii() and raw_vmid.isdecimal():
+            try:
+                vmid = int(raw_vmid)
+            except ValueError:
+                vmid = None
+        if vmid is None or vmid <= 0:
+            raise StateError(
+                f"VM '{vm.name}' has no valid positive Proxmox VM identifier",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
         token_name = self.config.token_secret
         token = require_line_safe_secret(
             ctx.secret(token_name),
@@ -690,7 +707,7 @@ class ProxmoxPlatform(VMPlatform):
         return ProxmoxConnection(
             self.config.api_url,
             self._vm_node(vm),
-            self._vmid(vm),
+            vmid,
             self.config.token_id,
             token,
             ca_bundle=self._ca_bundle(),

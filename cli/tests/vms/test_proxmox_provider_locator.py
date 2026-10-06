@@ -31,8 +31,8 @@ from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 _GENERATION = "613ea898-8445-4e6e-82c7-f6e9ae8d7235"
 
 
-def _vm() -> VMRow:
-    return cast(VMRow, SimpleNamespace(name="test-vm", platform_metadata={"vmid": "123", "node": "node1"}))
+def _vm(*, vmid: object = "123") -> VMRow:
+    return cast(VMRow, SimpleNamespace(name="test-vm", platform_metadata={"vmid": vmid, "node": "node1"}))
 
 
 def _platform(**overrides: object) -> ProxmoxPlatform:
@@ -176,6 +176,64 @@ def test_actual_connection_and_fixed_request_use_scoped_token_without_legacy_loo
     spawn.assert_called_once()
     assert "secret-canary" not in repr(spawn.call_args)
     assert 0 < process.communicate.call_args.kwargs["timeout"] <= payload["timeout"] <= 10
+
+
+@pytest.mark.parametrize(
+    "raw_vmid",
+    [
+        None,
+        True,
+        False,
+        123.9,
+        123.0,
+        0,
+        -123,
+        "",
+        "0",
+        "-123",
+        "+123",
+        "123.9",
+        " 123",
+        "123\n",
+        "１２３",
+        "١٢٣",
+        "secret-canary",
+        [],
+        {},
+        object(),
+    ],
+)
+def test_invalid_persisted_vmid_never_delivers_secrets_or_selects_provider_vm(
+    monkeypatch: pytest.MonkeyPatch, raw_vmid: object
+) -> None:
+    platform = _platform()
+    row = _vm(vmid=raw_vmid)
+    secret = MagicMock(side_effect=AssertionError("unexpected secret access"))
+    request = MagicMock(side_effect=AssertionError("unexpected provider request"))
+    monkeypatch.setattr(_ProxmoxWire, "request_current_config", request)
+    with pytest.raises(StateError) as raised:
+        platform.observe_provider_locator(
+            row, RunContext(secrets=SimpleNamespace(get=secret)), deadline=Deadline.after(10)
+        )
+    secret.assert_not_called()
+    request.assert_not_called()
+    assert "secret-canary" not in str(raised.value)
+    assert raised.value.__cause__ is None and raised.value.__context__ is None
+
+
+@pytest.mark.parametrize("raw_vmid", [123, "123", "00123"])
+def test_exact_integer_and_decimal_persisted_vmid_identify_the_same_vm(
+    monkeypatch: pytest.MonkeyPatch, raw_vmid: int | str
+) -> None:
+    request = MagicMock(return_value={"vmgenid": _GENERATION})
+    monkeypatch.setattr(_ProxmoxWire, "request_current_config", request)
+    ctx = RunContext(secrets=SimpleNamespace(get=lambda _name: "secret-canary"))
+    row = _vm()
+    baseline = _platform().observe_provider_locator(row, ctx, deadline=Deadline.after(10))
+    row = _vm(vmid=raw_vmid)
+    platform = _platform()
+    assert platform._execution_connection(row, ctx).vmid == 123
+    assert platform.observe_provider_locator(row, ctx, deadline=Deadline.after(10)) == baseline
 
 
 @pytest.mark.parametrize(

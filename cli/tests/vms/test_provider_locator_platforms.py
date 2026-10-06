@@ -52,7 +52,7 @@ def test_proxmox_locator_requires_scoped_configuration_without_legacy_lookup(mon
     monkeypatch.setattr(platform, "_api", lambda _ctx: pytest.fail("unexpected lookup"))
 
     with pytest.raises(ConfigError):
-        platform.observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))
+        platform.observe_provider_locator(_vm(metadata={"vmid": "123"}), RunContext(), deadline=Deadline.after(10))
 
 
 def test_wsl2_locator_uses_one_bounded_registration_probe(monkeypatch: pytest.MonkeyPatch) -> None:
