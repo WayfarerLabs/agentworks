@@ -3,14 +3,9 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import shutil
-import socket
-import subprocess
-import sys
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -38,6 +33,7 @@ from agentworks.execution.carriers.ssh.trust import (
     resolve_trust,
     trust_status,
 )
+from tests.execution.carriers.ssh.enrollment_server import LocalSSH
 
 pytestmark = pytest.mark.windows
 
@@ -256,167 +252,57 @@ def test_expired_filesystem_admission_never_dispatches(
     assert not synthetic.calls
 
 
-@dataclass
-class LocalSSH:
-    connection: SSHConnection
-    provenance: SSHCreationProvenance
-    authorized: Path
-    host_public_key: bytes
-    policy_kind: str
-
-
-@pytest.fixture
-def local_sshd(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[LocalSSH]:
-    """Own one foreground loopback server and all keys; never read operator SSH policy."""
-    if sys.platform != "linux":
-        pytest.skip("Local unprivileged sshd fixture requires Linux")
-    import pwd
-
-    tmp_path = tmp_path.resolve()
-    sshd = shutil.which("sshd") or "/usr/sbin/sshd"
-    if not Path(sshd).is_file() or shutil.which("ssh-keygen") is None or shutil.which("ssh") is None:
-        pytest.skip("Installed OpenSSH client, key generator and sshd required")
-    scenario = request.param
-    identity, host_key, other_key = (tmp_path / name for name in ("identity", "host-key", "other-key"))
-    for key in (identity, host_key, other_key):
-        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True, timeout=10)
-    authorized = tmp_path / "authorized"
-    authorized.write_bytes(b"" if scenario == "auth_failure" else identity.with_suffix(".pub").read_bytes())
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        port = listener.getsockname()[1]
-    lookup = f"[127.0.0.1]:{port}"
-    host_public = host_key.with_suffix(".pub").read_text()
-    other_public = other_key.with_suffix(".pub").read_text()
-    policy = tmp_path / "policy"
-    policy.write_text(
-        lookup + " " + host_public
-        if scenario == "matching"
-        else lookup + " " + other_public
-        if scenario == "mismatch"
-        else "@revoked " + lookup + " " + host_public
-        if scenario == "revoked_marker"
-        else "@cert-authority " + lookup + " " + other_public
-        if scenario in {"ca", "revoked_ca"}
-        else ""
-    )
-    certificate_config = ""
-    if scenario in {"ca", "revoked_ca"}:
-        subprocess.run(
-            [
-                "ssh-keygen",
-                "-q",
-                "-s",
-                str(other_key),
-                "-I",
-                "fixture-host",
-                "-h",
-                "-n",
-                "127.0.0.1",
-                "-V",
-                "-1m:+5m",
-                str(host_key.with_suffix(".pub")),
-            ],
-            check=True,
-            timeout=10,
-        )
-        certificate_config = f'HostCertificate "{host_key}-cert.pub"\n'
-    revoked = None
-    if scenario in {"revoked", "revoked_ca"}:
-        revoked = tmp_path / "revocations"
-        subprocess.run(
-            [
-                "ssh-keygen",
-                "-q",
-                "-k",
-                "-f",
-                str(revoked),
-                str((other_key if scenario == "revoked_ca" else host_key).with_suffix(".pub")),
-            ],
-            check=True,
-            timeout=10,
-        )
-    bundle = import_trust(tmp_path / "managed", sources=SSHTrustFiles((policy,), revoked), authority="fixture")
-    config = tmp_path / "sshd_config"
-    config.write_text(
-        f'Port {port}\nListenAddress 127.0.0.1\nHostKey "{host_key}"\n'
-        f'AuthorizedKeysFile "{authorized}"\nPidFile "{tmp_path / "pid"}"\n'
-        "StrictModes no\nUsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\n"
-        "PermitRootLogin prohibit-password\nLogLevel ERROR\n" + certificate_config
-    )
-    server = subprocess.Popen([sshd, "-D", "-e", "-f", str(config)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-    try:
-        until = time.monotonic() + 3
-        while True:
-            if server.poll() is not None:
-                pytest.skip("Local unprivileged sshd unavailable")
-            try:
-                with socket.create_connection(("127.0.0.1", port), timeout=0.1):
-                    break
-            except OSError:
-                if time.monotonic() >= until:
-                    pytest.fail("Owned sshd did not become available")
-                time.sleep(0.01)
-        yield LocalSSH(
-            SSHConnection("127.0.0.1", pwd.getpwuid(os.getuid()).pw_name, identity, bundle, port=port),
-            SSHCreationProvenance("fixture-provider/creation-123", "127.0.0.1", port=port),
-            authorized,
-            host_public.encode(),
-            scenario,
-        )
-    finally:
-        server.kill()
-        server.wait(timeout=2)
-        assert server.stderr is not None
-        server.stderr.close()
-        with socket.socket() as listener:
-            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            listener.bind(("127.0.0.1", port))
-
-
 @pytest.mark.integration
-@pytest.mark.parametrize("local_sshd", ["empty", "matching", "ca"], indirect=True)
-def test_installed_ssh_enrollment_and_strict_recovery(local_sshd: LocalSSH) -> None:
-    candidate = enroll_new_target(local_sshd.connection, provenance=local_sshd.provenance, deadline=Deadline.after(5))
+@pytest.mark.parametrize("enrollment_sshd", ["empty", "matching", "ca"], indirect=True)
+def test_installed_ssh_enrollment_and_strict_recovery(enrollment_sshd: LocalSSH) -> None:
+    candidate = enroll_new_target(
+        enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5)
+    )
     saved = candidate.known_hosts_file.read_bytes()
-    if local_sshd.policy_kind == "empty":
-        assert local_sshd.host_public_key.split()[1] in saved
+    if enrollment_sshd.policy_kind == "empty":
+        assert enrollment_sshd.host_public_key.split()[1] in saved
     else:
         assert saved == b""
-    recovered = recover_enrollment(local_sshd.connection, provenance=local_sshd.provenance, deadline=Deadline.after(5))
+    recovered = recover_enrollment(
+        enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5)
+    )
     assert recovered == candidate
     assert candidate.known_hosts_file.read_bytes() == saved
     with pytest.raises(SSHEnrollmentError):
-        enroll_new_target(local_sshd.connection, provenance=local_sshd.provenance, deadline=Deadline.after(5))
+        enroll_new_target(enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5))
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("local_sshd", ["mismatch", "revoked", "revoked_marker", "revoked_ca"], indirect=True)
-def test_installed_ssh_existing_policy_refuses_first_contact(local_sshd: LocalSSH) -> None:
+@pytest.mark.parametrize("enrollment_sshd", ["mismatch", "revoked", "revoked_marker", "revoked_ca"], indirect=True)
+def test_installed_ssh_existing_policy_refuses_first_contact(enrollment_sshd: LocalSSH) -> None:
     with pytest.raises(SSHEnrollmentError):
-        enroll_new_target(local_sshd.connection, provenance=local_sshd.provenance, deadline=Deadline.after(5))
+        enroll_new_target(enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5))
     with pytest.raises(SSHEnrollmentError):
-        recover_enrollment(local_sshd.connection, provenance=local_sshd.provenance, deadline=Deadline.after(5))
+        recover_enrollment(
+            enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5)
+        )
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("local_sshd", ["auth_failure"], indirect=True)
-def test_installed_ssh_auth_failure_retains_host_key_for_strict_recovery(local_sshd: LocalSSH) -> None:
+@pytest.mark.parametrize("enrollment_sshd", ["auth_failure"], indirect=True)
+def test_installed_ssh_auth_failure_retains_host_key_for_strict_recovery(enrollment_sshd: LocalSSH) -> None:
     with pytest.raises(SSHEnrollmentError):
-        enroll_new_target(local_sshd.connection, provenance=local_sshd.provenance, deadline=Deadline.after(5))
-    assert isinstance(local_sshd.connection.trust, ManagedSSHTrust)
-    primary = next(local_sshd.connection.trust.directory.glob("enrollment-*/known-hosts"))
+        enroll_new_target(enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5))
+    assert isinstance(enrollment_sshd.connection.trust, ManagedSSHTrust)
+    primary = next(enrollment_sshd.connection.trust.directory.glob("enrollment-*/known-hosts"))
     saved = primary.read_bytes()
-    assert local_sshd.host_public_key.split()[1] in saved
-    local_sshd.authorized.write_bytes(local_sshd.connection.identity_file.with_suffix(".pub").read_bytes())
-    candidate = recover_enrollment(local_sshd.connection, provenance=local_sshd.provenance, deadline=Deadline.after(5))
+    assert enrollment_sshd.host_public_key.split()[1] in saved
+    enrollment_sshd.authorized.write_bytes(enrollment_sshd.connection.identity_file.with_suffix(".pub").read_bytes())
+    candidate = recover_enrollment(
+        enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5)
+    )
     assert candidate.known_hosts_file.read_bytes() == saved
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("local_sshd", ["empty"], indirect=True)
+@pytest.mark.parametrize("enrollment_sshd", ["empty"], indirect=True)
 def test_installed_ssh_positive_ack_without_saved_key_fails_strict_verification(
-    local_sshd: LocalSSH, monkeypatch: pytest.MonkeyPatch
+    enrollment_sshd: LocalSSH, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     original = run_process
     statuses: list[int | None] = []
@@ -433,13 +319,15 @@ def test_installed_ssh_positive_ack_without_saved_key_fails_strict_verification(
 
     monkeypatch.setattr(enrollment, "run_process", lose_saved_key)
     with pytest.raises(SSHEnrollmentError):
-        enroll_new_target(local_sshd.connection, provenance=local_sshd.provenance, deadline=Deadline.after(5))
+        enroll_new_target(enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5))
     assert statuses == [0, 255]
-    assert isinstance(local_sshd.connection.trust, ManagedSSHTrust)
-    primary = next(local_sshd.connection.trust.directory.glob("enrollment-*/known-hosts"))
+    assert isinstance(enrollment_sshd.connection.trust, ManagedSSHTrust)
+    primary = next(enrollment_sshd.connection.trust.directory.glob("enrollment-*/known-hosts"))
     assert primary.read_bytes() == b""
     with pytest.raises(SSHEnrollmentError):
-        recover_enrollment(local_sshd.connection, provenance=local_sshd.provenance, deadline=Deadline.after(5))
+        recover_enrollment(
+            enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5)
+        )
     assert statuses[-1] == 255
 
 
@@ -493,18 +381,20 @@ def test_admission_generation_change_refuses_before_creation(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("local_sshd", ["auth_failure"], indirect=True)
-def test_installed_ssh_recovery_retains_mismatching_primary(local_sshd: LocalSSH) -> None:
+@pytest.mark.parametrize("enrollment_sshd", ["auth_failure"], indirect=True)
+def test_installed_ssh_recovery_retains_mismatching_primary(enrollment_sshd: LocalSSH) -> None:
     with pytest.raises(SSHEnrollmentError):
-        enroll_new_target(local_sshd.connection, provenance=local_sshd.provenance, deadline=Deadline.after(5))
-    assert isinstance(local_sshd.connection.trust, ManagedSSHTrust)
-    primary = next(local_sshd.connection.trust.directory.glob("enrollment-*/known-hosts"))
-    other = (local_sshd.authorized.parent / "other-key.pub").read_bytes()
-    mismatch = f"[127.0.0.1]:{local_sshd.connection.port} ".encode() + other
+        enroll_new_target(enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5))
+    assert isinstance(enrollment_sshd.connection.trust, ManagedSSHTrust)
+    primary = next(enrollment_sshd.connection.trust.directory.glob("enrollment-*/known-hosts"))
+    other = (enrollment_sshd.authorized.parent / "other-key.pub").read_bytes()
+    mismatch = f"[127.0.0.1]:{enrollment_sshd.connection.port} ".encode() + other
     primary.write_bytes(mismatch)
-    local_sshd.authorized.write_bytes(local_sshd.connection.identity_file.with_suffix(".pub").read_bytes())
+    enrollment_sshd.authorized.write_bytes(enrollment_sshd.connection.identity_file.with_suffix(".pub").read_bytes())
     with pytest.raises(SSHEnrollmentError):
-        recover_enrollment(local_sshd.connection, provenance=local_sshd.provenance, deadline=Deadline.after(5))
+        recover_enrollment(
+            enrollment_sshd.connection, provenance=enrollment_sshd.provenance, deadline=Deadline.after(5)
+        )
     assert primary.read_bytes() == mismatch
 
 

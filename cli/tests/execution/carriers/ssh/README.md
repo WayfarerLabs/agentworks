@@ -189,3 +189,16 @@ attempts and interruption. These use fixture-only creation IDs; they do not esta
 production creation provenance or publication binding. Every test owns its server, identity, agent
 and policy files. Native platform persistence and cleanup still need the integration tester's
 separate observations.
+
+The integration-marked trust workflow composes the owned enrollment-server helper with the actual
+maintenance CLI and a reused managed carrier. It verifies unknown-key refusal before and after a
+creation receipt, complete-policy publication using the observed generation, strict command
+execution, blocking, failed refresh with retained learned keys and immutable prior generations,
+explicit repair and strict reconnect. Its original policy includes valid unrelated CA and revoked
+records plus a real KRL; all source bytes and timestamps remain unchanged. Separate cases use real
+`ssh-keygen` hashed records at a nondefault port, with and without HostKeyAlias, and refuse a
+changed lookup identity against the same server. These Linux loopback fixtures use fixture-only
+creation provenance and do not prove provider ownership, publication binding, production RunContext
+use or native macOS/Windows behavior. Run them only under a separate authorized integration-test
+charter; collection and synthetic maintenance checks alone supply no installed-client workflow
+acceptance.
