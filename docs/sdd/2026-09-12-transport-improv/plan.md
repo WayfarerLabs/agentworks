@@ -2853,6 +2853,26 @@ tests), four builds and both deterministic comparisons also return zero. The ear
 cleanup, production factories, the complete new RunContext surface and native proof remain open;
 these private facts neither resolve an original obligation nor enable public MANAGED admission.
 
+The next private candidate, implemented at `59099d1f3` and integrated at `7239f79aa`, connects the
+bound `ExecutionAccess.start(...)` to a retained OPERATION run and actual dedicated WSL2/Proxmox
+delivery. Exact clean acknowledgement returns only an immutable run-ID reference; uncertain start
+retains its original obligations and safe reference without replay. The selected WSL2 route guard
+runs at the armed start boundary. Normal aggregate close attempts every keeper drain before guarded
+bookkeeping, proves separate workload, capture, mutation-closure and controller facts, and releases
+only the exact owned availability hold last. A different unresolved hold of the same kind remains
+blocking. Interrupted known closing-helper bookkeeping can be retried; unknown helper termination
+cannot be discarded.
+
+The implementer's focused 183 cases, coherent 5,860-case suite (42 skips) and Windows-selected
+1,217-case suite (47 skips) return zero on Linux, as do strict CI mypy, Ruff/format and file checks.
+The non-main-thread fixture now separates database setup from bounded start and drain phases rather
+than imposing the failed hosted two-second whole-test join. These are candidate-local results, not
+independent review clearance, native Windows confirmation or live acceptance. The unchanged QGA
+envelopes retain margins of 33 bytes independently and 2,085 bytes with the real lease. All three
+private review lanes and the lead's combined-pin gates are still pending. Full public RunContext,
+job observation/stop/output, other platform factories, recovery disposition and native proof remain
+open; no broad completion checkbox or public OPERATION admission follows from this candidate.
+
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
       serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one
       in-flight exchange, exact uncertainty retention and drain before release/disposal. Bind it to

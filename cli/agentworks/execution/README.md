@@ -134,8 +134,13 @@ bounded capture or discard on the Linux inline helper. MANAGED, independent life
 runtime, unsupported shell startup, unavailable elevation, invalid values and expired deadlines
 refuse before owner custody or dispatch. It performs one preparation and one dispatch attempt, then
 uses the contextual result reducer. It is not exported from the package root, placed in an
-`ExecutionTarget`, or supplied through RunContext. Jobs and complete target composition remain
-required before that public surface exists.
+`ExecutionTarget`, or supplied through RunContext. Its private `start(...)` now accepts explicit
+MANAGED protection and OPERATION lifetime for finite commands or explicitly selected scripts,
+including optional elevation. It returns an immutable, credential-free `JobRef` only after exact
+clean launch acknowledgement. Other modes refuse before managed reservation. Ordinary uncertain
+starts raise `StateError` with a safe run-reference cause; escaping control exceptions preserve
+their identity. Job observation, output, stop and complete target composition remain required before
+that public surface exists.
 
 `ExecutionOperation` requires an explicit managed target matching its owner's scope. An optional
 numeric bootstrap must match that VM's derived boot identity; platform-host targets cannot select
@@ -151,16 +156,18 @@ preparation. Boot waiting dispatches no guest helper. Failed startup retains exa
 when unresolved; fresh cleanup retries only ledger bookkeeping and known-task observation, never
 activation or preparation. Normal teardown leaves an activated VM running. Already-running VMs skip
 activation and the new responsiveness wait. Both retain the same exact owner through preparation,
-file and DIRECT operation execution, and aggregate cleanup. Proxmox retains one selected QGA binding
-and checks its locator before and after target preparation. The bounded read-only account probe is
-not itself guest-fenced; account facts grant no body authority without the prepared full guest and
-numeric identity checks at each body helper. Per-dispatch provider-route freshness, complete
-availability, public RunContext composition and native acceptance remain unproved. The native
-operation module and shipped-plugin registration import without retired execution packages. Existing
-legacy operations import their dependencies only when invoked; this does not supply new cloud/Lima
-bindings or migrate provisioning. Identity preparation retains completed or partial account evidence
-and conservative custody on borrow-release failure, preserving original escaping control. No target
-or root identity is inferred as a fallback.
+file, DIRECT execution and private MANAGED OPERATION start, and aggregate cleanup. The same frozen
+native binding supplies a distinct passive WSL2 or Proxmox carrier for each managed keeper. WSL2
+rechecks the selected route at the armed start boundary; this is not broader provider-route or boot
+acceptance. Proxmox retains one selected QGA binding and checks its locator before and after target
+preparation. The bounded read-only account probe is not itself guest-fenced; account facts grant no
+body authority without the prepared full guest and numeric identity checks at each body helper.
+Per-dispatch provider-route freshness, complete availability, public RunContext composition and
+native acceptance remain unproved. The native operation module and shipped-plugin registration
+import without retired execution packages. Existing legacy operations import their dependencies only
+when invoked; this does not supply new cloud/Lima bindings or migrate provisioning. Identity
+preparation retains completed or partial account evidence and conservative custody on borrow-release
+failure, preserving original escaping control. No target or root identity is inferred as a fallback.
 
 One shared `ExecutionOperation` keeps one lazily registered empty carrier-dispatch row for its
 lifetime, rather than consuming a row per clean command. Every call still uses a fresh serial
@@ -772,8 +779,9 @@ the fixed control and private stages; it does not prove that a publisher has dra
 
 This guest implementation has packed Python 3.11/3.12 tests with real children and a synthetic
 process-group boundary, not native systemd/cgroup or SSH/QGA acceptance. Public OPERATION admission
-remains refused. The keeper, recovery ceiling consumer, aggregate ownership and public job surface
-must be composed and proved before enabling that lifetime.
+remains refused. Private keeper, recovery-ceiling and normal aggregate-close consumers exist, but
+complete recovery disposition, public job composition and native acceptance must be proved before
+enabling that lifetime publicly.
 
 `_managed_operation_keeper.py` privately binds one planned OPERATION run to the actual owning
 operation, exact VM and full prepared guest identity. Its passive constructor retains dedicated
@@ -790,9 +798,10 @@ The owning composition publishes ordinary close intent before draining the keepe
 guarded owner bookkeeping. Drain requires independent worker-completion evidence before closing
 delivery custody, not thread-liveness metadata alone. After drain, only bound exact-run stop and
 observation remain available through this support effect. These methods preserve raw local and
-remote uncertainty and resolve neither the keeper row nor original start debt. Recovery-ceiling
-consumption, aggregate settlement and native acceptance remain unimplemented or unproved; this
-kernel is not a public lifetime or permission grant.
+remote uncertainty and resolve neither the keeper row nor original start debt by themselves. The
+keeper retains current closing-helper custody separately from renewal drain; known terminal reply
+bookkeeping can be retried, but unknown remote helpers remain blocking. This kernel is not a public
+lifetime or permission grant.
 
 `_managed_operation_run.py` composes the private start on its originating caller thread, which need
 not be the process's main thread. Core retains its passive instance and planned run ID before
@@ -805,8 +814,17 @@ with the accepted sample, then enters the existing owned-start boundary. An unce
 inspects only the planned run ID and preserves the original exception; it never retries reservation
 or start. Post-reservation refusal may leave a RESERVED tombstone. No accepted clock means no start;
 the keeper retains the raw observation. Only a clean exact ACK permits renewal. Returned start facts
-are not whole-operation settlement, and this composition does not resolve lifecycle debt, release
-availability or expose public JobAccess.
+are not whole-operation settlement. Private `ExecutionOperation.start_managed(...)` retains every
+run before reservation and binds the actual dedicated native delivery. Normal VM close first stops
+admission and attempts every keeper drain using one shared finite budget, before guarded execution
+bookkeeping. A drained run's cleanup separately requires permanent mutation closure, authentic exact
+launch, canonical wait, both closed streams, empty workload boundary and terminated or reconciled
+absent controller before resolving its keeper row. Valid nonzero or signaled wait is cleanup
+evidence, not workload success; cgroup-directory removal is not required. Original uncertain start
+debt is never resolved by this path. Remaining components, activation and all obligations other than
+the exact retained hold must settle before availability is released last. Unknown delivery blocks
+release and may be retried only as retained cleanup, never as start replay. This does not expose a
+public job surface or establish native acceptance.
 
 `_managed_operation_recovery.py` retains one exact admitted start or keeper obligation and its
 persisted OPERATION run after database takeover. Construction reads and rebinds SQLite state only;
