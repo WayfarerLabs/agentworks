@@ -73,7 +73,7 @@ class _Workflow:
     preparation_fact: VMTargetPreparation | None = None
     identity: TargetIdentityPreparation | None = None
     views: NativeVMOperation | None = None
-    closed: bool = False
+    finalizing: bool = False
 
     def _hold_settled(self, cleanup_deadline: Deadline) -> bool:
         selected = self.selected
@@ -136,7 +136,8 @@ class _Workflow:
 
     def close(self, *, cleanup_deadline: Deadline | None = None) -> None:
         """Stop body admission, then release only on aggregate exact settlement."""
-        if self.closed:
+        if self.finalizing:
+            self.owner.close()
             return
         self.owner.stop_admission()
         if not self._components_settled():
@@ -146,8 +147,10 @@ class _Workflow:
         if hold_settled and all(row.state is LifecycleObligationState.RESOLVED for row in obligations):
             self.owner.seal_lifecycle_obligations()
             self.owner.record_effects_resolved()
+            # A release may commit before its reply is interrupted. Retry the
+            # owner's exact reconciliation, not reads against the removed claim.
+            self.finalizing = True
             self.owner.close()
-            self.closed = True
             return
         raise StateError("Native VM operation retains unsettled work")
 

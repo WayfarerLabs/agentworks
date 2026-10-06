@@ -15,7 +15,8 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
-from agentworks.db import Database, OperationResourceKind, OperationScope, VMStatus
+from agentworks.db import Database, OperationOwnership, OperationResourceKind, OperationScope, VMStatus
+from agentworks.db.operations import OperationRepository
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _wsl2_owned_operation
 from agentworks.execution._file_operation import _ActiveFileUpload
@@ -319,6 +320,54 @@ def test_native_view_cannot_escape_expired_body_budget_and_cleanup_uses_new_one(
     fact.retry_cleanup(Deadline.after(10))
     assert observer.events == ["observe"]
     assert database.operations.inspect(_scope()) is None
+
+
+@pytest.mark.parametrize("committed", [False, True])
+def test_claim_release_interrupt_retries_only_finalization(
+    database: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, committed: bool
+) -> None:
+    platform = WSL2Platform("wsl2", {})
+    route, native, observer = _install_route(database, platform, monkeypatch)
+    repository = database.operations
+    original_release = OperationRepository.release_resolved
+    release_calls = 0
+    control = KeyboardInterrupt()
+
+    def interrupted_release(selected_repository: OperationRepository, ownership: OperationOwnership) -> None:
+        nonlocal release_calls
+        release_calls += 1
+        if release_calls == 1:
+            if committed:
+                original_release(selected_repository, ownership)
+            raise control
+        original_release(selected_repository, ownership)
+
+    monkeypatch.setattr(OperationRepository, "release_resolved", interrupted_release)
+    with (
+        pytest.raises(KeyboardInterrupt) as caught,
+        native_vm_operation(
+            database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=_root(tmp_path)
+        ) as views,
+    ):
+        pass
+    assert caught.value is control
+    fact = control.__cause__
+    assert isinstance(fact, NativeVMOperationControlFact)
+    assert (repository.inspect(_scope()) is None) is committed
+    with pytest.raises(StateError):
+        views.execution.run(Command(["/bin/true"]), profile=Protection.DIRECT)
+    dispatches = native.events.count("dispatch")
+    observations = list(observer.events)
+    control.__traceback__ = None
+    control.__context__ = None
+    gc.collect()
+    fact.retry_cleanup(Deadline.after(10))
+    fact.retry_cleanup(Deadline.after(10))
+    assert repository.inspect(_scope()) is None
+    assert release_calls == (1 if committed else 2)
+    assert native.events.count("dispatch") == dispatches
+    assert observer.events == observations
+    assert route.local.calls == 0
 
 
 def test_uncertain_hold_keeps_claim_and_stops_new_body_admission(
