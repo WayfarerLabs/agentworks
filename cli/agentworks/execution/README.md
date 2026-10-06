@@ -635,6 +635,12 @@ receipt-only proof. Uncertain delivery or interrupted arming retains the exact o
 for recovery. The adapter leaves the run row unchanged. Explicit release authorization, production
 route and operation-claim composition, recovery, public jobs and live SSH/QGA proof remain open.
 
+Both later-action adapters use `_managed_action_custody.py` for obligation registration, borrowed
+dispatch settlement and a single release attempt. Interrupted registration or release preserves
+uncertain custody on the original escaping control-flow exception. Each adapter still owns its
+action-specific exchange, accepted response states and result; shared custody does not equate stop
+acceptance with termination or disposal readiness with deletion.
+
 ## Input accounting
 
 The 262,144-byte preparation bound applies to the complete encoded envelope, not raw application
