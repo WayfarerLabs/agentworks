@@ -2776,10 +2776,12 @@ public operation-lifetime enablement is established.
 
 Controller scouting confirms that terminal capture facts follow spool closure and prevent later
 appends, but the final fact can be visible before its stage-unlink/directory-sync tail completes.
-The current observation helper does not query controller termination. Whole-owner settlement will
-use an exact same-boot controller observation, not broader store locking or a claim that terminal
-artifact safety means every process exited. Retained and collected units both need native proof;
-original activation reconciliation and workload emptiness remain separate obligations.
+The private observation helper now queries exact same-boot controller state separately from stored
+job facts. Its fixed bounded query distinguishes running, retained exit, explicit native absence and
+unknown; read-output does not query. Whole-owner settlement still needs its consumer and native
+proof, not broader store locking or a claim that terminal artifact safety means every process
+exited. Retained and collected units both need native proof; original activation reconciliation and
+workload emptiness remain separate obligations.
 
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
       serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one

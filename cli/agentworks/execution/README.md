@@ -778,14 +778,25 @@ must be composed and proved before enabling that lifetime.
 `_managed_observation_exchange.py` supplies private fixed `observe` and closed `read-output`
 attempts over the same carrier interface. Its Python 3.11 target helper reads fixed guest identity
 paths and the protected store for an exact expected launch, run, derived unit, target incarnation
-and boot identity. It returns only present fixed facts; absent facts remain unknown. Output bytes
-require the matching validated stream-end and closed capture spool. The host admits facts and bytes
-only after complete runtime, identity, record, stream and helper completion evidence. The request
-has no arbitrary path, unit, command, property, fact name or environment selector. Both private
-observation operations now require an observed VM guest identity: host preparation checks the
-expected launch's VM kind and derived boot, and the bundled helper rereads the protected marker,
+and boot identity. It returns only present fixed job facts; absent facts remain unknown. Output
+bytes require the matching validated stream-end and closed capture spool. The host admits facts and
+bytes only after complete runtime, identity, record, stream and helper completion evidence. The
+request has no arbitrary path, unit, command, property, fact name or environment selector. Both
+private observation operations now require an observed VM guest identity: host preparation checks
+the expected launch's VM kind and derived boot, and the bundled helper rereads the protected marker,
 kernel boot and PID 1 start time before opening the store. This does not establish a production
 route or public job view.
+
+After validating the protected launch, `observe` also queries the derived local systemd unit and
+returns separately correlated controller evidence: RUNNING, EXITED, ABSENT or UNKNOWN. A failed,
+noisy, incomplete or malformed query cannot establish exit or absence, and `MainPID=0` alone is not
+termination. ABSENT records explicit native absence, not release eligibility: a consumer must also
+reconcile the exact launch and one-start admission to exclude later activation. Controller evidence
+does not settle original start debt, workload emptiness, capture completion or cgroup-directory
+removal. `read-output` never queries the controller. The query retains at most 4096 bytes and allows
+five seconds for its child plus one second for reap; request I/O and framing are outside that guest
+budget. The unchanged caller deadline bounds local observation, not guest cancellation. Native
+systemd and carrier acceptance, keeper consumption and whole-owner settlement remain unproved.
 
 `_managed_observe_access.py` privately admits one exact, persisted independent VM run under a
 caller-held VM operation owner. It derives the expected launch from that row, borrows dispatch
