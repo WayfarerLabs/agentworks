@@ -254,7 +254,13 @@ work is proceeding in parallel in the transport lane, as confirmed by the operat
 - [ ] Verify R1-R5 across supported Linux/macOS/Windows workstations and target/provider boundaries.
       Exercise terminal restoration, forwarding/listener failure and cleanup, plus the complete
       isolation and trust acceptance requirements. Record missing live coverage for operator
-      disposition; inherited PoC evidence covers only its observed cases.
+      disposition; inherited PoC evidence covers only its observed cases. Include
+      [issue #845](https://github.com/WayfarerLabs/agentworks/issues/845)'s percent-encoded JSON
+      environment shape: verify exact guest bytes for percent tokens, quotes, backslashes, Unicode
+      and multiline values through the production new path, with values absent from SSH argv. Cover
+      the reported Windows OpenSSH 9.5 client and an expansion-enabled 10.x client, alongside
+      supported Linux/macOS workstations. Private Linux candidate proof does not close this
+      production/native gate or fix callers still using the legacy path.
 
 The
 [native managed-lifecycle report](phase2-results.md#native-managed-lifecycle-on-the-composed-ssh-branch)

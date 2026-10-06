@@ -1,12 +1,15 @@
-"""Shared preparation through SSH's process boundary, without a network target.
+"""Shared preparation through synthetic and installed SSH process boundaries.
 
 The executable fixture replaces the installed client with a POSIX-shell handoff.
 It tests quoting, byte pumping and shared framing together, not authentication,
-server compatibility or live SSH delivery.
+server compatibility or live SSH delivery. The integration-marked environment
+case additionally uses the fixture-owned loopback sshd.
 """
 
 from __future__ import annotations
 
+import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +17,11 @@ from pathlib import Path
 import pytest
 
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
+from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._inline import execute_inline_candidate, prepare_inline_candidate
+from agentworks.execution._inline_control import WaitKind
+from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState, RuntimeSelection, RuntimeTargetOS
 from agentworks.execution.carrier import (
     CapturedOutput,
     CarrierIO,
@@ -26,7 +34,9 @@ from agentworks.execution.carrier import (
     Provenance,
 )
 from agentworks.execution.carriers.ssh import SSHCarrier, SSHConnection
+from agentworks.execution.carriers.ssh.connection import build_ssh_argv
 from agentworks.execution.carriers.ssh.trust import SSHTrustFiles
+from agentworks.execution.models import Command
 from tests.execution.conformance import check_buffered_contract
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Shared bootstrap requires Linux userspace")
@@ -96,6 +106,60 @@ def test_framing_failure_diagnostics_do_not_include_payloads() -> None:
     with pytest.raises(AssertionError) as failure:
         check_buffered_contract(MalformedCarrier())
     assert payload.decode("ascii") not in str(failure.value)
+
+
+def _check_literal_environment_delivery(connection: SSHConnection) -> None:
+    environment = {
+        "AGW_ISSUE_845_JSON": json.dumps(
+            {
+                "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/fixture%40project.iam.gserviceaccount.com",
+                "private_key": "synthetic-only\\key\nsecond line\n",
+                "note": 'embedded "quotes" and 雪',
+            },
+            ensure_ascii=False,
+        ),
+        "AGW_LITERAL_VALUE": "literal %40 %h %% ${HOME} ' \" \\ 雪\n\r\t",
+        "AGW_EMPTY_VALUE": "",
+    }
+    groups = tuple(sorted(set(os.getgroups()) | {os.getegid()}))
+    plan = IdentityPlan(IdentityExpectation(os.geteuid(), os.getegid(), groups), IdentityMode.DIRECT)
+    source = (
+        "import os,sys; "
+        f"sys.stdout.buffer.write(b'\\0'.join(os.environ[name].encode('utf-8') for name in {tuple(environment)!r}))"
+    )
+    prepared = prepare_inline_candidate(
+        Command(("/usr/bin/python3", "-I", "-S", "-B", "-c", source)),
+        plan=plan,
+        env=environment,
+        runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+    )
+    assert isinstance(connection.trust, SSHTrustFiles)
+    argv = build_ssh_argv(connection, prepared.invocation, trust=connection.trust)
+    assert not any(argument.startswith("SetEnv=") for argument in argv)
+    assert all(value not in argument for value in environment.values() if value for argument in argv)
+    assert "fixture%40project" not in subprocess.list2cmdline(argv)
+
+    result = execute_inline_candidate(SSHCarrier(connection), prepared, deadline=Deadline.after(15))
+    assert result.dispatch is Dispatch.SENT
+    assert result.carrier_completion == ExitStatus(code=0)
+    assert result.carrier_failure is None
+    assert result.runtime_prerequisite.state is RuntimePrerequisiteState.READY
+    observation = result.observation
+    assert observation is not None and observation.trusted_terminal
+    assert observation.error is None and observation.failure is None
+    assert observation.wait is not None and observation.wait.kind is WaitKind.EXIT and observation.wait.value == 0
+    assert observation.stdout is not None and observation.stdout.complete and not observation.stdout.truncated
+    assert observation.stdout.data == b"\0".join(value.encode("utf-8") for value in environment.values())
+    assert observation.stderr is not None and observation.stderr.complete and observation.stderr.data == b""
+
+
+def test_inline_environment_preserves_percent_json_through_ssh_process(local_binding: SSHConnection) -> None:
+    _check_literal_environment_delivery(local_binding)
+
+
+@pytest.mark.integration
+def test_installed_ssh_inline_environment_preserves_percent_json(local_sshd: SSHConnection) -> None:
+    _check_literal_environment_delivery(local_sshd)
 
 
 def test_ssh_executes_in_fresh_process_without_legacy(local_binding: SSHConnection) -> None:
