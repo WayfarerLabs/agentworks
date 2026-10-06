@@ -878,6 +878,20 @@ unchecked, public round 1 stays open, and no handoff signal or broader completio
 database data was deleted or SSH branch changed. Explicit macOS/Windows in-place local Replace
 retains the approved supported-metadata preservation and partial-failure reporting.
 
+The next private unit integrates activation-custody worker `caa0fd5e9`: one fresh versioned ledger
+row before at most one start POST, receipt retention before publication, exact bookkeeping-only
+reconciliation and fenced task observation under finite budgets. Its 330 focused/adjacent cases (88
+adapter cases), owned typing/style, repository file quality and whitespace checks pass. Whole-unit
+source reviews, stopped-VM composition and complete lead validation remain pending.
+
+Private architecture review rejects a disappearance-only settlement draft: an ordinary Proxmox
+worker killed during its synchronous fork helper can leave the launch child preparing or launching
+QEMU. Project and complexity independently verify the pinned source and clear corrected design
+`19ddffa81`: only fully matching stopped ordinary work with exact successful `OK` or supported
+warnings may settle this request. Unknown/error/missing evidence and HA handoff retain custody.
+Native interrupted-launch and successful/warning acceptance remains open. This corrects the private
+draft before publication; no requirement, shared API, schema or broader completion changes.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
