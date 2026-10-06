@@ -389,8 +389,12 @@ collateral and passing-report visibility; `045d57efe052942464046471587988d5ab22d
 README's scoped `-rP` command and limits. Its six comparison tests pass, including the optional
 report-propagation assertion alongside the independent ABI check. A narrowly scoped CI step repeats
 only the owned-console node with `-rP`; it retains the existing installed candidate, ordinary suite
-and parallel settings, exposing no unrelated tests' passing output. All three independent source
-lanes clear the corrected combined pin `476e7c798de1953c42e52c8cda33c84945fa9728`.
+and parallel settings, exposing no unrelated tests' passing output. That collector remains local:
+GitHub rejected publication at `889d2f163` because the token lacks workflow scope. Published #832
+remains at `699c8517e`; no new-head CI started. The operator collection choice is pending between
+workflow access and the same scoped tester command, with no credential change attempted. All three
+independent source lanes clear the corrected combined pin
+`476e7c798de1953c42e52c8cda33c84945fa9728`.
 
 That pin rebases cleanly onto transport `51d5222d50cf04c38f1a5648d2bdd8b8f9bca8fd`, with no SSH
 source/test/CI byte changes relative to its pre-rebase pin `f1f02c377`. The dependency now binds
@@ -426,3 +430,15 @@ the scoped report. The experiment will measure only this Windows binary's inject
 physical keyboard input, Server 2022, production decoding, SSH/ConPTY launch/preparation and full
 native terminal acceptance remain separate gates. Public terminal delivery stays disabled. No
 completed checkbox, lockfile or final-product public feedback round follows from this increment.
+
+## Exact-target execution dependency refresh
+
+Local code/test pin `c46d75fbbf1344dd69e567e4afbddea9ea9a8ea8` rebases cleanly onto transport
+`ccfe5b34851f53ec9f98453dcb962487e6d67e51`. SSH production, SSH fixture and CI bytes are identical
+to the preceding local candidate `889d2f163`. The dependency now binds private buffered execution to
+the selected owner scope and bootstrap boot, and its private WSL2 native factory constructs one
+bootstrap from the prepared elevated plan and actual full guest for both file and execution state.
+This source reconciliation supplies no native credential-transition or keyboard evidence. Fresh
+recovery, service fencing, other platform composition and complete additive RunContext remain open.
+Publication and native comparison collection still await the operator choice above. No completed
+plan record, lockfile or public feedback round changes.

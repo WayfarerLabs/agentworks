@@ -190,20 +190,25 @@ local validation separately from the remaining shared integration and platform a
 proof fixtures from native execution and genuine production publication.
 
 Shared subprocess adoption introduces an implementation dependency on transport #833. Current
-integration uses `f49d060bc69490e0934b7da0aeddaa6c083b4c0c`, adding explicit buffered-inline
-bootstrap, private operation-context binding and actual durable-record envelope versions to workflow
-context forwarding, all eight file-helper families and the versioned durable codec, alongside
-reviewed WSL hold/query/probe adoption of named admission, bootstrap/file packaging, owner-mediated
-POSIX resize, shared terminal input and explicit borrowed native stdin, structural preflight,
-managed-start and download mechanisms. Early named admission separates root launch from the
-configured body account and preserves existing version-3 hold recovery. It does not complete
-production composition or native guest-fencing acceptance. Numeric context carries root entry and a
-complete verified guest; the private `FileOperation` binds that context once to its selected VM boot
-and gives prepared workflows the binding from construction. Admission, child publication, exact
-retry and retained updates use each typed record's actual envelope version. Private buffered-inline
-preparation uses the explicit context through the root program, checking the full guest before
-remaining modules and request consumption. Fresh version-two recovery preparation, production
-context construction, inline/service fencing and additive RunContext adoption remain open. The
+integration uses `ccfe5b34851f53ec9f98453dcb962487e6d67e51`, adding exact-target buffered execution
+ownership and one prepared WSL2 native bootstrap to explicit buffered-inline preparation, private
+operation-context binding and actual durable-record envelope versions, alongside workflow context
+forwarding, all eight file-helper families, the versioned durable codec, reviewed WSL
+hold/query/probe adoption of named admission, bootstrap/file packaging, owner-mediated POSIX resize,
+shared terminal input and explicit borrowed native stdin, structural preflight, managed-start and
+download mechanisms. Early named admission separates root launch from the configured body account
+and preserves existing version-3 hold recovery. It does not complete production composition or
+native guest-fencing acceptance. Numeric context carries root entry and a complete verified guest;
+the private `FileOperation` binds that context once to its selected VM boot and gives prepared
+workflows the binding from construction. Admission, child publication, exact retry and retained
+updates use each typed record's actual envelope version. Private buffered-inline preparation uses
+the explicit context through the root program, checking the full guest before remaining modules and
+request consumption. Private execution state now requires a selected target matching its owner scope
+and checks the bootstrap against the derived VM boot before preparation. The private WSL2 native
+factory requires both prepared identity plans, constructs one bootstrap from the elevated plan and
+actual full guest, and shares it between file and execution state. Missing preparation refuses
+before views. Fresh version-two recovery, native credential transitions, service fencing, other
+platform composition and additive RunContext adoption remain open. The
 [Windows ancestor-sharing correction](phase2-results.md#windows-ancestor-sharing-correction) records
 that rebase and its remaining limits. The earlier
 [local-download stack refresh](phase2-results.md#private-local-download-stack-refresh) and
