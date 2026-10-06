@@ -278,6 +278,14 @@ transport. The later
 resolves the database-open collision and records green hosted CI without adding a new SSH runtime
 composition or closing those Phase 2 gates.
 
+The
+[native workstation report](phase2-results.md#native-workstation-report-and-remaining-delivery-findings)
+adds private Linux/macOS SSH publication and Windows WSL2 observations. It also finds macOS home ACL
+refusal, a hardened-admin boot-probe failure and slow repeated-chunk SSH downloads. Transport owns
+their corrections; ordinary admin composition, usable home destinations and practical file delivery
+remain unproved. The earlier root-only fence proof does not close the admin-path gate. These
+findings remain within the open workflow acceptance below, not new completion claims.
+
 ### Integrate and deliver the usable new path
 
 - [ ] Integrate with transport's platform-host/provisioning consumers and review provider-inner
