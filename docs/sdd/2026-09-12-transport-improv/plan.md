@@ -616,6 +616,32 @@ gates, exit 0. Independent integrated reviews and lead gates remain pending. Ret
 version-two adoption, native predecessor drain, other platform availability and complete public
 recovery remain open; no broader checkbox or public round closes.
 
+The first span review at `8c4865661` finds one important negative-screen gap: project independently
+changes the retained native owner's status to EXITED, yet the READY-time anchor cache still permits
+another query. Its 246 main and 89 adjacent cases pass with 9 skips; this reproduced path is not
+disproved by those tests. Generic passes 145 and finds no additional issue. Complexity passes 139
+baseline/deletion/restored cases plus four independent persisted-identity changes, selecting removal
+of duplicate comparisons while preserving both fresh VM reads. The lead's baseline suite passes
+15,067 cases with 49 skips and 27 existing warnings; it is baseline evidence, not correction proof.
+The worker correction at `5504496d6` reads the current retained-native local snapshot, keeps
+historical guest/READY facts separate and rechecks the budget. Actual native-state changes, snapshot
+exceptions/interruptions and late reads now prevent preparation/action/dispatch. Redundant
+comparisons are removed without removing either fresh read. The worker passes 472 adjacent cases and
+scoped static, full file-quality and whitespace gates, exit 0. Integrated re-review and final lead
+gates remain pending; no native liveness/drain guarantee or public round closure is claimed.
+
+Before full additive RunContext adoption, address the execution ledger's clean-call capacity. The
+current private inline path registers one new carrier-dispatch row per command or script and keeps
+resolved rows until owner release. The 128-row total limit therefore refuses the next call even when
+every earlier call completed cleanly; preparation and holds reduce that budget further. This is an
+adoption gap, not current production behavior: production consumers still use the old stack. The
+file-package serial checkpoint already shares one row across many members. Do not silently remove
+bounds, prune retry evidence or introduce a generic workflow registry to mask the gap. Choose and
+review a bounded execution-specific reuse/accounting solution, then demonstrate more than 128 clean
+sequential commands with mixed file operations while preserving exact uncertainty,
+registration/resolution retry and recovery fencing. No implementation or capacity acceptance is
+claimed at this checkpoint.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state

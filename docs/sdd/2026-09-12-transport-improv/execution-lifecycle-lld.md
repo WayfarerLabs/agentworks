@@ -813,11 +813,12 @@ runtime cannot be substituted independently of that lifetime.
 
 A finite local action scope serializes against close and exposes a carrier usable only in that
 action and thread, under no later deadline. Admission and concrete carrier dispatch revalidate
-owner, VM, route and exact durable hold custody. An escaped action carrier refuses; cached
-host-client ACTIVE remains only a negative failure screen. This does not turn a READY history or
-power read into positive continuing guest identity or native queue-drain evidence. Individual
-retained-file adapters still own their recovery attempts and must supply applicable predecessor
-proof.
+owner, VM, route and exact durable hold custody. An escaped action carrier refuses; host-client
+ACTIVE remains only a negative failure screen. That screen reads the retained native owner's current
+local snapshot separately from historical READY/guest facts and refuses late observations. This does
+not turn a READY history or power read into positive continuing guest identity or native queue-drain
+evidence. Individual retained-file adapters still own their recovery attempts and must supply
+applicable predecessor proof.
 
 Close stops only span/view admission. It first permits exact settled preparation cleanup, including
 an interrupted local opening or close, then requires idle ownership before hold teardown. Unknown

@@ -587,14 +587,15 @@ span and its pinned carrier. This does not provide predecessor drain evidence.
 
 One finite action scope serializes with close and returns a guarded carrier bound to that action's
 thread and deadline; escaped carriers are inert after the action ends. Admission and execution
-recheck current owner, VM, selected route and exact hold custody. Cached host-client ACTIVE is only
-a negative failure screen, not continuing guest-liveness proof. Fixed helpers still require their
-full guest guards. Close stops this span's admission, not the owner's. It may reconcile only its
-settled preparation batch before idle validation and release its hold only after all other effect
-rows resolve. Unknown or conflicting custody retains the actual span; cleanup never repeats probes,
-resolves predecessor rows or finalizes the aggregate operation. Escaping control flow carries the
-span as safe custody. This private composition has SQLite/faked-native coverage only; retained-file
-adapter adoption, complete native drain, other platform spans and public recovery remain open.
+recheck current owner, VM, selected route and exact hold custody. The negative host-side screen
+reads the retained native owner's current snapshot, not the anchor's READY-time cache. ACTIVE is not
+continuing guest-liveness proof. Fixed helpers still require their full guest guards. Close stops
+this span's admission, not the owner's. It may reconcile only its settled preparation batch before
+idle validation and release its hold only after all other effect rows resolve. Unknown or
+conflicting custody retains the actual span; cleanup never repeats probes, resolves predecessor rows
+or finalizes the aggregate operation. Escaping control flow carries the span as safe custody. This
+private composition has SQLite/faked-native coverage only; retained-file adapter adoption, complete
+native drain, other platform spans and public recovery remain open.
 
 `_managed_job_wire.py` owns the Python 3.11, stdlib-only canonical version-one byte schema for
 private managed-job facts and reuses the portable `_helper_identity.py` validator. The host
