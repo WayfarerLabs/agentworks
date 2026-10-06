@@ -841,6 +841,21 @@ closes no public round or broader checklist and introduces no schema or shared c
 database data was deleted or SSH branch changed. The approved explicit macOS/Windows in-place local
 Replace behavior and its partial-failure reporting remain unchanged.
 
+The next private wire unit integrates worker `10f5f9160`. A closed explicit endpoint choice replaces
+the private current-config flag and adds one fixed body-free VM-start POST and literal task-status
+GET. Raw bounded scalar acknowledgment remains separate from dictionary observation. New control
+methods require positive finite budgets before worker creation, preserve verified authority and
+owned worker cleanup, and introduce no start replay, owner integration or definite-rejection claim.
+The worker reports 390 focused/adjacent cases, five-file typing/style, file quality and whitespace
+checks, exit 0. Whole-unit private reviews and complete lead gates remain pending.
+
+The lead records pinned start/task research and an explicit future activation custody boundary.
+Private complexity review keeps the design but corrects inaccurate source highlights and an
+overstated permission claim: a token's owning user can observe its tasks without node audit as well.
+The spelling gate also found missing UPID vocabulary, now added for its existing permanent-code use.
+These corrections do not enable stopped startup, HA settlement, atomic generation preconditions,
+queued-request drain or complete availability/RunContext. Both new plan items remain unchecked.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
