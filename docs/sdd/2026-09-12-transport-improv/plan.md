@@ -65,6 +65,16 @@ with 50 skips; strict mypy passes 1,197 sources. Three private reviews found the
 cleanup-handoff and stale-body gaps above. This is an implementation checkpoint, not a completed
 factory, native availability proof or public RunContext surface. No database data has been deleted.
 
+The correction at private `340bdf015` caps caller deadlines by the original operation deadline and
+retains the exact workflow through an exceptional cleanup fact, including failures before the
+context yields. Its finite cleanup retry cannot reopen body admission or repeat hold startup.
+Finalization resumes the owner's existing database-release reconciliation after an interrupted
+reply rather than reading a claim that may already have been removed. All three independent private
+review lanes clear these corrections; the lead's adjacent run passes 241 tests and strict mypy
+passes 1,196 sources after removal of the obsolete migration-guard test. The prepared-guest body
+fence and the other native gates above remain open. This private correction has not changed the
+published head or exposed a production RunContext surface.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
