@@ -164,11 +164,13 @@ canonical invocation models. SSH adopts that core while retaining environment fi
 carrier-specific evidence, and imports `Command` from `execution.models` in its independence
 fixture. This is an actual implementation dependency; #832 stacks on #833.
 
-The adapter accepts every current `CarrierIO` choice: EOF/finite/live byte input and
-capture/discard/sink output, and advertises live stdio. The temporary buffered-mode guard is retired
-after that adoption; `CarrierIO` validates its supported shapes at construction. New shared modes
-still require coordinated implementation and proof at the shared boundary. Terminal support remains
-disabled until its distinct handle and lifetime contract is implemented and proved.
+The adapter accepts EOF/finite/live byte input and capture/discard/sink output, and advertises live
+stdio. The temporary buffered-mode guard is retired after that adoption. `CarrierIO` validates its
+published shapes at construction; SSH additionally refuses unsupported input in its passive
+validator before trust admission, installed-client probing or dispatch. A shared input extension
+must never silently become EOF through the ordinary pipe adapter. New shared modes require
+coordinated implementation and proof at the shared boundary. Terminal support remains disabled until
+its distinct handle and lifetime contract is implemented and proved.
 
 The shared carrier interface now includes `LiveInput`, `SinkOutput` and delivered-output retention.
 SSH adoption must prove the actual types and preserve raw stream provenance, sensitivity and
