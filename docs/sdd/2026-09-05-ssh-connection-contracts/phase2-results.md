@@ -707,6 +707,12 @@ adaptation, the full CLI suite passed **14,298 tests with 27 skips**. Full Ruff 
 passed; mypy reported no issues in **1,199 source files**. These are local composed-tree results,
 not hosted CI or native platform acceptance for the new SSH head.
 
+That rebased implementation head, `d350516c3a9d6638d75fbf124f267bd762c4630e`, then passed
+[hosted CI run 37397919601](https://github.com/WayfarerLabs/agentworks/actions/runs/37397919601):
+Linux Python 3.12/3.13/3.14, Windows Python 3.13, static checks, website, file lint, locked-SDD,
+Rulesync drift and the aggregate gate. This verifies the pinned implementation revision in CI; it
+does not supply the pending native SSH workflows or production composition.
+
 Transport's new draft head removes its branch-specific migration 39–41 guard without deleting the
 historical development databases. Those databases are not migration acceptance evidence. Production
 RunContext, ExecutionAccess, FileAccess and JobAccess composition, terminal delivery, recoverable
