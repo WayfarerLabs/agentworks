@@ -20,6 +20,14 @@ Forwarding tests reuse the fixture-owned loopback sshd when available and exerci
 delivery, listener refusal and cleanup. These local fixtures do not establish the supported
 workstation and provider matrix; report skips separately.
 
+The conformance tests also pass synthetic percent-encoded JSON and literal percent tokens, dollar
+expressions, quotes, backslashes, Unicode and multiline environment values through transport's
+private inline candidate and the SSH carrier. One test uses the POSIX-shell substitute; an
+integration-marked companion uses the owned loopback sshd. Both require exact guest bytes and keep
+the values out of SSH argv. These regressions address the new-path delivery shape raised by
+[issue #845](https://github.com/WayfarerLabs/agentworks/issues/845). They do not establish a fix for
+current legacy callers, production RunContext composition or native Windows/macOS acceptance.
+
 The integration-marked file-delivery tests compose the production fixed helper bundles with the real
 SSH carrier and the fixture account's direct identity plan. They exercise bounded binary read, typed
 absence and limit refusal, then stage creation, exact-offset chunks, helper-backed reading,
