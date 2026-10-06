@@ -30,7 +30,8 @@ Public feedback/fix round 1 of the operator-authorized 3 began after the one-hou
 and the complete
 [native round-9 report](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6008723722).
 The PR is draft with `review-requested` removed while the fixed feedback batch is corrected. Its
-published head remains `08bf36fd6`; private implementation does not change that handoff.
+published head at the batch start was `08bf36fd6`. Intermediate draft WIP publications do not close
+the round or request a new public review or integration-test run.
 
 Native Linux, macOS and Windows measurements establish the tested caller-private Create and explicit
 Replace behavior, not complete supported-path or production acceptance. Stock macOS home ancestor
@@ -105,6 +106,17 @@ init-stat open; exact target credentials and capability checks precede helper lo
 descriptor provides fresh bounded reads and closes across exec without a process-global fork hook.
 This remains a separate private primitive, not a completed body fence or permission-policy surface.
 No production consumer uses that entry yet and no database data has been deleted.
+
+The draft WIP publication at `d9315847c` makes the reviewed shared stdin dependency available to
+SSH. Its Python tree is identical to `e769eaeaa`; the final commit only formats the plan paragraph.
+Fresh local validation passes 14,252 tests with 50 skips, strict mypy (1,198 sources), Ruff/format,
+typer isolation, file lint, locked-SDD and Rulesync checks. Website validation passes 160 Python and
+103 Node tests and both deterministic double-build comparisons. Native acceptance and the public
+round remain open. The publication excludes the later managed-action and hardened-guest bootstrap
+units. At private `508c59802`, their combined full suite passes 14,282 tests with 50 skips but fails
+three snapshot request-size cases: the fixed helper plus maximum manifest exceeds QGA's 65,536-byte
+HTTP body limit. Root-bootstrap delivery requires further packaging work before consumer adoption;
+no provider limit or request-bound test has been weakened.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
