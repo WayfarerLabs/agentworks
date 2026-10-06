@@ -3,11 +3,13 @@
 Python 3.12 supports nonblocking anonymous pipes on Windows as well as POSIX.
 The core remains Python 3.11-compatible for POSIX guest-helper reuse. A private
 launch owner constructs and retains the process while the caller alone pumps
-borrowed endpoints. Return leaves no task using an endpoint or live process
-capability. A canceled, capability-free bootstrap or terminal native return
-tail may finish after return. Execution uses the supplied deadline; killing and
-reaping the local process gets at most 0.5 seconds more. That allowance never
-resumes execution.
+borrowed endpoints. The waiting runner leaves no task using a borrowed endpoint.
+Bounded owner closure can return pending while construction or cleanup still
+owns native capabilities; its caller must retain the same owner and borrowed
+stdin. A canceled, capability-free bootstrap or terminal native return
+tail may finish after return. Execution uses the supplied deadline. Local cleanup
+uses a 0.5-second wait allowance; native calls are not made interruptible. That
+allowance never resumes execution.
 
 The launch admission handoff uses a condition lock for publication. It does not
 assume unsynchronized Python object writes are portable. On POSIX, an external
@@ -374,7 +376,11 @@ class LocalProcessPipes:
 
 @dataclass(frozen=True)
 class LocalProcessTerminal:
-    """Facts retained after an admitted process or denied admission settles."""
+    """Immutable facts from one cleanup attempt or denied admission.
+
+    Retryable cleanup failure leaves exact process custody with the owner.
+    Later attempts publish new facts without changing this observation.
+    """
 
     admitted: bool
     started: bool
@@ -383,6 +389,7 @@ class LocalProcessTerminal:
     cleaned: bool
     dispatch_failed: bool = False
     observation_failed: bool = False
+    cleanup_retryable: bool = False
 
 
 @dataclass(frozen=True)
@@ -398,8 +405,9 @@ class LocalProcessSnapshot:
 class LocalProcessOwner:
     """Own one local process while callers borrow its published pipes.
 
-    One caller serializes ``start`` and ``close``. Other threads may observe
-    immutable snapshots, but pipe borrowers must stop before ``close``.
+    One caller serializes ``start`` and closure. Other threads may observe
+    immutable snapshots, but pipe borrowers must stop before requesting closure.
+    Pending construction still borrows any caller-supplied stdin descriptor.
     """
 
     def __init__(self) -> None:
@@ -411,9 +419,12 @@ class LocalProcessOwner:
         self._observation_failed = False
         self._borrowers_stopped = False
         self._terminal: LocalProcessTerminal | None = None
+        self._first_terminal: LocalProcessTerminal | None = None
         self._start_called = False
         self._closed = False
         self._resize_request: _ResizeRequest | None = None
+        self._retained_status: _ProcessStatus | None = None
+        self._cleanup_retry_requested = False
 
     def _admit(self, request: LocalProcessRequest) -> bool:
         with self._condition:
@@ -446,7 +457,8 @@ class LocalProcessOwner:
 
     def _publish_ready(self, pipes: LocalProcessPipes) -> None:
         with self._condition:
-            self._pipes = pipes
+            if not self._borrowers_stopped:
+                self._pipes = pipes
             self._condition.notify_all()
 
     def _publish_observation_failure(self) -> None:
@@ -583,11 +595,16 @@ class LocalProcessOwner:
                 self._terminal,
             )
 
-    def _wait_terminal(self) -> LocalProcessTerminal:
+    def _wait_terminal(self, deadline: Deadline | None = None, *, first: bool = True) -> LocalProcessTerminal | None:
         with self._condition:
-            while self._terminal is None:
-                self._condition.wait(_POLL_SECONDS)
-            return self._terminal
+            while True:
+                terminal = self._first_terminal if first else self._terminal
+                if terminal is not None:
+                    return terminal
+                remaining = None if deadline is None else deadline.remaining()
+                if remaining is not None and remaining <= 0:
+                    return None
+                self._condition.wait(_POLL_SECONDS if remaining is None else min(remaining, _POLL_SECONDS))
 
     def _publish_terminal(self, terminal: LocalProcessTerminal) -> None:
         with self._condition:
@@ -601,10 +618,14 @@ class LocalProcessOwner:
             self._request = None
             self._pipes = None
             self._terminal = terminal
+            if self._first_terminal is None:
+                self._first_terminal = terminal
             self._condition.notify_all()
 
-    def start(self, request: LocalProcessRequest) -> None:
+    def start(self, request: LocalProcessRequest, *, close_deadline: Deadline | None = None) -> None:
         """Start the inert owner thread, then admit exactly one request."""
+        if close_deadline is not None:
+            self._validate_close_deadline(close_deadline)
         if self._start_called or self._closed:
             raise RuntimeError("local process owner start is not available")
         self._start_called = True
@@ -614,8 +635,9 @@ class LocalProcessOwner:
             terminal, interruption = self._settle(
                 error,
                 dispatch_failed=isinstance(error, Exception),
+                deadline=close_deadline,
             )
-            if not terminal.cleaned and interruption is not None:
+            if (terminal is None or not terminal.cleaned) and interruption is not None:
                 interruption.add_note("Local carrier process cleanup did not complete within its bound.")
             if isinstance(interruption, Exception):
                 return
@@ -627,18 +649,53 @@ class LocalProcessOwner:
             if not admitted:
                 raise RuntimeError("local process admission failed")
         except BaseException as error:
-            terminal, interruption = self._settle(error)
-            if not terminal.cleaned and interruption is not None:
+            terminal, interruption = self._settle(error, deadline=close_deadline)
+            if (terminal is None or not terminal.cleaned) and interruption is not None:
                 interruption.add_note("Local carrier process cleanup did not complete within its bound.")
             assert interruption is not None
             raise interruption from None
 
     def close(self) -> LocalProcessTerminal:
-        """Relinquish borrowed pipes and settle the one admitted process."""
+        """Relinquish borrowed pipes and wait for the first cleanup observation."""
         terminal, interruption = self._settle(None)
+        assert terminal is not None
         if not terminal.cleaned and interruption is not None:
             interruption.add_note("Local carrier process cleanup did not complete within its bound.")
         if interruption is not None:
+            raise interruption
+        return terminal
+
+    @staticmethod
+    def _validate_close_deadline(deadline: Deadline) -> None:
+        expires_at = deadline.expires_at
+        try:
+            finite = expires_at is not None and math.isfinite(expires_at)
+        except (TypeError, OverflowError):
+            finite = False
+        if not finite:
+            raise ValueError("bounded closure requires a finite deadline")
+
+    def close_bounded(self, deadline: Deadline) -> LocalProcessTerminal | None:
+        """Request cleanup, returning None if its observation deadline expires.
+
+        The caller must cease pipe use first and retain this owner on pending or
+        retryable failure. A pending constructor still needs borrowed stdin;
+        pending return does not permit closing it or restoring terminal modes.
+        Native construction and syscalls are not made interruptible. Calling
+        again after a retryable failure requests one serialized cleanup retry.
+        """
+        self._validate_close_deadline(deadline)
+        with self._condition:
+            first = not self._closed or self._first_terminal is None
+            if self._terminal is not None and self._terminal.cleanup_retryable:
+                self._terminal = None
+                self._cleanup_retry_requested = True
+                self._condition.notify_all()
+                first = False
+        terminal, interruption = self._settle(None, deadline=deadline, first=first)
+        if interruption is not None:
+            if terminal is None or not terminal.cleaned:
+                interruption.add_note("Local carrier process cleanup did not complete within its bound.")
             raise interruption
         return terminal
 
@@ -647,10 +704,14 @@ class LocalProcessOwner:
         interruption: BaseException | None,
         *,
         dispatch_failed: bool = False,
-    ) -> tuple[LocalProcessTerminal, BaseException | None]:
-        if self._closed:
-            assert self._terminal is not None
-            return self._terminal, interruption
+        deadline: Deadline | None = None,
+        first: bool = True,
+    ) -> tuple[LocalProcessTerminal | None, BaseException | None]:
+        with self._condition:
+            terminal = self._first_terminal if first else self._terminal
+            if self._closed and terminal is not None:
+                return terminal, interruption
+            self._closed = True
 
         while True:
             try:
@@ -668,7 +729,7 @@ class LocalProcessOwner:
                     interruption = _retain_control_exception(interruption, error)
             while True:
                 try:
-                    terminal = self._wait_terminal()
+                    terminal = self._wait_terminal() if deadline is None else self._wait_terminal(deadline, first=first)
                     break
                 except BaseException as error:
                     interruption = _retain_control_exception(interruption, error)
@@ -682,8 +743,28 @@ class LocalProcessOwner:
                 dispatch_failed=dispatch_failed,
             )
             self._publish_terminal(terminal)
-        self._closed = True
         return terminal, interruption
+
+    def _wait_cleanup_retry_or_exit(self, status: _ProcessStatus) -> None:
+        """Keep exact custody while observing exit, without unsolicited signals."""
+        while True:
+            with self._condition:
+                if self._cleanup_retry_requested:
+                    self._cleanup_retry_requested = False
+                    return
+            try:
+                exited = status.poll() is not None
+            except BaseException:
+                exited = False
+            if exited or status.lost:
+                # Cleanup of an observed exit only closes pipes and retires
+                # native bookkeeping. Lost ownership never authorizes a signal.
+                with self._condition:
+                    self._terminal = None
+                return
+            with self._condition:
+                if not self._cleanup_retry_requested:
+                    self._condition.wait(_POLL_SECONDS)
 
 
 def _cleanup(status: _ProcessStatus) -> bool:
@@ -794,28 +875,42 @@ def _run_local_process_owner(owner: LocalProcessOwner) -> None:
                     continue
     finally:
         request = None
-        if status is not None:
-            try:
-                cleaned = _cleanup(status)
-            except BaseException:
-                cleaned = False
-            local_status = status.status
-            status = None
-            process = None
-            pipes = None
-        else:
-            local_status = None
-        owner._publish_terminal(
-            LocalProcessTerminal(
-                admitted=True,
-                started=started,
-                local_status=local_status,
-                exit_status=exit_status,
-                cleaned=cleaned,
-                dispatch_failed=dispatch_failed,
-                observation_failed=observation_failed,
+        with owner._condition:
+            owner._retained_status = status
+        while True:
+            if status is not None:
+                try:
+                    cleaned = _cleanup(status)
+                except BaseException:
+                    cleaned = False
+                local_status = status.status
+                observation_failed |= status.lost
+                cleanup_retryable = not cleaned and not status.lost
+            else:
+                local_status = None
+                cleanup_retryable = False
+            if not cleanup_retryable:
+                with owner._condition:
+                    owner._retained_status = None
+                status = None
+                process = None
+                pipes = None
+            owner._publish_terminal(
+                LocalProcessTerminal(
+                    admitted=True,
+                    started=started,
+                    local_status=local_status,
+                    exit_status=exit_status,
+                    cleaned=cleaned,
+                    dispatch_failed=dispatch_failed,
+                    observation_failed=observation_failed,
+                    cleanup_retryable=cleanup_retryable,
+                )
             )
-        )
+            if not cleanup_retryable:
+                break
+            assert status is not None
+            owner._wait_cleanup_retry_or_exit(status)
 
 
 def _local_process_owner_entry(owner: LocalProcessOwner) -> None:
