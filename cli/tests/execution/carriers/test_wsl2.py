@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import (
     CapturedOutput,
     CarrierIO,
@@ -61,7 +62,10 @@ def execute(monkeypatch: pytest.MonkeyPatch, result: ProcessResult) -> tuple[Car
     pump = MagicMock(return_value=result)
     monkeypatch.setattr(wsl2, "run_process", pump)
     report = WSL2Carrier(connection()).execute(
-        PreparedInvocation(("/prepared/bootstrap",)), io=CarrierIO(), deadline=Deadline(None)
+        PreparedInvocation(("/prepared/bootstrap",)),
+        io=CarrierIO(),
+        deadline=Deadline(None),
+        custody=LocalDeliveryCustody(),
     )
     return report, pump
 
@@ -92,7 +96,7 @@ def test_structural_validation_is_pure_and_execute_repeats_it(monkeypatch: pytes
     with pytest.raises(ValidationError):
         carrier.validate(invocation, io=unsupported)
     with pytest.raises(ValidationError):
-        carrier.execute(invocation, io=unsupported, deadline=Deadline(None))
+        carrier.execute(invocation, io=unsupported, deadline=Deadline(None), custody=LocalDeliveryCustody())
     pump.assert_not_called()
 
 
@@ -128,8 +132,9 @@ def test_literal_argv_is_forwarded_without_a_shell(monkeypatch: pytest.MonkeyPat
     )
     io = CarrierIO()
     deadline = Deadline(None)
+    custody = LocalDeliveryCustody()
 
-    report = carrier.execute(invocation, io=io, deadline=deadline)
+    report = carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
 
     assert report.completion == ExitStatus(code=0)
     pump.assert_called_once_with(
@@ -149,6 +154,7 @@ def test_literal_argv_is_forwarded_without_a_shell(monkeypatch: pytest.MonkeyPat
         ],
         io=io,
         deadline=deadline,
+        custody=custody,
     )
 
 
@@ -166,7 +172,7 @@ def test_expired_deadline_refuses_without_process_creation(
     spawn = MagicMock(side_effect=AssertionError("expired execution attempted to create a process"))
     monkeypatch.setattr(subprocess, "Popen", spawn)
     report = WSL2Carrier(connection()).execute(
-        PreparedInvocation(("/prepared/bootstrap",)), io=io, deadline=Deadline.after(0)
+        PreparedInvocation(("/prepared/bootstrap",)), io=io, deadline=Deadline.after(0), custody=LocalDeliveryCustody()
     )
     assert report.dispatch == Dispatch.NOT_SENT
     assert report.completion is None
