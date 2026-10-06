@@ -432,7 +432,7 @@ retention of every predecessor/support debt across another takeover. This change
 requirement or stopped intent and activates no permission enforcement. Implementation, private
 review and native proof remain open.
 
-- [ ] Implement atomic recovery-support admission in the existing owner/repository, preserving
+- [x] Implement atomic recovery-support admission in the existing owner/repository, preserving
       generation fencing, bounds, exact retry, serial custody and sealed ordinary registration.
       Prove rollback/lost reply, stale owners, terminal/conflicting rows and recovery of recovery.
 - [ ] Bind the concrete recovery availability span and fixed read-only preparation through existing
@@ -460,6 +460,19 @@ fencing and serial custody. Its 99 focused/adjacent database/owner tests and com
 or data was changed. Independent integrated review and lead gates remain pending. The concrete
 availability span, read-only preparation, v2 adapter adoption and native proof remain unfinished;
 the support implementation gate stays unchecked until those scoped reviews and gates complete.
+
+All three independent lanes clear the combined service/admission pin `e1128eb96`. Project passes
+344 focused/adjacent cases; generic passes 128 service/owner/repository cases and 41 controller
+cases. Complexity passes 128 scoped cases, observes two relevant failures after removing the serial
+admission and requested-root guards, and restores its experiments. The lead's complete combined
+suite passes 14,885 non-integration tests with 49 skips, 27 existing fork warnings and exit 0.
+Complete Ruff/format, strict mypy (1,223 source and test files), typer isolation, file quality,
+locked-SDD, Rulesync and whitespace gates exit 0. Website validation passes 160 Python and 103 Node
+cases, four builds and both deterministic comparisons. The atomic support-admission checkbox now
+records only that implemented, reviewed boundary. Concrete renewed availability, fresh recovery
+preparation, retained-file adapter adoption, native service proof and additive RunContext remain
+open. No schema or database data was changed. Publication remains draft WIP without ready or
+review-requested; public feedback/fix round 1 remains open.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
