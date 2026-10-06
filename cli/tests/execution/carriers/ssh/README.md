@@ -18,10 +18,17 @@ owned console and then the complete supported Windows workflow.
 
 `test_terminal_windows_native.py` marks only its native case `windows`; other hosts skip that case
 and can check the fixed-width Win32 record ABI without native effects. On Windows, the fixture owns
-one fresh hidden console child with explicit `CONIN$` and `CONOUT$` descriptors. Install its
-candidate without editable links (`uv sync --frozen --no-editable`). It checks native resource
-admission, early raw input, viewport geometry and exact restoration with original and custom modes,
-preserving output mode, code pages, handle flags and descriptor inheritability. Its
+one fresh hidden console child with explicit `CONIN$` and `CONOUT$` descriptors. From `cli/`, retain
+its installed candidate without editable links or automatic synchronization:
+
+```bash
+uv sync --frozen --no-editable
+uv run --no-sync pytest tests/execution/carriers/ssh/test_terminal_windows_native.py -m windows
+```
+
+It checks native resource admission, early raw input, viewport geometry and exact restoration with
+original and custom modes, preserving output mode, code pages, handle flags and descriptor
+inheritability. Its
 [`ReadConsoleInputExW`](https://learn.microsoft.com/en-us/windows/console/readconsoleinputex) probe
 uses `CONSOLE_READ_NOWAIT` for empty queues, injected non-key events and injected UTF-16 key
 records. Each measured poll must finish within five seconds, a generous fixture bound rather than a
