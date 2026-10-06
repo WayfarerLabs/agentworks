@@ -100,6 +100,6 @@ class WSL2OwnedManagedJob(WSL2OwnedOperation):
     def _refuse_or_retain(self, deadline: Deadline, *, safe: bool) -> WSL2ManagedStartStatus:
         return (
             WSL2ManagedStartStatus.REFUSED
-            if self.release_if_settled(deadline, safe=safe)
+            if self.release_hold_if_settled(deadline, safe=safe)
             else WSL2ManagedStartStatus.RETAINED
         )

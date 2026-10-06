@@ -138,7 +138,7 @@ def test_managed_start_passes_selected_route_guest_and_caller_identity_without_a
         assert kwargs["guest"].init_start_ticks == subject.ready.identity.init_start_ticks
         assert callable(kwargs["before_dispatch"])
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
-        assert subject.release_if_settled(Deadline.after(30), safe=True)
+        assert subject.release_hold_if_settled(Deadline.after(30), safe=True)
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
         next_step = owner.register_lifecycle_obligation("caller-next-step", payload_version=1, payload=b"next")
         next_step.resolve()
@@ -200,7 +200,7 @@ def test_exceptional_prestart_locator_preserves_original_and_retains_owner(
             _start(subject, database)
         assert caught.value is original
         assert carrier.calls == 1
-        assert subject.release_if_settled(Deadline.after(30), safe=True)
+        assert subject.release_hold_if_settled(Deadline.after(30), safe=True)
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
 
 
@@ -266,7 +266,7 @@ def test_dispatch_route_callback_classifies_and_retains_owner(
             assert isinstance(caught.value, WSL2RouteRefusal)
             assert caught.value.status is expected
         assert carrier.calls == 1
-        assert subject.release_if_settled(Deadline.after(30), safe=True)
+        assert subject.release_hold_if_settled(Deadline.after(30), safe=True)
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
 
 
@@ -316,7 +316,7 @@ def test_exact_hold_settles_before_other_obligation_and_owner_closes_after_resol
 
         monkeypatch.setattr(managed, "start_bound_managed_job", start)
         assert _start(subject, database) is WSL2ManagedStartStatus.ATTEMPTED
-        assert subject.release_if_settled(Deadline.after(30), safe=True)
+        assert subject.release_hold_if_settled(Deadline.after(30), safe=True)
         rows = database.operations.list_lifecycle_obligations(subject.owner.ownership)
         assert any(
             row.obligation_kind == OBLIGATION_KIND and row.state is LifecycleObligationState.RESOLVED for row in rows
@@ -328,7 +328,7 @@ def test_exact_hold_settles_before_other_obligation_and_owner_closes_after_resol
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
         assert other is not None
         other.resolve()
-        assert subject.release_if_settled(Deadline.after(30), safe=True)
+        assert subject.release_hold_if_settled(Deadline.after(30), safe=True)
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
         _close_owner(owner)
         assert database.operations.inspect(subject.owner.ownership.scope) is None
@@ -354,7 +354,7 @@ def test_uncertain_start_or_escaping_control_retains_owner(
             )
             monkeypatch.setattr(managed, "start_bound_managed_job", Mock(return_value=outcome))
             assert _start(subject, database) is WSL2ManagedStartStatus.ATTEMPTED
-        assert subject.release_if_settled(Deadline.after(30), safe=True)
+        assert subject.release_hold_if_settled(Deadline.after(30), safe=True)
         rows = database.operations.list_lifecycle_obligations(subject.owner.ownership)
         assert any(row.state is LifecycleObligationState.RESOLVED for row in rows)
         assert database.operations.inspect(subject.owner.ownership.scope) is not None

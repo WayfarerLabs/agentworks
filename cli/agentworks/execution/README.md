@@ -351,22 +351,24 @@ another guest query. These portable process-loss tests do not prove WSLService d
 native Windows/WSL2 behavior, preparation discovery, a production factory or RunContext integration.
 
 `_wsl2_owned_download.py` is a private ordinary-path composition, not a production entry point. It
-acquires one VM operation owner before starting the WSL2 hold, checks the resolved guest marker,
-boot ID and PID-1 start ticks against the hold's persisted READY epoch before `FileOperation`
-dispatch, and releases only after file custody and the exact guest anchor settle. Missing source or
-other settled refusal releases safely; uncertain file or hold outcomes retain the owner and hold.
+consumes one caller-acquired exact VM operation owner before starting the WSL2 hold. It checks the
+resolved guest marker, boot ID and PID-1 start ticks against the hold's persisted READY epoch before
+`FileOperation` dispatch, and reports hold release only after file custody and the exact guest
+anchor settle. Missing source or other settled refusal can settle the hold; the caller still owns
+aggregate resolution and release. Uncertain file or hold outcomes retain the owner and hold.
 Portable SQLite tests cover this sequence, not native locator-to-registration binding, Windows/WSL
 behavior, WSLService drain, crash recovery, activation or RunContext wiring. Its private
 `from_platform` path uses the selected WSL2 platform to observe registration and resolve the native
-route before acquiring the VM claim, then re-observes registration under the hold during target
-preparation. It copies the selected route into one core-owned carrier used for both the guest probe
-and file dispatch. A changed registration refuses before file dispatch, and invalid route or runtime
-facts refuse before ownership. Replacement between the pre-probe observation and guest dispatch can
-still send the read-only probe to a changed registration; post-probe confirmation suppresses file
-dispatch in that case. This is not an atomic registration guarantee or a production factory.
+route under the already-acquired VM claim, then re-observes registration under the hold during
+target preparation. It copies the selected route into one core-owned carrier used for both the guest
+probe and file dispatch. A changed registration refuses before file dispatch, and invalid route or
+runtime facts refuse before hold activation without closing the caller's owner. Replacement between
+the pre-probe observation and guest dispatch can still send the read-only probe to a changed
+registration; post-probe confirmation suppresses file dispatch in that case. This is not an atomic
+registration guarantee or a production factory.
 
-`_wsl2_owned_operation.py` now shares selected-route copying, VM ownership, the WSL2 hold, exact
-target preparation and explicit settled release between that download path and the private
+`_wsl2_owned_operation.py` now shares selected-route copying, the caller's VM owner, the WSL2 hold,
+exact target preparation and hold-only settlement between that download path and the private
 `_wsl2_owned_managed_job.py` caller. The managed caller retains the supplied run ID and does not
 release the hold automatically after start. It compares a fresh locator, copied connection and
 runtime selection, then confirms the locator again before entering the bound-start composition.
@@ -855,6 +857,14 @@ original download outcome without exposing partial data. Its temporary buffer is
 exit, which is not secure memory erasure. This adapter introduces no retry, fallback or additional
 claim and is not the no-staging readiness path. Production FileAccess and durable recovery handoff
 remain separate integration work.
+
+`_local_download_publication.py` is the private Linux workstation stage for a verified download.
+Create cannot overwrite an entry; explicit Replace requires an ordinary writable single-link file
+and preserves supported local access metadata or refuses before publication. It records publication
+separately from cleanup, so a cleanup error cannot turn a changed destination into an unchanged
+claim. The stage does not consume a guest result or establish the caller's deadline and ownership
+facts. It is not wired to public `FileAccess.download`, and Windows and macOS local publication
+remain unaccepted.
 
 ## Private terminal handoff preparation
 

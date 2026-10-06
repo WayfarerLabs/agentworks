@@ -535,11 +535,18 @@ supported-workstation or production FileAccess acceptance; the checkbox stays op
       download, upload and JSON and removed duplicate control-flow branches. Admission-driven
       timeout regressions replace a reproduced startup-timing assumption; both fail against the old
       settlement behavior and pass under concurrent stress.
-- [ ] Implement local download publication with create-only default and explicit replace-existing
+- [x] Implement a private Linux x86_64/aarch64 local download stage with create-only publication and
+      explicit replace-existing selection. Require complete caller verification before publish,
+      ordinary destination write authority, ordinary single-link objects and same-directory staging;
+      preserve supported local access metadata or refuse before replacement, and retain exact
+      cleanup and published-effect facts separately. Native local tests cover ACLs, metadata and
+      failure boundaries. This is a host primitive, not public FileAccess download or non-Linux
+      acceptance.
+- [ ] Complete local download publication with create-only default and explicit replace-existing
       selection, as directed on 2026-10-05. Settle and prove workstation metadata/ACL handling,
       ordinary-file refusal, full-transfer verification and cleanup before publishing either form;
       never import guest ownership into the workstation or silently strip local metadata. Complete
-      native local publication and public result conversion remain required, including propagation
+      supported-host publication and public result conversion remain required, including propagation
       of timing failure alongside proved operation facts.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
       access. The models-only checkpoint is not additive-surface completion.
@@ -1719,6 +1726,15 @@ and whitespace checks pass. Live SSH/QGA and production route tests remain open.
       plugin-route mutation and uncertain custody in focused tests and private review. This
       supersedes only the earlier checkpoint's internal re-resolution, not its completed historical
       record or the native and production gates above.
+- [x] Require the private WSL2 operation wrapper to consume one exact VM owner acquired by its
+      caller before route selection. Share that owner across the hold, preparation, file dispatch
+      and managed start; read lifecycle facts through the owner and leave whole-operation sealing,
+      resolution and release to core. Exact-owner and cross-database regression tests cover both
+      wrapper entry points. This remains private composition, not production activation ownership.
+
+The earlier private WSL checkpoints' route-before-ownership ordering and wrapper-level owner release
+are superseded by this caller-owned arrangement. Their checked boxes record historical proofs, not
+the production order or release authority.
 
 The private WSL2 hold-recovery checkpoint at `15f8a936` consumes one exact persisted obligation
 after generic takeover. It resolves a registered row without dispatch or a post-`READY` row only

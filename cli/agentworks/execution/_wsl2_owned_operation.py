@@ -292,15 +292,12 @@ class WSL2OwnedOperation:
         if status is not WSL2RouteStatus.CURRENT:
             raise WSL2RouteRefusal(status)
 
-    def release_if_settled(self, deadline: Deadline, *, safe: bool) -> bool:
+    def release_hold_if_settled(self, deadline: Deadline, *, safe: bool) -> bool:
         """Report exact hold release, never aggregate whole-operation resolution.
 
         The caller supplies permission to attempt hold cleanup. A true result
         leaves the owner active, unsealed, and under the caller's custody.
         """
-        return self._release_exact_hold(deadline, safe=safe)
-
-    def _release_exact_hold(self, deadline: Deadline, *, safe: bool) -> bool:
         if not safe:
             return False
         if self._hold_released:

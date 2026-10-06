@@ -167,7 +167,7 @@ def test_hold_reads_and_settles_only_supplied_owners_database(
         rows = owner.list_lifecycle_obligations()
         assert rows == database.operations.list_lifecycle_obligations(owner.ownership)
         assert any(row.state is LifecycleObligationState.POSSIBLE_EFFECT for row in rows)
-        assert subject.release_if_settled(Deadline.after(30), safe=True)
+        assert subject.release_hold_if_settled(Deadline.after(30), safe=True)
         assert all(row.state is LifecycleObligationState.RESOLVED for row in owner.list_lifecycle_obligations())
         assert other_database.operations.inspect(other_owner.ownership.scope) == other_claim
         assert not other_owner.list_lifecycle_obligations()

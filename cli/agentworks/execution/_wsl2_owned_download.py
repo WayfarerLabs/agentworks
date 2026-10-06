@@ -71,7 +71,7 @@ class WSL2OwnedDownload(WSL2OwnedOperation):
         return self._release_status(deadline, safe=file_settled)
 
     def _release_status(self, deadline: Deadline, *, safe: bool) -> WSL2DownloadStatus:
-        if not self.release_if_settled(deadline, safe=safe):
+        if not self.release_hold_if_settled(deadline, safe=safe):
             return WSL2DownloadStatus.RETAINED
         if self.outcome is None or self.outcome.status is not FileDownloadStatus.COMPLETE:
             return WSL2DownloadStatus.REFUSED
