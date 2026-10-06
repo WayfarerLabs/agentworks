@@ -23,7 +23,7 @@ class WSL2DownloadStatus(StrEnum):
 
 
 class WSL2OwnedDownload(WSL2OwnedOperation):
-    """One caller-retained private download; escaping control flow keeps its claim."""
+    """One private download borrowing the caller's VM operation owner."""
 
     _purpose = "download"
     file_operation: FileOperation | None = None
@@ -39,7 +39,7 @@ class WSL2OwnedDownload(WSL2OwnedOperation):
         plan: IdentityPlan,
         deadline: Deadline,
     ) -> WSL2DownloadStatus:
-        """Run once; only typed settled obligations permit whole-owner release."""
+        """Run once and report file custody and exact platform-hold settlement."""
         guest = self.start_and_prepare(deadline)
         if self.preparation is None:
             return WSL2DownloadStatus.RETAINED

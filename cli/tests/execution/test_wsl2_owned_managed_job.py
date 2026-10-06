@@ -34,8 +34,8 @@ from agentworks.execution.binding import NativeExecutionBinding
 from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, PreparedInvocation
 from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
 from agentworks.execution.models import Command, Input, Output
-from agentworks.operations import LifecycleObligation
-from tests.execution.test_wsl2_owned_download import GuestThenFileCarrier
+from agentworks.operations import LifecycleObligation, OperationOwner
+from tests.execution.test_wsl2_owned_download import GuestThenFileCarrier, _acquire_owner, _close_owner
 from tests.execution.test_wsl2_platform_hold import FakeNative, FakeObserver
 from tests.vms.test_target_preparation import _vm
 
@@ -50,6 +50,7 @@ CONNECTION = WSL2Connection("Ubuntu", "admin", "wsl.exe")
 
 def _subject(
     database: Database,
+    owner: OperationOwner,
     monkeypatch: pytest.MonkeyPatch,
     *,
     bindings: list[NativeExecutionBinding] | None = None,
@@ -76,11 +77,14 @@ def _subject(
         _vm(),
         platform,
         cast(RunContext, object()),
+        owner=owner,
         deadline=Deadline.after(30),
         native=FakeNative([]),
         observer=FakeObserver([]),
     )
     assert subject is not None
+    assert subject.owner is owner
+    assert subject.hold._owner is owner
     return subject, platform, guest_carrier
 
 
@@ -108,7 +112,8 @@ def test_managed_start_passes_selected_route_guest_and_caller_identity_without_a
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
-        subject, platform, carrier = _subject(database, monkeypatch)
+        owner = _acquire_owner(database)
+        subject, platform, carrier = _subject(database, owner, monkeypatch)
         outcome = ManagedStartOutcome(launch_state=ManagedLaunchState.RECEIPT_CONFIRMED)
         start = Mock(return_value=outcome)
         monkeypatch.setattr(managed, "start_bound_managed_job", start)
@@ -135,6 +140,10 @@ def test_managed_start_passes_selected_route_guest_and_caller_identity_without_a
         assert callable(kwargs["before_dispatch"])
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
         assert subject.release_if_settled(Deadline.after(30), safe=True)
+        assert database.operations.inspect(subject.owner.ownership.scope) is not None
+        next_step = owner.register_lifecycle_obligation("caller-next-step", payload_version=1, payload=b"next")
+        next_step.resolve()
+        _close_owner(owner)
         assert database.operations.inspect(subject.owner.ownership.scope) is None
 
 
@@ -142,6 +151,7 @@ def test_changed_connection_refuses_before_reservation_and_releases_settled_hold
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
+        owner = _acquire_owner(database)
         first = NativeExecutionBinding(
             WSL2Carrier(CONNECTION), CONNECTION.user, RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable)
         )
@@ -149,13 +159,15 @@ def test_changed_connection_refuses_before_reservation_and_releases_settled_hold
         second = NativeExecutionBinding(
             WSL2Carrier(changed), changed.user, RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable)
         )
-        subject, _, carrier = _subject(database, monkeypatch, bindings=[first, second])
+        subject, _, carrier = _subject(database, owner, monkeypatch, bindings=[first, second])
         start = Mock(side_effect=AssertionError("managed start after route change"))
         monkeypatch.setattr(managed, "start_bound_managed_job", start)
 
         assert _start(subject, database) is WSL2ManagedStartStatus.REFUSED
         assert carrier.calls == 1
         start.assert_not_called()
+        assert database.operations.inspect(OperationScope(OperationResourceKind.VM, "box")) is not None
+        _close_owner(owner)
         assert database.operations.inspect(OperationScope(OperationResourceKind.VM, "box")) is None
 
 
@@ -164,8 +176,9 @@ def test_unconfirmed_prestart_locator_retains_owner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, observation: object
 ) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
+        owner = _acquire_owner(database)
         stable = ProviderLocator("wsl2:registration")
-        subject, _, carrier = _subject(database, monkeypatch, locators=[stable] * 3 + [observation])
+        subject, _, carrier = _subject(database, owner, monkeypatch, locators=[stable] * 3 + [observation])
         start = Mock(side_effect=AssertionError("managed start after unconfirmed route"))
         monkeypatch.setattr(managed, "start_bound_managed_job", start)
 
@@ -179,7 +192,8 @@ def test_exceptional_prestart_locator_preserves_original_and_retains_owner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
-        subject, platform, carrier = _subject(database, monkeypatch)
+        owner = _acquire_owner(database)
+        subject, platform, carrier = _subject(database, owner, monkeypatch)
         original = RuntimeError("locator observation failed")
         platform.observe_provider_locator.side_effect = [ProviderLocator("wsl2:registration")] * 2 + [original]
 
@@ -187,7 +201,7 @@ def test_exceptional_prestart_locator_preserves_original_and_retains_owner(
             _start(subject, database)
         assert caught.value is original
         assert carrier.calls == 1
-        assert not subject.release_if_settled(Deadline.after(30), safe=True)
+        assert subject.release_if_settled(Deadline.after(30), safe=True)
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
 
 
@@ -196,6 +210,7 @@ def test_dispatch_route_callback_classifies_and_retains_owner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
+        owner = _acquire_owner(database)
         stable = ProviderLocator("wsl2:registration")
         replacement = ProviderLocator("wsl2:replacement")
         locators: list[object] = [stable for _ in range(5)]
@@ -217,7 +232,9 @@ def test_dispatch_route_callback_classifies_and_retains_owner(
             if change == "runtime"
             else first.runtime_selection,
         )
-        subject, platform, carrier = _subject(database, monkeypatch, locators=locators, bindings=[first, first, second])
+        subject, platform, carrier = _subject(
+            database, owner, monkeypatch, locators=locators, bindings=[first, first, second]
+        )
         original = RuntimeError("locator observation failed")
 
         deadline = Deadline.after(30)
@@ -250,7 +267,7 @@ def test_dispatch_route_callback_classifies_and_retains_owner(
             assert isinstance(caught.value, WSL2RouteRefusal)
             assert caught.value.status is expected
         assert carrier.calls == 1
-        assert not subject.release_if_settled(Deadline.after(30), safe=True)
+        assert subject.release_if_settled(Deadline.after(30), safe=True)
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
 
 
@@ -259,6 +276,7 @@ def test_changed_runtime_or_late_locator_refuses_before_managed_start(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
+        owner = _acquire_owner(database)
         first = NativeExecutionBinding(
             WSL2Carrier(CONNECTION), CONNECTION.user, RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable)
         )
@@ -271,13 +289,15 @@ def test_changed_runtime_or_late_locator_refuses_before_managed_start(
         )
         stable = ProviderLocator("wsl2:registration")
         locators = [stable] * 4 + [ProviderLocator("wsl2:replacement") if change == "late-locator" else stable]
-        subject, _, carrier = _subject(database, monkeypatch, bindings=[first, second], locators=locators)
+        subject, _, carrier = _subject(database, owner, monkeypatch, bindings=[first, second], locators=locators)
         start = Mock(side_effect=AssertionError("managed start after selected route changed"))
         monkeypatch.setattr(managed, "start_bound_managed_job", start)
 
         assert _start(subject, database) is WSL2ManagedStartStatus.REFUSED
         assert carrier.calls == 1
         start.assert_not_called()
+        assert database.operations.inspect(OperationScope(OperationResourceKind.VM, "box")) is not None
+        _close_owner(owner)
         assert database.operations.inspect(OperationScope(OperationResourceKind.VM, "box")) is None
 
 
@@ -285,7 +305,8 @@ def test_exact_hold_settles_before_other_obligation_and_owner_closes_after_resol
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
-        subject, _, _ = _subject(database, monkeypatch)
+        owner = _acquire_owner(database)
+        subject, _, _ = _subject(database, owner, monkeypatch)
         other: LifecycleObligation | None = None
 
         def start(*args: object, **kwargs: object) -> ManagedStartOutcome:
@@ -296,7 +317,7 @@ def test_exact_hold_settles_before_other_obligation_and_owner_closes_after_resol
 
         monkeypatch.setattr(managed, "start_bound_managed_job", start)
         assert _start(subject, database) is WSL2ManagedStartStatus.ATTEMPTED
-        assert not subject.release_if_settled(Deadline.after(30), safe=True)
+        assert subject.release_if_settled(Deadline.after(30), safe=True)
         rows = database.operations.list_lifecycle_obligations(subject.owner.ownership)
         assert any(
             row.obligation_kind == OBLIGATION_KIND and row.state is LifecycleObligationState.RESOLVED for row in rows
@@ -309,6 +330,8 @@ def test_exact_hold_settles_before_other_obligation_and_owner_closes_after_resol
         assert other is not None
         other.resolve()
         assert subject.release_if_settled(Deadline.after(30), safe=True)
+        assert database.operations.inspect(subject.owner.ownership.scope) is not None
+        _close_owner(owner)
         assert database.operations.inspect(subject.owner.ownership.scope) is None
 
 
@@ -317,7 +340,8 @@ def test_uncertain_start_or_escaping_control_retains_owner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raises: bool
 ) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
-        subject, _, _ = _subject(database, monkeypatch)
+        owner = _acquire_owner(database)
+        subject, _, _ = _subject(database, owner, monkeypatch)
         if raises:
             monkeypatch.setattr(managed, "start_bound_managed_job", Mock(side_effect=RuntimeError("uncertain")))
             with pytest.raises(RuntimeError, match="uncertain"):
@@ -331,7 +355,7 @@ def test_uncertain_start_or_escaping_control_retains_owner(
             )
             monkeypatch.setattr(managed, "start_bound_managed_job", Mock(return_value=outcome))
             assert _start(subject, database) is WSL2ManagedStartStatus.ATTEMPTED
-        assert not subject.release_if_settled(Deadline.after(30), safe=True)
+        assert subject.release_if_settled(Deadline.after(30), safe=True)
         rows = database.operations.list_lifecycle_obligations(subject.owner.ownership)
         assert any(row.state is LifecycleObligationState.RESOLVED for row in rows)
         assert database.operations.inspect(subject.owner.ownership.scope) is not None

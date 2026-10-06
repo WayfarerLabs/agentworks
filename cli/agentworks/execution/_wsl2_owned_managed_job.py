@@ -29,15 +29,13 @@ class WSL2OwnedManagedJob(WSL2OwnedOperation):
     """Hold one selected VM route through a caller-supplied managed start.
 
     The independent run does not extend the WSL hold. A caller explicitly
-    releases the hold and owner after checking start custody and settling all
-    obligations; successful start does not release either resource here.
+    releases the hold after checking start custody. Whole-operation resolution
+    and owner release remain with core; successful start releases neither here.
     """
 
     _purpose = "managed-job"
 
     start_outcome: ManagedStartOutcome | None = None
-    _start_invoked = False
-    _start_control_uncertain = False
 
     def start_job(
         self,
@@ -73,50 +71,31 @@ class WSL2OwnedManagedJob(WSL2OwnedOperation):
             return self._refuse_or_retain(deadline, safe=True)
         target = preparation.target
         assert target is not None
-        try:
-            route = self.revalidate_selected_route(deadline)
-        except BaseException:
-            self._start_control_uncertain = True
-            raise
+        route = self.revalidate_selected_route(deadline)
         if route is not WSL2RouteStatus.CURRENT:
             return self._refuse_or_retain(deadline, safe=route is WSL2RouteStatus.CHANGED)
-        self._start_invoked = True
-        try:
-            self.start_outcome = start_bound_managed_job(
-                repository,
-                invocation,
-                target=target,
-                workload_plan=workload_plan,
-                root_plan=root_plan,
-                run_owner=run_owner,
-                input=input,
-                output=output,
-                env=env,
-                cwd=cwd,
-                sensitive=sensitive,
-                carrier=self._carrier,
-                runtime_selection=self._runtime,
-                deadline=deadline,
-                owner=self.owner,
-                obligation_id=obligation_id,
-                identity=identity,
-                guest=guest,
-                before_dispatch=lambda: self.require_selected_route(deadline),
-            )
-        except BaseException:
-            self._start_control_uncertain = True
-            raise
-        return WSL2ManagedStartStatus.ATTEMPTED
-
-    def release_if_settled(self, deadline: Deadline, *, safe: bool) -> bool:
-        """Settle the hold independently; close only when start custody permits."""
-        if not self._release_exact_hold(deadline, safe=safe):
-            return False
-        outcome = self.start_outcome
-        start_safe = not self._start_control_uncertain and (
-            not self._start_invoked or outcome is not None and not outcome.requires_owner_retention
+        self.start_outcome = start_bound_managed_job(
+            repository,
+            invocation,
+            target=target,
+            workload_plan=workload_plan,
+            root_plan=root_plan,
+            run_owner=run_owner,
+            input=input,
+            output=output,
+            env=env,
+            cwd=cwd,
+            sensitive=sensitive,
+            carrier=self._carrier,
+            runtime_selection=self._runtime,
+            deadline=deadline,
+            owner=self.owner,
+            obligation_id=obligation_id,
+            identity=identity,
+            guest=guest,
+            before_dispatch=lambda: self.require_selected_route(deadline),
         )
-        return start_safe and self._close_settled_owner()
+        return WSL2ManagedStartStatus.ATTEMPTED
 
     def _refuse_or_retain(self, deadline: Deadline, *, safe: bool) -> WSL2ManagedStartStatus:
         return (

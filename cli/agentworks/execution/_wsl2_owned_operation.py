@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Self
 
 from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLocatorUnavailable
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
-from agentworks.db import LifecycleObligationState, OperationResourceKind, OperationScope
+from agentworks.db import LifecycleObligationState, OperationResourceKind
 from agentworks.errors import ValidationError
 from agentworks.execution._runtime_prerequisite import RuntimeSelection
 from agentworks.execution._vm_guest_identity import VMGuestIdentityObservationState
@@ -64,11 +64,13 @@ class WSL2OwnedOperation:
         connection: WSL2Connection,
         runtime_selection: RuntimeSelection,
         *,
+        owner: OperationOwner,
         config: Config | None = None,
         native: OwnedHostClient | None = None,
         observer: GuestAnchorObserver | None = None,
     ) -> None:
         purpose = self._purpose
+        self._require_vm_owner(owner, vm)
         if type(locator) is not ProviderLocator or type(connection) is not WSL2Connection:
             raise ValidationError(f"WSL2 {purpose} requires an exact locator and connection")
         if vm.instance_marker is None:
@@ -85,9 +87,7 @@ class WSL2OwnedOperation:
         selected_binding = NativeExecutionBinding(selected_carrier, selected_connection.user, selected_runtime)
         selected_native = WindowsWSL2HostClient() if native is None else native
         selected_observer = WSL2GuestObserver(selected_connection) if observer is None else observer
-        self.owner = OperationOwner.acquire(
-            repository, OperationScope(OperationResourceKind.VM, vm.name), f"wsl2-{purpose}"
-        )
+        self.owner = owner
         self._repository = repository
         self._vm = vm
         self._locator = selected_locator
@@ -98,23 +98,15 @@ class WSL2OwnedOperation:
         self._platform = platform
         self._ctx = ctx
         self._config = config
-        try:
-            self.hold = WSL2PlatformHold(
-                self.owner,
-                vm.name,
-                selected_locator.token,
-                vm.instance_marker,
-                selected_connection,
-                selected_native,
-                selected_observer,
-            )
-        except BaseException as construction_error:
-            # Construction has not activated the hold or registered an obligation.
-            try:
-                self.owner.close()
-            except BaseException as close_error:
-                raise close_error from construction_error
-            raise
+        self.hold = WSL2PlatformHold(
+            self.owner,
+            vm.name,
+            selected_locator.token,
+            vm.instance_marker,
+            selected_connection,
+            selected_native,
+            selected_observer,
+        )
         self.ready: WSL2AnchorEvidence | None = None
         self.preparation: VMTargetPreparation | None = None
         self._used = False
@@ -128,13 +120,15 @@ class WSL2OwnedOperation:
         platform: WSL2Platform,
         ctx: RunContext,
         *,
+        owner: OperationOwner,
         deadline: Deadline,
         config: Config | None = None,
         native: OwnedHostClient | None = None,
         observer: GuestAnchorObserver | None = None,
     ) -> Self | None:
-        """Select a copied route before acquiring the VM claim."""
+        """Select a copied route under the caller's already-acquired VM claim."""
         purpose = cls._purpose
+        cls._require_vm_owner(owner, vm)
         if not isinstance(platform, WSL2Platform) or platform.site_name != vm.site:
             raise ValidationError(f"WSL2 {purpose} requires the VM's selected WSL2 platform")
         validate_vm_instance_marker(vm.instance_marker)
@@ -169,10 +163,20 @@ class WSL2OwnedOperation:
             locator,
             connection,
             runtime_selection,
+            owner=owner,
             config=config,
             native=native,
             observer=observer,
         )
+
+    @classmethod
+    def _require_vm_owner(cls, owner: OperationOwner, vm: VMRow) -> None:
+        """Enforce the exact owner and VM scope supplied to private composition."""
+        if type(owner) is not OperationOwner:
+            raise ValidationError(f"WSL2 {cls._purpose} requires an exact operation owner")
+        scope = owner.ownership.scope
+        if scope.resource_kind is not OperationResourceKind.VM or scope.resource_name != vm.name:
+            raise ValidationError(f"WSL2 {cls._purpose} requires the VM's operation owner")
 
     @classmethod
     def _selected_connection(cls, binding: NativeExecutionBinding) -> WSL2Connection:
@@ -294,8 +298,12 @@ class WSL2OwnedOperation:
             raise WSL2RouteRefusal(status)
 
     def release_if_settled(self, deadline: Deadline, *, safe: bool) -> bool:
-        """Release the exact hold and whole owner only with resolved obligations."""
-        return self._release_exact_hold(deadline, safe=safe) and self._close_settled_owner()
+        """Report exact hold release, never aggregate whole-operation resolution.
+
+        The caller supplies permission to attempt hold cleanup. A true result
+        leaves the owner active, unsealed, and under the caller's custody.
+        """
+        return self._release_exact_hold(deadline, safe=safe)
 
     def _release_exact_hold(self, deadline: Deadline, *, safe: bool) -> bool:
         if not safe:
@@ -313,13 +321,4 @@ class WSL2OwnedOperation:
         ):
             return False
         self._hold_released = True
-        return True
-
-    def _close_settled_owner(self) -> bool:
-        rows = self._repository.list_lifecycle_obligations(self.owner.ownership)
-        if not rows or any(row.state is not LifecycleObligationState.RESOLVED for row in rows):
-            return False
-        self.owner.seal_lifecycle_obligations()
-        self.owner.record_effects_resolved()
-        self.owner.close()
         return True
