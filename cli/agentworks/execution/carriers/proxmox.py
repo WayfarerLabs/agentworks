@@ -10,15 +10,14 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 import sys
 import time
 import urllib.parse
-from contextlib import suppress
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from agentworks.errors import ValidationError
+from agentworks.errors import StateError, ValidationError
 from agentworks.execution._process import SinkWriteError, try_write_to_sink
 from agentworks.execution.carrier import (
     Capture,
@@ -38,7 +37,16 @@ from agentworks.execution.carrier import (
     SinkOutput,
     TerminalInput,
 )
-from agentworks.execution.carriers._proxmox_http import _Endpoint, _valid_control_timeout, _valid_task_id
+from agentworks.execution.carriers._proxmox_http import (
+    _MAX_RESPONSE_BYTES,
+    _Endpoint,
+    _valid_control_timeout,
+    _valid_task_id,
+)
+from agentworks.execution.carriers._subprocess import run_process
+
+if TYPE_CHECKING:
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
 
 _MAX_INPUT_BYTES = 65_536
 # Older supported PVE 8 HTTP servers limit the complete POST, independently
@@ -102,44 +110,68 @@ class _WireFailure(Exception):
     """A REST response is unavailable or cannot establish execution evidence."""
 
 
+class _ResponseBuffer:
+    """Private bounded parsing bytes, never carrier output retention."""
+
+    def __init__(self) -> None:
+        self.data = bytearray()
+
+    def try_write(self, data: memoryview) -> int:
+        if len(self.data) + len(data) > _MAX_RESPONSE_BYTES:
+            raise SinkWriteError("Proxmox HTTP response exceeded its bound")
+        self.data.extend(data)
+        return len(data)
+
+
+class _DiscardResponse:
+    def try_write(self, data: memoryview) -> int:
+        return len(data)
+
+
 class _ProxmoxWire:
     def __init__(self, connection: ProxmoxConnection) -> None:
         self._connection = connection
 
     def request(
-        self, method: str, suffix: str, *, body: bytes | None = None, timeout: float | None
+        self,
+        method: str,
+        suffix: str,
+        *,
+        custody: LocalDeliveryCustody,
+        body: bytes | None = None,
+        timeout: float | None,
     ) -> dict[str, object]:
-        return self._request(_Endpoint.GUEST_AGENT, method, suffix, body=body, timeout=timeout)
+        return self._request(_Endpoint.GUEST_AGENT, method, suffix, custody=custody, body=body, timeout=timeout)
 
-    def request_power(self, *, timeout: float) -> dict[str, object]:
+    def request_power(self, *, custody: LocalDeliveryCustody, timeout: float) -> dict[str, object]:
         """Read provider power through the fixed, passive status endpoint."""
-        return self._request(_Endpoint.POWER, "GET", None, body=None, timeout=timeout)
+        return self._request(_Endpoint.POWER, "GET", None, custody=custody, body=None, timeout=timeout)
 
-    def request_current_config(self, *, timeout: float) -> dict[str, object]:
+    def request_current_config(self, *, custody: LocalDeliveryCustody, timeout: float) -> dict[str, object]:
         """Read live provider configuration through one fixed, passive endpoint."""
-        return self._request(_Endpoint.CURRENT_CONFIG, "GET", None, body=None, timeout=timeout)
+        return self._request(_Endpoint.CURRENT_CONFIG, "GET", None, custody=custody, body=None, timeout=timeout)
 
-    def request_vm_start(self, *, timeout: float) -> str:
+    def request_vm_start(self, *, custody: LocalDeliveryCustody, timeout: float) -> str:
         """Submit one fixed start, returning only a bounded raw acknowledgment."""
         if not _valid_control_timeout(timeout):
             raise ValidationError("Proxmox start requires a positive finite timeout")
-        data = self._exchange(_Endpoint.VM_START, "POST", None, body=None, timeout=timeout)
+        data = self._exchange(_Endpoint.VM_START, "POST", None, custody=custody, body=None, timeout=timeout)
         if not _valid_task_id(data):
             raise _WireFailure("Proxmox returned an invalid start acknowledgment")
         assert isinstance(data, str)
         return data
 
-    def request_task_status(self, upid: str, *, timeout: float) -> dict[str, object]:
+    def request_task_status(self, upid: str, *, custody: LocalDeliveryCustody, timeout: float) -> dict[str, object]:
         """Read one literal task under the selected node, without identity binding."""
         if not _valid_control_timeout(timeout) or not _valid_task_id(upid):
             raise ValidationError("Proxmox task status requires a bounded identifier and positive finite timeout")
-        return self._request(_Endpoint.TASK_STATUS, "GET", upid, body=None, timeout=timeout)
+        return self._request(_Endpoint.TASK_STATUS, "GET", upid, custody=custody, body=None, timeout=timeout)
 
-    def request_guest_info(self, *, timeout: float) -> dict[str, object]:
+    def request_guest_info(self, *, custody: LocalDeliveryCustody, timeout: float) -> dict[str, object]:
         """Read guest-agent information through one fixed, body-free endpoint."""
         if not _valid_control_timeout(timeout):
             raise ValidationError("Proxmox guest information requires a positive finite timeout")
-        return self._request(_Endpoint.GUEST_INFO, "GET", None, body=None, timeout=timeout)
+        return self._request(_Endpoint.GUEST_INFO, "GET", None, custody=custody, body=None, timeout=timeout)
 
     def _request(
         self,
@@ -147,10 +179,11 @@ class _ProxmoxWire:
         method: str,
         suffix: str | None,
         *,
+        custody: LocalDeliveryCustody,
         body: bytes | None,
         timeout: float | None,
     ) -> dict[str, object]:
-        data = self._exchange(endpoint, method, suffix, body=body, timeout=timeout)
+        data = self._exchange(endpoint, method, suffix, custody=custody, body=body, timeout=timeout)
         if not isinstance(data, dict):
             raise _WireFailure("Proxmox returned an invalid response envelope")
         return dict(data)
@@ -161,10 +194,13 @@ class _ProxmoxWire:
         method: str,
         suffix: str | None,
         *,
+        custody: LocalDeliveryCustody,
         body: bytes | None,
         timeout: float | None,
     ) -> object:
         """Own one HTTP worker until completion, timeout or propagated interruption."""
+        if not custody.settled:
+            raise StateError("Previous local delivery cleanup remains unsettled")
         started = time.monotonic()
         connection = asdict(self._connection)
         connection["ca_bundle"] = str(self._connection.ca_bundle) if self._connection.ca_bundle is not None else None
@@ -178,27 +214,23 @@ class _ProxmoxWire:
                 "endpoint": endpoint,
             }
         ).encode("ascii")
-        process = subprocess.Popen(
+        response = _ResponseBuffer()
+        result = run_process(
             [sys.executable, "-I", "-m", "agentworks.execution.carriers._proxmox_http"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            custody=custody,
+            io=CarrierIO(input=FiniteInput(payload, sensitive=True), output=SinkOutput(response, _DiscardResponse())),
+            deadline=Deadline(None if timeout is None else started + timeout),
         )
-        try:
-            remaining = None if timeout is None else max(0.0, timeout - (time.monotonic() - started))
-            encoded, _ = process.communicate(payload, timeout=remaining)
-        except BaseException:
-            if process.poll() is None:
-                with suppress(ProcessLookupError):
-                    process.kill()
-            process.communicate()
-            raise
-        if process.returncode != 0:
+        if not custody.settled or result.failure is not None or result.exit_status != 0 or not result.stdout.complete:
             raise _WireFailure("Proxmox request or response failed")
+        parsed: object = None
+        invalid_json = False
         try:
-            parsed = json.loads(encoded)
+            parsed = json.loads(response.data)
         except ValueError:
-            raise _WireFailure("Proxmox returned invalid JSON") from None
+            invalid_json = True
+        if invalid_json:
+            raise _WireFailure("Proxmox returned invalid JSON")
         if not isinstance(parsed, dict) or "data" not in parsed:
             raise _WireFailure("Proxmox returned an invalid response envelope")
         return parsed["data"]
@@ -247,12 +279,16 @@ class ProxmoxCarrier:
             raise ValidationError("Prepared Proxmox request exceeds the supported HTTP body limit")
         return body
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(
+        self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody
+    ) -> CarrierReport:
+        if not custody.settled:
+            raise StateError("Previous local delivery cleanup remains unsettled")
         body = self._request_body(invocation, io)
         if deadline.expired:
             return _incomplete(Dispatch.NOT_SENT, io, Failure.DEADLINE)
         try:
-            response = self._wire.request("POST", "exec", body=body, timeout=deadline.remaining())
+            response = self._wire.request("POST", "exec", custody=custody, body=body, timeout=deadline.remaining())
         except Exception:
             return _incomplete(Dispatch.UNKNOWN, io, Failure.DEADLINE if deadline.expired else Failure.DISPATCH)
         pid = response.get("pid")
@@ -260,7 +296,9 @@ class ProxmoxCarrier:
             return _incomplete(Dispatch.UNKNOWN, io, Failure.INVALID_RESPONSE)
         while not deadline.expired:
             try:
-                status = self._wire.request("GET", f"exec-status?pid={pid}", timeout=deadline.remaining())
+                status = self._wire.request(
+                    "GET", f"exec-status?pid={pid}", custody=custody, timeout=deadline.remaining()
+                )
             except Exception:
                 return _incomplete(Dispatch.SENT, io, Failure.DEADLINE if deadline.expired else Failure.OBSERVATION)
             report = _status_report(status, io, deadline)

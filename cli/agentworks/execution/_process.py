@@ -1027,15 +1027,30 @@ def run_owned_process(
     cwd: str | None = None,
     pass_fds: tuple[int, ...] = (),
     start_new_session: bool = False,
+    owner: LocalProcessOwner | None = None,
+    cleanup_allowance: float | None = None,
 ) -> ProcessResult:
     """Fairly pump bounded input and output without retaining borrowed endpoints.
 
     Passed descriptors remain caller-owned; only child inheritance is configured.
     POSIX session creation is a launch control, not descendant containment.
+    Bounded closure requires an explicitly retained owner. Pending construction
+    still requires the caller to retain any passed descriptors until settlement.
     """
+    if (owner is None) != (cleanup_allowance is None) or (
+        cleanup_allowance is not None and (not math.isfinite(cleanup_allowance) or cleanup_allowance < 0)
+    ):
+        raise ValueError("bounded process closure requires a retained owner and finite allowance")
+
+    def close_budget() -> Deadline | None:
+        return None if cleanup_allowance is None else Deadline(time.monotonic() + cleanup_allowance)
+
     stdout = _Output(output.capture_limit, output.stdout_sink)
     stderr = _Output(output.capture_limit, output.stderr_sink)
     if deadline.expired:
+        if owner is not None:
+            budget = close_budget()
+            owner.close_bounded(budget) if budget is not None else owner.close()
         return ProcessResult(False, None, None, stdout.report(), stderr.report(), ProcessFailure.DEADLINE)
 
     try:
@@ -1048,16 +1063,21 @@ def run_owned_process(
             start_new_session,
         )
     except (OSError, ValueError):
+        if owner is not None:
+            budget = close_budget()
+            owner.close_bounded(budget) if budget is not None else owner.close()
         return ProcessResult(False, None, None, stdout.report(), stderr.report(), ProcessFailure.DISPATCH)
 
-    owner = LocalProcessOwner()
+    owner = owner if owner is not None else LocalProcessOwner()
     failure: ProcessFailure | None = None
     exit_status: int | None = None
     interruption: BaseException | None = None
     pipes: LocalProcessPipes | None = None
     terminal: LocalProcessTerminal | None = None
+    start_returned = False
     try:
-        owner.start(request)
+        owner.start(request, close_deadline=close_budget())
+        start_returned = True
         del request
         while pipes is None:
             snapshot = owner.snapshot()
@@ -1087,19 +1107,32 @@ def run_owned_process(
         interruption = error
     finally:
         try:
-            terminal = owner.close()
+            budget = close_budget()
+            if budget is None:
+                terminal = owner.close()
+            else:
+                # Admission interruption may already have requested cleanup.
+                # Its failed observation is not permission for an implicit retry.
+                terminal = owner.snapshot().terminal
+                if terminal is None and start_returned:
+                    terminal = owner.close_bounded(budget)
         except BaseException as error:
             interruption = _retain_control_exception(interruption, error)
             # Waiting close preserves its first observation even while a later
             # natural-exit cleanup makes the current snapshot pending again.
-            terminal = owner.close()
-        assert terminal is not None
-        exit_status = terminal.exit_status
-        if not terminal.cleaned and interruption is not None:
+            terminal = owner.close() if cleanup_allowance is None else owner.snapshot().terminal
+        if terminal is not None:
+            exit_status = terminal.exit_status
+        if (terminal is None or not terminal.cleaned) and interruption is not None:
             interruption.add_note("Local carrier process cleanup did not complete within its bound.")
     if interruption is not None:
         raise interruption
-    assert terminal is not None
+    if terminal is None:
+        # Construction may already be admitted without published pipes. The
+        # retained owner, not started=False, establishes unresolved delivery.
+        return ProcessResult(
+            pipes is not None, None, exit_status, stdout.report(), stderr.report(), ProcessFailure.OBSERVATION
+        )
     if terminal.dispatch_failed:
         failure = ProcessFailure.DISPATCH
     elif not terminal.cleaned or terminal.observation_failed:

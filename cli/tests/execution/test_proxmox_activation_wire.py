@@ -19,9 +19,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carriers._proxmox_http import _request
 from agentworks.execution.carriers.proxmox import ProxmoxConnection, _ProxmoxWire, _WireFailure
-from tests.execution.test_proxmox import connection, stub_process, worker_payload
+from tests.execution.test_proxmox import connection, interrupted_worker, stub_process, worker_payload
 from tests.execution.test_proxmox_trust import _Endpoint
 from tests.execution.test_proxmox_trust import endpoint as endpoint
 
@@ -74,9 +75,11 @@ def activation_endpoint(endpoint: _Endpoint) -> Iterator[_ActivationEndpoint]:
 
 def _call(wire: _ProxmoxWire, route: str, *, timeout: float = 30):
     if route == "info":
-        return wire.request_guest_info(timeout=timeout)
+        return wire.request_guest_info(timeout=timeout, custody=LocalDeliveryCustody())
     return (
-        wire.request_vm_start(timeout=timeout) if route == "start" else wire.request_task_status(_UPID, timeout=timeout)
+        wire.request_vm_start(timeout=timeout, custody=LocalDeliveryCustody())
+        if route == "start"
+        else wire.request_task_status(_UPID, timeout=timeout, custody=LocalDeliveryCustody())
     )
 
 
@@ -92,10 +95,10 @@ def test_owned_tls_start_and_task_reads_are_fixed_body_free(
     value = activation_endpoint
     upid = _UPID.replace("qmstart", task_type)
     value.response = json.dumps({"data": upid}).encode()
-    assert value.wire.request_vm_start(timeout=30) == upid
+    assert value.wire.request_vm_start(timeout=30, custody=LocalDeliveryCustody()) == upid
     status = {"status": "stopped", "exitstatus": "OK", "upid": upid}
     value.response = json.dumps({"data": status}).encode()
-    assert value.wire.request_task_status(upid, timeout=30) == status
+    assert value.wire.request_task_status(upid, timeout=30, custody=LocalDeliveryCustody()) == status
     encoded = urllib.parse.quote(upid, safe="")
     assert value.requests == [
         ("POST", "/api2/json/nodes/node1/qemu/123/status/start", b"", "PVEAPIToken=user@pve!token=secret-canary"),
@@ -108,7 +111,7 @@ def test_owned_tls_start_and_task_reads_are_fixed_body_free(
 def test_literal_task_id_is_one_encoded_component(activation_endpoint: _ActivationEndpoint, upid: str) -> None:
     value = activation_endpoint
     value.response = b'{"data":{"status":"running"}}'
-    assert value.wire.request_task_status(upid, timeout=30) == {"status": "running"}
+    assert value.wire.request_task_status(upid, timeout=30, custody=LocalDeliveryCustody()) == {"status": "running"}
     encoded = urllib.parse.quote(upid, safe="").replace(".", "%2E")
     assert value.requests[0][1] == f"/api2/json/nodes/node1/tasks/{encoded}/status"
     assert value.requests[0][0] == "GET" and value.requests[0][2] == b""
@@ -129,7 +132,7 @@ def test_unretainable_task_id_refuses_before_worker(monkeypatch: pytest.MonkeyPa
     spawn = MagicMock()
     monkeypatch.setattr(subprocess, "Popen", spawn)
     with pytest.raises(ValidationError):
-        _ProxmoxWire(connection()).request_task_status(upid, timeout=1)
+        _ProxmoxWire(connection()).request_task_status(upid, timeout=1, custody=LocalDeliveryCustody())
     spawn.assert_not_called()
 
 
@@ -139,9 +142,9 @@ def test_unretainable_start_reply_is_generic_failure_after_one_request(
 ) -> None:
     process = stub_process(monkeypatch, json.dumps({"data": receipt}).encode())
     with pytest.raises(_WireFailure):
-        _ProxmoxWire(connection()).request_vm_start(timeout=1)
-    assert process.communicate.call_count == 1
-    payload = json.loads(process.communicate.call_args.args[0])
+        _ProxmoxWire(connection()).request_vm_start(timeout=1, custody=LocalDeliveryCustody())
+    assert process.exchange.call_count == 1
+    payload = json.loads(process.exchange.call_args.args[0])
     assert payload["endpoint"] == "vm-start" and payload["method"] == "POST" and payload["body"] is None
 
 
@@ -153,13 +156,13 @@ def test_missing_or_malformed_data_never_establishes_wire_reply(
     process = stub_process(monkeypatch, reply)
     with pytest.raises(_WireFailure):
         _call(_ProxmoxWire(connection()), route, timeout=1)
-    assert process.communicate.call_count == 1
+    assert process.exchange.call_count == 1
 
 
 @pytest.mark.parametrize("receipt", ["a" * 255, "\u00e9" * 127 + "a", "arbitrary raw receipt"])
 def test_bounded_start_receipt_remains_opaque(monkeypatch: pytest.MonkeyPatch, receipt: str) -> None:
     stub_process(monkeypatch, json.dumps({"data": receipt}).encode())
-    assert _ProxmoxWire(connection()).request_vm_start(timeout=1) == receipt
+    assert _ProxmoxWire(connection()).request_vm_start(timeout=1, custody=LocalDeliveryCustody()) == receipt
 
 
 @pytest.mark.parametrize("route,reply", [("start", b'{"data":{"status":"running"}}'), ("task", b'{"data":"raw"}')])
@@ -176,30 +179,26 @@ def test_startup_consumes_worker_budget_and_credentials_stay_on_stdin(monkeypatc
     response = json.dumps({"data": _UPID if route == "start" else {"status": "running"}}).encode()
     process = stub_process(monkeypatch, response)
 
-    def spawn(*args, **kwargs):
+    def before_exchange():
         now[0] = 102.0
-        return process
 
-    factory = MagicMock(side_effect=spawn)
-    monkeypatch.setattr(subprocess, "Popen", factory)
+    process.before_exchange.side_effect = before_exchange
     _call(_ProxmoxWire(connection()), route, timeout=5)
-    assert process.communicate.call_args.kwargs["timeout"] == 3
-    assert json.loads(process.communicate.call_args.args[0])["connection"]["token_secret"] == "secret-canary"
-    assert "secret-canary" not in repr(factory.call_args)
+    assert process.exchange.call_args.kwargs["timeout"] == 3
+    assert json.loads(process.exchange.call_args.args[0])["connection"]["token_secret"] == "secret-canary"
+    assert "secret-canary" not in repr(process.run_process.call_args)
 
 
 @pytest.mark.parametrize("route", ["start", "task", "info"])
 @pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit, GeneratorExit])
 def test_control_interrupt_kills_and_reaps_without_replay(monkeypatch: pytest.MonkeyPatch, route: str, interruption):
-    process = stub_process(monkeypatch, b"")
     control = interruption()
-    process.communicate.side_effect = [control, (b"", None)]
-    process.poll.return_value = None
-    with pytest.raises(interruption) as caught:
-        _call(_ProxmoxWire(connection()), route, timeout=1)
-    assert caught.value is control
-    process.kill.assert_called_once()
-    assert process.communicate.call_count == 2
+    with interrupted_worker(monkeypatch, control) as children:
+        with pytest.raises(interruption) as caught:
+            _call(_ProxmoxWire(connection()), route, timeout=1)
+        assert caught.value is control
+        assert len(children) == 1 and children[0].returncode is not None
+        assert children[0].stdout is not None and children[0].stdout.closed
 
 
 @pytest.mark.windows
@@ -330,7 +329,7 @@ def test_owned_tls_guest_info_is_fixed_readonly(activation_endpoint, monkeypatch
     value = activation_endpoint
     response = {"result": {"version": "9.0", "supported_commands": []}}
     value.response = json.dumps({"data": response}).encode()
-    assert value.wire.request_guest_info(timeout=30) == response
+    assert value.wire.request_guest_info(timeout=30, custody=LocalDeliveryCustody()) == response
     assert value.requests == [
         ("GET", "/api2/json/nodes/node1/qemu/123/agent/info", b"", "PVEAPIToken=user@pve!token=secret-canary")
     ]
