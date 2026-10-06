@@ -1,6 +1,6 @@
 """Portable, closed v1 request assets for a managed job.
 
-This file and its stdlib-only wire dependencies are bundled as exact source
+This file and its stdlib-only wire dependencies supply derived first-party source
 and run on Python 3.11 without an installed agentworks package.
 Limits bound memory before parsing or dispatch: control 32 KiB, environment
 64 KiB, source and stdin 16 MiB each. Capture uses the v1 16 MiB ceiling.

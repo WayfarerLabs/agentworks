@@ -2666,7 +2666,24 @@ does not enable a production target/RunContext, settle old debts or complete the
       bounded lease control, initial-expiry admission, monotonic renewal and irreversible expiry
       through the existing stop kernel. Preserve independent jobs and refusal at the host boundary
       until the keeper and aggregate lifecycle are delivered; no disconnected protocol scaffold is a
-      completed slice.
+      completed slice. The private guest implementation now supplies that protocol and its
+      controller consumer, including packed Python 3.11/3.12 real-child tests under a synthetic
+      process-group boundary. The focused managed/bootstrap selection passes 810 cases with 27
+      existing fork warnings. It preserves refused host OPERATION admission. The 10 KiB workload
+      fixture fits the unchanged 65,536-byte Proxmox HTTP envelope: 64,903 bytes for independent and
+      65,267 for private operation requests, leaving only 633 and 269 bytes respectively. Larger
+      metadata or workloads still face pure carrier validation; this does not establish a general
+      native request size or native delivery proof. First-party service source is derived with the
+      existing docstring compaction, including service admission, rather than bundling every
+      original source byte verbatim. Keeper, recovery and native gates remain open.
+
+The latest hosted Windows failure stopped at the migration fixture's five-second child-commit
+barrier before its database assertions. The private fixture correction uses generous finite
+coordination and reaps the child on parent failure while preserving all schema refusal assertions
+and product deadlines. A local delayed-spawn probe reproduces the old barrier failure and passes the
+corrected fixture; it does not establish the original hosted failure's cause or native Windows
+acceptance. Fresh hosted verification remains required.
+
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
       serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one
       in-flight exchange, exact uncertainty retention and drain before release/disposal. Bind it to

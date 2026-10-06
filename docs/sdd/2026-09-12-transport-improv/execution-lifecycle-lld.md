@@ -259,13 +259,16 @@ stream end before treating its disposition as fulfillment. `_managed_job_wire.py
 complete canonical byte schema as a Python 3.11-compatible stdlib module that reuses the portable
 `_helper_identity.py` validator. The host typed adapter delegates encoding, decoding and launch
 digest to it. Exact-source bundle tests prove byte round trips under Python 3.11 when installed. The
-target controller and private observation helper bundle those sources verbatim. The protected store
-uses the same portable codec. Host reservation/output-policy reduction, target controller
-production, cgroup/systemd launch, carrier proof and live validation remain open.
+target controller and private observation helper derive bundled source from those first-party
+modules. The helper builder removes docstrings from trusted modules; service admission now opts into
+this existing compaction and avoids redundant outer compression. The protected store uses the same
+portable codec. Host reservation/output-policy reduction, target controller production,
+cgroup/systemd launch, carrier proof and live validation remain open.
 
 ### Operation lifetime implementation path
 
-This is the next implementation path, not delivered behavior. Host admission continues to refuse
+The private guest protocol and first controller consumer are implemented; the host composition below
+remains the next implementation path, not delivered behavior. Host admission continues to refuse
 MANAGED plus OPERATION until the target protocol, keeper, aggregate cleanup and native proof below
 are complete. Reuse the existing per-run controller and stop path; do not add another supervisor or
 make the observation deadline a job lifetime.
@@ -361,6 +364,13 @@ publication and disposal. Tests use controlled clocks; native Linux SSH/QGA proo
 observe body admission, descendant cleanup and retained uncertainty. Keep public exposure and
 broader completion checkboxes open until these obligations are proved.
 
+Local packed tests exercise the canonical clock/lease codec and actual start/controller with real
+children under Python 3.11 and 3.12. Their boundary is a synthetic process group, not native cgroups
+or systemd. Controlled clocks cover pre-staging and pre-release expiry, later renewal, irreversible
+expiry, explicit stop, interrupted publication and disposal binding. Host admission stays refused;
+these tests do not establish keeper concurrency, recovery, aggregate lifecycle or platform
+acceptance.
+
 Give each keeper exchange separate delivery, preparation, nonce, collector and I/O custody. No
 generic concurrent-carrier capability is needed or inferred from immutable connection data.
 Operation-repository fencing is thread-safe; that does not make ordinary database repositories or
@@ -371,7 +381,8 @@ Carry these into the existing launch/interruption and keeper-drain gates before 
 
 ### First private managed service
 
-The first production-shaped service slice is Linux-only, `MANAGED` and `INDEPENDENT`. It does not
+The first host-admitted service slice is Linux-only, `MANAGED` and `INDEPENDENT`. Its guest
+controller also accepts the private operation-lease request described above. Host admission does not
 offer `OPERATION`, terminal attachment, live input/output, provisional output reads or a public job
 API. Those combinations refuse before dispatch. This is a sequencing limit, not a weaker public
 contract or an implicit downgrade. The existing no-staging DIRECT readiness path remains separate;

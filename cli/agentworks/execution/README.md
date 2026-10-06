@@ -32,16 +32,17 @@ stream whose EOF cannot be established within the carrier's collection bound. `O
 distinct capture-limit outcome. These local failures preserve independently observed completion and
 partial-stream evidence; none establishes guest cancellation or permits replay.
 
-The private managed-start exchange stages only the five fixed protected request assets and invokes
-the exact-source Linux service controller through one transient root systemd service. Its canonical
-request permits bounded binary source and stdin using ASCII base64 framing, but a carrier may reject
-a smaller direct envelope during pure validation. Large-request staging or fallback is still open;
-the protocol's own asset ceiling is not a promise that every carrier can deliver it directly.
-Possible dispatch is recorded durably before the sole carrier effect. An exact launch fact can
-confirm a receipt independently of the systemd client exit, while acknowledgement also requires
-trusted complete helper/carrier evidence and a zero client outcome. Separate private stop and
-disposal exchanges exist, but none of these slices provides public jobs or production SSH/QGA proof.
-The private start helper now checks the fixed guest marker, kernel boot and PID 1 start time before
+The private managed-start exchange stages the five fixed protected request assets and invokes the
+first-party derived Linux service controller through one transient root systemd service. An
+operation-owned request also publishes its separate protected lease control. Its canonical request
+permits bounded binary source and stdin using ASCII base64 framing, but a carrier may reject a
+smaller direct envelope during pure validation. Large-request staging or fallback is still open; the
+protocol's own asset ceiling is not a promise that every carrier can deliver it directly. Possible
+dispatch is recorded durably before the sole carrier effect. An exact launch fact can confirm a
+receipt independently of the systemd client exit, while acknowledgement also requires trusted
+complete helper/carrier evidence and a zero client outcome. Separate private stop and disposal
+exchanges exist, but none of these slices provides public jobs or production SSH/QGA proof. The
+private start helper now checks the fixed guest marker, kernel boot and PID 1 start time before
 opening the store or launching systemd. This is a guest-side fence, not proof that a production
 caller selected and retained the right provider route.
 
@@ -683,11 +684,11 @@ only after the matching launch-bound stream-end fact closes and authenticates th
 Exact-source tests bundle the wire and store together under Python 3.11. The host reservation also
 persists the requested output policy, but a later observer must still compare that request to the
 stream disposition; self-describing facts alone do not prove policy fulfillment. The first service
-slice is limited to independent lifetime until operation-owner liveness and cleanup are proved.
-Private fixed start, observe, closed read-output, stop and disposal exchanges exist. Production
-carrier wiring, live target evidence and SSH/QGA proof remain open.
+host start slice is limited to independent lifetime until operation-owner liveness and cleanup are
+proved. Private fixed start, observe, closed read-output, stop and disposal exchanges exist.
+Production carrier wiring, live target evidence and SSH/QGA proof remain open.
 
-`_managed_job_request.py` defines the separate private request assets for that independent slice.
+`_managed_job_request.py` defines the separate private request assets for the managed controller.
 The five fixed root-owned, mode-0400 leaves are `request-launch`, `request-control`,
 `request-environment`, `request-source` and `request-stdin`. Control is canonical ASCII JSON binding
 the run, command or script shape, literal command arguments, working directory, output policy, and
@@ -697,28 +698,46 @@ It records durable stop intent and is neither a request asset nor a terminal fac
 at 32 KiB, environment at 64 KiB, and source and stdin at 16 MiB each. The store accepts identical
 bytes on retry and refuses conflicting or unsafe leaves. A partial set is not a consumable request;
 no absent request asset proves launch or absence of launch. The request codec validates the complete
-canonical launch fact and requires an independent resource owner, a non-interactive shell, and a
-supported command or script shape before use. These request bytes are never bundle source, systemd
-arguments, environment, or journal content.
+canonical launch fact and requires its exact lifetime/owner pair, a non-interactive shell, and a
+supported command or script shape before use. Operation-owned requests additionally require an exact
+launch/boot-bound lease; independent requests refuse one. These request bytes are never bundle
+source, systemd arguments, environment, or journal content.
 
-`_managed_service_guest.py` is the fixed Python 3.11 Linux service main for the first independent
-managed slice. It accepts only the derived run ID, reads the complete protected request, and checks
-root service identity and membership in the exact derived delegated service cgroup. Its child waits
-for placement in a dedicated workload cgroup, then sets and verifies the requested identity, working
-directory, and descriptors. Immediately before exec it restores the standard payload signal state
-rather than inheriting the Python controller's blocked mask or ignored pipe signals. The service
-main publishes launch, sends `READY=1` over `NOTIFY_SOCKET`, and then checks stop intent before
-releasing the child to execute caller code. It keeps polling that intent while draining finite stdin
-and both output streams and observing the exact main child. A stop closes stdin and sends SIGTERM to
-that child. Its first observation starts a fixed grace interval that repeated reads do not extend.
-Main-child exit, or grace expiry while it remains alive, starts the existing cgroup cleanup. The
-controller reaps the main child and settles exec status, including any eligible wait fact, before
-publishing boundary-empty. Stream-end facts remain independent and may publish later. A
-close-on-exec status pipe permits wait publication only after proved application entry and normal
-exit; setup failure and signaled death leave wait unknown. Capture spools keep only the requested
-prefix and close before stream-end; discard and sensitivity suppression create no spool. Cleanup
-stops after a fixed bound, leaving unproved facts absent. `_managed_service_bundle.py` packages
-exact source without embedding request values. This controller has no live systemd proof.
+`_managed_service_guest.py` is the fixed Python 3.11 Linux service main for a private managed run.
+It accepts only the derived run ID, reads the complete protected request, and checks root service
+identity and membership in the exact derived delegated service cgroup. Its child waits for placement
+in a dedicated workload cgroup, then sets and verifies the requested identity, working directory,
+and descriptors. Immediately before exec it restores the standard payload signal state rather than
+inheriting the Python controller's blocked mask or ignored pipe signals. The service main publishes
+launch, sends `READY=1` over `NOTIFY_SOCKET`, and then checks stop intent before releasing the child
+to execute caller code. It keeps polling that intent while draining finite stdin and both output
+streams and observing the exact main child. A stop closes stdin and sends SIGTERM to that child. Its
+first observation starts a fixed grace interval that repeated reads do not extend. Main-child exit,
+or grace expiry while it remains alive, starts the existing cgroup cleanup. The controller reaps the
+main child and settles exec status, including any eligible wait fact, before publishing
+boundary-empty. Stream-end facts remain independent and may publish later. A close-on-exec status
+pipe permits wait publication only after proved application entry and normal exit; setup failure and
+signaled death leave wait unknown. Capture spools keep only the requested prefix and close before
+stream-end; discard and sensitivity suppression create no spool. Cleanup stops after a fixed bound,
+leaving unproved facts absent. `_managed_service_bundle.py` packages derived first-party source
+without embedding request values. The existing helper builder compacts trusted module source by
+removing docstrings; service admission opts into that same derivation. Portable codecs retain their
+canonical bytes. This controller has no live systemd proof.
+
+The private operation-lease guest path uses one mode-0400 `operation-lease` leaf and conflict-free
+`.lease-stage-<id>` files in the existing protected run directory. A bounded record binds the exact
+launch digest and boot identity to a guest `CLOCK_BOOTTIME` sample plus a fixed 60-second window.
+The fixed clock helper checks the prepared root and full guest identity; publication uses the
+supplied sample, never the publisher's later execution time. Initial expiry refuses before request
+staging, systemd invocation and child release. The controller accepts only later unexpired bound
+records, checks its remembered expiry first, and permanently closes renewal on expiry or explicit
+stop. Expiry enters the existing stop and cleanup path, not a second supervisor. Disposal recognizes
+the fixed control and private stages; it does not prove that a publisher has drained.
+
+This guest implementation has packed Python 3.11/3.12 tests with real children and a synthetic
+process-group boundary, not native systemd/cgroup or SSH/QGA acceptance. Host OPERATION admission
+remains refused. The keeper, recovery ceiling consumer, aggregate ownership and public job surface
+must be composed and proved before enabling that lifetime.
 
 `_managed_observation_exchange.py` supplies private fixed `observe` and closed `read-output`
 attempts over the same carrier interface. Its Python 3.11 target helper reads fixed guest identity
