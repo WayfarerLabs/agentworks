@@ -18,6 +18,12 @@ channel. Raw stdout/stderr go to distinct borrowed sinks. The worker uses explic
 through caller interruption, and reports endpoint or restoration uncertainty without retaining raw
 payload diagnostics. TERM comes from the supplied terminal input.
 
+Failed native acquisition preserves its primary exception and typed cleanup cause. The relay reduces
+that cleanup fact to observation uncertainty, including a safe note on a propagated control
+exception. It suppresses native cause chains at its public boundary so cleanup diagnostics cannot
+disclose endpoint data. Ordinary acquisition failures whose cleanup succeeds remain dispatch
+failures.
+
 This candidate copies initial geometry but stops with observation failure when geometry changes: the
 shared owner cannot yet notify its exact client. It is not enabled by `SSHCarrier`; actual resize,
 real SSH integration, native workstations and presentation policy remain required.
