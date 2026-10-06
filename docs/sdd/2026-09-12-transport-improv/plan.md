@@ -3306,6 +3306,16 @@ binding may be presented as SSH, QGA or native production evidence.
       unsupported startup, unavailable elevation, invalid values and expired deadlines before owner
       custody or dispatch. Keep this class internal and unexported; it neither completes the
       unchecked target/reducer checkbox above nor permits a run-only public RunContext target.
+- [ ] Remove the clean inline-call ledger-capacity limit before complete RunContext adoption. Use
+      one exact execution-lifetime row with fresh serial borrows, explicit installation and arming,
+      retained-effect handoff, and an admission-safe final resolution of only that row. Preserve
+      bounds, exact reply-loss retry, unknown custody and takeover fencing; never reopen resolved
+      rows or replay helpers. Demonstrate more than 128 actual clean commands/scripts with mixed
+      file operations and shared ordinary/elevated views, validation refusal, NOT_SENT, nonzero
+      application status, unknown/control interruption, lost registration/arming/handoff/resolution
+      replies, unused/duplicate finish, post-finish refusal and concurrent finish. Integrate final
+      resolution into outer native teardown before aggregate cleanup. Independently reviewed SQLite
+      probes show the existing APIs can compose this shape, not implementation or native acceptance.
 
 All three private lanes accept code pin `8ceb899a` with no material findings. Review corrected
 acceptance of output/status dataclass extensions that added diagnostic fields to default result

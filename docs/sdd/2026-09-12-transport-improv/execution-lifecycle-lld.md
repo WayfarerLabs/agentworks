@@ -712,6 +712,28 @@ ledger. Whole-operation resolution requires a sealed ledger, every registered ob
 release deletes the resolved obligations and releases the exact claim atomically. No automatic
 expiry, generic retry runner, dependency graph or force-release belongs in this layer.
 
+The proposed inline-capacity correction uses one empty `carrier-dispatch` obligation for the
+lifetime of the core-owned `ExecutionOperation`, shared by ordinary and elevated views. Each call
+still acquires a fresh serial borrow. It installs the same exact retained identifier, explicitly
+arms that borrow before candidate validation, settles the actual helper attempt only with the
+existing termination evidence, and hands off the retained effect instead of resolving the row. This
+permits intervening file calls without holding a workflow-long borrow or consuming a new row for
+every clean command. Exact registration already accepts the unchanged possible-effect row; resolved
+rows are never reopened, pruned or repurposed. The row bounds and payload schema remain unchanged.
+
+An explicit execution `finish` permanently closes this state's admission, coordinates with call
+admission, and resolves only its own row after its active and uncertain custody is settled. It
+creates no row for unused state and retries only exact bookkeeping after a lost reply, never replays
+a request. Registration and arming retain the actual call, borrow and identifier before submission.
+In particular, installation alone does not arm a new borrow: a validation failure must not
+default-close the lifetime row or attempt an unarmed retained handoff. Unknown attempts block new
+work and resolution. The outer workflow finishes this execution state before whole-ledger
+finalization while preserving its aggregate file, availability and owner checks. This is a reviewed
+response candidate, not implemented capacity acceptance; private SQLite API probes show composition
+of the existing primitives only. Actual high-volume mixed calls, interruptions, reply-loss and
+concurrent admission/finish remain required. DIRECT helper completion does not thereby acquire a
+stronger user-descendant cleanup or native-drain guarantee.
+
 Recovery must be fenced from a delayed original controller before it mutates an old obligation. The
 logical operation keeps its stable random operation identifier, while each database owner carries a
 separate random generation identifier. Initial acquisition creates both. A recovery controller
