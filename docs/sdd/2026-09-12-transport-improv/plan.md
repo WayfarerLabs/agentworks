@@ -154,9 +154,11 @@ Successful transitions remain mocked, while generated-source non-root refusal ru
 The unchanged numeric snapshot sizing fixture measures 64,568/64,610 bytes against QGA's 65,536-byte
 limit. No source pruning, guest module split, protocol ceiling reduction or data deletion was used.
 The integrated preceding head `3fdb286fe` passes 14,307 non-integration tests with 50 skips and
-complete local gates; the new leaf's integrated full run remains pending. Initial hold/query/probe,
-durable launch/body account recovery, native transitions and complete production fencing remain
-open. This leaf completes no public operation, permission boundary or feedback/fix round.
+complete local gates. The new leaf's integrated full run at `5dba2ab68` passes 14,357 tests with 50
+skips, and strict mypy passes 1,208 source and test files. Its Python tree is unchanged by the
+subsequent collateral review. Initial hold/query/probe, durable launch/body account recovery, native
+transitions and complete production fencing remain open. This leaf completes no public operation,
+permission boundary or feedback/fix round.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
