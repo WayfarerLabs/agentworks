@@ -774,6 +774,19 @@ establish a remote fence. Core awaits durable READY before fixed preparation and
 through its final recovery action. This is not a complete recovery path: outer renewed-availability
 composition, recovery-specific preparation, predecessor drain and native acceptance remain open.
 
+One serial fixed guest/account preparation batch owns a separate bounded `carrier-dispatch`
+obligation, preserving the existing version-one empty-payload meaning used by ordinary fixed helper
+preparation. Core retains its fresh ID and adapter before atomic support admission. Each concrete
+query uses exact recovery-dispatch custody and the existing termination classification. Completed
+protocol refusal can settle a helper without granting preparation facts. The batch closes its
+dispatcher and resolves only its own row after it stops and every admitted query is accounted for;
+unknown dispatch, interruption or uncertain bookkeeping stops further queries and retains debt.
+Another takeover inherits that row independently of the availability hold. Anchor absence, a newer
+successful preparation or hold release cannot discharge an earlier uncertain batch. This requires
+no new schema, codec, query counter or row per individual query. The empty row retains uncertainty;
+it cannot reconstruct native endpoint identity or prove complete predecessor drain after process
+loss. Until concrete adapter evidence supplies that proof, retain the claim without replay.
+
 That contract uses a distinct internal recovery-dispatch object, not a recovery mode on the ordinary
 borrow. Admission requires the sealed recovery owner, its exact current generation, a
 `possible-dispatch` coarse claim and the exact `possible-effect` obligation identity, state, payload

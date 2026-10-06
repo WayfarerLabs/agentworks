@@ -487,6 +487,27 @@ without changing owned source/test bytes. Native calls remain faked. Integrated 
 lead gates are pending. Outer availability composition, fixed fresh preparation and retained-file
 adapters remain open; no broader completion checkbox or public round closes.
 
+All three independent lanes clear the recovery-hold pin `08dfb40cd`. Project passes 244
+focused/adjacent cases; generic passes 24 new and 37 existing hold cases. Complexity passes 65
+hold/repository cases after restoring its deletion experiments. Removing the early ID check still
+lets the repository reject invalid spelling, but consumes startup and performs native observation;
+a temporary invalid-then-valid same-object probe confirms why the small preflight earns its place.
+The lead's complete suite passes 14,909 non-integration tests with 49 skips and 27 existing fork
+warnings, exit 0. Complete Ruff/format, strict mypy (1,224 source and test files), typer isolation,
+file quality, locked-SDD, Rulesync and whitespace gates exit 0. Website validation passes 160 Python
+and 103 Node cases, four builds and both deterministic comparisons. The published predecessor
+`1490c034c` passes hosted CI and CodeQL. Outer availability composition, fresh preparation,
+retained-file adapters and native acceptance remain open; no public round closes.
+
+Source-backed preparation scouting finds that anchor history cannot account for delayed finite
+guest/account queries across takeover. Independent project and complexity review select one
+separate version-one, empty-payload `carrier-dispatch` row per logical serial preparation batch,
+reusing ordinary fixed-helper meaning rather than adding a codec or per-query registry. Resolve it
+only after all concrete queries settle and the batch stops; unknown/control/coordination outcomes
+retain it independently of the hold. Native endpoint/drain reconstruction remains unproved, not
+supplied by this empty record. The lifecycle response records this refinement, and its bounded
+implementation is delegated. It does not complete fresh preparation or outer recovery.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
