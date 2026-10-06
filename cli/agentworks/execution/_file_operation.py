@@ -292,6 +292,11 @@ class FileOperation:
         """The one workstation stage still held by this in-memory operation."""
         return self._unfinished_local_download
 
+    @property
+    def has_active_local_download_call(self) -> bool:
+        """Whether whole-call finalization custody is still retained."""
+        return self._local_download_call is not None
+
     def begin_local_download(self) -> _LocalDownloadCall:
         """Acquire whole-call serial admission before workstation effects."""
         borrow = self._owner.borrow()
