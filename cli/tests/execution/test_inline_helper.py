@@ -35,12 +35,13 @@ from agentworks.execution.carrier import (
     Deadline,
     Dispatch,
     ExitStatus,
+    Failure,
     PreparedInvocation,
     Retention,
 )
-from agentworks.execution.carriers._subprocess import run_process
 from agentworks.execution.models import Command, Script, Shell
 from agentworks.execution.result import ApplicationState, ExitCode
+from tests.execution._bound_carrier_support import run_fixture_process
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the inline guest candidate requires Linux")
 PYTHON_311 = Path("/usr/bin/python3.11")
@@ -50,7 +51,7 @@ class LocalCarrier:
     def __init__(self) -> None:
         self.calls = 0
         self.last_report: CarrierReport | None = None
-        self.custody = LocalDeliveryCustody()
+        self.local_delivery = LocalDeliveryCustody()
 
     @property
     def features(self) -> ChannelFeatures:
@@ -69,8 +70,10 @@ class LocalCarrier:
     ) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
-        held = self.custody if custody is None else custody
-        result = run_process(list(invocation.argv), io=io, deadline=deadline, custody=held)
+        held = self.local_delivery if custody is None else custody
+        result = run_fixture_process(
+            list(invocation.argv), io=io, deadline=deadline, custody=custody, standalone_custody=self.local_delivery
+        )
         completion = None
         if result.exit_status is not None:
             completion = (
@@ -79,7 +82,11 @@ class LocalCarrier:
                 else ExitStatus(code=result.exit_status)
             )
         report = CarrierReport(
-            Dispatch.UNKNOWN if not held.settled else Dispatch.SENT if result.started else Dispatch.NOT_SENT,
+            Dispatch.SENT
+            if result.started
+            else Dispatch.UNKNOWN
+            if result.failure is Failure.OBSERVATION or not held.settled
+            else Dispatch.NOT_SENT,
             completion,
             result.local_status,
             result.stdout,
@@ -102,7 +109,7 @@ def test_local_proof_carrier_forwards_exact_external_custody() -> None:
         )
         assert report.completion == ExitStatus(code=0)
         assert external._owner is not None and external.settled
-        assert carrier.custody._owner is None
+        assert carrier.local_delivery._owner is None
     finally:
         assert external.close(Deadline.after(3))
 
