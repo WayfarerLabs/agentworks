@@ -11,6 +11,15 @@ provenance, completeness and retention. Completion can belong to an account shel
 before the bootstrap ran; it is not independent proof of bootstrap or application execution. Local
 status alone is not a guest exit. Payload fields have no diagnostic representation.
 
+`_proxmox_activation.py` retains a bounded non-secret obligation under a supplied exact VM owner
+before one start POST. Its selected route, original API identity and expected locator digest precede
+admission; a matching raw UPID is retained before durable publication. Lost bookkeeping replies can
+be reconciled without another POST. Exact known receipts permit read-only observation under a fresh
+finite deadline after ordinary owner admission stops. Matching stopped ordinary start workers settle
+only that request when the provider reports `OK` or supported warnings. Unknown results and HA
+handoff tasks retain custody. These facts neither admit guest work nor prove route freshness,
+incarnation safety or general provider drain. Native integration and acceptance remain open.
+
 `Carrier.validate` is a pure structural preflight on the prepared invocation and I/O shape, not a
 delivery attempt. It rejects only deterministic local incompatibility, including a carrier's smaller
 direct-request envelope; `execute` repeats validation before effects. Readiness, credentials,
