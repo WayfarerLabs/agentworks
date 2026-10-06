@@ -237,6 +237,22 @@ operation state, migrates envelope-version callers, prepares fresh recovery fact
 success. The preceding public `a128c09eb` now passes every hosted CI and CodeQL gate, including
 Python 3.14; the earlier framing failure remains unexplained rather than classified as fixed.
 
+Private integrated review at `404fa5d2a` is clear in the project and generic lanes. The project lane
+independently passes 309 focused and 59 adjacent cases; the generic lane passes 265 new cases. The
+complexity lane's accepted simplification removes redundant reconstruction of already-validated
+frozen bootstrap objects and nine constructor-bypass tests. Persisted decoding and cross-record
+target/gate validation remain intact. The corrected codec selection passes 161 cases, with its
+related 1,669-test selection unchanged. A separate fixture-only correction normalizes exactly four
+new test namespace directories, not production paths, and passes all 139 family cases both normally
+and under this workspace's inherited-ACL build directory. Integrated re-review and final lead gates
+remain pending.
+
+The first lead run at `404fa5d2a` passes 14,729 CLI tests with 50 skips, but one unchanged website
+browser input case fails while that run is active. The isolated case then passes, and a separate
+full website run passes all 160 cases. Its first failure's cause is not established; no browser
+assertion or timing was changed. The final publication must retain that failed-run evidence rather
+than describe the first validation as entirely green.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
