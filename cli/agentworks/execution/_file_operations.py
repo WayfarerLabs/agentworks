@@ -311,8 +311,9 @@ def _prepare_stat(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     borrow: OperationBorrow,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> _PreparedStat:
-    binding = FileStatBinding(trusted_root_path, relative_path, plan, runtime_selection)
+    binding = FileStatBinding(trusted_root_path, relative_path, plan, runtime_selection, bootstrap)
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
     return _PreparedStat(binding, _State(binding, operation, deadline))
 
@@ -329,6 +330,7 @@ def _prepare_inventory(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     borrow: OperationBorrow,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> _PreparedInventory:
     binding = FileInventoryBinding(
         trusted_root_path,
@@ -338,6 +340,7 @@ def _prepare_inventory(
         max_encoded_bytes,
         plan,
         runtime_selection,
+        bootstrap,
     )
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
     return _PreparedInventory(binding, _State(binding, operation, deadline))
@@ -354,6 +357,7 @@ def _prepare_remove(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     borrow: OperationBorrow,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> _PreparedRemove:
     binding = FileRemoveBinding(
         trusted_root_path,
@@ -362,6 +366,7 @@ def _prepare_remove(
         expected_revision,
         plan,
         runtime_selection,
+        bootstrap,
     )
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
     return _PreparedRemove(binding, _State(binding, operation, deadline))
@@ -380,6 +385,7 @@ def _prepare_metadata(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     borrow: OperationBorrow,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> _PreparedMetadata:
     _validate_metadata_inputs(
         operation,
@@ -400,6 +406,7 @@ def _prepare_metadata(
         mode,
         plan,
         runtime_selection,
+        bootstrap,
     )
     borrowed = BorrowedFixedHelperCarrier(carrier, borrow)
     return _PreparedMetadata(binding, _State(binding, borrowed, deadline))

@@ -256,6 +256,7 @@ def _prepare_download(
     runtime_selection: RuntimeSelection,
     borrow: OperationBorrow,
     effect_gate: FileEffectGateBinding | None = None,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> _PreparedDownload:
     """Prepare one validated concrete download without dispatching it."""
     binding = _validate_inputs(
@@ -268,6 +269,7 @@ def _prepare_download(
         runtime_selection,
         borrow,
         effect_gate,
+        bootstrap=bootstrap,
     )
     token = secrets.token_bytes(16)
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
@@ -748,6 +750,8 @@ def _validate_inputs(
     runtime_selection: object,
     borrow: object,
     effect_gate: object,
+    *,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> FileDownloadBinding:
     if type(trusted_root_path) is not str or not normalized_root(trusted_root_path):
         raise ValidationError("Download requires a normalized absolute trusted root")
@@ -789,4 +793,6 @@ def _validate_inputs(
         getter_failed = True
     if getter_failed or not callable(writer):
         raise ValidationError("Download requires a nonblocking byte sink")
-    return FileDownloadBinding(trusted_root_path, relative_path, max_bytes, plan, runtime_selection, effect_gate)
+    return FileDownloadBinding(
+        trusted_root_path, relative_path, max_bytes, plan, runtime_selection, effect_gate, bootstrap
+    )

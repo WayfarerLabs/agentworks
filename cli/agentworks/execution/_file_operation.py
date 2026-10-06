@@ -35,7 +35,6 @@ from agentworks.execution._file_json import (
 )
 from agentworks.execution._file_metadata_protocol import FileMetadataOperation
 from agentworks.execution._file_obligation import (
-    FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
     MAX_PACKAGE_UPLOAD_MEMBERS,
     FileCallFamily,
     FileCallObligation,
@@ -73,7 +72,7 @@ from agentworks.execution._file_upload import (
 from agentworks.execution._file_upload import _validate_inputs as _validate_upload_inputs
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTargetKind
-from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState, RuntimeTargetOS
+from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState, RuntimeTargetOS, _NumericGuestBootstrap
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 from agentworks.execution.carrier import Dispatch
 from agentworks.operations import LifecycleObligation, _PreRegistrationClosingRefusal, release_borrow_after_custody
@@ -123,9 +122,13 @@ class _ActiveFileCall[BindingT, PreparedT, OutcomeT]:
 class _FileCallAdmission:
     obligation_id: str
     payload: bytes
+    payload_version: int
 
 
 class _FileCallBinding(Protocol):
+    @property
+    def bootstrap(self) -> _NumericGuestBootstrap | None: ...
+
     @property
     def trusted_root_path(self) -> str: ...
 
@@ -252,7 +255,13 @@ class UnfinishedOwnedFile:
 class FileOperation:
     """One core file state shared by all views of an existing owner."""
 
-    def __init__(self, owner: OperationOwner, target: ManagedTargetIdentity) -> None:
+    def __init__(
+        self,
+        owner: OperationOwner,
+        target: ManagedTargetIdentity,
+        *,
+        bootstrap: _NumericGuestBootstrap | None = None,
+    ) -> None:
         """Bind file calls to one exact owner scope and managed target."""
         scope = owner.ownership.scope
         if (
@@ -261,8 +270,13 @@ class FileOperation:
             or target.name != scope.resource_name
         ):
             raise ValidationError("File operation target must match its owner scope")
+        if bootstrap is not None and (
+            target.kind is not ManagedTargetKind.VM or vm_guest_boot_id(bootstrap.guest) != target.boot_id
+        ):
+            raise ValidationError("Numeric file bootstrap must match the selected VM boot")
         self._owner = owner
         self._target = target
+        self._bootstrap = bootstrap
         self._active_downloads: dict[int, _ActiveFileDownload] = {}
         self._unfinished_downloads: list[UnfinishedFileDownload] = []
         self._unfinished_local_download: LocalDownloadStage | None = None
@@ -432,6 +446,7 @@ class FileOperation:
                 deadline=deadline,
                 runtime_selection=runtime_selection,
                 borrow=borrow,
+                bootstrap=self._bootstrap,
                 effect_gate=effect_gate,
             )
             admission = self._prepare_admission(FileCallFamily.DOWNLOAD, prepared.binding, token=prepared.state.token)
@@ -480,6 +495,7 @@ class FileOperation:
                 runtime_selection,
                 borrow,
                 None,
+                bootstrap=self._bootstrap,
             )
             if (
                 type(gate_setup) is not FileEffectGateSetup
@@ -520,6 +536,7 @@ class FileOperation:
             plan=plan,
             deadline=deadline,
             runtime_selection=runtime_selection,
+            bootstrap=self._bootstrap,
         )
         normal = operation.settle(result.dispatch, result.carrier_completion)
         if result.dispatch is Dispatch.NOT_SENT and not operation.requires_owner_retention:
@@ -605,6 +622,7 @@ class FileOperation:
                 deadline=deadline,
                 runtime_selection=runtime_selection,
                 borrow=borrow,
+                bootstrap=self._bootstrap,
                 effect_gate=effect_gate,
             )
             self._validate_upload_gate(prepared.binding)
@@ -656,6 +674,7 @@ class FileOperation:
                 runtime_selection,
                 borrow,
                 None,
+                bootstrap=self._bootstrap,
             )
             if (
                 type(gate_setup) is not FileEffectGateSetup
@@ -690,6 +709,7 @@ class FileOperation:
             plan=plan,
             deadline=deadline,
             runtime_selection=runtime_selection,
+            bootstrap=self._bootstrap,
         )
         normal = operation.settle(result.dispatch, result.carrier_completion)
         if result.dispatch is Dispatch.NOT_SENT and not operation.requires_owner_retention:
@@ -793,6 +813,7 @@ class FileOperation:
                         deadline=deadline,
                         runtime_selection=runtime_selection,
                         borrow=borrow,
+                        bootstrap=self._bootstrap,
                         effect_gate=effect_gate,
                     )
                 )
@@ -822,14 +843,13 @@ class FileOperation:
                 active.outcome = None
                 expected_revision = obligation.payload_revision
                 try:
-                    intended_payload = encode_file_call_admission(
-                        self._obligation(
-                            FileCallFamily.PACKAGE_UPLOAD,
-                            prepared.binding,
-                            token=prepared.state.token,
-                            batch_index=index,
-                        )
+                    record = self._obligation(
+                        FileCallFamily.PACKAGE_UPLOAD,
+                        prepared.binding,
+                        token=prepared.state.token,
+                        batch_index=index,
                     )
+                    intended_payload = encode_file_call_admission(record)
                 except FileCallObligationCodecError:
                     borrow.close()
                     self._active_package_uploads.pop(id(active))
@@ -838,17 +858,21 @@ class FileOperation:
                     try:
                         published = obligation.publish_payload(
                             expected_revision=expected_revision,
-                            payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+                            payload_version=record.payload_version,
                             payload=intended_payload,
                         )
                     except Exception:
                         # Exact repetition reconciles a commit whose reply was lost.
                         published = obligation.publish_payload(
                             expected_revision=expected_revision,
-                            payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+                            payload_version=record.payload_version,
                             payload=intended_payload,
                         )
-                    if published.payload_revision != expected_revision + 1 or published.payload != intended_payload:
+                    if (
+                        published.payload_revision != expected_revision + 1
+                        or published.payload != intended_payload
+                        or published.payload_version != record.payload_version
+                    ):
                         raise StateError("Package upload child publication did not advance exactly once")
                 except BaseException:
                     # The row may name either the checkpointed predecessor or
@@ -915,6 +939,7 @@ class FileOperation:
                 runtime_selection,
                 borrow,
                 None,
+                bootstrap=self._bootstrap,
             )
             if (
                 type(gate_setup) is not FileEffectGateSetup
@@ -951,6 +976,7 @@ class FileOperation:
             plan=plan,
             deadline=deadline,
             runtime_selection=runtime_selection,
+            bootstrap=self._bootstrap,
         )
         normal = operation.settle(result.dispatch, result.carrier_completion)
         if result.dispatch is Dispatch.NOT_SENT and not operation.requires_owner_retention:
@@ -1052,6 +1078,7 @@ class FileOperation:
                 deadline=deadline,
                 runtime_selection=runtime_selection,
                 borrow=borrow,
+                bootstrap=self._bootstrap,
             )
             admission = self._prepare_admission(FileCallFamily.JSON_UPDATE, prepared.binding)
             active: _ActiveFileJsonUpdate = _ActiveFileCall(
@@ -1104,6 +1131,7 @@ class FileOperation:
                 deadline=deadline,
                 runtime_selection=runtime_selection,
                 borrow=borrow,
+                bootstrap=self._bootstrap,
             )
             admission = self._prepare_admission(FileCallFamily.STAT, prepared.binding)
             active: _ActiveFileStat = _ActiveFileCall(
@@ -1160,6 +1188,7 @@ class FileOperation:
                 deadline=deadline,
                 runtime_selection=runtime_selection,
                 borrow=borrow,
+                bootstrap=self._bootstrap,
             )
             admission = self._prepare_admission(FileCallFamily.INVENTORY, prepared.binding)
             active: _ActiveFileInventory = _ActiveFileCall(
@@ -1214,6 +1243,7 @@ class FileOperation:
                 deadline=deadline,
                 runtime_selection=runtime_selection,
                 borrow=borrow,
+                bootstrap=self._bootstrap,
             )
             admission = self._prepare_admission(FileCallFamily.REMOVE, prepared.binding)
             active: _ActiveFileRemove = _ActiveFileCall(
@@ -1271,6 +1301,7 @@ class FileOperation:
                 deadline=deadline,
                 runtime_selection=runtime_selection,
                 borrow=borrow,
+                bootstrap=self._bootstrap,
             )
             admission = self._prepare_admission(FileCallFamily.SET_METADATA, prepared.binding)
             active: _ActiveFileMetadata = _ActiveFileCall(
@@ -1328,6 +1359,7 @@ class FileOperation:
                 deadline=deadline,
                 runtime_selection=runtime_selection,
                 borrow=borrow,
+                bootstrap=self._bootstrap,
             )
             admission = self._prepare_admission(FileCallFamily.ENSURE_DIRECTORY, prepared.binding)
             active: _ActiveFileMetadata = _ActiveFileCall(
@@ -1369,7 +1401,7 @@ class FileOperation:
             active.obligation = active.borrow.install_dispatch_obligation(
                 admission.obligation_id,
                 "file-call",
-                payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+                payload_version=admission.payload_version,
                 payload=admission.payload,
             )
         except _PreRegistrationClosingRefusal:
@@ -1388,12 +1420,11 @@ class FileOperation:
         gate_setup: FileEffectGateSetup | None = None,
     ) -> _FileCallAdmission:
         try:
-            payload = encode_file_call_admission(
-                self._obligation(family, binding, token=token, batch_index=batch_index, gate_setup=gate_setup)
-            )
+            record = self._obligation(family, binding, token=token, batch_index=batch_index, gate_setup=gate_setup)
+            payload = encode_file_call_admission(record)
         except FileCallObligationCodecError:
             raise ValidationError("File call lifecycle recovery identity is too large or invalid") from None
-        return _FileCallAdmission(secrets.token_hex(16), payload)
+        return _FileCallAdmission(secrets.token_hex(16), payload, record.payload_version)
 
     def _publish_json_child(
         self,
@@ -1402,17 +1433,16 @@ class FileOperation:
         attempt: int,
     ) -> None:
         obligation = self._require_obligation(active)
-        payload = encode_file_call_obligation(
-            self._obligation(
-                FileCallFamily.JSON_UPDATE,
-                active.binding,
-                token=child.state.token,
-                attempt=attempt,
-            )
+        record = self._obligation(
+            FileCallFamily.JSON_UPDATE,
+            active.binding,
+            token=child.state.token,
+            attempt=attempt,
         )
+        payload = encode_file_call_obligation(record)
         obligation.publish_payload(
             expected_revision=obligation.payload_revision,
-            payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+            payload_version=record.payload_version,
             payload=payload,
         )
 
@@ -1456,6 +1486,7 @@ class FileOperation:
             ),
             gate_setup=gate_setup,
             uncertainty=uncertainty,
+            bootstrap=binding.bootstrap,
         )
 
     @staticmethod
@@ -1475,7 +1506,7 @@ class FileOperation:
         obligation = self._require_obligation(active)
         obligation.publish_payload(
             expected_revision=obligation.payload_revision,
-            payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+            payload_version=recovery.payload_version,
             payload=encode_file_call_obligation(recovery),
         )
 

@@ -288,6 +288,7 @@ def _prepare_json_update(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     borrow: OperationBorrow,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> _PreparedJsonUpdate:
     """Prepare one validated JSON update without dispatching it."""
     inputs = _validate_json_inputs(
@@ -303,6 +304,7 @@ def _prepare_json_update(
         deadline,
         runtime_selection,
         borrow,
+        bootstrap=bootstrap,
     )
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
     state = _State(inputs.binding, operation)
@@ -637,6 +639,8 @@ def _validate_json_inputs(
     deadline: object,
     runtime_selection: object,
     borrow: object,
+    *,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> _Inputs:
     if type(source) is not bytes:
         raise ValidationError("JSON update requires source bytes")
@@ -660,6 +664,7 @@ def _validate_json_inputs(
         deadline,
         runtime_selection,
         borrow,
+        bootstrap=bootstrap,
     )
     json_binding = FileJsonBinding(
         binding.trusted_root_path,
@@ -670,6 +675,7 @@ def _validate_json_inputs(
         max_depth,
         binding.identity_plan,
         binding.runtime_selection,
+        bootstrap=bootstrap,
     )
     return _Inputs(json_binding, validated, canonical_metadata)
 

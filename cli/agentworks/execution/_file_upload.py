@@ -302,6 +302,7 @@ def _prepare_upload(
     runtime_selection: RuntimeSelection,
     borrow: OperationBorrow,
     effect_gate: FileEffectGateBinding | None = None,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> _PreparedUpload:
     """Prepare one validated concrete upload without dispatching it."""
     binding, canonical_condition, canonical_metadata = _validate_inputs(
@@ -316,6 +317,7 @@ def _prepare_upload(
         runtime_selection,
         borrow,
         effect_gate,
+        bootstrap=bootstrap,
     )
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
     return _prepare_upload_borrowed(
@@ -964,6 +966,8 @@ def _validate_inputs(
     runtime_selection: object,
     borrow: object,
     effect_gate: object = None,
+    *,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> tuple[FileUploadBinding, Create | Replace | Match, NewMetadata]:
     if type(trusted_root_path) is not str or not normalized_root(trusted_root_path):
         raise ValidationError("Upload requires a normalized absolute trusted root")
@@ -1026,7 +1030,7 @@ def _validate_inputs(
     if getter_failed or not callable(reader):
         raise ValidationError("Upload requires a nonblocking byte source")
     return (
-        FileUploadBinding(trusted_root_path, relative_path, size, plan, runtime_selection, effect_gate),
+        FileUploadBinding(trusted_root_path, relative_path, size, plan, runtime_selection, effect_gate, bootstrap),
         publication_inputs[0],
         create_metadata,
     )
