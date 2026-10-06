@@ -422,6 +422,24 @@ fencing, complete platform availability, terminal delivery and additive RunConte
 database data was removed. The PR remains draft with no review-requested or ready signal; public
 feedback/fix round 1 stays open.
 
+Fresh recovery composition exposes a missing ownership seam: takeover seals ordinary registration,
+while the existing WSL2 hold recovery only reconciles the predecessor anchor and cannot own a
+renewed availability span. Read-only scouting and independent project/complexity design reviews
+select separate bounded recovery-support obligations under the same claim, not a multi-anchor
+payload or a second VM claim. The lifecycle response now specifies atomic recovery-only
+append-and-admit, exact persistence retry without launch replay, unchanged ordinary seals and
+retention of every predecessor/support debt across another takeover. This changes no accepted
+requirement or stopped intent and activates no permission enforcement. Implementation, private
+review and native proof remain open.
+
+- [ ] Implement atomic recovery-support admission in the existing owner/repository, preserving
+      generation fencing, bounds, exact retry, serial custody and sealed ordinary registration.
+      Prove rollback/lost reply, stale owners, terminal/conflicting rows and recovery of recovery.
+- [ ] Bind the concrete recovery availability span and fixed read-only preparation through existing
+      recovery dispatch. Retain every old and new cleanup debt and exact carrier/lifetime binding;
+      never treat observed guest or anchor facts as a lease. Then adopt actual record versions and
+      fresh prepared facts in all retained-file adapters. Native acceptance remains required.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state

@@ -693,14 +693,14 @@ An adapter may replace its opaque payload with exact recovery identity while the
 `possible-effect`. That update is not a generic lifecycle state or a sealing prerequisite. A typed
 no-effect result can resolve an obligation that never created a runtime identity.
 
-Registration refuses after the ledger is sealed. The first `possible-effect` transition also arms
-the coarse claim in the same short transaction; each later dispatch revalidates the current owner
-generation against its already-possible obligation before permission returns. Later obligations
-advance independently. Once the workflow cannot create more effects, core seals the ledger.
-Whole-operation resolution requires a sealed ledger, every registered obligation in `resolved`, and
-no active borrow, outstanding attempt or retained in-memory cleanup custody. Final release deletes
-the resolved obligations and releases the exact claim atomically. No automatic expiry, generic retry
-runner, dependency graph or force-release belongs in this layer.
+Ordinary registration refuses after the ledger is sealed. The first `possible-effect` transition
+also arms the coarse claim in the same short transaction; each later dispatch revalidates the
+current owner generation against its already-possible obligation before permission returns. Later
+obligations advance independently. Once the workflow cannot create more effects, core seals the
+ledger. Whole-operation resolution requires a sealed ledger, every registered obligation in
+`resolved`, and no active borrow, outstanding attempt or retained in-memory cleanup custody. Final
+release deletes the resolved obligations and releases the exact claim atomically. No automatic
+expiry, generic retry runner, dependency graph or force-release belongs in this layer.
 
 Recovery must be fenced from a delayed original controller before it mutates an old obligation. The
 logical operation keeps its stable random operation identifier, while each database owner carries a
@@ -725,6 +725,38 @@ exact persisted row, publish recovery identity for an effect that was already po
 row with typed evidence. It cannot borrow the ordinary dispatch path, treat registration retry as
 rebind, or transition a previously `registered` row to `possible-effect`. Any future recovery probe
 or cleanup dispatch requires its own adapter-owned admission contract and remote-drain proof.
+
+Recovery also needs owned availability around its preparation and reconciliation. A predecessor's
+hold observation is not a live lease, and its native pipe or process handles cannot be reconstructed
+from a durable identity. Core may therefore admit a new, bounded recovery-support effect under the
+same logical operation and exact recovery generation. This is a separate admission API, not ordinary
+registration, an unsealed ledger or application replay. The transaction requires a sealed,
+unresolved recovery claim, inserts a fresh row directly as `possible-effect` and arms the coarse
+claim atomically. It retains every predecessor row and enforces the existing row/payload bounds.
+There is no intermediate `registered` row that recovery could promote into an old application.
+
+The caller chooses and retains the support obligation ID before admission. An exact persistence
+retry may confirm the same kind, payload version and bytes in a still-possible row; it never
+authorizes repeating an uncertain launch. Conflicting or terminal rows refuse. Each renewed
+availability span owns its own controller/nonce/anchor row, rather than adding several anchors to a
+predecessor payload. Another takeover inherits all those rows and their unresolved observation
+debts. Capacity exhaustion refuses further support admission without overwriting history.
+
+Core composition selects the concrete availability and fixed read-only preparation adapters needed
+for recovery. It uses the same platform availability contract as ordinary workflows, including
+stopped intent; a platform needing no hold may supply a no-op span. Support handles provide no
+ordinary application dispatch. Each adapter keeps admission, launch-attempt custody and cleanup
+together, proves the applicable endpoint/drain boundary and retains uncertainty after interrupted
+launch or observation. Fixed guest/account observations use the existing recovery-dispatch serial
+boundary, not ordinary borrowing or a direct carrier escape. A live support span must cover fresh
+preparation through the final retained-file action. Final resolution still checks every original and
+support obligation and excludes active or uncertain custody. The hold's durable row and retained
+native object represent its lifetime; holding the serial recovery-dispatch guard for that entire
+lifetime would incorrectly exclude the preparation and file attempts it supports.
+
+This is the selected implementation response, not an already implemented recovery path. The current
+owner/repository still reject all new recovery registration; renewed availability and
+recovery-specific preparation require their own implementation and native acceptance.
 
 That contract uses a distinct internal recovery-dispatch object, not a recovery mode on the ordinary
 borrow. Admission requires the sealed recovery owner, its exact current generation, a

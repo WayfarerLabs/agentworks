@@ -907,9 +907,10 @@ The private versioned codec now represents and validates those facts. `FileOpera
 optional context at construction, verifies the selected VM boot, and gives each prepared binding
 that context before registration or dispatch. Gate promotion preserves it, and all originating
 admissions, JSON/package child publications and retained updates use the typed record's actual
-version. Production VM construction has not yet adopted this composition. The current private
-recovery adapters do not supply fresh preparation and are not an accepted recovery path for
-bootstrap-bound records.
+version. The private WSL2 native factory now shares the actual prepared root/full guest context
+between file and buffered execution state; other platform and production RunContext composition
+remain unimplemented. The current private recovery adapters do not supply fresh preparation and are
+not an accepted recovery path for bootstrap-bound records.
 
 JSON owns one parent `file-call` row. Before any nested upload can dispatch, it publishes that
 child's fresh token and attempt number into the same row. A retry may replace those fields only
