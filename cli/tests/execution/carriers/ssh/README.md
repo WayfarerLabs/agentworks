@@ -37,6 +37,11 @@ owned temporary directory, including parent cleanup evidence. This is a native l
 fixture for ordinary Windows CI, with no network, credentials or caller-console access; report its
 actual native result separately from synthetic passes and skips.
 
+On failure, pytest also displays the controlled child stdout, stderr traceback and parent
+observations as an exception note. Each displayed log is bounded to 64 KiB; its complete contents
+remain in the owned temporary directory. Missing observations are reported as unavailable and do not
+satisfy cleanup or native acceptance.
+
 Both fixture workers begin inert. Only a successful start admits effects; a failed or interrupted
 start cancels even a delayed thread tail. Every admitted borrower settles before outer console or
 process cleanup can proceed. Synthetic tests on every host exercise failures before and after thread

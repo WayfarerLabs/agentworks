@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import ctypes
+import io
 import json
 import subprocess
 import sys
 from pathlib import Path
 from threading import Event, Thread
 from time import monotonic, sleep
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -136,6 +138,90 @@ def test_failed_borrower_finishes_before_outer_cleanup() -> None:
     assert order == [borrower_cleanup, outer_cleanup]
 
 
+@pytest.mark.parametrize("observer_failed", [False, True])
+def test_failing_owned_child_exposes_controlled_evidence_after_reaping(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, observer_failed: bool
+) -> None:
+    # Every process/window boundary is synthetic; invoke the actual supervisor
+    # and failure reporting without launching any child or accessing a console.
+    identity = {"phase": "identity", "pid": 47201, "window": 9181, "window_pid": 49001}
+    stdout = (json.dumps(identity) + "\n").encode()
+    stderr = b"Traceback (synthetic child):\nOSError: 731 native-fixture-evidence\n"
+    observation_error = OSError()
+    timeouts: list[float] = []
+
+    class Child:
+        pid = 47201
+        returncode = 1
+
+        def __init__(self) -> None:
+            self.stdout = io.BytesIO()
+            self.stderr = io.BytesIO()
+
+        def communicate(self, *, timeout: float) -> tuple[bytes, bytes]:
+            timeouts.append(timeout)
+            return stdout, stderr
+
+        def poll(self) -> int:
+            return self.returncode
+
+    child = Child()
+
+    def create(*args: object, **kwargs: object) -> Child:
+        return child
+
+    def observe(value: dict[str, object]) -> str:
+        assert value == identity
+        assert child.stdout.closed and child.stderr.closed
+        if observer_failed:
+            raise observation_error
+        return "unobservable"
+
+    module = sys.modules[__name__]
+    monkeypatch.setattr(module, "sys", SimpleNamespace(platform="win32", executable="synthetic"))
+    monkeypatch.setattr(
+        module,
+        "subprocess",
+        SimpleNamespace(
+            STARTUPINFO=lambda: SimpleNamespace(dwFlags=0, wShowWindow=0),
+            STARTF_USESHOWWINDOW=1,
+            SW_HIDE=0,
+            Popen=create,
+            DEVNULL=-3,
+            PIPE=-1,
+            CREATE_NEW_CONSOLE=16,
+            TimeoutExpired=subprocess.TimeoutExpired,
+        ),
+    )
+    monkeypatch.setattr(module, "_window_cleanup", observe)
+    with pytest.raises((AssertionError, BaseExceptionGroup)) as raised:
+        test_owned_console_resource_and_nowait_records(tmp_path)
+    assert timeouts == [120, 10]
+    assert child.stdout.closed and child.stderr.closed
+    assert (tmp_path / "stdout.jsonl").read_bytes() == stdout
+    assert (tmp_path / "stderr.log").read_bytes() == stderr
+    parent = (tmp_path / "parent.json").read_text(encoding="utf-8")
+    measurement = json.loads(parent)
+    assert measurement["child_pid"] == child.pid
+    assert measurement["returncode"] == 1
+    assert measurement["window_cleanup"] == "unobservable"
+    assert measurement["records"] == [identity]
+    if observer_failed:
+        error = raised.value
+        assert isinstance(error, BaseExceptionGroup)
+        inner = error.exceptions[0]
+        assert isinstance(inner, BaseExceptionGroup)
+        assert inner.exceptions == (observation_error,)
+        assert measurement["parent_error_types"] == ["OSError"]
+    else:
+        assert isinstance(raised.value, AssertionError)
+        assert measurement["parent_error_types"] == []
+    notes = "\n".join(raised.value.__notes__)
+    assert stdout.decode() in notes
+    assert stderr.decode() in notes
+    assert parent in notes
+
+
 def _window_cleanup(identity: dict[str, object]) -> str:
     if sys.platform != "win32":
         raise OSError("Native window observation requires Windows")
@@ -203,9 +289,15 @@ def _run_owned_child(logs: Path) -> dict[str, object]:
                     errors.append(error)
         (logs / "stdout.jsonl").write_bytes(stdout)
         (logs / "stderr.log").write_bytes(stderr)
-    records = [json.loads(line) for line in stdout.splitlines()]
-    identities = [record for record in records if record.get("phase") == "identity"]
-    cleanup = _window_cleanup(identities[0]) if len(identities) == 1 else "unobservable"
+    records = []
+    cleanup = "unobservable"
+    try:
+        records = [json.loads(line) for line in stdout.splitlines()]
+        identities = [record for record in records if record.get("phase") == "identity"]
+        if len(identities) == 1:
+            cleanup = _window_cleanup(identities[0])
+    except BaseException as error:
+        errors.append(error)
     result: dict[str, object] = {
         "child_pid": process.pid,
         "returncode": process.returncode,
@@ -219,9 +311,26 @@ def _run_owned_child(logs: Path) -> dict[str, object]:
     return result
 
 
-@pytest.mark.windows
-@pytest.mark.skipif(sys.platform != "win32", reason="Requires an owned native Windows console")
-def test_owned_console_resource_and_nowait_records(tmp_path: Path) -> None:
+def _failure_observations(logs: Path) -> str:
+    """Render only bounded, controlled logs from this fixture's owned child."""
+    observations = []
+    limit = 64 * 1024
+    for name in ("stdout.jsonl", "stderr.log", "parent.json"):
+        path = logs / name
+        try:
+            with path.open("rb") as stream:
+                data = stream.read(limit + 1)
+        except OSError as error:
+            observations.append(f"{path}: unavailable ({type(error).__name__})")
+            continue
+        text = data[:limit].decode("utf-8", errors="backslashreplace")
+        observations.append(f"{path}:\n{text}")
+        if len(data) > limit:
+            observations.append(f"Display truncated at {limit} bytes; full owned log remains at {path}.")
+    return "\n".join(observations)
+
+
+def _owned_console_case(tmp_path: Path) -> None:
     # Retain the parent supervisor before CreateProcess. Main-thread interruption
     # cannot orphan a constructor or skip child reaping. Its finite process timeout
     # bounds stalled native calls; no other console host is scanned or terminated.
@@ -251,3 +360,13 @@ def test_owned_console_resource_and_nowait_records(tmp_path: Path) -> None:
         assert case["empty_count"] == case["after_non_key_count"] == 0
         assert 4 in case["non_key_types"] and 8 in case["non_key_types"]
         assert case["unicode_units"] == [0x0041, 0x03A9, 0xD83D, 0xDE03]
+
+
+@pytest.mark.windows
+@pytest.mark.skipif(sys.platform != "win32", reason="Requires an owned native Windows console")
+def test_owned_console_resource_and_nowait_records(tmp_path: Path) -> None:
+    try:
+        _owned_console_case(tmp_path)
+    except BaseException as error:
+        error.add_note(_failure_observations(tmp_path))
+        raise
