@@ -156,3 +156,37 @@ narrow proof on the selected Windows 9.5/10.x clients. Server 2022 remains withi
 CI image is not permission to raise the supported Windows floor. An SSH-owned primitive
 console/polling proof fixture is being prepared independently, without claiming host keyboard
 translation, ConPTY or complete terminal delivery.
+
+## Private resize and native-fixture batch
+
+The POSIX resize developer's `63ec86147a1cd55e1ad3c8fac2c2981c6874e214` uses the actual shared
+notification API. Its finite local allowance is capped by the original operation deadline. Unknown
+notification retains observation uncertainty; an unsent notification uses fresh owner completion
+facts. Fifteen cases include two observed geometry changes and local SIGWINCH delivery to an owned
+synthetic child, deadline races and retained settlement. This is local signal evidence, not remote
+SSH resize. The developer reports 396 SSH tests passed with 5 skips and local quality gates.
+
+The Windows developer's `f3d8cf8c1a3eeeb44ed637b2451cb06bfa7ac44e` adds an owned hidden-console
+fixture. It measures raw-mode restoration, unchanged output mode/code pages/handle flags, NOWAIT
+empty and non-key records, injected UTF-16 units and exact child/window cleanup. Linux proves the
+external record ABI; it skips the native case. Physical keyboard translation, a production reader,
+SSH/ConPTY and native Windows acceptance remain unproved.
+
+All three independent source lanes identify the same material startup-custody gap in the Windows
+fixture at the combined private pin `57139913e1a3a888d3f88de10140be12c28241b8`: both supervisors
+start a worker before retaining startup interruption. A late start exception could abandon parent
+supervision or allow descriptor cleanup while the child worker still borrows them. The correction is
+required before publication or native execution. These reviews otherwise find no material issue in
+the resize unit; they do not clear this combined fixture batch.
+
+The full local suite at that pin reports **14,617 non-integration tests passed with 51 skips**;
+Ruff/format cover 1,265 files and strict mypy passes 1,228 sources. The native console case is one
+of the skips. These gates do not establish interrupted startup safety or native acceptance. The
+short private fixture root was independently checked for remaining process/descriptor use and
+removed after the run became terminal.
+
+Transport subsequently publishes the shared bootstrap/file-packaging increment at
+`73c75d38a61c76c51b7f0a33a388f4f18fd0d1ba`. All 114 carried SSH commits rebase cleanly onto it at
+`2b27c5050d3cb45e914750f65e11ffb57de9aab4`, with an identical SSH source/test tree. The earlier
+full-suite count belongs to the earlier shared dependency. Fresh combined validation and the fixture
+correction remain required; this rebase raises no public review/readiness signal.
