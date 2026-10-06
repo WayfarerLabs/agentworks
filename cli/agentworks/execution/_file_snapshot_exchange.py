@@ -9,7 +9,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
-from agentworks.execution._file_snapshot_bundle import FIXED_BUNDLE
+from agentworks.execution._file_snapshot_bundle import FIXED_BUNDLE, ROOT_PROGRAM
 from agentworks.execution._file_snapshot_host import (
     _historical_cleanup_shape,
     encode_file_snapshot_request,
@@ -46,6 +46,8 @@ from agentworks.execution._runtime_prerequisite import (
     RuntimePrerequisiteObservation,
     RuntimePrerequisiteState,
     RuntimeSelection,
+    _NumericGuestBootstrap,
+    build_root_guest_bootstrap_argv,
     build_runtime_identity_helper_argv,
 )
 from agentworks.execution._scratch import ScratchPhase, _cleanup_debt
@@ -379,19 +381,35 @@ def _exchange(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     on_stream_data: Callable[[bytes], bool] | None = None,
+    *,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> FileSnapshotCandidateResult:
-    fixed_argv, candidates, system_shim = build_runtime_identity_helper_argv(
-        plan,
-        selection=runtime_selection,
-        fixed_source=FIXED_BUNDLE.bootstrap,
-        nonce=request.nonce,
-    )
+    if bootstrap is None:
+        fixed_argv, candidates, system_shim = build_runtime_identity_helper_argv(
+            plan,
+            selection=runtime_selection,
+            fixed_source=FIXED_BUNDLE.bootstrap,
+            nonce=request.nonce,
+        )
+        prefix = FIXED_BUNDLE.prefix
+    else:
+        if request.effect_gate is not None and request.effect_gate.guest != bootstrap.guest:
+            raise ValidationError("Snapshot effect-gate guest does not match its numeric bootstrap")
+        fixed_argv, candidates, system_shim = build_root_guest_bootstrap_argv(
+            bootstrap.root_entry,
+            plan.expected,
+            selection=runtime_selection,
+            program=ROOT_PROGRAM,
+            nonce=request.nonce,
+            expected_guest=bootstrap.guest,
+        )
+        prefix = ROOT_PROGRAM.prefix
     collector = _FileSnapshotCollector(request, on_stream_data)
     reader = FileRecordReader(request.nonce, collector.accept)
     runtime = RuntimePrefixSink(request.nonce, candidates, reader, system_shim)
     stderr = _DiagnosticSink()
     io = CarrierIO(
-        input=FiniteInput(FIXED_BUNDLE.prefix + _request_data(request), sensitive=True),
+        input=FiniteInput(prefix + _request_data(request), sensitive=True),
         output=SinkOutput(runtime, stderr, require_live=isinstance(request, FileSnapshotStreamRequest)),
         sensitive=True,
     )
@@ -444,6 +462,7 @@ def snapshot_begin(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     effect_gate: FileEffectGateBinding | None = None,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> FileSnapshotCandidateResult:
     """Create one immutable private snapshot through one fresh attempt."""
     request = FileSnapshotBeginRequest(
@@ -456,7 +475,7 @@ def snapshot_begin(
         deadline.remaining(),
         effect_gate,
     )
-    return _exchange(carrier, request, plan, deadline, runtime_selection)
+    return _exchange(carrier, request, plan, deadline, runtime_selection, bootstrap=bootstrap)
 
 
 def snapshot_chunk(
@@ -470,6 +489,7 @@ def snapshot_chunk(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     effect_gate: FileEffectGateBinding | None = None,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> FileSnapshotCandidateResult:
     """Read one exact bounded range from an immutable private snapshot."""
     request = FileSnapshotChunkRequest(
@@ -482,7 +502,7 @@ def snapshot_chunk(
         deadline.remaining(),
         effect_gate,
     )
-    return _exchange(carrier, request, plan, deadline, runtime_selection)
+    return _exchange(carrier, request, plan, deadline, runtime_selection, bootstrap=bootstrap)
 
 
 def snapshot_stream(
@@ -495,6 +515,7 @@ def snapshot_stream(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     effect_gate: FileEffectGateBinding | None = None,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> FileSnapshotCandidateResult:
     """Stream one READY scratch over one live-stdio attempt, without replay."""
     if not carrier.features.live_stdio:
@@ -502,7 +523,7 @@ def snapshot_stream(
     request = FileSnapshotStreamRequest(
         secrets.token_hex(16), token, ready, plan.expected, deadline.remaining(), effect_gate
     )
-    return _exchange(carrier, request, plan, deadline, runtime_selection, write_data)
+    return _exchange(carrier, request, plan, deadline, runtime_selection, write_data, bootstrap=bootstrap)
 
 
 def snapshot_reconcile(
@@ -513,6 +534,7 @@ def snapshot_reconcile(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     effect_gate: FileEffectGateBinding | None = None,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> FileSnapshotCandidateResult:
     """Read historical cleanup ownership without replaying snapshot creation."""
     request = FileSnapshotReconcileRequest(
@@ -522,7 +544,7 @@ def snapshot_reconcile(
         deadline.remaining(),
         effect_gate,
     )
-    return _exchange(carrier, request, plan, deadline, runtime_selection)
+    return _exchange(carrier, request, plan, deadline, runtime_selection, bootstrap=bootstrap)
 
 
 def snapshot_cleanup(
@@ -534,6 +556,7 @@ def snapshot_cleanup(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     effect_gate: FileEffectGateBinding | None = None,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> FileSnapshotCandidateResult:
     """Attempt exact identity-bound cleanup once without a quiescence claim."""
     request = FileSnapshotCleanupRequest(
@@ -544,4 +567,4 @@ def snapshot_cleanup(
         deadline.remaining(),
         effect_gate,
     )
-    return _exchange(carrier, request, plan, deadline, runtime_selection)
+    return _exchange(carrier, request, plan, deadline, runtime_selection, bootstrap=bootstrap)

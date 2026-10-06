@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
-from agentworks.execution._file_effect_gate_bundle import FIXED_BUNDLE
+from agentworks.execution._file_effect_gate_bundle import FIXED_BUNDLE, ROOT_PROGRAM
 from agentworks.execution._file_effect_gate_protocol import (
     GateControlFailure,
     GateControlOperation,
@@ -26,6 +26,8 @@ from agentworks.execution._runtime_prerequisite import (
     RuntimePrerequisiteObservation,
     RuntimePrerequisiteState,
     RuntimeSelection,
+    _NumericGuestBootstrap,
+    build_root_guest_bootstrap_argv,
     build_runtime_identity_helper_argv,
 )
 from agentworks.execution.carrier import (
@@ -217,12 +219,27 @@ def exchange_file_effect_gate(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     binding: FileEffectGateBinding | None = None,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> GateControlCandidateResult:
     """Perform one non-replayed setup, inspection or CAS attempt."""
     nonce = secrets.token_hex(16)
-    fixed_argv, candidates, system_shim = build_runtime_identity_helper_argv(
-        plan, selection=runtime_selection, fixed_source=FIXED_BUNDLE.bootstrap, nonce=nonce
-    )
+    if bootstrap is None:
+        fixed_argv, candidates, system_shim = build_runtime_identity_helper_argv(
+            plan, selection=runtime_selection, fixed_source=FIXED_BUNDLE.bootstrap, nonce=nonce
+        )
+        prefix = FIXED_BUNDLE.prefix
+    else:
+        if bootstrap.guest != guest:
+            raise ValidationError("File-gate control guest does not match its numeric bootstrap")
+        fixed_argv, candidates, system_shim = build_root_guest_bootstrap_argv(
+            bootstrap.root_entry,
+            plan.expected,
+            selection=runtime_selection,
+            program=ROOT_PROGRAM,
+            nonce=nonce,
+            expected_guest=bootstrap.guest,
+        )
+        prefix = ROOT_PROGRAM.prefix
     try:
         request = GateControlRequest(
             nonce,
@@ -243,7 +260,7 @@ def exchange_file_effect_gate(
     runtime = RuntimePrefixSink(nonce, candidates, reader, system_shim)
     stderr = _DiagnosticSink()
     io = CarrierIO(
-        input=FiniteInput(FIXED_BUNDLE.prefix + manifest, sensitive=True),
+        input=FiniteInput(prefix + manifest, sensitive=True),
         output=SinkOutput(runtime, stderr, require_live=False),
         sensitive=True,
     )

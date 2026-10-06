@@ -117,6 +117,18 @@ class RuntimeSelection:
             _validate_path(self.explicit_path)
 
 
+@dataclass(frozen=True, slots=True)
+class _NumericGuestBootstrap:
+    """Bound root entry and full guest checkpoint for private numeric helpers."""
+
+    root_entry: IdentityPlan
+    guest: VMGuestIdentity
+
+    def __post_init__(self) -> None:
+        if _validate_plan(self.root_entry).euid != 0 or type(self.guest) is not VMGuestIdentity:
+            raise ValidationError("Numeric guest bootstrap requires root entry and a full guest identity")
+
+
 class RuntimePrerequisiteState(StrEnum):
     """Closed prerequisite fact observed before helper output."""
 
