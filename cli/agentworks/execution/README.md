@@ -376,7 +376,10 @@ or late observations are `UNCONFIRMED`, while exceptional observations preserve 
 exception. A post-arm refusal leaves the run `RESERVED` as a one-shot tombstone and retains VM
 custody. An exact hold can settle while a managed-start obligation still keeps VM ownership. These
 local checks do not make route validity atomic with dispatch, prove native WSL2 delivery or make
-this a production job API.
+this a production job API. In particular, releasing this command-scoped hold after a start does not
+keep an independent job's WSL2 distribution available. Public WSL2 `INDEPENDENT` remains unavailable
+until a separate recoverable job-length platform hold is proved; Linux cgroup ownership alone cannot
+provide that Windows-side power lifetime.
 
 ## Observation and guest lifetime
 
