@@ -9,11 +9,13 @@ import secrets
 import stat
 import struct
 import sys
+import time
 from pathlib import Path
 
 import pytest
 
 from agentworks.execution import _local_download_publication as local
+from agentworks.execution.carrier import Deadline
 from agentworks.execution.files import Create, Replace
 
 pytestmark = [pytest.mark.windows, pytest.mark.skipif(sys.platform != "linux", reason="Linux publication evidence")]
@@ -468,6 +470,41 @@ def test_sync_failure_leaves_destination_untouched(
     finally:
         writer.abort()
     assert not writer.publication_uncertain
+    if isinstance(condition, Replace):
+        assert destination.read_bytes() == b"old"
+    else:
+        assert not destination.exists()
+    assert not list(tmp_path.glob(".agw-download-*"))
+
+
+@pytest.mark.parametrize("condition", [Create(), Replace()])
+def test_budget_consumed_by_sync_refuses_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, condition: Create | Replace
+) -> None:
+    destination = tmp_path / "download"
+    if isinstance(condition, Replace):
+        destination.write_bytes(b"old")
+    deadline = Deadline.after(30)
+    writer = local.LocalDownloadPublication(destination, condition=condition)
+    writer.try_write(memoryview(b"new"))
+    sync = os.fsync
+
+    def expire_after_sync(fd: int) -> None:
+        sync(fd)
+        object.__setattr__(deadline, "expires_at", time.monotonic() - 1)
+
+    monkeypatch.setattr(os, "fsync", expire_after_sync)
+    try:
+        with pytest.raises(TimeoutError):
+            writer.commit(
+                verified_complete=True,
+                size=3,
+                sha256=hashlib.sha256(b"new").hexdigest(),
+                deadline=deadline,
+            )
+        assert not writer.published and not writer.publication_uncertain
+    finally:
+        writer.abort()
     if isinstance(condition, Replace):
         assert destination.read_bytes() == b"old"
     else:

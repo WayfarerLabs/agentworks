@@ -42,6 +42,8 @@ from agentworks.execution.files import Create, Replace
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from agentworks.execution.carrier import Deadline
+
 _CREATE = Create()
 # Linux include/uapi/linux/fs.h: FS_EXTENT_FL is a filesystem layout indicator.
 _EXTENT_FLAG = 0x00080000
@@ -234,11 +236,12 @@ class LocalDownloadPublication:
         except OSError as exc:
             raise LocalDownloadUnsupportedError("Cannot preserve local destination metadata") from exc
 
-    def commit(self, *, verified_complete: bool, size: int, sha256: str) -> None:
+    def commit(self, *, verified_complete: bool, size: int, sha256: str, deadline: Deadline | None = None) -> None:
         """Publish only after complete coordinator verification and matching bytes.
 
         The coordinator must also establish its deadline, ownership and remote
-        cleanup obligations before passing verified_complete=True. On any error,
+        cleanup obligations before passing verified_complete=True. The optional
+        deadline is checked after staging I/O and just before publication. On any error,
         inspect published and publication_uncertain and call abort. Neither a
         proved publication nor an uncertain attempt can be retried by this writer.
         """
@@ -256,6 +259,8 @@ class LocalDownloadPublication:
             raise ValueError("Local download stage is closed")
         if not verified_complete or size != self._size or sha256 != self._digest.hexdigest():
             raise ValueError("Local download is not completely verified")
+        if deadline is not None and deadline.expired:
+            raise TimeoutError("Local download deadline expired before publication")
         staged = os.fstat(fd)
         named = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
         if (staged.st_dev, staged.st_ino) != (named.st_dev, named.st_ino) or staged.st_nlink != 1:
@@ -269,8 +274,12 @@ class LocalDownloadPublication:
         if self._original is not None:
             self._preserve_metadata()
         os.fsync(fd)
+        if deadline is not None and deadline.expired:
+            raise TimeoutError("Local download deadline expired before publication")
         if self._original is not None and self._destination_metadata() != self._original:
             raise FileExistsError("Local download destination changed before replacement")
+        if deadline is not None and deadline.expired:
+            raise TimeoutError("Local download deadline expired before publication")
         self.publication_uncertain = True
         try:
             if self._original is None:
