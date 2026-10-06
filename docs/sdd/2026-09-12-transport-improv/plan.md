@@ -856,6 +856,28 @@ The spelling gate also found missing UPID vocabulary, now added for its existing
 These corrections do not enable stopped startup, HA settlement, atomic generation preconditions,
 queued-request drain or complete availability/RunContext. Both new plan items remain unchecked.
 
+All three independent lanes clear the whole wire unit at `4f5039478`. Project passes 545
+focused/adjacent cases plus five-file typing/style and file quality. Complexity passes 337
+baseline/restored cases; deleting guest-route validation fails three cases and sends the escaped
+route to the mocked opener, while deleting dot encoding fails two local TLS cases. Generic passes
+337 cases. The first complete lead suite finds one missed fixture adaptation: the maximum inventory
+test still sends the old private worker envelope. Correction `a00408929` adds the guest-agent
+endpoint without changing runtime code or weakening inventory assertions. All three lanes clear that
+correction; project and generic each pass 306 relevant cases, and complexity passes 44 inventory
+cases. Caller searches find no other missing endpoint adaptations.
+
+The corrected complete lead suite passes 15,465 non-integration cases with 49 skips and 27 existing
+fork warnings, exit 0. Complete Ruff/format (1,276 files), strict mypy (1,236 files), file quality,
+locked-SDD, Rulesync and whitespace gates pass. Typer isolation and website gates pass: 160 Python
+and 103 Node cases, four builds and both deterministic comparisons. Published predecessor
+`1a5441722` passes hosted CI and CodeQL. These are local TLS, scripted provider and local helper
+results, not native PVE acceptance, validated activation custody, startup, HA settlement, freshness,
+queued-request drain or complete RunContext. The next private adapter is delegated under the
+existing owner ledger; it does not change the completed wire evidence. Both plan items remain
+unchecked, public round 1 stays open, and no handoff signal or broader completion is claimed. No
+database data was deleted or SSH branch changed. Explicit macOS/Windows in-place local Replace
+retains the approved supported-metadata preservation and partial-failure reporting.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
