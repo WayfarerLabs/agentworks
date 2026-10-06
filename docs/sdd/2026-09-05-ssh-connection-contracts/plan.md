@@ -268,6 +268,28 @@ retained ownership and preservation of original control exceptions. Both operato
 decisions remain pending; these documentation proposals authorize no implementation. File quality,
 locked-SDD and whitespace checks pass, with no executable changes or new completed plan records.
 
+Draft `8afaaa71b` publishes that adoption on transport `12dcb01b`. Hosted CI
+[`37538665063`](https://github.com/WayfarerLabs/agentworks/actions/runs/37538665063) completes with
+failure. Its merge `2e11f40131549ce1a6a0e1d7b008190be90e13df` has those transport and SSH parents
+and tree `68fd409f89a0072b8f0171b6beebf8463cb7b4d3`, exactly the published SSH tree. Linux Python
+3.12-3.14 each report 6 failed, 16,065 passed, 201 skipped and 27 warnings; Windows Server
+2025/Python 3.13 reports 2 failed, 1,226 passed, 63 skipped and 25 warnings. Every pytest failure
+occurs in transport's unchanged `test_buffered_delivery_custody.py` SSH factory, which supplies a
+bare trust path instead of the current explicit trust type. These failures precede custody
+observations. That file also fabricates successful version discovery with unsettled storage; the
+real pump reports observation failure for pending cleanup. Shared fixture correction belongs to
+transport. Full mypy repeats the three held enrollment errors across 1,299 sources; Ruff/format,
+Rulesync, file quality, locked-SDD and website jobs pass. Typer isolation is skipped after mypy
+fails. No complete green or native handoff follows.
+
+Transport's
+[consumer compatibility reading](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6026464411)
+accepts both proposed resource shapes within its existing caller-retained custody model. SSH owns
+the candidate lock and forwarding worker/native-owner lifetimes; transport will retain the enclosing
+resources through uncertain outcomes and cleanup retries. Its actual consumers and native acceptance
+remain open. This compatibility feedback does not dispose either pending operator decision or
+authorize implementation.
+
 Combined code pin `38934134e3b8d12af814f9371b62075daa49db3e` preserves all 64 Python paths in the
 SSH contribution, including deletions, from published `186458307b`. Its full suite passes 16,125
 non-integration tests with 51 skips and 27 warnings, exit 0 in 267.18 seconds. Full Ruff/format
