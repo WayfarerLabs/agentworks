@@ -59,8 +59,9 @@ class SyntheticSSH:
         )
 
     def assert_closed(self) -> None:
+        assert self.custody.settled
         for child in self.children:
-            assert child.poll() is not None
+            assert child.returncode is not None
             for pipe in (child.stdin, child.stdout, child.stderr):
                 assert pipe is None or pipe.closed
 
@@ -84,15 +85,8 @@ def synthetic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
     yield value
-    # Failed assertions must not leave synthetic processes running.
-    value.custody.close(Deadline.after(2))
-    for child in value.children:
-        if child.poll() is None:
-            child.kill()
-        child.wait(timeout=2)
-        for pipe in (child.stdin, child.stdout, child.stderr):
-            if pipe is not None:
-                pipe.close()
+    assert value.custody.close(Deadline.after(2))
+    value.assert_closed()
 
 
 def test_inspection_is_passive(synthetic: SyntheticSSH) -> None:
@@ -388,9 +382,7 @@ def test_failed_cleanup_retains_custody_until_explicit_retry(
     assert report.dispatch == Dispatch.UNKNOWN
     assert "secret-canary" not in repr(report)
     assert not synthetic.custody.settled
-    synthetic.custody.close(Deadline.after(2))
-    assert synthetic.custody.settled
-    synthetic.children[-1].wait(timeout=2)
+    assert synthetic.custody.close(Deadline.after(2))
     synthetic.assert_closed()
 
 
@@ -420,9 +412,7 @@ def test_interrupted_failed_cleanup_retains_original_control_exception(
     assert raised.value is interrupted and raised.value.__notes__
     assert "secret-canary" not in repr(raised.value.__notes__)
     assert not synthetic.custody.settled
-    synthetic.custody.close(Deadline.after(2))
-    assert synthetic.custody.settled
-    synthetic.children[-1].wait(timeout=2)
+    assert synthetic.custody.close(Deadline.after(2))
     synthetic.assert_closed()
 
 
