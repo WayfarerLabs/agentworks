@@ -290,9 +290,14 @@ def test_cleanup_only_status_is_not_promoted_to_natural_exit(monkeypatch: pytest
 def test_incomplete_reap_is_reported_honestly(monkeypatch: pytest.MonkeyPatch) -> None:
     process = _fake_process()
     owner = process_core.LocalProcessOwner()
+    lost = threading.Event()
+
+    def poll(status: process_core._ProcessStatus) -> int | None:
+        status.lost = lost.is_set()
+        return None
 
     monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
-    monkeypatch.setattr(process_core._ProcessStatus, "poll", lambda status: None)
+    monkeypatch.setattr(process_core._ProcessStatus, "poll", poll)
     monkeypatch.setattr(process_core, "_cleanup", lambda status: False)
 
     owner.start(_request("pass"))
@@ -303,6 +308,9 @@ def test_incomplete_reap_is_reported_honestly(monkeypatch: pytest.MonkeyPatch) -
 
     assert terminal.started and not terminal.cleaned
     assert terminal.local_status is terminal.exit_status is None
+    assert terminal.cleanup_retryable
+    lost.set()
+    _wait_snapshot(owner, lambda snapshot: snapshot.terminal is not None and not snapshot.terminal.cleanup_retryable)
 
 
 def test_repeated_close_interruptions_preserve_first_identity_and_cleanup_once(
