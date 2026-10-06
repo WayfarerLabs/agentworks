@@ -110,7 +110,7 @@ class ManagedOperationRecovery:
         self._helper_terminated = True
         self.failed = False
         self.last_clock: ManagedLeaseCandidate | None = None
-        self.accepted_clock: ManagedLeaseCandidate | None = None
+        self._accepted_sample_ns: int | None = None
         self.ceiling_ns: int | None = None
         self.authority_elapsed = False
         self.last_stop: ManagedStopCandidate | None = None
@@ -169,8 +169,10 @@ class ManagedOperationRecovery:
                 custody=attempt.local_delivery,
             )
             self.last_clock = candidate
-            if isinstance(candidate.result, ClockObservation):
-                self.accepted_clock = candidate
+            if isinstance(candidate.result, ClockObservation) and (
+                self._accepted_sample_ns is None or candidate.result.sampled_ns >= self._accepted_sample_ns
+            ):
+                self._accepted_sample_ns = candidate.result.sampled_ns
                 if self.ceiling_ns is None:
                     with suppress(LeaseError):
                         self.ceiling_ns = sampled_lease(self._launch, candidate.result.sampled_ns).expires_ns

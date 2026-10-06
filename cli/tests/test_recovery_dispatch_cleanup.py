@@ -146,3 +146,71 @@ def test_reused_binding_failed_open_preserves_earlier_callers_dispatch(db: Datab
         binding._close_retained_dispatch()  # noqa: SLF001
     attempt.settle()
     earlier.close()
+
+
+@pytest.mark.parametrize("phase", ["before", "intent", "attempt", "active", "closed"])
+def test_unreturned_abort_retries_across_exact_local_mutations(db: Database, phase: str) -> None:
+    owner, row, binding = _recovery(db)
+    dispatch = binding.open_dispatch()
+    attempt = dispatch.begin_attempt()
+    error = KeyboardInterrupt()
+
+    def interrupt(frame: FrameType, event: str, arg: object) -> Any:
+        del arg
+        if frame.f_code is RecoveryDispatch._abort_unreturned_attempt.__code__:
+            states = {
+                "before": not dispatch._close_started,
+                "intent": dispatch._close_started and owner._outstanding_attempt is attempt,
+                "attempt": dispatch._close_started
+                and owner._outstanding_attempt is None
+                and owner._active_recovery_dispatch is dispatch,
+                "active": owner._active_recovery_dispatch is None and not dispatch._closed,
+                "closed": dispatch._closed,
+            }
+            boundary = event == ("return" if phase == "closed" else "line")
+            if boundary and states[phase]:
+                raise error
+        return interrupt
+
+    sys.settrace(interrupt)
+    try:
+        with pytest.raises(KeyboardInterrupt) as caught:
+            dispatch._abort_unreturned_attempt()
+        assert caught.value is error
+    finally:
+        sys.settrace(None)
+    dispatch._abort_unreturned_attempt()
+    dispatch._abort_unreturned_attempt()
+    assert owner._active_recovery_dispatch is None and owner._outstanding_attempt is None
+    assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
+    replacement = _binding(owner, row.obligation_id).open_dispatch()
+    replacement.close()
+
+
+@pytest.mark.parametrize("handoff", [False, True])
+def test_abort_retry_refuses_conflicting_dispatch_and_attempt(db: Database, handoff: bool) -> None:
+    owner, row, binding = _recovery(db)
+    dispatch = binding.open_dispatch()
+    dispatch.begin_attempt()
+    dispatch._abort_unreturned_attempt()
+    replacement = _binding(owner, row.obligation_id).open_dispatch()
+    attempt = replacement.begin_attempt()
+    if handoff:
+        replacement.handoff_unresolved()
+    with pytest.raises(StateError):
+        dispatch._abort_unreturned_attempt()
+    assert owner._outstanding_attempt is attempt
+    assert owner._active_recovery_dispatch is (None if handoff else replacement)
+    if not handoff:
+        attempt.settle()
+        replacement.close()
+
+
+def test_abort_cannot_release_handed_off_effect_without_exact_close_intent(db: Database) -> None:
+    owner, _, binding = _recovery(db)
+    dispatch = binding.open_dispatch()
+    attempt = dispatch.begin_attempt()
+    dispatch.handoff_unresolved()
+    with pytest.raises(StateError):
+        dispatch._abort_unreturned_attempt()
+    assert owner._outstanding_attempt is attempt and not dispatch._close_started

@@ -662,19 +662,27 @@ class RecoveryDispatch:
             self._closed = True
 
     def _abort_unreturned_attempt(self) -> None:
-        """Close after begin fails before its recovery attempt reaches the caller."""
+        """Retry exact local teardown after begin fails before effect entry."""
         owner = self._owner
         with owner._guard:  # noqa: SLF001
-            self._require_active_locked()
+            active = owner._active_recovery_dispatch  # noqa: SLF001
+            if active is not self and (active is not None or not self._close_started):
+                raise StateError(
+                    "recovery dispatch has no exact local abort custody",
+                    entity_kind=self.ownership.scope.resource_kind,
+                    entity_name=self.ownership.scope.resource_name,
+                )
             attempt = owner._outstanding_attempt  # noqa: SLF001
-            if attempt is not None:
-                if not isinstance(attempt, RecoveryAttempt) or attempt._dispatch is not self:  # noqa: SLF001
-                    raise StateError(
-                        "recovery dispatch has another outstanding attempt",
-                        entity_kind=self.ownership.scope.resource_kind,
-                        entity_name=self.ownership.scope.resource_name,
-                    )
-                owner._outstanding_attempt = None  # noqa: SLF001
+            if attempt is not None and (
+                not isinstance(attempt, RecoveryAttempt) or attempt._dispatch is not self  # noqa: SLF001
+            ):
+                raise StateError(
+                    "recovery dispatch has another outstanding attempt",
+                    entity_kind=self.ownership.scope.resource_kind,
+                    entity_name=self.ownership.scope.resource_name,
+                )
+            self._close_started = True
+            owner._outstanding_attempt = None  # noqa: SLF001
             owner._active_recovery_dispatch = None  # noqa: SLF001
             self._closed = True
 

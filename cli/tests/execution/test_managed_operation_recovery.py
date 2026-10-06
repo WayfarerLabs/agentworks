@@ -106,12 +106,15 @@ def recovery_setup(tmp_path, monkeypatch, request):
 def test_fresh_fixed_ceiling_and_current_poll_without_high_water_writes(recovery_setup) -> None:
     database, owner, row, span, _, helpers, recovery, _ = recovery_setup
     changes = database._conn.total_changes
+    accepted = 1000
     for sample in (1000, 2000, 1000 + WINDOW_NS, 0):
         helpers.sample = sample
         deadline = Deadline.after(2)
         with span.action(deadline) as context:
             candidate = recovery.observe_clock(context, deadline)
-        assert recovery.last_clock is candidate and recovery.accepted_clock is candidate
+        assert recovery.last_clock is candidate
+        accepted = max(accepted, sample)
+        assert recovery._accepted_sample_ns == accepted
         assert recovery.ceiling_ns == 1000 + WINDOW_NS
         assert recovery.authority_elapsed == (sample >= recovery.ceiling_ns)
         assert recovery.dispatch is None and recovery.attempt is None
@@ -243,6 +246,8 @@ def test_interrupted_local_transition_retains_exact_custody_without_replay(recov
     facts = recovery.drain(Deadline.after(1))
     assert facts.local_settled and facts.helper_termination_known and not facts.dispatch_retained
     assert recovery.dispatch is None and recovery.attempt is None
+    with span.action(Deadline.after(1)):
+        pass
     if phase in {"settle", "close"}:
         assert recovery.last_clock is not None and recovery.ceiling_ns == 1000 + WINDOW_NS
 
@@ -337,3 +342,54 @@ def test_each_exchange_checks_current_persisted_binding(recovery_setup, fault) -
         recovery.request_stop(context, Deadline.after(1))
     assert helpers.calls == 0
     assert not recovery.drain(Deadline.after(1)).dispatch_retained
+
+
+def test_regressing_clock_above_fixed_ceiling_is_not_elapsed_authority(recovery_setup) -> None:
+    _, _, _, span, _, helpers, recovery, _ = recovery_setup
+    for sample, elapsed in (
+        (1000, False),
+        (1000 + 2 * WINDOW_NS, True),
+        (1000 + WINDOW_NS, False),
+        (1000 + WINDOW_NS, False),
+        (1000 + 3 * WINDOW_NS, True),
+    ):
+        helpers.sample = sample
+        with span.action(Deadline.after(2)) as context:
+            candidate = recovery.observe_clock(context, Deadline.after(1))
+        assert candidate.result == ClockObservation(sample) and candidate.issue is None
+        assert recovery.last_clock is candidate and recovery.ceiling_ns == 1000 + WINDOW_NS
+        assert recovery.authority_elapsed is elapsed
+        if sample == 1000 + WINDOW_NS:
+            assert recovery._accepted_sample_ns == 1000 + 2 * WINDOW_NS
+
+
+@pytest.mark.parametrize("after", [False, True])
+def test_interrupted_abort_reply_can_be_drained_again_without_helper_replay(recovery_setup, monkeypatch, after) -> None:
+    _, _, _, span, _, helpers, recovery, _ = recovery_setup
+    begin_error, abort_error = KeyboardInterrupt(), KeyboardInterrupt()
+    original_begin = RecoveryDispatch.begin_attempt
+    original_abort = RecoveryDispatch._abort_unreturned_attempt
+
+    def begin(dispatch):
+        original_begin(dispatch)
+        raise begin_error
+
+    def abort(dispatch):
+        if after:
+            original_abort(dispatch)
+        raise abort_error
+
+    monkeypatch.setattr(RecoveryDispatch, "begin_attempt", begin)
+    with pytest.raises(KeyboardInterrupt) as caught, span.action(Deadline.after(2)) as context:
+        recovery.observe_clock(context, Deadline.after(1))
+    assert caught.value is begin_error and helpers.calls == 0
+    monkeypatch.setattr(RecoveryDispatch, "_abort_unreturned_attempt", abort)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        recovery.drain(Deadline.after(1))
+    assert caught.value is abort_error and recovery.dispatch is not None and recovery._beginning
+    monkeypatch.setattr(RecoveryDispatch, "_abort_unreturned_attempt", original_abort)
+    facts = recovery.drain(Deadline.after(1))
+    assert not facts.dispatch_retained and facts.local_settled and facts.helper_termination_known
+    with span.action(Deadline.after(1)):
+        pass
+    assert recovery.dispatch is None and recovery.attempt is None and helpers.calls == 0
