@@ -213,6 +213,15 @@ local results do not resolve the preceding hosted Python 3.14 failure or establi
 credentials. Operation-owned binding, recovery, remaining body families and complete RunContext
 composition remain open.
 
+The next bounded units extend the numeric context to the remaining file exchange families and add
+an explicit version-two durable file-call codec. Version-one bytes and semantics remain unchanged;
+new bootstrap-bound records retain root entry and the full guest separately from body identity.
+Context-free records remain private candidates or historical evidence, not a production VM fallback.
+The codec unit owns only serialization and validation. Operation-owned binding, correct envelope
+versions on every update, child/continuation custody, fresh recovery preparation, native acceptance
+and public RunContext wiring remain subsequent integration work. No database migration or data
+removal is implied by this record extension.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state

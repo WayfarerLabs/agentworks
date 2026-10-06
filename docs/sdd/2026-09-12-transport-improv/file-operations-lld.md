@@ -890,6 +890,22 @@ its logical resource matches the enclosing operation scope. Recovery may compose
 route to that exact target; it never persists a connection object, route, credential or provider
 secret.
 
+Bootstrap-bound Linux VM calls use a distinct version-two record. In addition to the independent
+body identity, it retains the prepared numeric root-entry plan and full verified guest checkpoint.
+The guest must match the managed target's derived boot identity and every gate or setup descriptor.
+These immutable facts survive child creation, binding replacement, retained outcomes and recovery;
+they do not authorize root execution or replace a fresh selected-route check. The database envelope
+version must match the encoded record's version on installation and every revision-checked update.
+Version-one records keep their exact bytes and original meaning, with no inferred bootstrap or
+automatic upgrade. A missing bootstrap is not an alternate production Linux VM delivery path.
+
+Recovery must freshly prepare and compare the selected target, complete guest, root entry and body
+identity before using a bootstrap-bound record. A changed or unavailable fact refuses dispatch while
+retaining uncertainty and custody; it does not rewrite the old record to match the new environment.
+Admission still reserves every reachable retained payload within the existing 8,192-byte envelope.
+This versioned codec and its composition are under implementation; the current private adapters do
+not yet supply that fresh preparation or production recovery path.
+
 JSON owns one parent `file-call` row. Before any nested upload can dispatch, it publishes that
 child's fresh token and attempt number into the same row. A retry may replace those fields only
 after the prior child has a typed terminal result with no retained responsibility. It does not add a
