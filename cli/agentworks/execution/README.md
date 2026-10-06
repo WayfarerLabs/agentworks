@@ -771,13 +771,13 @@ stop. Expiry enters the existing stop and cleanup path, not a second supervisor.
 the fixed control and private stages; it does not prove that a publisher has drained.
 
 This guest implementation has packed Python 3.11/3.12 tests with real children and a synthetic
-process-group boundary, not native systemd/cgroup or SSH/QGA acceptance. Host OPERATION admission
+process-group boundary, not native systemd/cgroup or SSH/QGA acceptance. Public OPERATION admission
 remains refused. The keeper, recovery ceiling consumer, aggregate ownership and public job surface
 must be composed and proved before enabling that lifetime.
 
 `_managed_operation_keeper.py` privately binds one planned OPERATION run to the actual owning
 operation, exact VM and full prepared guest identity. Its passive constructor retains dedicated
-delivery custody; main-thread admission registers a run-ID-only lifecycle row before clock work.
+delivery custody; caller-path admission registers a run-ID-only lifecycle row before clock work.
 Every LIVE clock or publication repeats the existing lifecycle admission fence and checks the
 refreshed exact row without changing its payload. A renewal cycle shares one five-second delivery
 budget, uses the sampled guest expiry and starts at nominal ten-second intervals without catch-up
@@ -788,9 +788,23 @@ The owning composition publishes ordinary close intent before draining the keepe
 guarded owner bookkeeping. Drain requires independent worker-completion evidence before closing
 delivery custody, not thread-liveness metadata alone. After drain, only bound exact-run stop and
 observation remain available through this support effect. These methods preserve raw local and
-remote uncertainty and resolve neither the keeper row nor original start debt. Main-thread start,
-recovery-ceiling consumption, aggregate settlement and native acceptance remain unimplemented or
-unproved; this kernel is not a public lifetime or permission grant.
+remote uncertainty and resolve neither the keeper row nor original start debt. Recovery-ceiling
+consumption, aggregate settlement and native acceptance remain unimplemented or unproved; this
+kernel is not a public lifetime or permission grant.
+
+`_managed_operation_run.py` composes the private start on its originating caller thread, which need
+not be the process's main thread. Core retains its passive instance and planned run ID before
+reservation. A frozen body snapshots finite input, resolved shell, environment and output policy,
+reserving bounded control space for the future lease without granting dispatch authority. The
+complete encoder still requires the real sampled lease for an OPERATION request.
+
+One start attempt reserves the run before keeper admission and clock observation, prepares delivery
+with the accepted sample, then enters the existing owned-start boundary. An uncertain reservation
+inspects only the planned run ID and preserves the original exception; it never retries reservation
+or start. Post-reservation refusal may leave a RESERVED tombstone. No accepted clock means no start;
+the keeper retains the raw observation. Only a clean exact ACK permits renewal. Returned start facts
+are not whole-operation settlement, and this composition does not resolve lifecycle debt, release
+availability or expose public JobAccess.
 
 `_managed_observation_exchange.py` supplies private fixed `observe` and closed `read-output`
 attempts over the same carrier interface. Its Python 3.11 target helper reads fixed guest identity

@@ -2810,7 +2810,7 @@ bespoke temporary-directory checks with portable fixtures. Independent completio
 required after an interrupted native join. Removing it fails both the simulated and real POSIX
 SIGINT regressions. The lead's integrated selection passes 382 cases; Ruff, formatting, CI's strict
 type-check selection of 1,264 sources and file lint all return zero. The kernel retains the fixed
-LIVE/CLOSING boundary and never resolves original start or keeper debt. Main-thread start
+LIVE/CLOSING boundary and never resolves original start or keeper debt. Caller-thread start
 composition is being implemented; recovery, aggregate settlement and native proof remain open.
 
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
