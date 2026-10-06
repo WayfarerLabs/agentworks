@@ -5,18 +5,23 @@ the coordinator's complete verification, byte count and digest. Failed publicati
 never removes the destination. A cleanup error may follow successful publication;
 published records that fact and abort can retry removing the remaining stage.
 
-Replace preserves local mode, owner, group and every readable xattr (including Linux
-POSIX ACLs), or refuses before publication. Agentworks must serialize its operations.
+Replace requires ordinary write access and preserves local mode, owner, group and
+non-security xattrs (including Linux POSIX ACLs), or refuses before publication.
+Set-ID files, security xattrs and unsupported inode flags explicitly refuse. New
+content retains staging write timestamps. Agentworks must serialize its operations.
 The last destination recheck and rename are separate syscalls: concurrent external
 writers can still race replacement. This is not an inode compare-and-swap protocol.
 """
 
 from __future__ import annotations
 
+import array
 import hashlib
 import os
+import platform
 import secrets
 import stat
+import struct
 import sys
 from contextlib import suppress
 from dataclasses import dataclass
@@ -28,6 +33,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _CREATE = Create()
+# Linux include/uapi/linux/fs.h: FS_EXTENT_FL is a filesystem layout indicator.
+_EXTENT_FLAG = 0x00080000
 
 
 class LocalDownloadUnsupportedError(OSError):
@@ -40,26 +47,47 @@ class _Metadata:
     mode: int
     uid: int
     gid: int
-    atime_ns: int
-    mtime_ns: int
+    flags: int
     xattrs: dict[str, bytes]
+
+
+def _inode_flags(fd: int) -> int:
+    """Inspect Linux flags only on hosts with the proved generic ioctl encoding."""
+    if platform.machine().lower() not in ("x86_64", "aarch64") or sys.byteorder != "little":
+        raise LocalDownloadUnsupportedError("Local inode flag inspection requires Linux x86_64 or aarch64")
+    import fcntl
+
+    flags = array.array("L", [0])
+    # FS_IOC_GETFLAGS = _IOR('f', 1, long), Linux generic ioctl ABI.
+    request = 0x80000000 | (struct.calcsize("l") << 16) | (ord("f") << 8) | 1
+    try:
+        fcntl.ioctl(fd, request, flags, True)
+    except OSError as exc:
+        raise LocalDownloadUnsupportedError("Cannot inspect local inode flags") from exc
+    if flags[0] & ~_EXTENT_FLAG:
+        raise LocalDownloadUnsupportedError("Local destination has unsupported inode flags")
+    return flags[0]
 
 
 def _metadata(fd: int) -> _Metadata:
     observed = os.fstat(fd)
     if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1:
         raise LocalDownloadUnsupportedError("Local destination must be an ordinary single-link regular file")
+    if observed.st_mode & (stat.S_ISUID | stat.S_ISGID):
+        raise LocalDownloadUnsupportedError("Local destination has privilege-bearing mode bits")
+    flags = _inode_flags(fd)
     try:
         xattrs = {name: os.getxattr(fd, name) for name in os.listxattr(fd)}
     except OSError as exc:
         raise LocalDownloadUnsupportedError("Cannot inspect all local extended attributes") from exc
+    if any(name.startswith("security.") for name in xattrs):
+        raise LocalDownloadUnsupportedError("Local destination has security extended attributes")
     return _Metadata(
         (observed.st_dev, observed.st_ino, observed.st_ctime_ns, observed.st_mtime_ns, observed.st_size),
         stat.S_IMODE(observed.st_mode),
         observed.st_uid,
         observed.st_gid,
-        observed.st_atime_ns,
-        observed.st_mtime_ns,
+        flags,
         xattrs,
     )
 
@@ -84,6 +112,7 @@ class LocalDownloadPublication:
         self._parent_fd: int | None = None
         self._stage_fd: int | None = None
         self._stage_name: str | None = None
+        self._stage_identity: tuple[int, int] | None = None
         self._original: _Metadata | None = None
         self._digest = hashlib.sha256()
         self._size = 0
@@ -112,6 +141,8 @@ class LocalDownloadPublication:
                     continue
                 self._stage_fd = fd
                 self._stage_name = name
+                staged = os.fstat(fd)
+                self._stage_identity = (staged.st_dev, staged.st_ino)
                 break
             else:
                 raise FileExistsError("Cannot allocate a unique local download stage")
@@ -120,9 +151,15 @@ class LocalDownloadPublication:
             raise
 
     def _destination_metadata(self) -> _Metadata:
-        fd = os.open(self._name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=self._parent_fd)
+        observed = os.stat(self._name, dir_fd=self._parent_fd, follow_symlinks=False)
+        if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1:
+            raise LocalDownloadUnsupportedError("Local destination must be an ordinary single-link regular file")
+        fd = os.open(self._name, os.O_WRONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=self._parent_fd)
         try:
-            return _metadata(fd)
+            metadata = _metadata(fd)
+            if metadata.identity[:2] != (observed.st_dev, observed.st_ino):
+                raise FileExistsError("Local destination changed while establishing write access")
+            return metadata
         finally:
             os.close(fd)
 
@@ -149,12 +186,12 @@ class LocalDownloadPublication:
                     os.removexattr(fd, name)
             for name, value in original.xattrs.items():
                 os.setxattr(fd, name, value)
-            os.utime(fd, ns=(original.atime_ns, original.mtime_ns))
             preserved = _metadata(fd)
-            if (preserved.mode, preserved.uid, preserved.gid, preserved.xattrs) != (
+            if (preserved.mode, preserved.uid, preserved.gid, preserved.flags, preserved.xattrs) != (
                 original.mode,
                 original.uid,
                 original.gid,
+                original.flags,
                 original.xattrs,
             ):
                 raise LocalDownloadUnsupportedError("Local metadata did not survive staging")
@@ -209,8 +246,12 @@ class LocalDownloadPublication:
             os.close(fd)
         if self._stage_name is not None and self._parent_fd is not None:
             with suppress(FileNotFoundError):
+                staged = os.stat(self._stage_name, dir_fd=self._parent_fd, follow_symlinks=False)
+                if (staged.st_dev, staged.st_ino) != self._stage_identity:
+                    raise LocalDownloadUnsupportedError("Local download cleanup name changed identity")
                 os.unlink(self._stage_name, dir_fd=self._parent_fd)
             self._stage_name = None
+            self._stage_identity = None
         if self._parent_fd is not None:
             fd, self._parent_fd = self._parent_fd, None
             os.close(fd)
