@@ -40,8 +40,8 @@ engine.
 
 Directory transfer and confined extraction remain required by R7 but are deliberately outside this
 first slice. Their absence blocks complete R7 acceptance, not delivery of the file-only vertical
-slice in plan step 4. Windows-local atomic download publication also needs a later host-specific
-design; this document covers Debian guest filesystems and SSH-accessed macOS platform hosts.
+slice in plan step 4. The macOS/Windows local-download publication mechanisms still need native
+design and proof; this document also covers their approved non-atomic replacement semantics.
 
 ## Small typed contract
 
@@ -137,9 +137,24 @@ and specify how existing local ACLs, modes and other metadata survive replacemen
 explicit unsupported refusal. It must not silently strip them. A pathname-based private stage must
 also refuse a destination whose directory ancestry another local user can rename through between
 validation and publication; trusted-owner sticky directories may be supported, while symlink
-ancestors refuse. `download.max_bytes` is an optional caller safety bound, not a core file-size cap.
-JSON byte/depth limits bound the source, existing snapshot, and result; defaults are
-caller-overridable, not authorization or a universal file ceiling.
+ancestors refuse.
+
+For macOS and Windows, explicit local `Replace` first holds and verifies a single existing regular
+file under the workstation caller's ordinary authority. It refuses links, reparse points, hard
+links, directories, special objects, unsupported flags or access metadata before mutation. Only
+after complete stream verification and settled remote cleanup may it copy the private verified stage
+into that held file and set the exact final length. It must prove supported ownership, ACL, mode and
+other access metadata remain as an ordinary direct write would leave them, or refuse the case before
+writing. A write, truncate, flush, deadline or close failure after the first local mutation may
+leave partial new bytes. The result preserves the verified remote facts, reports a possible local
+change and any local cleanup uncertainty, and never calls the destination unchanged or implies
+rollback. Linux may continue using same-directory rename with stronger publication behavior. Create
+remains no-replace on every host. Native proofs determine the exact supported filesystems and
+metadata cases before public FileAccess exposure.
+
+`download.max_bytes` is an optional caller safety bound, not a core file-size cap. JSON byte/depth
+limits bound the source, existing snapshot, and result; defaults are caller-overridable, not
+authorization or a universal file ceiling.
 
 Paths are absolute, normalized POSIX paths without NUL, empty, `.` or `..` components. A write does
 not create parents. `ensure_directory` creates exactly one missing final component with restrictive
@@ -180,9 +195,9 @@ Results are complete within that requested depth; exceeding an entry, name or en
 is an error, never truncation. Unsupported depths refuse before traversal. Sorting is bytewise by
 relative UTF-8 path so SSH and QGA return the same order.
 
-`upload` streams into `write_file`; `download` streams one snapshot to a private local sibling and
-replaces only after verification. Local links/special objects are refused. Windows-local publication
-needs a later host-specific design.
+`upload` streams into `write_file`; `download` streams one snapshot to a private local stage and
+admits local publication only after verification and remote cleanup. Local links and special objects
+are refused. The supported-host local publication implementation remains a native proof gate.
 
 ## JSON semantics
 
@@ -1294,19 +1309,20 @@ authority from those values until the removal PR wires them with no legacy bypas
 helper confirmed the mutation; `UNCHANGED` means it proved no mutation was needed. Neither result
 contains old bytes, a diff, a hash, attributes, helper paths, or carrier diagnostics.
 
-| Condition                                                                                                                                                                               | Public signal                                           | Destination effect and replay rule                                                                       |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Invalid path, bound, JSON value, strategy combination, owner/group/mode, or protocol value                                                                                              | `ValidationError`                                       | No target I/O when locally knowable; never replay by changing meaning.                                   |
-| Post-removal catalog or recipient denial                                                                                                                                                | `AuthorizationError`                                    | Before helper deployment/staging when knowable; no effect. Not active during coexistence.                |
-| Missing read/stat target                                                                                                                                                                | `None`                                                  | No mutation.                                                                                             |
-| Missing list target, wrong kind, link, hard link, special object, mount change, nonempty directory, or unsupported metadata                                                             | `StateError` with a closed reason code                  | No mutation when refusal precedes a mutating call; otherwise the partial-effect row applies.             |
-| Read or inventory bound exceeded                                                                                                                                                        | `LimitExceededError`                                    | No partial public result; streaming calls retain only bounded chunks.                                    |
-| Revision mismatch or exhausted JSON retry budget                                                                                                                                        | `ConflictError`                                         | No cooperating-writer overwrite/removal; take a new snapshot before retry.                               |
-| Operation admission deadline before dispatch                                                                                                                                            | Proposed shared deadline-category `ExternalError`       | No mutation; retry only as a new caller decision. It is not guest cancellation.                          |
-| Helper prerequisite, integrity, or complete pre-publication helper failure                                                                                                              | `ExternalError` or `ConnectivityError` by kind          | Regular-file destination unchanged; owned scratch cleanup may remain.                                    |
-| Reported `set_metadata`/`ensure_directory` failure after an in-place step                                                                                                               | `PartialMutationError` with closed completed-step facts | Target may be partially converged; re-observe and converge, never assume rollback.                       |
-| Carrier loss/timeout after a mutating helper was dispatched, invalid/truncated response, rename acknowledged only inside an unavailable response, or post-rename sync/cleanup ambiguity | `UncertainOutcomeError` with safe phase/dispatch facts  | Destination may have changed. Do not replay merge, replace, metadata, or removal blindly; observe first. |
-| Complete helper refusal before any target mutation                                                                                                                                      | Typed error above                                       | Destination unchanged; helper-owned staging cleanup is bounded separately.                               |
+| Condition                                                                                                                                                                               | Public signal                                                                                       | Destination effect and replay rule                                                                                                                         |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Invalid path, bound, JSON value, strategy combination, owner/group/mode, or protocol value                                                                                              | `ValidationError`                                                                                   | No target I/O when locally knowable; never replay by changing meaning.                                                                                     |
+| Post-removal catalog or recipient denial                                                                                                                                                | `AuthorizationError`                                                                                | Before helper deployment/staging when knowable; no effect. Not active during coexistence.                                                                  |
+| Missing read/stat target                                                                                                                                                                | `None`                                                                                              | No mutation.                                                                                                                                               |
+| Missing list target, wrong kind, link, hard link, special object, mount change, nonempty directory, or unsupported metadata                                                             | `StateError` with a closed reason code                                                              | No mutation when refusal precedes a mutating call; otherwise the partial-effect row applies.                                                               |
+| Read or inventory bound exceeded                                                                                                                                                        | `LimitExceededError`                                                                                | No partial public result; streaming calls retain only bounded chunks.                                                                                      |
+| Revision mismatch or exhausted JSON retry budget                                                                                                                                        | `ConflictError`                                                                                     | No cooperating-writer overwrite/removal; take a new snapshot before retry.                                                                                 |
+| Operation admission deadline before dispatch                                                                                                                                            | Proposed shared deadline-category `ExternalError`                                                   | No mutation; retry only as a new caller decision. It is not guest cancellation.                                                                            |
+| Helper prerequisite, integrity, or complete pre-publication helper failure                                                                                                              | `ExternalError` or `ConnectivityError` by kind                                                      | Regular-file destination unchanged; owned scratch cleanup may remain.                                                                                      |
+| Local macOS/Windows `Replace` write, truncate, flush, deadline or close failure after verified transfer and the first destination mutation                                              | `PartialMutationError` for proved partial effect; `UncertainOutcomeError` where effect is uncertain | Existing local destination may contain partial new bytes. Preserve verified remote facts, re-observe before repair, and never claim rollback or unchanged. |
+| Reported `set_metadata`/`ensure_directory` failure after an in-place step                                                                                                               | `PartialMutationError` with closed completed-step facts                                             | Target may be partially converged; re-observe and converge, never assume rollback.                                                                         |
+| Carrier loss/timeout after a mutating helper was dispatched, invalid/truncated response, rename acknowledged only inside an unavailable response, or post-rename sync/cleanup ambiguity | `UncertainOutcomeError` with safe phase/dispatch facts                                              | Destination may have changed. Do not replay merge, replace, metadata, or removal blindly; observe first.                                                   |
+| Complete helper refusal before any target mutation                                                                                                                                      | Typed error above                                                                                   | Destination unchanged; helper-owned staging cleanup is bounded separately.                                                                                 |
 
 `LimitExceededError`, `ConflictError`, `PartialMutationError`, and `UncertainOutcomeError` are new
 kind-based `AgentworksError` subclasses shared by execution operations rather than file-entity
@@ -1400,7 +1416,10 @@ The following are not established by source inspection and must remain open in t
 - prove unique-sibling atomic rename and the required creation/update owner, mode, and ACL semantics
   on every supported filesystem, refusing unsupported metadata before publication;
 - prove local create and explicit replace publication, including metadata/ACL handling, failure
-  cleanup and the supported macOS/Windows filesystem behavior;
+  cleanup and the supported macOS/Windows filesystem behavior; on macOS/Windows, test verified-stage
+  in-place replacement under ordinary authority with shorter, longer and empty content, preserved
+  supported ACL/owner/metadata, refusal of unsupported objects before mutation, and partial-effect
+  reporting for injected write/truncate/flush/close/deadline failures;
 - decide the supported macOS minimum for the local publication path;
 - complete directory transfer/confined extraction before claiming full R7;
 - inventory the exact future core catalog and recipient subsets before removal; and

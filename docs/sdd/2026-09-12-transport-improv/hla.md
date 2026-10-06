@@ -294,9 +294,12 @@ the LLD must provide a way to prevent implicit preparation writes in a readiness
 execution-helper constraint, not a claim that arbitrary shell code can be proven read-only.
 
 File writes stage beside the destination and publish by rename after setting permissions and
-ownership. File downloads publish locally only after complete receipt. Directory helpers retain
-explicit merge/replace semantics with confined extraction and cleanup; they do not inherit an
-unqualified recursive-delete default. Atomicity and crash durability are distinct promises.
+ownership. File downloads publish locally only after complete receipt and remote cleanup. Explicit
+macOS/Windows local replacement can then update the held existing file in place to preserve its
+metadata, with partial local effects reported on later failure; Linux can retain stronger rename
+publication. Directory helpers retain explicit merge/replace semantics with confined extraction and
+cleanup; they do not inherit an unqualified recursive-delete default. Atomicity and crash durability
+are distinct promises.
 
 ### File-only provisioning and the core ceiling
 

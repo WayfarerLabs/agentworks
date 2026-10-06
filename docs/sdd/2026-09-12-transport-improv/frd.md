@@ -234,8 +234,12 @@ active lifetime. Explicit stop, reboot and host loss remain outside that promise
 to prove the hold refuses that lifetime; it does not weaken the meaning of `INDEPENDENT`.
 
 For local download destinations, the operator chose explicit replacement in the first version, in
-addition to create-only publication. Local replacement and metadata semantics remain a design and
-proof gate; this choice does not authorize deleting existing local data implicitly.
+addition to create-only publication. For macOS and Windows, a fully verified download may be written
+into the existing local file under the caller's ordinary authority. A local failure after that write
+begins can leave partial new content and must report that effect honestly; a failed remote transfer
+or cleanup never authorizes the first local mutation. Linux may retain stronger rename publication.
+Native metadata and failure proof remain gates; this choice does not authorize implicit replacement
+or deletion of existing local data.
 
 For the unreleased transport migrations 39–41, the operator directed removal of the special
 branch-built-schema guard. Known development databases are retained until separate approval for any
@@ -420,7 +424,9 @@ that liveness check, create sockets or provide FIFO creation.
 
 A download to a local path supports an explicit create-only or replace-existing choice. Replacement
 must not silently discard local metadata or turn a failed transfer into a successful publication;
-the exact local publication and metadata rules are settled before implementation.
+the local result reports partial or uncertain change if a verified transfer is later followed by an
+incomplete in-place replacement. No cross-platform atomic-replace guarantee is made. Supported
+metadata preservation and refusal rules require native proof before public exposure.
 
 Callers select ordinary or elevated placement without hand-writing copy, chmod, or sudo wrappers.
 Elevation covers staging, publication and metadata under the bound file grant, not general admin
