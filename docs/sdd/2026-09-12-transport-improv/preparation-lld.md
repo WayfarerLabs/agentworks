@@ -800,9 +800,9 @@ for the joint terminal implementation and native acceptance gates.
 
 Hardened guests require a narrow system-fact boundary without running ordinary file effects as root.
 The private numeric bootstrap uses explicit root entry only to open the fixed read-only init-stat
-descriptor, then irreversibly sets and verifies the actual target's numeric credentials and
-capabilities before consuming stdin or loading operation code. It permits only system Python on
-Linux; platform hosts do not select this path.
+descriptor, then sets and verifies the actual target's numeric credentials and capabilities before
+consuming stdin or loading operation code. It permits only system Python on Linux; platform hosts do
+not select this path.
 
 `RootGuestProgram` selects inline fixed source or one fixed stdin prefix. After establishing the
 selected fixed delivery, its loader installs only the canonical guest-identity pair. The bootstrap
@@ -821,8 +821,17 @@ executable or automatic fallback. Carrier preflight still counts actual aggregat
 quoting and provider serialization. A valid protocol request can exceed a carrier's envelope and
 must refuse before provider dispatch; its decoder ceiling is not a delivery guarantee.
 
-This is a private packaging increment, not production adoption. The early WSL hold/query/probe needs
-an explicit named-account drop path before numeric preparation; ordinary helper and later service
+Early fixed guest operations use a separate named-account admission leaf because they precede
+numeric preparation and full guest observation. It resolves the core-bound account through the
+system account database, shares the fixed descriptor and exact credential transition, and loads its
+fixed first-party body only after admission. The body receives a fresh bounded init reader and owns
+stdin. Failure never substitutes root for the intended non-root account. A non-root target loses the
+bootstrap's root credentials; an explicit target resolving to UID 0 retains its intended authority
+without a demotion or confinement claim. This does not make the numeric path's mandatory full guest
+optional or expose arbitrary plugin source through a privileged entry.
+
+These are private implementation increments, not production adoption. Early WSL hold/query/probe
+wiring and durable launch/body account composition remain open; ordinary helper and later service
 entry still need production guest fencing and durable cleanup composition. Native post-drop init
 reads, credential transitions and complete workflows remain acceptance gates.
 

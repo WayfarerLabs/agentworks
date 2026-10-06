@@ -708,8 +708,20 @@ modules and entering their body once. There is no duplicate observer bundle, gue
 process-global fork hook. The outer cleanup closes the descriptor; application exec cannot inherit
 it. Runtime readiness remains separate from guest/body admission, and failures after the guest
 checkpoint remain body failures. Existing ordinary helpers do not select this builder automatically.
-Native hardened-guest behavior, initial named-account platform helpers, complete body fencing,
-recovery and production consumer wiring remain unproved.
+Native hardened-guest behavior, complete body fencing, recovery and production consumer wiring
+remain unproved.
+
+The separate private `build_named_guest_bootstrap_argv` handles early fixed guest operations before
+numeric account preparation. It resolves a core-bound account name through the system account
+database, normalizes its groups and uses the same fixed descriptor and verified credential
+transition. Only after admission does its fixed first-party body receive a fresh bounded init reader
+and enter `main(nonce)` once. Request stdin belongs to that body. Lookup or transition failure never
+retains root as a fallback. An explicitly configured account resolving to UID 0 retains that actual
+authority; this is not a claim of demotion or confinement. Named and numeric construction share the
+system-Python, compressed-launch and capability-clearing wrapper, but the numeric path still
+requires the full expected guest. This leaf is not a plugin execution surface or a permission grant.
+Early hold/query/probe wiring, durable launch/body account identity and successful native
+transitions remain separate gates.
 
 `_account.resolve_account` discovers a core-bound account's UID, primary GID and normalized groups
 through one read-only carrier attempt under the delivery identity. `RuntimeSelection` explicitly

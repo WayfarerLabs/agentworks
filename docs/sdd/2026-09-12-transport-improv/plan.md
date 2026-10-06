@@ -146,6 +146,18 @@ platform mock now restores within a bounded context and uses the directly import
 mypy passes all 1,198 source and test files. This record does not close native terminal,
 cleanup-entry interruption, production RunContext or public feedback/fix round 1.
 
+The named-account early admission leaf at `792ae935d` clears all three independent private review
+lanes after sharing the root-launch wrapper. Numeric full-guest checking remains mandatory; the
+separate named body receives its fixed reader only after verified credentials. The worker's focused
+selection passes 167 tests; the project and complexity lanes independently pass 138 and 161 tests.
+Successful transitions remain mocked, while generated-source non-root refusal runs on Python 3.11.
+The unchanged numeric snapshot sizing fixture measures 64,568/64,610 bytes against QGA's 65,536-byte
+limit. No source pruning, guest module split, protocol ceiling reduction or data deletion was used.
+The integrated preceding head `3fdb286fe` passes 14,307 non-integration tests with 50 skips and
+complete local gates; the new leaf's integrated full run remains pending. Initial hold/query/probe,
+durable launch/body account recovery, native transitions and complete production fencing remain
+open. This leaf completes no public operation, permission boundary or feedback/fix round.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
