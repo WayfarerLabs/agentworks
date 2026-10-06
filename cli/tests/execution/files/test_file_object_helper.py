@@ -37,9 +37,9 @@ from agentworks.execution.carrier import (
     ExitStatus,
     PreparedInvocation,
 )
-from agentworks.execution.carriers._subprocess import run_process
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 from tests.execution._bound_carrier_support import bind_carrier as bind_carrier
+from tests.execution._bound_carrier_support import run_fixture_process
 from tests.execution.files._runtime_support import runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the file-object helper requires Linux")
@@ -71,11 +71,12 @@ class LocalCarrier:
         self.calls += 1
         self.invocation = invocation
         self.io = io
-        result = run_process(
+        result = run_fixture_process(
             list(invocation.argv),
             io=io,
             deadline=deadline,
-            custody=custody if custody is not None else self.local_delivery,
+            custody=custody,
+            standalone_custody=self.local_delivery,
         )
         completion = None
         if result.exit_status is not None:

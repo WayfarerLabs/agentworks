@@ -254,6 +254,7 @@ def test_local_refusal_closes_predispatch_borrow_without_retained_state(
         owner.close()
         assert database.operations.inspect(owner.ownership.scope) is None
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -291,6 +292,7 @@ def test_download_installs_one_tokenized_file_call_before_dispatch_and_resolves_
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -326,6 +328,7 @@ def test_shared_operation_rejects_overlapping_view_call(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -407,6 +410,7 @@ def test_completed_call_forgets_only_its_record_when_next_call_attaches(
         release.set()
         if second_thread is not None:
             second_thread.join(timeout=10)
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -447,6 +451,7 @@ def test_successive_inert_cleanup_debts_remain_distinct(
         assert retained[0] is not retained[1]
         assert operation.active_downloads == ()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -480,6 +485,7 @@ def test_download_final_cleanup_hands_off_after_owner_close_was_requested(
         with pytest.raises(StateError):
             owner.borrow()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -527,6 +533,7 @@ def test_exceptional_outcome_is_retained_before_borrow_handoff(
         with pytest.raises(StateError):
             owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -572,6 +579,7 @@ def test_failed_unfinished_capture_keeps_attached_working_state_and_borrow(
         with pytest.raises(StateError):
             owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -615,6 +623,7 @@ def test_failed_exceptional_capture_preserves_control_identity_and_fact(
         with pytest.raises(StateError):
             owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -660,6 +669,7 @@ def test_outcome_allocation_failure_keeps_previously_attached_state_and_borrow(
         with pytest.raises(StateError):
             owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -732,4 +742,5 @@ def test_exceptional_fact_failure_preserves_control_without_reusing_prior_cause(
         with pytest.raises(StateError):
             owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()

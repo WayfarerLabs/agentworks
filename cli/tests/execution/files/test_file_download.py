@@ -98,6 +98,7 @@ def test_real_helper_downloads_verified_content_and_cleans_snapshot(
         operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -185,6 +186,7 @@ def test_live_stdio_download_uses_one_bounded_stream_between_begin_and_cleanup(
         assert carrier.calls == 3 and carrier.live_requests == [False, True, False]
         assert not tuple(scratch.iterdir()) and outcome.cleanup_debt is None
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -208,6 +210,7 @@ def test_live_stream_requires_normal_completion_before_cleanup(
         assert outcome.requires_owner_retention and tuple(scratch.iterdir())
         assert carrier.calls == 2 and carrier.live_requests == [False, True]
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -230,6 +233,7 @@ def test_live_stream_lost_cleanup_confirmation_retains_exact_debt(
         assert carrier.calls == 3 and carrier.live_requests == [False, True, False]
         assert not tuple(scratch.iterdir())
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -254,6 +258,7 @@ def test_proven_absence_writes_nothing(
         operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -361,6 +366,7 @@ def test_bad_sink_is_sanitized_and_snapshot_is_cleaned(
         operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -394,6 +400,7 @@ def test_sink_control_flow_propagates_with_bounded_clean_state(
             operation_owner.record_effects_resolved()
             operation_owner.close()
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -430,6 +437,7 @@ def test_real_carrier_timeout_records_deadline_with_unresolved_begin(
         assert not tuple(scratch.iterdir())
     finally:
         assert operation_owner.close_local_delivery(Deadline.after(3))
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -465,6 +473,7 @@ def test_expired_deadline_before_dispatch_has_no_exchange_facts(
         borrow.close()
         operation_owner.close()
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -491,6 +500,7 @@ def test_deadline_during_sink_stall_retains_exact_cleanup_debt(
         assert outcome.accepted_bytes == 0 and outcome.requires_owner_retention
         assert tuple(scratch.iterdir())
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -526,6 +536,7 @@ def test_runtime_refusal_stops_without_reconciliation(
         operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -552,6 +563,7 @@ def test_source_exceeding_bound_is_refused_without_sink_bytes(
         operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -580,6 +592,7 @@ def test_lost_creation_observation_reconciles_and_cleans_without_replay(
         operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -612,6 +625,7 @@ def test_begin_failure_facts_survive_distinct_reconcile_and_cleanup_failures(
         assert outcome.carrier_failure is Failure.DISPATCH
         assert outcome.cleanup_debt is not None and not tuple(scratch.iterdir())
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -639,6 +653,7 @@ def test_lost_chunk_observation_hands_no_bytes_then_cleans_known_snapshot(
         operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -682,6 +697,7 @@ guest.cleanup_scratch=failed_cleanup
         assert outcome.snapshot_failure is None
         assert outcome.cleanup_debt is not None and tuple(scratch.iterdir())
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -706,6 +722,7 @@ def test_lost_cleanup_observation_retains_exact_debt(
         assert outcome.cleanup_debt is not None and outcome.requires_owner_retention
         assert not tuple(scratch.iterdir())
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -734,6 +751,7 @@ def test_cleanup_failure_retains_its_exchange_facts(
         assert outcome.carrier_failure is Failure.OUTPUT_LIMIT
         assert outcome.cleanup_debt is not None and not tuple(scratch.iterdir())
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -763,6 +781,7 @@ def test_reconciliation_ownership_uncertainty_clears_stale_actionable_debt(
         assert outcome.cleanup_debt is None and outcome.requires_owner_retention
         assert tuple(scratch.iterdir())
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -798,6 +817,7 @@ guest.cleanup_scratch=failed_cleanup
         assert outcome.cleanup_debt is not None and outcome.requires_owner_retention
         assert tuple(scratch.iterdir())
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -878,6 +898,7 @@ def test_cleanup_entry_expiry_records_cleanup_phase(
         assert outcome.cleanup_debt is not None and outcome.requires_owner_retention
         assert tuple(scratch.iterdir())
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -911,6 +932,7 @@ def test_abnormal_chunk_wrapper_exit_hands_no_bytes_and_stops_followons(
         with pytest.raises(StateError):
             operation_owner.close()
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -947,6 +969,7 @@ def test_helper_declared_deadline_stops_before_sink_delivery(
         operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -970,6 +993,7 @@ def test_nonzero_cleanup_exit_preserves_debt_despite_cleaned_transcript(
         assert outcome.cleanup_debt is not None and outcome.requires_owner_retention
         assert not tuple(scratch.iterdir())
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1018,6 +1042,7 @@ def test_interrupted_dispatch_exports_pending_effect_facts_and_preserves_borrow(
         with pytest.raises(StateError):
             operation_owner.close()
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1048,6 +1073,7 @@ def test_interrupted_dispatch_records_expired_deadline_fact(
         assert fact.outcome.pending_remote_effects
         assert fact.outcome.requires_owner_retention
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1086,6 +1112,7 @@ def test_one_borrow_spans_snapshot_delivery_and_cleanup(
         operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1136,6 +1163,7 @@ def test_validation_preserves_caller_borrow_and_precedes_carrier_without_excepti
         borrow.close()
         operation_owner.close()
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1176,6 +1204,7 @@ def test_combined_begin_request_rejection_never_arms_dispatch_and_preserves_borr
         borrow.close()
         operation_owner.close()
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1217,4 +1246,5 @@ def test_whole_digest_mismatch_is_not_complete_and_still_cleans(
         operation_owner.record_effects_resolved()
         operation_owner.close()
     finally:
+        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()

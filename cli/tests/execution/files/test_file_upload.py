@@ -499,6 +499,7 @@ def test_real_helper_create_streams_exact_bytes_once(
         owner.close()
         assert database.operations.inspect(owner.ownership.scope) is None
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -536,6 +537,7 @@ def test_owner_reuses_one_borrow_obligation_and_revalidates_before_every_carrier
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -567,6 +569,7 @@ def test_local_source_failure_does_not_inherit_cleanup_exchange_evidence(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -615,6 +618,7 @@ def test_real_helper_replace_and_match_use_the_same_owner_without_overlapping_bo
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -661,6 +665,7 @@ def test_missing_create_owner_and_group_are_distinct_and_stop_before_staging(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -689,6 +694,7 @@ def test_unfinished_ownership_lookup_does_not_claim_destination_mutation(
         assert not outcome.publication_confirmed and not outcome.publication_uncertain
         assert outcome.pending_remote_effects and outcome.requires_owner_retention
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -715,6 +721,7 @@ def test_lost_creation_reply_reconciles_and_cleans_without_replaying_begin(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -765,6 +772,7 @@ def test_known_runtime_refusal_stops_before_pointless_reconciliation(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -787,6 +795,7 @@ def test_known_runtime_refusal_replaces_prior_unknown_without_erasing_ownership_
         assert outcome.stage_ownership_uncertain
         assert outcome.requires_owner_retention
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -812,6 +821,7 @@ def test_runtime_refusal_after_source_read_preserves_debt_and_distinct_counters(
         assert outcome.scratch_cleanup_debt is not None
         assert outcome.requires_owner_retention
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -838,6 +848,7 @@ def test_lost_publish_reply_never_replays_mutation_and_preserves_unknown_cleanup
         claim = database.operations.inspect(owner.ownership.scope)
         assert claim is not None and claim.state is OperationClaimState.POSSIBLE_DISPATCH
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -865,6 +876,7 @@ def test_nonzero_wrapper_exit_records_effect_but_stops_all_follow_on_calls(
             borrow.close()
             owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -891,6 +903,7 @@ def test_missing_completion_with_valid_transcript_stops_follow_on_calls_and_reta
         with pytest.raises(StateError):
             owner.borrow()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -918,6 +931,7 @@ def test_carrier_exception_after_execute_boundary_stops_follow_on_and_retains_ow
             borrow.close()
             owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -944,6 +958,7 @@ def test_interrupted_dispatch_records_expired_deadline_fact(
         assert fact.outcome.pending_remote_effects
         assert fact.outcome.requires_owner_retention
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -965,6 +980,7 @@ def test_deadline_exhaustion_after_stage_uses_no_fresh_cleanup_budget(
         assert outcome.requires_owner_retention
         assert not root.joinpath("target").exists()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -993,6 +1009,7 @@ def test_cleanup_entry_expiry_records_cleanup_phase_after_confirmed_publication(
         assert raised.value.details.reason is FileFailureReason.DEADLINE
         assert raised.value.details.effect is Change.CHANGED
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1025,6 +1042,7 @@ def test_ownership_refusal_precedes_later_host_deadline(
         assert raised.value.details is not None
         assert raised.value.details.reason is FileFailureReason.MISSING_OWNER
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1047,6 +1065,7 @@ def test_stage_refusal_precedes_later_host_deadline(
         assert raised.value.details is not None
         assert raised.value.details.reason is FileFailureReason.REFUSED
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1071,6 +1090,7 @@ def test_publication_conflict_precedes_later_host_deadline(
         assert raised.value.details is not None
         assert raised.value.details.reason is FileFailureReason.CONFLICT
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1109,6 +1129,7 @@ def test_real_carrier_timeout_records_deadline_without_staging_or_source_consump
         assert outcome.requires_owner_retention
         assert not root.joinpath("target").exists()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
@@ -1153,6 +1174,7 @@ def test_closed_stage_deadline_transcript_stops_without_fresh_cleanup(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1181,6 +1203,7 @@ def test_closed_publication_deadline_code_retains_scratch_without_cleanup(
         assert outcome.scratch_cleanup_debt is not None
         assert outcome.requires_owner_retention
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1207,6 +1230,7 @@ def test_real_helper_publication_deadline_retains_scratch_without_cleanup(
         assert outcome.scratch_cleanup_debt is not None
         assert outcome.requires_owner_retention
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1236,6 +1260,7 @@ def test_publish_failure_cleans_publication_debt_before_ordinary_scratch(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1263,6 +1288,7 @@ def test_failed_publication_cleanup_preserves_both_bound_debts(
         assert outcome.reference is not None and outcome.requires_owner_retention
         assert not root.joinpath("target").exists()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1291,6 +1317,7 @@ def test_progressed_publication_cleanup_binding_loss_clears_stale_debt(
         assert root.joinpath(scratch_name(outcome.token)).is_dir()
         assert outcome.requires_owner_retention
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1319,6 +1346,7 @@ def test_publication_cleanup_receipt_deadline_preserves_exact_debt_and_stops(
         assert outcome.scratch_cleanup_debt is not None
         assert outcome.requires_owner_retention
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1352,6 +1380,7 @@ def test_partial_stage_creation_failure_uses_failure_debt_for_cleanup(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1384,6 +1413,7 @@ def test_failed_cleanup_after_partial_stage_creation_preserves_failure_debt(
         assert root.joinpath(scratch_name(outcome.token)).is_dir()
         assert outcome.requires_owner_retention
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1408,4 +1438,5 @@ def test_cleanup_runtime_refusal_remains_operative_without_replacing_primary_exc
         assert outcome.runtime_prerequisite.state is RuntimePrerequisiteState.MISSING
         assert outcome.scratch_cleanup_debt is not None
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()

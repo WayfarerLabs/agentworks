@@ -46,6 +46,7 @@ from agentworks.execution._scratch_receipt import scratch_name
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, PreparedInvocation
 from agentworks.operations import LifecycleObligation, OperationOwner
+from tests.execution._bound_carrier_support import hold_operation_owner as hold_operation_owner
 from tests.execution.files._file_publication_support import LocalCarrier
 from tests.execution.files._file_upload_support import BytesSource, new_metadata
 from tests.execution.files._fixed_bundle_support import fixture_file_bundle
@@ -133,6 +134,7 @@ def context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     try:
         yield database, owner, operation, root, plan, gate
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -251,7 +253,9 @@ def test_upload_setup_publication_failure_retains_source_and_bound_row(
 
 
 @pytest.mark.parametrize("control", [RuntimeError, KeyboardInterrupt])
-def test_recovered_setup_only_upload_inspects_without_source_replay(context, control: type[BaseException]) -> None:
+def test_recovered_setup_only_upload_inspects_without_source_replay(
+    hold_operation_owner, context, control: type[BaseException]
+) -> None:
     database, owner, operation, root, plan, gate = context
     source = BytesSource(b"x")
 
@@ -282,7 +286,7 @@ def test_recovered_setup_only_upload_inspects_without_source_replay(context, con
             gate_setup=FileEffectGateSetup(gate.path, _GUEST),
         )
     assert source.calls == 0
-    recovered = OperationOwner.recover(database.operations, owner.ownership, "c" * 32)
+    recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "c" * 32))
     (row,) = database.operations.list_lifecycle_obligations(recovered.ownership)
     assert decode_file_call_obligation(row.payload).gate_setup is not None
     result = FileGateSetupRecovery.open(
@@ -426,7 +430,7 @@ def test_package_setup_binds_index_zero_before_any_child_side_effect(context) ->
     assert (root / "second").read_bytes() == b"b"
 
 
-def test_package_setup_lost_reply_recovers_only_setup(context) -> None:
+def test_package_setup_lost_reply_recovers_only_setup(hold_operation_owner, context) -> None:
     database, owner, operation, root, plan, gate = context
     source = BytesSource(b"a")
 
@@ -454,7 +458,7 @@ def test_package_setup_lost_reply_recovers_only_setup(context) -> None:
             gate_setup=FileEffectGateSetup(gate.path, _GUEST),
         )
     assert source.calls == 0
-    recovered = OperationOwner.recover(database.operations, owner.ownership, "c" * 32)
+    recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "c" * 32))
     (row,) = database.operations.list_lifecycle_obligations(recovered.ownership)
     call = decode_file_call_obligation(row.payload)
     assert call.family is FileCallFamily.PACKAGE_UPLOAD and call.batch_index == 0

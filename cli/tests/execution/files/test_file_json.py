@@ -266,6 +266,7 @@ def test_invalid_source_refuses_before_target_io(
         borrow.close()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -299,6 +300,7 @@ def test_replace_uses_stat_without_parsing_existing_bytes(tmp_path: Path, plan: 
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -338,6 +340,7 @@ def test_publication_metadata_is_canonical_before_target_observation(
         borrow.close()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -375,6 +378,7 @@ def test_skip_existing_leaves_any_regular_file_unchanged(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -400,6 +404,7 @@ def test_absent_destination_respects_create(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -437,6 +442,7 @@ def test_each_strategy_creates_an_absent_destination(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -477,6 +483,7 @@ def test_absent_creation_retains_nested_ownership_failure(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -548,6 +555,7 @@ def test_merge_uses_bounded_snapshot_and_atomic_leaf_semantics(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -577,6 +585,7 @@ def test_merge_rejects_invalid_existing_without_publication(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -613,6 +622,7 @@ def test_valid_existing_json_beyond_depth_bound_does_not_publish(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -652,6 +662,7 @@ def test_valid_existing_json_beyond_integer_parser_capacity_does_not_publish(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -688,6 +699,7 @@ def test_merge_enforces_snapshot_byte_bound_without_partial_publication(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -721,6 +733,7 @@ def test_merge_reports_result_capacity_separately_from_invalid_existing(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -753,6 +766,7 @@ def test_known_runtime_refusal_stops_before_upload(tmp_path: Path, plan: Identit
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -794,6 +808,7 @@ def test_merge_retries_a_later_exact_match_conflict_with_one_deadline_and_borrow
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -827,6 +842,7 @@ def test_merge_retry_read_keeps_its_deadline_over_the_prior_conflict(
         assert raised.value.details.reason is FileFailureReason.DEADLINE
         assert target.read_text() == '{"concurrent":true}'
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -856,6 +872,7 @@ def test_merge_stops_after_eight_total_condition_conflicts(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -884,6 +901,7 @@ def test_merge_does_not_retry_a_noncondition_publication_conflict(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -923,6 +941,7 @@ def test_whole_json_call_holds_borrow_against_sibling_upload(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -963,6 +982,7 @@ def test_read_and_upload_reuse_one_durable_obligation_and_revalidate_before_ever
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -989,6 +1009,7 @@ def test_lost_read_observation_stops_without_replay_or_owner_retention(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1014,6 +1035,7 @@ def test_lost_publication_observation_preserves_cleanup_and_never_replays(
         assert outcome.requires_owner_retention and carrier.calls == 5
         assert json.loads((root / "target").read_bytes()) == {"existing": True, "source": True}
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1043,6 +1065,7 @@ def test_interrupted_dispatch_exports_bounded_retention_fact(
         with pytest.raises(StateError):
             owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1074,6 +1097,7 @@ def test_expired_stat_or_read_result_preserves_termination_and_deadline_facts(
         assert raised.value.details.phase is FileOperationPhase.OBSERVATION
         assert raised.value.details.reason is FileFailureReason.DEADLINE
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1097,6 +1121,7 @@ def test_interrupted_json_exchange_records_expired_deadline_fact(
         assert fact.outcome.pending_remote_effects
         assert fact.outcome.requires_owner_retention
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1126,4 +1151,5 @@ def test_shared_file_carrier_refuses_an_inactive_borrow_before_dispatch(
         assert carrier.calls == 0
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()

@@ -363,6 +363,7 @@ def test_real_helpers_reduce_stat_inventory_and_conflict_without_private_state(t
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -405,6 +406,7 @@ def test_real_operation_retains_carrier_failure_across_runtime_unknown_and_mutat
         assert raised_remove.value.dispatch is Dispatch.SENT
         assert _error_details(raised_remove.value).reason is FileFailureReason.DEADLINE
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 

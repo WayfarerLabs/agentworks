@@ -23,6 +23,7 @@ from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution.carrier import CarrierIO, CarrierReport, ChannelFeatures, Deadline, PreparedInvocation
 from agentworks.operations import OperationOwner
+from tests.execution._bound_carrier_support import hold_operation_owner as hold_operation_owner
 from tests.execution.files._file_publication_support import LocalCarrier
 from tests.execution.files._file_publication_support import install_fixture_bundle as install_publication
 from tests.execution.files._file_stage_support import install_fixture_bundle as install_stage
@@ -98,12 +99,14 @@ def _plan() -> IdentityPlan:
     return IdentityPlan(IdentityExpectation(os.geteuid(), gid, groups), IdentityMode.DIRECT)
 
 
-def test_129_member_plan_stops_before_next_failed_checkpoint(tmp_path: Path) -> None:
+def test_129_member_plan_stops_before_next_failed_checkpoint(hold_operation_owner, tmp_path: Path) -> None:
     database = Database(tmp_path / "owner.db")
-    owner = OperationOwner.acquire(
-        database.operations,
-        OperationScope(OperationResourceKind.VM, "package-vm"),
-        "package",
+    owner = hold_operation_owner(
+        OperationOwner.acquire(
+            database.operations,
+            OperationScope(OperationResourceKind.VM, "package-vm"),
+            "package",
+        )
     )
     operation = FileOperation(owner, target_for_owner(owner))
     root = tmp_path / "root"
@@ -157,13 +160,17 @@ def test_129_member_plan_stops_before_next_failed_checkpoint(tmp_path: Path) -> 
         checkpoint_db.close()
 
 
-def test_4096_synthetic_members_fit_one_lifecycle_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_4096_synthetic_members_fit_one_lifecycle_row(
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Exercise the ledger bound without 4096 subprocesses or file writes."""
     database = Database(tmp_path / "owner.db")
-    owner = OperationOwner.acquire(
-        database.operations,
-        OperationScope(OperationResourceKind.VM, "package-vm"),
-        "package",
+    owner = hold_operation_owner(
+        OperationOwner.acquire(
+            database.operations,
+            OperationScope(OperationResourceKind.VM, "package-vm"),
+            "package",
+        )
     )
     operation = FileOperation(owner, target_for_owner(owner))
     plan = _plan()
@@ -231,12 +238,14 @@ def test_4096_synthetic_members_fit_one_lifecycle_row(tmp_path: Path, monkeypatc
     owner.close()
 
 
-def test_later_preparation_refusal_closes_checkpointed_batch(tmp_path: Path) -> None:
+def test_later_preparation_refusal_closes_checkpointed_batch(hold_operation_owner, tmp_path: Path) -> None:
     database = Database(tmp_path / "owner.db")
-    owner = OperationOwner.acquire(
-        database.operations,
-        OperationScope(OperationResourceKind.VM, "package-vm"),
-        "package",
+    owner = hold_operation_owner(
+        OperationOwner.acquire(
+            database.operations,
+            OperationScope(OperationResourceKind.VM, "package-vm"),
+            "package",
+        )
     )
     operation = FileOperation(owner, target_for_owner(owner))
     root = tmp_path / "root"
@@ -267,13 +276,15 @@ def test_later_preparation_refusal_closes_checkpointed_batch(tmp_path: Path) -> 
 
 
 def test_lost_child_cas_reply_retries_only_the_exact_intended_payload(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database = Database(tmp_path / "owner.db")
-    owner = OperationOwner.acquire(
-        database.operations,
-        OperationScope(OperationResourceKind.VM, "package-vm"),
-        "package",
+    owner = hold_operation_owner(
+        OperationOwner.acquire(
+            database.operations,
+            OperationScope(OperationResourceKind.VM, "package-vm"),
+            "package",
+        )
     )
     operation = FileOperation(owner, target_for_owner(owner))
     root = tmp_path / "root"
@@ -335,12 +346,16 @@ def test_lost_child_cas_reply_retries_only_the_exact_intended_payload(
     owner.close()
 
 
-def test_unconfirmed_child_cas_never_dispatches_that_child(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unconfirmed_child_cas_never_dispatches_that_child(
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     database = Database(tmp_path / "owner.db")
-    owner = OperationOwner.acquire(
-        database.operations,
-        OperationScope(OperationResourceKind.VM, "package-vm"),
-        "package",
+    owner = hold_operation_owner(
+        OperationOwner.acquire(
+            database.operations,
+            OperationScope(OperationResourceKind.VM, "package-vm"),
+            "package",
+        )
     )
     operation = FileOperation(owner, target_for_owner(owner))
     root = tmp_path / "root"
@@ -390,13 +405,15 @@ def test_unconfirmed_child_cas_never_dispatches_that_child(tmp_path: Path, monke
 
 
 def test_child_cas_control_stop_never_retries_or_dispatches_next_child(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database = Database(tmp_path / "owner.db")
-    owner = OperationOwner.acquire(
-        database.operations,
-        OperationScope(OperationResourceKind.VM, "package-vm"),
-        "package",
+    owner = hold_operation_owner(
+        OperationOwner.acquire(
+            database.operations,
+            OperationScope(OperationResourceKind.VM, "package-vm"),
+            "package",
+        )
     )
     operation = FileOperation(owner, target_for_owner(owner))
     root = tmp_path / "root"
@@ -449,13 +466,15 @@ def test_child_cas_control_stop_never_retries_or_dispatches_next_child(
 
 
 def test_retention_failure_preserves_package_control_and_attached_child(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database = Database(tmp_path / "owner.db")
-    owner = OperationOwner.acquire(
-        database.operations,
-        OperationScope(OperationResourceKind.VM, "package-vm"),
-        "package",
+    owner = hold_operation_owner(
+        OperationOwner.acquire(
+            database.operations,
+            OperationScope(OperationResourceKind.VM, "package-vm"),
+            "package",
+        )
     )
     operation = FileOperation(owner, target_for_owner(owner))
     root = tmp_path / "root"

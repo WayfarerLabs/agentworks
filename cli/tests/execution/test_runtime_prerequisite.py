@@ -22,7 +22,8 @@ from agentworks.execution._runtime_prerequisite import (
     build_runtime_helper_argv,
 )
 from agentworks.execution.carrier import CarrierIO, Deadline, Failure, FiniteInput, SinkOutput
-from agentworks.execution.carriers._subprocess import ProcessResult, run_process
+from agentworks.execution.carriers._subprocess import ProcessResult
+from tests.execution._bound_carrier_support import run_fixture_process
 
 _NONCE = "0123456789abcdef0123456789abcdef"
 _POSIX_ONLY = pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX shell checks")
@@ -82,7 +83,7 @@ def _run(
     output = _Sink()
     stderr = _Sink()
     prefix = RuntimePrefixSink(_NONCE, candidates, output, system_shim)
-    result = run_process(
+    result = run_fixture_process(
         list(argv),
         io=CarrierIO(
             input=FiniteInput(payload, sensitive=True),
@@ -90,7 +91,8 @@ def _run(
             sensitive=True,
         ),
         deadline=Deadline.after(timeout),
-        custody=local_delivery,
+        custody=None,
+        standalone_custody=local_delivery,
     )
     return prefix.observation, output, stderr, result
 
@@ -109,7 +111,7 @@ def _run_trampoline(preamble: str) -> tuple[RuntimePrerequisiteObservation, _Sin
     output = _Sink()
     stderr = _Sink()
     prefix = RuntimePrefixSink(_NONCE, (sys.executable,), output)
-    result = run_process(
+    result = run_fixture_process(
         [
             sys.executable,
             "-I",
@@ -123,7 +125,8 @@ def _run_trampoline(preamble: str) -> tuple[RuntimePrerequisiteObservation, _Sin
         ],
         io=CarrierIO(output=SinkOutput(prefix, stderr), sensitive=True),
         deadline=Deadline.after(5),
-        custody=local_delivery,
+        custody=None,
+        standalone_custody=local_delivery,
     )
     return prefix.observation, output, stderr, result
 

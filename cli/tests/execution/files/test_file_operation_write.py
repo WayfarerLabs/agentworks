@@ -352,6 +352,7 @@ def test_real_upload_has_no_completed_custody_or_source_retention(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -378,6 +379,7 @@ def test_upload_installs_one_tokenized_file_call_before_dispatch_and_resolves_it
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -398,6 +400,7 @@ def test_mismatched_target_refuses_before_the_owner_is_borrowed(tmp_path: Path) 
         borrow.close()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -430,6 +433,7 @@ def test_json_replaces_its_tokenless_file_call_payload_before_child_dispatch(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -472,6 +476,7 @@ def test_registration_started_interruption_keeps_the_attached_upload_and_owner_b
         with pytest.raises(StateError):
             owner.borrow()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -516,6 +521,7 @@ def test_close_requested_before_install_releases_unregistered_active_upload(
         owner.close()
         assert database.operations.inspect(owner.ownership.scope) is None
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -561,6 +567,7 @@ def test_failed_pre_registration_cleanup_keeps_the_active_upload(
         assert len(operation.active_uploads) == 1
         assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -588,6 +595,7 @@ def test_interrupted_json_payload_publication_keeps_its_attached_child_and_owner
         with pytest.raises(StateError):
             owner.borrow()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -628,6 +636,7 @@ def test_real_json_strategies_share_core_custody_and_preserve_noop(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -674,6 +683,7 @@ def test_json_observation_carrier_failure_precedes_success_or_invalid_response(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -713,6 +723,7 @@ def test_cross_family_reentry_is_rejected_by_one_owner(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -761,6 +772,7 @@ def test_local_write_refusals_close_predispatch_borrows(
         assert operation.active_json_updates == ()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -810,6 +822,7 @@ def test_upload_and_json_admission_overflow_closes_predispatch_borrows(
         assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -842,6 +855,7 @@ def test_nested_json_upload_uses_one_whole_call_borrow(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -877,6 +891,7 @@ def test_multiple_upload_cleanup_obligations_remain_exact_and_bounded(
         assert all(not hasattr(item, "source") for item in retained)
         assert operation.active_uploads == ()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -899,6 +914,7 @@ def test_upload_final_cleanup_hands_off_after_owner_close_was_requested(
         with pytest.raises(StateError):
             owner.borrow()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -930,6 +946,7 @@ def test_json_uncertain_publication_retains_child_upload_without_payload(
         borrow = owner.borrow()
         borrow.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -967,6 +984,7 @@ def test_ownership_result_is_attached_before_failed_settlement_and_outcome_alloc
         with pytest.raises(StateError):
             owner.borrow()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1005,6 +1023,7 @@ def test_upload_retention_failure_preserves_original_control_and_attached_source
         with pytest.raises(StateError):
             owner.borrow()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1056,6 +1075,7 @@ def test_upload_allocation_failure_cannot_reuse_source_exception_cause(
         with pytest.raises(StateError):
             owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1100,6 +1120,7 @@ def test_json_child_ownership_lookup_allocation_failure_preserves_original_contr
         with pytest.raises(StateError):
             owner.borrow()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1136,6 +1157,7 @@ def test_json_retention_failure_preserves_original_control_and_parent_fact(
         with pytest.raises(StateError):
             owner.borrow()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -1174,4 +1196,5 @@ def test_json_child_capture_failure_does_not_reuse_unrelated_upload_fact(
         with pytest.raises(StateError):
             owner.borrow()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()

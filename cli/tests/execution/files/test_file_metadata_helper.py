@@ -35,9 +35,9 @@ from agentworks.execution.carrier import (
     ExitStatus,
     PreparedInvocation,
 )
-from agentworks.execution.carriers._subprocess import run_process
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 from tests.execution._bound_carrier_support import bind_carrier as bind_carrier
+from tests.execution._bound_carrier_support import run_fixture_process
 from tests.execution.files._fixed_bundle_support import fixture_file_bundle
 from tests.execution.files._runtime_support import runtime_selection
 
@@ -72,11 +72,12 @@ class LocalCarrier:
         self.invocation = invocation
         self.io = io
         process_deadline = Deadline.after(2) if self._guest_deadline_grace else deadline
-        result = run_process(
+        result = run_fixture_process(
             list(invocation.argv),
             io=io,
             deadline=process_deadline,
-            custody=custody if custody is not None else self.local_delivery,
+            custody=custody,
+            standalone_custody=self.local_delivery,
         )
         completion = None
         if result.exit_status is not None:

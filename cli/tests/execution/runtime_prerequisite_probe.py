@@ -18,7 +18,7 @@ from pathlib import Path
 
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import Capture, CarrierIO, Deadline
-from agentworks.execution.carriers._subprocess import run_process
+from tests.execution._bound_carrier_support import run_fixture_process
 
 _SHELL = "/bin/sh"
 _DEFAULT_CANDIDATES = (Path("/opt/homebrew/bin/python3"), Path("/usr/local/bin/python3"))
@@ -168,12 +168,13 @@ def observe_runtime_prerequisite(
         *[os.fspath(path) for path in candidates],
     ]
 
-    result = run_process(
+    result = run_fixture_process(
         argv,
         io=CarrierIO(output=Capture(_MAX_CAPTURE)),
         deadline=Deadline.after(timeout),
         env=_MINIMAL_ENV,
-        custody=local_delivery,
+        custody=None,
+        standalone_custody=local_delivery,
     )
     if result.failure is not None or result.exit_status != 0 or not result.stdout.complete:
         return _unknown()

@@ -36,6 +36,7 @@ from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, Pre
 from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
 from agentworks.execution.models import Command, Input, Output
 from agentworks.operations import LifecycleObligation, OperationOwner
+from tests.execution._bound_carrier_support import hold_operation_owner as hold_operation_owner
 from tests.execution.test_wsl2_owned_download import GuestThenFileCarrier, _acquire_owner, _close_owner
 from tests.execution.test_wsl2_platform_hold import FakeNative, FakeObserver
 from tests.vms.test_target_preparation import _vm
@@ -114,10 +115,10 @@ def _start(
 
 
 def test_managed_start_passes_selected_route_guest_and_caller_identity_without_auto_release(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
-        owner = _acquire_owner(database)
+        owner = hold_operation_owner(_acquire_owner(database))
         subject, platform, carrier = _subject(database, owner, monkeypatch)
         outcome = ManagedStartOutcome(launch_state=ManagedLaunchState.RECEIPT_CONFIRMED)
         start = Mock(return_value=outcome)
@@ -153,10 +154,10 @@ def test_managed_start_passes_selected_route_guest_and_caller_identity_without_a
 
 
 def test_changed_connection_refuses_before_reservation_and_releases_settled_hold(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
-        owner = _acquire_owner(database)
+        owner = hold_operation_owner(_acquire_owner(database))
         first = NativeExecutionBinding(
             WSL2Carrier(CONNECTION), CONNECTION.user, RuntimeSelection(RuntimeTargetOS.LINUX)
         )
@@ -176,10 +177,10 @@ def test_changed_connection_refuses_before_reservation_and_releases_settled_hold
 
 @pytest.mark.parametrize("observation", [ProviderLocatorUnavailable(), object()])
 def test_unconfirmed_prestart_locator_retains_owner(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, observation: object
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, observation: object
 ) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
-        owner = _acquire_owner(database)
+        owner = hold_operation_owner(_acquire_owner(database))
         stable = ProviderLocator("wsl2:registration")
         subject, _, carrier = _subject(database, owner, monkeypatch, locators=[stable] * 3 + [observation])
         start = Mock(side_effect=AssertionError("managed start after unconfirmed route"))
@@ -192,10 +193,10 @@ def test_unconfirmed_prestart_locator_retains_owner(
 
 
 def test_exceptional_prestart_locator_preserves_original_and_retains_owner(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
-        owner = _acquire_owner(database)
+        owner = hold_operation_owner(_acquire_owner(database))
         subject, platform, carrier = _subject(database, owner, monkeypatch)
         original = RuntimeError("locator observation failed")
         platform.observe_provider_locator.side_effect = [ProviderLocator("wsl2:registration")] * 2 + [original]
@@ -210,10 +211,10 @@ def test_exceptional_prestart_locator_preserves_original_and_retains_owner(
 
 @pytest.mark.parametrize("change", ["locator", "connection", "runtime", "unavailable", "invalid", "late", "exception"])
 def test_dispatch_route_callback_classifies_and_retains_owner(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
-        owner = _acquire_owner(database)
+        owner = hold_operation_owner(_acquire_owner(database))
         stable = ProviderLocator("wsl2:registration")
         replacement = ProviderLocator("wsl2:replacement")
         locators: list[object] = [stable for _ in range(5)]
@@ -276,10 +277,10 @@ def test_dispatch_route_callback_classifies_and_retains_owner(
 
 @pytest.mark.parametrize("change", ["runtime", "late-locator"])
 def test_changed_runtime_or_late_locator_refuses_before_managed_start(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
-        owner = _acquire_owner(database)
+        owner = hold_operation_owner(_acquire_owner(database))
         first = NativeExecutionBinding(
             WSL2Carrier(CONNECTION), CONNECTION.user, RuntimeSelection(RuntimeTargetOS.LINUX)
         )
@@ -305,10 +306,10 @@ def test_changed_runtime_or_late_locator_refuses_before_managed_start(
 
 
 def test_exact_hold_settles_before_other_obligation_and_owner_closes_after_resolution(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
-        owner = _acquire_owner(database)
+        owner = hold_operation_owner(_acquire_owner(database))
         subject, _, _ = _subject(database, owner, monkeypatch)
         other: LifecycleObligation | None = None
 
@@ -340,10 +341,10 @@ def test_exact_hold_settles_before_other_obligation_and_owner_closes_after_resol
 
 @pytest.mark.parametrize("raises", [False, True])
 def test_uncertain_start_or_escaping_control_retains_owner(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raises: bool
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raises: bool
 ) -> None:
     with closing(Database(tmp_path / "state.db")) as database:
-        owner = _acquire_owner(database)
+        owner = hold_operation_owner(_acquire_owner(database))
         subject, _, _ = _subject(database, owner, monkeypatch)
         if raises:
             monkeypatch.setattr(managed, "start_bound_managed_job", Mock(side_effect=RuntimeError("uncertain")))

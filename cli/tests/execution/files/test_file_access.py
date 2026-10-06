@@ -421,6 +421,7 @@ def test_upload_deadline_rejection_precedes_source_read_and_does_not_close_sourc
         owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -494,6 +495,7 @@ def test_upload_validation_rejects_before_source_read_or_dispatch(
         assert carrier.invocations == []
     finally:
         owner.close()
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -539,6 +541,7 @@ def test_upload_sudo_selects_bound_elevated_plan_before_dispatch(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -673,6 +676,7 @@ def test_unavailable_elevation_refuses_before_validation_or_dispatch(
         assert carrier.invocations == []
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -715,6 +719,7 @@ def test_json_workflow_reuses_one_bound_deadline(tmp_path: Path, plan: IdentityP
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -748,6 +753,7 @@ def test_sudo_selects_the_bound_elevated_plan_before_dispatch(tmp_path: Path, pl
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -781,6 +787,7 @@ def test_bound_views_share_the_supplied_serial_owner(tmp_path: Path, plan: Ident
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -811,4 +818,5 @@ def test_unresolved_observation_keeps_owner_close_refused(tmp_path: Path, plan: 
         with pytest.raises(StateError):
             owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()

@@ -28,11 +28,11 @@ from agentworks.execution.carrier import (
     PreparedInvocation,
     Retention,
 )
-from agentworks.execution.carriers._subprocess import run_process
 from agentworks.execution.models import Command, Input, Lifetime, Output, Script, Shell
 from agentworks.execution.profiles import Protection
 from agentworks.execution.result import CheckedExecutionError, ExitCode
 from agentworks.operations import OperationOwner
+from tests.execution._bound_carrier_support import run_fixture_process
 from tests.execution.files._target_support import target_for_owner
 
 _LINUX_ONLY = pytest.mark.skipif(sys.platform != "linux", reason="inline execution requires Linux")
@@ -63,11 +63,12 @@ class LocalCarrier:
         self.validate(invocation, io=io)
         self.calls += 1
         self.deadlines.append(deadline)
-        result = run_process(
+        result = run_fixture_process(
             list(invocation.argv),
             io=io,
             deadline=deadline,
-            custody=custody if custody is not None else self.local_delivery,
+            custody=custody,
+            standalone_custody=self.local_delivery,
         )
         completion = None
         if result.exit_status is not None:
@@ -138,6 +139,7 @@ def bound(tmp_path: Path) -> Iterator[Bound]:
     try:
         yield database, owner, operation, carrier, access, deadline
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 

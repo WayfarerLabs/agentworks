@@ -32,6 +32,7 @@ from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, PreparedInvocation
 from agentworks.operations import OperationOwner
+from tests.execution._bound_carrier_support import hold_operation_owner as hold_operation_owner
 from tests.execution.files._file_publication_support import LocalCarrier
 from tests.execution.files._fixed_bundle_support import fixture_file_bundle
 from tests.execution.files._runtime_support import runtime_selection
@@ -74,6 +75,7 @@ def context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     try:
         yield database, owner, target, plan, gate
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -126,7 +128,7 @@ def test_advance_fences_old_guest_effect_and_preserves_child(context, index: int
         recovered.close()
 
 
-def test_lost_advance_reply_reuses_durable_proposal(context) -> None:
+def test_lost_advance_reply_reuses_durable_proposal(hold_operation_owner, context) -> None:
     database, owner, target, _, gate = context
     _, row = _admit(context, 3)
     recovered, fence = _recover(context, row, "b" * 32)
@@ -148,7 +150,7 @@ def test_lost_advance_reply_reuses_durable_proposal(context) -> None:
     (proposed_row,) = database.operations.list_lifecycle_obligations(recovered.ownership)
     proposed = decode_file_call_obligation(proposed_row.payload).effect_gate
     assert proposed is not None and proposed.proposed_generation is not None
-    again = OperationOwner.recover(database.operations, recovered.ownership, "c" * 32)
+    again = hold_operation_owner(OperationOwner.recover(database.operations, recovered.ownership, "c" * 32))
     (current,) = database.operations.list_lifecycle_obligations(again.ownership)
     result = FilePackageFenceRecovery.open(again, target, current).advance(LocalCarrier(), deadline=Deadline.after(30))
     assert result.observation is not None
@@ -162,7 +164,7 @@ def test_lost_advance_reply_reuses_durable_proposal(context) -> None:
 
 
 def test_lost_proposal_publication_reply_does_not_choose_another_generation(
-    context, monkeypatch: pytest.MonkeyPatch
+    hold_operation_owner, context, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database, owner, target, _, _ = context
     _, row = _admit(context, 1)
@@ -187,7 +189,7 @@ def test_lost_proposal_publication_reply_does_not_choose_another_generation(
     proposed = decode_file_call_obligation(proposed_row.payload).effect_gate
     assert proposed is not None and proposed.proposed_generation is not None
     monkeypatch.setattr(type(database.operations), "publish_lifecycle_obligation_payload", original)
-    again = OperationOwner.recover(database.operations, recovered.ownership, "c" * 32)
+    again = hold_operation_owner(OperationOwner.recover(database.operations, recovered.ownership, "c" * 32))
     (current,) = database.operations.list_lifecycle_obligations(again.ownership)
     FilePackageFenceRecovery.open(again, target, current).advance(LocalCarrier(), deadline=Deadline.after(30))
     (current,) = database.operations.list_lifecycle_obligations(again.ownership)
@@ -195,10 +197,10 @@ def test_lost_proposal_publication_reply_does_not_choose_another_generation(
     assert confirmed is not None and confirmed.generation == proposed.proposed_generation
 
 
-def test_stale_row_and_missing_gate_refuse_without_resolution(context) -> None:
+def test_stale_row_and_missing_gate_refuse_without_resolution(hold_operation_owner, context) -> None:
     database, owner, target, _, gate = context
     call, row = _admit(context, 1)
-    recovered = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+    recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "b" * 32))
     bound = recovered.rebind_lifecycle_obligation(
         row.obligation_id, "file-call", payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION, payload=row.payload
     )
@@ -220,10 +222,10 @@ def test_stale_row_and_missing_gate_refuse_without_resolution(context) -> None:
     assert proposed is not None and proposed.proposed_generation is not None
 
 
-def test_wrong_guest_and_replaced_gate_refuse(context) -> None:
+def test_wrong_guest_and_replaced_gate_refuse(hold_operation_owner, context) -> None:
     database, owner, target, _, gate = context
     _, row = _admit(context, 2)
-    recovered = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+    recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "b" * 32))
     wrong_target = replace(target, boot_id="123e4567-e89b-12d3-a456-426614174001")
     with pytest.raises(StateError):
         FilePackageFenceRecovery.open(recovered, wrong_target, row)
@@ -238,10 +240,10 @@ def test_wrong_guest_and_replaced_gate_refuse(context) -> None:
     assert proposed is not None and proposed.proposed_generation is not None
 
 
-def test_ungated_package_row_is_not_a_fence_candidate(context) -> None:
+def test_ungated_package_row_is_not_a_fence_candidate(hold_operation_owner, context) -> None:
     database, owner, target, _, _ = context
     call, row = _admit(context, 0)
-    recovered = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+    recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "b" * 32))
     bound = recovered.rebind_lifecycle_obligation(
         row.obligation_id, "file-call", payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION, payload=row.payload
     )
@@ -255,7 +257,9 @@ def test_ungated_package_row_is_not_a_fence_candidate(context) -> None:
         FilePackageFenceRecovery.open(recovered, target, current)
 
 
-def test_control_stop_after_proposal_reuses_it_on_next_takeover(context, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_control_stop_after_proposal_reuses_it_on_next_takeover(
+    hold_operation_owner, context, monkeypatch: pytest.MonkeyPatch
+) -> None:
     database, owner, target, _, _ = context
     _, row = _admit(context, 4)
     recovered, fence = _recover(context, row, "b" * 32)
@@ -271,7 +275,7 @@ def test_control_stop_after_proposal_reuses_it_on_next_takeover(context, monkeyp
     proposed = decode_file_call_obligation(current.payload).effect_gate
     assert proposed is not None and proposed.proposed_generation is not None
     monkeypatch.setattr(_file_package_recovery, "exchange_file_effect_gate", original)
-    again = OperationOwner.recover(database.operations, recovered.ownership, "c" * 32)
+    again = hold_operation_owner(OperationOwner.recover(database.operations, recovered.ownership, "c" * 32))
     (current,) = database.operations.list_lifecycle_obligations(again.ownership)
     FilePackageFenceRecovery.open(again, target, current).advance(LocalCarrier(), deadline=Deadline.after(30))
     (current,) = database.operations.list_lifecycle_obligations(again.ownership)
@@ -279,7 +283,9 @@ def test_control_stop_after_proposal_reuses_it_on_next_takeover(context, monkeyp
     assert confirmed is not None and confirmed.generation == proposed.proposed_generation
 
 
-def test_lost_confirmed_binding_publication_keeps_resolved_gate(context, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_lost_confirmed_binding_publication_keeps_resolved_gate(
+    hold_operation_owner, context, monkeypatch: pytest.MonkeyPatch
+) -> None:
     database, owner, target, _, gate = context
     _, row = _admit(context, 5)
     recovered, fence = _recover(context, row, "b" * 32)
@@ -310,7 +316,7 @@ def test_lost_confirmed_binding_publication_keeps_resolved_gate(context, monkeyp
     with pytest.raises(StateError):
         fence.advance(LocalCarrier(), deadline=Deadline.after(30))
     monkeypatch.setattr(type(database.operations), "publish_lifecycle_obligation_payload", original)
-    again = OperationOwner.recover(database.operations, recovered.ownership, "c" * 32)
+    again = hold_operation_owner(OperationOwner.recover(database.operations, recovered.ownership, "c" * 32))
     (current,) = database.operations.list_lifecycle_obligations(again.ownership)
     assert decode_file_call_obligation(current.payload).effect_gate == call.effect_gate
 

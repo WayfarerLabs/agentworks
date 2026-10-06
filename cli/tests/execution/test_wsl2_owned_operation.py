@@ -25,19 +25,20 @@ from agentworks.execution.binding import NativeExecutionBinding
 from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, PreparedInvocation
 from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
 from agentworks.operations import OperationOwner
+from tests.execution._bound_carrier_support import hold_operation_owner as hold_operation_owner
 from tests.execution.test_wsl2_owned_download import GuestThenFileCarrier, _acquire_owner, _close_owner
 from tests.execution.test_wsl2_platform_hold import FakeNative, FakeObserver
 from tests.vms.test_target_preparation import _vm
 
 
-def test_durable_ready_requires_the_full_selected_anchor_payload(tmp_path: Path) -> None:
+def test_durable_ready_requires_the_full_selected_anchor_payload(hold_operation_owner, tmp_path: Path) -> None:
     local_delivery = LocalDeliveryCustody()
     from dataclasses import replace
 
     from agentworks.execution._wsl2_platform_hold import decode_hold_payload, encode_hold_payload
 
     with closing(Database(tmp_path / "state.db")) as database:
-        owner = _acquire_owner(database)
+        owner = hold_operation_owner(_acquire_owner(database))
         platform = Mock(spec=WSL2Platform)
         platform.site_name = "local"
         selected = WSL2OwnedOperation(
@@ -126,10 +127,10 @@ def test_invalid_owner_refuses_before_route_selection_or_native_effects(
         assert database.operations.inspect(scope) is None
 
 
-def test_factory_exception_preserves_unsealed_caller_claim(tmp_path: Path) -> None:
+def test_factory_exception_preserves_unsealed_caller_claim(hold_operation_owner, tmp_path: Path) -> None:
     local_delivery = LocalDeliveryCustody()
     with closing(Database(tmp_path / "state.db")) as database:
-        owner = _acquire_owner(database)
+        owner = hold_operation_owner(_acquire_owner(database))
         platform = Mock(spec=WSL2Platform)
         platform.site_name = "local"
         original = RuntimeError("locator unavailable")
@@ -155,6 +156,7 @@ def test_factory_exception_preserves_unsealed_caller_claim(tmp_path: Path) -> No
 @pytest.mark.parametrize("entry", ["constructor", "factory"])
 @pytest.mark.parametrize("runtime_path", [None, "/usr/bin/python3"])
 def test_hold_reads_and_settles_only_supplied_owners_database(
+    hold_operation_owner,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     composition: type[WSL2OwnedOperation],
@@ -166,8 +168,8 @@ def test_hold_reads_and_settles_only_supplied_owners_database(
         closing(Database(tmp_path / "owner.db")) as database,
         closing(Database(tmp_path / "other.db")) as other_database,
     ):
-        owner = _acquire_owner(database)
-        other_owner = _acquire_owner(other_database)
+        owner = hold_operation_owner(_acquire_owner(database))
+        other_owner = hold_operation_owner(_acquire_owner(other_database))
         other_claim = other_database.operations.inspect(other_owner.ownership.scope)
         carrier = GuestThenFileCarrier(database)
 
@@ -249,6 +251,7 @@ def test_hold_reads_and_settles_only_supplied_owners_database(
     [RuntimeSelection(RuntimeTargetOS.LINUX, "/custom/python3"), RuntimeSelection(RuntimeTargetOS.DARWIN)],
 )
 def test_unsupported_runtime_refuses_before_hold_construction_or_native_activation(
+    hold_operation_owner,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     composition: type[WSL2OwnedOperation],
@@ -257,7 +260,7 @@ def test_unsupported_runtime_refuses_before_hold_construction_or_native_activati
 ) -> None:
     local_delivery = LocalDeliveryCustody()
     with closing(Database(tmp_path / "state.db")) as database:
-        owner = _acquire_owner(database)
+        owner = hold_operation_owner(_acquire_owner(database))
         platform = Mock(spec=WSL2Platform)
         platform.site_name = "local"
         locator = ProviderLocator("wsl2:registration")

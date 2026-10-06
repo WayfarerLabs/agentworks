@@ -60,8 +60,8 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
-from agentworks.execution.carriers._subprocess import run_process
 from agentworks.execution.models import Command
+from tests.execution._bound_carrier_support import run_fixture_process
 
 _HOST_TARGET = RuntimeTargetOS.DARWIN if sys.platform == "darwin" else RuntimeTargetOS.LINUX
 
@@ -290,11 +290,12 @@ class LocalCarrier:
         self.calls += 1
         self.io = io
         self.invocation = invocation
-        result = run_process(
+        result = run_fixture_process(
             list(invocation.argv),
             io=io,
             deadline=deadline,
-            custody=custody if custody is not None else self.local_delivery,
+            custody=custody,
+            standalone_custody=self.local_delivery,
         )
         completion = None
         if result.exit_status is not None:

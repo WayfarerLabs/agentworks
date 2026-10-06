@@ -62,6 +62,7 @@ from agentworks.execution.carrier import (
 )
 from agentworks.operations import LifecycleObligation as OwnerLifecycleObligation
 from agentworks.operations import OperationOwner, RecoveryAttempt, RecoveryDispatch
+from tests.execution._bound_carrier_support import hold_operation_owner as hold_operation_owner
 from tests.execution.files._file_download_support import BytesSink
 from tests.execution.files._file_snapshot_support import LocalCarrier, fixture_source, install_fixture_bundle
 from tests.execution.files._runtime_support import runtime_selection
@@ -696,6 +697,7 @@ def _possible_download(
 
 
 def test_recovery_reconciles_then_persists_exact_debt_before_cleanup(
+    hold_operation_owner,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -724,7 +726,7 @@ def test_recovery_reconciles_then_persists_exact_debt_before_cleanup(
         assert started.observation is not None
         assert started.observation.state is FileSnapshotObservationState.READY
 
-        recovered = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "b" * 32))
         evidence = _local_drain_evidence(
             recovered.ownership,
             persisted,
@@ -739,7 +741,9 @@ def test_recovery_reconciles_then_persists_exact_debt_before_cleanup(
         row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
         retained = decode_file_call_obligation(row.payload)
         assert retained.scratch_cleanup_debt is not None
-        recovered_again = OperationOwner.recover(database.operations, recovered.ownership, "c" * 32)
+        recovered_again = hold_operation_owner(
+            OperationOwner.recover(database.operations, recovered.ownership, "c" * 32)
+        )
         repeated_evidence = _local_drain_evidence(
             recovered_again.ownership,
             row,
@@ -762,7 +766,7 @@ def test_recovery_reconciles_then_persists_exact_debt_before_cleanup(
 
 
 def test_download_recovery_settle_interruption_releases_local_dispatch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = tmp_path / "source-root"
     root.mkdir()
@@ -773,7 +777,7 @@ def test_download_recovery_settle_interruption_releases_local_dispatch(
     database = Database(tmp_path / "state.db")
     owner, call, _ = _possible_download(database, root, _target(), _plan())
     try:
-        recovered = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "b" * 32))
         row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
         evidence = _local_drain_evidence(
             recovered.ownership, row, call, (_LocalHelperDrainRecord("previous-helper", exited=True),)
@@ -799,6 +803,7 @@ def test_download_recovery_settle_interruption_releases_local_dispatch(
 
 
 def test_spawned_controller_loss_after_helper_completion_keeps_download_recoverable(
+    hold_operation_owner,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -830,7 +835,7 @@ def test_spawned_controller_loss_after_helper_completion_keeps_download_recovera
         assert call.family is FileCallFamily.DOWNLOAD and call.token is not None
         drain_records = _drain_records_from_journal(journal_path, call.token)
         assert drain_records[0].exited
-        recovered = OperationOwner.recover(database.operations, predecessor.ownership, "b" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, predecessor.ownership, "b" * 32))
         evidence = _local_drain_evidence(
             recovered.ownership,
             persisted,
@@ -851,7 +856,7 @@ def test_spawned_controller_loss_after_helper_completion_keeps_download_recovera
         database.close()
 
 
-def test_spawned_live_helper_blocks_download_recovery_until_it_disappears(tmp_path: Path) -> None:
+def test_spawned_live_helper_blocks_download_recovery_until_it_disappears(hold_operation_owner, tmp_path: Path) -> None:
     root = tmp_path / "source-root"
     root.mkdir()
     root.joinpath("source").write_bytes(b"blocked helper")
@@ -879,7 +884,7 @@ def test_spawned_live_helper_blocks_download_recovery_until_it_disappears(tmp_pa
         assert call.family is FileCallFamily.DOWNLOAD and call.token is not None
         drain_records = _drain_records_from_journal(journal_path, call.token)
         assert len(drain_records) == 1 and not drain_records[0].exited
-        recovered = OperationOwner.recover(database.operations, predecessor.ownership, "b" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, predecessor.ownership, "b" * 32))
         with pytest.raises(ValueError):
             _local_drain_evidence(recovered.ownership, persisted, call, drain_records)
     finally:
@@ -900,7 +905,7 @@ def test_spawned_live_helper_blocks_download_recovery_until_it_disappears(tmp_pa
         assert call.token is not None
         completed_records = _drain_records_from_journal(journal_path, call.token)
         assert all(record.exited for record in completed_records)
-        recovered = OperationOwner.recover(database.operations, predecessor.ownership, "c" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, predecessor.ownership, "c" * 32))
         evidence = _local_drain_evidence(
             recovered.ownership,
             persisted,
@@ -914,6 +919,7 @@ def test_spawned_live_helper_blocks_download_recovery_until_it_disappears(tmp_pa
 
 @pytest.mark.parametrize(("after_cleanup", "exit_code"), [(False, 96), (True, 97)])
 def test_spawned_recovery_crash_retains_persisted_debt_for_the_next_generation(
+    hold_operation_owner,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     after_cleanup: bool,
@@ -956,7 +962,7 @@ def test_spawned_recovery_crash_retains_persisted_debt_for_the_next_generation(
         assert token is not None
         drain_records = _drain_records_from_journal(journal_path, token)
         assert all(record.exited for record in drain_records)
-        recovered = OperationOwner.recover(database.operations, predecessor.ownership, "c" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, predecessor.ownership, "c" * 32))
         evidence = _local_drain_evidence(
             recovered.ownership,
             persisted,
@@ -978,6 +984,7 @@ def test_spawned_recovery_crash_retains_persisted_debt_for_the_next_generation(
 
 
 def test_gated_recovery_of_recovery_retries_interrupted_exact_cleanup(
+    hold_operation_owner,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1052,7 +1059,9 @@ def test_gated_recovery_of_recovery_retries_interrupted_exact_cleanup(
             recorded = _drain_records_from_journal(journal_path, token)
             assert len(recorded) == 3 and sum(not record.exited for record in recorded) == 1
 
-            recovered_c = OperationOwner.recover(database.operations, predecessor.ownership, "c" * 32)
+            recovered_c = hold_operation_owner(
+                OperationOwner.recover(database.operations, predecessor.ownership, "c" * 32)
+            )
             with pytest.raises(ValueError):
                 _local_drain_evidence(recovered_c.ownership, persisted, call_b, recorded)
             proposed = replace(call_b.effect_gate, proposed_generation=b"c" * 16)
@@ -1180,7 +1189,7 @@ def test_proc_start_ticks_uses_the_final_parenthesis() -> None:
         _proc_start_ticks("17 (truncated)")
 
 
-def test_recovery_refuses_stale_payload_family_and_target(tmp_path: Path) -> None:
+def test_recovery_refuses_stale_payload_family_and_target(hold_operation_owner, tmp_path: Path) -> None:
     root = tmp_path / "source-root"
     root.mkdir()
     database = Database(tmp_path / "state.db")
@@ -1188,7 +1197,7 @@ def test_recovery_refuses_stale_payload_family_and_target(tmp_path: Path) -> Non
     plan = _plan()
     owner, call, persisted = _possible_download(database, root, target, plan)
     try:
-        recovered = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "b" * 32))
         evidence = _local_drain_evidence(
             recovered.ownership,
             persisted,
@@ -1231,7 +1240,7 @@ def test_recovery_refuses_stale_payload_family_and_target(tmp_path: Path) -> Non
         database.close()
 
 
-def test_snapshot_recovery_refuses_a_setup_only_download(tmp_path: Path) -> None:
+def test_snapshot_recovery_refuses_a_setup_only_download(hold_operation_owner, tmp_path: Path) -> None:
     root = tmp_path / "source-root"
     root.mkdir()
     database = Database(tmp_path / "state.db")
@@ -1250,7 +1259,7 @@ def test_snapshot_recovery_refuses_a_setup_only_download(tmp_path: Path) -> None
             payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
             payload=encode_file_call_obligation(setup),
         )
-        recovered = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "b" * 32))
         evidence = _local_drain_evidence(
             recovered.ownership,
             persisted,
@@ -1264,7 +1273,7 @@ def test_snapshot_recovery_refuses_a_setup_only_download(tmp_path: Path) -> None
         database.close()
 
 
-def test_local_drain_evidence_refuses_a_live_or_unidentified_helper(tmp_path: Path) -> None:
+def test_local_drain_evidence_refuses_a_live_or_unidentified_helper(hold_operation_owner, tmp_path: Path) -> None:
     root = tmp_path / "source-root"
     root.mkdir()
     database = Database(tmp_path / "state.db")
@@ -1272,7 +1281,7 @@ def test_local_drain_evidence_refuses_a_live_or_unidentified_helper(tmp_path: Pa
     plan = _plan()
     owner, call, persisted = _possible_download(database, root, target, plan)
     try:
-        recovered = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "b" * 32))
         with pytest.raises(ValueError):
             _local_drain_evidence(
                 recovered.ownership,
@@ -1286,7 +1295,9 @@ def test_local_drain_evidence_refuses_a_live_or_unidentified_helper(tmp_path: Pa
         database.close()
 
 
-def test_recovery_of_recovery_requires_current_evidence_for_all_recorded_helpers(tmp_path: Path) -> None:
+def test_recovery_of_recovery_requires_current_evidence_for_all_recorded_helpers(
+    hold_operation_owner, tmp_path: Path
+) -> None:
     root = tmp_path / "source-root"
     root.mkdir()
     database = Database(tmp_path / "state.db")
@@ -1294,14 +1305,14 @@ def test_recovery_of_recovery_requires_current_evidence_for_all_recorded_helpers
     plan = _plan()
     owner, call, persisted = _possible_download(database, root, target, plan)
     try:
-        recovered_b = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+        recovered_b = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "b" * 32))
         evidence_b = _local_drain_evidence(
             recovered_b.ownership,
             persisted,
             call,
             (_LocalHelperDrainRecord("generation-a-helper", exited=True),),
         )
-        recovered_c = OperationOwner.recover(database.operations, recovered_b.ownership, "c" * 32)
+        recovered_c = hold_operation_owner(OperationOwner.recover(database.operations, recovered_b.ownership, "c" * 32))
         with pytest.raises(StateError):
             FileDownloadRecovery.open(recovered_c, target, persisted, evidence_b)
         evidence_c = _local_drain_evidence(
@@ -1319,6 +1330,7 @@ def test_recovery_of_recovery_requires_current_evidence_for_all_recorded_helpers
 
 
 def test_stale_recovery_dispatch_never_calls_the_carrier_and_allows_current_rebind(
+    hold_operation_owner,
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "source-root"
@@ -1328,7 +1340,7 @@ def test_stale_recovery_dispatch_never_calls_the_carrier_and_allows_current_rebi
     plan = _plan()
     owner, call, persisted = _possible_download(database, root, target, plan)
     try:
-        recovered = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "b" * 32))
         recovery = FileDownloadRecovery.open(
             recovered,
             target,
@@ -1374,6 +1386,7 @@ def test_stale_recovery_dispatch_never_calls_the_carrier_and_allows_current_rebi
 
 
 def test_interrupted_recovery_attempt_before_return_releases_current_custody(
+    hold_operation_owner,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1384,7 +1397,7 @@ def test_interrupted_recovery_attempt_before_return_releases_current_custody(
     plan = _plan()
     owner, call, persisted = _possible_download(database, root, target, plan)
     try:
-        recovered = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "b" * 32))
         recovery = FileDownloadRecovery.open(
             recovered,
             target,
@@ -1432,7 +1445,7 @@ def test_interrupted_recovery_attempt_before_return_releases_current_custody(
 
 
 def test_interruption_after_attempt_return_retains_uncertain_custody(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = tmp_path / "source-root"
     root.mkdir()
@@ -1440,7 +1453,7 @@ def test_interruption_after_attempt_return_retains_uncertain_custody(
     target = _target()
     owner, call, persisted = _possible_download(database, root, target, _plan())
     try:
-        recovered = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "b" * 32))
         recovery = FileDownloadRecovery.open(
             recovered,
             target,
@@ -1494,7 +1507,7 @@ def test_interruption_after_attempt_return_retains_uncertain_custody(
         with pytest.raises(StateError):
             recovered.close()
 
-        successor = OperationOwner.recover(database.operations, recovered.ownership, "c" * 32)
+        successor = hold_operation_owner(OperationOwner.recover(database.operations, recovered.ownership, "c" * 32))
         current = database.operations.list_lifecycle_obligations(successor.ownership)[0]
         FileDownloadRecovery.open(
             successor,
@@ -1512,6 +1525,7 @@ def test_interruption_after_attempt_return_retains_uncertain_custody(
 
 
 def test_recovery_dispatch_refuses_competing_payload_before_carrier_entry(
+    hold_operation_owner,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1526,7 +1540,7 @@ def test_recovery_dispatch_refuses_competing_payload_before_carrier_entry(
     plan = _plan()
     owner, call, persisted = _possible_download(database, root, target, plan)
     try:
-        recovered = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "b" * 32))
         recovery = FileDownloadRecovery.open(
             recovered,
             target,
@@ -1582,6 +1596,7 @@ class _LostReply(Exception):
 
 
 def test_cleanup_debt_commit_then_lost_reply_adopts_exact_row_and_rethrows(
+    hold_operation_owner,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1607,7 +1622,7 @@ def test_cleanup_debt_commit_then_lost_reply_adopts_exact_row_and_rethrows(
             deadline=Deadline.after(30),
             runtime_selection=call.runtime_selection,
         )
-        recovered = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "b" * 32))
         recovery = FileDownloadRecovery.open(
             recovered,
             target,
@@ -1642,6 +1657,7 @@ def test_cleanup_debt_commit_then_lost_reply_adopts_exact_row_and_rethrows(
 
 
 def test_cleanup_debt_lost_reply_survives_interrupted_exact_readback(
+    hold_operation_owner,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1667,7 +1683,7 @@ def test_cleanup_debt_lost_reply_survives_interrupted_exact_readback(
             deadline=Deadline.after(30),
             runtime_selection=call.runtime_selection,
         )
-        recovered = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "b" * 32))
         recovery = FileDownloadRecovery.open(
             recovered,
             target,
@@ -1712,6 +1728,7 @@ def test_cleanup_debt_lost_reply_survives_interrupted_exact_readback(
 
 @pytest.mark.parametrize("publish", ["no-commit", "different-payload"])
 def test_cleanup_debt_lost_reply_without_exact_row_preserves_original_state(
+    hold_operation_owner,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     publish: str,
@@ -1738,7 +1755,7 @@ def test_cleanup_debt_lost_reply_without_exact_row_preserves_original_state(
             deadline=Deadline.after(30),
             runtime_selection=call.runtime_selection,
         )
-        recovered = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "b" * 32))
         recovery = FileDownloadRecovery.open(
             recovered,
             target,
@@ -1795,6 +1812,7 @@ def test_cleanup_debt_lost_reply_without_exact_row_preserves_original_state(
 
 
 def test_reconcile_failure_cleanup_debt_is_persisted_before_exact_cleanup(
+    hold_operation_owner,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1835,7 +1853,7 @@ def _fixture_failure_after_reconcile(request, expires_at):
 guest._operate=_fixture_failure_after_reconcile
 """
         install_fixture_bundle(monkeypatch, scratch, failure_patch)
-        recovered = OperationOwner.recover(database.operations, owner.ownership, "b" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "b" * 32))
         recovery = FileDownloadRecovery.open(
             recovered,
             target,

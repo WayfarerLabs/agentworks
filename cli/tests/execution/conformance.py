@@ -117,8 +117,11 @@ def check_buffered_contract(carrier: Carrier, *, seconds_per_case: float = 15.0)
         deadline = Deadline.after(seconds_per_case)
         custody = LocalDeliveryCustody()
         prepared = prepare(request, stdin=stdin, env=env, cwd=cwd, sensitive=sensitive)
-        report = carrier.execute(prepared.invocation, io=prepared.io, deadline=deadline, custody=custody)
-        _require(custody.settled, name)
+        try:
+            report = carrier.execute(prepared.invocation, io=prepared.io, deadline=deadline, custody=custody)
+            _require(custody.settled, name)
+        finally:
+            _require(custody.close(Deadline.after(3)), name)
         output = decode_output(prepared, report.stdout)
         complete = output.stdout_complete and output.stderr_complete
         if sensitive:

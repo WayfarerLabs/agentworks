@@ -17,7 +17,7 @@ from agentworks.execution.carrier import (
     ExitStatus,
     PreparedInvocation,
 )
-from agentworks.execution.carriers._subprocess import run_process
+from tests.execution._bound_carrier_support import run_fixture_process
 from tests.execution.files._fixed_bundle_support import fixture_file_bundle
 
 if TYPE_CHECKING:
@@ -59,11 +59,12 @@ class LocalCarrier:
         self.calls += 1
         self.invocation = invocation
         self.io = io
-        result = run_process(
+        result = run_fixture_process(
             list(invocation.argv),
             io=io,
             deadline=self.dispatch_deadline or deadline,
-            custody=custody if custody is not None else self.local_delivery,
+            custody=custody,
+            standalone_custody=self.local_delivery,
         )
         completion = None
         if result.exit_status is not None:

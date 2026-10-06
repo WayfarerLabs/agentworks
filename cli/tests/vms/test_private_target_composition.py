@@ -94,7 +94,6 @@ class _LocalWSL2Dispatch:
     """Exercise a real WSL2 binding without launching a Windows client."""
 
     def __init__(self, database: Database, owner: OperationOwner) -> None:
-        self.local_delivery = LocalDeliveryCustody()
         self.inline_uncertain = False
         self.calls = 0
         self.guest_calls = 0
@@ -111,7 +110,7 @@ class _LocalWSL2Dispatch:
         *,
         io: CarrierIO,
         deadline: Deadline,
-        custody: LocalDeliveryCustody | None = None,
+        custody: LocalDeliveryCustody,
     ) -> CarrierReport:
         carrier.validate(invocation, io=io)
         self.calls += 1
@@ -161,7 +160,7 @@ class _LocalWSL2Dispatch:
             list(invocation.argv),
             io=io,
             deadline=deadline,
-            custody=custody if custody is not None else self.local_delivery,
+            custody=custody,
         )
         completion = None if result.exit_status is None else ExitStatus(code=result.exit_status)
         return CarrierReport(
@@ -202,6 +201,7 @@ def composition(
     try:
         yield database, owner, vm, platform, dispatch
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 

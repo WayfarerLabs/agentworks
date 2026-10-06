@@ -48,6 +48,7 @@ from agentworks.operations import (
     RecoveryAttempt,
     _PreRegistrationClosingRefusal,
 )
+from tests.execution._bound_carrier_support import hold_operation_owner as hold_operation_owner
 from tests.execution.files._file_download_support import BytesSink
 from tests.execution.files._file_snapshot_support import LocalCarrier, install_fixture_bundle
 from tests.execution.files._fixed_bundle_support import fixture_file_bundle
@@ -384,7 +385,7 @@ def test_setup_failures_retain_one_exact_pending_call(
 
 
 def test_recovered_setup_only_inspection_settles_that_obligation_without_helper_exit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source, gate_root = _fixture(monkeypatch, tmp_path)
     database = Database(tmp_path / "state.db")
@@ -396,7 +397,7 @@ def test_recovered_setup_only_inspection_settles_that_obligation_without_helper_
         old_obligation = active.obligation
         assert old_obligation is not None
         predecessor = owner.ownership
-        recovered = OperationOwner.recover(database.operations, predecessor, "c" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, predecessor, "c" * 32))
         row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
         assert decode_file_call_obligation(row.payload).gate_setup == setup
 
@@ -429,7 +430,7 @@ def test_recovered_setup_only_inspection_settles_that_obligation_without_helper_
 
 
 def test_delayed_setup_cannot_publish_or_start_snapshot_after_takeover(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source, gate_root = _fixture(monkeypatch, tmp_path)
     database = Database(tmp_path / "state.db")
@@ -438,7 +439,7 @@ def test_delayed_setup_cannot_publish_or_start_snapshot_after_takeover(
 
     def takeover() -> None:
         nonlocal recovered
-        recovered = OperationOwner.recover(database.operations, owner.ownership, "c" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "c" * 32))
         row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
         assert decode_file_call_obligation(row.payload).gate_setup == setup
         inspected = FileGateSetupRecovery.open(recovered, _target(recovered), row).inspect(
@@ -462,7 +463,9 @@ def test_delayed_setup_cannot_publish_or_start_snapshot_after_takeover(
         database.close()
 
 
-def test_recovered_setup_only_inspection_refuses_missing_gate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_recovered_setup_only_inspection_refuses_missing_gate(
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     source, gate_root = _fixture(monkeypatch, tmp_path)
     database = Database(tmp_path / "state.db")
     owner, operation, setup = _context(database, gate_root)
@@ -470,7 +473,7 @@ def test_recovered_setup_only_inspection_refuses_missing_gate(tmp_path: Path, mo
         with pytest.raises(RuntimeError, match="lost setup reply"):
             _call(operation, _InspectingCarrier(database, owner, fail_setup="lost"), source, setup)
         Path(setup.path).unlink()
-        recovered = OperationOwner.recover(database.operations, owner.ownership, "c" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "c" * 32))
         row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
         result = FileGateSetupRecovery.open(recovered, _target(recovered), row).inspect(
             LocalCarrier(), deadline=Deadline.after(20)
@@ -487,7 +490,7 @@ def test_recovered_setup_only_inspection_refuses_missing_gate(tmp_path: Path, mo
 
 
 def test_recovered_setup_only_inspection_requires_complete_observation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source, gate_root = _fixture(monkeypatch, tmp_path)
     database = Database(tmp_path / "state.db")
@@ -495,7 +498,7 @@ def test_recovered_setup_only_inspection_requires_complete_observation(
     try:
         with pytest.raises(RuntimeError, match="lost setup reply"):
             _call(operation, _InspectingCarrier(database, owner, fail_setup="lost"), source, setup)
-        recovered = OperationOwner.recover(database.operations, owner.ownership, "c" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "c" * 32))
         row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
         recovery = FileGateSetupRecovery.open(recovered, _target(recovered), row)
         incomplete = recovery.inspect(
@@ -517,7 +520,7 @@ def test_recovered_setup_only_inspection_requires_complete_observation(
 
 
 def test_recovered_setup_only_inspection_refuses_already_bound_row(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source, gate_root = _fixture(monkeypatch, tmp_path)
     database = Database(tmp_path / "state.db")
@@ -532,7 +535,7 @@ def test_recovered_setup_only_inspection_refuses_already_bound_row(
     try:
         with pytest.raises(RuntimeError, match="lost publication reply"):
             _call(operation, LocalCarrier(), source, setup)
-        recovered = OperationOwner.recover(database.operations, owner.ownership, "c" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "c" * 32))
         row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
         assert decode_file_call_obligation(row.payload).effect_gate is not None
         with pytest.raises(StateError):
@@ -542,10 +545,14 @@ def test_recovered_setup_only_inspection_refuses_already_bound_row(
         database.close()
 
 
-def test_recovered_setup_only_refuses_cross_scope_target_before_inspection(tmp_path: Path) -> None:
+def test_recovered_setup_only_refuses_cross_scope_target_before_inspection(
+    hold_operation_owner, tmp_path: Path
+) -> None:
     database = Database(tmp_path / "state.db")
-    owner = OperationOwner.acquire(
-        database.operations, OperationScope(OperationResourceKind.VM, "core-file-vm"), "gated-download"
+    owner = hold_operation_owner(
+        OperationOwner.acquire(
+            database.operations, OperationScope(OperationResourceKind.VM, "core-file-vm"), "gated-download"
+        )
     )
     foreign_target = replace(_target(owner), name="other-vm")
     groups = tuple(sorted(set(os.getgroups()) | {os.getegid()}))
@@ -567,17 +574,18 @@ def test_recovered_setup_only_refuses_cross_scope_target_before_inspection(tmp_p
             payload=encode_file_call_obligation(call),
         )
         obligation.mark_possible_effect()
-        recovered = OperationOwner.recover(database.operations, owner.ownership, "c" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "c" * 32))
         row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
         with pytest.raises(StateError):
             FileGateSetupRecovery.open(recovered, foreign_target, row)
         assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
 def test_recovered_setup_only_settle_interruption_releases_local_dispatch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source, gate_root = _fixture(monkeypatch, tmp_path)
     database = Database(tmp_path / "state.db")
@@ -585,7 +593,7 @@ def test_recovered_setup_only_settle_interruption_releases_local_dispatch(
     try:
         with pytest.raises(RuntimeError, match="lost setup reply"):
             _call(operation, _InspectingCarrier(database, owner, fail_setup="lost"), source, setup)
-        recovered = OperationOwner.recover(database.operations, owner.ownership, "c" * 32)
+        recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "c" * 32))
         row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
         recovery = FileGateSetupRecovery.open(recovered, _target(recovered), row)
         original_settle = RecoveryAttempt.settle

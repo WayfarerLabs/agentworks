@@ -57,6 +57,7 @@ from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTar
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 from agentworks.execution.carrier import Deadline
 from agentworks.operations import OperationOwner
+from tests.execution._bound_carrier_support import hold_operation_owner as hold_operation_owner
 from tests.execution.files._file_download_support import BytesSink
 from tests.execution.files._file_snapshot_support import LocalCarrier, fixture_source, install_fixture_bundle
 from tests.execution.files._runtime_support import runtime_selection
@@ -244,6 +245,7 @@ def test_binding_codec_and_exact_file_call_row_survive_reopen(tmp_path: Path) ->
                 effect_gate=replace(binding, scope_name="another-vm"),
             )
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -616,7 +618,7 @@ def test_inspection_waits_for_same_flock_and_respects_deadline(tmp_path: Path) -
 
 
 def test_fixed_snapshot_survives_controller_loss_and_is_fenced_before_recovery(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    hold_operation_owner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     binding = _gate(tmp_path)
     root = Path(binding.path).parent
@@ -646,7 +648,7 @@ def test_fixed_snapshot_survives_controller_loss_and_is_fenced_before_recovery(
             source_metadata = Path(binding.path).stat()
             assert (source_metadata.st_dev, source_metadata.st_ino) == (binding.device, binding.inode)
             proposed = replace(binding, proposed_generation=secrets.token_bytes(16))
-            owner = OperationOwner.recover(database.operations, predecessor.ownership, "b" * 32)
+            owner = hold_operation_owner(OperationOwner.recover(database.operations, predecessor.ownership, "b" * 32))
             bound = owner.rebind_lifecycle_obligation(
                 row.obligation_id, "file-call", payload_version=row.payload_version, payload=row.payload
             )
@@ -787,6 +789,7 @@ def test_real_download_persists_gate_before_dispatch_and_retains_missing_gate(
         assert refused.requires_owner_retention
         assert not Path(binding.path).exists()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 

@@ -56,4 +56,5 @@ def bound_access(tmp_path: Path, plan: IdentityPlan, monkeypatch: pytest.MonkeyP
     try:
         yield access, root, owner, database
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()

@@ -154,6 +154,7 @@ def test_single_call_admission_refusal_closes_predispatch_borrow(
         assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -260,6 +261,7 @@ def test_real_stat_inventory_and_conditional_remove_share_core_custody(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -331,6 +333,7 @@ def test_real_metadata_and_directory_paths_preserve_noop_and_refusal(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -383,6 +386,7 @@ def test_real_partial_directory_creation_is_captured_without_replay(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -425,6 +429,7 @@ def test_cross_family_reentry_uses_the_same_owner(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -459,6 +464,7 @@ def test_local_inventory_refusal_relinquishes_borrow_without_custody(
         owner.close()
         assert database.operations.inspect(owner.ownership.scope) is None
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -499,6 +505,7 @@ def test_normal_outcome_is_attached_before_borrow_closes(
         owner.record_effects_resolved()
         owner.close()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -554,6 +561,7 @@ def test_multiple_unfinished_single_file_outcomes_remain_distinct(
         with pytest.raises(StateError):
             owner.record_effects_resolved()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -601,6 +609,7 @@ def test_fact_allocation_failure_preserves_current_binding_and_original_control(
         with pytest.raises(StateError):
             owner.borrow()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -642,6 +651,7 @@ def test_capture_failure_preserves_original_fact_and_active_state(
         with pytest.raises(StateError):
             owner.borrow()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
@@ -685,4 +695,5 @@ def test_metadata_lookup_fact_is_attached_before_failed_settlement(
         with pytest.raises(StateError):
             owner.borrow()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()

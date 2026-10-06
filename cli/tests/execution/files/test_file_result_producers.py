@@ -97,6 +97,7 @@ def real_operation(
     try:
         yield root, owner, FileOperation(owner, target_for_owner(owner)), plan, runtime_selection(sys.executable)
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 

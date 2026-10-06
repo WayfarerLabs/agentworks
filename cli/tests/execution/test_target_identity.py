@@ -41,8 +41,8 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
-from agentworks.execution.carriers._subprocess import run_process
 from agentworks.operations import OperationAttempt, OperationOwner
+from tests.execution._bound_carrier_support import run_fixture_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -164,11 +164,12 @@ class LocalCarrier:
     ) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
-        result = run_process(
+        result = run_fixture_process(
             list(invocation.argv),
             io=io,
             deadline=deadline,
-            custody=custody if custody is not None else self.local_delivery,
+            custody=custody,
+            standalone_custody=self.local_delivery,
         )
         completion = None
         if result.exit_status is not None:
@@ -220,6 +221,7 @@ def owned(tmp_path: Path) -> Iterator[tuple[Database, OperationOwner]]:
     try:
         yield database, owner
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
