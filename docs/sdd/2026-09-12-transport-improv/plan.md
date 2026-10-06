@@ -118,6 +118,21 @@ three snapshot request-size cases: the fixed helper plus maximum manifest exceed
 HTTP body limit. Root-bootstrap delivery requires further packaging work before consumer adoption;
 no provider limit or request-bound test has been weakened.
 
+The privately reviewed packaging unit at `2b1f4018a` replaces the duplicate observer with one
+canonical identity checkpoint and separates four file-module responsibilities. All three code lanes
+found no material implementation failure; the complexity lane identified the obsolete README
+description, which now reflects mandatory full guest checking and single module loading. Follow-up
+`ab9cc6a80` removes the dead reader-rebinding emitter and the redundant decoded-name check,
+retaining the early identity-dependency check. Its local file/bootstrap/runtime run passes 1,648
+tests with 25 skips, including isolated distribution Python 3.11. Under the worker's CPython 3.12.13
+test values, actual QGA serialization measures an ordinary 21-vector maximum of 61,974 bytes and
+root snapshot bodies of 64,048/64,090 bytes with a 32 KiB manifest. The separate reviewer measured
+slightly different root values at the earlier pin; these fixture measurements are not fixed sizes or
+a promise for every identity. A valid large-group publication request is refused before provider
+dispatch by the aggregate carrier bound. No protocol/carrier limit was reduced, test weakened or
+database data removed. Final re-review, complete CLI gates, native root behavior and producer/body
+fencing remain open. This does not close public feedback/fix round 1 or authorize merge readiness.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state

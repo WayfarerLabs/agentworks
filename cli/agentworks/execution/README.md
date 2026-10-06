@@ -686,13 +686,18 @@ acceptance and native integration remain open; these private plans are not grant
 activate permissions.
 
 The separate private `build_root_guest_bootstrap_argv` builder accepts an explicit root-entry plan,
-exact target credentials and an optional expected guest. It permits only Linux system Python. Its
-fixed bootstrap verifies root entry before opening `/proc/1/stat`, then sets and verifies the target
-IDs, groups and capabilities before loading helper code or consuming its stdin prefix. A fresh
-bounded reader supplies init identity through the held non-inheritable descriptor, including when a
-trusted bundle reloads its guest-identity module. No process-global fork hook is installed. Existing
-ordinary helpers do not select this builder automatically. Native hardened-guest behavior, complete
-body fencing, recovery and production consumer wiring remain unproved.
+exact target credentials, a `RootGuestProgram` and the mandatory full expected guest. It permits
+only Linux system Python. Its fixed bootstrap verifies root entry before opening `/proc/1/stat`,
+then sets and verifies the target IDs, groups and capabilities before loading helper code or
+consuming its stdin prefix. The program selects inline fixed source or one exact digest-verified
+stdin prefix. It loads the canonical guest-identity pair first, binds a fresh bounded reader to the
+held non-inheritable descriptor and checks the full guest before loading the remaining trusted
+modules and entering their body once. There is no duplicate observer bundle, guest-module reload or
+process-global fork hook. The outer cleanup closes the descriptor; application exec cannot inherit
+it. Runtime readiness remains separate from guest/body admission, and failures after the guest
+checkpoint remain body failures. Existing ordinary helpers do not select this builder automatically.
+Native hardened-guest behavior, initial named-account platform helpers, complete body fencing,
+recovery and production consumer wiring remain unproved.
 
 `_account.resolve_account` discovers a core-bound account's UID, primary GID and normalized groups
 through one read-only carrier attempt under the delivery identity. `RuntimeSelection` explicitly
