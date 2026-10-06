@@ -18,6 +18,7 @@ becomes observable.
 from __future__ import annotations
 
 import _thread
+import math
 import os
 import signal
 import subprocess
@@ -302,6 +303,21 @@ class _ProcessStatus:
         return self.status
 
 
+class ResizeNotification(StrEnum):
+    """Evidence available for one local terminal resize notification."""
+
+    NOT_SENT = "not_sent"
+    REQUESTED = "requested"
+    UNKNOWN = "unknown"
+
+
+@dataclass
+class _ResizeRequest:
+    deadline: Deadline
+    claimed: bool = False
+    result: ResizeNotification | None = None
+
+
 class _Admission(StrEnum):
     WAITING = "waiting"
     ADMITTED = "admitted"
@@ -397,6 +413,7 @@ class LocalProcessOwner:
         self._terminal: LocalProcessTerminal | None = None
         self._start_called = False
         self._closed = False
+        self._resize_request: _ResizeRequest | None = None
 
     def _admit(self, request: LocalProcessRequest) -> bool:
         with self._condition:
@@ -432,38 +449,125 @@ class LocalProcessOwner:
             self._pipes = pipes
             self._condition.notify_all()
 
-    def _publish_exit(self, status: int) -> None:
-        with self._condition:
-            if self._exit_status is None:
-                self._exit_status = status
-                self._condition.notify_all()
-
     def _publish_observation_failure(self) -> None:
         with self._condition:
             self._observation_failed = True
+            self._deny_pending_resize_locked()
             self._condition.notify_all()
+
+    def _deny_pending_resize_locked(self) -> None:
+        request = self._resize_request
+        if request is not None and not request.claimed:
+            request.result = ResizeNotification.NOT_SENT
+            self._resize_request = None
 
     def _wait_for_borrowers(self, status: _ProcessStatus) -> tuple[bool, int | None]:
         """Observe exact status until the caller relinquishes all pipe use."""
         while True:
+            observed: int | None = None
+            observation_failed = False
             if not self._observation_failed:
                 try:
                     observed = status.poll()
                 except OSError:
-                    self._publish_observation_failure()
+                    observation_failed = True
                 else:
                     if status.lost:
-                        self._publish_observation_failure()
-                    elif observed is not None:
-                        self._publish_exit(observed)
+                        observation_failed = True
+            request_to_signal: _ResizeRequest | None = None
             with self._condition:
-                if self._borrowers_stopped:
+                if observation_failed:
+                    self._observation_failed = True
+                elif observed is not None and self._exit_status is None:
+                    self._exit_status = observed
+                request = self._resize_request
+                if request is not None and not request.claimed:
+                    if (
+                        self._borrowers_stopped
+                        or self._observation_failed
+                        or self._exit_status is not None
+                        or request.deadline.expired
+                    ):
+                        request.result = ResizeNotification.NOT_SENT
+                        self._resize_request = None
+                        self._condition.notify_all()
+                    else:
+                        request.claimed = True
+                        request_to_signal = request
+                if self._borrowers_stopped and request_to_signal is None:
                     return self._observation_failed, self._exit_status
-                self._condition.wait(_POLL_SECONDS)
+                if request_to_signal is None:
+                    self._condition.wait(_POLL_SECONDS)
+
+            if request_to_signal is not None:
+                try:
+                    os.kill(status.process.pid, signal.SIGWINCH)
+                except ProcessLookupError:
+                    result = ResizeNotification.NOT_SENT
+                except BaseException:
+                    # The native call's outcome is not safe to infer, but its
+                    # failure must not replace process status or cleanup facts.
+                    result = ResizeNotification.UNKNOWN
+                else:
+                    result = ResizeNotification.REQUESTED
+                with self._condition:
+                    request_to_signal.result = result
+                    if self._resize_request is request_to_signal:
+                        self._resize_request = None
+                    self._condition.notify_all()
+
+    def notify_resize(self, deadline: Deadline) -> ResizeNotification:
+        """Request one bounded SIGWINCH through the existing process owner."""
+        expires_at = deadline.expires_at
+        if expires_at is None or isinstance(expires_at, bool) or not isinstance(expires_at, (int, float)):
+            raise ValueError("resize notification requires a finite deadline")
+        try:
+            finite_deadline = math.isfinite(expires_at)
+        except OverflowError:
+            finite_deadline = False
+        if not finite_deadline:
+            raise ValueError("resize notification requires a finite deadline")
+        if deadline.expired or os.name != "posix":
+            return ResizeNotification.NOT_SENT
+
+        with self._condition:
+            if (
+                self._closed
+                or self._borrowers_stopped
+                or self._pipes is None
+                or self._terminal is not None
+                or self._exit_status is not None
+                or self._observation_failed
+                or self._resize_request is not None
+            ):
+                return ResizeNotification.NOT_SENT
+            request = _ResizeRequest(deadline)
+            self._resize_request = request
+            self._condition.notify_all()
+            while request.result is None:
+                remaining = deadline.remaining()
+                if remaining is not None and remaining <= 0:
+                    if not request.claimed and self._resize_request is request:
+                        request.result = ResizeNotification.NOT_SENT
+                        self._resize_request = None
+                        self._condition.notify_all()
+                        return request.result
+                    return ResizeNotification.UNKNOWN
+                assert remaining is not None
+                try:
+                    self._condition.wait(min(remaining, _POLL_SECONDS))
+                except BaseException:
+                    if not request.claimed and self._resize_request is request:
+                        request.result = ResizeNotification.NOT_SENT
+                        self._resize_request = None
+                        self._condition.notify_all()
+                    raise
+            return request.result
 
     def _stop_borrowers(self) -> None:
         with self._condition:
             self._borrowers_stopped = True
+            self._deny_pending_resize_locked()
             self._condition.notify_all()
 
     def _wait_until_borrowers_stopped(self) -> None:
@@ -488,6 +592,7 @@ class LocalProcessOwner:
 
     def _publish_terminal(self, terminal: LocalProcessTerminal) -> None:
         with self._condition:
+            self._deny_pending_resize_locked()
             self._request = None
             self._pipes = None
             self._terminal = terminal
