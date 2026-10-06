@@ -485,3 +485,9 @@ fixture to a private short temporary root gives 19 passes, followed by the compl
 without weakening checks or changing product code. Both failed and passing logs are retained. Exact
 settled fixture roots were independently verified unused before removal. No native comparison,
 complete terminal or RunContext acceptance follows from this correction.
+
+Published `149ed81d6fabe4874df2437987e0968353ec195c` subsequently passes
+[hosted CI](https://github.com/WayfarerLabs/agentworks/actions/runs/37482270480), including Windows,
+Linux Python 3.12–3.14, static/repository checks and website validation. Ordinary Windows coverage
+passes 1,071 tests with 59 skips on Server 2025 and excludes the manually selected comparison; that
+result supplies no native comparison values.

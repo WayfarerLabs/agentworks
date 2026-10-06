@@ -190,16 +190,24 @@ local validation separately from the remaining shared integration and platform a
 proof fixtures from native execution and genuine production publication.
 
 Shared subprocess adoption introduces an implementation dependency on transport #833. Current
-integration uses `3d98a1a67940118e89658aa65850f916c22de108`. Its shared carrier, process,
+integration uses `1a5441722c995ea5c54095c7c8a47360a4b1c6f4`. Its shared carrier, process,
 preparation and terminal-input interfaces remain unchanged from the preceding SSH integration.
 Private execution binds the selected owner scope and bootstrap boot; the WSL2 native factory
 requires both prepared identity plans and shares one elevated-plan/full-guest bootstrap between file
 and execution state. Numeric file workflows retain that context and each record's actual envelope
 version. New private recovery/lifecycle candidates and fixed body-free Proxmox generation
 observation advance transport's composition, with source and faked-provider evidence recorded in its
-plan. Native recovery, provider freshness at dispatch, fencing/drain, complete platform
-availability, Windows terminal delivery and additive RunContext remain open. These private
-increments supply no new SSH terminal or production acceptance. The
+plan. Its latest private already-running Proxmox composition retains one VM owner and numeric
+bootstrap, while account and guest preparation preserve observed facts and original interruption
+when borrow release fails. Stopped startup still refuses. Native recovery, provider freshness at
+dispatch, fencing/drain, complete platform availability, Windows terminal delivery and additive
+RunContext remain open. These private increments supply no new SSH terminal or production
+acceptance. Rebased code pin `e38f5fcff35bd85d099129fdbe5dd8480017c007` passes 15,768
+non-integration tests with 51 skips and 27 warnings, full Ruff/format, strict mypy (1,277 sources),
+exact CI typer isolation, file quality, locked-SDD, Rulesync and whitespace checks. Website
+validation passes 160 Python and 103 Node tests, four builds and both deterministic comparisons. The
+first build target was refused inside the checkout; corrected external owned output roots pass. No
+SSH code changes or native acceptance follow from this dependency refresh. The
 [Windows ancestor-sharing correction](phase2-results.md#windows-ancestor-sharing-correction) records
 that rebase and its remaining limits. The earlier
 [local-download stack refresh](phase2-results.md#private-local-download-stack-refresh) and
