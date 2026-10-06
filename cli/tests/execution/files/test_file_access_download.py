@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import sys
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
@@ -15,6 +14,7 @@ from agentworks.errors import ConflictError, ExternalError, StateError, Uncertai
 from agentworks.execution import _file_local_download as local_download_module
 from agentworks.execution import _file_operation as file_operation_module
 from agentworks.execution import access as access_module
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_download import FileDownloadFailure, FileDownloadFailurePhase
 from agentworks.execution._file_local_download import (
     FileLocalDownloadControlFact,
@@ -58,7 +58,14 @@ def test_live_stream_file_access_reduction_preserves_typed_failure_and_remote_cu
         def __init__(self) -> None:
             super().__init__(live_stdio=True)
 
-        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+        def execute(
+            self,
+            invocation: PreparedInvocation,
+            *,
+            io: CarrierIO,
+            deadline: Deadline,
+            custody: LocalDeliveryCustody | None = None,
+        ) -> CarrierReport:
             if self.calls == 1 and fault == "scratch_refusal":
                 held = tuple(scratch.iterdir())
                 assert len(held) == 1

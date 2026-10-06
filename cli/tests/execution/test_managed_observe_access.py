@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from dataclasses import replace
 from pathlib import Path
 
@@ -12,6 +11,7 @@ from agentworks.db import Database, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _fixed_helper_operation as fixed_operation
 from agentworks.execution import _managed_observe_access as access
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, encode_file_record
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan

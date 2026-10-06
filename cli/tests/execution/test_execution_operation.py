@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import subprocess
 import sys
 import time
@@ -15,6 +14,7 @@ import pytest
 from agentworks.db import Database, OperationClaimState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _execution_operation as execution_operation
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
@@ -58,7 +58,14 @@ class RecordingCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self.validations += 1
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         del invocation, io
         self.calls += 1

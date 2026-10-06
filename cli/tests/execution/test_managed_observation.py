@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import hashlib
 import json
 import os
@@ -15,6 +14,7 @@ import pytest
 from agentworks.errors import ValidationError
 from agentworks.execution import _managed_job_wire as wire
 from agentworks.execution import _managed_observation_guest as guest
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, encode_file_record
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
@@ -171,7 +171,14 @@ class ScriptedCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         pass
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
         self.invocation = invocation

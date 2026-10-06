@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import os
 import subprocess
 import sys
@@ -12,6 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from agentworks.execution import _workload_shell_guest as guest
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState, RuntimeSelection, RuntimeTargetOS
@@ -80,7 +80,14 @@ class CarrierStub:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         pass
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.calls += 1
         assert isinstance(io.input, FiniteInput)
         assert isinstance(io.output, SinkOutput)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import hashlib
 import json
 import os
@@ -14,6 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_inventory_bundle import FIXED_BUNDLE
 from agentworks.execution._file_inventory_exchange import (
     FileInventoryCandidateResult,
@@ -71,12 +71,24 @@ class LocalCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         del invocation, io
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
         self.invocation = invocation
         self.io = io
-        result = run_process(list(invocation.argv), io=io, deadline=deadline, custody=custody if custody is not None else self.local_delivery)
+        result = run_process(
+            list(invocation.argv),
+            io=io,
+            deadline=deadline,
+            custody=custody if custody is not None else self.local_delivery,
+        )
         completion = None
         if result.exit_status is not None:
             completion = (

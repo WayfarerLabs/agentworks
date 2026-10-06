@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import os
 import sys
 from collections.abc import Callable
@@ -14,6 +13,7 @@ import pytest
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _file_effect_gate, _file_effect_gate_exchange, _file_gate_setup, _file_operation
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_download import FileDownloadOutcome
 from agentworks.execution._file_effect_gate_bundle import _MODULE_NAMES, _PACKAGE
 from agentworks.execution._file_effect_gate_exchange import GateControlMutationUncertain
@@ -72,7 +72,14 @@ class _InspectingCarrier(LocalCarrier):
         self.payloads: list[FileCallObligation] = []
         self.borrows: list[OperationBorrow | None] = []
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         rows = self._database.operations.list_lifecycle_obligations(self._owner.ownership)
         assert len(rows) == 1 and rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
         self.payloads.append(decode_file_call_obligation(rows[0].payload))
@@ -95,7 +102,14 @@ class _TakeoverAfterSetupCarrier(LocalCarrier):
         super().__init__()
         self._takeover = takeover
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         result = super().execute(invocation, io=io, deadline=deadline, custody=custody)
         if self.calls == 1:
             self._takeover()

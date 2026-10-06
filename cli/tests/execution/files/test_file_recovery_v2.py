@@ -7,7 +7,6 @@ not prove native privilege transitions, guest effects or predecessor drain.
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from dataclasses import replace
 from typing import Any
 from unittest.mock import Mock
@@ -18,6 +17,7 @@ from agentworks.db import LifecycleObligationState
 from agentworks.errors import StateError
 from agentworks.execution import _file_effect_gate_bundle as gate_bundle
 from agentworks.execution import _file_snapshot_bundle as snapshot_bundle
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_download_recovery import FileDownloadRecovery, _DownloadDrainEvidence
 from agentworks.execution._file_effect_gate import FileEffectGateBinding
 from agentworks.execution._file_effect_gate_protocol import (

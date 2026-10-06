@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import hashlib
 import time
 from pathlib import Path
@@ -12,6 +11,7 @@ import pytest
 from agentworks.errors import ValidationError
 from agentworks.execution import _managed_job_wire as wire
 from agentworks.execution import _managed_result as result_module
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._managed_job_store import FactName, Stream
 from agentworks.execution._managed_observation_protocol import ManagedOperation, ManagedResultControl
 from agentworks.execution._managed_observe_access import read_bound_managed_output

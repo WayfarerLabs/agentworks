@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import builtins
 import os
 import subprocess
@@ -17,6 +16,7 @@ from agentworks.errors import ValidationError
 from agentworks.execution import _file_effect_gate_bundle as gate_bundle
 from agentworks.execution import _file_snapshot_bundle as snapshot_bundle
 from agentworks.execution import _guest_bootstrap
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_effect_gate import FileEffectGateBinding
 from agentworks.execution._file_effect_gate_exchange import GateControlObservationState, exchange_file_effect_gate
 from agentworks.execution._file_effect_gate_protocol import GateControlOperation, decode_gate_control_request
@@ -93,7 +93,14 @@ class _CapturedCarrier:
         del invocation, io
         return 125
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         del deadline
         self.calls += 1
         self.invocation, self.io = invocation, io

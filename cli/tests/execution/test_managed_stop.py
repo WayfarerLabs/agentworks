@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import hashlib
 import json
 import os
@@ -17,6 +16,7 @@ from agentworks.errors import ValidationError
 from agentworks.execution import _managed_job_store as job_store
 from agentworks.execution import _managed_job_wire as wire
 from agentworks.execution import _managed_stop_guest as guest
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, encode_file_record
 from agentworks.execution._helper_bundle import build_helper_modules
 from agentworks.execution._helper_identity import IdentityExpectation
@@ -139,7 +139,14 @@ class Carrier:
         self.validations += 1
         assert isinstance(io.input, FiniteInput) and io.input.data.startswith(FIXED_BUNDLE.prefix)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.calls += 1
         assert isinstance(io.input, FiniteInput) and isinstance(io.output, SinkOutput)
         request = decode_request(io.input.data[len(FIXED_BUNDLE.prefix) :])

@@ -6,7 +6,6 @@ with fixture admission, so these tests do not prove native root or PVE behavior.
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import builtins
 import json
 import os
@@ -32,6 +31,7 @@ from agentworks.db import (
 from agentworks.db.operations import OperationRepository
 from agentworks.errors import ExternalError, StateError, ValidationError
 from agentworks.execution import _target_identity
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution.binding import NativeExecutionBinding
@@ -82,7 +82,14 @@ class _Route:
         self.ownership: OperationOwnership | None = None
         self.deadlines: list[Deadline] = []
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         claim = self.database.operations.inspect(_scope())
         assert claim is not None and claim.state is OperationClaimState.POSSIBLE_DISPATCH
         if self.ownership is None:

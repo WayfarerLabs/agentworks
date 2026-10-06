@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from collections.abc import Callable, Generator
 from dataclasses import replace
 from pathlib import Path
@@ -12,6 +11,7 @@ import pytest
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _managed_start_operation as start_operation
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, encode_file_record
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
@@ -136,7 +136,14 @@ class Carrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self.validations += 1
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.calls += 1
         if self.error is not None:
             raise self.error

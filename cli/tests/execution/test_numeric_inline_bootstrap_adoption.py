@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import hashlib
 import json
 import os
@@ -15,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._execution_operation import OwnedInlineOutcome
 from agentworks.execution._execution_result import reduce_owned_inline_result
 from agentworks.execution._helper_bundle import RootGuestDelivery
@@ -112,7 +112,14 @@ class _PackedCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         pass
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         assert isinstance(io.input, FiniteInput) and isinstance(io.output, SinkOutput)
         nonce = invocation.argv[invocation.argv.index("agentworks-runtime-prerequisite") + 1]
         guest = self.observed

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import base64
 import json
 from dataclasses import dataclass
@@ -10,6 +9,7 @@ from dataclasses import dataclass
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_read import _max_success_stdout_bytes, read_file
 from agentworks.execution._file_read_bundle import FIXED_BUNDLE
 from agentworks.execution._file_read_protocol import (
@@ -55,7 +55,14 @@ class CaptureCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         del invocation, io
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         del invocation, deadline
         self.calls += 1

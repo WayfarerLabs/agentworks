@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import base64
 import hashlib
 import io
@@ -16,6 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_inventory import FileInventoryEntry, encode_inventory
 from agentworks.execution._file_inventory_exchange import (
     FileInventoryObservationError,
@@ -338,7 +338,14 @@ class _ScriptedCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         del invocation, io
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         del deadline
         self.calls += 1
@@ -365,7 +372,14 @@ class _TruncatingCompleteCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         del invocation, io
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         del deadline
         assert isinstance(io.output, SinkOutput)

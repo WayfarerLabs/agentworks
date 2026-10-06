@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -12,6 +11,7 @@ import pytest
 from agentworks.db import LifecycleObligationState
 from agentworks.errors import ValidationError
 from agentworks.execution import _managed_action_custody as access
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_wire import FileRecordKind
 from agentworks.execution._managed_disposal_access import (
     MANAGED_DISPOSAL_OBLIGATION_KIND,

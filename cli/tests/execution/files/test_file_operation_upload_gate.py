@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import json
 import os
 import sys
@@ -21,6 +20,7 @@ from agentworks.execution import (
     _file_publication_exchange,
     _file_stage_exchange,
 )
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_effect_gate_bundle import _MODULE_NAMES as GATE_MODULES
 from agentworks.execution._file_effect_gate_bundle import _PACKAGE as GATE_PACKAGE
 from agentworks.execution._file_effect_gate_exchange import GateControlMutationUncertain
@@ -65,7 +65,14 @@ class _RowCheckingCarrier(LocalCarrier):
         self.expected_index: int | None = None
         self.seen: list[tuple[FileCallFamily, int | None]] = []
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         (row,) = (
             candidate
             for candidate in self._database.operations.list_lifecycle_obligations(self._owner.ownership)
@@ -169,7 +176,14 @@ def test_upload_setup_promotes_one_row_before_source_read(context) -> None:
             super().__init__()
             self.rows: list[tuple[int, FileCallFamily, bytes, bool]] = []
 
-        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+        def execute(
+            self,
+            invocation: PreparedInvocation,
+            *,
+            io: CarrierIO,
+            deadline: Deadline,
+            custody: LocalDeliveryCustody | None = None,
+        ) -> CarrierReport:
             (row,) = database.operations.list_lifecycle_obligations(owner.ownership)
             call = decode_file_call_obligation(row.payload)
             self.rows.append((row.payload_revision, call.family, call.token or b"", call.gate_setup is not None))
@@ -242,7 +256,14 @@ def test_recovered_setup_only_upload_inspects_without_source_replay(context, con
     source = BytesSource(b"x")
 
     class LostSetupCarrier(LocalCarrier):
-        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+        def execute(
+            self,
+            invocation: PreparedInvocation,
+            *,
+            io: CarrierIO,
+            deadline: Deadline,
+            custody: LocalDeliveryCustody | None = None,
+        ) -> CarrierReport:
             super().execute(invocation, io=io, deadline=deadline, custody=custody)
             raise control("lost setup reply")
 
@@ -360,7 +381,14 @@ def test_package_setup_binds_index_zero_before_any_child_side_effect(context) ->
             super().__init__()
             self.rows: list[tuple[int, int, bytes, bool]] = []
 
-        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+        def execute(
+            self,
+            invocation: PreparedInvocation,
+            *,
+            io: CarrierIO,
+            deadline: Deadline,
+            custody: LocalDeliveryCustody | None = None,
+        ) -> CarrierReport:
             (row,) = database.operations.list_lifecycle_obligations(owner.ownership)
             call = decode_file_call_obligation(row.payload)
             assert call.family is FileCallFamily.PACKAGE_UPLOAD
@@ -403,7 +431,14 @@ def test_package_setup_lost_reply_recovers_only_setup(context) -> None:
     source = BytesSource(b"a")
 
     class LostReplyCarrier(LocalCarrier):
-        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+        def execute(
+            self,
+            invocation: PreparedInvocation,
+            *,
+            io: CarrierIO,
+            deadline: Deadline,
+            custody: LocalDeliveryCustody | None = None,
+        ) -> CarrierReport:
             super().execute(invocation, io=io, deadline=deadline, custody=custody)
             raise RuntimeError("lost setup reply")
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import gc
 import json
 import os
@@ -17,6 +16,7 @@ import pytest
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import ExternalError, StateError, ValidationError
 from agentworks.execution import _file_upload
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_json import (
     FileJsonChange,
     FileJsonControlFact,
@@ -90,7 +90,14 @@ class NthInterruptCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self._inner.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
         if self.calls == self._call:
@@ -109,7 +116,14 @@ class MissingCompletionCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self._inner.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         return replace(self._inner.execute(invocation, io=io, deadline=deadline, custody=custody), completion=None)
 
@@ -127,7 +141,14 @@ class OutputFailureCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self._inner.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
         report = self._inner.execute(invocation, io=io, deadline=deadline, custody=custody)
@@ -152,7 +173,14 @@ class ReentrantCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self._inner.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         if self.calls == 0:
             with pytest.raises(StateError):
@@ -176,7 +204,14 @@ class ObligationInspectingCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self._inner.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         rows = self._database.operations.list_lifecycle_obligations(self._owner.ownership)
         assert len(rows) == 1
@@ -199,7 +234,14 @@ class ClosingLostCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self._inner.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
         if self.calls == self._lost_call:

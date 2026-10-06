@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import hashlib
 import os
 import stat
@@ -13,6 +12,7 @@ from pathlib import Path
 import pytest
 
 import agentworks.execution._file_publication_exchange as publication_exchange
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_publication import (
     Create,
     CreateMetadata,

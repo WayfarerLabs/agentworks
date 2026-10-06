@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import hashlib
 import json
 import stat
@@ -13,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_publication import (
     Create,
     CreateMetadata,
@@ -248,7 +248,14 @@ class TranscriptCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         del invocation, io
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         del deadline
         self.calls += 1

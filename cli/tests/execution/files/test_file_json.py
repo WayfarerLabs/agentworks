@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import json
 import os
 import sys
@@ -16,6 +15,7 @@ from agentworks.db import Database, OperationResourceKind, OperationScope
 from agentworks.errors import ExternalError, StateError, ValidationError
 from agentworks.execution._account import FileOwnershipObservationState
 from agentworks.execution._account_protocol import FileOwnershipFailure
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_json import (
     FileJsonChange,
     FileJsonControlFact,
@@ -92,7 +92,8 @@ class AfterCallCarrier:
         invocation: PreparedInvocation,
         *,
         io: CarrierIO,
-        deadline: Deadline, custody: LocalDeliveryCustody | None = None,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
     ) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
@@ -118,7 +119,8 @@ class InterruptingCarrier:
         invocation: PreparedInvocation,
         *,
         io: CarrierIO,
-        deadline: Deadline, custody: LocalDeliveryCustody | None = None,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
     ) -> CarrierReport:
         self.validate(invocation, io=io)
         del invocation, io
@@ -145,7 +147,8 @@ class ExpiredMissingCompletionCarrier:
         invocation: PreparedInvocation,
         *,
         io: CarrierIO,
-        deadline: Deadline, custody: LocalDeliveryCustody | None = None,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
     ) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
@@ -172,7 +175,8 @@ class ConflictThenDeadlineCarrier:
         invocation: PreparedInvocation,
         *,
         io: CarrierIO,
-        deadline: Deadline, custody: LocalDeliveryCustody | None = None,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
     ) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1

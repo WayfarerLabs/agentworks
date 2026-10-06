@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import os
 import subprocess
 import sys
@@ -13,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.execution import _vm_guest_identity_guest as guest_helper
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._runtime_prerequisite import (
     RuntimePrefixSink,
     RuntimePrerequisiteState,
@@ -86,7 +86,14 @@ class TranscriptCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         pass
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         del deadline
         self.calls += 1
@@ -106,7 +113,14 @@ class TranscriptCarrier:
 
 
 class RaisingCarrier(TranscriptCarrier):
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         del invocation, deadline
         self.calls += 1

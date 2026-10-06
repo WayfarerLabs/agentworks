@@ -6,7 +6,6 @@ are mocked. Native credential transitions and root-owned scratch are not proved.
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import gc
 import json
 import os
@@ -33,6 +32,7 @@ from agentworks.db import (
 from agentworks.db.operations import OperationRepository
 from agentworks.errors import ExternalError, StateError, UncertainOutcomeError, ValidationError
 from agentworks.execution import _wsl2_owned_operation
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_obligation import decode_file_call_obligation
 from agentworks.execution._file_operation import _ActiveFileUpload
 from agentworks.execution._helper_identity import IdentityExpectation
@@ -257,7 +257,14 @@ class _PackedCarrier:
         self.observed = VMGuestIdentity(_MARKER, BOOT, 4096)
         self.scratch: Path | None = None
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         assert isinstance(io.input, FiniteInput) and isinstance(io.output, SinkOutput)
         self.calls += 1
         nonce = invocation.argv[invocation.argv.index("agentworks-runtime-prerequisite") + 1]
@@ -300,7 +307,13 @@ class _RouteCarrier:
         self.prepared_guest: VMGuestIdentity | None = None
 
     def execute(
-        self, carrier: WSL2Carrier, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None
+        self,
+        carrier: WSL2Carrier,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
     ) -> CarrierReport:
         claim = self.guest.database.operations.inspect(_scope())
         assert claim is not None and claim.state is OperationClaimState.POSSIBLE_DISPATCH

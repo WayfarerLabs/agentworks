@@ -7,7 +7,6 @@ not proved by these tests.
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from dataclasses import replace
 from threading import Thread
 from unittest.mock import Mock
@@ -20,6 +19,7 @@ from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope, VMStatus
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._account import resolve_account
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 from agentworks.execution._wsl2_lifecycle import HandleSettlement, HostClientStatus

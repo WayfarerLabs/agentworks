@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import hashlib
 import os
 import stat
@@ -29,6 +28,7 @@ from agentworks.execution._account import (
     FileOwnershipResolutionResult,
 )
 from agentworks.execution._account_protocol import FileOwnershipFailure
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_download import (
     FileDownloadBinding,
     FileDownloadFailure,
@@ -217,7 +217,14 @@ class _ClosedFailureCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         del invocation, io
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         del deadline
         if self.admit_runtime:

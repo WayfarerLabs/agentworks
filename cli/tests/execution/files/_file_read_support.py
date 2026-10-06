@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from typing import TYPE_CHECKING
 
 from agentworks.execution import _file_read
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_read_bundle import _MODULE_NAMES, _PACKAGE
 from agentworks.execution._helper_bundle import FixedFileHelperBundle
 from agentworks.execution.carrier import (
@@ -47,12 +47,24 @@ class LocalCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         del invocation, io
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
         self.invocation = invocation
         self.io = io
-        result = run_process(list(invocation.argv), io=io, deadline=self.dispatch_deadline or deadline, custody=custody if custody is not None else self.local_delivery)
+        result = run_process(
+            list(invocation.argv),
+            io=io,
+            deadline=self.dispatch_deadline or deadline,
+            custody=custody if custody is not None else self.local_delivery,
+        )
         completion = None
         if result.exit_status is not None:
             completion = (

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
 
 import pytest
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._evidence_wire import Frame, FrameKind, WireError, encode_frame
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
@@ -84,7 +84,9 @@ class TranscriptCarrier:
     def validate(self, invocation: object, *, io: CarrierIO) -> None:
         pass
 
-    def execute(self, invocation: object, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self, invocation: object, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         del invocation, deadline
         self.calls += 1

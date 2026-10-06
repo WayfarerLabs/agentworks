@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import os
 import stat
 import sys
@@ -14,6 +13,7 @@ import pytest
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _file_operations as operations
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_inventory_exchange import FileInventoryObservationState
 from agentworks.execution._file_metadata_bundle import _MODULE_NAMES as METADATA_MODULES
 from agentworks.execution._file_metadata_bundle import _PACKAGE as METADATA_PACKAGE
@@ -49,7 +49,14 @@ class InterruptingCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         del invocation, io
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         del invocation, io, deadline
         self.calls += 1
@@ -70,7 +77,14 @@ class ReentrantCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self.inner.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         if self.calls == 0:
             with pytest.raises(StateError):

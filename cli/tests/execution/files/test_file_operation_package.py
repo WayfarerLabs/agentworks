@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import os
 import secrets
 import sqlite3
@@ -15,6 +14,7 @@ import pytest
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _file_operation
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_obligation import FileCallFamily, decode_file_call_obligation
 from agentworks.execution._file_operation import FileOperation, PackageUploadMember
 from agentworks.execution._file_publication import Create
@@ -47,7 +47,14 @@ class RowCheckingCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self._inner.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         (row,) = self._database.operations.list_lifecycle_obligations(self._owner.ownership)
         call = decode_file_call_obligation(row.payload)
         assert call.family is FileCallFamily.PACKAGE_UPLOAD
@@ -68,7 +75,14 @@ class InterruptCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self._inner.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         raise self._control
 
 

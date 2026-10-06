@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import json
 import multiprocessing
 import os
@@ -24,6 +23,7 @@ import pytest
 from agentworks.db import Database, LifecycleObligation, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError
 from agentworks.execution import _file_effect_gate, _file_gate_setup
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_download_recovery import (
     FileDownloadRecovery,
     _DownloadDrainEvidence,
@@ -120,7 +120,14 @@ class _JournalCarrier(LocalCarrier):
         self._token = token
         self._operation = operation
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         marker = invocation.argv.index("agentworks-runtime-prerequisite")
         _append_journal(
@@ -139,7 +146,9 @@ class _RecordedExitCarrier(_JournalCarrier):
     def __init__(self, journal_path: str, token: bytes) -> None:
         super().__init__(journal_path, token, "FileSnapshotBeginRequest")
 
-    def execute(self, invocation: PreparedInvocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self, invocation: PreparedInvocation, *, io, deadline, custody: LocalDeliveryCustody | None = None
+    ) -> CarrierReport:
         super().execute(invocation, io=io, deadline=deadline, custody=custody)
         os._exit(91)
 
@@ -149,7 +158,9 @@ class _CrashAfterHelperCarrier(_JournalCarrier):
         super().__init__(journal_path, token, operation)
         self._exit_code = exit_code
 
-    def execute(self, invocation: PreparedInvocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self, invocation: PreparedInvocation, *, io, deadline, custody: LocalDeliveryCustody | None = None
+    ) -> CarrierReport:
         super().execute(invocation, io=io, deadline=deadline, custody=custody)
         os._exit(self._exit_code)
 
@@ -159,7 +170,9 @@ class _CrashAfterDataUnlinkCarrier(_JournalCarrier):
         super().__init__(journal_path, token, "FileSnapshotCleanupRequest")
         self._data_unlinked_path = data_unlinked_path
 
-    def execute(self, invocation: PreparedInvocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self, invocation: PreparedInvocation, *, io, deadline, custody: LocalDeliveryCustody | None = None
+    ) -> CarrierReport:
         def crash_after_data_unlink() -> None:
             until = time.monotonic() + 20
             while time.monotonic() < until:
@@ -173,7 +186,9 @@ class _CrashAfterDataUnlinkCarrier(_JournalCarrier):
 
 
 class _CrashAfterActualCarrier(_RecordedExitCarrier):
-    def execute(self, invocation: PreparedInvocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self, invocation: PreparedInvocation, *, io, deadline, custody: LocalDeliveryCustody | None = None
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
 
         def crash_after_actual() -> None:
@@ -203,7 +218,9 @@ class _OriginatingDownloadCarrier(LocalCarrier):
         self._journal_path = journal_path
         self._blocked = blocked
 
-    def execute(self, invocation: PreparedInvocation, *, io, deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self, invocation: PreparedInvocation, *, io, deadline, custody: LocalDeliveryCustody | None = None
+    ) -> CarrierReport:
         rows = self._database.operations.list_lifecycle_obligations(self._owner.ownership)
         assert len(rows) == 1 and rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
         call = decode_file_call_obligation(rows[0].payload)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import sys
 from contextlib import closing
 from pathlib import Path
@@ -17,6 +16,7 @@ from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import ValidationError
 from agentworks.execution import _wsl2_owned_managed_job as managed
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._managed_runs import (
@@ -60,7 +60,12 @@ def _subject(
     guest_carrier = GuestThenFileCarrier(database)
 
     def execute(
-        selected: WSL2Carrier, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None
+        selected: WSL2Carrier,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
     ) -> CarrierReport:
         assert selected.connection == WSL2Connection(CONNECTION.distribution, "root", CONNECTION.wsl_executable)
         return guest_carrier.execute(invocation, io=io, deadline=deadline, custody=custody)

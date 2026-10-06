@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import os
 import sys
 from dataclasses import dataclass
@@ -12,6 +11,7 @@ import pytest
 
 from agentworks.errors import ValidationError
 from agentworks.execution import _helper_identity, _inline_guest
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._evidence_wire import Frame, FrameKind, FrameReader
 from agentworks.execution._file_read import read_file
 from agentworks.execution._helper_identity import IdentityExpectation, decode_identity
@@ -271,7 +271,14 @@ class _PreHelperFailureCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         pass
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         del io, deadline
         self.calls += 1

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import hashlib
 import json
 import os
@@ -16,6 +15,7 @@ from unittest.mock import patch
 import pytest
 
 from agentworks.execution import _file_stage_guest
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_stage_bundle import FIXED_BUNDLE
 from agentworks.execution._file_stage_exchange import (
     FileStageObservationState,

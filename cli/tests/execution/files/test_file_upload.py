@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import os
 import sys
 import time
@@ -17,6 +16,7 @@ from agentworks.db import Database, OperationClaimState, OperationResourceKind, 
 from agentworks.errors import ConflictError, ExternalError, StateError
 from agentworks.execution._account import FileOwnershipObservationState
 from agentworks.execution._account_protocol import FileOwnershipFailure
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_publication import Match, PublicationFailureKind, PublicationPhase, Replace
 from agentworks.execution._file_publication_protocol import (
     FilePublicationFailureCode,

@@ -6,7 +6,6 @@ or root-entry proofs.
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -22,6 +21,7 @@ from agentworks.execution._account import (
     FileOwnershipResolutionResult,
 )
 from agentworks.execution._account_protocol import FileOwnership
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_effect_gate import FileEffectGateBinding
 from agentworks.execution._file_effect_gate_exchange import (
     GateControlCandidateResult,
@@ -92,7 +92,14 @@ class EvidenceCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         del invocation, io
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         del invocation, io, deadline
         self.calls += 1
         if self.control:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import hashlib
 import os
 import sys
@@ -14,6 +13,7 @@ import pytest
 from agentworks.db import Database, OperationClaimState
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _file_download
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_download import (
     FileDownloadControlFact,
     FileDownloadFailure,
@@ -106,14 +106,28 @@ class _RecordingLiveCarrier(LocalCarrier):
         super().__init__(live_stdio=True)
         self.live_requests: list[bool] = []
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         assert isinstance(io.output, SinkOutput)
         self.live_requests.append(io.output.require_live)
         return super().execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 class _LostLiveCompletionCarrier(_RecordingLiveCarrier):
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         report = super().execute(invocation, io=io, deadline=deadline, custody=custody)
         if self.calls == 2:
             return replace(report, completion=None)
@@ -121,7 +135,14 @@ class _LostLiveCompletionCarrier(_RecordingLiveCarrier):
 
 
 class _LostLiveCleanupCarrier(_RecordingLiveCarrier):
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         report = super().execute(invocation, io=io, deadline=deadline, custody=custody)
         if self.calls == 3:
             return replace(report, completion=None)

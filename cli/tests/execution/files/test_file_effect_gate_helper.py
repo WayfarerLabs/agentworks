@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import json
 import os
 import subprocess
@@ -14,6 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.execution import _file_effect_gate_exchange
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_effect_gate_bundle import _MODULE_NAMES, _PACKAGE, FIXED_BUNDLE
 from agentworks.execution._file_effect_gate_exchange import GateControlObservationState, exchange_file_effect_gate
 from agentworks.execution._file_effect_gate_protocol import (
@@ -200,7 +200,14 @@ def test_stale_guest_is_refused_before_creation(tmp_path: Path, monkeypatch: pyt
 
 
 class _LostOutputCarrier(LocalCarrier):
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         report = super().execute(invocation, io=io, deadline=deadline, custody=custody)
         return replace(report, stdout=replace(report.stdout, complete=False))
 
@@ -211,7 +218,14 @@ class _BlackholeSink:
 
 
 class _LostCompleteOutputCarrier(LocalCarrier):
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         assert isinstance(io.output, SinkOutput)
         dropped = replace(io, output=replace(io.output, stdout=_BlackholeSink()))
         report = super().execute(invocation, io=dropped, deadline=deadline, custody=custody)

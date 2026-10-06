@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import os
 import sys
 from dataclasses import replace
@@ -13,6 +12,7 @@ import pytest
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError
 from agentworks.execution import _file_effect_gate, _file_effect_gate_exchange, _file_gate_setup, _file_package_recovery
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_effect_gate import FileEffectGateError, hold_file_effect_gate
 from agentworks.execution._file_effect_gate_bundle import _MODULE_NAMES, _PACKAGE
 from agentworks.execution._file_effect_gate_exchange import exchange_file_effect_gate
@@ -132,7 +132,14 @@ def test_lost_advance_reply_reuses_durable_proposal(context) -> None:
     recovered, fence = _recover(context, row, "b" * 32)
 
     class LostReply(LocalCarrier):
-        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+        def execute(
+            self,
+            invocation: PreparedInvocation,
+            *,
+            io: CarrierIO,
+            deadline: Deadline,
+            custody: LocalDeliveryCustody | None = None,
+        ) -> CarrierReport:
             super().execute(invocation, io=io, deadline=deadline, custody=custody)
             raise RuntimeError("lost advance reply")
 

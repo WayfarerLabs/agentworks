@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import os
 import sys
 from contextlib import closing
@@ -18,6 +17,7 @@ from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import ValidationError
 from agentworks.execution import _file_effect_gate, _file_effect_gate_exchange, _file_gate_setup, _wsl2_owned_operation
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_effect_gate_bundle import _MODULE_NAMES, _PACKAGE
 from agentworks.execution._file_gate_setup import FileEffectGateSetup
 from agentworks.execution._helper_identity import IdentityExpectation
@@ -71,7 +71,14 @@ class GuestThenFileCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         self.file_carrier.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.calls += 1
         claim = self.database.operations.inspect(OperationScope(OperationResourceKind.VM, "box"))
         assert claim is not None
@@ -140,7 +147,12 @@ def _platform_subject(
     observed_carriers: list[WSL2Carrier] | None = None,
 ) -> tuple[WSL2OwnedDownload | None, Mock]:
     def execute(
-        selected: WSL2Carrier, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None
+        selected: WSL2Carrier,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
     ) -> CarrierReport:
         if observed_routes is not None:
             observed_routes.append(selected.connection)

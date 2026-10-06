@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import sys
 from contextlib import closing
 from pathlib import Path
@@ -17,6 +16,7 @@ from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import ValidationError
 from agentworks.execution import _wsl2_owned_operation
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution._wsl2_owned_download import WSL2OwnedDownload
 from agentworks.execution._wsl2_owned_managed_job import WSL2OwnedManagedJob
@@ -163,7 +163,12 @@ def test_hold_reads_and_settles_only_supplied_owners_database(
         carrier = GuestThenFileCarrier(database)
 
         def execute(
-            selected: WSL2Carrier, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None
+            selected: WSL2Carrier,
+            invocation: PreparedInvocation,
+            *,
+            io: CarrierIO,
+            deadline: Deadline,
+            custody: LocalDeliveryCustody | None = None,
         ) -> CarrierReport:
             assert selected.connection == WSL2Connection("Ubuntu", "root", "wsl.exe")
             return carrier.execute(invocation, io=io, deadline=deadline, custody=custody)

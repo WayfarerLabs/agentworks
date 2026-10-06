@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import threading
 import time
 from typing import TYPE_CHECKING
 
 from agentworks.execution import _process
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import CarrierIO, ChannelFeatures, SinkOutput
 from tests.execution.files._file_stage_support import LocalCarrier
 from tests.execution.files._runtime_support import runtime_ready_record
@@ -84,7 +84,8 @@ class AdmittedTimeoutCarrier:
         invocation: PreparedInvocation,
         *,
         io: CarrierIO,
-        deadline: Deadline, custody: LocalDeliveryCustody | None = None,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
     ) -> CarrierReport:
         self.validate(invocation, io=io)
         if self._startup_delay:

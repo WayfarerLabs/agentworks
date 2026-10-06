@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from dataclasses import replace
 from pathlib import Path
 
@@ -12,6 +11,7 @@ from agentworks.db import Database, LifecycleObligationState, OperationResourceK
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _fixed_helper_operation as fixed_operation
 from agentworks.execution import _managed_job_access as access
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._managed_runs import (
@@ -397,7 +397,14 @@ def test_user_default_shell_is_observed_before_reservation(tmp_path: Path) -> No
     owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "start")
 
     class DualCarrier(Carrier):
-        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+        def execute(
+            self,
+            invocation: PreparedInvocation,
+            *,
+            io: CarrierIO,
+            deadline: Deadline,
+            custody: LocalDeliveryCustody | None = None,
+        ) -> CarrierReport:
             assert isinstance(io.input, FiniteInput)
             if io.input.data.startswith(FIXED_BUNDLE.prefix):
                 return super().execute(invocation, io=io, deadline=deadline, custody=custody)

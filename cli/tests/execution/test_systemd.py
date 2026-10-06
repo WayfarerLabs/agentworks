@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 import hashlib
 import os
 import signal
@@ -18,6 +17,7 @@ import pytest
 
 from agentworks.errors import ValidationError
 from agentworks.execution import systemd
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._evidence_wire import Frame, FrameKind, FrameReader, encode_frame
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._inline_control import (
@@ -214,7 +214,14 @@ class SystemdFake:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         pass
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         del deadline
         argv = invocation.argv
@@ -492,7 +499,14 @@ def test_prerequisite_requires_root_v252_and_cgroup_v2() -> None:
     assert all("cgroup.kill" not in part for call in current.calls for part in call)
 
     class Older(SystemdFake):
-        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+        def execute(
+            self,
+            invocation: PreparedInvocation,
+            *,
+            io: CarrierIO,
+            deadline: Deadline,
+            custody: LocalDeliveryCustody | None = None,
+        ) -> CarrierReport:
             self.validate(invocation, io=io)
             if invocation.argv == ("/usr/bin/systemd-run", "--version"):
                 return _report(b"systemd 251\n")
@@ -501,7 +515,14 @@ def test_prerequisite_requires_root_v252_and_cgroup_v2() -> None:
     assert check_systemd_prerequisites(Older(), deadline=Deadline.after(1)) is PrerequisiteState.UNSUPPORTED
 
     class Newer(SystemdFake):
-        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+        def execute(
+            self,
+            invocation: PreparedInvocation,
+            *,
+            io: CarrierIO,
+            deadline: Deadline,
+            custody: LocalDeliveryCustody | None = None,
+        ) -> CarrierReport:
             self.validate(invocation, io=io)
             if invocation.argv == ("/usr/bin/systemd-run", "--version"):
                 return _report(b"systemd 253\n")
@@ -510,7 +531,14 @@ def test_prerequisite_requires_root_v252_and_cgroup_v2() -> None:
     assert check_systemd_prerequisites(Newer(), deadline=Deadline.after(1)) is PrerequisiteState.READY
 
     class Unprivileged(SystemdFake):
-        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody | None = None) -> CarrierReport:
+        def execute(
+            self,
+            invocation: PreparedInvocation,
+            *,
+            io: CarrierIO,
+            deadline: Deadline,
+            custody: LocalDeliveryCustody | None = None,
+        ) -> CarrierReport:
             self.validate(invocation, io=io)
             if invocation.argv[:5] == ("/usr/bin/python3", "-I", "-S", "-B", "-c"):
                 return _report(b"AGW_MANAGED_CONTROL_1:unavailable\n")
