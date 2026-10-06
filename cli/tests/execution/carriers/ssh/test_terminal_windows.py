@@ -15,8 +15,6 @@ import pytest
 from agentworks.execution.carriers.ssh import _terminal_windows as module
 from agentworks.execution.carriers.ssh._terminal_windows import WindowsTerminal
 
-pytestmark = pytest.mark.windows
-
 _INPUT_FD, _OUTPUT_FD = 17, 23
 _INPUT_HANDLE, _OUTPUT_HANDLE = 0x100000011, 0x100000017
 
@@ -101,7 +99,6 @@ def test_early_raw_mode_exact_restore_and_explicit_handles(console: _FakeConsole
     terminal = WindowsTerminal.acquire(_INPUT_FD, _OUTPUT_FD)
     assert console.mode == (original & ~0x0007) | 0x0200
     assert terminal.input_handle == _INPUT_HANDLE
-    assert terminal.output_handle == _OUTPUT_HANDLE
     assert terminal.dimensions() == (31, 97)
     console.size = (42, 113)
     assert terminal.dimensions() == (42, 113)
@@ -114,7 +111,7 @@ def test_early_raw_mode_exact_restore_and_explicit_handles(console: _FakeConsole
         ("set", _INPUT_HANDLE, (original & ~0x0007) | 0x0200),
         ("set", _INPUT_HANDLE, original),
     ]
-    for access in (lambda: terminal.input_handle, lambda: terminal.output_handle, terminal.dimensions):
+    for access in (lambda: terminal.input_handle, terminal.dimensions):
         with pytest.raises(RuntimeError):
             access()
     assert console.calls == effects
@@ -135,7 +132,6 @@ def test_wrong_worker_refuses_access_and_release_without_effect(console: _FakeCo
     def wrong_worker() -> None:
         for access in (
             lambda: terminal.input_handle,
-            lambda: terminal.output_handle,
             terminal.dimensions,
             terminal.release,
         ):
@@ -147,7 +143,7 @@ def test_wrong_worker_refuses_access_and_release_without_effect(console: _FakeCo
     worker = Thread(target=wrong_worker)
     worker.start()
     worker.join()
-    assert len(failures) == 4
+    assert len(failures) == 3
     assert all(isinstance(error, RuntimeError) for error in failures)
     assert console.calls == before
     assert terminal.release() == ()
@@ -236,7 +232,7 @@ def test_release_records_uncertainty_once_and_closes_no_borrower(console: _FakeC
     assert evidence == (error,)
     effects = list(console.calls)
     assert terminal.release() is evidence
-    for access in (lambda: terminal.input_handle, lambda: terminal.output_handle, terminal.dimensions):
+    for access in (lambda: terminal.input_handle, terminal.dimensions):
         with pytest.raises(RuntimeError):
             access()
     assert console.calls == effects
@@ -289,10 +285,15 @@ class _Kernel:
         self.fail: str | None = None
         self.window = (11, 17, 107, 47)
         self.calls: list[tuple[str, int]] = []
+        self.crt_fds: list[int] = []
         self.GetConsoleMode = _NativeCall(self.mode_query)
         self.GetNumberOfConsoleInputEvents = _NativeCall(self.events_query)
         self.SetConsoleMode = _NativeCall(self.mode_set)
         self.GetConsoleScreenBufferInfo = _NativeCall(self.geometry)
+
+    def crt_handle(self, fd: int) -> int:
+        self.crt_fds.append(fd)
+        return 123
 
     def mode_query(self, handle: int, pointer: Any) -> int:
         self.calls.append(("mode", handle))
@@ -330,6 +331,7 @@ class _Kernel:
 def native_boundary(monkeypatch: pytest.MonkeyPatch) -> tuple[module._ConsoleAPI, _Kernel]:
     kernel = _Kernel()
     monkeypatch.setattr(module, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setitem(sys.modules, "msvcrt", SimpleNamespace(get_osfhandle=kernel.crt_handle))
     monkeypatch.setattr(ctypes, "WinDLL", lambda *args, **kwargs: kernel, raising=False)
     monkeypatch.setattr(ctypes, "get_last_error", lambda: 87, raising=False)
     monkeypatch.setattr(ctypes, "WinError", lambda code: OSError(code, "Native refusal"), raising=False)
@@ -390,13 +392,10 @@ def test_external_viewport_invalidity_refuses(
         api.dimensions(_OUTPUT_HANDLE)
 
 
-def test_crt_translation_uses_supplied_descriptor(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[int] = []
-    monkeypatch.setattr(module, "sys", SimpleNamespace(platform="win32"))
-    monkeypatch.setitem(sys.modules, "msvcrt", SimpleNamespace(get_osfhandle=lambda fd: calls.append(fd) or 123))
-    api = object.__new__(module._ConsoleAPI)
+def test_crt_translation_uses_supplied_descriptor(native_boundary: tuple[module._ConsoleAPI, _Kernel]) -> None:
+    api, kernel = native_boundary
     assert api.handle(37) == 123
-    assert calls == [37]
+    assert kernel.crt_fds == [37]
 
 
 def test_non_windows_binding_refuses_without_loading_kernel(monkeypatch: pytest.MonkeyPatch) -> None:
