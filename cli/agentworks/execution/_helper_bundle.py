@@ -116,7 +116,7 @@ def _build_root_guest_program(
     return RootGuestProgram(loader, delivery, delivered)
 
 
-def build_helper_modules(package_name: str, module_names: tuple[str, ...]) -> str:
+def build_helper_modules(package_name: str, module_names: tuple[str, ...], *, compact: bool = False) -> str:
     """Build a loader for core-selected sibling modules in dependency order.
 
     Only trusted packaged source belongs here. Request values travel separately
@@ -125,6 +125,8 @@ def build_helper_modules(package_name: str, module_names: tuple[str, ...]) -> st
     """
     package = files(__package__)
     sources = tuple((name, package.joinpath(f"{name}.py").read_text(encoding="utf-8")) for name in module_names)
+    if compact:
+        sources = tuple((name, _compact_fixed_source(source)) for name, source in sources)
     payload = base64.b64encode(
         bz2.compress(json.dumps(sources, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
     ).decode("ascii")

@@ -12,6 +12,7 @@ from agentworks.execution import _managed_job_wire as wire
 from agentworks.execution._helper_bundle import build_helper_modules
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._managed_job_request import ManagedJobRequest
+from agentworks.execution._managed_lease_wire import sampled_lease
 from agentworks.execution._managed_start_bundle import FIXED_BUNDLE
 from agentworks.execution._managed_start_protocol import ManagedStartRequest, encode_request
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
@@ -64,7 +65,8 @@ def test_exact_bundle_runs_without_installed_package(interpreter: str, tmp_path:
 
 
 @pytest.mark.parametrize("interpreter", [sys.executable, "/usr/bin/python3.11"])
-def test_exact_source_binary_codec_parity(interpreter: str, tmp_path: Path) -> None:
+@pytest.mark.parametrize("operation", [False, True])
+def test_exact_source_binary_codec_parity(interpreter: str, operation: bool, tmp_path: Path) -> None:
     if not Path(interpreter).exists():
         pytest.skip("interpreter unavailable")
     source = build_helper_modules(
@@ -72,8 +74,10 @@ def test_exact_source_binary_codec_parity(interpreter: str, tmp_path: Path) -> N
         (
             "_helper_identity",
             "_managed_job_wire",
+            "_managed_lease_wire",
             "_managed_job_request",
             "_managed_job_store",
+            "_managed_lease_store",
             "_file_wire",
             "_vm_guest_identity_protocol",
             "_managed_start_protocol",
@@ -85,12 +89,27 @@ def test_exact_source_binary_codec_parity(interpreter: str, tmp_path: Path) -> N
         "assert p.encode_request(p.decode_request(data))==data\n"
         "assert p.decode_request(data).job.stdin==b'\\x00\\xff\\x80'\n"
     )
+    launch = _launch()
+    if operation:
+        value = wire.decode_fact(launch)
+        value["owner"] = {"kind": "operation", "owner_id": "c" * 32}
+        value["lifetime"] = "operation"
+        launch = wire.encode_fact(value)
     request = encode_request(
         ManagedStartRequest(
             NONCE,
             IdentityExpectation(0, 0, (0,)),
             ManagedJobRequest(
-                _launch(), "command", ("/usr/bin/true",), None, "discard", None, (), b"", b"\x00\xff\x80"
+                launch,
+                "command",
+                ("/usr/bin/true",),
+                None,
+                "discard",
+                None,
+                (),
+                b"",
+                b"\x00\xff\x80",
+                sampled_lease(launch, 1000) if operation else None,
             ),
             GUEST,
         )

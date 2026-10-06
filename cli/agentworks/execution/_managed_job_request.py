@@ -1,6 +1,6 @@
-"""Portable, closed v1 request assets for an independent managed job.
+"""Portable, closed v1 request assets for a managed job.
 
-This file and its two stdlib-only wire dependencies are bundled as exact source
+This file and its stdlib-only wire dependencies are bundled as exact source
 and run on Python 3.11 without an installed agentworks package.
 Limits bound memory before parsing or dispatch: control 32 KiB, environment
 64 KiB, source and stdin 16 MiB each. Capture uses the v1 16 MiB ceiling.
@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import cast
 
 from . import _managed_job_wire as wire
+from ._managed_lease_wire import LeaseError, OperationLease, checked_lease, decode_lease, encode_lease
 
 VERSION = 1
 MAX_LAUNCH_BYTES = wire.MAX_MANAGED_JOB_FACT_BYTES
@@ -51,6 +52,7 @@ class ManagedJobRequest:
     environment: tuple[tuple[str, str], ...]
     source: bytes
     stdin: bytes
+    operation_lease: OperationLease | None = None
 
 
 def _json(value: object) -> bytes:
@@ -126,16 +128,15 @@ def _checked_metadata(value: object, maximum: int, *, allow_empty: bool) -> None
 
 
 def decode_request_launch(data: bytes) -> dict[str, object]:
-    """Validate the complete canonical launch fact and independent owner."""
+    """Validate the canonical launch and its exact lifetime/owner pair."""
     try:
         value = wire.decode_fact(data)
     except wire.ManagedJobWireError:
         raise RequestError("invalid launch") from None
-    if value["kind"] != "launch" or value["lifetime"] != "independent":
+    if value["kind"] != "launch":
         raise RequestError("unsupported launch")
-    owner = cast("dict[str, object]", value["owner"])
     shell = cast("dict[str, object]", value["shell"])
-    if owner["kind"] != "resource" or shell["interactive"]:
+    if shell["interactive"]:
         raise RequestError("unsupported launch ownership or shell")
     return value
 
@@ -145,7 +146,8 @@ def decode_control(data: bytes) -> dict[str, object]:
     value = _decode(data, MAX_CONTROL_BYTES)
     run_id = value.get("run_id")
     if (
-        set(value) != {"version", "run_id", "kind", "argv", "cwd", "output", "environment", "source", "stdin"}
+        set(value) - {"operation_lease"}
+        != {"version", "run_id", "kind", "argv", "cwd", "output", "environment", "source", "stdin"}
         or type(value["version"]) is not int
         or value["version"] != VERSION
         or type(run_id) is not str
@@ -169,6 +171,11 @@ def decode_control(data: bytes) -> dict[str, object]:
         _checked_metadata(value[name], maximum, allow_empty=name != "environment")
     if kind == "command" and value["source"] != _metadata(b""):
         raise RequestError("command source must be empty")
+    if "operation_lease" in value:
+        try:
+            decode_lease(_json(value["operation_lease"]))
+        except LeaseError:
+            raise RequestError("invalid operation lease") from None
     return value
 
 
@@ -218,6 +225,15 @@ def encode_request(request: ManagedJobRequest) -> dict[str, bytes]:
     if type(request) is not ManagedJobRequest:
         raise RequestError("invalid request")
     launch = decode_request_launch(request.launch)
+    try:
+        if launch["lifetime"] == "operation":
+            if request.operation_lease is None:
+                raise RequestError("operation lease required")
+            checked_lease(request.operation_lease, request.launch)
+        elif request.operation_lease is not None:
+            raise RequestError("independent request cannot carry operation lease")
+    except LeaseError:
+        raise RequestError("invalid operation lease") from None
     shell = cast("dict[str, object]", launch["shell"])
     if type(request.argv) is not tuple:
         raise RequestError("invalid argv")
@@ -265,6 +281,11 @@ def encode_request(request: ManagedJobRequest) -> dict[str, bytes]:
             "environment": _metadata(environment),
             "source": _metadata(request.source),
             "stdin": _metadata(request.stdin),
+            **(
+                {"operation_lease": json.loads(encode_lease(request.operation_lease))}
+                if request.operation_lease is not None
+                else {}
+            ),
         }
     )
     if len(control) > MAX_CONTROL_BYTES:
@@ -292,6 +313,7 @@ def decode_request(assets: dict[str, bytes]) -> ManagedJobRequest:
         decode_environment(assets["request-environment"]),
         assets["request-source"],
         assets["request-stdin"],
+        decode_lease(_json(control["operation_lease"])) if "operation_lease" in control else None,
     )
     if encode_request(request) != assets:
         raise RequestError("noncanonical request")

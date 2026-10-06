@@ -753,8 +753,10 @@ def test_exact_source_python_311(interpreter: str, tmp_path: Path) -> None:
         (
             "_helper_identity",
             "_managed_job_wire",
+            "_managed_lease_wire",
             "_managed_job_request",
             "_managed_job_store",
+            "_managed_lease_store",
             "_file_wire",
             "_vm_guest_identity_protocol",
             "_managed_observation_protocol",
