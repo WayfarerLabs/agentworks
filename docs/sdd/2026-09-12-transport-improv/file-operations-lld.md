@@ -902,6 +902,16 @@ automatic upgrade. A missing bootstrap is not an alternate production Linux VM d
 Recovery must freshly prepare and compare the selected target, complete guest, root entry and body
 identity before using a bootstrap-bound record. A changed or unavailable fact refuses dispatch while
 retaining uncertainty and custody; it does not rewrite the old record to match the new environment.
+For version two, compare the exact root and body numeric UID, GID and complete groups, in addition
+to the target, full guest and runtime selection. Identity transition modes are delivery-relative:
+fresh root delivery may enter directly where the historical SSH route used sudo, and the numeric
+bootstrap may demote to the same body whose earlier route entered directly. Fresh preparation must
+succeed on the explicitly selected route before using its launcher; no failed launch may trigger
+another mode or root fallback for a missing or changed non-root body. This grants no new operation
+or elevation authority. Keep the persisted plans, including their historical modes, byte-for-byte as
+the exact version/revision rebind and publication basis; use the freshly prepared root launcher only
+for the current delivery. Version-one recovery retains its original plan semantics without
+projection, inferred bootstrap or upgrade. Matching these identities does not establish drain.
 Admission still reserves every reachable retained payload within the existing 8,192-byte envelope.
 The private versioned codec now represents and validates those facts. `FileOperation` binds one
 optional context at construction, verifies the selected VM boot, and gives each prepared binding

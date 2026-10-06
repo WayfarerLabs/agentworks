@@ -543,12 +543,21 @@ availability composition, retained-file adoption and native endpoint/drain evide
 The private local-cleanup follow-up at `3acac1653` retains an exact dispatcher candidate before
 activation and clears that slot before a reused binding's next preflight. Same-dispatch close can
 retry only its own validated close transition; private cleanup of an unreturned opening refuses
-outstanding or conflicting custody. The batch separates stopped-query accounting from whether
-close returned, so resolution retry may finish only local cleanup and its own row without another
-probe. The worker passes 319 focused/adjacent cases, scoped strict mypy, Ruff/format, full file
-quality and whitespace gates, exit 0. It adds no activation marker, schema, ordinary-borrow change
-or wider adapter migration. Integrated reviews and lead gates remain pending. Outer availability,
+outstanding or conflicting custody. The batch separates stopped-query accounting from whether close
+returned, so resolution retry may finish only local cleanup and its own row without another probe.
+The worker passes 319 focused/adjacent cases, scoped strict mypy, Ruff/format, full file quality and
+whitespace gates, exit 0. It adds no activation marker, schema, ordinary-borrow change or wider
+adapter migration. Integrated reviews and lead gates remain pending. Outer availability,
 retained-file adoption and native drain proof remain open; no public round closes.
+
+Fresh version-two recovery compares logical numeric root/body credentials, not equality of
+delivery-relative transition modes. Source-backed project review confirms that the numeric bootstrap
+consumes the body's UID/GID/complete groups separately from the selected root-entry launcher. Native
+direct root entry and a historical SSH sudo entry can therefore preserve the same bound authority
+without rewriting the retained record. The file LLD now distinguishes immutable historical plans
+from a freshly prepared current launcher; no mode fallback, changed non-root body, version-one
+reinterpretation or drain inference is permitted. This is response clarification, not implemented
+adapter adoption or native privilege proof.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
