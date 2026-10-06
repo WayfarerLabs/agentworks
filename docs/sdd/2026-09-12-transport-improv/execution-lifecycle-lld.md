@@ -358,6 +358,16 @@ dispatch transaction: a takeover after the last check can still race an already 
 The supplied sampled expiry bounds that exchange's possible extension; it is not instant target
 fencing.
 
+The main path first resolves the workload shell and validates and freezes the body, environment and
+output policy, including control-space headroom for the later lease field. Reserve the planned
+OPERATION run before admitting its keeper or sampling the guest clock, so recovery can always read
+its exact specification. Retain the run ID before reservation and inspect it after an uncertain
+commit; never replay start. Attach only the real sampled initial lease, then perform complete request
+and carrier preparation before one start. A clock or carrier refusal after reservation may leave a
+`RESERVED` one-shot tombstone. This differs from independent start's complete preflight-before-reserve
+ordering because the initial operation lease requires a guest observation. No body launch precedes
+the durable possible-dispatch transition.
+
 Register the run-ID-only support obligation on the main path before borrowing ordinary work. Bind
 OPERATION lifetime and owner kind to the actual operation ID, exact VM and full guest identity once,
 then pass immutable facts and a separately prepared carrier to the worker. Reuse the retained

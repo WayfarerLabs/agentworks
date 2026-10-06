@@ -2790,8 +2790,17 @@ thread-affine managed repository. Initial renewal starts only after a clean ackn
 uncertain starts retain their debt without renewal. A blocked repository fence also demonstrates why
 ordinary close intent now uses one monotonic event instead of waiting for the owner guard. Keeper
 join and local drain must precede all later guarded teardown. The private close-signal
-implementation passes 428 coherent cases; independent implementation review and complete keeper
-composition remain open.
+implementation passes 428 coherent cases. Independent project, complexity and generic reviews of the
+integrated controller-observation and close-signal unit report no material findings. The final
+generic review at `83f4deec6` passes 273 cases; the project and complexity reviews of its identical
+code at `4b37d94c2` pass 264 and 234 cases respectively. Host collector mutation rejects all three
+wrong unit, boot and digest cases; restoring guarded close intent fails the real lock-contention
+regression. Complete keeper composition, recovery and native acceptance remain open.
+
+The full non-integration suite at `83f4deec6` passes 15,918 cases with 50 skips and 27 existing fork
+warnings on the Linux Python 3.12 workstation. The run uses a private short test directory without
+the workspace's inherited default ACL; no production file checks are weakened. This is not native
+Windows, systemd, SSH or QGA acceptance.
 
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
       serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one
