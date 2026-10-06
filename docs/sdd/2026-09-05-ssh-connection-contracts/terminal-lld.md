@@ -243,6 +243,10 @@ not establish that custody. Asynchronous thread injection, fatal signals and all
 are outside this interruption guarantee. The shared process owner still needs native stdin support;
 the actual relay, cleanup reduction, presentation sanitation and native acceptance remain open.
 
+Use explicit worker completion facts when a caller wait is interrupted. The current signal case
+interrupts before joining and leaves interrupted-wait settlement unproved. The test helper retains
+its fixtures until worker settlement; an owning test-process/job timeout supplies the hang bound.
+
 ## Remaining proof
 
 The host experiment used bounded small writes and captured output, not a production relay. The
