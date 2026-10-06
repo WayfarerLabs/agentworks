@@ -468,3 +468,20 @@ files remain untouched and that check is not a claimed pass. Actual collection a
 includes only the ordinary native fixture in both normal CI selections, and the explicit comparison
 node collects separately. These observations do not execute either native case. New native
 comparison values remain unobserved. The README now names the one-time command.
+
+All three private source lanes clear combined code/evidence pin
+`53ae6123ed25e1697bb2a76a5cafdf255d271d4f`, on transport `3d98a1a67`. Complete local validation
+passes **15,717 non-integration tests with 51 skips and 27 warnings**, exit 0 in 240.33 seconds.
+Full Ruff/format (1,313 files), strict mypy (1,276 sources), scoped strict Windows typing (4 files
+with silent imports), exact CI typer isolation, file quality, locked-SDD, Rulesync and whitespace
+gates pass. Actual collection selects the ordinary native node under Windows CI and the research
+node only when explicitly requested. Website inputs and locked dependency files remain unchanged
+from the preceding complete website validation; no new website run is claimed.
+
+The initial full run beneath the shared workspace recorded 208 failures and 37 setup errors. Its
+fixture directories inherited mode 2770/default group ACLs; diagnostics include unsafe gate/stage
+namespaces, ancestor traversal denial and overlong Unix socket paths. Moving the same code's gate
+fixture to a private short temporary root gives 19 passes, followed by the complete pass above,
+without weakening checks or changing product code. Both failed and passing logs are retained. Exact
+settled fixture roots were independently verified unused before removal. No native comparison,
+complete terminal or RunContext acceptance follows from this correction.
