@@ -190,15 +190,17 @@ local validation separately from the remaining shared integration and platform a
 proof fixtures from native execution and genuine production publication.
 
 Shared subprocess adoption introduces an implementation dependency on transport #833. Current
-integration uses `a128c09eb37986ba4264ce041d39d5b2f5fbebaa`, adding private numeric gate/snapshot
-bootstrap context to reviewed WSL hold/query/probe adoption of named admission, bootstrap/file
-packaging, owner-mediated POSIX resize, shared terminal input and explicit borrowed native stdin,
-structural preflight, managed-start and download mechanisms. Early named admission separates root
-launch from the configured body account and preserves existing version-3 hold recovery. It does not
-complete production composition or native guest-fencing acceptance. Numeric context carries root
-entry and a complete verified guest; operation binding and other helper-family adoption remain open.
-The [Windows ancestor-sharing correction](phase2-results.md#windows-ancestor-sharing-correction)
-records that rebase and its remaining limits. The earlier
+integration uses `e0ad14ded9265238fa19cad972f92cc047548111`, adding private numeric context across
+all eight file-helper families and a versioned durable codec to reviewed WSL hold/query/probe
+adoption of named admission, bootstrap/file packaging, owner-mediated POSIX resize, shared terminal
+input and explicit borrowed native stdin, structural preflight, managed-start and download
+mechanisms. Early named admission separates root launch from the configured body account and
+preserves existing version-3 hold recovery. It does not complete production composition or native
+guest-fencing acceptance. Numeric context carries root entry and a complete verified guest;
+operation binding, workflow children, exact envelope-version consumers, fresh recovery and additive
+RunContext adoption remain open. The
+[Windows ancestor-sharing correction](phase2-results.md#windows-ancestor-sharing-correction) records
+that rebase and its remaining limits. The earlier
 [local-download stack refresh](phase2-results.md#private-local-download-stack-refresh) and
 [advanced-stack refresh](phase2-results.md#advanced-transport-stack-refresh) retain the pins they
 validated. The

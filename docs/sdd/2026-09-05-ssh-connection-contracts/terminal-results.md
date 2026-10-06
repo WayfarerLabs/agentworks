@@ -307,3 +307,37 @@ and 103 Node tests; four builds and both deterministic comparisons exit 0. All 2
 records remain unchanged. Owned suite/build roots are independently checked for remaining process
 and descriptor use and removed after completion. The publication adds only SSH evidence to this
 Python tree; new-head hosted/native results remain pending.
+
+## Installed Windows resource identity
+
+Hosted CI at `467ef0dd9e7f4914a580b666b17492dca0283d11` completes all Linux Python 3.12/3.13/3.14
+and non-Windows gates successfully. Its
+[Windows job](https://github.com/WayfarerLabs/agentworks/actions/runs/37436598649/job/112179822374)
+measures one exact launched/interpreter console member, PID 9668, matching the hidden window owner.
+Virtual-environment executable/base executable, both prefixes and isolation flags match; independent
+cleanup observes window absence. The sole test failure occurs before descriptor effects: pytest's
+parent imports the checkout resource while the isolated child imports the installed resource. The
+job does not establish equal source bytes, and no primitive measurement case runs.
+
+The correction permits that measured storage-origin difference while retaining exact interpreter,
+prefix, installed-location and source-byte identity. It records both origins and SHA256 digests; the
+child must import the exact candidate pure-Python installation path inside its environment.
+Admission remains before console descriptors, with independent parent verification. Synthetic cases
+refuse changed source bytes, stale digests, wrong imports and outside-prefix locations. No loader,
+path injection, second process owner or broader console admission is added. The native command pairs
+installation without editable links with `uv run --no-sync`, avoiding automatic editable
+resynchronization.
+
+All three independent source lanes clear combined code/test pin
+`b513b80a44bf582ffd29ce72eeb4b3e098204080`, rebased cleanly onto transport
+`e0ad14ded9265238fa19cad972f92cc047548111`. The rebase changes no SSH source or tests. Transport's
+private file-family numeric context and durable codec still await operation/workflow/recovery
+binding; they do not complete production composition. Before that rebase, focused SSH validation
+measures 424 passed and 6 skipped; full and Windows-specific typing pass. Complete combined
+validation at `b513b80a44bf582ffd29ce72eeb4b3e098204080` measures **15,100 non-integration tests
+passed with 51 skips** (exit 0), Ruff/format (1,292 files), strict mypy (1,255 sources), typer
+isolation, file quality, locked-SDD and Rulesync. Website validation passes 160 Python and 103 Node
+tests, four builds and both deterministic comparisons. All 25 completed plan records remain
+unchanged. Native Windows byte-equivalence admission and primitive measurements require the next
+hosted run; physical keyboard behavior, supported terminal delivery and additive RunContext remain
+open.
