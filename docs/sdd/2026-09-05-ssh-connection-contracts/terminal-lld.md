@@ -261,6 +261,25 @@ Use explicit worker completion facts when a caller wait is interrupted. The curr
 interrupts before joining and leaves interrupted-wait settlement unproved. The test helper retains
 its fixtures until worker settlement; an owning test-process/job timeout supplies the hang bound.
 
+## Windows caller resource and record feasibility
+
+The private `WindowsTerminal` resource borrows explicit input/output descriptors through one
+retained non-main worker. Read-only native queries establish console-input kind and output viewport
+geometry. Acquisition snapshots input mode and establishes raw VT input before client launch;
+release restores that exact mode once and retains cleanup uncertainty. It neither changes output
+mode/code pages nor closes caller handles. Every borrower must stop before release, and resource
+access remains confined to the acquiring worker.
+
+The [native primitive record](terminal-results.md#native-owned-console-primitive-acceptance) now
+establishes resource admission/restoration and `ReadConsoleInputExW` record polling with
+`CONSOLE_READ_NOWAIT` on a fresh owned Windows Server 2025 console. Injected records preserve
+fixed-width UTF-16 units under original and custom settings. This does not select a production
+keyboard decoder: physical key translation, partial surrogate/repeat state and numeric keypad input
+using Alt under custom code pages still need applicable source and native evidence. The carrier must
+not change borrowed code pages or add a blocked reader thread to hide those semantics. Windows
+Server 2022 and the transport-owned child-launch/preparation boundary remain separate acceptance
+gates. Public terminal delivery remains disabled.
+
 ## Remaining proof
 
 The host experiment used bounded small writes and captured output, not a production relay. The

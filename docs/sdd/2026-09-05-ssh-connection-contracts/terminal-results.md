@@ -341,3 +341,28 @@ tests, four builds and both deterministic comparisons. All 25 completed plan rec
 unchanged. Native Windows byte-equivalence admission and primitive measurements require the next
 hosted run; physical keyboard behavior, supported terminal delivery and additive RunContext remain
 open.
+
+## Native owned-console primitive acceptance
+
+[Hosted CI](https://github.com/WayfarerLabs/agentworks/actions/runs/37439026161) at
+`968b19f32203905f698c76496ffc046fd4c364b9` completes all Linux Python 3.12/3.13/3.14, Windows Python
+3.13, static/file/SDD/Rulesync/website and aggregate gates successfully. Its
+[Windows job](https://github.com/WayfarerLabs/agentworks/actions/runs/37439026161/job/112187882921)
+measures **816 passed and 59 skipped** on Windows Server 2025 with Python 3.13.15. The native
+owned-console case passes rather than skipping. It requires actual installed and checkout
+source-byte identity, interpreter/prefix/isolation identity, exact sole console PID and
+hidden-window evidence before descriptor effects.
+
+The child observes two cases with original and custom settings. They verify raw input admission and
+geometry, empty/non-key queue polling, injected UTF-16 units including a surrogate pair, unchanged
+output mode/code pages/handle flags/inheritability and live borrowed descriptors. Both cases restore
+the exact prior snapshot; repeated release preserves its cleanup result. Parent checks require both
+descriptors closed, no child or parent cleanup errors, retained reaping and independent
+disappearance or identity change of the exact reported window. Passing observations establish this
+native primitive fixture, not physical keyboard translation or a production cancellation guarantee.
+
+Windows Server 2022, SSH/ConPTY launch and preparation, shared presentation sanitation, the keyboard
+decoder and complete terminal workflows remain open. The public terminal feature stays disabled.
+Authentication/POSIX fixtures and trust-policy migration cases still need their separately
+authorized native runs. This result changes no completed plan record or final-product feedback-round
+count.
