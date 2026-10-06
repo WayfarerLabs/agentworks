@@ -253,6 +253,17 @@ full website run passes all 160 cases. Its first failure's cause is not establis
 assertion or timing was changed. The final publication must retain that failed-run evidence rather
 than describe the first validation as entirely green.
 
+The corrected integrated pin `97e4cc118` passes 14,720 non-integration CLI tests with 50 skips. All
+three private lanes are clear: project and complexity each pass 300 focused cases, generic passes
+256 new cases, and the complexity lane independently proves the ACL fixture correction by observing
+14 failures without it and 14 passes with it under inherited ACLs. Complete strict mypy passes 1,217
+source and test files; Ruff, format, file quality, typer isolation, locked-SDD, Rulesync and
+whitespace checks exit 0. Final website tests pass 160 Python and 103 Node cases, with four builds
+and both deterministic comparisons. This closes this private unit's local validation, not the
+native, production-binding, recovery or RunContext gates. Public feedback/fix round 1 remains open
+and the PR remains draft without a review/readiness signal. The next private unit forwards the same
+context through file workflow bindings and JSON children before operation-owned adoption.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
