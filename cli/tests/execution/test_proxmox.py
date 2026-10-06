@@ -129,14 +129,66 @@ def test_wire_sends_json_and_uses_explicit_network_policy(monkeypatch: pytest.Mo
     assert response.closed
 
 
+def test_power_wire_uses_fixed_provider_get_and_verified_tls(monkeypatch: pytest.MonkeyPatch) -> None:
+    import ssl
+
+    response = io.BytesIO(b'{"data":{"status":"running"}}')
+    opener = MagicMock()
+    opener.open.return_value = response
+    build = MagicMock(return_value=opener)
+    monkeypatch.setattr(urllib.request, "build_opener", build)
+    bundle = Path("cluster-ca.pem")
+    payload = {**worker_payload(), "method": "GET", "suffix": None, "body": None}
+    payload["connection"]["ca_bundle"] = str(bundle)
+    context = ssl.create_default_context()
+    trust = MagicMock(return_value=context)
+    monkeypatch.setattr(ssl, "create_default_context", trust)
+    assert _request(payload) == b'{"data":{"status":"running"}}'
+    request = opener.open.call_args.args[0]
+    assert request.full_url == "https://pve.example:8006/api2/json/nodes/node1/qemu/123/status/current"
+    assert request.get_method() == "GET" and request.data is None
+    assert request.get_header("Authorization") == "PVEAPIToken=user@pve!token=secret-canary"
+    trust.assert_called_once_with(cafile=str(bundle))
+    assert context.check_hostname and context.verify_mode == ssl.CERT_REQUIRED
+    assert any(isinstance(handler, _NoRedirect) for handler in build.call_args.args)
+    assert any(
+        isinstance(handler, urllib.request.ProxyHandler) and vars(handler)["proxies"] == {}
+        for handler in build.call_args.args
+    )
+
+
+@pytest.mark.parametrize("method,body", [("POST", None), ("GET", "{}")])
+def test_provider_power_route_refuses_mutating_shapes(method: str, body: str | None) -> None:
+    with pytest.raises(ValueError):
+        _request({**worker_payload(), "method": method, "suffix": None, "body": body})
+
+
+def test_power_worker_startup_subtracts_from_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = [100.0]
+    monkeypatch.setattr("time.monotonic", lambda: now[0])
+    process = stub_process(monkeypatch, b'{"data":{"status":"running"}}')
+
+    def spawn(*args, **kwargs):
+        now[0] = 102.0
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    assert _ProxmoxWire(connection()).request_power(timeout=5) == {"status": "running"}
+    assert process.communicate.call_args.kwargs["timeout"] == 3
+
+
 @pytest.mark.parametrize("status", [301, 302, 303, 307, 308, 401, 500])
-def test_http_failure_is_not_replayed_or_exposed(monkeypatch: pytest.MonkeyPatch, status: int) -> None:
+@pytest.mark.parametrize("power", [False, True])
+def test_http_failure_is_not_replayed_or_exposed(monkeypatch: pytest.MonkeyPatch, status: int, power: bool) -> None:
     response = io.BytesIO(b"secret-canary")
     error = urllib.error.HTTPError("https://pve.example", status, "secret-canary", {}, response)
     opener = MagicMock()
     opener.open.side_effect = error
     monkeypatch.setattr(urllib.request, "build_opener", lambda *args: opener)
-    source = io.BytesIO(json.dumps(worker_payload()).encode())
+    payload = worker_payload()
+    if power:
+        payload.update(method="GET", suffix=None, body=None)
+    source = io.BytesIO(json.dumps(payload).encode())
     sink = io.BytesIO()
     with monkeypatch.context() as context:
         context.setattr(sys, "stdin", SimpleNamespace(buffer=source))
@@ -154,14 +206,18 @@ def test_malformed_wire_envelope_is_not_execution_evidence(monkeypatch: pytest.M
         _ProxmoxWire(connection()).request("GET", "exec-status?pid=42", timeout=1)
 
 
-def test_wire_bounds_response_before_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("power", [False, True])
+def test_wire_bounds_response_before_parsing(monkeypatch: pytest.MonkeyPatch, power: bool) -> None:
     monkeypatch.setattr("agentworks.execution.carriers._proxmox_http._MAX_RESPONSE_BYTES", 10)
     response = io.BytesIO(b"x" * 11)
     opener = MagicMock()
     opener.open.return_value = response
     monkeypatch.setattr(urllib.request, "build_opener", lambda *args: opener)
     with pytest.raises(ValueError):
-        _request(worker_payload())
+        payload = worker_payload()
+        if power:
+            payload.update(method="GET", suffix=None, body=None)
+        _request(payload)
     assert response.closed
 
 
@@ -191,7 +247,8 @@ def test_ca_bundle_path_serializes_only_for_worker(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.windows
-def test_owned_http_worker_is_killed_and_reaped_at_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("power", [False, True])
+def test_owned_http_worker_is_killed_and_reaped_at_deadline(monkeypatch: pytest.MonkeyPatch, power: bool) -> None:
     original = subprocess.Popen
     children = []
 
@@ -202,7 +259,11 @@ def test_owned_http_worker_is_killed_and_reaped_at_deadline(monkeypatch: pytest.
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
     with pytest.raises(subprocess.TimeoutExpired):
-        _ProxmoxWire(connection()).request("POST", "exec", body=b"{}", timeout=0.05)
+        wire = _ProxmoxWire(connection())
+        if power:
+            wire.request_power(timeout=0.05)
+        else:
+            wire.request("POST", "exec", body=b"{}", timeout=0.05)
     assert len(children) == 1
     assert children[0].poll() is not None
     assert children[0].stdin is not None and children[0].stdout is not None

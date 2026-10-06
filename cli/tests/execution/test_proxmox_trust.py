@@ -19,7 +19,7 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from agentworks.errors import ValidationError
 from agentworks.execution.carrier import CarrierIO, Deadline, Dispatch, ExitStatus, Failure, PreparedInvocation
-from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
+from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection, _ProxmoxWire, _WireFailure
 
 _TOKEN = "synthetic-secret-token"
 
@@ -129,7 +129,10 @@ def endpoint(tmp_path: Path) -> Iterator[_Endpoint]:
             self.reply(b'{"data":{"pid":42}}')
 
         def do_GET(self) -> None:
-            self.reply(b'{"data":{"exited":1,"exitcode":0}}')
+            if self.path.endswith("/status/current"):
+                self.reply(b'{"data":{"status":"running"}}')
+            else:
+                self.reply(b'{"data":{"exited":1,"exitcode":0}}')
 
         def reply(self, body: bytes) -> None:
             requests.append((self.command, self.path, self.headers.get("Authorization")))
@@ -159,6 +162,26 @@ def _execute(url: str, ca_bundle: Path | None):
     return ProxmoxCarrier(connection).execute(
         PreparedInvocation(("/bin/true",)), io=CarrierIO(), deadline=Deadline.after(30)
     )
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("trust", ["matching", "unknown-ca", "wrong-host", "system"])
+def test_passive_provider_power_preserves_ca_and_hostname_policy(endpoint: _Endpoint, trust: str) -> None:
+    url = endpoint.url.replace("localhost", "127.0.0.1") if trust == "wrong-host" else endpoint.url
+    bundle: Path | None = endpoint.unknown_ca if trust == "unknown-ca" else endpoint.ca_bundle
+    if trust == "system":
+        bundle = None
+    wire = _ProxmoxWire(ProxmoxConnection(url, "node1", 123, "test@pve!token", _TOKEN, ca_bundle=bundle))
+    if trust == "matching":
+        assert wire.request_power(timeout=30) == {"status": "running"}
+        assert endpoint.requests == [
+            ("GET", "/api2/json/nodes/node1/qemu/123/status/current", f"PVEAPIToken=test@pve!token={_TOKEN}")
+        ]
+    else:
+        with pytest.raises(_WireFailure) as raised:
+            wire.request_power(timeout=30)
+        assert _TOKEN not in str(raised.value)
+        assert endpoint.requests == []
 
 
 # These exercise workstation TLS, path serialization and the real owned worker.

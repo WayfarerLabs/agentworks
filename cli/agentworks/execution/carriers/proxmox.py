@@ -108,6 +108,15 @@ class _ProxmoxWire:
     def request(
         self, method: str, suffix: str, *, body: bytes | None = None, timeout: float | None
     ) -> dict[str, object]:
+        return self._request(method, suffix, body=body, timeout=timeout)
+
+    def request_power(self, *, timeout: float) -> dict[str, object]:
+        """Read provider power through the fixed, passive status endpoint."""
+        return self._request("GET", None, body=None, timeout=timeout)
+
+    def _request(
+        self, method: str, suffix: str | None, *, body: bytes | None, timeout: float | None
+    ) -> dict[str, object]:
         """Own one HTTP worker until completion, timeout or propagated interruption."""
         started = time.monotonic()
         connection = asdict(self._connection)

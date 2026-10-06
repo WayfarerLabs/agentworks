@@ -40,7 +40,13 @@ def _request(payload: dict[str, Any]) -> bytes:
     connection = payload["connection"]
     node = urllib.parse.quote(connection["node"], safe="")
     origin = connection["api_url"].rstrip("/")
-    url = f"{origin}/api2/json/nodes/{node}/qemu/{connection['vmid']}/agent/{payload['suffix']}"
+    base = f"{origin}/api2/json/nodes/{node}/qemu/{connection['vmid']}"
+    if payload["suffix"] is None:
+        if payload["method"] != "GET" or payload["body"] is not None:
+            raise ValueError("Provider power observation requires a body-free GET")
+        url = f"{base}/status/current"
+    else:
+        url = f"{base}/agent/{payload['suffix']}"
     body = payload["body"]
     request = urllib.request.Request(
         url, data=body.encode("ascii") if body is not None else None, method=payload["method"]

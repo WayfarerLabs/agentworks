@@ -19,6 +19,7 @@ from agentworks.capabilities.vm_platform.base import (
     ProvisionRequest,
     ProvisionResult,
     VMPlatform,
+    execution_power_remaining,
 )
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
@@ -45,6 +46,7 @@ if TYPE_CHECKING:
     from agentworks.db import VMRow
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Deadline
+    from agentworks.execution.carriers.proxmox import ProxmoxConnection
     from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
 
 
@@ -577,13 +579,48 @@ class ProxmoxPlatform(VMPlatform):
         """Bind verified QGA delivery without probing or constructing legacy execution."""
         from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
         from agentworks.execution.binding import NativeExecutionBinding
-        from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
+        from agentworks.execution.carriers.proxmox import ProxmoxCarrier
+
+        del deadline, config
+        return NativeExecutionBinding(
+            ProxmoxCarrier(self._execution_connection(vm, ctx)),
+            "root",
+            RuntimeSelection(RuntimeTargetOS.LINUX),
+        )
+
+    def observe_execution_power(self, vm: VMRow, ctx: RunContext, *, deadline: Deadline) -> VMStatus:
+        """Observe provider power without starting a VM or contacting its guest.
+
+        The owned HTTP worker bounds DNS, TLS and response delivery. Local
+        configuration and scoped secret delivery are checked against the budget
+        before dispatch, but cannot themselves be preempted by this hook.
+        """
+        from agentworks.execution.carriers.proxmox import _ProxmoxWire
+
+        execution_power_remaining(deadline, vm_name=vm.name)
+        connection = self._execution_connection(vm, ctx)
+        timeout = execution_power_remaining(deadline, vm_name=vm.name)
+        try:
+            response = _ProxmoxWire(connection).request_power(timeout=timeout)
+        except Exception:
+            response = {}
+        execution_power_remaining(deadline, vm_name=vm.name)
+        status = response.get("status")
+        if type(status) is str:
+            if status == "running":
+                return VMStatus.RUNNING
+            if status == "stopped":
+                return VMStatus.STOPPED
+        return VMStatus.UNKNOWN
+
+    def _execution_connection(self, vm: VMRow, ctx: RunContext) -> ProxmoxConnection:
+        """Prepare explicit verified authority shared by new execution routes."""
+        from agentworks.execution.carriers.proxmox import ProxmoxConnection
         from agentworks.secrets.line_safety import (
             LineOrientedSecretUse,
             require_line_safe_secret,
         )
 
-        del deadline, config
         if not self.config.verify_ssl:
             raise ConfigError(
                 f"Native execution for vm-site '{self.site_name}' requires TLS certificate verification",
@@ -597,18 +634,13 @@ class ProxmoxPlatform(VMPlatform):
             use=LineOrientedSecretUse.PROXMOX_API,
             secret_name=token_name,
         )
-        connection = ProxmoxConnection(
+        return ProxmoxConnection(
             self.config.api_url,
             self._vm_node(vm),
             self._vmid(vm),
             self.config.token_id,
             token,
             ca_bundle=self._ca_bundle(),
-        )
-        return NativeExecutionBinding(
-            ProxmoxCarrier(connection),
-            "root",
-            RuntimeSelection(RuntimeTargetOS.LINUX),
         )
 
     # -- Helpers ---------------------------------------------------------------
