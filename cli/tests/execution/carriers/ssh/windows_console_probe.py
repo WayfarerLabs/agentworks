@@ -7,9 +7,11 @@ adapter and exercises no SSH client or pseudoconsole. Importing it has no effect
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import json
 import os
 import sys
+import sysconfig
 from pathlib import Path
 from threading import Condition, Event, Thread
 from time import perf_counter
@@ -325,7 +327,10 @@ def _case(native: _Native, input_fd: int, output_fd: int, custom: bool) -> dict[
 def _interpreter_identity() -> dict[str, str]:
     resource = sys.modules[WindowsTerminal.__module__].__file__
     assert resource is not None
-    return {
+    purelib = sysconfig.get_path("purelib")
+    assert purelib is not None
+    installed_resource = Path(purelib) / Path(*WindowsTerminal.__module__.split(".")).with_suffix(".py")
+    identity = {
         name: os.path.normcase(str(Path(value).resolve()))
         for name, value in {
             "executable": sys.executable,
@@ -333,8 +338,21 @@ def _interpreter_identity() -> dict[str, str]:
             "prefix": sys.prefix,
             "base_prefix": sys.base_prefix,
             "resource_file": resource,
+            "installed_resource_file": str(installed_resource),
         }.items()
     }
+    identity["resource_sha256"] = hashlib.sha256(Path(resource).read_bytes()).hexdigest()
+    return identity
+
+
+def _check_candidate_identity(actual: dict[str, str], expected: dict[str, str]) -> None:
+    # Pytest can import checkout source while isolated startup imports the wheel.
+    # Only origins may differ; the installed resource must contain candidate bytes.
+    assert {key: value for key, value in actual.items() if key != "resource_file"} == {
+        key: value for key, value in expected.items() if key != "resource_file"
+    }
+    assert actual["resource_file"] == actual["installed_resource_file"]
+    assert Path(actual["resource_file"]).is_relative_to(Path(actual["prefix"]))
 
 
 def main() -> None:
@@ -368,7 +386,7 @@ def main() -> None:
     try:
         assert count == 1 and processes[0] == os.getpid()
         assert window and not native.user.IsWindowVisible(window)
-        assert _interpreter_identity() == json.loads(sys.argv[1])
+        _check_candidate_identity(_interpreter_identity(), json.loads(sys.argv[1]))
         assert sys.flags.isolated == sys.flags.ignore_environment == sys.flags.no_user_site == 1
         input_fd = os.open("CONIN$", os.O_RDWR | os.O_BINARY)
         output_fd = os.open("CONOUT$", os.O_RDWR | os.O_BINARY)

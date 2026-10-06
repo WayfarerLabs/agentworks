@@ -18,9 +18,10 @@ owned console and then the complete supported Windows workflow.
 
 `test_terminal_windows_native.py` marks only its native case `windows`; other hosts skip that case
 and can check the fixed-width Win32 record ABI without native effects. On Windows, the fixture owns
-one fresh hidden console child with explicit `CONIN$` and `CONOUT$` descriptors. It checks native
-resource admission, early raw input, viewport geometry and exact restoration with original and
-custom modes, preserving output mode, code pages, handle flags and descriptor inheritability. Its
+one fresh hidden console child with explicit `CONIN$` and `CONOUT$` descriptors. Install its
+candidate without editable links (`uv sync --frozen --no-editable`). It checks native resource
+admission, early raw input, viewport geometry and exact restoration with original and custom modes,
+preserving output mode, code pages, handle flags and descriptor inheritability. Its
 [`ReadConsoleInputExW`](https://learn.microsoft.com/en-us/windows/console/readconsoleinputex) probe
 uses `CONSOLE_READ_NOWAIT` for empty queues, injected non-key events and injected UTF-16 key
 records. Each measured poll must finish within five seconds, a generous fixture bound rather than a
@@ -33,16 +34,19 @@ reaping timeout. It launches the real CPython interpreter directly using the
 [multiprocessing venv launch mechanism](https://github.com/python/cpython/blob/4061bc4c35f7c26f25264666d4ba083b93d2f6f9/Lib/multiprocessing/popen_spawn_win32.py#L60-L79):
 child-only `__PYVENV_LAUNCHER__` retains the candidate environment while `-I` isolates startup. This
 avoids a venv launcher process sharing the fixture console. Before opening descriptors, the child
-checks its executable, base executable, environment prefixes, SSH resource import and isolation
-against the parent candidate, and requires itself to be the console's sole client. Synthetic tests
-check launch/environment preservation and refusal before descriptor effects. The child releases the
-resource, restores its fixture modes and code pages, closes its descriptors and detaches its console
-in cleanup. The parent observes only that reported console window for up to 10 seconds; missing or
-unresolved window evidence fails the native case. It never scans or terminates unrelated console
-hosts. JSON observations and stderr remain under the test's owned temporary directory, including
-parent cleanup evidence. This is a native local primitive fixture for ordinary Windows CI, with no
-network, credentials or caller-console access; report its actual native result separately from
-synthetic passes and skips.
+checks its executable, base executable, environment prefixes and isolation against the parent
+candidate, and requires itself to be the console's sole client. Pytest can import the checkout while
+isolated startup imports the installed wheel. The child therefore requires the resource at its
+candidate environment's exact pure-Python installation path with identical SHA256 source bytes. Both
+import origins and digests remain observations; source contents are not logged. Synthetic tests
+check launch/environment preservation, digest changes and refusal before descriptor effects. The
+child releases the resource, restores its fixture modes and code pages, closes its descriptors and
+detaches its console in cleanup. The parent observes only that reported console window for up to 10
+seconds; missing or unresolved window evidence fails the native case. It never scans or terminates
+unrelated console hosts. JSON observations and stderr remain under the test's owned temporary
+directory, including parent cleanup evidence. This is a native local primitive fixture for ordinary
+Windows CI, with no network, credentials or caller-console access; report its actual native result
+separately from synthetic passes and skips.
 
 On failure, pytest also displays the controlled child stdout, stderr traceback and parent
 observations as an exception note. Each displayed log is bounded to 64 KiB; its complete contents

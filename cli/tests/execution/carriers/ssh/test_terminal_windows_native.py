@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import io
 import json
 import os
@@ -16,6 +17,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.execution.carriers.ssh import _terminal_windows as terminal
 from tests.execution.carriers.ssh import windows_console_probe as probe
 
 if TYPE_CHECKING:
@@ -238,16 +240,31 @@ def test_failing_owned_child_exposes_controlled_evidence_after_reaping(
     assert parent in notes
 
 
-@pytest.mark.parametrize("mismatch", ["prefix", "resource_file", "isolated", "console_pid", None])
+@pytest.mark.parametrize(
+    "mismatch", ["prefix", "resource_file", "resource_sha256", "outside_prefix", "isolated", "console_pid", None]
+)
 def test_child_admits_candidate_identity_before_descriptor_effects(
-    monkeypatch: pytest.MonkeyPatch, mismatch: str | None
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mismatch: str | None
 ) -> None:
     # Native boundaries are entirely fake. Failed identity or isolation must
     # detach the owned console without opening descriptors or admitting a worker.
-    identity = {"prefix": "candidate-venv", "resource_file": "candidate-resource"}
+    prefix = tmp_path / "candidate-venv"
+    installed = prefix / "site-packages" / "resource.py"
+    identity = {
+        "prefix": str(prefix),
+        "resource_file": str(installed),
+        "installed_resource_file": str(installed),
+        "resource_sha256": "candidate-digest",
+    }
     expected = identity.copy()
-    if mismatch in ("prefix", "resource_file"):
+    expected["resource_file"] = str(tmp_path / "checkout" / "resource.py")
+    if mismatch in ("prefix", "resource_sha256"):
         expected[mismatch] = "different-candidate"
+    elif mismatch == "resource_file":
+        identity["resource_file"] = str(tmp_path / "checkout" / "resource.py")
+    elif mismatch == "outside_prefix":
+        identity["resource_file"] = identity["installed_resource_file"] = str(tmp_path / "other" / "resource.py")
+        expected["installed_resource_file"] = identity["installed_resource_file"]
     flags = SimpleNamespace(isolated=int(mismatch != "isolated"), ignore_environment=1, no_user_site=1)
     module = sys.modules[probe.__name__]
     monkeypatch.setattr(
@@ -302,6 +319,19 @@ def test_child_admits_candidate_identity_before_descriptor_effects(
     else:
         assert len(raised.value.exceptions) == 1
         assert isinstance(raised.value.exceptions[0], AssertionError)
+
+
+def test_resource_observation_hashes_exact_source_bytes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    resource = tmp_path / "resource.py"
+    resource.write_bytes(b"synthetic-resource\r\n")
+    monkeypatch.setattr(terminal, "__file__", str(resource))
+    original = probe._interpreter_identity()
+    assert original["resource_file"] == os.path.normcase(str(resource.resolve()))
+    assert original["resource_sha256"] == hashlib.sha256(resource.read_bytes()).hexdigest()
+    resource.write_bytes(b"synthetic-resource\n")
+    changed = probe._interpreter_identity()
+    assert changed["resource_sha256"] == hashlib.sha256(resource.read_bytes()).hexdigest()
+    assert changed["resource_sha256"] != original["resource_sha256"]
 
 
 def _window_cleanup(identity: dict[str, object]) -> str:
@@ -439,7 +469,7 @@ def _owned_console_case(tmp_path: Path) -> None:
     identity, measurements, cleanup = records
     assert identity["pid"] == result["child_pid"]
     assert identity["console_pids"] == [result["child_pid"]]
-    assert identity["interpreter"] == result["expected_interpreter"]
+    probe._check_candidate_identity(identity["interpreter"], result["expected_interpreter"])
     assert identity["isolated"] == identity["ignore_environment"] == identity["no_user_site"] == 1
     assert identity["window"] and identity["window_pid"]
     assert identity["window_visible"] is False
