@@ -409,6 +409,17 @@ both deterministic comparisons, all exit 0. The scoped native-report node collec
 execution. All 25 completed plan records remain unchanged. Independent same-user process
 cwd/descriptor scans find no references before removal of the exact settled suite scratch root.
 
+The subsequent clean rebase onto transport `f49d060bc69490e0934b7da0aeddaa6c083b4c0c` preserves all
+SSH production/test/CI bytes from that reviewed pin. Project review clears dependency/evidence pin
+`1bfa56c877a253fbd45ee831645900d679bc9895`, whose complete local suite passes **15,234
+non-integration tests with 51 skips and 27 warnings**, exit 0 in 322.73 seconds. Full Ruff/format
+(1,299 files), strict mypy (1,262 sources), file quality, locked-SDD, Rulesync and whitespace gates
+pass. Fresh website validation passes 160 Python and 103 Node cases, four builds and both
+deterministic comparisons, all exit 0. The new dependency accepts explicit buffered-inline bootstrap
+through its existing root program; production operation-owned context, recovery, fencing and
+RunContext remain open. The suite is terminal and its exact scratch root is independently verified
+unused before removal. This supplies no new native comparison observation.
+
 **Comparison values have not been observed natively.** Collection or a skipped Linux case does not
 establish them. Even a passing captured run cannot establish specific private-flag values without
 the scoped report. The experiment will measure only this Windows binary's injected-record behavior;
