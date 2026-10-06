@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import shutil
-import tempfile
 import threading
 import time
 from collections.abc import Generator
@@ -43,25 +40,25 @@ from agentworks.operations import OperationOwner
 from .test_managed_lease_exchange import PLAN, RUNTIME, ScriptedCarrier, _success
 from .test_managed_start_operation import GUEST, RUN, _spec
 
+# Real SQLite fencing and host-thread custody are also exercised on Windows.
+pytestmark = pytest.mark.windows
+
 
 @pytest.fixture
-def bound() -> Generator[tuple[Database, OperationOwner, ManagedRunReceipt]]:
-    scratch = Path(tempfile.mkdtemp(prefix="agw-kp.", dir="/tmp"))
-    assert scratch.parent == Path("/tmp") and scratch.name.startswith("agw-kp.")
-    assert scratch.stat().st_mode & 0o777 == 0o700
-    assert "system.posix_acl_access" not in os.listxattr(scratch)
-    database = Database(scratch / "state.db")
-    owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "keeper")
-    spec = replace(
-        _spec(),
-        lifetime=ManagedRunLifetime.OPERATION,
-        owner=ManagedRunOwner(ManagedRunOwnerKind.OPERATION, owner.ownership.operation_id),
-    )
+def bound(tmp_path: Path) -> Generator[tuple[Database, OperationOwner, ManagedRunReceipt]]:
+    database = Database(tmp_path / "state.db")
     try:
+        owner = OperationOwner.acquire(
+            database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "keeper"
+        )
+        spec = replace(
+            _spec(),
+            lifetime=ManagedRunLifetime.OPERATION,
+            owner=ManagedRunOwner(ManagedRunOwnerKind.OPERATION, owner.ownership.operation_id),
+        )
         yield database, owner, ManagedRunReceipt(RUN, RUN.unit_name, spec)
     finally:
         database.close()
-        shutil.rmtree(scratch)
 
 
 def make_keeper(owner: OperationOwner, receipt: ManagedRunReceipt, carrier: ScriptedCarrier) -> ManagedOperationKeeper:

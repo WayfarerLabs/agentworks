@@ -36,6 +36,9 @@ from .test_managed_operation_keeper import clean_start, make_keeper
 
 bound = keeper_tests.bound
 
+# Real SQLite custody and interrupted host threads are also exercised on Windows.
+pytestmark = pytest.mark.windows
+
 
 class ClosingCarrier(ScriptedCarrier):
     def __init__(self) -> None:
