@@ -480,9 +480,10 @@ class WindowsLocalDownloadPublication:
             raise
 
     def _close_observation(self, handle: int) -> None:
+        prior_uncertainty = self._observation_close_uncertain
         self._observation_close_uncertain = True
         self._api.close(handle)
-        self._observation_close_uncertain = False
+        self._observation_close_uncertain = prior_uncertainty
 
     def _close_target(self) -> None:
         assert self._target is not None

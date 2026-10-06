@@ -6,12 +6,12 @@ import hashlib
 import os
 import sys
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
+from agentworks.execution._local_download_publication import LocalDownloadCleanupUncertainError
 from agentworks.execution._local_download_publication_windows import (
-    LocalDownloadCleanupUncertainError,
     LocalDownloadPartialMutationError,
     WindowsLocalDownloadPublication,
     _WindowsAPI,
@@ -65,7 +65,7 @@ def test_held_ancestor_blocks_directory_rename_access(tmp_path: Path) -> None:
     try:
         with pytest.raises(OSError) as blocked:
             api.open(parent, 0x10000, 1 | 2 | 4, 3, 0x02000000 | 0x00200000)
-        assert blocked.value.winerror == 32  # ERROR_SHARING_VIOLATION.
+        assert cast("Any", blocked.value).winerror == 32  # ERROR_SHARING_VIOLATION.
     finally:
         writer.abort()
     handle = api.open(parent, 0x10000, 1 | 2 | 4, 3, 0x02000000 | 0x00200000)
@@ -110,10 +110,10 @@ def test_held_replace_target_blocks_another_writer_or_rename(tmp_path: Path) -> 
     try:
         with pytest.raises(OSError) as blocked_write:
             api.open(destination, 0x40000000, 1 | 2 | 4, 3, 0x00200000)
-        assert blocked_write.value.winerror == 32
+        assert cast("Any", blocked_write.value).winerror == 32
         with pytest.raises(OSError) as blocked_delete:
             api.open(destination, 0x10000, 1 | 2 | 4, 3, 0x00200000)
-        assert blocked_delete.value.winerror == 32
+        assert cast("Any", blocked_delete.value).winerror == 32
         assert destination.read_bytes() == b"old"
     finally:
         writer.abort()
@@ -249,6 +249,37 @@ def test_ancestor_close_uncertainty_does_not_block_other_ancestors(
     assert not list(tmp_path.glob(".agw-download-*"))
 
 
+def test_later_observation_close_does_not_erase_earlier_uncertainty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    writer = WindowsLocalDownloadPublication(tmp_path / "download")
+    assert writer._stage_path is not None
+    first = writer._open_observation(writer._stage_path)
+    assert first is not None
+    real_close = writer._api.close
+    interrupted = False
+
+    def close_then_interrupt(handle: int) -> None:
+        nonlocal interrupted
+        real_close(handle)
+        if handle == first and not interrupted:
+            interrupted = True
+            raise OSError("injected interruption after observation close admission")
+
+    monkeypatch.setattr(writer._api, "close", close_then_interrupt)
+    with pytest.raises(OSError):
+        writer._close_observation(first)
+    assert writer.cleanup_uncertain
+    second = writer._open_observation(writer._stage_path)
+    assert second is not None
+    writer._close_observation(second)
+    assert writer.cleanup_uncertain
+    with pytest.raises(LocalDownloadCleanupUncertainError):
+        writer.abort()
+    assert not writer._ancestors
+    assert not list(tmp_path.glob(".agw-download-*"))
+
+
 @pytest.mark.parametrize("phase", ["truncate", "flush", "metadata", "close"])
 def test_replace_checks_deadline_after_each_final_step(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str
@@ -280,10 +311,10 @@ def test_replace_checks_deadline_after_each_final_step(
 
         monkeypatch.setattr(writer._api, "flush", after_flush)
     elif phase == "metadata":
-        original = writer._api.security_descriptor
+        original_security_descriptor = writer._api.security_descriptor
 
         def after_metadata(handle: int) -> bytes:
-            result = original(handle)
+            result = original_security_descriptor(handle)
             if writer.possible_local_change:
                 deadline.expired = True
             return result
