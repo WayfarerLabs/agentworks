@@ -73,6 +73,103 @@ def _admit_resolved_effect(owner: OperationOwner) -> None:
     obligation.resolve()
 
 
+def test_recovery_support_admission_reconciles_committed_lost_reply(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = db.operations
+    predecessor = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    owner = OperationOwner.recover(repository, predecessor.ownership, "b" * 32)
+    _interrupt_after_repository_return(
+        monkeypatch,
+        repository=repository,
+        method_name="admit_recovery_support_obligation",
+        owner_method=owner.admit_recovery_support_obligation,
+    )
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            owner.admit_recovery_support_obligation(
+                "support", payload_version=1, payload=b"new", obligation_id="c" * 32
+            )
+    finally:
+        sys.settrace(None)
+    assert owner._transition_uncertain  # noqa: SLF001
+    handle = owner.admit_recovery_support_obligation(
+        "support", payload_version=1, payload=b"new", obligation_id="c" * 32
+    )
+    assert not owner._transition_uncertain  # noqa: SLF001
+    assert len(owner.list_lifecycle_obligations()) == 1
+    with pytest.raises(StateError):
+        owner.borrow()
+    with pytest.raises(StateError):
+        owner.register_lifecycle_obligation("ordinary", payload_version=1, payload=b"")
+    with pytest.raises(StateError):
+        owner.record_effects_resolved()
+    handle.publish_payload(expected_revision=0, payload_version=2, payload=b"receipt")
+    handle.resolve()
+    owner.record_effects_resolved()
+    owner.close()
+    with pytest.raises(StateError):
+        owner.admit_recovery_support_obligation("support", payload_version=1, payload=b"new", obligation_id="d" * 32)
+
+
+def test_recovery_support_admission_reconciles_uncommitted_interruption(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = db.operations
+    predecessor = OperationOwner.acquire(repository, _scope(), "file-upload")
+    owner = OperationOwner.recover(repository, predecessor.ownership, "b" * 32)
+    before = repository.inspect(_scope())
+
+    def interrupt_load(*args: object) -> None:
+        del args
+        raise KeyboardInterrupt
+
+    with monkeypatch.context() as patch:
+        patch.setattr(repository, "_load_obligation", interrupt_load)
+        with pytest.raises(KeyboardInterrupt):
+            owner.admit_recovery_support_obligation(
+                "support", payload_version=1, payload=b"new", obligation_id="c" * 32
+            )
+    assert repository.inspect(_scope()) == before
+    assert owner.list_lifecycle_obligations() == ()
+    assert owner._transition_uncertain  # noqa: SLF001
+    handle = owner.admit_recovery_support_obligation(
+        "support", payload_version=1, payload=b"new", obligation_id="c" * 32
+    )
+    assert handle.state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert not owner._transition_uncertain  # noqa: SLF001
+
+
+def test_recovery_support_admission_excludes_serial_custody_and_stopped_admission(db: Database) -> None:
+    predecessor = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    with pytest.raises(StateError):
+        predecessor.admit_recovery_support_obligation(
+            "support", payload_version=1, payload=b"new", obligation_id="c" * 32
+        )
+    owner = OperationOwner.recover(db.operations, predecessor.ownership, "b" * 32)
+    handle = owner.admit_recovery_support_obligation(
+        "support", payload_version=1, payload=b"new", obligation_id="c" * 32
+    )
+    recovered = owner.rebind_possible_effect_lifecycle_obligation(
+        handle.obligation_id, "support", payload_version=1, payload=b"new", payload_revision=0
+    )
+    dispatch = recovered.open_dispatch()
+    with pytest.raises(StateError):
+        owner.admit_recovery_support_obligation("support", payload_version=1, payload=b"new", obligation_id="d" * 32)
+    attempt = dispatch.begin_attempt()
+    dispatch.handoff_unresolved()
+    with pytest.raises(StateError):
+        owner.admit_recovery_support_obligation("support", payload_version=1, payload=b"new", obligation_id="d" * 32)
+    assert len(owner.list_lifecycle_obligations()) == 1
+    del attempt
+    successor = OperationOwner.recover(db.operations, owner.ownership, "e" * 32)
+    successor.stop_admission()
+    with pytest.raises(StateError):
+        successor.admit_recovery_support_obligation(
+            "support", payload_version=1, payload=b"new", obligation_id="d" * 32
+        )
+
+
 def test_owner_claim_conflicts_across_connections_before_borrow(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
     first = Database(path)

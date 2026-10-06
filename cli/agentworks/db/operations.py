@@ -497,6 +497,95 @@ class OperationRepository:
                 )
             return self._load_obligation(ownership, obligation_id)
 
+    def admit_recovery_support_obligation(
+        self,
+        ownership: OperationOwnership,
+        obligation_kind: str,
+        payload_version: int,
+        payload: bytes,
+        *,
+        obligation_id: str,
+    ) -> LifecycleObligation:
+        """Atomically retain a new support effect under sealed recovery ownership.
+
+        The caller retains the identifier before submission. An exact retry
+        confirms durable custody only, never permission to repeat dispatch.
+        """
+        _validate_operation_kind(obligation_kind)
+        _validate_payload(payload_version, payload)
+        _validate_obligation_id(obligation_id)
+        now = _utc_now()
+        with self._standalone_transaction():
+            claim = self._require_owned_claim(ownership)
+            if (
+                not self._is_recovery_ownership(ownership)
+                or claim.obligations_sealed_at is None
+                or claim.state is OperationClaimState.RESOLVED
+            ):
+                raise StateError(
+                    "support admission requires sealed unresolved recovery ownership",
+                    entity_kind=ownership.scope.resource_kind,
+                    entity_name=ownership.scope.resource_name,
+                )
+            existing = self._connection.execute(
+                "SELECT * FROM lifecycle_obligations WHERE operation_id = ? AND obligation_id = ?",
+                (ownership.operation_id, obligation_id),
+            ).fetchone()
+            if existing is not None:
+                obligation = self._decode_obligation(existing, ownership)
+                if (
+                    obligation.state is LifecycleObligationState.POSSIBLE_EFFECT
+                    and obligation.obligation_kind == obligation_kind
+                    and obligation.payload_version == payload_version
+                    and obligation.payload == payload
+                ):
+                    return obligation
+                raise StateError(
+                    "recovery support admission conflicts with an existing obligation",
+                    entity_kind=ownership.scope.resource_kind,
+                    entity_name=ownership.scope.resource_name,
+                )
+            cursor = self._connection.execute(
+                "INSERT INTO lifecycle_obligations "
+                "(operation_id, obligation_id, obligation_kind, state, payload_version, payload, payload_revision, "
+                "registered_at, updated_at) "
+                "SELECT ?, ?, ?, ?, ?, ?, 0, ?, ? "
+                "WHERE (SELECT COUNT(*) FROM lifecycle_obligations WHERE operation_id = ?) < ?",
+                (
+                    ownership.operation_id,
+                    obligation_id,
+                    obligation_kind,
+                    LifecycleObligationState.POSSIBLE_EFFECT,
+                    payload_version,
+                    payload,
+                    now,
+                    now,
+                    ownership.operation_id,
+                    MAX_LIFECYCLE_OBLIGATIONS,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise StateError(
+                    "operation lifecycle obligation limit is reached",
+                    entity_kind=ownership.scope.resource_kind,
+                    entity_name=ownership.scope.resource_name,
+                )
+            if claim.state is OperationClaimState.RESERVED:
+                cursor = self._connection.execute(
+                    "UPDATE operation_owners SET state = ?, updated_at = ? "
+                    "WHERE operation_id = ? AND generation_id = ? AND state = ?",
+                    (
+                        OperationClaimState.POSSIBLE_DISPATCH,
+                        now,
+                        ownership.operation_id,
+                        ownership.generation_id,
+                        OperationClaimState.RESERVED,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    self._raise_stale_or_invalid_state(ownership, OperationClaimState.RESERVED)
+            return self._load_obligation(ownership, obligation_id)
+
     def mark_lifecycle_obligation_possible_effect(
         self,
         ownership: OperationOwnership,

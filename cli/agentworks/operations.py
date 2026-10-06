@@ -143,6 +143,43 @@ class OperationOwner:
             )
             return LifecycleObligation(self, obligation)
 
+    def admit_recovery_support_obligation(
+        self,
+        obligation_kind: str,
+        *,
+        payload_version: int,
+        payload: bytes,
+        obligation_id: str,
+    ) -> LifecycleObligation:
+        """Retain a support effect without reopening ordinary admission.
+
+        Exact persistence retries confirm custody, not permission to repeat
+        an uncertain dispatch. Core chooses the support adapter and retains
+        its identifier before calling.
+        """
+        with self._guard:
+            if not self._recovery_owner:
+                raise StateError(
+                    "support admission requires recovery ownership",
+                    entity_kind=self._ownership.scope.resource_kind,
+                    entity_name=self._ownership.scope.resource_name,
+                )
+            self._require_no_active_work_locked()
+            if self._transition_uncertain:
+                self._reconcile_transition_locked()
+            self._require_dispatch_admission_locked()
+            self._transition_uncertain = True
+            obligation = self._repository.admit_recovery_support_obligation(
+                self._ownership,
+                obligation_kind,
+                payload_version,
+                payload,
+                obligation_id=obligation_id,
+            )
+            self._durable_possible_dispatch = True
+            self._transition_uncertain = False
+            return LifecycleObligation(self, obligation)
+
     def rebind_lifecycle_obligation(
         self,
         obligation_id: str,
