@@ -98,15 +98,18 @@ def test_host_pump_preserves_exact_control_and_settles(
 
     monkeypatch.setattr(core, "_pump_owned_pipes", interrupt)
     custody = LocalDeliveryCustody()
-    with pytest.raises(control_type) as caught:
-        run_process(
-            [sys.executable, "-c", "import time; time.sleep(30)"],
-            io=CarrierIO(),
-            deadline=Deadline(None),
-            custody=custody,
-        )
-    assert caught.value is control
-    assert custody.settled
+    try:
+        with pytest.raises(control_type) as caught:
+            run_process(
+                [sys.executable, "-c", "import time; time.sleep(30)"],
+                io=CarrierIO(),
+                deadline=Deadline(None),
+                custody=custody,
+            )
+        assert caught.value is control
+        assert custody.settled
+    finally:
+        assert custody.close(Deadline.after(3))
 
 
 @pytest.mark.parametrize("natural_exit", [False, True])
@@ -215,10 +218,13 @@ def test_real_http_worker_binary_json_is_parsed_privately(monkeypatch: pytest.Mo
 
     monkeypatch.setattr(subprocess, "Popen", worker)
     custody = LocalDeliveryCustody()
-    assert _ProxmoxWire(connection()).request("POST", "exec", body=b"{}", timeout=3, custody=custody) == {"pid": 42}
-    assert custody.settled
-    assert len(calls) == 1
-    assert "secret-canary" not in repr(calls)
+    try:
+        assert _ProxmoxWire(connection()).request("POST", "exec", body=b"{}", timeout=3, custody=custody) == {"pid": 42}
+        assert custody.settled
+        assert len(calls) == 1
+        assert "secret-canary" not in repr(calls)
+    finally:
+        assert custody.close(Deadline.after(3))
 
 
 def test_real_http_worker_invalid_binary_output_has_no_sensitive_cause(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -235,11 +241,15 @@ def test_real_http_worker_invalid_binary_output_has_no_sensitive_cause(monkeypat
         )
 
     monkeypatch.setattr(subprocess, "Popen", worker)
-    with pytest.raises(_WireFailure) as caught:
-        _ProxmoxWire(connection()).request("GET", "exec-status?pid=42", timeout=3, custody=LocalDeliveryCustody())
-    assert caught.value.__cause__ is None
-    assert caught.value.__context__ is None
-    assert "secret-canary" not in str(caught.value)
+    custody = LocalDeliveryCustody()
+    try:
+        with pytest.raises(_WireFailure) as caught:
+            _ProxmoxWire(connection()).request("GET", "exec-status?pid=42", timeout=3, custody=custody)
+        assert caught.value.__cause__ is None
+        assert caught.value.__context__ is None
+        assert "secret-canary" not in str(caught.value)
+    finally:
+        assert custody.close(Deadline.after(3))
 
 
 @pytest.mark.parametrize("control_type", [KeyboardInterrupt, SystemExit, GeneratorExit])
@@ -312,9 +322,13 @@ def test_multiple_independent_http_workers_have_no_shared_custody(monkeypatch: p
     def exchange(custody: LocalDeliveryCustody) -> dict[str, object]:
         return _ProxmoxWire(connection()).request("POST", "exec", body=b"{}", timeout=5, custody=custody)
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        assert list(executor.map(exchange, stores)) == [{"pid": 42}] * 3
-    assert all(custody.settled for custody in stores)
+    try:
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            assert list(executor.map(exchange, stores)) == [{"pid": 42}] * 3
+        assert all(custody.settled for custody in stores)
+    finally:
+        for custody in stores:
+            assert custody.close(Deadline.after(3))
 
 
 def test_private_http_capture_enforces_complete_response_bound(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -327,6 +341,10 @@ def test_private_http_capture_enforces_complete_response_bound(monkeypatch: pyte
 
     monkeypatch.setattr(subprocess, "Popen", worker)
     custody = LocalDeliveryCustody()
-    with pytest.raises(_WireFailure):
-        _ProxmoxWire(connection()).request("POST", "exec", body=b"{}", timeout=3, custody=custody)
-    assert custody.settled
+    try:
+        with pytest.raises(_WireFailure):
+            _ProxmoxWire(connection()).request("POST", "exec", body=b"{}", timeout=3, custody=custody)
+        assert custody.settled
+
+    finally:
+        assert custody.close(Deadline.after(3))
