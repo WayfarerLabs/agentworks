@@ -438,11 +438,11 @@ process exit or cleanup facts. Local POSIX tests do not establish remote resize 
 macOS/Windows acceptance.
 
 The host adapter allows 0.5 seconds of fresh cleanup observation after pumping stops, including when
-execution has no deadline. It does not retry automatically or make native syscalls interruptible.
-Pending construction can therefore return without published pipes or a known local status; an
-unsettled store prevents interpreting that absence as proved non-dispatch. The guest runner's
-default waiting settlement remains unchanged because its source descriptors do not have a host-side
-retention consumer.
+execution has no deadline. It does not retry automatically or interrupt native syscalls. Pending
+construction can therefore return without published pipes or a known local status; an unsettled
+store prevents interpreting that absence as proved non-dispatch. The guest runner's default waiting
+settlement remains unchanged because its source descriptors do not have a host-side retention
+consumer.
 
 Local Linux tests exercise interrupted startup, admission and cleanup, including the interval after
 admission but before pumping. They do not establish native Windows/macOS acceptance. A separately
