@@ -34,7 +34,7 @@ from agentworks.execution._file_publication_protocol import (
     publication_context,
 )
 from agentworks.execution._file_publication_wire import bind_publication_cleanup_debt
-from agentworks.execution._file_snapshot import read_snapshot
+from agentworks.execution._file_snapshot_read import read_snapshot
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._publication_receipt import (

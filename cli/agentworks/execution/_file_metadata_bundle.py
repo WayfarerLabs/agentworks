@@ -10,6 +10,7 @@ _MODULE_NAMES = (
     "_file_stat",
     "_file_paths",
     "_file_snapshot",
+    "_file_snapshot_read",
     "_file_objects",
     "_file_metadata",
     "_file_wire",

@@ -11,7 +11,8 @@ from pathlib import Path
 import pytest
 
 from agentworks.execution._file_snapshot_bundle import FIXED_BUNDLE
-from agentworks.execution._file_snapshot_protocol import FileSnapshotBeginRequest, encode_file_snapshot_request
+from agentworks.execution._file_snapshot_host import encode_file_snapshot_request
+from agentworks.execution._file_snapshot_protocol import FileSnapshotBeginRequest
 from agentworks.execution._helper_bundle import build_helper_modules
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
@@ -31,6 +32,7 @@ _MODULE_NAMES = (
     "_file_stat",
     "_file_paths",
     "_file_snapshot",
+    "_file_snapshot_read",
     "_scratch_receipt",
     "_scratch",
     "_publication_receipt",
@@ -41,7 +43,7 @@ _MODULE_NAMES = (
 _DISPATCHER = """
 import hashlib, os, secrets, stat, sys
 from _agw_file._file_publication import Create, CreateMetadata, Match, ScratchFileSource, publish_file
-from _agw_file._file_snapshot import read_revision
+from _agw_file._file_snapshot_read import read_revision
 from _agw_file._scratch import begin_scratch, cleanup_scratch, verify_scratch, write_scratch_chunk
 from _agw_file._scratch_receipt import ScratchOperation, current_receipt_context
 

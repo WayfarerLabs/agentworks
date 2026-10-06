@@ -14,9 +14,9 @@ from agentworks.db import Database, LifecycleObligationState, OperationResourceK
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _file_effect_gate, _file_effect_gate_exchange, _file_gate_setup, _file_operation
 from agentworks.execution._file_download import FileDownloadOutcome
-from agentworks.execution._file_effect_gate import inspect_file_effect_gate, setup_file_effect_gate
 from agentworks.execution._file_effect_gate_bundle import _MODULE_NAMES, _PACKAGE
 from agentworks.execution._file_effect_gate_exchange import GateControlMutationUncertain
+from agentworks.execution._file_gate_control import inspect_file_effect_gate, setup_file_effect_gate
 from agentworks.execution._file_gate_setup import FileEffectGateSetup
 from agentworks.execution._file_gate_setup_recovery import FileGateSetupRecovery
 from agentworks.execution._file_obligation import (

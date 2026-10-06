@@ -22,7 +22,8 @@ from agentworks.execution._file_effect_gate_protocol import (
     decode_gate_control_request,
     encode_gate_control_request,
 )
-from agentworks.execution._file_wire import FileRecord, FileRecordKind, FileRecordReader
+from agentworks.execution._file_wire import FileRecord, FileRecordKind
+from agentworks.execution._file_wire_reader import FileRecordReader
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState, build_runtime_identity_helper_argv

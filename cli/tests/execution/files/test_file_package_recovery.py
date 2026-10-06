@@ -12,13 +12,10 @@ import pytest
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError
 from agentworks.execution import _file_effect_gate, _file_effect_gate_exchange, _file_gate_setup, _file_package_recovery
-from agentworks.execution._file_effect_gate import (
-    FileEffectGateError,
-    hold_file_effect_gate,
-    setup_file_effect_gate,
-)
+from agentworks.execution._file_effect_gate import FileEffectGateError, hold_file_effect_gate
 from agentworks.execution._file_effect_gate_bundle import _MODULE_NAMES, _PACKAGE
 from agentworks.execution._file_effect_gate_exchange import exchange_file_effect_gate
+from agentworks.execution._file_gate_control import setup_file_effect_gate
 from agentworks.execution._file_gate_setup import file_effect_gate_path
 from agentworks.execution._file_obligation import (
     FILE_CALL_OBLIGATION_PAYLOAD_VERSION,

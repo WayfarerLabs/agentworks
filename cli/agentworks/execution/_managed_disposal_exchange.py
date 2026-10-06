@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
 
-from ._file_wire import FileRecord, FileRecordKind, FileRecordReader, FileWireError
+from ._file_wire import FileRecord, FileRecordKind
+from ._file_wire_reader import FileRecordReader, FileWireError
 from ._helper_launcher import IdentityPlan
 from ._managed_disposal_bundle import FIXED_BUNDLE
 from ._managed_disposal_protocol import DisposalError, DisposalRequest, DisposalResult, decode_result, encode_request

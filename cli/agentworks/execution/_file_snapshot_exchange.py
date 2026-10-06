@@ -10,6 +10,17 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
 from agentworks.execution._file_snapshot_bundle import FIXED_BUNDLE
+from agentworks.execution._file_snapshot_host import (
+    _historical_cleanup_shape,
+    encode_file_snapshot_request,
+    parse_empty_file_snapshot_body,
+    parse_file_snapshot_begin_result,
+    parse_file_snapshot_chunk_result,
+    parse_file_snapshot_cleanup_result,
+    parse_file_snapshot_failure,
+    parse_file_snapshot_reconcile_result,
+    parse_file_snapshot_stream_result,
+)
 from agentworks.execution._file_snapshot_protocol import (
     FileSnapshotBeginRequest,
     FileSnapshotChunkRequest,
@@ -23,23 +34,13 @@ from agentworks.execution._file_snapshot_protocol import (
     FileSnapshotRequest,
     FileSnapshotRequestError,
     FileSnapshotStreamRequest,
-    _historical_cleanup_shape,
-    encode_file_snapshot_request,
-    parse_empty_file_snapshot_body,
-    parse_file_snapshot_begin_result,
-    parse_file_snapshot_chunk_result,
-    parse_file_snapshot_cleanup_result,
-    parse_file_snapshot_failure,
-    parse_file_snapshot_reconcile_result,
-    parse_file_snapshot_stream_result,
 )
 from agentworks.execution._file_wire import (
     MAX_RECORD_BODY_BYTES,
     FileRecord,
     FileRecordKind,
-    FileRecordReader,
-    FileWireError,
 )
+from agentworks.execution._file_wire_reader import FileRecordReader, FileWireError
 from agentworks.execution._runtime_prerequisite import (
     RuntimePrefixSink,
     RuntimePrerequisiteObservation,

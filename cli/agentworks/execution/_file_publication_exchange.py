@@ -35,7 +35,8 @@ from agentworks.execution._file_publication_protocol import (
     parse_file_publication_reconcile_result,
     parse_file_publish_result,
 )
-from agentworks.execution._file_wire import FileRecord, FileRecordKind, FileRecordReader, FileWireError
+from agentworks.execution._file_wire import FileRecord, FileRecordKind
+from agentworks.execution._file_wire_reader import FileRecordReader, FileWireError
 from agentworks.execution._publication_receipt import PublicationStageCleanupDebt
 from agentworks.execution._runtime_prerequisite import (
     RuntimePrefixSink,

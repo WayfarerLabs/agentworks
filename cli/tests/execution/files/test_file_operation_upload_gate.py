@@ -20,10 +20,10 @@ from agentworks.execution import (
     _file_publication_exchange,
     _file_stage_exchange,
 )
-from agentworks.execution._file_effect_gate import advance_file_effect_gate, setup_file_effect_gate
 from agentworks.execution._file_effect_gate_bundle import _MODULE_NAMES as GATE_MODULES
 from agentworks.execution._file_effect_gate_bundle import _PACKAGE as GATE_PACKAGE
 from agentworks.execution._file_effect_gate_exchange import GateControlMutationUncertain
+from agentworks.execution._file_gate_control import advance_file_effect_gate, setup_file_effect_gate
 from agentworks.execution._file_gate_setup import FileEffectGateSetup, file_effect_gate_path
 from agentworks.execution._file_gate_setup_recovery import FileGateSetupRecovery
 from agentworks.execution._file_obligation import (

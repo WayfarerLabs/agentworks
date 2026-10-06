@@ -4,35 +4,28 @@ from __future__ import annotations
 
 import base64
 import binascii
-import hashlib
-import hmac
 import json
 import math
-import stat
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ._file_effect_gate import (
     FileEffectGateBinding,
     FileEffectGateError,
     decode_file_effect_gate,
-    encode_file_effect_gate,
 )
 from ._file_paths import normalized_relative_path, normalized_root
-from ._file_revision_wire import FileRevisionWireError, decode_file_revision, encode_file_revision
-from ._file_spool import SpoolSnapshot, SpoolSnapshotFailureKind
+from ._file_revision_wire import encode_file_revision
 from ._file_wire import valid_nonce
-from ._helper_identity import IdentityExpectation, decode_identity
+from ._helper_identity import decode_identity
 from ._scratch import ReadyScratchReference, ScratchFailureKind, ScratchPhase, _cleanup_debt
 from ._scratch_receipt import (
-    _RECEIPT_MODE,
     ScratchCleanupDebt,
     ScratchHistoricalOwnership,
     ScratchOperation,
     ScratchOwnershipUncertainty,
     ScratchReceiptContext,
-    scratch_name,
 )
 from ._scratch_wire import (
     ScratchWireError,
@@ -41,6 +34,10 @@ from ._scratch_wire import (
     encode_cleanup_debt,
     encode_ready_scratch_reference,
 )
+
+if TYPE_CHECKING:
+    from ._file_spool import SpoolSnapshot, SpoolSnapshotFailureKind
+    from ._helper_identity import IdentityExpectation
 
 MAX_REQUEST_BYTES = 32_768
 MAX_PATH_BYTES = 4_096
@@ -195,16 +192,6 @@ def snapshot_context(identity: IdentityExpectation) -> ScratchReceiptContext:
     return ScratchReceiptContext(ScratchOperation.SNAPSHOT, identity)
 
 
-def _historical_cleanup_shape(debt: ScratchCleanupDebt) -> bool:
-    return (
-        debt._parent is not None
-        and debt._directory is not None
-        and debt._object is not None
-        and debt._receipt is not None
-        and debt._receipt_modes == (_RECEIPT_MODE,)
-    )
-
-
 def _invalid_request() -> FileSnapshotRequestError:
     return FileSnapshotRequestError(FileSnapshotFailureCode.INVALID_REQUEST)
 
@@ -213,10 +200,14 @@ def _json_bytes(value: object) -> bytes:
     return json.dumps(value, allow_nan=False, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("ascii")
 
 
-def _load_json(data: bytes, *, request: bool) -> dict[str, object]:
+def _encode_bytes(value: bytes) -> str:
+    return base64.b64encode(value).decode("ascii")
+
+
+def _load_json(data: bytes) -> dict[str, object]:
     failed = False
     value: Any = None
-    maximum = MAX_REQUEST_BYTES if request else 4_096
+    maximum = MAX_REQUEST_BYTES
     if type(data) is not bytes or len(data) > maximum:
         failed = True
     else:
@@ -225,14 +216,8 @@ def _load_json(data: bytes, *, request: bool) -> dict[str, object]:
         except (UnicodeDecodeError, ValueError, RecursionError):
             failed = True
     if failed or type(value) is not dict:
-        if request:
-            raise _invalid_request()
-        raise FileSnapshotControlError
+        raise _invalid_request()
     return value
-
-
-def _encode_bytes(value: bytes) -> str:
-    return base64.b64encode(value).decode("ascii")
 
 
 def _decode_request_bytes(value: object, maximum: int, *, exact: int | None = None) -> bytes:
@@ -268,10 +253,6 @@ def _decode_path(value: object, *, root: bool) -> str:
     return text
 
 
-def _encode_token(token: bytes) -> str:
-    return token.hex()
-
-
 def _decode_token(value: object) -> bytes:
     if type(value) is not str or len(value) != 32 or any(character not in _LOWER_HEX for character in value):
         raise _invalid_request()
@@ -290,10 +271,6 @@ def _identity(value: object) -> IdentityExpectation:
     return identity
 
 
-def _identity_value(identity: IdentityExpectation) -> dict[str, object]:
-    return {"egid": identity.egid, "euid": identity.euid, "groups": list(identity.groups)}
-
-
 def _bounded_request_integer(value: object, maximum: int, *, positive: bool = False) -> int:
     minimum = 1 if positive else 0
     if type(value) is not int or not minimum <= value <= maximum:
@@ -309,76 +286,13 @@ def _remaining(value: object) -> float | None:
     return value
 
 
-def encode_file_snapshot_request(request: FileSnapshotRequest) -> bytes:
-    """Encode trusted host values and enforce the complete guest schema."""
-    failed = False
-    encoded = b""
-    try:
-        common: dict[str, object] = {
-            "identity": _identity_value(request.identity),
-            "nonce": request.nonce,
-            "operation": request.operation.value,
-            "remaining_seconds": request.remaining_seconds,
-            "token": _encode_token(request.token),
-            "version": 1,
-        }
-        if request.effect_gate is not None:
-            if request.effect_gate.proposed_generation is not None or request.effect_gate.euid != request.identity.euid:
-                raise FileEffectGateError("invalid snapshot gate binding")
-            common["effect_gate"] = encode_file_effect_gate(request.effect_gate)
-        if isinstance(request, FileSnapshotBeginRequest):
-            common.update(
-                {
-                    "max_bytes": request.max_bytes,
-                    "path": _encode_bytes(request.relative_path.encode("utf-8")),
-                    "root": _encode_bytes(request.root_path.encode("utf-8")),
-                }
-            )
-        elif isinstance(request, FileSnapshotChunkRequest):
-            reference = request.ready._reference._ownership
-            if reference._token != request.token or reference._context != snapshot_context(request.identity):
-                raise ScratchWireError
-            common.update(
-                {
-                    "length": request.length,
-                    "offset": request.offset,
-                    "ready": encode_ready_scratch_reference(request.ready),
-                }
-            )
-        elif isinstance(request, FileSnapshotStreamRequest):
-            reference = request.ready._reference._ownership
-            if reference._token != request.token or reference._context != snapshot_context(request.identity):
-                raise ScratchWireError
-            common["ready"] = encode_ready_scratch_reference(request.ready)
-        elif isinstance(request, FileSnapshotReconcileRequest):
-            pass
-        elif isinstance(request, FileSnapshotCleanupRequest):
-            if (
-                request.cleanup_debt._name != scratch_name(request.token)
-                or request.cleanup_debt._uid != request.identity.euid
-            ):
-                raise ScratchWireError
-            common["cleanup"] = encode_cleanup_debt(request.cleanup_debt)
-        else:
-            raise TypeError
-        encoded = _json_bytes(common)
-    except (AttributeError, FileEffectGateError, ScratchWireError, TypeError, UnicodeEncodeError, ValueError):
-        failed = True
-    if failed:
-        raise _invalid_request()
-    if len(encoded) > MAX_REQUEST_BYTES:
-        raise FileSnapshotRequestError(FileSnapshotFailureCode.OVERSIZED_REQUEST)
-    decode_file_snapshot_request(encoded)
-    return encoded
-
-
 def decode_file_snapshot_request(data: bytes) -> FileSnapshotRequest:
     """Validate one untrusted canonical request before identity or path access."""
     if type(data) is not bytes:
         raise _invalid_request()
     if len(data) > MAX_REQUEST_BYTES:
         raise FileSnapshotRequestError(FileSnapshotFailureCode.OVERSIZED_REQUEST)
-    value = _load_json(data, request=True)
+    value = _load_json(data)
     failed = False
     canonical = b""
     try:
@@ -469,11 +383,6 @@ def empty_file_snapshot_body() -> bytes:
     return b"{}"
 
 
-def parse_empty_file_snapshot_body(body: bytes) -> None:
-    if body != empty_file_snapshot_body():
-        raise FileSnapshotControlError
-
-
 def encode_file_snapshot_begin_result(result: SpoolSnapshot | None) -> bytes:
     if result is None:
         return b'{"result":"absent"}'
@@ -486,49 +395,6 @@ def encode_file_snapshot_begin_result(result: SpoolSnapshot | None) -> bytes:
     )
 
 
-def parse_file_snapshot_begin_result(
-    body: bytes,
-    token: bytes,
-    identity: IdentityExpectation,
-    max_bytes: int,
-) -> SpoolSnapshot | None:
-    value = _load_json(body, request=False)
-    failed = False
-    canonical = b""
-    try:
-        canonical = _json_bytes(value)
-    except (TypeError, ValueError):
-        failed = True
-    if failed or canonical != body:
-        raise FileSnapshotControlError
-    result = value.get("result")
-    if result == "absent" and set(value) == {"result"}:
-        return None
-    if result != "ready" or set(value) != {"ready", "result", "source"}:
-        raise FileSnapshotControlError
-    failed = False
-    ready: ReadyScratchReference | None = None
-    source = None
-    try:
-        ready = decode_ready_scratch_reference(value["ready"], token, snapshot_context(identity))
-        source = decode_file_revision(value["source"])
-    except (FileRevisionWireError, ScratchWireError):
-        failed = True
-    if failed or ready is None or source is None:
-        raise FileSnapshotControlError
-    source_digest = source.digest
-    length = ready._reference._ownership._length
-    if (
-        source_digest is None
-        or not stat.S_ISREG(source.stat.mode)
-        or source.stat.size > max_bytes
-        or length != source.stat.size
-        or not hmac.compare_digest(ready._digest, source_digest)
-    ):
-        raise FileSnapshotControlError
-    return SpoolSnapshot(ready, source)
-
-
 def encode_file_snapshot_chunk_result(result: FileSnapshotChunkResult) -> bytes:
     return _json_bytes(
         {
@@ -539,73 +405,10 @@ def encode_file_snapshot_chunk_result(result: FileSnapshotChunkResult) -> bytes:
     )
 
 
-def parse_file_snapshot_chunk_result(
-    body: bytes,
-    requested_offset: int,
-    requested_length: int,
-    data: bytes,
-) -> FileSnapshotChunkResult:
-    value = _load_json(body, request=False)
-    failed = False
-    canonical = b""
-    try:
-        canonical = _json_bytes(value)
-    except (TypeError, ValueError):
-        failed = True
-    if failed or canonical != body or set(value) != {"chunk_sha256", "length", "offset"}:
-        raise FileSnapshotControlError
-    if value["offset"] != requested_offset or type(value["offset"]) is not int:
-        raise FileSnapshotControlError
-    if value["length"] != requested_length or type(value["length"]) is not int:
-        raise FileSnapshotControlError
-    digest_value = value["chunk_sha256"]
-    if (
-        type(digest_value) is not str
-        or len(digest_value) != 64
-        or any(character not in _LOWER_HEX for character in digest_value)
-    ):
-        raise FileSnapshotControlError
-    if len(data) != requested_length:
-        raise FileSnapshotControlError
-    digest = bytes.fromhex(digest_value)
-    if not hmac.compare_digest(hashlib.sha256(data).digest(), digest):
-        raise FileSnapshotControlError
-    return FileSnapshotChunkResult(requested_offset, requested_length, data, digest)
-
-
 def encode_file_snapshot_stream_result(length: int, digest: bytes) -> bytes:
     if type(length) is not int or not 0 <= length <= _MAX_LENGTH or type(digest) is not bytes or len(digest) != 32:
         raise FileSnapshotControlError
     return _json_bytes({"length": length, "sha256": digest.hex()})
-
-
-def parse_file_snapshot_stream_result(
-    body: bytes,
-    expected_length: int,
-    expected_digest: bytes,
-    observed_length: int,
-    observed_digest: bytes,
-) -> None:
-    value = _load_json(body, request=False)
-    try:
-        canonical = _json_bytes(value)
-    except (TypeError, ValueError):
-        raise FileSnapshotControlError from None
-    digest = value.get("sha256")
-    if (
-        canonical != body
-        or set(value) != {"length", "sha256"}
-        or type(value["length"]) is not int
-        or value["length"] != expected_length
-        or value["length"] != observed_length
-        or type(digest) is not str
-        or len(digest) != 64
-        or any(character not in _LOWER_HEX for character in digest)
-    ):
-        raise FileSnapshotControlError
-    decoded = bytes.fromhex(digest)
-    if not hmac.compare_digest(decoded, expected_digest) or not hmac.compare_digest(decoded, observed_digest):
-        raise FileSnapshotControlError
 
 
 def encode_file_snapshot_reconcile_result(
@@ -616,38 +419,8 @@ def encode_file_snapshot_reconcile_result(
     return _json_bytes({"cleanup": encode_cleanup_debt(_cleanup_debt(result)), "result": "recovered"})
 
 
-def parse_file_snapshot_reconcile_result(
-    body: bytes,
-    token: bytes,
-    identity: IdentityExpectation,
-) -> ScratchCleanupDebt | None:
-    value = _load_json(body, request=False)
-    failed = False
-    canonical = b""
-    cleanup: ScratchCleanupDebt | None = None
-    try:
-        canonical = _json_bytes(value)
-        result = value.get("result")
-        if result == "recovered" and set(value) == {"cleanup", "result"}:
-            cleanup = decode_cleanup_debt(value["cleanup"], token, snapshot_context(identity))
-            if not _historical_cleanup_shape(cleanup):
-                failed = True
-        elif result != "ownership_uncertain" or set(value) != {"result"}:
-            failed = True
-    except (ScratchWireError, TypeError, ValueError):
-        failed = True
-    if failed or canonical != body:
-        raise FileSnapshotControlError
-    return cleanup
-
-
 def encode_file_snapshot_cleanup_result() -> bytes:
     return b"{}"
-
-
-def parse_file_snapshot_cleanup_result(body: bytes) -> None:
-    if body != encode_file_snapshot_cleanup_result():
-        raise FileSnapshotControlError
 
 
 def encode_file_snapshot_failure(failure: FileSnapshotFailureControl) -> bytes:
@@ -678,55 +451,3 @@ def encode_file_snapshot_failure(failure: FileSnapshotFailureControl) -> bytes:
         return _json_bytes(value)
     except (AttributeError, ScratchWireError, TypeError, ValueError):
         raise FileSnapshotControlError from None
-
-
-def parse_file_snapshot_failure(
-    body: bytes,
-    token: bytes,
-    identity: IdentityExpectation,
-) -> FileSnapshotFailureControl:
-    value = _load_json(body, request=False)
-    failed = False
-    canonical = b""
-    code = FileSnapshotFailureCode.INVALID_REQUEST
-    try:
-        canonical = _json_bytes(value)
-        code_value = value.get("code")
-        code = FileSnapshotFailureCode(code_value if type(code_value) is str else "")
-    except (TypeError, ValueError):
-        failed = True
-    if failed or canonical != body:
-        raise FileSnapshotControlError
-    if code not in {FileSnapshotFailureCode.SPOOL, FileSnapshotFailureCode.SCRATCH}:
-        if set(value) != {"code"}:
-            raise FileSnapshotControlError
-        return FileSnapshotFailureControl(code)
-    context = snapshot_context(identity)
-    cleanup: ScratchCleanupDebt | None = None
-    if code is FileSnapshotFailureCode.SPOOL:
-        if set(value) != {"cleanup", "code", "kind"}:
-            raise FileSnapshotControlError
-        failed = False
-        kind = SpoolSnapshotFailureKind.IO
-        try:
-            kind = SpoolSnapshotFailureKind(value["kind"])
-            cleanup = None if value["cleanup"] is None else decode_cleanup_debt(value["cleanup"], token, context)
-        except (ScratchWireError, TypeError, ValueError):
-            failed = True
-        if failed:
-            raise FileSnapshotControlError
-        return FileSnapshotFailureControl(code, spool_kind=kind, cleanup_debt=cleanup)
-    if set(value) != {"cleanup", "code", "kind", "phase"}:
-        raise FileSnapshotControlError
-    failed = False
-    scratch_kind = ScratchFailureKind.IO
-    phase = ScratchPhase.BEGIN
-    try:
-        scratch_kind = ScratchFailureKind(value["kind"])
-        phase = ScratchPhase(value["phase"])
-        cleanup = None if value["cleanup"] is None else decode_cleanup_debt(value["cleanup"], token, context)
-    except (ScratchWireError, TypeError, ValueError):
-        failed = True
-    if failed:
-        raise FileSnapshotControlError
-    return FileSnapshotFailureControl(code, scratch_kind=scratch_kind, scratch_phase=phase, cleanup_debt=cleanup)

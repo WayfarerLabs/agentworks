@@ -11,6 +11,7 @@ _MODULE_NAMES = (
     "_vm_guest_identity_guest",
     "_file_wire",
     "_file_effect_gate",
+    "_file_gate_control",
     "_file_effect_gate_protocol",
     "_file_effect_gate_guest",
 )

@@ -6,13 +6,7 @@ import os
 import sys
 import time
 
-from ._file_effect_gate import (
-    FileEffectGateBinding,
-    FileEffectGateError,
-    advance_file_effect_gate,
-    inspect_file_effect_gate,
-    setup_file_effect_gate,
-)
+from ._file_effect_gate import FileEffectGateBinding, FileEffectGateError
 from ._file_effect_gate_protocol import (
     MAX_REQUEST_BYTES,
     GateControlFailure,
@@ -22,6 +16,11 @@ from ._file_effect_gate_protocol import (
     decode_gate_control_request,
     encode_gate_control_failure,
     encode_gate_control_result,
+)
+from ._file_gate_control import (
+    advance_file_effect_gate,
+    inspect_file_effect_gate,
+    setup_file_effect_gate,
 )
 from ._file_wire import FileRecordKind, FileRecordWriter
 from ._helper_identity import matches_current_identity

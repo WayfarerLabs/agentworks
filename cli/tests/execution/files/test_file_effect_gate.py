@@ -19,14 +19,17 @@ import pytest
 
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import ValidationError
+from agentworks.execution import _file_gate_control
 from agentworks.execution._file_download import FileDownloadStatus
 from agentworks.execution._file_effect_gate import (
     FileEffectGateBinding,
     FileEffectGateError,
-    advance_file_effect_gate,
     decode_file_effect_gate,
     encode_file_effect_gate,
     hold_file_effect_gate,
+)
+from agentworks.execution._file_gate_control import (
+    advance_file_effect_gate,
     inspect_file_effect_gate,
     setup_file_effect_gate,
 )
@@ -330,7 +333,9 @@ def test_setup_deadline_before_commit_retains_incomplete_inode(tmp_path: Path, m
     import agentworks.execution._file_effect_gate as _file_effect_gate
 
     path = _gate_path(tmp_path)
-    original = _file_effect_gate._connect
+    control_module = sys.modules["agentworks.execution._file_gate_control"]
+    connect_attribute = "_connect"
+    original = getattr(control_module, connect_attribute)
     now = [0.0]
     monkeypatch.setattr(_file_effect_gate, "time", SimpleNamespace(monotonic=lambda: now[0], sleep=time.sleep))
 
@@ -339,7 +344,7 @@ def test_setup_deadline_before_commit_retains_incomplete_inode(tmp_path: Path, m
         now[0] = 2.0
         return connection
 
-    monkeypatch.setattr(_file_effect_gate, "_connect", slow_connect)
+    monkeypatch.setattr(control_module, "_connect", slow_connect)
     with pytest.raises(FileEffectGateError):
         setup_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", _observe_guest, expires_at=1.0)
     assert path.exists()
@@ -447,8 +452,6 @@ def test_setup_never_repairs_or_replaces_unacceptable_existing_gate(tmp_path: Pa
 def test_setup_does_not_inspect_after_nonexistence_unrelated_open_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from agentworks.execution import _file_effect_gate
-
     path = _gate_path(tmp_path)
     original_open = os.open
 
@@ -461,7 +464,7 @@ def test_setup_does_not_inspect_after_nonexistence_unrelated_open_failure(
         raise AssertionError("non-EEXIST setup failure must not inspect")
 
     monkeypatch.setattr(os, "open", denied_open)
-    monkeypatch.setattr(_file_effect_gate, "inspect_file_effect_gate", unexpected_inspection)
+    monkeypatch.setattr(_file_gate_control, "inspect_file_effect_gate", unexpected_inspection)
     with pytest.raises(FileEffectGateError):
         setup_file_effect_gate(str(path), _GUEST, os.geteuid(), "gate-vm", _observe_guest)
     assert not path.exists()
@@ -504,7 +507,7 @@ def test_bookworm_python_can_setup_and_inspect_gate(tmp_path: Path) -> None:
 import os
 import sys
 import agentworks.execution._file_effect_gate as _file_effect_gate
-from agentworks.execution._file_effect_gate import setup_file_effect_gate, inspect_file_effect_gate
+from agentworks.execution._file_gate_control import setup_file_effect_gate, inspect_file_effect_gate
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 
 _file_effect_gate._GATE_NAMESPACE = {str(_gate_path(tmp_path).parent.parent)!r}
@@ -859,21 +862,21 @@ def test_slow_guest_observation_cannot_advance_or_admit_after_deadline(tmp_path:
 def test_deadline_during_sqlite_generation_check_rolls_back_before_advance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import agentworks.execution._file_effect_gate as _file_effect_gate
-
     binding = _gate(tmp_path)
     proposed = replace(binding, proposed_generation=secrets.token_bytes(16))
-    original = _file_effect_gate._record
+    control_module = sys.modules["agentworks.execution._file_gate_control"]
+    record_attribute = "_record"
+    original = getattr(control_module, record_attribute)
 
     def slow_record(connection, expected):
         generation = original(connection, expected)
         time.sleep(0.05)
         return generation
 
-    monkeypatch.setattr(_file_effect_gate, "_record", slow_record)
+    monkeypatch.setattr(control_module, "_record", slow_record)
     with pytest.raises(FileEffectGateError):
         advance_file_effect_gate(proposed, _observe_guest, expires_at=time.monotonic() + 0.01)
-    monkeypatch.setattr(_file_effect_gate, "_record", original)
+    monkeypatch.setattr(control_module, "_record", original)
     with hold_file_effect_gate(binding, _observe_guest):
         pass
     assert advance_file_effect_gate(proposed, _observe_guest).generation == proposed.proposed_generation

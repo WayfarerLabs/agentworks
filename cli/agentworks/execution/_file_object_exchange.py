@@ -23,7 +23,8 @@ from agentworks.execution._file_object_protocol import (
     parse_file_object_result,
 )
 from agentworks.execution._file_objects import FileKind, FileObjectFailureKind, FileObjectPhase
-from agentworks.execution._file_wire import FileRecord, FileRecordKind, FileRecordReader, FileWireError
+from agentworks.execution._file_wire import FileRecord, FileRecordKind
+from agentworks.execution._file_wire_reader import FileRecordReader, FileWireError
 from agentworks.execution._runtime_prerequisite import (
     RuntimePrefixSink,
     RuntimePrerequisiteObservation,

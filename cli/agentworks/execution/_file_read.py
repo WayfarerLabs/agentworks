@@ -26,9 +26,8 @@ from agentworks.execution._file_wire import (
     MAX_RECORD_BYTES,
     FileRecord,
     FileRecordKind,
-    FileRecordReader,
-    FileWireError,
 )
+from agentworks.execution._file_wire_reader import FileRecordReader, FileWireError
 from agentworks.execution._runtime_prerequisite import (
     MAX_RUNTIME_RECORD_BYTES,
     RuntimePrefixSink,

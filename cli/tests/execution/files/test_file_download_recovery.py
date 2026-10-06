@@ -30,9 +30,8 @@ from agentworks.execution._file_download_recovery import (
 from agentworks.execution._file_effect_gate import (
     FileEffectGateBinding,
     FileEffectGateError,
-    advance_file_effect_gate,
-    setup_file_effect_gate,
 )
+from agentworks.execution._file_gate_control import advance_file_effect_gate, setup_file_effect_gate
 from agentworks.execution._file_gate_setup import FileEffectGateSetup, file_effect_gate_path
 from agentworks.execution._file_obligation import (
     FILE_CALL_OBLIGATION_PAYLOAD_VERSION,

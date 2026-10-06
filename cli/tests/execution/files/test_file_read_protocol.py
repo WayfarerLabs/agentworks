@@ -34,11 +34,10 @@ from agentworks.execution._file_wire import (
     MAX_RECORD_BYTES,
     FileRecord,
     FileRecordKind,
-    FileRecordReader,
     FileRecordWriter,
-    FileWireError,
     encode_file_record,
 )
+from agentworks.execution._file_wire_reader import FileRecordReader, FileWireError
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import RuntimePrefixSink

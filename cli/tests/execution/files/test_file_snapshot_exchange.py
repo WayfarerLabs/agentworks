@@ -38,7 +38,8 @@ from agentworks.execution._file_snapshot_protocol import (
     snapshot_context,
 )
 from agentworks.execution._file_spool import SpoolSnapshotFailureKind
-from agentworks.execution._file_wire import FileRecord, FileRecordKind, FileWireError, encode_file_record
+from agentworks.execution._file_wire import FileRecord, FileRecordKind, encode_file_record
+from agentworks.execution._file_wire_reader import FileWireError
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState

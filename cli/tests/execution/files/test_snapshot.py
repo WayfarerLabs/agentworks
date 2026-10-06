@@ -14,10 +14,9 @@ import pytest
 
 import agentworks.execution._file_snapshot as snapshot_module
 from agentworks.execution._file_paths import open_linux_confined
-from agentworks.execution._file_snapshot import (
+from agentworks.execution._file_snapshot import SnapshotFailureKind, SnapshotReadError
+from agentworks.execution._file_snapshot_read import (
     FileSnapshot,
-    SnapshotFailureKind,
-    SnapshotReadError,
     read_revision,
     read_snapshot,
 )

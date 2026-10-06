@@ -16,7 +16,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.execution import _file_effect_gate, _file_publication_guest, _file_stage_guest
-from agentworks.execution._file_effect_gate import FileEffectGateError, advance_file_effect_gate, setup_file_effect_gate
+from agentworks.execution._file_effect_gate import FileEffectGateError
+from agentworks.execution._file_gate_control import advance_file_effect_gate, setup_file_effect_gate
 from agentworks.execution._file_publication import Create, CreateMetadata, PublicationCleanupDebt
 from agentworks.execution._file_publication_bundle import _MODULE_NAMES as PUBLICATION_MODULES
 from agentworks.execution._file_publication_bundle import _PACKAGE as PUBLICATION_PACKAGE
@@ -42,7 +43,8 @@ from agentworks.execution._file_stage_protocol import (
     decode_file_stage_request,
     encode_file_stage_request,
 )
-from agentworks.execution._file_wire import FileRecord, FileRecordKind, FileRecordReader
+from agentworks.execution._file_wire import FileRecord, FileRecordKind
+from agentworks.execution._file_wire_reader import FileRecordReader
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._publication_receipt import _Identity, publication_stage_name
 from agentworks.execution._scratch import _cleanup_debt

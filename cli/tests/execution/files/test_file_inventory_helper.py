@@ -33,9 +33,9 @@ from agentworks.execution._file_wire import (
     MAX_RECORD_BODY_BYTES,
     FileRecord,
     FileRecordKind,
-    FileRecordReader,
     encode_file_record,
 )
+from agentworks.execution._file_wire_reader import FileRecordReader
 from agentworks.execution._helper_bundle import FixedFileHelperBundle
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan

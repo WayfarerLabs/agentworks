@@ -24,8 +24,8 @@ from ._file_snapshot import (
     SnapshotFailureKind,
     SnapshotReadError,
     _snapshot_stat,
-    read_revision,
 )
+from ._file_snapshot_read import read_revision
 from ._file_stat import FileRevision
 
 

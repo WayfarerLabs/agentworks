@@ -19,7 +19,8 @@ from ._file_read_protocol import (
     encode_file_read_failure,
     encode_file_read_result,
 )
-from ._file_snapshot import FileSnapshot, SnapshotFailureKind, SnapshotReadError, read_snapshot
+from ._file_snapshot import SnapshotFailureKind, SnapshotReadError
+from ._file_snapshot_read import FileSnapshot, read_snapshot
 from ._file_wire import MAX_RECORD_BODY_BYTES, FileRecordKind, FileRecordWriter
 from ._helper_identity import matches_current_identity
 

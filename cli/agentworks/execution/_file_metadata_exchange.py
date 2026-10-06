@@ -24,7 +24,8 @@ from agentworks.execution._file_metadata_protocol import (
     parse_file_metadata_failure,
     parse_file_metadata_result,
 )
-from agentworks.execution._file_wire import FileRecord, FileRecordKind, FileRecordReader, FileWireError
+from agentworks.execution._file_wire import FileRecord, FileRecordKind
+from agentworks.execution._file_wire_reader import FileRecordReader, FileWireError
 from agentworks.execution._runtime_prerequisite import (
     RuntimePrefixSink,
     RuntimePrerequisiteObservation,

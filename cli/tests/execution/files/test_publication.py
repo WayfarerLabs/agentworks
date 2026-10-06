@@ -27,7 +27,7 @@ from agentworks.execution._file_publication import (
     publish_file,
     retry_publication_cleanup,
 )
-from agentworks.execution._file_snapshot import FileSnapshot, read_revision, read_snapshot
+from agentworks.execution._file_snapshot_read import FileSnapshot, read_revision, read_snapshot
 from agentworks.execution._file_stat import FileRevision
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux file publication")

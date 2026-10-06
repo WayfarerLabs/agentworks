@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ValidationError
 
 from . import _managed_job_request as request_wire
-from ._file_wire import FileRecord, FileRecordKind, FileRecordReader, FileWireError
+from ._file_wire import FileRecord, FileRecordKind
+from ._file_wire_reader import FileRecordReader, FileWireError
 from ._fixed_helper_operation import BorrowedFixedHelperCarrier
 from ._helper_launcher import IdentityPlan
 from ._managed_job_protocol import ManagedJobFactError, encode_managed_job_fact

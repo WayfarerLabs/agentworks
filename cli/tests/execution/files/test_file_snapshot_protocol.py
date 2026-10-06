@@ -18,6 +18,16 @@ from agentworks.execution._file_revision_wire import (
     decode_file_revision,
     encode_file_revision,
 )
+from agentworks.execution._file_snapshot_host import (
+    encode_file_snapshot_request,
+    parse_empty_file_snapshot_body,
+    parse_file_snapshot_begin_result,
+    parse_file_snapshot_chunk_result,
+    parse_file_snapshot_cleanup_result,
+    parse_file_snapshot_failure,
+    parse_file_snapshot_reconcile_result,
+    parse_file_snapshot_stream_result,
+)
 from agentworks.execution._file_snapshot_protocol import (
     MAX_PATH_BYTES,
     MAX_REQUEST_BYTES,
@@ -39,15 +49,7 @@ from agentworks.execution._file_snapshot_protocol import (
     encode_file_snapshot_cleanup_result,
     encode_file_snapshot_failure,
     encode_file_snapshot_reconcile_result,
-    encode_file_snapshot_request,
     encode_file_snapshot_stream_result,
-    parse_empty_file_snapshot_body,
-    parse_file_snapshot_begin_result,
-    parse_file_snapshot_chunk_result,
-    parse_file_snapshot_cleanup_result,
-    parse_file_snapshot_failure,
-    parse_file_snapshot_reconcile_result,
-    parse_file_snapshot_stream_result,
     snapshot_context,
 )
 from agentworks.execution._file_spool import SpoolSnapshot, SpoolSnapshotFailureKind

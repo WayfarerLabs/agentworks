@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
 
-from ._file_wire import FileRecord, FileRecordKind, FileRecordReader, FileWireError
+from ._file_wire import FileRecord, FileRecordKind
+from ._file_wire_reader import FileRecordReader, FileWireError
 from ._helper_launcher import IdentityPlan
 from ._managed_observation_protocol import ManagedObservationError, checked_fact
 from ._managed_stop_bundle import FIXED_BUNDLE

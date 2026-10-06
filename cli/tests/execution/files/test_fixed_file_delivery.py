@@ -23,10 +23,11 @@ from agentworks.execution._file_read_bundle import _PACKAGE as READ_PACKAGE
 from agentworks.execution._file_read_bundle import FIXED_BUNDLE as READ_BUNDLE
 from agentworks.execution._file_read_protocol import parse_file_read_failure
 from agentworks.execution._file_snapshot_bundle import FIXED_BUNDLE as SNAPSHOT_BUNDLE
-from agentworks.execution._file_snapshot_protocol import parse_file_snapshot_failure
+from agentworks.execution._file_snapshot_host import parse_file_snapshot_failure
 from agentworks.execution._file_stage_bundle import FIXED_BUNDLE as STAGE_BUNDLE
 from agentworks.execution._file_stage_protocol import parse_file_stage_failure
-from agentworks.execution._file_wire import FileRecord, FileRecordKind, FileRecordReader
+from agentworks.execution._file_wire import FileRecord, FileRecordKind
+from agentworks.execution._file_wire_reader import FileRecordReader
 from agentworks.execution._helper_bundle import FixedFileHelperBundle, _build_file_helper_bundle
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan

@@ -11,6 +11,7 @@ _MODULE_NAMES = (
     "_file_revision_wire",
     "_file_paths",
     "_file_snapshot",
+    "_file_snapshot_read",
     "_file_objects",
     "_file_wire",
     "_file_object_protocol",

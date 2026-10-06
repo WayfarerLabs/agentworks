@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ValidationError
 
 from . import _managed_job_wire as wire
-from ._file_wire import MAX_RECORD_BODY_BYTES, FileRecord, FileRecordKind, FileRecordReader, FileWireError
+from ._file_wire import MAX_RECORD_BODY_BYTES, FileRecord, FileRecordKind
+from ._file_wire_reader import FileRecordReader, FileWireError
 from ._managed_job_store import FactName, Stream
 from ._managed_observation_bundle import FIXED_BUNDLE
 from ._managed_observation_protocol import (

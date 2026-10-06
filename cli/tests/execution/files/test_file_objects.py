@@ -21,7 +21,7 @@ from agentworks.execution._file_objects import (
     stat_file_object,
 )
 from agentworks.execution._file_paths import open_linux_confined
-from agentworks.execution._file_snapshot import read_revision
+from agentworks.execution._file_snapshot_read import read_revision
 from agentworks.execution._file_stat import FileRevision
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux file objects")
