@@ -310,6 +310,23 @@ use or native macOS/Windows behavior. Run them only under a separate authorized 
 charter; collection and synthetic maintenance checks alone supply no installed-client workflow
 acceptance.
 
+The integration-marked `test_trust_migration_native.py` cases extend isolated-copy maintenance with
+an applicable CA-policy transition against a server already presenting a replacement-CA certificate,
+and publication of a real KRL revoking the served host key. Source updates alone leave the admitted
+snapshot unchanged. Explicit refresh changes strict admission; failed refresh stays blocked.
+Restoring owned source bytes and timestamps, reconstructing the same explicit connection,
+stale-generation refresh and an attempted import over an existing bundle cannot discard retained
+learned keys or generations or reactivate superseded policy. Complete forward repair retains the
+learned key, CA/revoked records and applicable KRL. Each application attempt uses an isolated
+interpreter with retired execution modules unavailable and an effect marker proving refused commands
+did not execute. Bounded probe logs retain status/count observations without client diagnostics or
+key contents. These fixtures retain the server's 120-second lifetime, ten-second
+operation/key-generator bounds and a 15-second subprocess observation bound. They require the same
+authorized tester and account/home prerequisite as the other native enrollment fixtures. Collection
+does not perform native work. They do not measure a live server CA rotation, production creation or
+writer ownership, persisted configuration rollback, provider/RunContext composition, or native
+macOS/Windows acceptance.
+
 The integration-marked authentication-offer tests retain the owned server's DEBUG2 packet logs. They
 compare every queried or signed wire key, including its algorithm and complete blob, with the
 configured fixture identity. A foreground owned agent contains independently verified multiple
