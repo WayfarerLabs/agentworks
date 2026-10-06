@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import threading
 from typing import TYPE_CHECKING
@@ -10,7 +11,6 @@ import pytest
 
 from agentworks.db import Database, OperationResourceKind, OperationScope
 from agentworks.errors import StateError
-from agentworks.execution import _process
 from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._process import LocalProcessInput, LocalProcessRequest
 from agentworks.execution.carrier import (
@@ -41,8 +41,8 @@ def _scope() -> OperationScope:
 @pytest.fixture
 def delayed_constructor(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[threading.Event, threading.Event]]:
     entered, release = threading.Event(), threading.Event()
-    create = _process.subprocess.Popen
-    children: list[_process.subprocess.Popen[bytes]] = []
+    create = subprocess.Popen
+    children: list[subprocess.Popen[bytes]] = []
 
     def delayed(*args, **kwargs):
         entered.set()
@@ -51,12 +51,12 @@ def delayed_constructor(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[threa
         children.append(child)
         return child
 
-    monkeypatch.setattr(_process.subprocess, "Popen", delayed)
+    monkeypatch.setattr(subprocess, "Popen", delayed)
     try:
         yield entered, release
     finally:
         release.set()
-        assert all(child.poll() is not None for child in children)
+        assert all(child.returncode is not None for child in children)
 
 
 def _launch(custody: LocalDeliveryCustody, entered: threading.Event) -> None:

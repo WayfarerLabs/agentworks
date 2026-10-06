@@ -14,7 +14,7 @@ from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.errors import ConfigError, ConnectivityError, LimitExceededError, StateError
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
-from agentworks.execution.carrier import Capture, CapturedOutput, Deadline, Failure
+from agentworks.execution.carrier import Capture, CapturedOutput, CarrierIO, Deadline, Failure
 from agentworks.execution.carriers._subprocess import ProcessResult
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
@@ -76,7 +76,7 @@ def test_wsl2_locator_uses_one_bounded_registration_probe(monkeypatch: pytest.Mo
     local_delivery = LocalDeliveryCustody()
     calls: list[dict[str, object]] = []
 
-    def run(*args: object, **kwargs: object) -> SimpleNamespace:
+    def run(*args: object, **kwargs: object) -> ProcessResult:
         calls.append({"args": args, "kwargs": kwargs})
         return _process_result(
             status=0,
@@ -106,9 +106,10 @@ def test_wsl2_locator_uses_one_bounded_registration_probe(monkeypatch: pytest.Mo
     kwargs = cast(dict[str, object], calls[0]["kwargs"])
     env = cast(dict[str, str], kwargs["env"])
     command = cast(list[str], args[0])
-    assert isinstance(kwargs["io"].output, Capture)
+    assert isinstance(cast(CarrierIO, kwargs["io"]).output, Capture)
     assert kwargs["custody"] is local_delivery
-    assert cast(Deadline, kwargs["deadline"]).remaining() > 0
+    remaining = cast(Deadline, kwargs["deadline"]).remaining()
+    assert remaining is not None and remaining > 0
     assert "test-distro" not in command
     assert env["AGENTWORKS_WSL_DISTRO"] == "test-distro"
 
@@ -160,7 +161,7 @@ def test_wsl2_locator_maps_missing_or_duplicate_registration_to_state(monkeypatc
 def test_wsl2_locator_maps_process_timeout_to_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     local_delivery = LocalDeliveryCustody()
 
-    def timeout(*_args: object, **_kwargs: object) -> SimpleNamespace:
+    def timeout(*_args: object, **_kwargs: object) -> ProcessResult:
         return _process_result(failure=Failure.DEADLINE)
 
     monkeypatch.setattr("agentworks.capabilities.vm_platform.wsl2.run_process", timeout)

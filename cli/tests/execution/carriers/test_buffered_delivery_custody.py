@@ -152,10 +152,7 @@ def test_actual_delayed_constructor_retained_and_never_replayed(
             )
     finally:
         release.set()
-        custody.close(Deadline.after(2))
-        for child in children:
-            if child.poll() is None:
-                child.kill()
-            child.wait(timeout=2)
+        assert custody.close(Deadline.after(2))
     assert custody.settled and len(children) == 1
+    assert children[0].returncode is not None
     assert all(pipe is None or pipe.closed for pipe in (children[0].stdin, children[0].stdout, children[0].stderr))
