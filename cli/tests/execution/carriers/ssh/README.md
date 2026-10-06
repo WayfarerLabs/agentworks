@@ -246,3 +246,14 @@ all keys, logs, server, agent and socket lifetimes. These cases do not place hos
 system SSH config: portable OpenSSH locates user config through the account's passwd home, so
 setting HOME to a fixture directory would not supply that evidence. Hostile default config, account
 startup and native macOS/Windows agent behavior remain separate platform acceptance gates.
+
+Native loopback execution requires a tester-owned account and home, or independently demonstrated
+absence of startup hooks in the configured account shell. `PermitUserRC no` disables SSH user rc
+files but does not exclude account-shell startup or home hooks. Do not infer account isolation from
+that option or run these cases through an ordinary operator account without that prerequisite. The
+source-pure fixture worker admits effects only after thread startup returns, retains one worker
+through process construction and borrowed lifetime, and waits for explicit cleanup completion before
+logs, sockets and directories close. Synthetic cases cover inert late tails, caller interruption,
+constructor/cleanup failures and cleanup order. Unexpected server startup exit fails with retained
+owned diagnostics; only identified platform/binary prerequisites skip. Native process, account-shell
+and default-config acceptance still requires the tester's separate charter.

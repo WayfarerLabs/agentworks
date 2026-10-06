@@ -13,6 +13,7 @@ from agentworks.execution.carrier import Capture, CarrierIO, Deadline, Dispatch,
 from agentworks.execution.carriers.ssh.client import SSHCarrier
 from tests.execution.carriers.ssh.auth_offer_fixtures import key_offers, owned_agent, public_key
 from tests.execution.carriers.ssh.enrollment_server import LocalSSH, enrollment_server
+from tests.execution.carriers.ssh.fixture_worker import fixture_call
 
 pytestmark = pytest.mark.integration
 
@@ -109,24 +110,26 @@ def test_automatic_sibling_certificate_is_never_offered(
     identity = server.connection.identity_file
     other = identity.parent / "other-key"
     with owned_agent((other, identity)) as endpoint:
-        subprocess.run(
-            [
-                "ssh-keygen",
-                "-q",
-                "-s",
-                str(other),
-                "-I",
-                "owned-user-certificate",
-                "-n",
-                server.connection.user,
-                "-V",
-                "-1m:+5m",
-                str(identity.with_suffix(".pub")),
-            ],
-            check=True,
-            timeout=10,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        fixture_call(
+            lambda: subprocess.run(
+                [
+                    "ssh-keygen",
+                    "-q",
+                    "-s",
+                    str(other),
+                    "-I",
+                    "owned-user-certificate",
+                    "-n",
+                    server.connection.user,
+                    "-V",
+                    "-1m:+5m",
+                    str(identity.with_suffix(".pub")),
+                ],
+                check=True,
+                timeout=10,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         )
         certificate = public_key(identity.with_name(identity.name + "-cert.pub"))
         assert "-cert-" in certificate[0]
