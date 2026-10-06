@@ -437,7 +437,6 @@ def test_real_carrier_timeout_records_deadline_with_unresolved_begin(
         assert not tuple(scratch.iterdir())
     finally:
         assert operation_owner.close_local_delivery(Deadline.after(3))
-        assert operation_owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
