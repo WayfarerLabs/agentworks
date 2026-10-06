@@ -253,6 +253,14 @@ below retains its measured pin. The preceding transport source's hosted CI `3751
 `37513246961` pass, including the corrected Windows fixture. Its original failure's cause remains
 unknown. No native gate follows from these hosted results.
 
+Private corrections at `7f02ad436` retain actual forwarding fixture resources through early test
+failure, correct permanent enrollment availability and remove a redundant discovery check. All three
+private lanes clear those corrections and the scoped buffered/live adoption, while retaining the
+open production forwarding, enrollment and terminal obligations. The affected suite passes 207 tests
+with three skips. Full strict mypy checks 1,299 sources and reports exactly the three held
+enrollment errors, exit 1; file quality and locked-SDD checks exit 0. No public handoff or native
+acceptance follows, and all 25 completed records remain unchanged.
+
 Combined code pin `38934134e3b8d12af814f9371b62075daa49db3e` preserves all 64 Python paths in the
 SSH contribution, including deletions, from published `186458307b`. Its full suite passes 16,125
 non-integration tests with 51 skips and 27 warnings, exit 0 in 267.18 seconds. Full Ruff/format
