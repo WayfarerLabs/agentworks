@@ -42,11 +42,7 @@ from agentworks.debian import DebianRelease
 from agentworks.errors import ProvisioningError, StateError
 from agentworks.naming import NAME_RE
 from agentworks.schema import AgwModel, NonEmptyStr
-from agentworks.ssh import SSH_DEFAULT_RETRIES, SSHError, SSHTarget
-from agentworks.ssh import run as ssh_run
-from agentworks.subprocess_io import decode_stream, stdin_bytes
 from agentworks.topics import TopicProse
-from agentworks.transports import LimaTransport, RemoteLimaTransport, SSHTransport
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
@@ -54,8 +50,8 @@ if TYPE_CHECKING:
     from agentworks.db import VMRow
     from agentworks.execution.carrier import Deadline
     from agentworks.resources.graph import Readiness
-    from agentworks.ssh import SSHLogger
-    from agentworks.transports import Transport
+    from agentworks.ssh import SSHLogger, SSHTarget
+    from agentworks.transports import SSHTransport, Transport
 
 # Markers the restart-sentinel probe echoes on stdout. The probe exits 0
 # either way, so an absent sentinel stays a normal result, not an exception.
@@ -283,6 +279,10 @@ class LimaPlatform(VMPlatform):
         timeout: int | None = None,
     ) -> str:
         """Run a limactl command, locally or on the site's placement host."""
+        from agentworks.ssh import SSH_DEFAULT_RETRIES, SSHError, SSHTarget
+        from agentworks.ssh import run as ssh_run
+        from agentworks.subprocess_io import decode_stream, stdin_bytes
+
         if self.is_remote:
             assert self._remote_host is not None
             target = SSHTarget(host=self._remote_host, user=None, login_shell=True)
@@ -346,6 +346,8 @@ class LimaPlatform(VMPlatform):
             )
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
+        from agentworks.ssh import SSHError
+
         images = code_owned_release_value(
             _LIMA_IMAGE_BLOCKS,
             request.debian_release,
@@ -522,6 +524,8 @@ class LimaPlatform(VMPlatform):
         sentinel is there, so a raised ``SSHError`` means a genuine shell or
         transport failure and never a merely absent sentinel.
         """
+        from agentworks.ssh import SSHError
+
         probe = self._run_lima(
             f"limactl shell {instance_name} sh -c "
             f"'test -f {REBOOT_SENTINEL_PATH} "
@@ -535,6 +539,8 @@ class LimaPlatform(VMPlatform):
 
     def _instance_exists(self, instance_name: str) -> bool:
         """Pre-flight: does a Lima instance with this name exist?"""
+        from agentworks.ssh import SSHError
+
         try:
             listing = self._run_lima(f"limactl list --json {instance_name}", check=False)
         except SSHError:
@@ -549,6 +555,8 @@ class LimaPlatform(VMPlatform):
         return False
 
     def _transport_for(self, instance_name: str) -> Transport:
+        from agentworks.transports import LimaTransport, RemoteLimaTransport
+
         if self.is_remote:
             assert self._remote_host is not None
             return RemoteLimaTransport(vm_name=instance_name, vm_host_ssh=self._remote_host)
@@ -556,6 +564,8 @@ class LimaPlatform(VMPlatform):
 
     def _create_local(self, instance_name: str, lima_yaml: str) -> None:
         """Create and start a local Lima VM without persisting its template."""
+        from agentworks.ssh import SSHError
+
         try:
             # Lima's documented ``-`` template source consumes stdin. The
             # provider configuration therefore never needs a local filesystem
@@ -574,6 +584,8 @@ class LimaPlatform(VMPlatform):
         """An exec transport to the site's placement host (remote sites only):
         the create path's run_detached target, and the interrupt
         rollback's kill target."""
+        from agentworks.transports import SSHTransport
+
         assert self._remote_host is not None
         return SSHTransport(
             host=self._remote_host,
@@ -601,6 +613,9 @@ class LimaPlatform(VMPlatform):
         ``lima_yaml`` is the exact provider-persisted configuration and must
         contain no resolved secret.
         """
+        from agentworks.ssh import SSHError, SSHTarget
+        from agentworks.ssh import run as ssh_run
+
         assert self._remote_host is not None
         target = SSHTarget(host=self._remote_host, user=None)
 
@@ -685,6 +700,8 @@ class LimaPlatform(VMPlatform):
 
     def _allocate_remote_template_dir(self, target: SSHTarget) -> str:
         """Atomically allocate and validate a private remote staging directory."""
+        from agentworks.ssh import run as ssh_run
+
         path_template = f"{_REMOTE_TEMPLATE_ROOT}/{_REMOTE_TEMPLATE_PREFIX}{'X' * _REMOTE_TEMPLATE_RANDOM_LENGTH}"
         result = ssh_run(target, f"umask 077 && mktemp -d {shlex.quote(path_template)}")
         remote_template_dir = result.stdout.strip()
@@ -701,6 +718,8 @@ class LimaPlatform(VMPlatform):
 
     def _remove_remote_template_dir(self, target: SSHTarget, remote_template_dir: str) -> None:
         """Remove the remote Lima template staging directory."""
+        from agentworks.ssh import run as ssh_run
+
         quoted_dir = shlex.quote(remote_template_dir)
         command = f"rm -rf -- {quoted_dir} && test ! -e {quoted_dir}"
         ssh_run(target, command)
@@ -758,6 +777,8 @@ class LimaPlatform(VMPlatform):
 
     def _log_provision_errors(self, instance_name: str) -> None:
         """Attempt to surface provision script errors from Lima logs."""
+        from agentworks.ssh import SSHError
+
         try:
             log_output = self._run_lima(
                 f"limactl shell {instance_name} cat /var/log/cloud-init-output.log 2>/dev/null || true",
@@ -834,6 +855,8 @@ class LimaPlatform(VMPlatform):
         return ProviderLocatorUnavailable()
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
+        from agentworks.ssh import SSHError
+
         instance_name = self._instance_name(vm)
         try:
             listing = self._run_lima(

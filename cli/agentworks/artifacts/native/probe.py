@@ -13,7 +13,6 @@ from agentworks.artifacts.application import ArtifactFile
 from agentworks.artifacts.frontmatter import parse_metadata
 from agentworks.artifacts.native.common import MAX_CODEX_PERSONA_BYTES
 from agentworks.errors import ExternalError, StateError
-from agentworks.native_files import require_python3
 from agentworks.package_sources import CaptureLimits
 from agentworks.sources import SourceRefError
 
@@ -381,6 +380,8 @@ def probe_native(
     check_policy: bool = True,
 ) -> str:
     """Check the actual native home and relevant native policy without starting a model."""
+    from agentworks.native_files import require_python3
+
     require_python3(runner)
     entries = {file.path: file.native_identity for file in files if file.native_identity}
     identities = tuple(entries.values())

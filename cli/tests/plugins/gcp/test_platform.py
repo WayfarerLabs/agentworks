@@ -346,7 +346,7 @@ def _platform(monkeypatch: pytest.MonkeyPatch, transport: _Transport) -> tuple[G
         transport.host = str(kwargs["host"])
         return transport
 
-    monkeypatch.setattr("agentworks.plugins.gcp.platform.SSHTransport", transport_factory)
+    monkeypatch.setattr("agentworks.transports.SSHTransport", transport_factory)
     return platform, cache
 
 

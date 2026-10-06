@@ -26,7 +26,6 @@ from agentworks.artifacts.native.common import (
     validate_names,
     validate_native_argv,
 )
-from agentworks.ssh import SSHError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -181,6 +180,8 @@ def session_prompt_snapshot(runner: Transport, environment: Mapping[str, str]) -
     Before 2.1.265, explicit system-prompt flags disabled recording automatically.
     https://code.claude.com/docs/en/cli-reference#system-prompt-flags-in-resumed-conversations
     """
+    from agentworks.ssh import SSHError
+
     version = None
     try:
         result = runner.run(

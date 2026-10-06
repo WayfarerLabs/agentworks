@@ -22,11 +22,11 @@ from agentworks.capabilities.harness_integration.settings import (
 )
 from agentworks.errors import ConfigError, StateError
 from agentworks.harness_setup.model import NativeClaim
-from agentworks.native_files import NativeFiles, native_path
 from agentworks.plugins._harness_native.native_cli import NativeCLI, NativeMarket, NativeTool
 
 if TYPE_CHECKING:
     from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
+    from agentworks.native_files import NativeFiles
     from agentworks.plugins._harness_native.native_config import NativeUserConfig, NativeWorkspaceConfig
 
 
@@ -127,6 +127,8 @@ def setup_workspace(
     tool: NativeTool, config: NativeWorkspaceConfig | None, invocation: WorkspaceSetupInvocation
 ) -> None:
     """Publish one fixed project role; workspace setup never installs plugins."""
+    from agentworks.native_files import NativeFiles, native_path
+
     claims = list(invocation.prior.claims if invocation.prior else ())
     if any(claim.role != "settings" for claim in claims):
         raise StateError("workspace native setup contains unsupported ownership claims")
@@ -194,6 +196,8 @@ def _check_contributions(
 
 def setup_user(tool: NativeTool, config: NativeUserConfig | None, invocation: UserSetupInvocation) -> None:
     """Reconcile actual-user native associations using confirmed prior claims."""
+    from agentworks.native_files import NativeFiles, native_path
+
     mapping = None if config is None else config.settings
     prepared = None if mapping is None else prepare_settings(mapping, format=_format(tool))
     claims = list(invocation.prior.claims if invocation.prior else ())

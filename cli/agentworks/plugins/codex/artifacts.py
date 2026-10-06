@@ -25,7 +25,6 @@ from agentworks.artifacts.native.common import (
     validate_native_argv,
 )
 from agentworks.errors import ConfigError
-from agentworks.native_files import NativeFiles
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -60,6 +59,8 @@ def _persona(item: ArtifactInput, *, role_layer: bool = False) -> str:
 
 def guidance_path(runner: Transport, root: str) -> str:
     """Use the instruction file Codex actually selects at this directory."""
+    from agentworks.native_files import NativeFiles
+
     override = f"{root}/AGENTS.override.md"
     with NativeFiles(runner) as files:
         content = files.read(override)

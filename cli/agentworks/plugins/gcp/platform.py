@@ -82,7 +82,6 @@ from agentworks.plugins.gcp.network import (
     resolve_network,
 )
 from agentworks.topics import TopicProse
-from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -419,6 +418,8 @@ class GCEPlatform(VMPlatform):
             verify_instance_network(running, network_url=network.network_url, subnet_url=network.subnet_url)
             external_ip = live_external_ipv4(running)
             request.progress.output(f"GCE instance '{names.backend_name}' is running")
+            from agentworks.transports import SSHTransport
+
             transport = SSHTransport(
                 host=external_ip,
                 user=request.admin_username,
@@ -648,6 +649,8 @@ class GCEPlatform(VMPlatform):
         identity_file = None
         if config is not None:
             identity_file = getattr(getattr(config, "operator", None), "ssh_private_key", None)
+        from agentworks.transports import SSHTransport
+
         return SSHTransport(
             host=live_external_ipv4(current, access_config_name=identity.access_config_name),
             user=vm.admin_username,

@@ -59,7 +59,6 @@ from agentworks.plugins.azure.network import (
     wrap_azure_error,
 )
 from agentworks.topics import TopicProse
-from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -649,6 +648,8 @@ class AzureVMPlatform(VMPlatform):
             try:
                 output.detail(f"Azure VM '{vm_name}' provisioned (IP: {public_ip})")
 
+                from agentworks.transports import SSHTransport
+
                 prov_transport = SSHTransport(
                     host=public_ip,
                     user=admin_username,
@@ -875,6 +876,8 @@ class AzureVMPlatform(VMPlatform):
         identity_file = None
         if config is not None:
             identity_file = getattr(getattr(config, "operator", None), "ssh_private_key", None)
+
+        from agentworks.transports import SSHTransport
 
         return SSHTransport(
             host=public_ip,

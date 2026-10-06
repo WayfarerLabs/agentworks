@@ -73,7 +73,6 @@ from agentworks.plugins.aws.network import (
     wrap_ec2_error,
 )
 from agentworks.topics import TopicProse
-from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -577,6 +576,8 @@ class EC2Platform(VMPlatform):
             public_ip = self._public_ip(ec2, instance_id)
             output.detail(f"EC2 instance '{backend_name}' provisioned (IP: {public_ip})")
 
+            from agentworks.transports import SSHTransport
+
             prov_transport = SSHTransport(
                 host=public_ip,
                 user=request.admin_username,
@@ -836,6 +837,8 @@ class EC2Platform(VMPlatform):
         identity_file = None
         if config is not None:
             identity_file = getattr(getattr(config, "operator", None), "ssh_private_key", None)
+
+        from agentworks.transports import SSHTransport
 
         return SSHTransport(
             host=public_ip,
