@@ -794,7 +794,12 @@ opening ordinary borrowing to recovery. Original escaping control exceptions car
 preparation facts; unknown or uncertain attempts stop the batch. A retry can reconcile only a
 stopped, settled batch's exact resolution, never repeat a probe. The caller must retain the batch
 before admission and separately own the durable-ready availability span through its last recovery
-action. This private implementation does not establish that outer span, adopt retained-file records
+action. The binding retains its exact local dispatcher before activation. Separate stopped-query
+accounting permits a retry to close only an unused unreturned opening or the batch's interrupted,
+fully settled local close before resolving its row. It never clears another dispatcher or an
+outstanding attempt. Binding reuse cannot let an early refused opening target a prior caller's
+handle. This narrow cleanup does not promise signal-atomic Python bookkeeping or native drain.
+This private implementation does not establish that outer span, adopt retained-file records
 or supply native endpoint/drain proof.
 
 That contract uses a distinct internal recovery-dispatch object, not a recovery mode on the ordinary

@@ -212,6 +212,11 @@ guest/locator and numeric account composers, with each helper admitted through e
 dispatch. Known non-dispatch or normal zero completion settles the helper; protocol refusal still
 grants no prepared facts. Once stopped and fully settled, the batch closes its dispatcher and
 resolves only its own row. A lost resolution reply may be reconciled without repeating observations.
+The batch also retains its exact local opening before activation and separately records when no
+queries ran or all queries settled. Its retry may finish that unused opening or interrupted local
+close, then resolve only its own row. Reusing a binding cannot make cleanup target an earlier
+caller's dispatcher; conflicting or outstanding custody refuses cleanup. These are local facts,
+not native drain evidence or general signal-atomic bookkeeping.
 Unknown dispatch, interruption or uncertain bookkeeping retains the batch and available attempt
 custody and prevents further queries. The result is not an availability lease: core still needs to
 retain a durable-ready span through the final file action. The empty row neither reconstructs native

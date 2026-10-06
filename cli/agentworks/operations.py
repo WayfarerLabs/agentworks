@@ -550,7 +550,7 @@ class RecoveredLifecycleObligation:
     _local_dispatch: RecoveryDispatch | None = field(default=None, init=False)
 
     def open_dispatch(self) -> RecoveryDispatch:
-        """Reserve this owner for one recovery dispatcher without mutation."""
+        """Reserve this owner for one recovery dispatcher without durable mutation."""
         owner = self._owner
         with owner._guard:  # noqa: SLF001
             # A refused new opening must not retain an earlier caller's handle.
