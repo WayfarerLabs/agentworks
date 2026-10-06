@@ -190,17 +190,19 @@ local validation separately from the remaining shared integration and platform a
 proof fixtures from native execution and genuine production publication.
 
 Shared subprocess adoption introduces an implementation dependency on transport #833. Current
-integration uses `51d5222d50cf04c38f1a5648d2bdd8b8f9bca8fd`, adding private operation-context
-binding and actual durable-record envelope versions to workflow context forwarding, all eight
-file-helper families and the versioned durable codec, alongside reviewed WSL hold/query/probe
-adoption of named admission, bootstrap/file packaging, owner-mediated POSIX resize, shared terminal
-input and explicit borrowed native stdin, structural preflight, managed-start and download
-mechanisms. Early named admission separates root launch from the configured body account and
-preserves existing version-3 hold recovery. It does not complete production composition or native
-guest-fencing acceptance. Numeric context carries root entry and a complete verified guest; the
-private `FileOperation` binds that context once to its selected VM boot and gives prepared workflows
-the binding from construction. Admission, child publication, exact retry and retained updates use
-each typed record's actual envelope version. Fresh version-two recovery preparation, production
+integration uses `f49d060bc69490e0934b7da0aeddaa6c083b4c0c`, adding explicit buffered-inline
+bootstrap, private operation-context binding and actual durable-record envelope versions to workflow
+context forwarding, all eight file-helper families and the versioned durable codec, alongside
+reviewed WSL hold/query/probe adoption of named admission, bootstrap/file packaging, owner-mediated
+POSIX resize, shared terminal input and explicit borrowed native stdin, structural preflight,
+managed-start and download mechanisms. Early named admission separates root launch from the
+configured body account and preserves existing version-3 hold recovery. It does not complete
+production composition or native guest-fencing acceptance. Numeric context carries root entry and a
+complete verified guest; the private `FileOperation` binds that context once to its selected VM boot
+and gives prepared workflows the binding from construction. Admission, child publication, exact
+retry and retained updates use each typed record's actual envelope version. Private buffered-inline
+preparation uses the explicit context through the root program, checking the full guest before
+remaining modules and request consumption. Fresh version-two recovery preparation, production
 context construction, inline/service fencing and additive RunContext adoption remain open. The
 [Windows ancestor-sharing correction](phase2-results.md#windows-ancestor-sharing-correction) records
 that rebase and its remaining limits. The earlier
