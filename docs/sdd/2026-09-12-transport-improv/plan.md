@@ -2343,9 +2343,9 @@ and whitespace checks pass. Live SSH/QGA and production route tests remain open.
       `current=1`, recreation, default/unique restore, disk/RAM rollback, clone, stop/start,
       migration and VMID reuse. Settle explicit adoption/alternative handling for missing, disabled
       or manually preserved IDs without synthetic identity or readiness repair. Do not impose an
-      uncopyable-cluster requirement or infer positive generation from configured addresses. The
-      [prior-art finding](prior-art-research.md) is response input, not native acceptance or
-      recovery cutover by itself.
+      requirement for a cluster identifier that cannot be copied or infer positive generation from
+      configured addresses. The [prior-art finding](prior-art-research.md) is response input, not
+      native acceptance or recovery cutover by itself.
 - [ ] Complete and prove Linux supervisor launch through SSH and native QGA: protected identity,
       secret/source delivery, privilege changes, foreground wait, independent launch, output
       retention and terminal evidence. No workload code runs before boundary entry.

@@ -685,7 +685,8 @@ do not provide a documented, immutable cluster-plus-VM-incarnation locator that 
 survives or distinguishes every reuse, clone, migration and restore. Node plus VMID is an address,
 not such an identity. Do not infer one from SMBIOS UUID or VM generation ID without an explicit
 adoption/uniqueness policy and native proof. At that checkpoint the Proxmox locator remained
-unavailable; the revised candidate below does not require an uncopyable cluster identifier.
+unavailable; the revised candidate below does not require a cluster identifier that cannot be
+copied.
 
 The earlier, now superseded candidate combined the exact cluster CA fingerprint from the read-only
 [`certificates/info` endpoint](https://github.com/proxmox/pve-manager/blob/master/PVE/API2/Certificates.pm),
@@ -707,12 +708,12 @@ An October 6 read-only audit inspects official Proxmox source commits
 `5ccd363e5908aa5a7b969797babdff1df5159475` (`stable-bookworm`, qemu-server 8.4.10) and
 `80e0590e144359fd136a2ba1e3f44716bfc535b0` (qemu-server 9.2.10, trixie). Both API create paths
 generate a UUID when `vmgenid` is absent or `1`, except for aarch64. The schema accepts `0` to
-disable, `1` to request API/CLI autogeneration, or a UUID; manually editing configuration does not
-perform that generation. Both restore transforms replace a configured nonzero ID, independently of
-the separate `unique` MAC/SMBIOS option. Clone and snapshot rollback likewise regenerate an enabled
-ID; saved-RAM rollback is therefore a distinct native coverage case, not something the guest boot
-UUID alone proves. The config endpoint requires `VM.Audit`; explicit `current=1` selects current
-instead of pending config.
+disable, `1` to request API/CLI automatic generation, or a UUID; manually editing configuration does
+not perform that generation. Both restore transforms replace a configured nonzero ID, independently
+of the separate `unique` MAC/SMBIOS option. Clone and snapshot rollback likewise regenerate an
+enabled ID; saved-RAM rollback is therefore a distinct native coverage case, not something the guest
+boot UUID alone proves. The config endpoint requires `VM.Audit`; explicit `current=1` selects
+current instead of pending config.
 
 Sources:
 [PVE 8 create and generation](https://github.com/proxmox/qemu-server/blob/5ccd363e5908aa5a7b969797babdff1df5159475/src/PVE/API2/Qemu.pm#L1447-L1452),
