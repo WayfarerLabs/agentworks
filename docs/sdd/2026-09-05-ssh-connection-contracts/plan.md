@@ -290,6 +290,21 @@ resources through uncertain outcomes and cleanup retries. Its actual consumers a
 remain open. This compatibility feedback does not dispose either pending operator decision or
 authorize implementation.
 
+Transport's reviewed working publication `fc2e1992d35c31d9147f9bb77084681aa7727828` adds private
+managed lease, keeper and exact-run recovery composition. SSH rebases without conflicts at
+`26dce2dd86f6c9b116452838b4e3a0ee7cea1d64`; range-diff verifies all 167 SSH commit patches unchanged
+from `ce1fb59a9`. The shared process owner, delivery custody, subprocess pump and shared buffered
+custody fixture still match transport exactly. Ruff and formatting pass across 1,349 files. Full
+strict mypy checks 1,312 sources and repeats only the three held enrollment errors, exit 1. The full
+Linux Python 3.12 non-integration suite reports 6 failed, 16,489 passed, 49 skipped and 27 warnings,
+exit 1 in 197.51 seconds. Every failure remains in the unchanged shared SSH custody fixture
+described above. The initial run also fails nine Unix-socket fixtures because the lead's scratch
+path exceeds native socket-path limits; the full rerun with a short private root passes all nine
+without product changes. Locked-SDD and Rulesync checks pass. No complete green or native acceptance
+follows. Transport's new publication leaves the carrier contract unchanged and retains open
+production RunContext, aggregate cleanup and native evidence. Neither pending SSH resource decision
+is disposed.
+
 Combined code pin `38934134e3b8d12af814f9371b62075daa49db3e` preserves all 64 Python paths in the
 SSH contribution, including deletions, from published `186458307b`. Its full suite passes 16,125
 non-integration tests with 51 skips and 27 warnings, exit 0 in 267.18 seconds. Full Ruff/format
