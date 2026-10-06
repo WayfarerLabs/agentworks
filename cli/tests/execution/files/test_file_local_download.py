@@ -26,6 +26,7 @@ from agentworks.execution._file_stat import FileRevision, FileStat
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._local_download_publication import LocalDownloadPublication
+from agentworks.execution._local_download_stage import LocalDownloadCleanupError, LocalDownloadUnsupportedError
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution._scratch_receipt import ScratchCleanupDebt
 from agentworks.execution.carrier import Deadline
@@ -498,3 +499,135 @@ def test_ambiguous_close_after_publication_never_claims_unchanged(
     with pytest.raises(OSError):
         fact.outcome.unfinished_stage.abort()
     assert list(tmp_path.iterdir()) == [destination]
+
+
+class _HostStage:
+    def __init__(self, destination: Path, *, condition: Create | Replace = _CREATE) -> None:
+        self.destination = destination
+        self.condition = condition
+        self.published = False
+        self.publication_uncertain = False
+        self.cleanup_uncertain = False
+        self.possible_local_change = False
+        self.aborted = False
+        self.written = bytearray()
+
+    def try_write(self, data: memoryview) -> int:
+        self.written.extend(data)
+        return len(data)
+
+    def commit(self, *, verified_complete: bool, size: int, sha256: str, deadline: Deadline | None = None) -> None:
+        assert verified_complete and size == len(self.written)
+        assert sha256 == hashlib.sha256(self.written).hexdigest()
+        assert deadline is not None and not deadline.expired
+        self.published = True
+
+    def abort(self) -> None:
+        self.aborted = True
+
+
+@pytest.mark.parametrize(
+    ("host", "publisher_name"),
+    [
+        ("linux", "LocalDownloadPublication"),
+        ("darwin", "MacOSLocalDownloadPublication"),
+        ("win32", "WindowsLocalDownloadPublication"),
+    ],
+)
+def test_local_download_selects_host_publisher(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host: str, publisher_name: str
+) -> None:
+    stages: list[_HostStage] = []
+
+    def construct(destination: Path, *, condition: Create | Replace = _CREATE) -> _HostStage:
+        stage = _HostStage(destination, condition=condition)
+        stages.append(stage)
+        return stage
+
+    operation = _FakeOperation(_download(b"payload"))
+    destination = tmp_path / "destination"
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "platform", host)
+        patch.setattr(local, publisher_name, construct)
+        outcome = _run_fake(destination, operation, condition=Replace())
+    assert operation.calls == 1
+    assert outcome.download is operation.outcome and outcome.published
+    assert not outcome.publication_uncertain and not outcome.possible_local_change
+    assert len(stages) == 1 and stages[0].destination == destination
+    assert isinstance(stages[0].condition, Replace) and stages[0].aborted
+
+
+def test_unsupported_host_refuses_before_remote_dispatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    operation = _FakeOperation(_download(b"payload"))
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "platform", "unsupported-host")
+        with pytest.raises(LocalDownloadUnsupportedError) as raised:
+            _run_fake(tmp_path / "destination", operation)
+    fact = raised.value.__cause__
+    assert isinstance(fact, local.FileLocalDownloadControlFact)
+    assert fact.outcome.download is None and not fact.outcome.published
+    assert not fact.outcome.cleanup_failed and fact.outcome.unfinished_stage is None
+    assert operation.calls == 0
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize(
+    ("host", "publisher_name"),
+    [("darwin", "MacOSLocalDownloadPublication"), ("win32", "WindowsLocalDownloadPublication")],
+)
+def test_in_place_replacement_failure_retains_mutation_fact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host: str, publisher_name: str
+) -> None:
+    class PartialStage(_HostStage):
+        def commit(self, *, verified_complete: bool, size: int, sha256: str, deadline: Deadline | None = None) -> None:
+            assert verified_complete and size == len(self.written) and deadline is not None
+            self.possible_local_change = True
+            self.publication_uncertain = True
+            raise OSError("local replacement interrupted")
+
+    stages: list[PartialStage] = []
+
+    def construct(destination: Path, *, condition: Create | Replace = _CREATE) -> PartialStage:
+        stage = PartialStage(destination, condition=condition)
+        stages.append(stage)
+        return stage
+
+    operation = _FakeOperation(_download(b"payload"))
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "platform", host)
+        patch.setattr(local, publisher_name, construct)
+        with pytest.raises(OSError) as raised:
+            _run_fake(tmp_path / "destination", operation, condition=Replace())
+    fact = raised.value.__cause__
+    assert isinstance(fact, local.FileLocalDownloadControlFact)
+    assert fact.outcome.download is operation.outcome
+    assert not fact.outcome.published and fact.outcome.publication_uncertain
+    assert fact.outcome.possible_local_change and not fact.outcome.cleanup_failed
+    assert operation.calls == 1 and len(stages) == 1 and stages[0].aborted
+
+
+@pytest.mark.parametrize(
+    ("host", "publisher_name"),
+    [("darwin", "MacOSLocalDownloadPublication"), ("win32", "WindowsLocalDownloadPublication")],
+)
+def test_constructor_cleanup_custody_survives_host_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host: str, publisher_name: str
+) -> None:
+    stage = _HostStage(tmp_path / "destination")
+    stage.cleanup_uncertain = True
+
+    def construct(destination: Path, *, condition: Create | Replace = _CREATE) -> _HostStage:
+        del destination, condition
+        raise LocalDownloadCleanupError("constructor cleanup failed", unfinished_stage=stage)
+
+    operation = _FakeOperation(_download(b"payload"))
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "platform", host)
+        patch.setattr(local, publisher_name, construct)
+        with pytest.raises(LocalDownloadCleanupError) as raised:
+            _run_fake(tmp_path / "destination", operation)
+    fact = raised.value.__cause__
+    assert isinstance(fact, local.FileLocalDownloadControlFact)
+    assert fact.outcome.unfinished_stage is stage
+    assert fact.outcome.cleanup_failed and fact.outcome.cleanup_uncertain
+    assert not stage.aborted and operation.calls == 0

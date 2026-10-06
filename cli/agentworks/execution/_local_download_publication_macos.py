@@ -21,7 +21,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from agentworks.execution._local_download_publication import (
+from agentworks.execution._local_download_stage import (
     LocalDownloadCleanupError,
     LocalDownloadCleanupUncertainError,
     LocalDownloadUnsupportedError,
@@ -273,6 +273,10 @@ class MacOSLocalDownloadPublication:
             or self._parent_close_uncertain
             or self._ancestor_close_uncertain
         )
+
+    @property
+    def possible_local_change(self) -> bool:
+        return self.local_mutation_started
 
     def try_write(self, data: memoryview) -> int:
         if self._stage_fd is None or self.published or self.publication_uncertain or self.cleanup_uncertain:

@@ -16,7 +16,7 @@ from ctypes import wintypes
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from agentworks.execution._local_download_publication import (
+from agentworks.execution._local_download_stage import (
     LocalDownloadCleanupError,
     LocalDownloadCleanupUncertainError,
     LocalDownloadUnsupportedError,
@@ -447,7 +447,7 @@ class WindowsLocalDownloadPublication:
                 error_type = LocalDownloadCleanupUncertainError if self.cleanup_uncertain else LocalDownloadCleanupError
                 raise error_type(
                     "Local download construction left unfinished cleanup",
-                    unfinished_stage=cast("Any", self),
+                    unfinished_stage=self,
                     setup_error=setup_error,
                     cleanup_error=cleanup_error,
                 ) from cleanup_error

@@ -37,6 +37,15 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from agentworks.execution._local_download_stage import (
+    LocalDownloadCleanupError as LocalDownloadCleanupError,
+)
+from agentworks.execution._local_download_stage import (
+    LocalDownloadCleanupUncertainError as LocalDownloadCleanupUncertainError,
+)
+from agentworks.execution._local_download_stage import (
+    LocalDownloadUnsupportedError as LocalDownloadUnsupportedError,
+)
 from agentworks.execution.files import Create, Replace
 
 if TYPE_CHECKING:
@@ -47,35 +56,6 @@ if TYPE_CHECKING:
 _CREATE = Create()
 # Linux include/uapi/linux/fs.h: FS_EXTENT_FL is a filesystem layout indicator.
 _EXTENT_FLAG = 0x00080000
-
-
-class LocalDownloadUnsupportedError(OSError):
-    """The host cannot establish the required local publication guarantees."""
-
-
-class LocalDownloadCleanupError(LocalDownloadUnsupportedError):
-    """Local cleanup did not finish; a failed constructor can expose its writer."""
-
-    cleanup_uncertain = False
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        unfinished_stage: LocalDownloadPublication | None = None,
-        setup_error: BaseException | None = None,
-        cleanup_error: BaseException | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.unfinished_stage = unfinished_stage
-        self.setup_error = setup_error
-        self.cleanup_error = cleanup_error
-
-
-class LocalDownloadCleanupUncertainError(LocalDownloadCleanupError):
-    """Cleanup has an uncertain close outcome, including failed construction."""
-
-    cleanup_uncertain = True
 
 
 @dataclass(frozen=True)
@@ -247,6 +227,11 @@ class LocalDownloadPublication:
     def cleanup_uncertain(self) -> bool:
         """An admitted close has no established outcome; abort cannot resolve it."""
         return self._stage_close_uncertain or self._parent_close_uncertain or self._metadata_close_uncertain
+
+    @property
+    def possible_local_change(self) -> bool:
+        """Linux publishes by rename, so it never partially mutates an existing file."""
+        return False
 
     def try_write(self, data: memoryview) -> int:
         """Accept one synchronous write, retaining only size and digest state."""

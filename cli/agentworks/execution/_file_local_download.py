@@ -1,12 +1,20 @@
-"""Private Linux publication of one core-owned, verified download."""
+"""Private host publication of one core-owned, verified download."""
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from agentworks.execution._file_download import FileDownloadControlFact, FileDownloadOutcome, FileDownloadStatus
-from agentworks.execution._local_download_publication import LocalDownloadCleanupError, LocalDownloadPublication
+from agentworks.execution._local_download_publication import LocalDownloadPublication
+from agentworks.execution._local_download_publication_macos import MacOSLocalDownloadPublication
+from agentworks.execution._local_download_publication_windows import WindowsLocalDownloadPublication
+from agentworks.execution._local_download_stage import (
+    LocalDownloadCleanupError,
+    LocalDownloadStage,
+    LocalDownloadUnsupportedError,
+)
 from agentworks.execution.files import Create, Replace
 
 _CREATE = Create()
@@ -27,10 +35,11 @@ class FileLocalDownloadOutcome:
     download: FileDownloadOutcome | None
     published: bool = False
     publication_uncertain: bool = False
+    possible_local_change: bool = False
     cleanup_uncertain: bool = False
     cleanup_failed: bool = False
     deadline_exceeded: bool = False
-    unfinished_stage: LocalDownloadPublication | None = field(default=None, repr=False)
+    unfinished_stage: LocalDownloadStage | None = field(default=None, repr=False)
 
 
 class FileLocalDownloadControlFact(Exception):
@@ -43,6 +52,16 @@ class FileLocalDownloadControlFact(Exception):
 
 def _ready_to_publish(download: FileDownloadOutcome, deadline: Deadline) -> bool:
     return download.status is FileDownloadStatus.COMPLETE and not download.deadline_exceeded and not deadline.expired
+
+
+def _publisher_for_host(destination: Path, condition: Create | Replace) -> LocalDownloadStage:
+    if sys.platform == "linux":
+        return LocalDownloadPublication(destination, condition=condition)
+    if sys.platform == "darwin":
+        return MacOSLocalDownloadPublication(destination, condition=condition)
+    if sys.platform == "win32":
+        return WindowsLocalDownloadPublication(destination, condition=condition)
+    raise LocalDownloadUnsupportedError(f"Local download publication is unsupported on {sys.platform}")
 
 
 def download_to_local_file(
@@ -67,14 +86,14 @@ def download_to_local_file(
     if deadline.expired:
         return FileLocalDownloadOutcome(None, deadline_exceeded=True)
 
-    writer: LocalDownloadPublication | None = None
+    writer: LocalDownloadStage | None = None
     download: FileDownloadOutcome | None = None
     control: BaseException | None = None
     cleanup_failed = False
     construction_cleanup_uncertain = False
     construction_cleanup_failed = False
     try:
-        writer = LocalDownloadPublication(destination, condition=condition)
+        writer = _publisher_for_host(destination, condition)
         if not deadline.expired:
             download = operation.download(
                 carrier,
@@ -118,6 +137,7 @@ def download_to_local_file(
         download,
         published=writer.published if writer is not None else False,
         publication_uncertain=writer.publication_uncertain if writer is not None else False,
+        possible_local_change=writer.possible_local_change if writer is not None else False,
         cleanup_uncertain=writer.cleanup_uncertain if writer is not None else construction_cleanup_uncertain,
         cleanup_failed=cleanup_failed,
         deadline_exceeded=deadline.expired or (download.deadline_exceeded if download is not None else False),
