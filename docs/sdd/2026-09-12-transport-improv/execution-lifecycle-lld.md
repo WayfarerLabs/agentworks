@@ -361,7 +361,7 @@ fencing.
 Register the run-ID-only support obligation on the main path before borrowing ordinary work. Bind
 OPERATION lifetime and owner kind to the actual operation ID, exact VM and full guest identity once,
 then pass immutable facts and a separately prepared carrier to the worker. Reuse the retained
-lifecycle handle's admission check after each clock sample; compare its returned persisted identity
+lifecycle handle's admission check after each clock sample; compare its refreshed persisted identity
 with the fixed kind, version, payload and revision before publishing. An already possible effect
 needs no renewal payload update or new owner API. Start the renewal worker only after a clean
 acknowledged initial launch and settled local start delivery. An admitted but uncertain start gets

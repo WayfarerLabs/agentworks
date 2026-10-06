@@ -2785,7 +2785,7 @@ workload emptiness remain separate obligations.
 
 The keeper design audit proves that the existing lifecycle admission method can fence an already
 possible effect while ordinary work holds its borrow, without changing the durable row. The worker
-must correlate the returned persisted binding and use only immutable prepared facts, not a
+must correlate the refreshed persisted binding and use only immutable prepared facts, not a
 thread-affine managed repository. Initial renewal starts only after a clean acknowledged launch;
 uncertain starts retain their debt without renewal. A blocked repository fence also demonstrates why
 ordinary close intent now uses one monotonic event instead of waiting for the owner guard. Keeper
