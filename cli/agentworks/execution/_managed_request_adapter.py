@@ -45,19 +45,12 @@ class _ManagedBody:
     output_policy: ManagedOutputPolicy
 
     def __post_init__(self) -> None:
-        if self.request.operation_lease is not None:
-            raise RequestError("prepared body cannot carry an operation lease")
         size = len(_encode_request_assets(self.request, body_only=True)["request-control"])
         if (
             decode_request_launch(self.request.launch)["lifetime"] == "operation"
             and size + OPERATION_LEASE_CONTROL_HEADROOM > MAX_CONTROL_BYTES
         ):
             raise RequestError("operation control exceeds bound with lease headroom")
-        if (
-            self.request.output_mode != self.output_policy.mode.value
-            or self.request.capture_prefix_bytes != self.output_policy.capture_prefix_bytes
-        ):
-            raise RequestError("prepared body output policy mismatch")
 
 
 def compose_managed_body(

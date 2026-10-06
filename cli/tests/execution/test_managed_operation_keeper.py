@@ -299,6 +299,8 @@ def test_one_worker_uses_same_cycle_deadline_store_and_no_replay(bound, fault, m
         assert worker is not None
         assert keeper._worker_done.wait(1)
         assert carrier.calls == (2 if fault in {"close", "takeover"} else 3)
+        if fault == "interrupt":
+            assert keeper.failed and keeper.last_clock is not None and keeper.last_publication is None
         assert all(custody is custodies[0] for custody in custodies)
         if carrier.calls == 3:
             assert deadlines[1] is deadlines[2]
@@ -375,7 +377,7 @@ def test_interrupted_native_thread_start_denies_late_worker(bound, monkeypatch, 
         assert entered.wait(1)
         facts = keeper.drain(Deadline.after(0.01))
         assert facts.worker_active and facts.startup_pending and not facts.drained
-        assert carrier.calls == 1 and keeper.failure is error
+        assert carrier.calls == 1 and keeper.failed
         with pytest.raises(StateError):
             keeper.request_stop(Deadline.after(1))
     finally:
@@ -423,7 +425,7 @@ def test_cadence_uses_actual_cycle_start_without_catch_up(bound, monkeypatch) ->
         keeper._renew()
         assert waits == pytest.approx([10, 9.8, 9.8])
         assert [deadline.expires_at for deadline in cycle_deadlines] == [55, 65]
-        assert carrier.calls == 5 and keeper.failure is None
+        assert carrier.calls == 5 and not keeper.failed
     finally:
         monkeypatch.undo()
         assert keeper.drain(Deadline.after(1)).drained
@@ -453,7 +455,7 @@ def test_publication_validation_cannot_bypass_last_delivery_fence(bound, monkeyp
         monkeypatch.setattr(keeper_module, "_CADENCE_SECONDS", 0)
         keeper.acknowledge_start(clean_start(receipt))
         assert keeper._worker_done.wait(1)
-        assert carrier.calls == 2 and keeper.failure is not None
+        assert carrier.calls == 2 and keeper.failed
         assert keeper.last_publication is None
     finally:
         assert keeper.drain(Deadline.after(1)).drained
@@ -474,7 +476,7 @@ def test_uncertain_registration_retains_preheld_identity_without_replay(bound, m
         monkeypatch.setattr(owner, "register_lifecycle_obligation", interrupted)
         with pytest.raises(KeyboardInterrupt) as caught:
             keeper.admit()
-        assert caught.value is error and keeper.failure is error
+        assert caught.value is error and keeper.failed
         assert keeper.obligation is None and keeper.admission_uncertain
         assert owner.list_lifecycle_obligations()[0].obligation_id == "b" * 32
         with pytest.raises(StateError):

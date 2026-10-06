@@ -1,6 +1,6 @@
 """Private retained custody for one operation-owned run's fixed lease helpers.
 
-The main-thread composition retains this object before admission and publishes
+The caller-thread composition retains this object before admission and publishes
 ordinary close intent before draining it. No method resolves start or lifecycle debt.
 """
 
@@ -111,7 +111,7 @@ class _LeaseCarrier:
 class ManagedOperationKeeper:
     """One dedicated carrier, one retained store, and at most one renewal worker.
 
-    Construction is passive. Main-thread methods are serialized by the owning
+    Construction is passive. Caller-thread methods are serialized by the owning
     composition; only LIVE fencing and lease delivery run in the worker. Local
     deadlines cannot preempt a blocked database, guest or native system call.
     """
@@ -155,7 +155,8 @@ class ManagedOperationKeeper:
         self._obligation: LifecycleObligation | None = None
         self.registration_started = False
         self.admission_uncertain = False
-        self.failure: BaseException | None = None
+        # Exception objects would retain caller payloads through their tracebacks.
+        self.failed = False
         self.initial: InitialOperationLease | None = None
         self.last_clock: ManagedLeaseCandidate | None = None
         self.last_publication: ManagedLeaseCandidate | None = None
@@ -192,8 +193,8 @@ class ManagedOperationKeeper:
                 obligation_id=self._obligation_id,
             )
             self._fence()
-        except BaseException as error:
-            self.failure = error
+        except BaseException:
+            self.failed = True
             self._stop.set()
             raise
         self.admission_uncertain = False
@@ -253,7 +254,7 @@ class ManagedOperationKeeper:
         return InitialOperationLease(clock, sampled_lease(self._expected_launch, clock.result.sampled_ns))
 
     def sample_initial(self, deadline: Deadline) -> InitialOperationLease:
-        """Return the original guest-clock expiry for the future main-thread start."""
+        """Return the original guest-clock expiry for the future caller-thread start."""
         self._finite(deadline)
         if self._initial_started:
             raise StateError("Operation keeper initial sampling is one-shot")
@@ -261,8 +262,8 @@ class ManagedOperationKeeper:
         try:
             self.initial = self._sample(deadline)
             return self.initial
-        except BaseException as error:
-            self.failure = error
+        except BaseException:
+            self.failed = True
             self._stop.set()
             raise
 
@@ -305,7 +306,7 @@ class ManagedOperationKeeper:
                 # This fresh private stdlib start reports RuntimeError when
                 # native creation was refused, before the target can exist.
                 self._startup_failed = not isinstance(error, RuntimeError)
-                self.failure = error
+                self.failed = True
                 self._stop.set()
                 raise
             self._worker_permission = True
@@ -344,8 +345,8 @@ class ManagedOperationKeeper:
                 next_start = started + _CADENCE_SECONDS
                 if next_start <= time.monotonic():
                     next_start = time.monotonic() + _CADENCE_SECONDS
-        except BaseException as error:
-            self.failure = error
+        except BaseException:
+            self.failed = True
             self._stop.set()
         finally:
             self._worker_done.set()
@@ -390,8 +391,8 @@ class ManagedOperationKeeper:
                 guest=self._guest,
             )
             return self.last_stop
-        except BaseException as error:
-            self.failure = error
+        except BaseException:
+            self.failed = True
             raise
 
     def observe_cleanup(self, deadline: Deadline) -> ManagedObservationCandidate:
@@ -407,6 +408,6 @@ class ManagedOperationKeeper:
                 guest=self._guest,
             )
             return self.last_cleanup
-        except BaseException as error:
-            self.failure = error
+        except BaseException:
+            self.failed = True
             raise

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import gc
 import threading
+import weakref
 from dataclasses import replace
 from pathlib import Path
 
@@ -22,11 +24,12 @@ from agentworks.execution._managed_runs import (
     ManagedRunOwnerKind,
     ManagedRunReceipt,
     ManagedRunRepository,
+    ManagedShellIdentity,
 )
 from agentworks.execution._managed_start_protocol import ManagedStartResult, encode_result
 from agentworks.execution._vm_guest_identity_protocol import vm_guest_boot_id
 from agentworks.execution.carrier import Deadline, Dispatch
-from agentworks.execution.models import Command, Input, Output
+from agentworks.execution.models import Command, Input, Output, Script, Shell
 from agentworks.operations import OperationOwner
 
 from . import test_managed_operation_keeper as keeper_tests
@@ -215,6 +218,71 @@ def test_start_requires_originating_caller_thread_before_any_effect(bound) -> No
     finally:
         worker.join(1)
         assert not worker.is_alive()
+        assert run.keeper.drain(Deadline.after(1)).drained
+
+
+def test_equal_numeric_thread_identity_does_not_authorize_distinct_thread_object(bound, monkeypatch) -> None:
+    run, repository, start, clock = make_run(bound)
+    original = threading.current_thread()
+    replacement = threading.Thread()
+    # A retired caller's numeric identity can be reused by an unrelated thread.
+    monkeypatch.setattr(replacement, "_ident", original.ident)
+    assert replacement is not original and replacement.ident == original.ident
+    monkeypatch.setattr(threading, "current_thread", lambda: replacement)
+    try:
+        with pytest.raises(StateError):
+            run.start(body_for(bound[2]), Deadline.after(1))
+        assert not run.reservation_started and repository.inspect(bound[2].identity) is None
+        assert start.calls == clock.calls == 0 and bound[1].list_lifecycle_obligations() == ()
+    finally:
+        assert run.keeper.drain(Deadline.after(1)).drained
+
+
+def test_escaping_clock_exception_does_not_retain_outer_caller_payload(bound) -> None:
+    database, owner, receipt = bound
+    receipt = replace(receipt, spec=replace(receipt.spec, shell=ManagedShellIdentity(Shell.SH, "/bin/sh")))
+    run, _, start, clock = make_run((database, owner, receipt))
+
+    class CallerPayload:
+        def __init__(self) -> None:
+            self.source = "printf 'private-source'"
+            self.stdin = b"private-stdin"
+            self.environment = {"TOKEN": "private-environment"}
+
+    def outer_caller() -> weakref.ReferenceType[CallerPayload]:
+        payload = CallerPayload()
+        error = KeyboardInterrupt()
+        clock.interrupt = error
+        try:
+            body = compose_managed_body(
+                Script(payload.source, Shell.SH),
+                input=Input.bytes(payload.stdin),
+                output=Output.capture(4096),
+                env=payload.environment,
+                cwd="/tmp",
+                sensitive=False,
+                identity=receipt.identity,
+                spec=receipt.spec,
+            )
+            run.start(body, Deadline.after(1))
+        except KeyboardInterrupt as escaped:
+            assert escaped is error
+        else:
+            pytest.fail("clock interruption did not escape")
+        finally:
+            # The injector must not itself own the original exception/traceback.
+            clock.interrupt = None
+        return weakref.ref(payload)
+
+    try:
+        payload_reference = outer_caller()
+        gc.collect()
+        assert payload_reference() is None
+        assert run.keeper.failed and run.control_escaped and run.reserved is not None
+        assert run._prepared is None and start.calls == 0 and clock.calls == 1
+        assert run.keeper.obligation is not None
+        assert run.keeper.obligation.state is LifecycleObligationState.POSSIBLE_EFFECT
+    finally:
         assert run.keeper.drain(Deadline.after(1)).drained
 
 

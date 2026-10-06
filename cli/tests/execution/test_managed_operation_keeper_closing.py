@@ -133,7 +133,8 @@ def test_unknown_publication_allows_bound_stop_after_drain_without_resolving_deb
         assert keeper.drain(Deadline.after(1)).drained
 
 
-def test_interrupted_closing_helper_retains_store_until_explicit_redrain(bound) -> None:
+@pytest.mark.parametrize("method", ["request_stop", "observe_cleanup"])
+def test_interrupted_closing_helper_retains_store_until_explicit_redrain(bound, method) -> None:
     _, owner, receipt = bound
     carrier = ClosingCarrier()
     keeper = make_keeper(owner, receipt, carrier)
@@ -146,8 +147,9 @@ def test_interrupted_closing_helper_retains_store_until_explicit_redrain(bound) 
         assert keeper.drain(Deadline.after(1)).drained
         carrier.closing_error = error
         with pytest.raises(KeyboardInterrupt) as caught:
-            keeper.request_stop(Deadline.after(1))
-        assert caught.value is error and keeper.failure is error
+            getattr(keeper, method)(Deadline.after(1))
+        assert caught.value is error and keeper.failed
+        assert keeper.last_stop is None and keeper.last_cleanup is None
         assert not keeper._custody.settled
         with pytest.raises(StateError):
             keeper.observe_cleanup(Deadline.after(1))
@@ -208,7 +210,7 @@ def test_native_creation_refusal_permits_drain_and_exact_cleanup(bound, monkeypa
         monkeypatch.setattr(threading, spawn, refused)
         with pytest.raises(RuntimeError) as caught:
             keeper.acknowledge_start(clean_start(receipt))
-        assert caught.value is error and keeper.failure is error
+        assert caught.value is error and keeper.failed
         assert carrier.calls == 1 and keeper._worker is not None and not keeper._worker_permission
         facts = keeper.drain(Deadline.after(1))
         assert facts.drained and not facts.worker_active and not facts.startup_pending

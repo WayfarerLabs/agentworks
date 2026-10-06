@@ -273,7 +273,7 @@ def prepare_managed_start(
     runtime_selection: RuntimeSelection,
     guest: VMGuestIdentity,
 ) -> _PreparedAttempt:
-    """Prepare one exact managed start before any run reservation is written."""
+    """Prepare one exact managed start before delivering it."""
     if (
         type(identity) is not ManagedRunIdentity
         or type(spec) is not ManagedRunSpec

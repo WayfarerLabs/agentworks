@@ -54,7 +54,7 @@ class ManagedOperationRun:
         root_plan: IdentityPlan,
         runtime_selection: RuntimeSelection,
     ) -> None:
-        self._caller_thread = threading.get_ident()
+        self._caller_thread = threading.current_thread()
         if start_carrier is dedicated_keeper_carrier or start_obligation_id == keeper_obligation_id:
             raise ValidationError("Operation run requires dedicated delivery and distinct obligation identities")
         self.receipt = receipt
@@ -132,7 +132,7 @@ class ManagedOperationRun:
         the keeper retains that raw clock candidate. Escaping control preserves
         this instance's reservation, keeper and independent start custody.
         """
-        if threading.get_ident() != self._caller_thread:
+        if threading.current_thread() is not self._caller_thread:
             raise StateError("Operation run start requires its originating caller thread")
         if self._started:
             raise StateError("Operation run start is one-shot")
