@@ -167,6 +167,38 @@ def test_replace_reports_partial_bytes_after_write_failure(tmp_path: Path, monke
     assert destination.exists()
 
 
+@pytest.mark.parametrize("stop", [KeyboardInterrupt, SystemExit])
+def test_replace_preserves_exceptional_control_after_partial_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stop: type[BaseException]
+) -> None:
+    destination = tmp_path / "download"
+    destination.write_bytes(b"old content")
+    writer = WindowsLocalDownloadPublication(destination, condition=Replace())
+    original_write = writer._api.write
+    wrote_target = False
+
+    def partial_then_stop(handle: int, data: memoryview) -> int:
+        nonlocal wrote_target
+        if handle == writer._target:
+            if wrote_target:
+                raise stop("injected exceptional control")
+            wrote_target = True
+            return original_write(handle, data[:2])
+        return original_write(handle, data)
+
+    monkeypatch.setattr(writer._api, "write", partial_then_stop)
+    try:
+        writer.try_write(memoryview(b"new bytes"))
+        with pytest.raises(stop) as stopped:
+            _commit(writer, b"new bytes")
+        assert type(stopped.value) is stop
+        assert writer.possible_local_change and writer.publication_uncertain
+        assert not writer.published
+        assert destination.read_bytes().startswith(b"ne")
+    finally:
+        writer.abort()
+
+
 def test_replace_close_failure_keeps_change_uncertain_and_cleans_other_handles(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

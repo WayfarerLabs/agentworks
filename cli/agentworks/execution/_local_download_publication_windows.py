@@ -629,7 +629,7 @@ class WindowsLocalDownloadPublication:
                 self._close_target()
                 if deadline is not None and deadline.expired:
                     raise TimeoutError("Local download deadline expired after replacement close")
-            except BaseException as exc:
+            except Exception as exc:
                 if self.possible_local_change:
                     raise LocalDownloadPartialMutationError("Local replacement may contain partial new bytes") from exc
                 raise

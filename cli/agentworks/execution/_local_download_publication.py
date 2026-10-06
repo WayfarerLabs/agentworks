@@ -228,11 +228,6 @@ class LocalDownloadPublication:
         """An admitted close has no established outcome; abort cannot resolve it."""
         return self._stage_close_uncertain or self._parent_close_uncertain or self._metadata_close_uncertain
 
-    @property
-    def possible_local_change(self) -> bool:
-        """Linux publishes by rename, so it never partially mutates an existing file."""
-        return False
-
     def try_write(self, data: memoryview) -> int:
         """Accept one synchronous write, retaining only size and digest state."""
         if self._stage_fd is None or self.published or self.publication_uncertain or self.cleanup_uncertain:

@@ -508,7 +508,6 @@ class _HostStage:
         self.published = False
         self.publication_uncertain = False
         self.cleanup_uncertain = False
-        self.possible_local_change = False
         self.aborted = False
         self.written = bytearray()
 
@@ -552,7 +551,7 @@ def test_local_download_selects_host_publisher(
         outcome = _run_fake(destination, operation, condition=Replace())
     assert operation.calls == 1
     assert outcome.download is operation.outcome and outcome.published
-    assert not outcome.publication_uncertain and not outcome.possible_local_change
+    assert not outcome.publication_uncertain
     assert len(stages) == 1 and stages[0].destination == destination
     assert isinstance(stages[0].condition, Replace) and stages[0].aborted
 
@@ -575,13 +574,12 @@ def test_unsupported_host_refuses_before_remote_dispatch(tmp_path: Path, monkeyp
     ("host", "publisher_name"),
     [("darwin", "MacOSLocalDownloadPublication"), ("win32", "WindowsLocalDownloadPublication")],
 )
-def test_in_place_replacement_failure_retains_mutation_fact(
+def test_in_place_replacement_failure_retains_publication_uncertainty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host: str, publisher_name: str
 ) -> None:
     class PartialStage(_HostStage):
         def commit(self, *, verified_complete: bool, size: int, sha256: str, deadline: Deadline | None = None) -> None:
             assert verified_complete and size == len(self.written) and deadline is not None
-            self.possible_local_change = True
             self.publication_uncertain = True
             raise OSError("local replacement interrupted")
 
@@ -602,8 +600,39 @@ def test_in_place_replacement_failure_retains_mutation_fact(
     assert isinstance(fact, local.FileLocalDownloadControlFact)
     assert fact.outcome.download is operation.outcome
     assert not fact.outcome.published and fact.outcome.publication_uncertain
-    assert fact.outcome.possible_local_change and not fact.outcome.cleanup_failed
+    assert not fact.outcome.cleanup_failed
     assert operation.calls == 1 and len(stages) == 1 and stages[0].aborted
+
+
+@pytest.mark.parametrize("stop", [KeyboardInterrupt, SystemExit])
+def test_host_exceptional_control_retains_publication_uncertainty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stop: type[BaseException]
+) -> None:
+    class InterruptedStage(_HostStage):
+        def commit(self, *, verified_complete: bool, size: int, sha256: str, deadline: Deadline | None = None) -> None:
+            assert verified_complete and size == len(self.written) and deadline is not None
+            self.publication_uncertain = True
+            raise stop("local replacement interrupted")
+
+    stages: list[InterruptedStage] = []
+
+    def construct(destination: Path, *, condition: Create | Replace = _CREATE) -> InterruptedStage:
+        stage = InterruptedStage(destination, condition=condition)
+        stages.append(stage)
+        return stage
+
+    operation = _FakeOperation(_download(b"payload"))
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "platform", "win32")
+        patch.setattr(local, "WindowsLocalDownloadPublication", construct)
+        with pytest.raises(stop) as raised:
+            _run_fake(tmp_path / "destination", operation, condition=Replace())
+    fact = raised.value.__cause__
+    assert type(raised.value) is stop and isinstance(fact, local.FileLocalDownloadControlFact)
+    assert fact.outcome.download is operation.outcome
+    assert not fact.outcome.published and fact.outcome.publication_uncertain
+    assert not fact.outcome.cleanup_failed and fact.outcome.unfinished_stage is None
+    assert len(stages) == 1 and stages[0].aborted
 
 
 @pytest.mark.parametrize(

@@ -35,7 +35,6 @@ class FileLocalDownloadOutcome:
     download: FileDownloadOutcome | None
     published: bool = False
     publication_uncertain: bool = False
-    possible_local_change: bool = False
     cleanup_uncertain: bool = False
     cleanup_failed: bool = False
     deadline_exceeded: bool = False
@@ -137,7 +136,6 @@ def download_to_local_file(
         download,
         published=writer.published if writer is not None else False,
         publication_uncertain=writer.publication_uncertain if writer is not None else False,
-        possible_local_change=writer.possible_local_change if writer is not None else False,
         cleanup_uncertain=writer.cleanup_uncertain if writer is not None else construction_cleanup_uncertain,
         cleanup_failed=cleanup_failed,
         deadline_exceeded=deadline.expired or (download.deadline_exceeded if download is not None else False),

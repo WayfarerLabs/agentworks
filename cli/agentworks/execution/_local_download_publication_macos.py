@@ -274,10 +274,6 @@ class MacOSLocalDownloadPublication:
             or self._ancestor_close_uncertain
         )
 
-    @property
-    def possible_local_change(self) -> bool:
-        return self.local_mutation_started
-
     def try_write(self, data: memoryview) -> int:
         if self._stage_fd is None or self.published or self.publication_uncertain or self.cleanup_uncertain:
             raise ValueError("Local download stage is closed")
