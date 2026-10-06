@@ -8,11 +8,13 @@ import os
 import shlex
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
 import pytest
 
+from agentworks.execution import _process as process_core
 from agentworks.execution._process import (
     Deadline,
     ProcessFailure,
@@ -22,6 +24,8 @@ from agentworks.execution._process import (
     StreamResult,
     run_owned_process,
 )
+from tests.execution.test_process_launch_owner import _assert_exact_cleanup, _wait_snapshot
+from tests.execution.test_process_launch_owner import children as children
 
 CORE_PATH = Path(__file__).parents[2] / "agentworks" / "execution" / "_process.py"
 PYTHON_311 = Path("/usr/bin/python3.11")
@@ -53,6 +57,84 @@ def test_process_result_representation_hides_nested_stream_bytes() -> None:
 
     assert secret.decode() not in repr(stream)
     assert secret.decode() not in repr(result)
+
+
+@pytest.mark.windows
+def test_runner_preserves_close_interruption_while_latest_cleanup_observation_is_pending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, children: list[subprocess.Popen[bytes]]
+) -> None:
+    permit_exit = tmp_path / "permit-exit"
+    cleanup = process_core._cleanup
+    wait_terminal = process_core.LocalProcessOwner._wait_terminal
+    owner = process_core.LocalProcessOwner()
+    later_cleanup_entered = threading.Event()
+    release_later_cleanup = threading.Event()
+    control = KeyboardInterrupt()
+    first_observation: list[process_core.LocalProcessTerminal] = []
+    cleanup_attempts = 0
+    signal_attempts = 0
+    interrupted = False
+
+    def denied_signal(*args: object) -> None:
+        nonlocal signal_attempts
+        signal_attempts += 1
+        raise PermissionError("injected native kill failure")
+
+    def hold_natural_exit_cleanup(status: process_core._ProcessStatus) -> bool:
+        nonlocal cleanup_attempts
+        cleanup_attempts += 1
+        if cleanup_attempts == 1 and os.name == "nt":
+            monkeypatch.setattr(status.process, "kill", denied_signal)
+        if cleanup_attempts == 2:
+            later_cleanup_entered.set()
+            assert release_later_cleanup.wait(30)
+        return cleanup(status)
+
+    def interrupt_wait_once(deadline=None, *, first=True):
+        nonlocal interrupted
+        if not interrupted:
+            snapshot = _wait_snapshot(owner, lambda snapshot: snapshot.terminal is not None)
+            assert snapshot.terminal is not None and snapshot.terminal.cleanup_retryable
+            first_observation.append(snapshot.terminal)
+            permit_exit.touch()
+            assert later_cleanup_entered.wait(30)
+            assert owner.snapshot().terminal is None
+            interrupted = True
+            raise control
+        return wait_terminal(owner, deadline, first=first)
+
+    monkeypatch.setattr(process_core, "LocalProcessOwner", lambda: owner)
+    monkeypatch.setattr(process_core, "_cleanup", hold_natural_exit_cleanup)
+    monkeypatch.setattr(owner, "_wait_terminal", interrupt_wait_once)
+    if os.name == "posix":
+        monkeypatch.setattr(os, "kill", denied_signal)
+    try:
+        with pytest.raises(KeyboardInterrupt) as caught:
+            run_owned_process(
+                [
+                    sys.executable,
+                    "-I",
+                    "-c",
+                    f"import time; from pathlib import Path; marker=Path({str(permit_exit)!r}); "
+                    "\nwhile not marker.exists(): time.sleep(0.01)\nraise SystemExit(7)",
+                ],
+                input=ProcessInput(),
+                output=ProcessOutput(capture_limit=4096),
+                deadline=Deadline(time.monotonic() + 0.05),
+            )
+        assert caught.value is control
+        assert owner.snapshot().terminal is None
+        assert owner.close() is first_observation[0]
+        assert not first_observation[0].cleaned
+    finally:
+        permit_exit.touch()
+        release_later_cleanup.set()
+        settled = _wait_snapshot(owner, lambda snapshot: snapshot.terminal is not None and snapshot.terminal.cleaned)
+    assert settled.terminal is not first_observation[0]
+    assert settled.terminal is not None and settled.terminal.local_status == 7
+    assert settled.terminal.exit_status is None
+    assert cleanup_attempts == 2 and signal_attempts == 1
+    _assert_exact_cleanup(children)
 
 
 @pytest.mark.windows

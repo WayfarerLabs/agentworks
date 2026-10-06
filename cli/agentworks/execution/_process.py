@@ -1090,7 +1090,9 @@ def run_owned_process(
             terminal = owner.close()
         except BaseException as error:
             interruption = _retain_control_exception(interruption, error)
-            terminal = owner.snapshot().terminal
+            # Waiting close preserves its first observation even while a later
+            # natural-exit cleanup makes the current snapshot pending again.
+            terminal = owner.close()
         assert terminal is not None
         exit_status = terminal.exit_status
         if not terminal.cleaned and interruption is not None:
