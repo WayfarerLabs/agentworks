@@ -946,12 +946,26 @@ registers one row for every member under the same operation. This includes prefl
 reads, publication, retirement and cleanup: per-member preflight rows alone can exhaust the ledger
 before a write begins. The current 128-row bound counts resolved rows too, while supported captures
 can contain 4,096 files. The candidate batch design retains one serial borrow and one adapter-owned
-row, with only the current child's bounded recovery identity in the payload. Admit a distinct child
-before its effect; do not advance until its remote effect and cleanup are settled and the
-application's per-file ownership checkpoint has completed durably. Advance by expected-revision
-payload replacement, reconciling a lost reply against that same child and revision. On takeover,
-recover only the retained child and stop; do not infer the remaining package plan or replay content
-from the row. Keep completed ownership in the application checkpoint, not a growing row payload.
+row, with the current child's bounded recovery identity and cleanup facts in the payload. Admit a
+distinct child before its effect. Generic directory copying is non-atomic and leaves confirmed
+destinations in place: core checkpoints bounded transfer progress only after that child's required
+remote and local work settles. Artifact workflows additionally require their application's durable
+per-file ownership checkpoint before advancing; a progress ordinal cannot establish which artifacts
+the application owns for later reconciliation or retirement.
+
+Advance by expected-revision payload replacement, reconciling a lost reply against that same child
+and revision. Retain exact current-child identity and outstanding cleanup facts until its checkpoint
+and any next-child admission are confirmed; an ordinal or confirmed bit alone is insufficient. On
+takeover, recover only the retained child and stop; do not reconstruct or resume the remaining plan
+or undo confirmed prior destinations. Core progress is not application ownership, and the generic
+copy contract does not reconstruct a complete per-entry result after process loss. Keep completed
+artifact ownership in the application checkpoint, not a growing row payload.
+
+For downloads, remote snapshot completion is not local publication. Core checkpoints progress only
+after the requested local Create or Replace publication has succeeded and local custody has settled.
+The recovery row does not persist workstation destination paths and promises no post-crash local
+repair or reconstruction of local completion from remote evidence.
+
 This requires an actual post-child checkpoint gate in core file custody and a package-aware recovery
 adapter. The private `FileOperation.upload_package` increment implements the originating upload gate
 and one-row child admission, including exact-payload CAS retry after a lost reply. It does not yet
@@ -961,6 +975,11 @@ peer that duplicates `FileOperation` admission and capture would not satisfy the
 boundary merely by reusing the generic borrow. Preserve the current bounds and exact retry semantics
 until the complete workflow is proved at the largest supported package size and interruption
 boundaries.
+
+The existing `upload_package` requires the real durable application checkpoint. Generic directory
+support must supply its core progress checkpoint explicitly; it cannot reuse that callback contract
+with a no-op or in-memory acknowledgment. Directory transfer and its checkpoint implementation are
+still open, not delivered by this clarification.
 
 ### DOWNLOAD recovery dispatch
 
@@ -1404,9 +1423,10 @@ contains old bytes, a diff, a hash, attributes, helper paths, or carrier diagnos
 
 `LimitExceededError`, `ConflictError`, `PartialMutationError`, and `UncertainOutcomeError` are new
 kind-based `AgentworksError` subclasses shared by execution operations rather than file-entity
-subclasses. Provider exception text and raw errno values remain internal. Multi-file callers
-checkpoint each confirmed effect; this slice supplies no transaction and never reports a partial or
-uncertain operation as unchanged.
+subclasses. Provider exception text and raw errno values remain internal. Core directory transfer
+checkpoints settled progress; artifact callers additionally checkpoint each confirmed ownership
+effect. This slice supplies no transaction and never reports a partial or uncertain operation as
+unchanged.
 
 Public reduction follows core custody, never replaces it. Existing error `entity_kind` and
 `entity_name` fields carry a core-supplied safe logical target, not filesystem paths or account
