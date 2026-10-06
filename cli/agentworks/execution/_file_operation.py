@@ -293,7 +293,7 @@ class FileOperation:
         return self._unfinished_local_download
 
     @property
-    def has_active_local_download_call(self) -> bool:
+    def has_unfinished_local_download_call(self) -> bool:
         """Whether whole-call finalization custody is still retained."""
         return self._local_download_call is not None
 
