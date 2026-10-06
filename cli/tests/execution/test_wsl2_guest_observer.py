@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 import pytest
 
 from agentworks.execution._wsl2_guest_observer import WSL2GuestObserver
-from agentworks.execution._wsl2_guest_query import FIXED_GUEST_QUERY_SOURCE
 from agentworks.execution._wsl2_lifecycle import (
     GuestAnchorIdentity,
     GuestAnchorPresence,
@@ -43,6 +42,7 @@ class FakeClient:
     argv: tuple[str, ...] = ()
     reads: int = 0
     settlement_blocked: bool = False
+    runtime: bytes | None = None
 
     def _step(self, name: str) -> None:
         self.events.append(name)
@@ -64,10 +64,14 @@ class FakeClient:
 
     def read_stdout_line(self, limit: int, deadline: Deadline) -> bytes:
         assert not deadline.expired
+        if limit == 129:
+            self._step("runtime")
+            nonce = next(arg for arg in self.argv if len(arg) == 32 and set(arg) <= set("0123456789abcdef"))
+            return self.runtime if self.runtime is not None else f"AGW_RUNTIME_1:{nonce}:ready:0\n".encode()
         self.reads += 1
         self._step("read_line" if self.reads == 1 else "read_eof")
         if self.reads == 1:
-            nonce = self.argv[-2]
+            nonce = next(arg for arg in self.argv if len(arg) == 32 and set(arg) <= set("0123456789abcdef"))
             ticks = "8192" if self.kind == "found" else "-"
             return (
                 self.response
@@ -115,22 +119,36 @@ def test_query_uses_exact_route_fixed_source_and_complete_local_proof() -> None:
     assert result is GuestAnchorPresence.ABSENT_CONFIRMED
     assert len(factory.clients) == 1
     argv = factory.clients[0].argv
-    assert argv[:11] == (
+    assert argv[:6] == (
         "wsl.exe",
         "--distribution",
         "Ubuntu",
         "--user",
         "root",
         "--exec",
-        "/usr/bin/python3",
-        "-I",
-        "-S",
-        "-B",
-        "-c",
     )
-    assert argv[11] == FIXED_GUEST_QUERY_SOURCE
-    assert len(argv[12]) == 32 and argv[13] == "137"
-    assert factory.events == ["create", "spawn", "close_stdin", "read_line", "wait", "read_eof", "settle"]
+    assert factory.events == ["create", "spawn", "close_stdin", "runtime", "read_line", "wait", "read_eof", "settle"]
+
+
+@pytest.mark.parametrize("runtime", [b"", b"AGW_GQ2 forged\n", b"x" * 129, b"AGW_RUNTIME_1:bad:ready:0\n"])
+def test_missing_or_invalid_runtime_blocks_query_evidence_and_retry(runtime: bytes) -> None:
+    events: list[str] = []
+    client = FakeClient(events, runtime=runtime)
+    subject = WSL2GuestObserver(WSL2Connection("Ubuntu", "agent", "wsl.exe"), client_factory=lambda: client)
+    assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.UNKNOWN
+    assert client.argv[:6] == ("wsl.exe", "--distribution", "Ubuntu", "--user", "root", "--exec")
+    assert client.reads == 0 and client.local.settled
+    assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.UNKNOWN
+    assert events.count("spawn") == 1
+
+
+@pytest.mark.parametrize("state,token", [("missing", "-"), ("unusable", "0"), ("missing_modules", "0")])
+def test_nonready_runtime_cannot_reduce_a_valid_query(state: str, token: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agentworks.execution._wsl2_guest_observer.secrets.token_hex", lambda _: "a" * 32)
+    client = FakeClient([], runtime=f"AGW_RUNTIME_1:{'a' * 32}:{state}:{token}\n".encode())
+    subject = WSL2GuestObserver(WSL2Connection("Ubuntu", "agent", "wsl.exe"), client_factory=lambda: client)
+    assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.UNKNOWN
+    assert client.reads == 0
 
 
 @pytest.mark.parametrize("trailing", [b"x", b"\n", b"another line\n"])
@@ -141,7 +159,7 @@ def test_trailing_output_prevents_absence(trailing: bytes) -> None:
     assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.UNKNOWN
 
 
-@pytest.mark.parametrize("fail_at", ["spawn", "close_stdin", "read_line", "wait", "read_eof", "settle"])
+@pytest.mark.parametrize("fail_at", ["spawn", "close_stdin", "runtime", "read_line", "wait", "read_eof", "settle"])
 def test_interruption_retains_client_and_blocks_new_dispatch(fail_at: str) -> None:
     factory = Factory()
     first = FakeClient(factory.events, fail_at=fail_at)
@@ -220,6 +238,15 @@ def test_nonzero_exit_is_unknown_even_with_complete_output_and_settlement() -> N
     client = FakeClient(factory.events, exit_status=1)
     subject = WSL2GuestObserver(WSL2Connection("Ubuntu", "root", "wsl.exe"), client_factory=lambda: client)
     assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.UNKNOWN
+
+
+def test_runtime_ready_then_admission_refusal_never_proves_absence_or_allows_retry() -> None:
+    client = FakeClient([], response=b"", exit_status=125)
+    subject = WSL2GuestObserver(WSL2Connection("Ubuntu", "agent", "wsl.exe"), client_factory=lambda: client)
+    assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.UNKNOWN
+    assert client.local.settled
+    assert subject.observe(IDENTITY, Deadline.after(1)) is GuestAnchorPresence.UNKNOWN
+    assert client.events.count("spawn") == 1
 
 
 @pytest.mark.parametrize("failure", ["trailing", "exit", "malformed"])

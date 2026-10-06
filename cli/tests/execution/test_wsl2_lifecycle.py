@@ -70,6 +70,7 @@ class FakeNative:
     spawned: bool = False
     closed_stdin: bool = False
     snapshot_calls: int = 0
+    runtime: bytes | None = None
     settle_deadlines: list[Deadline] = field(default_factory=list)
 
     def spawn_owned(self, argv: tuple[str, ...], deadline: Deadline) -> None:
@@ -81,8 +82,10 @@ class FakeNative:
             raise self.spawn_interrupt
 
     def read_stdout_line(self, limit: int, deadline: Deadline) -> bytes:
-        assert limit == 513
+        assert limit in (129, 513)
         assert not deadline.expired
+        if limit == 129:
+            return self.runtime if self.runtime is not None else b"AGW_RUNTIME_1:" + b"a" * 32 + b":ready:0\n"
         value = self.lines.pop(0)
         return value  # type: ignore[return-value]
 
@@ -154,19 +157,64 @@ def test_literal_helper_argv_and_start_evidence(monkeypatch: pytest.MonkeyPatch)
 
     evidence = subject.start(Deadline.after(1))
 
-    assert native.argv[:7] == (
+    assert native.argv[:6] == (
         r"C:\Windows\System32\wsl.exe",
         "--distribution",
         "test-distro",
         "--user",
-        "test-user",
+        "root",
         "--exec",
-        "/usr/bin/python3",
     )
-    assert native.argv[7:12] == ("-I", "-S", "-B", "-c", _HELPER_SOURCE)
-    assert native.argv[12] == "a" * 32
+    assert "a" * 32 in native.argv
+    assert not native.closed_stdin
     assert evidence.identity == GuestAnchorIdentity(BOOT_ID, 137, 8192, INIT_START_TICKS)
     assert evidence.local.job_assignment == JobAssignment.ASSIGNED_AT_CREATION
+
+
+@pytest.mark.parametrize(
+    "runtime",
+    [
+        b"",
+        b"READY ignored\n",
+        b"x" * 129,
+        b"AGW_RUNTIME_1:" + b"b" * 32 + b":ready:0\n",
+        b"AGW_RUNTIME_1:" + b"a" * 32 + b":missing:-\n",
+        b"AGW_RUNTIME_1:" + b"a" * 32 + b":unsupported_version:0\n",
+    ],
+)
+def test_missing_or_denied_runtime_cannot_publish_ready(runtime: bytes) -> None:
+    settled = local(
+        HostClientStatus.EXITED,
+        125,
+        JobAssignment.ASSIGNED_AT_CREATION,
+        HandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
+    )
+    native = FakeNative([ready()], runtime=runtime, settle_results=[settled])
+    subject = owner(native)
+    with pytest.raises(ValidationError):
+        subject.start(Deadline.after(1), nonce="a" * 32)
+    assert subject.evidence.identity is None
+    assert subject.evidence.guest_anchor_presence is GuestAnchorPresence.UNKNOWN
+    assert subject.evidence.local.settled
+    assert native.lines == [ready()]
+
+
+def test_runtime_ready_then_admission_refusal_never_proves_anchor_readiness() -> None:
+    settled = local(
+        HostClientStatus.EXITED,
+        125,
+        JobAssignment.ASSIGNED_AT_CREATION,
+        HandleSettlement.CLOSED,
+        HandleSettlement.CLOSED,
+    )
+    native = FakeNative([b""], settle_results=[settled])
+    subject = owner(native)
+    with pytest.raises(ValidationError):
+        subject.start(Deadline.after(1), nonce="a" * 32)
+    assert subject.evidence.identity is None
+    assert subject.evidence.local.settled
+    assert subject.evidence.guest_anchor_presence is GuestAnchorPresence.UNKNOWN
 
 
 def _bounded_line(selector: selectors.BaseSelector, stream: IO[bytes]) -> bytes:
@@ -193,7 +241,17 @@ def test_helper_protocol_runs_under_local_python_and_waits_for_eof(python: str) 
         pytest.skip("requires procfs")
     nonce = "a" * 32
     process = subprocess.Popen(
-        [python, "-I", "-S", "-B", "-c", _HELPER_SOURCE, nonce],
+        [
+            python,
+            "-I",
+            "-S",
+            "-B",
+            "-c",
+            _HELPER_SOURCE + "\ndef _agw_read_init():\n"
+            "    with open('/proc/1/stat', 'rb') as source:\n        return source.read(4097)\n"
+            "raise SystemExit(main(sys.argv[1]))\n",
+            nonce,
+        ],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -499,7 +557,8 @@ def test_late_ready_is_rejected_and_cleaned(monkeypatch: pytest.MonkeyPatch) -> 
 
     def late(limit: int, deadline: Deadline) -> bytes:
         result = original(limit, deadline)
-        clock[0] = 12.0
+        if limit == 513:
+            clock[0] = 12.0
         return result
 
     native.read_stdout_line = late  # type: ignore[method-assign]

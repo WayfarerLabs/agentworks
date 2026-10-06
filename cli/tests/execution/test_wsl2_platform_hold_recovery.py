@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from weakref import ReferenceType, ref
 
@@ -18,9 +18,10 @@ from agentworks.db.operations import (
     OperationScope,
 )
 from agentworks.errors import StateError
-from agentworks.execution._wsl2_controller_observer import ControllerPresence
+from agentworks.execution._wsl2_controller_observer import ControllerIdentity, ControllerPresence
 from agentworks.execution._wsl2_guest_observer import WSL2GuestObserver
 from agentworks.execution._wsl2_lifecycle import (
+    GuestAnchorIdentity,
     HandleSettlement,
     HostClientStatus,
     JobAssignment,
@@ -58,6 +59,75 @@ NEVER = LocalResourceSnapshot(
 )
 
 
+@pytest.mark.parametrize("version", [3, 4])
+def test_recovery_default_observer_uses_and_publishes_original_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int
+) -> None:
+    query = QueryClient()
+    monkeypatch.setattr("agentworks.execution._wsl2_windows.WindowsWSL2HostClient", lambda: query)
+    connection = WSL2Connection("Ubuntu", "configured-agent", "wsl.exe")
+    payload = WSL2HoldPayload(
+        locator_digest("opaque-locator"),
+        "c" * 32,
+        "Ubuntu",
+        connection.user,
+        "a" * 32,
+        ControllerIdentity(42, 123456789),
+        GuestAnchorIdentity(BOOT, 137, 8192, 4096),
+        launch_user=None if version == 3 else "root",
+    )
+    with closing(Database(tmp_path / "versions.db")) as database:
+        predecessor = OperationOwner.acquire(database.operations, SCOPE, "proof")
+        obligation = predecessor.register_lifecycle_obligation(
+            OBLIGATION_KIND, payload_version=version, payload=encode_hold_payload(payload)
+        )
+        obligation.mark_possible_effect()
+        owner = OperationOwner.recover(database.operations, predecessor.ownership, "d" * 32)
+        row = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        recovery = WSL2PlatformHoldRecovery(
+            owner,
+            row,
+            locator="opaque-locator",
+            instance_marker="c" * 32,
+            connection=connection,
+            controller_observer=Controller(),
+        )
+        assert recovery.recover(Deadline.after(2))
+        persisted = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        assert persisted.state is LifecycleObligationState.RESOLVED
+        assert persisted.payload_version == version
+        assert decode_hold_payload(persisted.payload) == replace(payload, query_may_have_been_admitted=True)
+        assert query.argv[4] == ("configured-agent" if version == 3 else "root")
+        assert query.runtime_reads == (0 if version == 3 else 1)
+
+
+@pytest.mark.parametrize("envelope,body", [(3, 4), (4, 3), (2, 3), (5, 4)])
+def test_recovery_refuses_unknown_or_mismatched_envelope_before_rebinding(
+    tmp_path: Path, envelope: int, body: int
+) -> None:
+    payload = WSL2HoldPayload(
+        locator_digest("opaque-locator"),
+        "c" * 32,
+        "Ubuntu",
+        "root",
+        "a" * 32,
+        ControllerIdentity(42, 123456789),
+        launch_user=None if body == 3 else "root",
+    )
+    with closing(Database(tmp_path / "mismatch.db")) as database:
+        predecessor = OperationOwner.acquire(database.operations, SCOPE, "proof")
+        predecessor.register_lifecycle_obligation(
+            OBLIGATION_KIND, payload_version=envelope, payload=encode_hold_payload(payload)
+        )
+        owner = OperationOwner.recover(database.operations, predecessor.ownership, "d" * 32)
+        row = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        with pytest.raises(StateError):
+            WSL2PlatformHoldRecovery(
+                owner, row, locator="opaque-locator", instance_marker="c" * 32, connection=CONNECTION
+            )
+        assert database.operations.list_lifecycle_obligations(owner.ownership)[0] == row
+
+
 @dataclass
 class AnchorClient:
     nonce: str = ""
@@ -67,10 +137,12 @@ class AnchorClient:
         return 42, 123456789
 
     def spawn_owned(self, argv: tuple[str, ...], deadline: Deadline) -> None:
-        self.nonce = argv[-1]
+        self.nonce = next(arg for arg in argv if len(arg) == 32 and set(arg) <= set("0123456789abcdef"))
         self.local = OPEN
 
     def read_stdout_line(self, limit: int, deadline: Deadline) -> bytes:
+        if limit == 129:
+            return f"AGW_RUNTIME_1:{self.nonce}:ready:0\n".encode()
         return f"READY {self.nonce} {BOOT} 137 8192 4096\n".encode()
 
     def snapshot(self) -> LocalResourceSnapshot:
@@ -109,6 +181,8 @@ class QueryClient:
     present: bool = False
     settle_open_count: int = 0
     settle_calls: int = 0
+    runtime_reads: int = 0
+    argv: tuple[str, ...] = ()
 
     def current_controller_identity(self) -> tuple[int, int]:
         raise AssertionError("guest query cannot inspect controller identity")
@@ -118,12 +192,17 @@ class QueryClient:
 
     def spawn_owned(self, argv: tuple[str, ...], deadline: Deadline) -> None:
         self.spawned = True
-        self.nonce, self.pid = argv[-2:]
+        self.argv = argv
+        self.nonce = next(arg for arg in argv if len(arg) == 32 and set(arg) <= set("0123456789abcdef"))
+        self.pid = "137"
 
     def close_stdin(self) -> None:
         pass
 
     def read_stdout_line(self, limit: int, deadline: Deadline) -> bytes:
+        if limit == 129:
+            self.runtime_reads += 1
+            return f"AGW_RUNTIME_1:{self.nonce}:ready:0\n".encode()
         self.reads += 1
         if self.reads == 1:
             if self.present:
@@ -204,6 +283,7 @@ def test_missing_ready_and_marked_query_retain_claim(tmp_path: Path) -> None:
             "root",
             "a" * 32,
             ControllerIdentity(42, 123456789),
+            launch_user="root",
         )
         obligation = owner.register_lifecycle_obligation(
             OBLIGATION_KIND, payload_version=PAYLOAD_VERSION, payload=encode_hold_payload(payload)
@@ -255,6 +335,7 @@ def test_registered_takeover_resolves_and_mismatch_refuses(tmp_path: Path) -> No
             "root",
             "a" * 32,
             ControllerIdentity(42, 123456789),
+            launch_user="root",
         )
         owner.register_lifecycle_obligation(
             OBLIGATION_KIND, payload_version=PAYLOAD_VERSION, payload=encode_hold_payload(payload)

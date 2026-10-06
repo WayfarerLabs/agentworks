@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from agentworks.operations import LifecycleObligation, OperationOwner
 
 OBLIGATION_KIND = "wsl2-platform-hold"
-PAYLOAD_VERSION = 3
+PAYLOAD_VERSION = 4
 _MAX_LOCATOR_BYTES = 4096
 
 
@@ -45,6 +45,7 @@ class WSL2HoldPayload:
     controller: ControllerIdentity
     guest: GuestAnchorIdentity | None = None
     query_may_have_been_admitted: bool = False
+    launch_user: str | None = None
 
     def __post_init__(self) -> None:
         if not _hex(self.locator_sha256, 64) or not _valid_instance_marker(self.instance_marker):
@@ -59,6 +60,13 @@ class WSL2HoldPayload:
             raise ValidationError("WSL2 hold query admission marker is invalid")
         if self.query_may_have_been_admitted and self.guest is None:
             raise ValidationError("WSL2 hold query admission requires a guest identity")
+        if self.launch_user is not None and (type(self.launch_user) is not str or self.launch_user != "root"):
+            raise ValidationError("WSL2 hold launch account is invalid")
+
+    @property
+    def version(self) -> int:
+        """Keep old data in v3; root-entry holds explicitly select v4."""
+        return 3 if self.launch_user is None else PAYLOAD_VERSION
 
 
 def _hex(value: object, length: int) -> bool:
@@ -100,8 +108,10 @@ def encode_hold_payload(payload: WSL2HoldPayload) -> bytes:
         "nonce": payload.nonce,
         "query_may_have_been_admitted": payload.query_may_have_been_admitted,
         "user": payload.user,
-        "version": PAYLOAD_VERSION,
+        "version": payload.version,
     }
+    if payload.launch_user is not None:
+        value["launch_user"] = payload.launch_user
     if payload.guest is not None:
         value.update(
             guest_boot_id=payload.guest.boot_id,
@@ -127,7 +137,7 @@ def decode_hold_payload(data: bytes) -> WSL2HoldPayload:
 
     try:
         value = json.loads(data.decode("ascii"))
-        if type(value) is not dict or type(value.get("version")) is not int or value["version"] != PAYLOAD_VERSION:
+        if type(value) is not dict or type(value.get("version")) is not int or value["version"] not in (3, 4):
             raise ValueError("invalid version")
         guest_fields = {"guest_boot_id", "guest_init_start_ticks", "guest_pid", "guest_start_time"}
         guest = (
@@ -146,6 +156,7 @@ def decode_hold_payload(data: bytes) -> WSL2HoldPayload:
             ControllerIdentity(value["controller_pid"], value["controller_creation_ticks"]),
             guest,
             value["query_may_have_been_admitted"],
+            value["launch_user"] if value["version"] == 4 else None,
         )
         if encode_hold_payload(payload) != data:
             raise ValueError("noncanonical JSON")
@@ -258,6 +269,7 @@ class WSL2PlatformHold:
             self._connection.user,
             secrets.token_hex(16),
             ControllerIdentity(pid, ticks),
+            launch_user="root",
         )
         self._payload = payload
         encoded = encode_hold_payload(payload)

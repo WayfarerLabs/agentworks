@@ -11,8 +11,10 @@ from threading import TIMEOUT_MAX, Lock
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
+from agentworks.execution._wsl2_early_bootstrap import build_early_argv, require_early_runtime
 from agentworks.execution._wsl2_guest_query import (
     FIXED_GUEST_QUERY_SOURCE,
+    LEGACY_GUEST_QUERY_SOURCE,
     MAX_GUEST_QUERY_RESPONSE_BYTES,
     reduce_guest_query_response,
 )
@@ -69,6 +71,7 @@ class WSL2GuestObserver:
             try:
                 client.spawn_owned(self._argv(identity, nonce), deadline)
                 client.close_stdin()
+                self._admit_runtime(client, nonce, deadline)
                 response = client.read_stdout_line(MAX_GUEST_QUERY_RESPONSE_BYTES, deadline)
                 exit_status = client.wait(deadline)
                 trailing = client.read_stdout_line(1, deadline)
@@ -134,6 +137,20 @@ class WSL2GuestObserver:
         return settled
 
     def _argv(self, identity: GuestAnchorIdentity, nonce: str) -> tuple[str, ...]:
+        source = f"_agw_query_pid = {identity.pid!r}\n" + FIXED_GUEST_QUERY_SOURCE
+        return build_early_argv(self._connection, source, nonce)
+
+    def _admit_runtime(self, client: OwnedHostClient, nonce: str, deadline: Deadline) -> None:
+        require_early_runtime(client, nonce, deadline)
+
+
+class _LegacyWSL2GuestObserver(WSL2GuestObserver):
+    """Former same-user query for persisted v3 hold recovery only."""
+
+    def _admit_runtime(self, client: OwnedHostClient, nonce: str, deadline: Deadline) -> None:
+        pass
+
+    def _argv(self, identity: GuestAnchorIdentity, nonce: str) -> tuple[str, ...]:
         return (
             self._connection.wsl_executable,
             "--distribution",
@@ -146,7 +163,7 @@ class WSL2GuestObserver:
             "-S",
             "-B",
             "-c",
-            FIXED_GUEST_QUERY_SOURCE,
+            LEGACY_GUEST_QUERY_SOURCE,
             nonce,
             str(identity.pid),
         )

@@ -68,7 +68,7 @@ class FakeObligation:
             raise OSError("lost mark reply")
 
     def publish_payload(self, *, expected_revision: int, payload_version: int, payload: bytes) -> None:
-        assert expected_revision == self.payload_revision and payload_version == 3
+        assert expected_revision == self.payload_revision and payload_version == 4
         event = "admit" if decode_hold_payload(payload).query_may_have_been_admitted else "publish"
         self.events.append(event)
         self.payload = payload
@@ -95,7 +95,7 @@ class FakeOwner:
     )
 
     def register_lifecycle_obligation(self, kind: str, *, payload_version: int, payload: bytes) -> FakeObligation:
-        assert kind == OBLIGATION_KIND and payload_version == 3
+        assert kind == OBLIGATION_KIND and payload_version == 4
         self.events.append("register")
         obligation = FakeObligation(self.events, self.fail_at, payload=payload)
         self.obligations.append(obligation)
@@ -132,13 +132,15 @@ class FakeNative:
         assert not deadline.expired
         self.events.append("dispatch")
         self.argv = argv
-        self.nonce = argv[-1]
+        self.nonce = next(arg for arg in argv if len(arg) == 32 and set(arg) <= set("0123456789abcdef"))
         self.local = NEVER if self.never_created else OPEN
         if self.fail_spawn:
             raise self.fail_spawn
 
     def read_stdout_line(self, limit: int, deadline: Deadline) -> bytes:
-        assert limit == 513 and not deadline.expired
+        assert limit in (129, 513) and not deadline.expired
+        if limit == 129:
+            return f"AGW_RUNTIME_1:{self.nonce}:ready:0\n".encode()
         self.stdout_reads += 1
         if self.stdout_reads == 1:
             return f"READY {self.nonce} {BOOT} 137 8192 4096\n".encode()
@@ -226,14 +228,17 @@ class QueryNative:
         self.events.append(f"{self.name}:eof")
 
     def read_stdout_line(self, limit: int, deadline: Deadline) -> bytes:
-        assert limit in {1, 160} and not deadline.expired
+        assert limit in {1, 129, 160} and not deadline.expired
+        nonce = next(arg for arg in self.argv if len(arg) == 32 and set(arg) <= set("0123456789abcdef"))
+        if limit == 129:
+            return f"AGW_RUNTIME_1:{nonce}:ready:0\n".encode()
         self.reads += 1
         self.events.append(f"{self.name}:read")
         if self.interrupt_on_first_read and self.reads == 1 and not self.interrupted:
             self.interrupted = True
             raise KeyboardInterrupt
         if self.reads == 1:
-            return f"AGW_GQ2 {self.argv[-2]} 137 {BOOT} 4096 missing -\n".encode()
+            return f"AGW_GQ2 {nonce} 137 {BOOT} 4096 missing -\n".encode()
         return b""
 
     def wait(self, deadline: Deadline) -> int:
@@ -939,13 +944,15 @@ def test_canonical_payload_rejects_malformed_boundary() -> None:
     payload = subject.payload
     assert payload is not None
     encoded = encode_hold_payload(payload)
+    assert payload.version == 4 and payload.launch_user == "root"
     assert len(encoded) < 8192 and b"opaque-locator" not in encoded
     assert locator_digest("opaque-locator") == payload.locator_sha256
     for bad in (
         encoded + b" ",
-        encoded.replace(b'"version":3', b'"version":true'),
-        encoded.replace(b'"version":3', b'"version":2'),
-        encoded[:-1] + b',"version":3}',
+        encoded.replace(b'"version":4', b'"version":true'),
+        encoded.replace(b'"version":4', b'"version":2'),
+        encoded.replace(b'"version":4', b'"version":5'),
+        encoded[:-1] + b',"version":4}',
         encoded[:-1] + b',"version":1}',
         b"\xff",
         b"{}",

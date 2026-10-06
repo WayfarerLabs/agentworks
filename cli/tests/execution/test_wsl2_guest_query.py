@@ -10,7 +10,7 @@ import sys
 import pytest
 
 from agentworks.execution._wsl2_guest_query import (
-    FIXED_GUEST_QUERY_SOURCE,
+    LEGACY_GUEST_QUERY_SOURCE,
     MAX_GUEST_QUERY_RESPONSE_BYTES,
     reduce_guest_query_response,
 )
@@ -92,7 +92,7 @@ def test_fixed_guest_source_observes_current_process_and_missing_pid(python: str
         init_fields = source.read().split(b") ")[-1].split()
     identity = GuestAnchorIdentity(boot, os.getpid(), int(fields[19]), int(init_fields[19]))
     present = subprocess.run(
-        [python, "-c", FIXED_GUEST_QUERY_SOURCE, NONCE, str(identity.pid)],
+        [python, "-c", LEGACY_GUEST_QUERY_SOURCE, NONCE, str(identity.pid)],
         capture_output=True,
         check=False,
         timeout=5,
@@ -112,7 +112,7 @@ def test_fixed_guest_source_observes_current_process_and_missing_pid(python: str
 
     absent_pid = 2**31 - 1
     missing = subprocess.run(
-        [python, "-c", FIXED_GUEST_QUERY_SOURCE, NONCE, str(absent_pid)],
+        [python, "-c", LEGACY_GUEST_QUERY_SOURCE, NONCE, str(absent_pid)],
         capture_output=True,
         check=False,
         timeout=5,

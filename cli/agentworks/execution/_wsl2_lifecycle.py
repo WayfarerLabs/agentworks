@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from agentworks.errors import ValidationError
 from agentworks.execution._vm_guest_identity_protocol import _valid_boot_id
+from agentworks.execution._wsl2_early_bootstrap import build_early_argv, require_early_runtime
 from agentworks.execution.carrier import Deadline
 
 if TYPE_CHECKING:
@@ -44,8 +45,11 @@ def boot():
     return value[:-1].decode('ascii')
 
 def ticks(pid):
-    with open('/proc/{}/stat'.format(pid), 'rb') as source:
-        value = source.read(4097)
+    if pid == 1:
+        value = _agw_read_init()
+    else:
+        with open('/proc/{}/stat'.format(pid), 'rb') as source:
+            value = source.read(4097)
     prefix = str(pid).encode('ascii') + b' ('
     closing = value.rfind(b') ')
     if (len(value) > 4096 or not value.endswith(b'\\n') or b'\\n' in value[:-1]
@@ -59,17 +63,19 @@ def ticks(pid):
         raise ValueError('invalid start ticks')
     return result
 
-nonce = sys.argv[1]
-pid = os.getpid()
-before_boot, before_init = boot(), ticks(1)
-start = ticks(pid)
-if before_boot != boot() or before_init != ticks(1):
-    raise SystemExit(2)
-sys.stdout.buffer.write('READY {} {} {} {} {}\\n'.format(nonce, before_boot, pid, start, before_init).encode('ascii'))
-sys.stdout.buffer.flush()
-sys.stdin.buffer.read()
-sys.stdout.buffer.write('EXITING {}\\n'.format(nonce).encode('ascii'))
-sys.stdout.buffer.flush()
+def main(nonce):
+    pid = os.getpid()
+    before_boot, before_init = boot(), ticks(1)
+    start = ticks(pid)
+    if before_boot != boot() or before_init != ticks(1):
+        return 2
+    line = 'READY {} {} {} {} {}\\n'.format(nonce, before_boot, pid, start, before_init)
+    sys.stdout.buffer.write(line.encode('ascii'))
+    sys.stdout.buffer.flush()
+    sys.stdin.buffer.read()
+    sys.stdout.buffer.write('EXITING {}\\n'.format(nonce).encode('ascii'))
+    sys.stdout.buffer.flush()
+    return 0
 """
 
 
@@ -297,6 +303,7 @@ class WSL2GuestAnchorOwner:
             self._refresh()
             if deadline.expired:
                 raise ValidationError("WSL2 anchor start deadline has expired")
+            require_early_runtime(self._native, self._nonce, deadline)
             receipt = self._native.read_stdout_line(_MAX_RECEIPT_BYTES + 1, deadline)
             identity = _ready_identity(receipt, self._nonce)
             self._identity = identity
@@ -393,18 +400,4 @@ class WSL2GuestAnchorOwner:
             self._guest_anchor_presence = presence
 
     def _argv(self, nonce: str) -> tuple[str, ...]:
-        return (
-            self._connection.wsl_executable,
-            "--distribution",
-            self._connection.distribution,
-            "--user",
-            self._connection.user,
-            "--exec",
-            "/usr/bin/python3",
-            "-I",
-            "-S",
-            "-B",
-            "-c",
-            _HELPER_SOURCE,
-            nonce,
-        )
+        return build_early_argv(self._connection, _HELPER_SOURCE, nonce)

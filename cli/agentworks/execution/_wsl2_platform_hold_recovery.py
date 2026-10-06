@@ -13,11 +13,10 @@ from agentworks.execution._wsl2_controller_observer import (
     ControllerPresence,
     WindowsControllerObserver,
 )
-from agentworks.execution._wsl2_guest_observer import WSL2GuestObserver
+from agentworks.execution._wsl2_guest_observer import WSL2GuestObserver, _LegacyWSL2GuestObserver
 from agentworks.execution._wsl2_lifecycle import GuestAnchorPresence
 from agentworks.execution._wsl2_platform_hold import (
     OBLIGATION_KIND,
-    PAYLOAD_VERSION,
     WSL2HoldPayload,
     decode_hold_payload,
     encode_hold_payload,
@@ -60,10 +59,13 @@ class WSL2PlatformHoldRecovery:
             obligation.ownership != owner.ownership
             or owner.ownership.scope.resource_kind is not OperationResourceKind.VM
             or obligation.obligation_kind != OBLIGATION_KIND
-            or obligation.payload_version != PAYLOAD_VERSION
+            or type(obligation.payload_version) is not int
+            or obligation.payload_version not in (3, 4)
         ):
             raise StateError("WSL2 hold recovery requires an exact taken-over VM obligation")
         payload = decode_hold_payload(obligation.payload)
+        if payload.version != obligation.payload_version:
+            raise StateError("WSL2 hold recovery payload version does not match")
         if (
             payload.locator_sha256 != locator_digest(locator)
             or payload.instance_marker != instance_marker
@@ -75,7 +77,7 @@ class WSL2PlatformHoldRecovery:
         bound = owner.rebind_lifecycle_obligation(
             obligation.obligation_id,
             OBLIGATION_KIND,
-            payload_version=PAYLOAD_VERSION,
+            payload_version=payload.version,
             payload=obligation.payload,
         )
         current = bound._persisted_obligation  # noqa: SLF001
@@ -87,7 +89,8 @@ class WSL2PlatformHoldRecovery:
         self._payload: WSL2HoldPayload = payload
         self._state = current.state
         self._controller = controller_observer if controller_observer is not None else WindowsControllerObserver()
-        self._guest = guest_observer if guest_observer is not None else WSL2GuestObserver(connection)
+        observer_type = _LegacyWSL2GuestObserver if payload.version == 3 else WSL2GuestObserver
+        self._guest = guest_observer if guest_observer is not None else observer_type(connection)
         self._lock = Lock()
         self._query_uncertain = False
         self._completed_present = False
@@ -156,7 +159,7 @@ class WSL2PlatformHoldRecovery:
         self._admission_uncertain = True
         self._bound.publish_payload(
             expected_revision=self._bound.payload_revision,
-            payload_version=PAYLOAD_VERSION,
+            payload_version=self._payload.version,
             payload=encode_hold_payload(admitted),
         )
         self._payload = admitted
@@ -167,7 +170,7 @@ class WSL2PlatformHoldRecovery:
         recovery = self._owner.rebind_possible_effect_lifecycle_obligation(
             self._obligation_id,
             OBLIGATION_KIND,
-            payload_version=PAYLOAD_VERSION,
+            payload_version=self._payload.version,
             payload=encoded,
             payload_revision=self._bound.payload_revision,
         )
