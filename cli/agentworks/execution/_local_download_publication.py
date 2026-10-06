@@ -12,8 +12,8 @@ admission leaves cleanup_uncertain: that descriptor number is diagnostic state,
 not safe recovery custody, and is never closed again because it may be reused.
 Other known cleanup can proceed without erasing that uncertainty.
 This includes temporary destination metadata handles. If construction fails with
-an uncertain close, LocalDownloadCleanupUncertainError exposes cleanup_uncertain
-even though no writer was returned to the caller.
+unfinished cleanup, LocalDownloadCleanupError exposes the writer for retry;
+LocalDownloadCleanupUncertainError also exposes close uncertainty.
 
 Replace requires ordinary write access and preserves local mode, owner, group and
 non-security xattrs (including Linux POSIX ACLs), or refuses before publication.
@@ -53,7 +53,26 @@ class LocalDownloadUnsupportedError(OSError):
     """The host cannot establish the required local publication guarantees."""
 
 
-class LocalDownloadCleanupUncertainError(LocalDownloadUnsupportedError):
+class LocalDownloadCleanupError(LocalDownloadUnsupportedError):
+    """Local cleanup did not finish; a failed constructor can expose its writer."""
+
+    cleanup_uncertain = False
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        unfinished_stage: LocalDownloadPublication | None = None,
+        setup_error: BaseException | None = None,
+        cleanup_error: BaseException | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.unfinished_stage = unfinished_stage
+        self.setup_error = setup_error
+        self.cleanup_error = cleanup_error
+
+
+class LocalDownloadCleanupUncertainError(LocalDownloadCleanupError):
     """Cleanup has an uncertain close outcome, including failed construction."""
 
     cleanup_uncertain = True
@@ -169,8 +188,17 @@ class LocalDownloadPublication:
                 break
             else:
                 raise FileExistsError("Cannot allocate a unique local download stage")
-        except BaseException:
-            self.abort()
+        except BaseException as setup_error:
+            try:
+                self.abort()
+            except BaseException as cleanup_error:
+                error_type = LocalDownloadCleanupUncertainError if self.cleanup_uncertain else LocalDownloadCleanupError
+                raise error_type(
+                    "Local download construction left unfinished cleanup",
+                    unfinished_stage=self,
+                    setup_error=setup_error,
+                    cleanup_error=cleanup_error,
+                ) from cleanup_error
             raise
 
     def _destination_metadata(self) -> _Metadata:
@@ -316,6 +344,11 @@ class LocalDownloadPublication:
         retained, and the destination is never removed.
         """
         self._close_metadata_descriptor()
+        if self._stage_name is not None and self._stage_identity is None:
+            if self._stage_fd is None or self._stage_close_uncertain:
+                raise LocalDownloadUnsupportedError("Local download stage identity is unavailable for cleanup")
+            staged = os.fstat(self._stage_fd)
+            self._stage_identity = (staged.st_dev, staged.st_ino)
         if self._stage_fd is not None and not self._stage_close_uncertain:
             self._stage_close_uncertain = True
             os.close(self._stage_fd)

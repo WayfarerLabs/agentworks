@@ -526,6 +526,64 @@ def test_unreadable_metadata_refuses_before_staging(tmp_path: Path, monkeypatch:
     assert list(tmp_path.iterdir()) == [destination]
 
 
+def test_constructor_fstat_then_unlink_failure_retains_stage_for_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    destination = tmp_path / "download"
+    fstat = os.fstat
+    setup_error = OSError("stage inspection failed")
+    cleanup_error = PermissionError("stage removal failed")
+    inspections = 0
+
+    def fail_first_inspection(fd: int) -> os.stat_result:
+        nonlocal inspections
+        inspections += 1
+        if inspections == 1:
+            raise setup_error
+        return fstat(fd)
+
+    def fail_removal(*args: object, **kwargs: object) -> None:
+        raise cleanup_error
+
+    with monkeypatch.context() as failure:
+        failure.setattr(os, "fstat", fail_first_inspection)
+        failure.setattr(os, "unlink", fail_removal)
+        with pytest.raises(local.LocalDownloadCleanupError) as caught:
+            local.LocalDownloadPublication(destination)
+
+    error = caught.value
+    assert not isinstance(error, local.LocalDownloadCleanupUncertainError)
+    assert error.setup_error is setup_error and error.cleanup_error is cleanup_error
+    assert not error.cleanup_uncertain
+    writer = error.unfinished_stage
+    assert writer is not None and not writer.cleanup_uncertain
+    assert writer._stage_identity is not None and writer._parent_fd is not None
+    assert len(list(tmp_path.glob(".agw-download-*"))) == 1
+    writer.abort()
+    assert not list(tmp_path.iterdir())
+
+
+def test_constructor_keeps_stage_descriptor_when_identity_cannot_be_inspected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    destination = tmp_path / "download"
+
+    def fail_inspection(fd: int) -> os.stat_result:
+        raise OSError("stage inspection failed")
+
+    with monkeypatch.context() as failure:
+        failure.setattr(os, "fstat", fail_inspection)
+        with pytest.raises(local.LocalDownloadCleanupError) as caught:
+            local.LocalDownloadPublication(destination)
+
+    writer = caught.value.unfinished_stage
+    assert writer is not None and not writer.cleanup_uncertain
+    assert writer._stage_identity is None and writer._stage_fd is not None
+    assert len(list(tmp_path.glob(".agw-download-*"))) == 1
+    writer.abort()
+    assert not list(tmp_path.iterdir())
+
+
 def test_stage_name_collision_preserves_other_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     collision = tmp_path / ".agw-download-collision"
     collision.write_bytes(b"unrelated")
@@ -675,6 +733,7 @@ def test_ambiguous_metadata_close_is_visible_and_never_retried(
             with pytest.raises(local.LocalDownloadCleanupUncertainError) as error:
                 local.LocalDownloadPublication.__init__(writer, destination, condition=Replace())
             assert error.value.cleanup_uncertain
+            assert error.value.unfinished_stage is writer
         else:
             with pytest.raises(KeyboardInterrupt):
                 commit(writer, b"new")
