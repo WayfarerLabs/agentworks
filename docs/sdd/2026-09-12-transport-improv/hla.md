@@ -373,18 +373,20 @@ I/O/evidence. A wait timeout is not stop. Stop verifies ownership and descendant
 the main PID's exit. References survive connections, but require newly authorized targets for later
 observation. Retention and abandoned-work cleanup remain the resource owner's responsibility.
 
-Platform availability is a separate, platform-owned boundary around every VM operation, acquired
-before activation and retained through routing, body and teardown. The boundary can be a no-op on
-platforms that need no active hold. `INDEPENDENT` work on a platform that can idle-stop the VM
-requires a resource-owned, recoverable availability hold lasting until that job is terminal; a
-command-scoped hold does not satisfy it. If the platform cannot prove that guarantee, refuse
-`INDEPENDENT` there rather than advertising weaker behavior. This does not override explicit VM
-stop, reboot or host loss. WSL2, platform-owned macOS host workflows and early bootstrap need their
-own measured acceptance cases. Mac hosts do not inherit a blanket guest MANAGED requirement;
-platforms own resource lifecycle and recovery without a new weak profile or a hostile-platform
-isolation claim. Required operations cannot simply be dropped. The guest lifecycle proof gates
-include lost launch acknowledgment, observer loss, anchor death, stale identity, descendant cleanup
-and containment escape paths. The accepted buffered PoC does not establish those guarantees.
+Platform availability is a separate, platform-owned boundary around every authorized VM operation
+that can perform guest work, acquired before activation and retained through routing, body and
+teardown. Passive readiness/preflight may inspect already-existing availability but cannot activate
+a VM or start or extend a hold. The boundary can be a no-op on platforms that need no active hold.
+`INDEPENDENT` work on a platform that can idle-stop the VM requires a resource-owned, recoverable
+availability hold lasting until that job is terminal; a command-scoped hold does not satisfy it. If
+the platform cannot prove that guarantee, refuse `INDEPENDENT` there rather than advertising weaker
+behavior. This does not override explicit VM stop, reboot or host loss. WSL2, platform-owned macOS
+host workflows and early bootstrap need their own measured acceptance cases. Mac hosts do not
+inherit a blanket guest MANAGED requirement; platforms own resource lifecycle and recovery without a
+new weak profile or a hostile-platform isolation claim. Required operations cannot simply be
+dropped. The guest lifecycle proof gates include lost launch acknowledgment, observer loss, anchor
+death, stale identity, descendant cleanup and containment escape paths. The accepted buffered PoC
+does not establish those guarantees.
 
 ## RunContext integration
 

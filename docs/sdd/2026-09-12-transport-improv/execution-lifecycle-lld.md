@@ -127,13 +127,15 @@ and released only after terminal job/cleanup evidence; if the platform cannot pr
 not idle-stop, the availability hold can be a no-op. Neither contract overrides an explicit VM stop,
 reboot or host loss.
 
-Every VM operation, including execution, file work, recovery and later job observation, enters the
-same platform availability boundary before activation and retains it through routing, body and
-teardown. Admission and release remain in core's database-owned operation lifecycle; platform hooks
-supply their actual hold evidence. A stopped WSL2 distribution during a supposedly active
-independent job is a discontinuity to report and recover, not proof that the old job stayed alive.
-Whether a later observation may wake an already stopped VM solely to inspect terminal records is
-separate from the active-job availability guarantee and must be decided before public exposure.
+Every authorized VM operation that can perform guest work, including execution, file work, recovery
+and later job observation, enters the same platform availability boundary before activation and
+retains it through routing, body and teardown. Passive readiness/preflight only observes
+already-existing availability; it cannot start or extend a hold or activate the VM. Admission and
+release remain in core's database-owned operation lifecycle; platform hooks supply their actual hold
+evidence. A stopped WSL2 distribution during a supposedly active independent job is a discontinuity
+to report and recover, not proof that the old job stayed alive. Whether a later observation may wake
+an already stopped VM solely to inspect terminal records is separate from the active-job
+availability guarantee and must be decided before public exposure.
 
 PTY is an I/O choice, not a background state. `attach(ref, terminal=...)` requires an attach grant
 and supported transport, and does not create a new run. A reusable detached terminal needs an owned

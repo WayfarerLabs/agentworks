@@ -1149,6 +1149,14 @@ remain open.
 
 ## WSL2 native client ownership
 
+[Microsoft's WSL systemd guidance](https://learn.microsoft.com/en-us/windows/wsl/systemd) states
+that systemd services do not by themselves keep a WSL instance alive. A Linux managed unit can own
+and clean up its guest process tree without owning the Windows-side distribution power lifetime.
+Therefore `INDEPENDENT` on WSL2 needs a separately proved, recoverable platform availability hold
+through the active job; the current command-scoped client/guest anchor does not supply that promise
+after the initiating operation ends. Other VM platforms use the same availability contract, with a
+no-op hold only where their lifecycle semantics justify one.
+
 The legacy WSL keepalive starts `wsl.exe` and assigns it to a Job Object afterward. That is useful
 Job-limit prior art but not an acceptable new-stack ownership mechanism: controller death between
 process creation and assignment can leave an unowned client. `subprocess.Popen` also cannot express

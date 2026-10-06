@@ -226,11 +226,12 @@ On VM and independent-job availability, the operator clarified:
 > And this really shouldn't be wsl specific. We generally want to ensure vm availabilty for all
 > platforms. For most that's a no-op but no harm in wrapping everything we do.
 
-Every VM operation therefore enters a platform-owned availability boundary. An independent job
-cannot claim disconnect survival on a platform that can idle-stop its VM unless a recoverable
-availability hold covers that job's active lifetime. Explicit stop, reboot and host loss remain
-outside that promise. A platform unable to prove the hold refuses that lifetime; it does not weaken
-the meaning of `INDEPENDENT`.
+Every authorized VM operation that can perform guest work therefore enters a platform-owned
+availability boundary. Passive readiness/preflight may inspect already-existing availability but
+cannot activate a VM or start or extend a hold. An independent job cannot claim disconnect survival
+on a platform that can idle-stop its VM unless a recoverable availability hold covers that job's
+active lifetime. Explicit stop, reboot and host loss remain outside that promise. A platform unable
+to prove the hold refuses that lifetime; it does not weaken the meaning of `INDEPENDENT`.
 
 For local download destinations, the operator chose explicit replacement in the first version, in
 addition to create-only publication. Local replacement and metadata semantics remain a design and
@@ -402,8 +403,9 @@ Disconnect survival assumes the VM remains running. Detached work does not promi
 reboot, VM stop, or host shutdown, and cannot override an operator's explicit stop. Platform holds
 must cover an active operation. On a platform that can idle-stop its VM, a recoverable hold must
 also cover an independent job's active lifetime, not merely its initiating call, or that lifetime is
-unavailable there. Every VM operation uses the platform availability boundary, which may be a no-op
-where no hold is needed. Releasing a client context must not masquerade as stopping its job.
+unavailable there. Every authorized VM operation that can perform guest work uses the platform
+availability boundary, which may be a no-op where no hold is needed. Passive readiness/preflight
+remains no-effects. Releasing a client context must not masquerade as stopping its job.
 
 ### R7. Files
 

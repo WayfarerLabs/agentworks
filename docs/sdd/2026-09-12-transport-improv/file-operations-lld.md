@@ -1393,6 +1393,7 @@ The following are not established by source inspection and must remain open in t
   on every supported filesystem, refusing unsupported metadata before publication;
 - prove local create and explicit replace publication, including metadata/ACL handling, failure
   cleanup and the supported macOS/Windows filesystem behavior;
+- decide the supported macOS minimum for the local publication path;
 - complete directory transfer/confined extraction before claiming full R7;
 - inventory the exact future core catalog and recipient subsets before removal; and
 - obtain operator disposition for any required destination that cannot meet atomic rename, metadata

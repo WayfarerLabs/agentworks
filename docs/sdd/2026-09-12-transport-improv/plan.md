@@ -73,11 +73,13 @@ associated pending acceptance gates are superseded by this ruling.
       and shared platform-host resources without splitting ownership by transport route or identity.
       Retire superseded local harness coordination during consumer migration, not through a second
       competing new-stack lock.
-- [ ] Establish one platform-neutral VM availability boundary around every new-stack VM operation,
-      entered after core admits the operation but before activation and retained through route, body
-      and teardown. Prove no-op platforms and stateful holds with the same caller contract; each
-      stateful hold contributes exact lifecycle evidence before whole-operation release. Cover file,
-      execution, recovery and later job actions, not only foreground command paths.
+- [ ] Establish one platform-neutral VM availability boundary around every authorized new-stack VM
+      operation that can perform guest work, entered after core admits the operation but before
+      activation and retained through route, body and teardown. Prove no-op platforms and stateful
+      holds with the same caller contract; each stateful hold contributes exact lifecycle evidence
+      before whole-operation release. Cover file, execution, recovery and later job actions, not
+      only foreground command paths. Passive readiness/preflight only inspects already-existing
+      availability; it cannot activate a VM or start or extend a hold.
 - [ ] Cover pre-context activation and nested teardown when wiring ownership. At `806741ca`,
       `gated_vm_boundary` enters `activation_gate` before assembling its ordinary operation context,
       and `LiveVMNode` constructs a separate gate context. Context factories, harness setup's
