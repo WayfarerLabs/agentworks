@@ -8,8 +8,19 @@ The private `_terminal_posix` resource layer admits supplied readable terminal i
 geometry descriptor, allocates its own PTY and restores borrowed input modes after all users stop.
 One retained non-main worker owns acquisition, resize and release; other threads cannot mutate the
 resource. The geometry descriptor may be read-only. It starts no client or relay and does not enable
-terminal delivery. Shared terminal input, worker/client custody and supported-workstation proof
-remain required.
+terminal delivery.
+
+The private `_terminal_relay` candidate composes the shared `TerminalInput` with that resource and
+`LocalProcessOwner`. One retained worker owns admission, raw mode, the owned stdin PTY, bounded fair
+relay and process settlement before restoration. Preparation stalls with `None`; its final empty
+chunk hands input permanently to the keyboard after pending payload drains, without closing the
+channel. Raw stdout/stderr go to distinct borrowed sinks. The worker uses explicit completion facts
+through caller interruption, and reports endpoint or restoration uncertainty without retaining raw
+payload diagnostics. TERM comes from the supplied terminal input.
+
+This candidate copies initial geometry but stops with observation failure when geometry changes: the
+shared owner cannot yet notify its exact client. It is not enabled by `SSHCarrier`; actual resize,
+real SSH integration, native workstations and presentation policy remain required.
 
 ## Connection policy
 
