@@ -5,8 +5,9 @@ The core remains Python 3.11-compatible for POSIX guest-helper reuse. A private
 launch owner constructs and retains the process while the caller alone pumps
 borrowed endpoints. The waiting runner leaves no task using a borrowed endpoint.
 Bounded owner closure can return pending while construction or cleanup still
-owns native capabilities; its caller must retain the same owner and borrowed
-stdin. A canceled, capability-free bootstrap or terminal native return
+owns native capabilities; its caller must retain the same owner and caller-owned
+stdin and pass_fds descriptors while construction is pending. A canceled,
+capability-free bootstrap or terminal native return
 tail may finish after return. Execution uses the supplied deadline. Local cleanup
 uses a 0.5-second wait allowance; native calls are not made interruptible. That
 allowance never resumes execution.
@@ -407,7 +408,7 @@ class LocalProcessOwner:
 
     One caller serializes ``start`` and closure. Other threads may observe
     immutable snapshots, but pipe borrowers must stop before requesting closure.
-    Pending construction still borrows any caller-supplied stdin descriptor.
+    Pending construction still borrows caller-owned stdin and pass_fds descriptors.
     """
 
     def __init__(self) -> None:
@@ -423,7 +424,6 @@ class LocalProcessOwner:
         self._start_called = False
         self._closed = False
         self._resize_request: _ResizeRequest | None = None
-        self._retained_status: _ProcessStatus | None = None
         self._cleanup_retry_requested = False
 
     def _admit(self, request: LocalProcessRequest) -> bool:
@@ -679,8 +679,9 @@ class LocalProcessOwner:
         """Request cleanup, returning None if its observation deadline expires.
 
         The caller must cease pipe use first and retain this owner on pending or
-        retryable failure. A pending constructor still needs borrowed stdin;
-        pending return does not permit closing it or restoring terminal modes.
+        retryable failure. A pending constructor still needs caller-owned stdin
+        and pass_fds descriptors; pending return does not permit closing or
+        reusing them or restoring terminal modes.
         Native construction and syscalls are not made interruptible. Calling
         again after a retryable failure requests one serialized cleanup retry.
         """
@@ -875,8 +876,6 @@ def _run_local_process_owner(owner: LocalProcessOwner) -> None:
                     continue
     finally:
         request = None
-        with owner._condition:
-            owner._retained_status = status
         while True:
             if status is not None:
                 try:
@@ -890,8 +889,6 @@ def _run_local_process_owner(owner: LocalProcessOwner) -> None:
                 local_status = None
                 cleanup_retryable = False
             if not cleanup_retryable:
-                with owner._condition:
-                    owner._retained_status = None
                 status = None
                 process = None
                 pipes = None

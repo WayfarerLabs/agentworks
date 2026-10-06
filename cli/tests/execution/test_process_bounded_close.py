@@ -221,7 +221,6 @@ def test_cleanup_retry_keeps_exact_status_and_is_not_requested_by_pending_observ
         first = owner.close_bounded(_deadline())
         assert first is not None and not first.cleaned and first.cleanup_retryable
         assert owner.close() is first
-        assert owner._retained_status is statuses[0]
         assert owner.snapshot().pipes is None
         assert len(statuses) == 1
         assert owner.close_bounded(_deadline(0.02)) is None
@@ -236,7 +235,6 @@ def test_cleanup_retry_keeps_exact_status_and_is_not_requested_by_pending_observ
     assert owner.close() is first
     assert not first.cleaned and first.cleanup_retryable
     assert statuses[0] is statuses[1]
-    assert owner._retained_status is None
     assert owner.close_bounded(_deadline()) is final
     _assert_exact_cleanup(children)
 
@@ -370,7 +368,6 @@ def test_lost_exclusive_ownership_stops_retention_and_denies_every_retry(monkeyp
         assert terminal.observation_failed
         assert owner.close_bounded(_deadline()) is terminal
         assert owner.close_bounded(_deadline()) is terminal
-        assert owner._retained_status is None
         assert signals == [] and calls == 2
         assert process.stdout.closed and process.stderr.closed
     finally:
