@@ -11,6 +11,9 @@ Cleanup retains descriptors until close returns. An interruption after close
 admission leaves cleanup_uncertain: that descriptor number is diagnostic state,
 not safe recovery custody, and is never closed again because it may be reused.
 Other known cleanup can proceed without erasing that uncertainty.
+This includes temporary destination metadata handles. If construction fails with
+an uncertain close, LocalDownloadCleanupUncertainError exposes cleanup_uncertain
+even though no writer was returned to the caller.
 
 Replace requires ordinary write access and preserves local mode, owner, group and
 non-security xattrs (including Linux POSIX ACLs), or refuses before publication.
@@ -46,6 +49,12 @@ _EXTENT_FLAG = 0x00080000
 
 class LocalDownloadUnsupportedError(OSError):
     """The host cannot establish the required local publication guarantees."""
+
+
+class LocalDownloadCleanupUncertainError(LocalDownloadUnsupportedError):
+    """Cleanup has an uncertain close outcome, including failed construction."""
+
+    cleanup_uncertain = True
 
 
 @dataclass(frozen=True)
@@ -118,10 +127,12 @@ class LocalDownloadPublication:
         self._name = self._destination.name
         self._parent_fd: int | None = None
         self._stage_fd: int | None = None
+        self._metadata_fd: int | None = None
         self._stage_name: str | None = None
         self._stage_identity: tuple[int, int] | None = None
         self._stage_close_uncertain = False
         self._parent_close_uncertain = False
+        self._metadata_close_uncertain = False
         self._original: _Metadata | None = None
         self._digest = hashlib.sha256()
         self._size = 0
@@ -161,22 +172,32 @@ class LocalDownloadPublication:
             raise
 
     def _destination_metadata(self) -> _Metadata:
+        if self._metadata_fd is not None or self.cleanup_uncertain:
+            raise ValueError("Local destination metadata descriptor is unavailable")
         observed = os.stat(self._name, dir_fd=self._parent_fd, follow_symlinks=False)
         if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1:
             raise LocalDownloadUnsupportedError("Local destination must be an ordinary single-link regular file")
-        fd = os.open(self._name, os.O_WRONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=self._parent_fd)
+        self._metadata_fd = os.open(self._name, os.O_WRONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=self._parent_fd)
+        fd = self._metadata_fd
         try:
             metadata = _metadata(fd)
             if metadata.identity[:2] != (observed.st_dev, observed.st_ino):
                 raise FileExistsError("Local destination changed while establishing write access")
             return metadata
         finally:
-            os.close(fd)
+            self._close_metadata_descriptor()
+
+    def _close_metadata_descriptor(self) -> None:
+        if self._metadata_fd is not None and not self._metadata_close_uncertain:
+            self._metadata_close_uncertain = True
+            os.close(self._metadata_fd)
+            self._metadata_fd = None
+            self._metadata_close_uncertain = False
 
     @property
     def cleanup_uncertain(self) -> bool:
         """An admitted close has no established outcome; abort cannot resolve it."""
-        return self._stage_close_uncertain or self._parent_close_uncertain
+        return self._stage_close_uncertain or self._parent_close_uncertain or self._metadata_close_uncertain
 
     def try_write(self, data: memoryview) -> int:
         """Accept one synchronous write, retaining only size and digest state."""
@@ -285,6 +306,7 @@ class LocalDownloadPublication:
         explicitly refuses if close uncertainty remains. Publication facts are
         retained, and the destination is never removed.
         """
+        self._close_metadata_descriptor()
         if self._stage_fd is not None and not self._stage_close_uncertain:
             self._stage_close_uncertain = True
             os.close(self._stage_fd)
@@ -304,4 +326,4 @@ class LocalDownloadPublication:
             self._parent_fd = None
             self._parent_close_uncertain = False
         if self.cleanup_uncertain:
-            raise LocalDownloadUnsupportedError("Local download descriptor cleanup has an uncertain close outcome")
+            raise LocalDownloadCleanupUncertainError("Local download descriptor cleanup has an uncertain close outcome")

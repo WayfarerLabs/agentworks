@@ -560,6 +560,85 @@ def test_interruption_before_close_admission_retains_retry_custody(tmp_path: Pat
     assert not list(tmp_path.glob(".agw-download-*"))
 
 
+@pytest.mark.parametrize("during_construction", [False, True])
+def test_metadata_close_interruption_before_admission_cleans_with_retry(
+    tmp_path: Path, during_construction: bool
+) -> None:
+    destination = tmp_path / "download"
+    destination.write_bytes(b"old")
+    writer = _InterruptBeforeCloseAdmission.__new__(_InterruptBeforeCloseAdmission)
+    if not during_construction:
+        _InterruptBeforeCloseAdmission.__init__(writer, destination, condition=Replace())
+        writer.try_write(memoryview(b"new"))
+    writer.interrupt_name = "_metadata_close_uncertain"
+    with pytest.raises(KeyboardInterrupt):
+        if during_construction:
+            _InterruptBeforeCloseAdmission.__init__(writer, destination, condition=Replace())
+        else:
+            commit(writer, b"new")
+    assert not writer.cleanup_uncertain
+    writer.abort()
+    assert writer._metadata_fd is None and writer._stage_fd is None and writer._parent_fd is None
+    assert not writer.cleanup_uncertain
+    assert not writer.published and not writer.publication_uncertain
+    assert list(tmp_path.iterdir()) == [destination]
+    assert destination.read_bytes() == b"old"
+
+
+@pytest.mark.parametrize("during_construction", [False, True])
+@pytest.mark.parametrize("effect", [False, True])
+def test_ambiguous_metadata_close_is_visible_and_never_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, during_construction: bool, effect: bool
+) -> None:
+    destination = tmp_path / "download"
+    destination.write_bytes(b"old")
+    writer = local.LocalDownloadPublication.__new__(local.LocalDownloadPublication)
+    if not during_construction:
+        local.LocalDownloadPublication.__init__(writer, destination, condition=Replace())
+        writer.try_write(memoryview(b"new"))
+    close = os.close
+    interrupted: list[int] = []
+    unrelated = tmp_path / "unrelated"
+
+    def interrupt(fd: int) -> None:
+        if fd != writer._metadata_fd:
+            close(fd)
+            return
+        interrupted.append(fd)
+        if effect:
+            close(fd)
+            replacement = os.open(unrelated, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            if replacement != fd:
+                os.dup2(replacement, fd)
+                close(replacement)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(os, "close", interrupt)
+    try:
+        if during_construction:
+            with pytest.raises(local.LocalDownloadCleanupUncertainError) as error:
+                local.LocalDownloadPublication.__init__(writer, destination, condition=Replace())
+            assert error.value.cleanup_uncertain
+        else:
+            with pytest.raises(KeyboardInterrupt):
+                commit(writer, b"new")
+        assert writer.cleanup_uncertain
+        with pytest.raises(local.LocalDownloadCleanupUncertainError) as error:
+            writer.abort()
+        assert error.value.cleanup_uncertain and writer.cleanup_uncertain
+        assert len(interrupted) == 1
+        assert not writer.published and not writer.publication_uncertain
+        assert writer._stage_fd is None and writer._parent_fd is None
+        remaining = os.fstat(interrupted[0])
+        expected = unrelated.stat() if effect else destination.stat()
+        assert (remaining.st_dev, remaining.st_ino) == (expected.st_dev, expected.st_ino)
+        assert destination.read_bytes() == b"old"
+        assert not list(tmp_path.glob(".agw-download-*"))
+    finally:
+        if interrupted:
+            close(interrupted[0])
+
+
 @pytest.mark.parametrize("handle", ["stage", "parent"])
 @pytest.mark.parametrize("effect", [False, True])
 @pytest.mark.parametrize("publish", [False, True])
