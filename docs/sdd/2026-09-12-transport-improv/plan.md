@@ -2384,18 +2384,37 @@ and whitespace checks pass. Live SSH/QGA and production route tests remain open.
       No operation silently downgrades. `ProvisionRequest.instance_marker` remains creation
       evidence; this hook alone does not establish the private guest observation/composition
       checkpoint below or third-party managed target identity.
-- [ ] Settle Proxmox restore/rollback incarnation policy before replacing its unavailable locator. A
-      live candidate combines the verified configured authority namespace, VMID and nonzero current
-      `vmgenid`, with the node retained only as a route. The independent marker/full guest checks
-      still apply. Version-pinned official source shows ordinary enabled-ID create, clone, restore
-      and rollback generation; it does not prove native observation or a disabled/absent-ID policy.
-      Prove the selected policy on PVE 8 and 9 with the intended restricted token and `VM.Audit`,
-      `current=1`, recreation, default/unique restore, disk/RAM rollback, clone, stop/start,
-      migration and VMID reuse. Settle explicit adoption/alternative handling for missing, disabled
-      or manually preserved IDs without synthetic identity or readiness repair. Do not impose a
-      requirement for a cluster identifier that cannot be copied or infer positive generation from
-      configured addresses. The [prior-art finding](prior-art-research.md) is response input, not
-      native acceptance or recovery cutover by itself.
+- [ ] Settle Proxmox restore/rollback incarnation policy before production target or recovery
+      cutover. Implement the new-stack locator observation for private proof first; source
+      implementation is not native acceptance. A live candidate combines the verified configured
+      authority namespace, VMID and nonzero current `vmgenid`, with the node retained only as a
+      route. The independent marker/full guest checks still apply. Version-pinned official source
+      shows ordinary enabled-ID create, clone, restore and rollback generation; it does not prove
+      native observation or a disabled/absent-ID policy. Prove the selected policy on PVE 8 and 9
+      with the intended restricted token and `VM.Audit`, `current=1`, recreation, default/unique
+      restore, disk/RAM rollback, clone, stop/start, migration and VMID reuse. Settle explicit
+      adoption/alternative handling for missing, disabled or manually preserved IDs without
+      synthetic identity or readiness repair. Do not impose a requirement for a cluster identifier
+      that cannot be copied or infer positive generation from configured addresses. The
+      [prior-art finding](prior-art-research.md) is response input, not native acceptance or
+      recovery cutover by itself.
+
+The Proxmox observation source uses the exact configured HTTPS origin as its operator-owned
+namespace. It performs no DNS alias discovery or host/port/IPv6 spelling normalization; a changed
+configured spelling requires explicit re-adoption. Node, token identity/secret and CA path are not
+incarnation components. A versioned, unambiguously framed tuple of origin, VMID and normalized
+nonzero hyphenated UUID is hashed into a bounded opaque token. This avoids imposing the locator's
+size limit on the origin or exposing provider fields through a new public shape.
+
+Read only current configuration through one fixed body-free `GET /config?current=1`, reusing the
+verified, deadline-owned worker. After an attempted lookup, unavailable provider delivery/envelope
+raises a sanitized typed provider failure; successfully observed config with missing, disabled, nil
+or malformed generation raises a typed state refusal. It does not become
+`ProviderLocatorUnavailable`, target-absence evidence, a synthetic UUID or a readiness repair. The
+shared unavailable result remains a deliberate platform inability without an attempted lookup. This
+response sequences source before its native proof so the proof can exercise the implementation; it
+does not enable a production target/RunContext, settle old debts or complete the preceding gate.
+
 - [ ] Complete and prove Linux supervisor launch through SSH and native QGA: protected identity,
       secret/source delivery, privilege changes, foreground wait, independent launch, output
       retention and terminal evidence. No workload code runs before boundary entry.

@@ -738,6 +738,16 @@ boundary, not a malicious-platform containment guarantee. The PVE 9 changelog pi
 independently checked binary-package provenance claim. This research does not establish a positive
 production locator, native acceptance or recovery cutover.
 
+The response distinguishes implementation from acceptance: build the new-stack observation so its
+native proof can exercise actual code, then gate production target and recovery cutover on that
+proof. Its namespace is the exact configured HTTPS origin, without endpoint-alias discovery; a
+configuration spelling change requires explicit re-adoption. Node, credential identity/secret and CA
+path do not change incarnation. Hash a versioned, framed origin/VMID/normalized nonzero UUID tuple
+into the bounded opaque locator. An attempted request failure remains a typed provider error; an
+observed config without usable generation is a typed state refusal, never an unavailable-result
+fallback or implicit repair. This is response policy, not an upstream guarantee or a substitute for
+the native disabled-ID/adoption, rollback and predecessor-fencing gates above.
+
 ### Decisions still required
 
 The new-guest package and preinstalled macOS host runtime choices are settled, but their
