@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from agentworks.errors import ValidationError
+from agentworks.errors import StateError, ValidationError
 from agentworks.execution.carrier import (
     CarrierIO,
     CarrierReport,
@@ -21,6 +21,7 @@ from agentworks.execution.carrier import (
 from agentworks.execution.carriers._subprocess import run_process
 
 if TYPE_CHECKING:
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.carrier import Deadline, PreparedInvocation
 
 
@@ -72,9 +73,13 @@ class WSL2Carrier:
         if isinstance(io.input, LiveInput) or isinstance(io.output, SinkOutput) and io.output.require_live:
             raise ValidationError("WSL2 does not support live standard I/O")
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(
+        self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody
+    ) -> CarrierReport:
         """Spend the original deadline on at most one literal WSL exec attempt."""
         self.validate(invocation, io=io)
+        if not custody.settled:
+            raise StateError("Local delivery custody is unsettled")
         result = run_process(
             [
                 self._connection.wsl_executable,
@@ -87,13 +92,20 @@ class WSL2Carrier:
             ],
             io=io,
             deadline=deadline,
+            custody=custody,
         )
         status = result.exit_status
         # WSL's init normalizes an ordinary exit but otherwise sends raw wait
         # status. Nonzero exits and signals can therefore have the same value.
         observed = result.started and status is not None and 0 <= status <= 255
         completion = ExitStatus(code=0) if observed and status == 0 else None
-        dispatch = Dispatch.SENT if observed else Dispatch.UNKNOWN if result.started else Dispatch.NOT_SENT
+        dispatch = (
+            Dispatch.SENT
+            if observed
+            else Dispatch.UNKNOWN
+            if result.started or not custody.settled
+            else Dispatch.NOT_SENT
+        )
         failure = result.failure
         if result.started and completion is None and failure is None:
             failure = Failure.OBSERVATION

@@ -19,6 +19,8 @@ from typing import Any
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution import _process
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import (
     Capture,
     CarrierIO,
@@ -32,7 +34,8 @@ from agentworks.execution.carrier import (
     Provenance,
     Retention,
 )
-from agentworks.execution.carriers.ssh import _io, client
+from agentworks.execution.carriers import _subprocess
+from agentworks.execution.carriers.ssh import client
 from agentworks.execution.carriers.ssh.client import SSHCarrier
 from agentworks.execution.carriers.ssh.connection import SSHConnection
 
@@ -46,10 +49,14 @@ class SyntheticSSH:
     version: str = "import sys; sys.stderr.write('OpenSSH_9.9p1, LibreSSL 3.3.6\\n')"
     calls: list[list[str]] = field(default_factory=list)
     children: list[subprocess.Popen[bytes]] = field(default_factory=list)
+    custody: LocalDeliveryCustody = field(default_factory=LocalDeliveryCustody)
 
     def execute(self, io: CarrierIO | None = None, seconds: float | None = 10):
         return self.carrier.execute(
-            PreparedInvocation(("/synthetic/program",)), io=io or CarrierIO(), deadline=Deadline.after(seconds)
+            PreparedInvocation(("/synthetic/program",)),
+            io=io or CarrierIO(),
+            deadline=Deadline.after(seconds),
+            custody=self.custody,
         )
 
     def assert_closed(self) -> None:
@@ -147,7 +154,7 @@ def test_status_and_raw_stream_evidence(synthetic: SyntheticSSH, code: int) -> N
 def test_native_status_outside_posix_exit_range_is_not_guest_completion(
     synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
-    original = _io.run_process
+    original = _subprocess.run_process
 
     def run(argv, **kwargs):
         result = original(argv, **kwargs)
@@ -228,14 +235,14 @@ def test_unretained_output_never_enters_capture(
         "import sys; data=sys.stdin.buffer.read()*10000; sys.stdout.buffer.write(data); sys.stderr.buffer.write(data)"
     )
     observed = []
-    original = _io._Output.report
+    original = _process._Output.report
 
     def report(output):
-        if output.retention != Retention.CAPTURED:
+        if output.limit is None:
             observed.append(len(output.data))
         return original(output)
 
-    monkeypatch.setattr(_io._Output, "report", report)
+    monkeypatch.setattr(_process._Output, "report", report)
     result = synthetic.execute(io)
     assert observed == [0, 0]
     assert result.stdout.data == result.stderr.data == b""
@@ -386,7 +393,7 @@ def test_interrupted_failed_reap_attaches_safe_evidence(
     synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     original_wait = Popen.wait
-    original_read = _io._Output.read
+    original_read = _process._Output.advance
 
     def read(output, pipe):
         if len(synthetic.children) == 2:
@@ -400,7 +407,7 @@ def test_interrupted_failed_reap_attaches_safe_evidence(
 
     synthetic.command = "import time; time.sleep(30)"
     with monkeypatch.context() as context:
-        context.setattr(_io._Output, "read", read)
+        context.setattr(_process._Output, "advance", read)
         context.setattr(Popen, "wait", wait)
         with pytest.raises(KeyboardInterrupt) as raised:
             synthetic.execute()
@@ -460,14 +467,14 @@ def test_failed_spawn_does_not_claim_dispatch_or_expose_exception(
 def test_interruption_cleans_owned_process_before_propagating(
     synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, interruption: type[BaseException]
 ) -> None:
-    original = _io._Output.read
+    original = _process._Output.advance
 
     def read(output, pipe):
         if len(synthetic.children) == 2:
             raise interruption()
         return original(output, pipe)
 
-    monkeypatch.setattr(_io._Output, "read", read)
+    monkeypatch.setattr(_process._Output, "advance", read)
     synthetic.command = "import time; time.sleep(30)"
     with pytest.raises(interruption):
         synthetic.execute()
@@ -507,15 +514,15 @@ def test_descendant_output_handles_do_not_block_cleanup(
         "sys.stdout.write('parent')"
     )
     if flood:
-        original = _io._Output.read
+        original = _process._Output.advance
 
         def read(output, pipe):
-            progressed = original(output, pipe)
+            progressed, failed = original(output, pipe)
             # Model uninterrupted pipe readiness even if this test scheduler
             # happens to pause the real flooding writer between two reads.
-            return progressed or (len(synthetic.children) == 2 and not output.eof)
+            return progressed or (len(synthetic.children) == 2 and not output.eof), failed
 
-        monkeypatch.setattr(_io._Output, "read", read)
+        monkeypatch.setattr(_process._Output, "advance", read)
     try:
         started = time.monotonic()
         report = synthetic.execute(CarrierIO(output=Capture(32)), seconds=None)
@@ -647,6 +654,7 @@ def test_installed_ssh_owns_fresh_pipe_handles(
                 # fixture's deliberate pre-authentication disconnect.
                 io=CarrierIO(input=FiniteInput(b"")),
                 deadline=Deadline.after(5),
+                custody=LocalDeliveryCustody(),
             )
             assert received and received[0].startswith(b"SSH-2.0-")
             assert report.failure == Failure.OBSERVATION
