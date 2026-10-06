@@ -57,6 +57,12 @@ at `833f1c280cc67f8d9b8f71f2e229ab69d20f7df5`. All 110 carried SSH commits rebas
 bounded presentation and native Linux/macOS/Windows workflows remain required. No public SSH
 feedback/fix round or merge-readiness signal follows from this dependency adoption.
 
+The lead validates the rebase at `12306a4f2`: **423 affected non-integration SSH/process-owner/
+maintenance cases pass with 5 skips**. Full Ruff/format cover 1,262 files and strict mypy passes
+1,225 sources. File quality, locked-SDD and Rulesync also pass. These checks precede the actual
+relay resize integration and owned Windows native fixture under development; they are not a fresh
+full-suite or native terminal result.
+
 ## Fixture boundary diagnosis
 
 The first combined local run failed because its long workspace temporary paths exceeded Unix socket
