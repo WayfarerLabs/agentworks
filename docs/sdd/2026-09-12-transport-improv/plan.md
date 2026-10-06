@@ -24,7 +24,7 @@ transport-side implementation, local tests and successive joint live reports. Th
 [proof evidence](proof-lld.md) records acceptance of the finite-input slice and its limits. No
 broad-build or production-cutover gate is completed by those measurements.
 
-### Current acceptance checkpoint, 2026-10-06
+## Current acceptance checkpoint, 2026-10-06
 
 Public feedback/fix round 1 of the operator-authorized 3 began after the one-hour collection window
 and the complete
