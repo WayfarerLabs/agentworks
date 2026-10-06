@@ -680,6 +680,45 @@ Closing an owner with a possible-dispatch claim but no explicit whole-operation 
 it never promotes "no child attempt is currently open" into quiescence. Interrupted admission,
 resolution and release reconcile the same fenced record before any later dispatch or release.
 
+### Proxmox activation evidence boundary
+
+Stopped Proxmox startup needs a new bounded producer, not the retired start waiter. Its first
+delivery slice adds fixed body-free start POST and task-status GET primitives to the existing
+verified, deadline-owned HTTP worker. The start response's scalar `data` is raw acknowledgment; task
+status retains an object envelope. Neither primitive constitutes operation admission, a validated
+task receipt, completed startup or provider freshness. The wire capacity for task IDs is 255 UTF-8
+bytes, a conservative task-log filename capacity rather than an API schema limit. Higher composition
+validates the receipt before using it; the wire quotes it as one path component and never selects
+arbitrary provider routes or start options.
+
+The planned owner integration retains one fresh activation obligation before the single start POST,
+under the exact VM claim acquired before observation. Its versioned non-secret payload identifies
+the selected authority/VM route and expected locator, then preserves the returned UPID and task node
+before later observation. Do not persist credentials, provider diagnostics or task output. The same
+owner covers preparation, guest body and aggregate teardown. Stopped intent refuses automatic
+activation; passive readiness never starts the VM. Ordinary teardown does not stop a successfully
+activated VM merely because its operation ended.
+
+A matching receipt identifies asynchronous work. It must match the selected node, VM ID, start task
+kind and original API identity; task status must match that retained receipt. Token status splits
+the original identity into user and token ID, so compare the complete original identity, not the
+displayed base user alone. Preserved historical task identity is separate from authorization of a
+later observation route. Terminal status, task outcome and fresh VM power are distinct facts.
+Preserve warnings separately from failure; neither arbitrary error text nor a missing task log
+establishes completion or rejection. A lost/malformed acknowledgment, generic HTTP failure,
+interruption or late response retains uncertain admission without another start POST. Known receipts
+may be observed again under a fresh finite budget; task-list search and a running-power snapshot
+cannot reconstruct or settle a missing receipt.
+
+HA-managed VMs return a different handoff task. Completion of that handoff is not proof that the HA
+manager's activation work has ended. Native ownership/availability proof must cover that path rather
+than treating it as an ordinary completed start worker. Proxmox's public start API has no expected
+generation/configuration precondition: its worker loads configuration under a later VM lock.
+Client-side pre/post observations are therefore not atomic stale-request prevention. Exact receipt
+observation does not establish queued-request drain, incarnation safety or a blanket provider
+quiescence guarantee. Owner integration, PVE 8/9 token/HA/generation proof and production startup
+remain open; the wire slice alone cannot expose complete RunContext availability.
+
 ### Durable lifecycle-obligation ledger
 
 Production ownership needs a durable handoff between the coarse resource claim and the independent

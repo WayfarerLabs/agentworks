@@ -748,6 +748,47 @@ observed config without usable generation is a typed state refusal, never an una
 fallback or implicit repair. This is response policy, not an upstream guarantee or a substitute for
 the native disabled-ID/adoption, rollback and predecessor-fencing gates above.
 
+### Proxmox start receipts and task observation
+
+The October 6 source audit uses the QEMU pins above, PVE manager pins `5aee9c094` (8) and
+`ac0c87dd3` (9), and common-library pins `91962804f` (8) and `defd246f3` (9). Start is a
+`VM.PowerMgmt`-authorized POST returning a scalar UPID, not a completed-start result. Ordinary VMs
+return a start worker; HA-managed VMs return a worker that requests HA activation. No expected
+generation or configuration digest is accepted. The ordinary start worker loads configuration under
+a later VM lock, so client-side observations are not an atomic precondition.
+
+Sources:
+[PVE 8 start API and HA branch](https://github.com/proxmox/qemu-server/blob/5ccd363e5908aa5a7b969797babdff1df5159475/src/PVE/API2/Qemu.pm#L3174-L3339),
+[PVE 9 start API](https://github.com/proxmox/qemu-server/blob/80e0590e144359fd136a2ba1e3f44716bfc535b0/src/PVE/API2/Qemu.pm#L3283-L3457),
+[PVE 8 locked configuration load](https://github.com/proxmox/qemu-server/blob/5ccd363e5908aa5a7b969797babdff1df5159475/src/PVE/QemuServer.pm#L5582-L5621).
+
+Task status binds a retained UPID and node, distinguishes running from stopped by process start
+time, and reports exit status separately. A token can observe its own tasks; another observer needs
+node audit authority. Response normalization splits token identity into base user and token ID.
+Missing task logs refuse observation; task-list rotation supplies no durable receipt retention
+guarantee. The common decoder accepts eight or nine hexadecimal process-start digits and retains
+non-ASCII identity fields. Its log filename includes the UPID. The wire's 255 UTF-8-byte capacity is
+therefore a conservative local bound, not a declared API schema maximum. Completed warnings are
+non-errors, but remain distinct from an exact successful result.
+
+Sources:
+[PVE 8 task ownership and status](https://github.com/proxmox/pve-manager/blob/5aee9c094b1d5608e36fec9cf35c6f71c38a1bdc/PVE/API2/Tasks.pm),
+[PVE 9 task status](https://github.com/proxmox/pve-manager/blob/ac0c87dd37115e3046cbfa5756f2a02fc659e8cd/PVE/API2/Tasks.pm#L425-L514),
+[PVE 8 task ID and status decoding](https://github.com/proxmox/pve-common/blob/91962804ffce2cdb70261f03b2df5c0b7a0a2c4d/src/PVE/Tools.pm#L1182-L1286),
+[PVE 9 task ID and status decoding](https://github.com/proxmox/pve-common/blob/defd246f31f327463f901a2daaf8dc52efcc5a97/src/PVE/UPID.pm#L5-L97).
+
+Both worker implementations permit the child to proceed before final task-list handling and receipt
+return. A failure after that point can lose acknowledgment of accepted work. Decision: retain
+uncertain POST admission rather than replaying it or inferring rejection from arbitrary HTTP
+failure. Known receipts support exact observation, not completion by themselves. Native proof must
+establish ordinary task settlement, HA handoff, restricted-token access and generation/drain
+behavior before production startup; this source audit and the fixed wire implementation do not
+supply it.
+
+Sources:
+[PVE 8 worker acknowledgment ordering](https://github.com/proxmox/pve-common/blob/91962804ffce2cdb70261f03b2df5c0b7a0a2c4d/src/PVE/RESTEnvironment.pm#L665-L731),
+[PVE 9 worker acknowledgment ordering](https://github.com/proxmox/pve-common/blob/defd246f31f327463f901a2daaf8dc52efcc5a97/src/PVE/RESTEnvironment.pm#L635-L697).
+
 ### Decisions still required
 
 The new-guest package and preinstalled macOS host runtime choices are settled, but their

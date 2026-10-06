@@ -905,6 +905,17 @@ associated pending acceptance gates are superseded by this ruling.
       unknown provider states explicitly rather than assuming they are stopped. Implement this
       boundary with its concrete activation producer and selected platform hold; a freely
       constructible active-now token or test-only no-op adapter does not prove availability.
+- [ ] Add fixed bounded Proxmox start/task-status wire primitives, preserving scalar acknowledgment
+      and object observation as separate envelopes. Prove exact body-free routes, literal task-ID
+      encoding, verified authority, finite local worker custody and unchanged guest/power/config
+      delivery without advertising operation admission or completed startup.
+- [ ] Bind stopped Proxmox activation into the existing exact VM owner before the one start POST.
+      Preserve a validated task/node receipt in a versioned obligation, retain missing/lost/late
+      acknowledgment and task-observation uncertainty without replay, and aggregate only supported
+      activation settlement with fresh power and guest preparation. Cover stopped intent,
+      interruption and SQLite transition failures before/after commit. Prove HA handoff, changed
+      generations and native PVE 8/9 behavior separately; receipt observation is not queued-request
+      drain or atomic generation-conditional activation.
 - [ ] Cover pre-context activation and nested teardown when wiring ownership. At `806741ca`,
       `gated_vm_boundary` enters `activation_gate` before assembling its ordinary operation context,
       and `LiveVMNode` constructs a separate gate context. Context factories, harness setup's
