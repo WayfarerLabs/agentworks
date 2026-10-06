@@ -2830,6 +2830,29 @@ An initial file-lint failure was only README wrapping and is corrected. The earl
 aggregate settlement, production factories, public wiring and native proof remain open; this private
 composition neither resolves original obligations nor enables public MANAGED admission.
 
+The private exact-run recovery consumer at `f0ee33edf` binds the persisted OPERATION run and
+possible-effect row through an already prepared recovery span. Construction reads SQLite only; each
+clock, stop or observation uses a fresh protected action. Its first accepted guest sample fixes the
+conservative 60-second ceiling, later samples cannot raise it, and regressed samples cannot
+authorize elapsed authority. Stop does not wait for that ceiling. Local delivery drain remains
+separate from helper termination, predecessor dispatch debt and whole-owner settlement.
+
+All three independent private lanes clear that whole unit: project passes 427 related cases and six
+independent interruption/clock probes, complexity passes 153 cases and observes four expected
+failures after restoring the faulty cleanup ordering, and generic correctness passes 412 cases, six
+bookkeeping probes and 14 earlier boundary checks. They verify fresh actual span admission after
+interrupted cleanup, original exception identity and zero helper replay. The corrections retain one
+accepted clock scalar and exact abort intent; they add no recovery framework or per-renewal database
+writes. Windows-selected cases ran on Linux, not native Windows.
+
+The lead's final full suite at that pin passes 16,072 cases with 50 skips and 27 existing fork
+warnings, exit 0. Ruff/format, strict CI mypy (1,268 sources), typer isolation, file quality,
+locked-SDD, Rulesync and whitespace checks return zero. Website Python (160 tests), Node (103
+tests), four builds and both deterministic comparisons also return zero. The earlier 16,054- and
+16,068-pass runs predate the final interruption corrections. Recovery row disposition, aggregate
+cleanup, production factories, the complete new RunContext surface and native proof remain open;
+these private facts neither resolve an original obligation nor enable public MANAGED admission.
+
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
       serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one
       in-flight exchange, exact uncertainty retention and drain before release/disposal. Bind it to
