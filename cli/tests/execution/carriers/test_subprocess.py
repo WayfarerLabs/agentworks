@@ -49,17 +49,25 @@ def children(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[subprocess.Popen[
     monkeypatch.setattr(subprocess, "Popen", spawn)
     yield started
     for child in started:
-        if child.poll() is None:
-            child.kill()
-        child.wait(timeout=2)
+        assert child.returncode is not None
         for pipe in (child.stdin, child.stdout, child.stderr):
             if pipe is not None:
-                pipe.close()
+                assert pipe.closed
+
+
+@pytest.fixture
+def custody(children: list[subprocess.Popen[bytes]]) -> Iterator[LocalDeliveryCustody]:
+    held = LocalDeliveryCustody()
+    try:
+        yield held
+    finally:
+        assert held.close(Deadline.after(3))
 
 
 def execute(
     script: str,
     *,
+    custody: LocalDeliveryCustody,
     io: CarrierIO | None = None,
     seconds: float | None = 10,
     env: Mapping[str, str] | None = None,
@@ -71,7 +79,7 @@ def execute(
         deadline=Deadline.after(seconds),
         env=env,
         live_stdio=live_stdio,
-        custody=LocalDeliveryCustody(),
+        custody=custody,
     )
 
 
@@ -90,7 +98,7 @@ def fresh_process_result(script: str) -> object:
 def assert_closed(children: list[subprocess.Popen[bytes]]) -> None:
     assert children
     for child in children:
-        assert child.poll() is not None
+        assert child.returncode is not None
         for pipe in (child.stdin, child.stdout, child.stderr):
             assert pipe is None or pipe.closed
 
@@ -131,10 +139,13 @@ class ShortSink:
         self.closed = True
 
 
-def test_binary_streams_remain_separate_and_unattributed(children: list[subprocess.Popen[bytes]]) -> None:
+def test_binary_streams_remain_separate_and_unattributed(
+    children: list[subprocess.Popen[bytes]], custody: LocalDeliveryCustody
+) -> None:
     result = execute(
         "import sys; sys.stdout.buffer.write(b'\\x00\\xff\\r\\n'); "
-        "sys.stderr.buffer.write(b'\\x80err\\n'); sys.exit(23)"
+        "sys.stderr.buffer.write(b'\\x80err\\n'); sys.exit(23)",
+        custody=custody,
     )
     assert result.started
     assert result.local_status == result.exit_status == 23
@@ -147,8 +158,10 @@ def test_binary_streams_remain_separate_and_unattributed(children: list[subproce
 
 
 @pytest.mark.parametrize("code", [0, 42, 255])
-def test_exact_wait_preserves_every_representative_exit(children: list[subprocess.Popen[bytes]], code: int) -> None:
-    result = execute(f"import sys; sys.exit({code})")
+def test_exact_wait_preserves_every_representative_exit(
+    children: list[subprocess.Popen[bytes]], code: int, custody: LocalDeliveryCustody
+) -> None:
+    result = execute(f"import sys; sys.exit({code})", custody=custody)
 
     assert result.local_status == result.exit_status == code
     assert result.failure is None
@@ -300,7 +313,7 @@ def test_interrupted_exact_wait_retries_same_owned_pid(monkeypatch: pytest.Monke
 
 @pytest.mark.skipif(os.name == "nt", reason="waitpid ownership is POSIX-specific")
 def test_repeated_wait_interruptions_respect_operation_and_cleanup_bounds(
-    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
 ) -> None:
     original_waitpid = os.waitpid
 
@@ -313,7 +326,7 @@ def test_repeated_wait_interruptions_respect_operation_and_cleanup_bounds(
         context.setattr(os, "waitpid", always_interrupted)
         context.setattr(process_core, "_CLEANUP_SECONDS", 0.05)
         started = time.monotonic()
-        result = execute("import time; time.sleep(30)", seconds=0.05)
+        result = execute("import time; time.sleep(30)", seconds=0.05, custody=custody)
 
     assert time.monotonic() - started < 0.5
     assert result.local_status is None and result.exit_status is None
@@ -352,18 +365,20 @@ def test_stopped_wait_status_remains_pending_until_terminal_status(
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows retains handle-backed Popen waiting")
 def test_windows_waiting_never_calls_posix_waitpid(
-    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
 ) -> None:
     monkeypatch.setattr(os, "waitpid", lambda *args: pytest.fail("Windows called waitpid"), raising=False)
 
-    result = execute("import sys; sys.exit(42)")
+    result = execute("import sys; sys.exit(42)", custody=custody)
 
     assert result.local_status == result.exit_status == 42
     assert result.failure is None
     assert_closed(children)
 
 
-def test_duplex_pressure_delivers_finite_input_once_then_eof(children: list[subprocess.Popen[bytes]]) -> None:
+def test_duplex_pressure_delivers_finite_input_once_then_eof(
+    children: list[subprocess.Popen[bytes]], custody: LocalDeliveryCustody
+) -> None:
     data = bytes(range(256)) * 8192
     result = execute(
         "import hashlib,sys; "
@@ -371,6 +386,7 @@ def test_duplex_pressure_delivers_finite_input_once_then_eof(children: list[subp
         "sys.stderr.buffer.write(b'e'*200000); sys.stderr.buffer.flush(); "
         "data=sys.stdin.buffer.read(); sys.stdout.buffer.write(hashlib.sha256(data).hexdigest().encode())",
         io=CarrierIO(input=FiniteInput(data)),
+        custody=custody,
     )
     assert result.stdout.data == b"o" * 200_000 + hashlib.sha256(data).hexdigest().encode()
     assert result.stderr.data == b"e" * 200_000
@@ -382,6 +398,7 @@ def test_duplex_pressure_delivers_finite_input_once_then_eof(children: list[subp
 
 def test_live_duplex_handles_stalls_short_writes_and_binary_bytes(
     children: list[subprocess.Popen[bytes]],
+    custody: LocalDeliveryCustody,
 ) -> None:
     data = bytes(range(256)) * 512
     chunks: list[bytes | None] = [None]
@@ -397,6 +414,7 @@ def test_live_duplex_handles_stalls_short_writes_and_binary_bytes(
         "data=sys.stdin.buffer.read(); sys.stdout.buffer.write(hashlib.sha256(data).digest())",
         io=CarrierIO(input=LiveInput(source), output=SinkOutput(stdout, stderr, require_live=True)),
         live_stdio=True,
+        custody=custody,
     )
     assert bytes(stdout.data) == bytes(range(256)) * 256 + hashlib.sha256(data).digest()
     assert bytes(stderr.data) == bytes(reversed(range(256))) * 256
@@ -411,12 +429,15 @@ def test_live_duplex_handles_stalls_short_writes_and_binary_bytes(
     assert_closed(children)
 
 
-def test_live_source_eof_closes_only_owned_stdin(children: list[subprocess.Popen[bytes]]) -> None:
+def test_live_source_eof_closes_only_owned_stdin(
+    children: list[subprocess.Popen[bytes]], custody: LocalDeliveryCustody
+) -> None:
     source = ChunkSource([b""])
     result = execute(
         "import sys; assert sys.stdin.buffer.read() == b''; sys.stdout.buffer.write(b'eof')",
         io=CarrierIO(input=LiveInput(source)),
         live_stdio=True,
+        custody=custody,
     )
     assert result.stdout.data == b"eof"
     assert result.failure is None
@@ -424,7 +445,9 @@ def test_live_source_eof_closes_only_owned_stdin(children: list[subprocess.Popen
     assert_closed(children)
 
 
-def test_sensitive_sink_delivery_is_transient_not_retained(children: list[subprocess.Popen[bytes]]) -> None:
+def test_sensitive_sink_delivery_is_transient_not_retained(
+    children: list[subprocess.Popen[bytes]], custody: LocalDeliveryCustody
+) -> None:
     canary = b"sensitive-live-reflection-canary"
     source = ChunkSource([canary, b""])
     stdout = ShortSink(7)
@@ -437,6 +460,7 @@ def test_sensitive_sink_delivery_is_transient_not_retained(children: list[subpro
             output=SinkOutput(stdout, stderr, require_live=True),
         ),
         live_stdio=True,
+        custody=custody,
     )
     assert bytes(stdout.data) == bytes(stderr.data) == canary
     assert result.exit_status == 19
@@ -453,7 +477,7 @@ def test_sensitive_sink_delivery_is_transient_not_retained(children: list[subpro
     ids=["oversized", "text", "integer", "boolean", "exception"],
 )
 def test_invalid_live_source_response_is_input_failure(
-    children: list[subprocess.Popen[bytes]], response: object
+    children: list[subprocess.Popen[bytes]], response: object, custody: LocalDeliveryCustody
 ) -> None:
     class InvalidSource:
         def try_read(self, limit: int) -> bytes | None:
@@ -465,6 +489,7 @@ def test_invalid_live_source_response_is_input_failure(
         "import time; time.sleep(30)",
         io=CarrierIO(input=LiveInput(InvalidSource())),
         live_stdio=True,
+        custody=custody,
     )
     assert result.failure == Failure.INPUT
     assert result.exit_status is None
@@ -473,7 +498,9 @@ def test_invalid_live_source_response_is_input_failure(
 
 
 @pytest.mark.parametrize("response", [0, -1, True, "one", 1_000_000, ValueError("secret-sink-canary")])
-def test_invalid_sink_response_is_output_failure(children: list[subprocess.Popen[bytes]], response: object) -> None:
+def test_invalid_sink_response_is_output_failure(
+    children: list[subprocess.Popen[bytes]], response: object, custody: LocalDeliveryCustody
+) -> None:
     class InvalidSink:
         def try_write(self, data: memoryview) -> int | None:
             if isinstance(response, Exception):
@@ -483,6 +510,7 @@ def test_invalid_sink_response_is_output_failure(children: list[subprocess.Popen
     result = execute(
         "import sys,time; sys.stdout.buffer.write(b'payload'); sys.stdout.buffer.flush(); time.sleep(30)",
         io=CarrierIO(output=SinkOutput(InvalidSink(), ShortSink(64))),
+        custody=custody,
     )
     assert result.failure == Failure.OUTPUT
     assert result.exit_status is None
@@ -499,21 +527,26 @@ def test_invalid_sink_response_is_output_failure(children: list[subprocess.Popen
         CarrierIO(output=SinkOutput(ShortSink(64), ShortSink(64), require_live=True)),
     ],
 )
-def test_live_feature_mismatch_refuses_before_process_creation(monkeypatch: pytest.MonkeyPatch, io: CarrierIO) -> None:
+def test_live_feature_mismatch_refuses_before_process_creation(
+    monkeypatch: pytest.MonkeyPatch, io: CarrierIO, custody: LocalDeliveryCustody
+) -> None:
     def spawn(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
         raise AssertionError("unsupported live I/O attempted to spawn")
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
     with pytest.raises(ValidationError):
-        execute("raise AssertionError", io=io)
+        execute("raise AssertionError", io=io, custody=custody)
 
 
-def test_buffered_sink_delivery_does_not_require_live_feature(children: list[subprocess.Popen[bytes]]) -> None:
+def test_buffered_sink_delivery_does_not_require_live_feature(
+    children: list[subprocess.Popen[bytes]], custody: LocalDeliveryCustody
+) -> None:
     stdout = ShortSink(2)
     stderr = ShortSink(3)
     result = execute(
         "import sys; sys.stdout.buffer.write(b'out'); sys.stderr.buffer.write(b'error')",
         io=CarrierIO(output=SinkOutput(stdout, stderr)),
+        custody=custody,
     )
     assert bytes(stdout.data) == b"out"
     assert bytes(stderr.data) == b"error"
@@ -524,11 +557,14 @@ def test_buffered_sink_delivery_does_not_require_live_feature(children: list[sub
 
 
 @pytest.mark.parametrize("finite", [False, True])
-def test_empty_input_observes_eof(children: list[subprocess.Popen[bytes]], finite: bool) -> None:
+def test_empty_input_observes_eof(
+    children: list[subprocess.Popen[bytes]], finite: bool, custody: LocalDeliveryCustody
+) -> None:
     io = CarrierIO(input=FiniteInput(b"")) if finite else CarrierIO()
     result = execute(
         "import sys; assert sys.stdin.buffer.read() == b''; sys.stdout.buffer.write(b'eof')",
         io=io,
+        custody=custody,
     )
     assert result.stdout.data == b"eof"
     assert result.failure is None
@@ -537,10 +573,13 @@ def test_empty_input_observes_eof(children: list[subprocess.Popen[bytes]], finit
 
 
 @pytest.mark.parametrize("count,limit", [(0, 0), (8, 8), (9, 8), (100_000, 0)])
-def test_capture_limits_apply_independently(children: list[subprocess.Popen[bytes]], count: int, limit: int) -> None:
+def test_capture_limits_apply_independently(
+    children: list[subprocess.Popen[bytes]], count: int, limit: int, custody: LocalDeliveryCustody
+) -> None:
     result = execute(
         f"import sys; sys.stdout.buffer.write(b'o'*{count}); sys.stderr.buffer.write(b'e'*{count})",
         io=CarrierIO(output=Capture(limit)),
+        custody=custody,
     )
     assert result.stdout.data == b"o" * min(count, limit)
     assert result.stderr.data == b"e" * min(count, limit)
@@ -560,11 +599,12 @@ def test_capture_limits_apply_independently(children: list[subprocess.Popen[byte
     ],
 )
 def test_unretained_output_is_drained_without_capture(
-    children: list[subprocess.Popen[bytes]], io: CarrierIO, retention: Retention
+    children: list[subprocess.Popen[bytes]], io: CarrierIO, retention: Retention, custody: LocalDeliveryCustody
 ) -> None:
     result = execute(
         "import sys; data=sys.stdin.buffer.read()*10000; sys.stdout.buffer.write(data); sys.stderr.buffer.write(data)",
         io=io,
+        custody=custody,
     )
     assert result.stdout.data == result.stderr.data == b""
     assert result.stdout.retention == result.stderr.retention == retention
@@ -575,12 +615,12 @@ def test_unretained_output_is_drained_without_capture(
     assert_closed(children)
 
 
-def test_expired_deadline_does_not_spawn(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_expired_deadline_does_not_spawn(monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody) -> None:
     def spawn(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
         raise AssertionError("expired execution attempted to spawn")
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
-    result = execute("raise AssertionError", seconds=0)
+    result = execute("raise AssertionError", seconds=0, custody=custody)
     assert result == ProcessResult(
         started=False,
         local_status=None,
@@ -593,7 +633,7 @@ def test_expired_deadline_does_not_spawn(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_deadline_preserves_partial_evidence_and_reaps(
-    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
 ) -> None:
     markers = {b"partial", b"diagnostic"}
     observed: set[bytes] = set()
@@ -626,7 +666,7 @@ def test_deadline_preserves_partial_evidence_and_reaps(
         ],
         io=CarrierIO(),
         deadline=deadline,
-        custody=LocalDeliveryCustody(),
+        custody=custody,
     )
     assert observed == markers
     assert result.failure == Failure.DEADLINE
@@ -639,7 +679,7 @@ def test_deadline_preserves_partial_evidence_and_reaps(
 
 
 def test_deadline_budget_includes_process_startup(
-    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
 ) -> None:
     startup_offset = 0.0
     monotonic = time.monotonic
@@ -662,7 +702,7 @@ def test_deadline_budget_includes_process_startup(
         [sys.executable, "-c", "import time; time.sleep(30)"],
         io=CarrierIO(),
         deadline=deadline,
-        custody=LocalDeliveryCustody(),
+        custody=custody,
     )
     assert result.started
     assert result.failure == Failure.DEADLINE
@@ -674,7 +714,7 @@ def test_deadline_budget_includes_process_startup(
 
 @pytest.mark.parametrize("live", [False, True])
 def test_natural_exit_is_observed_despite_unsent_input(
-    children: list[subprocess.Popen[bytes]], tmp_path: Path, live: bool
+    children: list[subprocess.Popen[bytes]], tmp_path: Path, live: bool, custody: LocalDeliveryCustody
 ) -> None:
     class EndlessSource:
         def try_read(self, limit: int) -> bytes:
@@ -697,7 +737,7 @@ def test_natural_exit_is_observed_despite_unsent_input(
     )
     try:
         input = LiveInput(EndlessSource()) if live else FiniteInput(b"x" * 2_000_000)
-        result = execute(script, io=CarrierIO(input=input), seconds=None, live_stdio=live)
+        result = execute(script, io=CarrierIO(input=input), seconds=None, live_stdio=live, custody=custody)
         assert result.failure == Failure.INPUT
         assert result.local_status == result.exit_status == 23
         assert result.stdout.data == b"parent"
@@ -710,7 +750,9 @@ def test_natural_exit_is_observed_despite_unsent_input(
         assert done.exists()
 
 
-def test_live_input_early_close_preserves_only_observed_evidence(children: list[subprocess.Popen[bytes]]) -> None:
+def test_live_input_early_close_preserves_only_observed_evidence(
+    children: list[subprocess.Popen[bytes]], custody: LocalDeliveryCustody
+) -> None:
     class EndlessSource:
         def __init__(self) -> None:
             self.calls = 0
@@ -725,6 +767,7 @@ def test_live_input_early_close_preserves_only_observed_evidence(children: list[
         io=CarrierIO(input=LiveInput(source)),
         seconds=None,
         live_stdio=True,
+        custody=custody,
     )
     assert source.calls > 0
     assert result.failure == Failure.INPUT
@@ -737,7 +780,7 @@ def test_live_input_early_close_preserves_only_observed_evidence(children: list[
 
 
 def test_status_first_observed_during_cleanup_is_not_exit_evidence(
-    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
 ) -> None:
     class EndlessSource:
         def try_read(self, limit: int) -> bytes:
@@ -760,6 +803,7 @@ def test_status_first_observed_during_cleanup_is_not_exit_evidence(
         io=CarrierIO(input=LiveInput(EndlessSource())),
         seconds=2,
         live_stdio=True,
+        custody=custody,
     )
 
     assert result.failure == Failure.INPUT
@@ -770,6 +814,7 @@ def test_status_first_observed_during_cleanup_is_not_exit_evidence(
 
 def test_stalled_source_keeps_draining_until_deadline_and_stops_after_return(
     children: list[subprocess.Popen[bytes]],
+    custody: LocalDeliveryCustody,
 ) -> None:
     class StalledSource:
         def __init__(self) -> None:
@@ -790,6 +835,7 @@ def test_stalled_source_keeps_draining_until_deadline_and_stops_after_return(
         ),
         seconds=0.1,
         live_stdio=True,
+        custody=custody,
     )
     calls_after_return = source.calls
     time.sleep(0.05)
@@ -802,7 +848,9 @@ def test_stalled_source_keeps_draining_until_deadline_and_stops_after_return(
     assert_closed(children)
 
 
-def test_sink_failure_preserves_independently_observed_exit(children: list[subprocess.Popen[bytes]]) -> None:
+def test_sink_failure_preserves_independently_observed_exit(
+    children: list[subprocess.Popen[bytes]], custody: LocalDeliveryCustody
+) -> None:
     class FailAfterExit:
         def try_write(self, data: memoryview) -> int | None:
             if children[-1].returncode is None:
@@ -813,6 +861,7 @@ def test_sink_failure_preserves_independently_observed_exit(children: list[subpr
         "import sys; sys.stdout.buffer.write(b'payload'); sys.stdout.buffer.flush(); sys.exit(23)",
         io=CarrierIO(output=SinkOutput(FailAfterExit(), ShortSink(64))),
         seconds=None,
+        custody=custody,
     )
     assert result.local_status == result.exit_status == 23
     assert result.failure == Failure.OUTPUT
@@ -824,6 +873,7 @@ def test_sink_failure_preserves_independently_observed_exit(children: list[subpr
 
 def test_post_exit_budget_pauses_for_healthy_sink_backpressure(
     children: list[subprocess.Popen[bytes]],
+    custody: LocalDeliveryCustody,
 ) -> None:
     class DelayedSink:
         def __init__(self) -> None:
@@ -844,6 +894,7 @@ def test_post_exit_budget_pauses_for_healthy_sink_backpressure(
         "import sys; sys.stdout.buffer.write(b'payload'); sys.stdout.buffer.flush()",
         io=CarrierIO(output=SinkOutput(stdout, ShortSink(64))),
         seconds=3,
+        custody=custody,
     )
     assert time.monotonic() - started >= 0.18
     assert bytes(stdout.data) == b"payload"
@@ -855,6 +906,7 @@ def test_post_exit_budget_pauses_for_healthy_sink_backpressure(
 
 def test_permanently_stalled_post_exit_sink_uses_operation_deadline(
     children: list[subprocess.Popen[bytes]],
+    custody: LocalDeliveryCustody,
 ) -> None:
     class StalledSink:
         def try_write(self, data: memoryview) -> int | None:
@@ -865,6 +917,7 @@ def test_permanently_stalled_post_exit_sink_uses_operation_deadline(
         "import sys; sys.stdout.buffer.write(b'payload'); sys.stdout.buffer.flush()",
         io=CarrierIO(output=SinkOutput(StalledSink(), ShortSink(64))),
         seconds=0.25,
+        custody=custody,
     )
     elapsed = time.monotonic() - started
     assert 0.2 <= elapsed < 1
@@ -874,7 +927,9 @@ def test_permanently_stalled_post_exit_sink_uses_operation_deadline(
     assert_closed(children)
 
 
-def test_post_exit_short_writes_are_delivered_fairly(children: list[subprocess.Popen[bytes]]) -> None:
+def test_post_exit_short_writes_are_delivered_fairly(
+    children: list[subprocess.Popen[bytes]], custody: LocalDeliveryCustody
+) -> None:
     class DelayedShortSink:
         def __init__(self) -> None:
             self.ready_at = 0.0
@@ -895,6 +950,7 @@ def test_post_exit_short_writes_are_delivered_fairly(children: list[subprocess.P
         f"import sys; sys.stdout.buffer.write({payload!r}); sys.stdout.buffer.flush()",
         io=CarrierIO(output=SinkOutput(stdout, ShortSink(64))),
         seconds=3,
+        custody=custody,
     )
     assert bytes(stdout.data) == payload
     assert result.local_status == result.exit_status == 0
@@ -973,7 +1029,7 @@ def test_same_iteration_pending_transition_stops_fresh_other_stream_read(
     reason="deterministic non-reaping exit observation requires POSIX waitid WNOWAIT",
 )
 def test_alternating_post_exit_backpressure_spends_collection_budget(
-    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
 ) -> None:
     class AlternatingSink:
         def __init__(self, *, stall_first: bool) -> None:
@@ -1006,7 +1062,7 @@ def test_alternating_post_exit_backpressure_spends_collection_budget(
     stderr = AlternatingSink(stall_first=True)
     monkeypatch.setattr(subprocess, "Popen", completed_start)
     monkeypatch.setattr(os, "read", continuously_ready_read)
-    result = execute("pass", io=CarrierIO(output=SinkOutput(stdout, stderr)), seconds=1)
+    result = execute("pass", io=CarrierIO(output=SinkOutput(stdout, stderr)), seconds=1, custody=custody)
 
     assert result.local_status == result.exit_status == 0
     assert result.failure == Failure.OUTPUT
@@ -1025,6 +1081,7 @@ def test_post_exit_pending_delivery_stops_fresh_reads_from_other_stream(
     stall_seconds: float | None,
     deadline_seconds: float,
     expected_failure: Failure,
+    custody: LocalDeliveryCustody,
 ) -> None:
     class CountingSink:
         def __init__(self) -> None:
@@ -1076,6 +1133,7 @@ def test_post_exit_pending_delivery_stops_fresh_reads_from_other_stream(
             script,
             io=CarrierIO(output=SinkOutput(stdout, stderr)),
             seconds=deadline_seconds,
+            custody=custody,
         )
         assert len(stdout.stderr_after_exit) > 5
         assert len(set(stdout.stderr_after_exit)) == 1
@@ -1098,19 +1156,23 @@ def test_post_exit_pending_delivery_stops_fresh_reads_from_other_stream(
         assert done.exists()
 
 
-def test_input_pipe_failure_is_safe(children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_input_pipe_failure_is_safe(
+    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
+) -> None:
     def write(fd: int, data: bytes) -> int:
         raise OSError("secret-canary")
 
     monkeypatch.setattr(os, "write", write)
-    result = execute("import time; time.sleep(30)", io=CarrierIO(input=FiniteInput(b"secret-canary")))
+    result = execute("import time; time.sleep(30)", io=CarrierIO(input=FiniteInput(b"secret-canary")), custody=custody)
     assert result.failure == Failure.INPUT
     assert result.exit_status is None
     assert "secret-canary" not in repr(result)
     assert_closed(children)
 
 
-def test_output_pipe_failure_is_safe(children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_output_pipe_failure_is_safe(
+    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
+) -> None:
     original = os.read
 
     def read(fd: int, size: int) -> bytes:
@@ -1122,7 +1184,7 @@ def test_output_pipe_failure_is_safe(children: list[subprocess.Popen[bytes]], mo
         return original(fd, size)
 
     monkeypatch.setattr(os, "read", read)
-    result = execute("import time; time.sleep(30)")
+    result = execute("import time; time.sleep(30)", custody=custody)
     assert result.failure == Failure.OUTPUT
     assert result.exit_status is None
     assert not result.stdout.complete and not result.stderr.complete
@@ -1131,13 +1193,13 @@ def test_output_pipe_failure_is_safe(children: list[subprocess.Popen[bytes]], mo
 
 
 def test_nonblocking_setup_failure_reaps_without_completion_claim(
-    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
 ) -> None:
     def set_blocking(fd: int, blocking: bool) -> None:
         raise OSError("secret-canary")
 
     monkeypatch.setattr(os, "set_blocking", set_blocking)
-    result = execute("import time; time.sleep(30)")
+    result = execute("import time; time.sleep(30)", custody=custody)
     assert result.failure == Failure.OBSERVATION
     assert result.local_status is not None
     assert result.exit_status is None
@@ -1151,6 +1213,7 @@ def test_descendant_output_handles_have_a_bounded_post_exit_drain(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     flood: bool,
+    custody: LocalDeliveryCustody,
 ) -> None:
     release = tmp_path / "release"
     done = tmp_path / "done"
@@ -1177,7 +1240,7 @@ def test_descendant_output_handles_have_a_bounded_post_exit_drain(
         monkeypatch.setattr(process_core._Output, "advance", advance)
     try:
         started = time.monotonic()
-        result = execute(script, io=CarrierIO(output=Capture(32)), seconds=None)
+        result = execute(script, io=CarrierIO(output=Capture(32)), seconds=None, custody=custody)
         assert time.monotonic() - started < 2
         assert result.stdout.data == b"parent"
         assert len(result.stderr.data) <= 32
@@ -1194,7 +1257,7 @@ def test_descendant_output_handles_have_a_bounded_post_exit_drain(
 
 
 def test_ready_sink_does_not_reset_bounded_descendant_collection(
-    children: list[subprocess.Popen[bytes]], tmp_path: Path
+    children: list[subprocess.Popen[bytes]], tmp_path: Path, custody: LocalDeliveryCustody
 ) -> None:
     class CountingSink:
         def __init__(self) -> None:
@@ -1228,6 +1291,7 @@ def test_ready_sink_does_not_reset_bounded_descendant_collection(
             script,
             io=CarrierIO(output=SinkOutput(stdout, ShortSink(64))),
             seconds=None,
+            custody=custody,
         )
         assert time.monotonic() - started < 2
         assert stdout.bytes_written > len(b"parent")
@@ -1248,68 +1312,111 @@ def test_interruption_reaps_before_propagating(
     children: list[subprocess.Popen[bytes]],
     monkeypatch: pytest.MonkeyPatch,
     interruption: type[BaseException],
+    custody: LocalDeliveryCustody,
 ) -> None:
     def advance(output: process_core._Output, pipe: Any) -> tuple[bool, bool]:
         raise interruption()
 
     monkeypatch.setattr(process_core._Output, "advance", advance)
     with pytest.raises(interruption):
-        execute("import time; time.sleep(30)")
+        execute("import time; time.sleep(30)", custody=custody)
     assert_closed(children)
 
 
-def test_failed_reap_is_observation_failure(
-    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("kill_fails", [False, True], ids=["reap", "kill"])
+def test_failed_native_cleanup_is_observation_failure(
+    children: list[subprocess.Popen[bytes]],
+    monkeypatch: pytest.MonkeyPatch,
+    custody: LocalDeliveryCustody,
+    kill_fails: bool,
 ) -> None:
     original = Popen.wait
     original_waitpid = os.waitpid if os.name != "nt" else None
+    original_cleanup = process_core._cleanup
+    statuses: list[process_core._ProcessStatus] = []
+    native_failures = 0
+
+    def cleanup(status: process_core._ProcessStatus) -> bool:
+        statuses.append(status)
+        return original_cleanup(status)
+
+    monkeypatch.setattr(process_core, "_cleanup", cleanup)
+
+    def kill(*args: Any) -> None:
+        nonlocal native_failures
+        assert children
+        assert args[0] == children[-1].pid if os.name != "nt" else args[0] is children[-1]
+        native_failures += 1
+        raise PermissionError("secret-canary")
 
     def wait(process: Popen[bytes], timeout: float | None = None) -> int:
+        nonlocal native_failures
         if process is children[-1]:
+            native_failures += 1
             raise subprocess.TimeoutExpired("secret-canary", timeout)
         return original(process, timeout=timeout)
 
     def waitpid(pid: int, options: int) -> tuple[int, int]:
+        nonlocal native_failures
         if children and pid == children[-1].pid:
+            native_failures += 1
             raise OSError("secret-canary")
         assert original_waitpid is not None
         return original_waitpid(pid, options)
 
     with monkeypatch.context() as context:
-        if os.name == "nt":
+        if kill_fails:
+            context.setattr(os, "kill", kill) if os.name != "nt" else context.setattr(Popen, "kill", kill)
+        elif os.name == "nt":
             context.setattr(Popen, "wait", wait)
         else:
             context.setattr(os, "waitpid", waitpid)
-        result = execute("import time; time.sleep(30)", seconds=0.1)
+        result = execute("import time; time.sleep(30)", seconds=0.1, custody=custody)
+        owner = custody._owner
+        assert owner is not None
+        first = owner.close()
+        assert not first.cleaned and first.cleanup_retryable
+        assert not custody.settled
+        assert native_failures > 0
     assert result.failure == Failure.OBSERVATION
     assert result.local_status is None
     assert result.exit_status is None
     assert "secret-canary" not in repr(result)
-    children[-1].wait(timeout=2)
+    assert custody.close(Deadline.after(3))
+    assert len(statuses) >= 2
+    assert all(status is statuses[0] for status in statuses)
+    assert statuses[0].process is children[-1]
+    assert owner.close() is first and not first.cleaned
+    assert result.failure == Failure.OBSERVATION and result.local_status is None
     assert_closed(children)
 
 
 def test_failed_reap_during_interruption_adds_safe_note(
-    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
 ) -> None:
     original_wait = Popen.wait
     original_waitpid = os.waitpid if os.name != "nt" else None
-    waitpid_calls = 0
+    native_failures = 0
+    fail_reaping = False
+    control = KeyboardInterrupt()
 
     def advance(output: process_core._Output, pipe: Any) -> tuple[bool, bool]:
-        raise KeyboardInterrupt()
+        nonlocal fail_reaping
+        fail_reaping = True
+        raise control
 
     def wait(process: Popen[bytes], timeout: float | None = None) -> int:
+        nonlocal native_failures
         if process is children[-1]:
+            native_failures += 1
             raise subprocess.TimeoutExpired("secret-canary", timeout)
         return original_wait(process, timeout=timeout)
 
     def waitpid(pid: int, options: int) -> tuple[int, int]:
-        nonlocal waitpid_calls
-        if children and pid == children[-1].pid:
-            waitpid_calls += 1
-            if waitpid_calls > 2:
-                raise OSError("secret-canary")
+        nonlocal native_failures
+        if children and pid == children[-1].pid and fail_reaping:
+            native_failures += 1
+            raise OSError("secret-canary")
         assert original_waitpid is not None
         return original_waitpid(pid, options)
 
@@ -1320,19 +1427,30 @@ def test_failed_reap_during_interruption_adds_safe_note(
         else:
             context.setattr(os, "waitpid", waitpid)
         with pytest.raises(KeyboardInterrupt) as raised:
-            execute("import time; time.sleep(30)")
+            execute("import time; time.sleep(30)", custody=custody)
+        owner = custody._owner
+        assert owner is not None
+        first = owner.close()
+        assert not first.cleaned and first.cleanup_retryable
+        assert not custody.settled
+        assert native_failures > 0
+        assert raised.value is control
     assert raised.value.__notes__
     assert "secret-canary" not in repr(raised.value.__notes__)
-    children[-1].wait(timeout=2)
+    assert custody.close(Deadline.after(3))
+    assert owner.close() is first and not first.cleaned
     assert_closed(children)
 
 
-def test_explicit_environment_is_passed_through(children: list[subprocess.Popen[bytes]]) -> None:
+def test_explicit_environment_is_passed_through(
+    children: list[subprocess.Popen[bytes]], custody: LocalDeliveryCustody
+) -> None:
     env = dict(os.environ)
     env["AGENTWORKS_PUMP_FIXTURE"] = "caller-owned-value"
     result = execute(
         "import os,sys; sys.stdout.write(os.environ['AGENTWORKS_PUMP_FIXTURE'])",
         env=env,
+        custody=custody,
     )
     assert result.stdout.data == b"caller-owned-value"
     assert result.failure is None
@@ -1340,12 +1458,12 @@ def test_explicit_environment_is_passed_through(children: list[subprocess.Popen[
     assert_closed(children)
 
 
-def test_spawn_failure_is_safe(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_spawn_failure_is_safe(monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody) -> None:
     def spawn(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
         raise OSError("secret-canary")
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
-    result = execute("pass")
+    result = execute("pass", custody=custody)
     assert not result.started
     assert result.local_status is None and result.exit_status is None
     assert result.failure == Failure.DISPATCH
