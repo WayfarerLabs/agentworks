@@ -96,15 +96,12 @@ def _build_root_guest_program(
             "raise ValueError('invalid fixed prefix')\n"
         )
         delivered = prefix
-    expected_names = tuple(name for name, _source in compact)
     entrypoint = f"{package_name}.{entrypoint_module}"
     loader = (
         "import os,base64,bz2,hashlib,json,sys,types\n"
         f"_agw_guest_module={package_name + '._vm_guest_identity_guest'!r}\n"
         f"{input_source}"
         "_agw_sources=json.loads(bz2.decompress(base64.b64decode(b,validate=True)))\n"
-        f"if tuple(n for n,s in _agw_sources)!={expected_names!r}:"
-        "raise ValueError('invalid fixed modules')\n"
         f"p=types.ModuleType({package_name!r});p.__path__=[];p.__package__={package_name!r};"
         f"sys.modules[{package_name!r}]=p\n"
         "def _agw_install(items):\n"
@@ -131,7 +128,6 @@ def build_helper_modules(package_name: str, module_names: tuple[str, ...]) -> st
     payload = base64.b64encode(
         bz2.compress(json.dumps(sources, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
     ).decode("ascii")
-    binding = _init_reader_binding(package_name) if "_vm_guest_identity_guest" in module_names else ""
     return (
         "import base64,bz2,json,sys,types\n"
         f"p=types.ModuleType({package_name!r});p.__path__=[];p.__package__={package_name!r};"
@@ -140,7 +136,6 @@ def build_helper_modules(package_name: str, module_names: tuple[str, ...]) -> st
         f" q={package_name!r}+'.'+n;m=types.ModuleType(q);m.__file__='<'+q+'>';"
         f"m.__package__={package_name!r};sys.modules[q]=m;"
         "exec(compile(s,m.__file__,'exec'),m.__dict__)\n"
-        f"{binding}"
     )
 
 
@@ -168,7 +163,6 @@ def _build_file_helper_bundle(
     digest = hashlib.sha256(prefix).hexdigest()
     prefix_length = len(prefix)
     entrypoint = f"{package_name}.{entrypoint_module}"
-    binding = _init_reader_binding(package_name) if "_vm_guest_identity_guest" in dict(sources) else ""
     bootstrap = (
         "import os,base64,bz2,hashlib,json,sys,types\n"
         "b=bytearray()\n"
@@ -183,16 +177,9 @@ def _build_file_helper_bundle(
         f" q={package_name!r}+'.'+n;m=types.ModuleType(q);m.__file__='<'+q+'>';"
         f"m.__package__={package_name!r};sys.modules[q]=m;"
         "exec(compile(s,m.__file__,'exec'),m.__dict__)\n"
-        f"{binding}"
         f"raise SystemExit(sys.modules[{entrypoint!r}].main(sys.argv[1]))\n"
     )
     return FixedFileHelperBundle(bootstrap, prefix)
-
-
-def _init_reader_binding(package_name: str) -> str:
-    """Rebind a trusted loader's fresh reader after it replaces the guest module."""
-    guest_module = f"{package_name}._vm_guest_identity_guest"
-    return f"if '_agw_init_reader' in globals():\n sys.modules[{guest_module!r}]._bind_init_reader(_agw_init_reader)\n"
 
 
 def _compact_fixed_source(source: str) -> str:
