@@ -6,17 +6,27 @@ import posixpath
 import re
 from dataclasses import dataclass, field
 from enum import StrEnum
+from importlib.resources import files
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
-from agentworks.execution._helper_launcher import build_clean_environment_argv, build_identity_argv
+from agentworks.execution._helper_bundle import build_helper_modules
+from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._helper_launcher import (
+    IdentityMode,
+    IdentityPlan,
+    _validate_plan,
+    build_clean_environment_argv,
+    build_identity_argv,
+)
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 
 if TYPE_CHECKING:
-    from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution.carrier import ByteSink
 
 _SHELL = "/bin/sh"
-_LINUX_CANDIDATES = ("/usr/bin/python3",)
+_SYSTEM_LINUX_PYTHON = "/usr/bin/python3"
+_LINUX_CANDIDATES = (_SYSTEM_LINUX_PYTHON,)
 _DARWIN_CANDIDATES = ("/opt/homebrew/bin/python3", "/usr/local/bin/python3")
 _DARWIN_SYSTEM_SHIM = "/usr/bin/python3"
 MAX_RUNTIME_RECORD_BYTES = 128
@@ -181,6 +191,53 @@ def build_runtime_identity_helper_argv(
         nonce=nonce,
     )
     return build_identity_argv(plan, argv), candidates, system_shim
+
+
+def build_root_guest_bootstrap_argv(
+    root_entry: IdentityPlan,
+    target_identity: IdentityExpectation,
+    *,
+    selection: RuntimeSelection,
+    fixed_source: str,
+    nonce: str,
+    expected_guest: VMGuestIdentity | None = None,
+) -> tuple[tuple[str, ...], tuple[str, ...], str | None]:
+    """Build one Linux system-Python helper entered through fixed root custody."""
+    if (
+        type(selection) is not RuntimeSelection
+        or selection.target_os is not RuntimeTargetOS.LINUX
+        or selection.explicit_path not in (None, _SYSTEM_LINUX_PYTHON)
+        or type(root_entry) is not IdentityPlan
+        or _validate_plan(root_entry).euid != 0
+        or type(target_identity) is not IdentityExpectation
+        or type(fixed_source) is not str
+    ):
+        raise ValidationError("Root guest bootstrap requires bound Linux system Python and identities")
+    _validate_plan(IdentityPlan(target_identity, IdentityMode.DIRECT))
+    if expected_guest is not None and type(expected_guest) is not VMGuestIdentity:
+        raise ValidationError("Root guest bootstrap requires an exact expected guest")
+
+    observer_source = build_helper_modules(
+        "_agw_bootstrap_guest",
+        ("_vm_guest_identity_protocol", "_vm_guest_identity_guest"),
+    )
+    bootstrap_source = files(__package__).joinpath("_guest_bootstrap.py").read_text(encoding="utf-8")
+    guest_tuple = (
+        (expected_guest.instance_marker, expected_guest.boot_id, expected_guest.init_start_ticks)
+        if expected_guest is not None
+        else None
+    )
+    source = (
+        bootstrap_source
+        + "\nraise SystemExit(main("
+        + f"{target_identity.euid!r},{target_identity.egid!r},{target_identity.groups!r},"
+        + f"{observer_source!r},{fixed_source!r},{guest_tuple!r}))\n"
+    )
+    argv, candidates, system_shim = build_runtime_helper_argv(selection=selection, fixed_source=source, nonce=nonce)
+    if candidates != (_SYSTEM_LINUX_PYTHON,):
+        raise ValidationError("Root guest bootstrap requires system Python")
+    capped = ("/usr/bin/setpriv", "--inh-caps=-all", "--ambient-caps=-all", "--", *argv)
+    return build_identity_argv(root_entry, capped), candidates, system_shim
 
 
 _RECORD = re.compile(

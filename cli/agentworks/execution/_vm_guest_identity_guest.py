@@ -7,6 +7,10 @@ import os
 import stat
 import sys
 from contextlib import suppress
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from ._vm_guest_identity_protocol import (
     VM_BOOT_ID_PATH,
@@ -24,9 +28,16 @@ _MARKER_MODE = 0o444
 _MARKER_BYTES = 33
 _BOOT_BYTES = 37
 _INIT_STAT_BYTES = 8192
+_INIT_READER: Callable[[], bytes] | None = None
 _MARKER_COMPONENTS = tuple(component for component in VM_INSTANCE_MARKER_PATH.split("/") if component)
 if "/" + "/".join(_MARKER_COMPONENTS) != VM_INSTANCE_MARKER_PATH or len(_MARKER_COMPONENTS) < 2:
     raise RuntimeError("VM instance marker path must be a canonical absolute path")
+
+
+def _bind_init_reader(reader: Callable[[], bytes]) -> None:
+    """Bind the bootstrap's held descriptor reader in memory."""
+    global _INIT_READER
+    _INIT_READER = reader
 
 
 class _GuestRefusal(Exception):
@@ -156,19 +167,25 @@ def _read_boot_id(root_path: str = "/") -> str:
 
 
 def _read_init_start_ticks(root_path: str = "/") -> int:
-    path = VM_INIT_STAT_PATH if root_path == "/" else root_path.rstrip("/") + VM_INIT_STAT_PATH
-    try:
-        descriptor = os.open(path, _open_flags(nonblocking=True))
-    except OSError:
-        raise _GuestRefusal(VMGuestIdentityFailure.INIT_START_UNREADABLE) from None
-    try:
+    if root_path == "/" and _INIT_READER is not None:
         try:
-            content = os.read(descriptor, _INIT_STAT_BYTES + 1)
+            content = _INIT_READER()
         except OSError:
             raise _GuestRefusal(VMGuestIdentityFailure.INIT_START_UNREADABLE) from None
-    finally:
-        with suppress(OSError):
-            os.close(descriptor)
+    else:
+        path = VM_INIT_STAT_PATH if root_path == "/" else root_path.rstrip("/") + VM_INIT_STAT_PATH
+        try:
+            descriptor = os.open(path, _open_flags(nonblocking=True))
+        except OSError:
+            raise _GuestRefusal(VMGuestIdentityFailure.INIT_START_UNREADABLE) from None
+        try:
+            try:
+                content = os.read(descriptor, _INIT_STAT_BYTES + 1)
+            except OSError:
+                raise _GuestRefusal(VMGuestIdentityFailure.INIT_START_UNREADABLE) from None
+        finally:
+            with suppress(OSError):
+                os.close(descriptor)
     if len(content) > _INIT_STAT_BYTES or not content.endswith(b"\n") or b"\n" in content[:-1]:
         raise _GuestRefusal(VMGuestIdentityFailure.INVALID_IDENTITY)
     # Field 22 is the process start time. The comm field may contain spaces or
