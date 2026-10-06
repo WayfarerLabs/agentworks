@@ -6,8 +6,6 @@ import pytest
 
 from tests.execution.carriers.ssh.auth_offer_fixtures import KeyOffer, key_offers
 
-pytestmark = pytest.mark.windows
-
 
 def test_offer_observation_preserves_phase_algorithm_and_exact_wire_blob() -> None:
     log = (
