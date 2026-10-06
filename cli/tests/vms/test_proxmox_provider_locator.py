@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from dataclasses import replace
@@ -206,24 +207,46 @@ def test_invalid_or_expired_budget_never_prepares_secrets(monkeypatch: pytest.Mo
     prepare.assert_not_called()
 
 
-@pytest.mark.parametrize("expire_at", [2, 3, 4])
+@pytest.mark.parametrize("expire_during", ["preparation", "response", "hash"])
 def test_expiry_after_preparation_or_response_refuses_observation(
-    observation: tuple[ProxmoxPlatform, MagicMock], monkeypatch: pytest.MonkeyPatch, expire_at: int
+    monkeypatch: pytest.MonkeyPatch, expire_during: str
 ) -> None:
-    platform, request = observation
-    checks = 0
+    now = [100.0]
+    monkeypatch.setattr("time.monotonic", lambda: now[0])
+    platform = _platform()
+    ctx = RunContext(secrets=SimpleNamespace(get=lambda _name: "secret-canary"))
+    request = MagicMock(return_value={"vmgenid": _GENERATION})
+    monkeypatch.setattr(_ProxmoxWire, "request_current_config", request)
 
-    def remaining(*_args: object, **_kwargs: object) -> float:
-        nonlocal checks
-        checks += 1
-        if checks == expire_at:
-            raise LimitExceededError("expired")
-        return 1
+    if expire_during == "preparation":
+        original_prepare = platform._execution_connection
 
-    monkeypatch.setattr("agentworks.plugins.proxmox.platform.provider_locator_remaining", remaining)
+        def prepare(vm: VMRow, context: RunContext) -> ProxmoxConnection:
+            connection = original_prepare(vm, context)
+            now[0] = 106.0
+            return connection
+
+        monkeypatch.setattr(platform, "_execution_connection", prepare)
+    elif expire_during == "response":
+
+        def respond(*, timeout: float) -> dict[str, object]:
+            now[0] = 106.0
+            return {"vmgenid": _GENERATION}
+
+        request.side_effect = respond
+    else:
+        original_hash = hashlib.sha256
+
+        def hash_and_expire(data: bytes) -> object:
+            digest = original_hash(data)
+            now[0] = 106.0
+            return digest
+
+        monkeypatch.setattr(hashlib, "sha256", hash_and_expire)
+
     with pytest.raises(LimitExceededError):
-        platform.observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))
-    assert request.call_count == (0 if expire_at == 2 else 1)
+        platform.observe_provider_locator(_vm(), ctx, deadline=Deadline(105))
+    assert request.call_count == (0 if expire_during == "preparation" else 1)
 
 
 @pytest.mark.parametrize("expired", [False, True])
@@ -252,12 +275,17 @@ def test_late_provider_failure_still_checks_deadline(
     observation: tuple[ProxmoxPlatform, MagicMock], monkeypatch: pytest.MonkeyPatch, failure: type[Exception]
 ) -> None:
     platform, request = observation
-    request.side_effect = failure("secret-canary")
-    checks = MagicMock(side_effect=[1.0, 1.0, LimitExceededError("expired")])
-    monkeypatch.setattr("agentworks.plugins.proxmox.platform.provider_locator_remaining", checks)
+    now = [100.0]
+    monkeypatch.setattr("time.monotonic", lambda: now[0])
+
+    def fail(*, timeout: float) -> dict[str, object]:
+        now[0] = 106.0
+        raise failure("secret-canary")
+
+    request.side_effect = fail
     with pytest.raises(LimitExceededError):
-        platform.observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))
-    assert checks.call_count == 3
+        platform.observe_provider_locator(_vm(), RunContext(), deadline=Deadline(105))
+    request.assert_called_once()
 
 
 def test_unverified_configuration_never_prepares_token(monkeypatch: pytest.MonkeyPatch) -> None:
