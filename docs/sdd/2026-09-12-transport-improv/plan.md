@@ -95,10 +95,10 @@ data has been deleted.
 The shared resize candidate at `75a38d706` adds one owner-mediated POSIX SIGWINCH notification
 without another process owner, native handle exposure or a general signal API. Its local results
 distinguish refusal, kernel-call acceptance and uncertainty; remote terminal acknowledgment remains
-outside that evidence. Fresh Linux non-integration validation passes 14,263 tests with 50 skips.
-The private project and complexity lanes found a Windows test-selection error and a test scheduling
-race; those findings must be corrected and re-reviewed before publication. The generic lane found
-no material source defect. This record does not close native terminal, cleanup-entry interruption,
+outside that evidence. Fresh Linux non-integration validation passes 14,263 tests with 50 skips. The
+private project and complexity lanes found a Windows test-selection error and a test scheduling
+race; those findings must be corrected and re-reviewed before publication. The generic lane found no
+material source defect. This record does not close native terminal, cleanup-entry interruption,
 production RunContext or public feedback/fix round 1.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the

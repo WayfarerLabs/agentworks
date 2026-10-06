@@ -276,16 +276,16 @@ admission, relaying, geometry and restoration remain adapter responsibilities; n
 Windows terminal proof remain open.
 
 `LocalProcessOwner.notify_resize(Deadline)` asks the existing owner thread to send one fixed POSIX
-SIGWINCH to its held child after the adapter updates PTY geometry. It requires a finite deadline
-and does not expose a PID or native process handle. `ResizeNotification.NOT_SENT` records refusal
-before the signal call or the kernel reporting an absent child; `REQUESTED` records local
-kernel-call acceptance, not acknowledgment from SSH or a remote terminal. `UNKNOWN` preserves
-uncertainty after admission. Only one request may occupy the slot; another request refuses while
-the owner still holds it, including after the first caller times out. Interruption cancels only an
-unclaimed request and otherwise leaves custody with the owner. Unsupported hosts, stopped
-borrowing, observed exit and lost observation refuse; close and terminal publication settle pending
-requests without replacing process exit or cleanup facts. Local POSIX tests do not establish remote
-resize delivery or native macOS/Windows acceptance.
+SIGWINCH to its held child after the adapter updates PTY geometry. It requires a finite deadline and
+does not expose a PID or native process handle. `ResizeNotification.NOT_SENT` records refusal before
+the signal call or the kernel reporting an absent child; `REQUESTED` records local kernel-call
+acceptance, not acknowledgment from SSH or a remote terminal. `UNKNOWN` preserves uncertainty after
+admission. Only one request may occupy the slot; another request refuses while the owner still holds
+it, including after the first caller times out. Interruption cancels only an unclaimed request and
+otherwise leaves custody with the owner. Unsupported hosts, stopped borrowing, observed exit and
+lost observation refuse; close and terminal publication settle pending requests without replacing
+process exit or cleanup facts. Local POSIX tests do not establish remote resize delivery or native
+macOS/Windows acceptance.
 
 Local Linux tests exercise interrupted startup, admission and cleanup, including the interval after
 admission but before pumping. They do not establish native Windows/macOS acceptance or update the
