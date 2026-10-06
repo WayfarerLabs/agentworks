@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import signal
 import threading
 from typing import cast
 
@@ -189,28 +191,85 @@ def test_lost_thread_liveness_metadata_does_not_allow_pipe_cleanup(bound, monkey
         assert keeper.drain(Deadline.after(1)).drained
 
 
-def test_interrupted_startup_gate_denies_worker_before_permission(bound, monkeypatch) -> None:
+def test_native_creation_refusal_permits_drain_and_exact_cleanup(bound, monkeypatch) -> None:
     _, owner, receipt = bound
-    carrier = ScriptedCarrier()
+    carrier = ClosingCarrier()
     keeper = make_keeper(owner, receipt, carrier)
-    original = keeper._startup_decided.set
-    error = KeyboardInterrupt()
-    calls = 0
+    error = RuntimeError("native thread creation refused")
 
-    def interrupted():
-        nonlocal calls
-        calls += 1
-        original()
-        if calls == 1:
-            raise error
+    def refused(*args, **kwargs):
+        raise error
 
     try:
         keeper.admit()
         keeper.sample_initial(Deadline.after(1))
-        monkeypatch.setattr(keeper._startup_decided, "set", interrupted)
-        with pytest.raises(KeyboardInterrupt) as caught:
+        # Python 3.13+ uses joinable native threads; earlier hosts use this spawn.
+        spawn = "_start_joinable_thread" if hasattr(threading, "_start_joinable_thread") else "_start_new_thread"
+        monkeypatch.setattr(threading, spawn, refused)
+        with pytest.raises(RuntimeError) as caught:
             keeper.acknowledge_start(clean_start(receipt))
-        assert caught.value is error and keeper._worker_done.wait(1)
-        assert carrier.calls == 1 and not keeper._worker_permission
+        assert caught.value is error and keeper.failure is error
+        assert carrier.calls == 1 and keeper._worker is not None and not keeper._worker_permission
+        facts = keeper.drain(Deadline.after(1))
+        assert facts.drained and not facts.worker_active and not facts.startup_pending
+        stop = keeper.request_stop(Deadline.after(1))
+        assert stop.observation is not None and stop.observation.facts == (
+            (FactName.LAUNCH, encode_managed_job_fact(receipt)),
+        )
+        assert keeper.obligation is not None and keeper.obligation.state is LifecycleObligationState.POSSIBLE_EFFECT
     finally:
+        assert keeper.drain(Deadline.after(1)).drained
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process SIGINT delivery interrupts a native join")
+def test_real_sigint_join_retains_active_delivery_until_target_done(bound, monkeypatch) -> None:
+    _, owner, receipt = bound
+    carrier = ScriptedCarrier()
+    keeper = make_keeper(owner, receipt, carrier)
+    entered, release, joining = threading.Event(), threading.Event(), threading.Event()
+    signaler = None
+
+    def response(request):
+        if request.lease is not None:
+            entered.set()
+            assert release.wait(3)
+        return _success(request)
+
+    def interrupt_join():
+        assert joining.wait(1)
+        os.kill(os.getpid(), signal.SIGINT)
+
+    try:
+        keeper.admit()
+        keeper.sample_initial(Deadline.after(1))
+        carrier.response = response
+        monkeypatch.setattr(keeper_module, "_CADENCE_SECONDS", 0)
+        keeper.acknowledge_start(clean_start(receipt))
+        assert entered.wait(1)
+        worker = keeper._worker
+        assert worker is not None
+        original_join = worker.join
+
+        def join(timeout=None):
+            joining.set()
+            original_join(timeout)
+
+        monkeypatch.setattr(worker, "join", join)
+        signaler = threading.Thread(target=interrupt_join)
+        signaler.start()
+        with pytest.raises(KeyboardInterrupt):
+            keeper.drain(Deadline.after(1))
+        assert not keeper._worker_done.is_set()
+        facts = keeper.drain(Deadline.after(0.01))
+        assert facts.worker_active and not facts.drained
+        with pytest.raises(StateError):
+            keeper.request_stop(Deadline.after(1))
+    finally:
+        release.set()
+        if signaler is not None:
+            signaler.join(1)
+            assert not signaler.is_alive()
+        if keeper._worker is not None:
+            assert keeper._worker_done.wait(1)
+        monkeypatch.undo()
         assert keeper.drain(Deadline.after(1)).drained

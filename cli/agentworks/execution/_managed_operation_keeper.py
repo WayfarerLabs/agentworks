@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import threading
 import time
-from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -168,7 +167,6 @@ class ManagedOperationKeeper:
         self._stop = threading.Event()
         self._worker: threading.Thread | None = None
         self._startup_guard = threading.Lock()
-        self._startup_decided = threading.Event()
         self._worker_entered = threading.Event()
         self._worker_done = threading.Event()
         self._worker_permission = False
@@ -302,22 +300,19 @@ class ManagedOperationKeeper:
         with self._startup_guard:
             try:
                 self._worker.start()
-                self._startup_decided.set()
-                self._worker_permission = True
             except BaseException as error:
                 self._worker_permission = False
-                self._startup_failed = True
+                # This fresh private stdlib start reports RuntimeError when
+                # native creation was refused, before the target can exist.
+                self._startup_failed = not isinstance(error, RuntimeError)
                 self.failure = error
                 self._stop.set()
-                # A second interruption retains the denied, pending worker.
-                with suppress(BaseException):
-                    self._startup_decided.set()
                 raise
+            self._worker_permission = True
 
     def _renew(self) -> None:
         self._worker_entered.set()
         try:
-            self._startup_decided.wait()
             with self._startup_guard:
                 if not self._worker_permission:
                     return

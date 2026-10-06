@@ -346,12 +346,19 @@ def test_blocked_database_fence_drain_does_not_acquire_owner_guard(bound, monkey
         assert keeper.drain(Deadline.after(1)).drained
 
 
-def test_interrupted_native_thread_start_denies_late_worker(bound, monkeypatch) -> None:
+@pytest.mark.parametrize("error", [KeyboardInterrupt(), SystemExit(7), OSError("uncertain native start")])
+def test_interrupted_native_thread_start_denies_late_worker(bound, monkeypatch, error) -> None:
     _, owner, receipt = bound
     carrier = ScriptedCarrier()
     keeper = make_keeper(owner, receipt, carrier)
     original = threading.Thread.start
-    error = KeyboardInterrupt()
+    target = keeper._renew
+    entered, release = threading.Event(), threading.Event()
+
+    def delayed_target():
+        entered.set()
+        assert release.wait(2)
+        target()
 
     def interrupted(thread):
         original(thread)
@@ -360,38 +367,20 @@ def test_interrupted_native_thread_start_denies_late_worker(bound, monkeypatch) 
     try:
         keeper.admit()
         keeper.sample_initial(Deadline.after(1))
+        monkeypatch.setattr(keeper, "_renew", delayed_target)
         monkeypatch.setattr(threading.Thread, "start", interrupted)
-        with pytest.raises(KeyboardInterrupt) as caught:
+        with pytest.raises(type(error)) as caught:
             keeper.acknowledge_start(clean_start(receipt))
         assert caught.value is error and keeper._worker is not None
-        assert keeper._worker_done.wait(1)
+        assert entered.wait(1)
+        facts = keeper.drain(Deadline.after(0.01))
+        assert facts.worker_active and facts.startup_pending and not facts.drained
         assert carrier.calls == 1 and keeper.failure is error
+        with pytest.raises(StateError):
+            keeper.request_stop(Deadline.after(1))
     finally:
+        release.set()
         assert keeper.drain(Deadline.after(1)).drained
-
-
-def test_failed_thread_start_retains_pending_start_and_refuses_cleanup(bound, monkeypatch) -> None:
-    _, owner, receipt = bound
-    carrier = ScriptedCarrier()
-    keeper = make_keeper(owner, receipt, carrier)
-    error = RuntimeError("native start not acknowledged")
-
-    def failed(thread):
-        raise error
-
-    keeper.admit()
-    keeper.sample_initial(Deadline.after(1))
-    monkeypatch.setattr(threading.Thread, "start", failed)
-    with pytest.raises(RuntimeError) as caught:
-        keeper.acknowledge_start(clean_start(receipt))
-    assert caught.value is error
-    facts = keeper.drain(Deadline.after(0.01))
-    assert facts.startup_pending and not facts.worker_active and not facts.drained
-    with pytest.raises(StateError):
-        keeper.observe_cleanup(Deadline.after(1))
-    # Simulate the delayed native entry: permission is already denied.
-    keeper._renew()
-    assert keeper.drain(Deadline.after(1)).drained and carrier.calls == 1
 
 
 def test_cadence_uses_actual_cycle_start_without_catch_up(bound, monkeypatch) -> None:
@@ -431,7 +420,6 @@ def test_cadence_uses_actual_cycle_start_without_catch_up(bound, monkeypatch) ->
         monkeypatch.setattr(time, "monotonic", lambda: clock[0])
         monkeypatch.setattr(keeper, "_stop", ControlledStop())
         keeper._worker_permission = True
-        keeper._startup_decided.set()
         keeper._renew()
         assert waits == pytest.approx([10, 9.8, 9.8])
         assert [deadline.expires_at for deadline in cycle_deadlines] == [55, 65]
