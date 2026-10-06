@@ -1,9 +1,12 @@
 """Linux workstation staging for verified downloads, separate from guest metadata.
 
 The caller owns this writer and must call abort in a finally block. Commit requires
-the coordinator's complete verification, byte count and digest. Failed publication
-never removes the destination. A cleanup error may follow successful publication;
-published records that fact and abort can retry removing the remaining stage.
+the coordinator's complete verification, byte count and digest. Publication and
+cleanup errors never remove the destination. Before admitting publication, the
+writer records publication_uncertain. An interrupted call confirms published only
+if the destination has the exact staged inode; otherwise uncertainty remains.
+Both facts survive abort. A cleanup error may follow successful publication;
+abort can retry removing the remaining stage without erasing publication evidence.
 
 Replace requires ordinary write access and preserves local mode, owner, group and
 non-security xattrs (including Linux POSIX ACLs), or refuses before publication.
@@ -117,6 +120,7 @@ class LocalDownloadPublication:
         self._digest = hashlib.sha256()
         self._size = 0
         self.published = False
+        self.publication_uncertain = False
         try:
             self._parent_fd = os.open(self._destination.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
             if isinstance(condition, Replace):
@@ -165,7 +169,7 @@ class LocalDownloadPublication:
 
     def try_write(self, data: memoryview) -> int:
         """Accept one synchronous write, retaining only size and digest state."""
-        if self._stage_fd is None or self.published:
+        if self._stage_fd is None or self.published or self.publication_uncertain:
             raise ValueError("Local download stage is closed")
         written = os.write(self._stage_fd, data)
         self._digest.update(data[:written])
@@ -203,12 +207,13 @@ class LocalDownloadPublication:
 
         The coordinator must also establish its deadline, ownership and remote
         cleanup obligations before passing verified_complete=True. On any error,
-        inspect published and call abort; do not retry a published transfer.
+        inspect published and publication_uncertain and call abort. Neither a
+        proved publication nor an uncertain attempt can be retried by this writer.
         """
         fd = self._stage_fd
         parent_fd = self._parent_fd
         name = self._stage_name
-        if fd is None or parent_fd is None or name is None or self.published:
+        if fd is None or parent_fd is None or name is None or self.published or self.publication_uncertain:
             raise ValueError("Local download stage is closed")
         if not verified_complete or size != self._size or sha256 != self._digest.hexdigest():
             raise ValueError("Local download is not completely verified")
@@ -225,21 +230,39 @@ class LocalDownloadPublication:
         if self._original is not None:
             self._preserve_metadata()
         os.fsync(fd)
-        if self._original is None:
-            os.link(name, self._name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd, follow_symlinks=False)
-        else:
-            if self._destination_metadata() != self._original:
-                raise FileExistsError("Local download destination changed before replacement")
-            os.replace(name, self._name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
-            self._stage_name = None
-        self.published = True
+        if self._original is not None and self._destination_metadata() != self._original:
+            raise FileExistsError("Local download destination changed before replacement")
+        self.publication_uncertain = True
+        try:
+            if self._original is None:
+                os.link(name, self._name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd, follow_symlinks=False)
+            else:
+                os.replace(name, self._name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+            self.published = True
+            self.publication_uncertain = False
+        except BaseException:
+            self._reconcile_publication(parent_fd)
+            raise
         self.abort()
+
+    def _reconcile_publication(self, parent_fd: int) -> None:
+        """Retain uncertainty unless the exact staged inode proves publication."""
+        try:
+            destination = os.stat(self._name, dir_fd=parent_fd, follow_symlinks=False)
+            if (destination.st_dev, destination.st_ino) == self._stage_identity:
+                self.published = True
+                self.publication_uncertain = False
+        except BaseException:
+            # A second interruption or failed inspection must not erase the
+            # admitted attempt or replace the original publication exception.
+            pass
 
     def abort(self) -> None:
         """Remove only the owned stage and close handles; safe after publication.
 
         Cleanup errors propagate, retaining the parent handle and stage name for
-        a retry. The destination is never removed, even after commit fails.
+        a retry. Publication facts are retained. The destination is never removed,
+        even after commit fails or its effect cannot be established.
         """
         if self._stage_fd is not None:
             fd, self._stage_fd = self._stage_fd, None

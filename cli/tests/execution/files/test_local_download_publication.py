@@ -375,6 +375,79 @@ def test_cleanup_failure_retains_published_fact_and_can_retry(tmp_path: Path, mo
 
 
 @pytest.mark.parametrize("condition", [Create(), Replace()])
+@pytest.mark.parametrize("effect", [False, True])
+@pytest.mark.parametrize("failure", [KeyboardInterrupt, OSError])
+def test_publication_interrupt_retains_effect_facts_after_abort(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    condition: Create | Replace,
+    effect: bool,
+    failure: type[BaseException],
+) -> None:
+    destination = tmp_path / "download"
+    if isinstance(condition, Replace):
+        destination.write_bytes(b"old")
+    writer = local.LocalDownloadPublication(destination, condition=condition)
+    writer.try_write(memoryview(b"new"))
+    operation = "link" if isinstance(condition, Create) else "replace"
+    publish = getattr(os, operation)
+
+    def interrupt(*args: object, **kwargs: object) -> None:
+        assert writer.publication_uncertain
+        if effect:
+            publish(*args, **kwargs)
+        raise failure
+
+    monkeypatch.setattr(os, operation, interrupt)
+    with pytest.raises(failure):
+        commit(writer, b"new")
+    writer.abort()
+    assert writer.published is effect
+    assert writer.publication_uncertain is not effect
+    assert not list(tmp_path.glob(".agw-download-*"))
+    if effect or isinstance(condition, Replace):
+        assert destination.read_bytes() == (b"new" if effect else b"old")
+    else:
+        assert not destination.exists()
+
+
+@pytest.mark.parametrize("condition", [Create(), Replace()])
+def test_publication_inspection_failure_keeps_uncertainty_after_abort(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, condition: Create | Replace
+) -> None:
+    destination = tmp_path / "download"
+    if isinstance(condition, Replace):
+        destination.write_bytes(b"old")
+    writer = local.LocalDownloadPublication(destination, condition=condition)
+    writer.try_write(memoryview(b"new"))
+    operation = "link" if isinstance(condition, Create) else "replace"
+    publish = getattr(os, operation)
+    inspect = os.stat
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise PermissionError
+
+    def interrupt(*args: object, **kwargs: object) -> None:
+        publish(*args, **kwargs)
+        monkeypatch.setattr(os, "stat", refuse)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(os, operation, interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        commit(writer, b"new")
+    assert not writer.published and writer.publication_uncertain
+    with pytest.raises(ValueError):
+        writer.try_write(memoryview(b"more"))
+    with pytest.raises(ValueError):
+        commit(writer, b"new")
+    monkeypatch.setattr(os, "stat", inspect)
+    writer.abort()
+    assert not writer.published and writer.publication_uncertain
+    assert destination.read_bytes() == b"new"
+    assert not list(tmp_path.glob(".agw-download-*"))
+
+
+@pytest.mark.parametrize("condition", [Create(), Replace()])
 def test_sync_failure_leaves_destination_untouched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, condition: Create | Replace
 ) -> None:
@@ -394,6 +467,7 @@ def test_sync_failure_leaves_destination_untouched(
         assert not writer.published
     finally:
         writer.abort()
+    assert not writer.publication_uncertain
     if isinstance(condition, Replace):
         assert destination.read_bytes() == b"old"
     else:
@@ -426,18 +500,28 @@ def test_stage_name_collision_preserves_other_file(tmp_path: Path, monkeypatch: 
     assert list(tmp_path.iterdir()) == [collision]
 
 
-def test_abort_refuses_changed_stage_identity(tmp_path: Path) -> None:
+def test_abort_refuses_changed_stage_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     writer = local.LocalDownloadPublication(tmp_path / "download")
+    writer.try_write(memoryview(b"new"))
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise OSError
+
+    monkeypatch.setattr(os, "link", refuse)
+    with pytest.raises(OSError):
+        commit(writer, b"new")
     stage = next(tmp_path.iterdir())
     owned = tmp_path / "owned"
     stage.rename(owned)
     stage.write_bytes(b"unrelated")
     with pytest.raises(local.LocalDownloadUnsupportedError):
         writer.abort()
+    assert not writer.published and writer.publication_uncertain
     assert stage.read_bytes() == b"unrelated"
     assert owned.exists()
     os.replace(owned, stage)
     writer.abort()
+    assert not writer.published and writer.publication_uncertain
     assert not list(tmp_path.iterdir())
 
 
