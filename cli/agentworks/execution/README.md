@@ -775,6 +775,23 @@ process-group boundary, not native systemd/cgroup or SSH/QGA acceptance. Host OP
 remains refused. The keeper, recovery ceiling consumer, aggregate ownership and public job surface
 must be composed and proved before enabling that lifetime.
 
+`_managed_operation_keeper.py` privately binds one planned OPERATION run to the actual owning
+operation, exact VM and full prepared guest identity. Its passive constructor retains dedicated
+delivery custody; main-thread admission registers a run-ID-only lifecycle row before clock work.
+Every LIVE clock or publication repeats the existing lifecycle admission fence and checks the
+refreshed exact row without changing its payload. A renewal cycle shares one five-second delivery
+budget, uses the sampled guest expiry and starts at nominal ten-second intervals without catch-up
+bursts. Only an exact clean acknowledged start with settled delivery permits one renewal worker;
+unknown starts, clocks or publications never replay or obtain further renewal authority.
+
+The owning composition publishes ordinary close intent before draining the keeper and before any
+guarded owner bookkeeping. Drain requires independent worker-completion evidence before closing
+delivery custody, not thread-liveness metadata alone. After drain, only bound exact-run stop and
+observation remain available through this support effect. These methods preserve raw local and
+remote uncertainty and resolve neither the keeper row nor original start debt. Main-thread start,
+recovery-ceiling consumption, aggregate settlement and native acceptance remain unimplemented or
+unproved; this kernel is not a public lifetime or permission grant.
+
 `_managed_observation_exchange.py` supplies private fixed `observe` and closed `read-output`
 attempts over the same carrier interface. Its Python 3.11 target helper reads fixed guest identity
 paths and the protected store for an exact expected launch, run, derived unit, target incarnation
