@@ -855,8 +855,12 @@ entries, including reconciliation and cleanup, forward the context. Canonical re
 preserves each body's fresh effect checks rather than replacing them with cached evidence.
 Production VM composition must bind the context once in operation-owned state and retain it through
 all continuations and recovery. Optional context-free private candidates are not a production VM
-fallback. Inline execution and the separately launched service boundary still need adoption; these
-private exchange leaves do not complete those gates.
+fallback. Buffered inline preparation now accepts the same explicit context through the existing
+INLINE root program, with no stdin prefix or manifest change. The full guest checkpoint precedes
+body entry and request consumption; existing identity and exact-wait evidence remain required.
+Missing terminal evidence after bootstrap refusal leaves the application unknown. Operation-owned
+execution composition and the separately launched service boundary still need adoption; these
+private leaves do not complete those gates or prove native credential transitions.
 
 ## Public result and check behavior
 
