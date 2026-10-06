@@ -302,12 +302,12 @@ def _serve(
             states.append(_StreamState(stream, fd, writer))
         store.publish_fact(FactName.LAUNCH, request.launch)
         notify()
-        if lease is not None:
-            checked_lease(lease, request.launch, boottime_ns())
         if store.read_stop_request():
             _close(release_w)
             release_w = -1
         else:
+            if lease is not None:
+                checked_lease(lease, request.launch, boottime_ns())
             os.write(release_w, b"1")
         launched = True
         _observe(run_id, digest, request, store, boundary, pid, input_w, exec_r, states, control)
