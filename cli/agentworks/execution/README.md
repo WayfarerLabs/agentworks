@@ -875,9 +875,9 @@ caller-private access without overwriting an existing entry: mode 0600 on Linux/
 caller-only protected DACL on Windows. macOS and Windows Replace copy into a held existing file; a
 later write, truncate, flush, close or deadline failure retains publication uncertainty. macOS
 currently refuses ACLs, extended attributes, BSD flags and privilege-bearing modes. Windows uses
-native file identity, sharing and security-descriptor checks. Native macOS and Windows filesystem
-behavior still needs acceptance evidence before these candidates can supply production download
-access.
+native file identity, sharing and security-descriptor checks; its ancestor holds require ordinary
+directory-list access, not metadata-only access. Native macOS and Windows filesystem behavior still
+needs acceptance evidence before these candidates can supply production download access.
 
 `_file_local_download.py` privately selects the workstation's stage through a shared stage protocol
 and composes it with the owned snapshot download. Unsupported hosts are refused before remote
