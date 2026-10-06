@@ -43,14 +43,19 @@ types while the public terminal feature remains disabled.
 
 The
 [resize coordination](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6010061812)
-identifies a remaining launch boundary: the shared owner currently exposes pipes and completion
-facts, but no owner-mediated notification of the exact client's geometry change. SSH will not reach
-into private process state, introduce another process owner or claim full terminal delivery without
-that step. Transport
+identified a launch boundary at `d9315847`: the shared owner exposed pipes and completion facts, but
+no owner-mediated notification of the exact client's geometry change. SSH will not reach into
+private process state, introduce another process owner or claim full terminal delivery without that
+step. Transport
 [accepts ownership of the notification](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6010143834)
-and is preparing its reviewed pin. Retained worker/client settlement through interruption, bounded
-presentation and native Linux/macOS/Windows workflows remain required. No public SSH feedback/fix
-round or merge-readiness signal follows from this dependency adoption.
+and now
+[publishes its reviewed pin](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6010798164)
+at `833f1c280cc67f8d9b8f71f2e229ab69d20f7df5`. All 110 carried SSH commits rebase cleanly as
+`a975ce65f418c2e8ec1e95968f5930acdc0321fc`. SSH is integrating the actual finite-deadline
+`notify_resize()` operation. `REQUESTED` reports an accepted local signal, not remote geometry;
+`NOT_SENT` and `UNKNOWN` preserve their actual uncertainty. Retained worker/client settlement,
+bounded presentation and native Linux/macOS/Windows workflows remain required. No public SSH
+feedback/fix round or merge-readiness signal follows from this dependency adoption.
 
 ## Fixture boundary diagnosis
 
@@ -116,6 +121,9 @@ unchanged. The suite uses a short private fixture root outside the shared checko
 checks described above. These are local gates and synthetic/native-primitive fixtures, not complete
 Linux/macOS/Windows terminal or production RunContext acceptance. Hosted CI for this increment
 follows publication; the earlier green hosted result belongs to its separately recorded draft pin.
+All [hosted checks](https://github.com/WayfarerLabs/agentworks/actions/runs/37424299777) now pass at
+the published increment `a767aebdfd4165bab1ac163d693b9f7318f0de45`. This result precedes the
+subsequent trust-proof fixture and resize-dependency rebase.
 
 ## Native Windows boundary investigation
 
@@ -135,4 +143,10 @@ The
 [joint boundary question](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6010272043)
 returns launch/preparation feasibility to transport. No new wire format or process owner is selected
 by this record. Windows remains required, with native proof of payload secrecy, geometry/resize,
-interruption and restoration still open.
+interruption and restoration still open. Transport's
+[response](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6010798696) accepts
+native launch/status/cleanup and preparation ownership while keeping the mechanism open pending
+narrow proof on the selected Windows 9.5/10.x clients. Server 2022 remains within scope; the latest
+CI image is not permission to raise the supported Windows floor. An SSH-owned primitive
+console/polling proof fixture is being prepared independently, without claiming host keyboard
+translation, ConPTY or complete terminal delivery.
