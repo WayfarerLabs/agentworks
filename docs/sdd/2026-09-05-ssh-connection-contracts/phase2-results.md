@@ -736,6 +736,29 @@ combined-tree results. The preceding hosted CI and native reports retain their e
 heads; neither validates this new SSH head. Public FileAccess and RunContext composition, terminal
 delivery, genuine binding and supported-platform SSH workflows remain open.
 
+## Percent-encoded environment regression
+
+[Issue #845](https://github.com/WayfarerLabs/agentworks/issues/845) reports an opaque Windows
+OpenSSH failure when the legacy `SetEnv` path receives percent-encoded JSON with embedded quotes.
+The new SSH carrier does not build `SetEnv` options: transport's private inline candidate carries
+the workload environment as stdin data. The legacy production commands remain separate during the
+agreed parallel migration, so candidate evidence does not close that live issue.
+
+The SSH conformance regression now exercises that inline candidate through both the synthetic
+POSIX-shell client and the installed loopback SSH client/server. It verifies exact guest bytes for
+synthetic JSON containing `%40`, quotes and backslashes, plus literal `%h`, `%%`, `${HOME}`,
+Unicode, multiline and empty values. It also verifies the values stay out of raw SSH argv and the
+percent-encoded JSON marker stays out of Windows command-line serialization. All **4 conformance
+tests passed**, including the installed-peer case, on Linux with OpenSSH client **9.2p1** and server
+**9.2** (Debian `2+deb12u10`). The owned fixture creates temporary keys and one server and cleans
+them up; it uses no operator secrets or VM state.
+
+This is exact-byte Linux candidate proof, not native Windows or production caller acceptance. Repeat
+the vector through the additive RunContext path on the reported Windows 9.5 client and an
+expansion-enabled 10.x client, plus supported Linux/macOS workstations, before claiming new-path
+delivery complete. Any urgent compatibility correction to the legacy path requires its own native
+reproduction and disposition; no legacy runtime correction is made in this increment.
+
 ## Remaining integration and acceptance
 
 Earlier integration `fefc2b9e` uses transport `f3339f3d3cccace129be58711dc7eeb30ec66dc2`, which adds
