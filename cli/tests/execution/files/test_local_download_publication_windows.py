@@ -57,16 +57,23 @@ def test_create_refuses_existing_entry_even_if_it_arrives_after_staging(tmp_path
     assert list(tmp_path.iterdir()) == [destination]
 
 
-def test_held_ancestor_blocks_directory_rename(tmp_path: Path) -> None:
+def test_held_ancestor_blocks_directory_rename_and_delete_access(tmp_path: Path) -> None:
     parent = tmp_path / "held"
     parent.mkdir()
     renamed = tmp_path / "renamed"
+    api = _WindowsAPI()
     writer = WindowsLocalDownloadPublication(parent / "download")
+    unexpected_handle: int | None = None
     try:
+        with pytest.raises(OSError) as delete_blocked:
+            unexpected_handle = api.open(parent, 0x10000, 1 | 2 | 4, 3, 0x02000000 | 0x00200000)
+        assert cast("Any", delete_blocked.value).winerror == 32
         with pytest.raises(OSError) as blocked:
             parent.rename(renamed)
         assert cast("Any", blocked.value).winerror == 32  # ERROR_SHARING_VIOLATION.
     finally:
+        if unexpected_handle is not None:
+            api.close(unexpected_handle)
         writer.abort()
     parent.rename(renamed)
     assert renamed.is_dir() and not parent.exists()
