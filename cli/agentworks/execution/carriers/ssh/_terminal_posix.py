@@ -18,6 +18,10 @@ if TYPE_CHECKING:
 type _TerminalMode = list[int | list[bytes | int]]
 
 
+class AcquisitionCleanupFailure(BaseExceptionGroup):
+    """Native acquisition cleanup failed; adapters disclose only its category."""
+
+
 @dataclass
 class PosixTerminal:
     """One owned stdin PTY, borrowing the caller's input and output descriptors."""
@@ -67,7 +71,7 @@ class PosixTerminal:
         except BaseException as error:
             cleanup_errors = terminal.release()
             if cleanup_errors:
-                cleanup = BaseExceptionGroup("Terminal acquisition cleanup failed", cleanup_errors)
+                cleanup = AcquisitionCleanupFailure("Terminal acquisition cleanup failed", cleanup_errors)
                 cleanup.__cause__ = error.__cause__
                 raise error from cleanup
             raise

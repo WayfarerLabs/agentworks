@@ -13,7 +13,7 @@ from threading import Thread
 
 import pytest
 
-from agentworks.execution.carriers.ssh._terminal_posix import PosixTerminal
+from agentworks.execution.carriers.ssh._terminal_posix import AcquisitionCleanupFailure, PosixTerminal
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="Requires POSIX terminal descriptors")
 
@@ -315,7 +315,7 @@ def test_acquisition_retains_primary_and_cleanup_failures(
         with pytest.raises(KeyboardInterrupt) as caught:
             PosixTerminal.acquire(borrowed, borrowed)
         assert caught.value is primary
-        assert isinstance(caught.value.__cause__, BaseExceptionGroup)
+        assert isinstance(caught.value.__cause__, AcquisitionCleanupFailure)
         assert caught.value.__cause__.exceptions == (cleanup,)
         assert caught.value.__cause__.__cause__ is prior_cause
         assert caught.value.__context__ is prior_context

@@ -33,7 +33,7 @@ from agentworks.execution.carrier import (
     TerminalInput,
 )
 from agentworks.execution.carriers._subprocess import ProcessResult
-from agentworks.execution.carriers.ssh._terminal_posix import PosixTerminal
+from agentworks.execution.carriers.ssh._terminal_posix import AcquisitionCleanupFailure, PosixTerminal
 
 if TYPE_CHECKING:
     from typing import IO
@@ -248,9 +248,15 @@ class _Attempt:
                         owner.start(request)
                         failure = self._pump(owner, terminal, stdout, stderr)
                     del request, env
-        except Exception:
-            failure = Failure.OBSERVATION if terminal is not None else Failure.DISPATCH
+        except Exception as error:
+            failure = (
+                Failure.OBSERVATION
+                if terminal is not None or isinstance(error.__cause__, AcquisitionCleanupFailure)
+                else Failure.DISPATCH
+            )
         except BaseException as error:
+            if isinstance(error.__cause__, AcquisitionCleanupFailure):
+                failure = Failure.OBSERVATION
             self._record_control(error)
         finally:
             # The native worker alone pumps descriptors. It has stopped before
@@ -397,6 +403,8 @@ def run_terminal_relay_candidate(
     Initial geometry is copied. A detected geometry change refuses the attempt
     because the shared process owner cannot yet notify its exact client. This
     candidate neither constructs a substitute process owner nor interprets
-    preparation readiness. Endpoint use ends before return.
+    preparation readiness. Endpoint use ends before return. Native acquisition
+    cleanup uncertainty becomes an observation fact and a safe control note;
+    public control propagation suppresses raw native cause chains.
     """
     return _Attempt(argv, io, deadline).run()
