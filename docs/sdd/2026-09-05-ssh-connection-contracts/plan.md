@@ -196,7 +196,7 @@ partial-update custody. Production writer coexistence and rollback through both 
 paths still require transport composition and native acceptance.
 
 Shared subprocess adoption introduces an implementation dependency on transport #833. Current
-integration uses `16a6cecba3bad7efe7e65f985e22220d801a8655`. Its shared carrier, process,
+integration uses `e1d4c9b1189edbc247210c6c900975c6290ac531`. Its shared carrier, process,
 preparation and terminal-input interfaces remain unchanged from the preceding SSH integration.
 Private execution binds the selected owner scope and bootstrap boot; the WSL2 native factory
 requires both prepared identity plans and shares one elevated-plan/full-guest bootstrap between file
@@ -236,6 +236,17 @@ workload-size or native envelope proof. The Windows migration fixture now uses b
 and failure-path child cleanup without changing product deadlines or schema assertions. Transport
 records all three private lanes clear at `a2d27446c`; its final head changes only evidence from that
 source pin. No shared SSH interface changed.
+
+Transport's next carrier contract requires caller-held `LocalDeliveryCustody` at actual delivery. It
+retains the existing inert native process owner before admission, so bounded local cleanup may
+return with exact ownership still held by the enclosing operation, keeper or provider workflow.
+Pending/lost local ownership prevents another exchange; remote effects remain separate. The SSH LLD
+records native descriptor/terminal retention and aggregate drain without reopening dispatch. This is
+planned integration, not an implemented adapter guarantee. The design-only dependency and SSH
+response preserve executable/configuration trees from published `2ef07cd6e`; the code-gate evidence
+below retains its measured pin. The preceding transport source's hosted CI `37513250709` and CodeQL
+`37513246961` pass, including the corrected Windows fixture. Its original failure's cause remains
+unknown. No native gate follows from these hosted results.
 
 Combined code pin `38934134e3b8d12af814f9371b62075daa49db3e` preserves all 64 Python paths in the
 SSH contribution, including deletions, from published `186458307b`. Its full suite passes 16,125
@@ -352,7 +363,12 @@ and supported-workstation gates below are unchanged.
       procedure for copied CA/revocation policy, failed updates and rollback.
 - [ ] Complete the carrier's supported delivery modes and explicitly owned forwarding, retaining the
       proven buffered implementation and the transport-owned execution semantics. Optional SCP
-      acceleration must use the same connection policy and obey shared file semantics.
+      acceleration must use the same connection policy and obey shared file semantics. Adopt the
+      concrete shared caller-held delivery custody at actual SSH delivery, with no temporary
+      adapter-local storage. Prove bounded pending construction/cleanup, serialized settlement,
+      refusal while ownership is pending/lost, native descriptor/terminal retention and aggregate
+      drain after borrow handoff. Retain immutable evidence and original interruption; local cleanup
+      establishes no remote cancellation or dispatch-debt resolution.
 - [ ] Implement and validate connection/trust migration with isolated copies: supported operator
       policy, authentication offers, strict verification, genuine creation provenance, concurrent
       writer ownership and rollback evidence. Follow the

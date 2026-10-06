@@ -131,6 +131,24 @@ proof and correction of the cleanup gap remain acceptance work. Forwarding adopt
 [ownership design](forwarding-lld.md#launch-ownership-integration) and measured evidence distinguish
 this adoption from complete native acceptance.
 
+That return-and-cleanup behavior describes the implemented baseline and its open gaps. Transport's
+next carrier contract adds mandatory caller-held `LocalDeliveryCustody` to `execute`. SSH consumes
+that shared storage directly; it does not create temporary adapter-local storage, another process
+owner or live cleanup capabilities inside reports or exception causes. The existing inert native
+owner must be retained before process admission. A bounded return with pending construction or
+cleanup leaves its exact ownership in the caller's enclosing lifetime. Pending or lost ownership
+prevents another exchange through that storage; lost ownership never permits signaling a reused PID.
+Local settlement does not establish remote cancellation or clear uncertain remote dispatch.
+
+The SSH adaptation must preserve borrowed native descriptors and associated terminal state until an
+unfinished constructor can no longer inherit them. Returning or raising is no authority to close,
+reuse or restore those resources. Borrowed byte endpoints remain caller-pumped, with no background
+pump after return. Aggregate cleanup must retain and drain custody after ordinary borrow handoff
+without reopening dispatch. Transport owns the concrete storage type and aggregate integration; SSH
+owns its carrier call sites and terminal resource adaptation. The current runtime signature and
+settlement behavior remain unchanged until that shared implementation and its actual consumers are
+available. Forwarding retains its separately explicit lifetime through the shared native owner.
+
 Live measurements confirm that guest workloads and bootstrap descendants can survive local
 observation expiry. The shared
 [lifetime contract](../2026-09-12-transport-improv/execution-contract.md#carrier-contract) records
