@@ -590,6 +590,19 @@ file quality and whitespace gates, exit 0. Integrated private reviews and lead g
 Provider-locator composition, whole-operation availability and native acceptance remain open; no
 completion checkbox or public round closes.
 
+All three independent lanes clear the Proxmox power unit: project at `4703176ca` passes 201 focused
+and 160 adjacent cases with scoped typing/style; complexity and generic at `429c13547` pass 164
+restored and 153 cases respectively. The latter pin changes only collateral wording, not source or
+tests. Complexity's deletion experiments separately demonstrate that removing early budget
+validation reaches secret preparation and removing the final check accepts late results. The lead
+passes 15,018 non-integration tests with 49 skips and 27 existing fork warnings, exit 0. Complete
+Ruff/format, strict mypy (1,228 source and test files), typer isolation, file quality, locked-SDD,
+Rulesync and whitespace gates exit 0. Website validation passes 160 Python and 103 Node cases, four
+builds and both deterministic comparisons. Published predecessor `6cd18fa65` passes hosted CI and
+CodeQL. This completes local validation of passive power only; whole-platform composition, native
+availability and provider identity acceptance remain open. Draft WIP publication closes no public
+round or broader plan gate.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
