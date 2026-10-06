@@ -61,7 +61,7 @@ def _program() -> str:
         f"exec(compile({start_source!r},'<packed-start>','exec'),m.__dict__)\n"
     )
     source += r"""
-import os, signal
+import os, signal, time
 from pathlib import Path
 root=Path(sys.argv[1])
 phase=sys.argv[2]
@@ -99,22 +99,42 @@ fd=os.open(root,os.O_RDONLY|os.O_DIRECTORY)
 store=st.ManagedJobStore(request.job.operation_lease.run_id,_namespace='managed',_owner_uid=os.getuid(),_anchor_fd=fd)
 os.close(fd)
 boundary=Boundary()
+if phase in {'release-read','release-stop-read'}:
+    real_read=store.read_stop_request
+    calls=0
+    def delayed_stop_read():
+        global calls
+        calls+=1
+        result=real_read()
+        (root/'stop-reads').write_text(str(calls))
+        if calls==1:(root/'clock').write_text('60000000001')
+        elif phase=='release-read':
+            until=time.monotonic()+1
+            while not (root/'entered').exists() and time.monotonic()<until:time.sleep(0.001)
+        return result
+    store.read_stop_request=delayed_stop_read
 def notify():
     if phase=='release':(root/'clock').write_text('60000000000')
+    if phase=='release-read':(root/'clock').write_text('59000000000')
+    if phase=='release-stop-read':
+        (root/'clock').write_text('59000000000')
+        store.publish_stop_request(request.job.launch)
 def runner(argv):
     assert argv[-2]==request.job.operation_lease.run_id
     return g.run(request.job.operation_lease.run_id,_store=store,_boundary=boundary,
                  _notify=notify,_identity_check=False,_apply_identity=False)
 try:
     prepared=s._prepare_start(request,store,python=sys.executable,runner=runner)
-    assert prepared.result.exit_code== (125 if phase in {'placement','release'} else 0)
+    assert prepared.result.exit_code== (125 if phase in {'placement','release','release-read'} else 0)
 finally:store.close()
 """
     return source
 
 
 @pytest.mark.parametrize("interpreter", [sys.executable, "/usr/bin/python3.11"])
-@pytest.mark.parametrize("phase", ["placement", "release", "expiry", "renewal", "stop"])
+@pytest.mark.parametrize(
+    "phase", ["placement", "release", "release-read", "release-stop-read", "expiry", "renewal", "stop"]
+)
 def test_packed_operation_start_lease_and_existing_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, interpreter: str, phase: str
 ) -> None:
@@ -147,7 +167,7 @@ def test_packed_operation_start_lease_and_existing_cleanup(
     parent_pid = None
     descendant_pid = None
     try:
-        if phase not in {"placement", "release"}:
+        if phase not in {"placement", "release", "release-read", "release-stop-read"}:
             _wait_file(marker)
             parent_pid, descendant_pid = map(int, marker.read_text().split())
             with _store(tmp_path) as store:
@@ -171,13 +191,22 @@ def test_packed_operation_start_lease_and_existing_cleanup(
                 else:
                     _set_clock(clock, WINDOW_NS)
         stdout, stderr = worker.communicate(timeout=5)
+        if phase == "release-read":
+            assert not marker.exists(), marker.read_text()
+            assert (tmp_path / "stop-reads").read_text() == "1"
+            assert clock.read_text() == str(WINDOW_NS + 1)
+        if phase == "release-stop-read":
+            assert not marker.exists()
+            assert int((tmp_path / "stop-reads").read_text()) >= 1
+            assert clock.read_text() == str(WINDOW_NS + 1)
         assert worker.returncode == 0, stderr
         assert stdout == b"" and stderr == b""
         with _store(tmp_path) as store:
-            if phase in {"placement", "release"}:
+            if phase in {"placement", "release", "release-read", "release-stop-read"}:
                 assert not marker.exists()
-                assert store.read_fact(FactName.LAUNCH) == (launch() if phase == "release" else None)
-                assert store.read_fact(FactName.BOUNDARY_EMPTY) is None
+                assert not Path(f"/proc/{int((tmp_path / 'placed').read_text())}").exists()
+                assert store.read_fact(FactName.LAUNCH) == (None if phase == "placement" else launch())
+                assert (store.read_fact(FactName.BOUNDARY_EMPTY) is not None) == (phase == "release-stop-read")
             else:
                 assert store.read_fact(FactName.LAUNCH) == launch()
                 assert store.read_fact(FactName.BOUNDARY_EMPTY) is not None
