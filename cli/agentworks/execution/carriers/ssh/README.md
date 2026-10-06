@@ -6,8 +6,10 @@ yet. Production factories and RunContext still use the existing execution stack.
 
 The private `_terminal_posix` resource layer admits supplied readable terminal input and a terminal
 geometry descriptor, allocates its own PTY and restores borrowed input modes after all users stop.
-The geometry descriptor may be read-only. It starts no client or relay and does not enable terminal
-delivery. Shared terminal input, launch custody and supported-workstation proof remain required.
+One retained non-main worker owns acquisition, resize and release; other threads cannot mutate the
+resource. The geometry descriptor may be read-only. It starts no client or relay and does not enable
+terminal delivery. Shared terminal input, worker/client custody and supported-workstation proof
+remain required.
 
 ## Connection policy
 
