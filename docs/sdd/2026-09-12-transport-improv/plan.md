@@ -518,6 +518,28 @@ independent reviews and lead gates are pending. Outer durable-ready availability
 retained-file adoption and native endpoint/drain evidence remain open. No public round closes or
 broader completion checkbox changes.
 
+All three independent lanes clear preparation-batch pin `2d95648e2`. Project passes 211 batch,
+ordinary preparation and ownership cases plus 91 adjacent native-operation/binding cases. Complexity
+passes 221 after restoring experiments: deleting fresh-ID refusal permits an existing row, while
+deleting resolution-ready state breaks both lost-resolution-reply cases. Generic passes 150 and
+withdraws its initial material finding after contract review: interrupted local dispatch open/close
+can retain same-controller custody, but neither loses durable debt nor permits replay or false
+success. Project independently reproduces both states with four passing focused cases. The lead
+passes 14,961 non-integration tests with 49 skips and 27 existing fork warnings, exit 0. Complete
+Ruff/format, strict mypy (1,226 source and test files), typer isolation, file quality, locked-SDD,
+Rulesync and whitespace gates exit 0. Website validation passes 160 Python and 103 Node cases, four
+builds and both deterministic comparisons. Published predecessor `6b55e8215` passes hosted CI and
+CodeQL. No native acceptance or public round closure is claimed.
+
+Before production cleanup completeness, add a bounded local reconciliation follow-up for an
+unreturned dispatch open and an interrupted close after all queries settle. Current conservative
+retention is truthful, but can keep a VM claim even when no probe ran or all probes terminated.
+Retain exact local handles before activation; cleanup may close only that handle with no outstanding
+attempt and may retry only stopped, settled row resolution. Never clear a different dispatcher,
+reopen observation admission, infer native drain from the empty row or replay probes. This is not an
+owner-transfer framework or general signal-atomic bookkeeping promise. Outer durable-ready
+availability composition, retained-file adoption and native endpoint/drain evidence remain open.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
