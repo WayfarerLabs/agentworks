@@ -281,8 +281,8 @@ observation. This supplies private source mechanics, not native PVE 8/9 generati
 guest identity, predecessor drain or production RunContext composition.
 
 New Proxmox connection preparation accepts persisted VMIDs only as positive exact integers or ASCII
-decimal strings. Booleans, floats and malformed/nonpositive values refuse before scoped secret
-lookup or provider access; legacy conversion is not reused at this authority boundary.
+decimal strings. Booleans, floats, malformed values and zero/negative IDs refuse before scoped
+secret lookup or provider access; legacy conversion is not reused at this authority boundary.
 
 `binding.py` carries a native carrier, its actual delivery account and explicit runtime selection.
 The private platform resolver is an explicit preparation operation with a required deadline, so a
