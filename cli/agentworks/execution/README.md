@@ -808,6 +808,20 @@ the keeper retains the raw observation. Only a clean exact ACK permits renewal. 
 are not whole-operation settlement, and this composition does not resolve lifecycle debt, release
 availability or expose public JobAccess.
 
+`_managed_operation_recovery.py` retains one exact admitted start or keeper obligation and its
+persisted OPERATION run after database takeover. Construction reads and rebinds SQLite state only;
+each clock, stop or observation exchange requires a fresh protected action from the same retained
+recovery span. The first span factory remains WSL2-only, so this consumer is not all-platform
+recovery delivery.
+
+A clean same-boot clock fixes one 60-second ceiling for old admitted lease expiry. Later polls never
+raise it, and missing or unusable observations do not authorize elapsed authority. Stop is available
+without waiting for the ceiling. Local drain settles only this recovery exchange when its helper
+termination is independently known; unknown remote termination remains blocking after local drain.
+The consumer retains exact stop and controller observations without resolving predecessor debt,
+resuming the old keeper, replaying start or claiming whole-operation cleanup. Controller absence
+still needs separate one-start admission reconciliation.
+
 `_managed_observation_exchange.py` supplies private fixed `observe` and closed `read-output`
 attempts over the same carrier interface. Its Python 3.11 target helper reads fixed guest identity
 paths and the protected store for an exact expected launch, run, derived unit, target incarnation
