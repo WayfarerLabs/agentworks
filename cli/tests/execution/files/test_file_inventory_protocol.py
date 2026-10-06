@@ -491,6 +491,7 @@ def test_maximum_inventory_response_crosses_http_and_carrier_into_typed_entries(
                     "token_secret": "secret",
                     "ca_bundle": None,
                 },
+                "endpoint": "guest-agent",
                 "method": "GET",
                 "suffix": suffix,
                 "body": None,
