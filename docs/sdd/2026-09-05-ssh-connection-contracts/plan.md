@@ -1,6 +1,6 @@
 # Independent SSH Carrier: Staged Delivery Plan
 
-- Updated: 2026-09-21
+- Updated: 2026-10-06
 - Requirements: [frd.md](frd.md)
 - Architecture: [hla.md](hla.md)
 - Shared contract:
@@ -215,8 +215,9 @@ Transport's
 confirms that it owns the borrowed native-stdin addition to the existing held process owner. Its
 [published dependency checkpoint](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6010031679)
 now supplies the privately reviewed shared types and launch option. The
-[terminal implementation record](terminal-results.md) separates their adoption from actual relay and
-native acceptance. SSH retains its PTY slave until launcher/client settlement and keeps the native
+[terminal implementation record](terminal-results.md) separates shared adoption, the privately
+reviewed POSIX relay and Windows caller resource from native acceptance. The public terminal feature
+remains disabled. SSH retains its PTY slave until launcher/client settlement and keeps the native
 resource worker through interrupted waits and relay cleanup. An
 [owner-mediated resize boundary](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6010061812)
 is now
