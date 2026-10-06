@@ -96,10 +96,11 @@ paths. The candidate remains after publication as evidence.
 
 ## Delivery and forwarding
 
-`SSHCarrier.validate` accepts every current shared prepared invocation and I/O shape without
-effects. Managed-start composition must call it before committing durable `possible-dispatch`;
-transport owns that shared wiring. Connection-file and trust admission, installed-client probing and
-process work stay in `execute`, which also calls the validator before those effects.
+`SSHCarrier.validate` accepts EOF, finite and live byte input without effects, and refuses input
+modes the adapter cannot deliver. Managed-start composition must call it before committing durable
+`possible-dispatch`; transport owns that shared wiring. Connection-file and trust admission,
+installed-client probing and process work stay in `execute`, which also calls the validator before
+those effects.
 
 `SSHCarrier.execute` dispatches once. Captured bytes preserve their provenance; client/guest mixed
 stderr is never relabeled as guest stderr. Exit 255 remains ambiguous. Local timeout and process
@@ -107,12 +108,12 @@ cleanup do not prove guest termination or authorize replay. Shared preparation a
 interpretation belong above this adapter.
 
 The carrier advertises `live_stdio` and accepts the shared `LiveInput` and `SinkOutput` modes.
-`CarrierIO` validates the published mode shapes, and SSH supports every current shape without a
-second adapter allowlist. Borrowed sources and sinks remain caller-owned and are used only for the
-duration of the attempt. The shared process core handles bounded reads, partial sink writes and
-temporary sink stalls while the SSH adapter retains its environment filter and stream provenance.
-Delivered output is not retained in the report. Endpoint failure is reported on its input or output
-boundary and still performs bounded local client cleanup.
+`CarrierIO` validates the published mode shapes. SSH separately admits supported byte input so a new
+shared input mode cannot silently become EOF in the pipe adapter. Borrowed sources and sinks remain
+caller-owned and are used only for the duration of the attempt. The shared process core handles
+bounded reads, partial sink writes and temporary sink stalls while the SSH adapter retains its
+environment filter and stream provenance. Delivered output is not retained in the report. Endpoint
+failure is reported on its input or output boundary and still performs bounded local client cleanup.
 
 The shared process core owns client construction separately from caller-driven byte I/O. Its
 remaining cleanup-interruption and native-platform gates also apply to this adapter. Buffered/live
