@@ -784,7 +784,26 @@ are implemented. Selected-binding preparation and full guest/numeric body guards
 per-dispatch provider-route freshness. Existing account preparation remains a bounded read-only
 probe; its facts cannot authorize body effects without the prepared full guest fence. These are
 explicit later composition/identity gates, not reasons to advertise complete platform availability
-or RunContext. No implementation or native acceptance of this separate unit is claimed yet.
+or RunContext. At the initial assignment, no implementation or native acceptance was claimed.
+
+The private running-Proxmox composition now integrates worker `2b549bef5` and test correction
+`f591e7042`. Ownership precedes passive power, locator and selected root-QGA binding preparation;
+one common numeric guest bootstrap and target bind file/DIRECT views through aggregate teardown.
+Only already-running Proxmox is admitted; stopped activation remains refused. Static marker and
+administrative-account validation precede observation. Preparation and account evidence are retained
+on failed/control paths. The shared account seam no longer loses completed/partial facts or replaces
+original control when borrow release fails; conservative uncertain custody remains retained rather
+than authorizing a body or replay. Worker tests cover SQLite release failures before/after commit.
+
+The worker reports 2,426 focused/adjacent tests with 25 skips, complete strict mypy (1,235 files),
+Ruff/format (1,275 files), full file quality and whitespace checks, exit 0. Its final running import
+guard correction passes 115 composition/native/identity cases and owned typing/style. The actual
+platform and test dependencies are constructed before the guard; packed file and DIRECT bodies then
+refuse all retired-root imports. A separate fresh-process test proves only native-module import and
+stopped refusal. Fresh full plugin registration still reaches legacy SSH through AWS/Tailscale
+registration; this remains a production-factory independence gate, not waived by cached imports.
+Whole-unit private reviews and final lead gates remain pending. Native PVE behavior, startup,
+provider freshness, account-probe guest fencing and complete availability/RunContext remain open.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
