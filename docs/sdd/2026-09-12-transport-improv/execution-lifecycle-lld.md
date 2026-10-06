@@ -772,7 +772,7 @@ coordinator state. If takeover follows admission but precedes launch, the alread
 remains inherited debt and stale publication/resolution refuse; an extra in-process check would not
 establish a remote fence. Core awaits durable READY before fixed preparation and keeps the hold
 through its final recovery action. This is not a complete recovery path: outer renewed-availability
-composition, recovery-specific preparation, predecessor drain and native acceptance remain open.
+composition, retained-file adoption, predecessor drain and native acceptance remain open.
 
 One serial fixed guest/account preparation batch owns a separate bounded `carrier-dispatch`
 obligation, preserving the existing version-one empty-payload meaning used by ordinary fixed helper
@@ -786,6 +786,16 @@ successful preparation or hold release cannot discharge an earlier uncertain bat
 new schema, codec, query counter or row per individual query. The empty row retains uncertainty; it
 cannot reconstruct native endpoint identity or prove complete predecessor drain after process loss.
 Until concrete adapter evidence supplies that proof, retain the claim without replay.
+
+The private `RecoveryGuestPreparationBatch` implements that serial boundary on one pinned native
+binding. It composes fresh fixed guest/selected-locator observations before numeric delivery,
+workload and optional elevated account observations. It shares ordinary observation bodies without
+opening ordinary borrowing to recovery. Original escaping control exceptions carry safe retained
+preparation facts; unknown or uncertain attempts stop the batch. A retry can reconcile only a
+stopped, settled batch's exact resolution, never repeat a probe. The caller must retain the batch
+before admission and separately own the durable-ready availability span through its last recovery
+action. This private implementation does not establish that outer span, adopt retained-file records
+or supply native endpoint/drain proof.
 
 That contract uses a distinct internal recovery-dispatch object, not a recovery mode on the ordinary
 borrow. Admission requires the sealed recovery owner, its exact current generation, a

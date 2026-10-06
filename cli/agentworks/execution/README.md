@@ -201,8 +201,22 @@ support effect under the exact sealed, unresolved recovery generation. It atomic
 possible-effect row and arms the coarse claim. Exact ID/kind/version/bytes retries confirm only
 persistence; they do not repeat dispatch. Ordinary registration/borrowing and predecessor registered
 promotion remain forbidden, and all original/support rows survive later takeover. The existing
-serial guard excludes active or uncertain work. Concrete availability and read-only preparation
-adapters are not yet connected; this bookkeeping alone is neither a lease nor file-recovery proof.
+serial guard excludes active or uncertain work. Private recovery hold startup and fixed preparation
+consume this admission separately; their outer availability composition remains unimplemented. This
+bookkeeping alone is neither a lease nor file-recovery proof.
+
+`_recovery_guest_preparation.py` pins one native binding, recovery owner and caller-retained fresh
+ID before its single-use guest/account batch. A separate version-one empty `carrier-dispatch` row
+owns the serial observations, independently of any availability hold. It reuses the fixed
+guest/locator and numeric account composers, with each helper admitted through exact recovery
+dispatch. Known non-dispatch or normal zero completion settles the helper; protocol refusal still
+grants no prepared facts. Once stopped and fully settled, the batch closes its dispatcher and
+resolves only its own row. A lost resolution reply may be reconciled without repeating observations.
+Unknown dispatch, interruption or uncertain bookkeeping retains the batch and available attempt
+custody and prevents further queries. The result is not an availability lease: core still needs to
+retain a durable-ready span through the final file action. The empty row neither reconstructs native
+handles nor proves predecessor endpoint drain; production composition and native acceptance remain
+open.
 
 The bootstrap waits for source and stdin producers as well as output encoders. Unexpected producer
 failure invalidates delivery even if the command exits zero. Intentional early input closure is

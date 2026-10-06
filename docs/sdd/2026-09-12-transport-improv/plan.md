@@ -508,6 +508,16 @@ it independently of the hold. Native endpoint/drain reconstruction remains unpro
 this empty record. The lifecycle response records this refinement, and its bounded implementation is
 delegated. It does not complete fresh preparation or outer recovery.
 
+The private preparation-batch unit at `011d1b9fb` pins a native binding, sealed recovery owner and
+fresh ID, then admits one separate empty `carrier-dispatch` row. Reused guest/locator and numeric
+account composers execute serially through exact recovery custody. Unknown or interrupted queries
+retain the batch; a lost resolution reply can reconcile only its stopped, settled row without
+replaying probes. The worker passes 362 focused/adjacent cases, including 52 new behavioral checks,
+scoped strict mypy, Ruff/format, full file quality and whitespace gates with exit 0. Integrated
+independent reviews and lead gates are pending. Outer durable-ready availability composition,
+retained-file adoption and native endpoint/drain evidence remain open. No public round closes or
+broader completion checkbox changes.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
