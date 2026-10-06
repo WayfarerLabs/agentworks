@@ -2810,8 +2810,25 @@ bespoke temporary-directory checks with portable fixtures. Independent completio
 required after an interrupted native join. Removing it fails both the simulated and real POSIX
 SIGINT regressions. The lead's integrated selection passes 382 cases; Ruff, formatting, CI's strict
 type-check selection of 1,264 sources and file lint all return zero. The kernel retains the fixed
-LIVE/CLOSING boundary and never resolves original start or keeper debt. Caller-thread start
-composition is being implemented; recovery, aggregate settlement and native proof remain open.
+LIVE/CLOSING boundary and never resolves original start or keeper debt.
+
+The private caller-thread start composition at `0b6d4e717` now reserves the frozen planned run
+before keeper admission and clock effects, attaches the actual initial lease, and permits renewal
+only after a clean acknowledged start with settled local delivery. Uncertain reservation inspects
+only the exact planned ID without replay. Independent project, complexity and generic re-reviews
+report no remaining material findings: 161 start/keeper cases plus 60 codec cases, 161 cases plus
+two targeted mutation failures, and 228 cases plus four adversarial probes respectively. They close
+recycled numeric-thread identity and raw-exception traceback retention defects without weakening
+retained debt or changing escaping original exceptions. Windows-selected cases ran on Linux, not
+native Windows. The unchanged QGA envelope limit retains measured margins of 33 bytes for the
+existing fixture and 2,085 bytes for the operation-lease fixture.
+
+The corrected lead full non-integration suite passes 15,994 cases with 50 skips and 27 existing fork
+warnings on Linux Python 3.12. Ruff, formatting, strict CI type checking and file lint return zero.
+An initial file-lint failure was only README wrapping and is corrected. The earlier full-suite
+15,991-pass result predates the two corrections and is not their acceptance evidence. Recovery,
+aggregate settlement, production factories, public wiring and native proof remain open; this private
+composition neither resolves original obligations nor enables public MANAGED admission.
 
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
       serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one
