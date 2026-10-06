@@ -138,10 +138,11 @@ and checks its locator before and after target preparation. The bounded read-onl
 not itself guest-fenced; account facts grant no body authority without the prepared full guest and
 numeric identity checks at each body helper. Per-dispatch provider-route freshness, complete
 availability, public RunContext composition and native acceptance remain unproved. The native
-operation module imports without retired execution packages; fresh system-plugin registration still
-imports unrelated legacy SSH code. Identity preparation retains completed or partial account
-evidence and conservative custody on borrow-release failure, preserving original escaping control.
-No target or root identity is inferred as a fallback.
+operation module and shipped-plugin registration import without retired execution packages. Existing
+legacy operations import their dependencies only when invoked; this does not supply new cloud/Lima
+bindings or migrate provisioning. Identity preparation retains completed or partial account evidence
+and conservative custody on borrow-release failure, preserving original escaping control. No target
+or root identity is inferred as a fallback.
 
 One shared `ExecutionOperation` keeps one lazily registered empty carrier-dispatch row for its
 lifetime, rather than consuming a row per clean command. Every call still uses a fresh serial

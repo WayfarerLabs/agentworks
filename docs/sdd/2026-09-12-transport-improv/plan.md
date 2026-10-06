@@ -927,8 +927,8 @@ pre-POST cleanup, while a committed row follows adapter reconciliation. Normal t
 VM running. The worker passes 891 focused/adjacent cases, including 39 stopped-workflow and 147 wire
 cases, six-file typing/style, repository file quality and whitespace checks. Provider/account facts
 are scripted and packed Linux bodies run locally. Whole-unit private reviews and complete lead gates
-remain pending; native PVE, Windows-native, HA, generation/drain and complete RunContext remain open.
-This source is integrated privately without a handoff signal or completion checkbox.
+remain pending; native PVE, Windows-native, HA, generation/drain and complete RunContext remain
+open. This source is integrated privately without a handoff signal or completion checkbox.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
@@ -3718,6 +3718,18 @@ suite passed 1,041 tests, and private project, complexity and generic correctnes
 material findings. This proves only the WSL2 construction/binding path on the local host;
 plugin-package independence, complete platform composition and native Windows acceptance keep the
 checkbox open.
+
+Private registration worker `b8e65bc37` now localizes eager retired imports to the existing old
+operations in nine platform/Tailscale/harness modules, without changing registry design or old
+operation behavior. Plugin-first and registry-first fresh subprocesses block all six retirement
+roots before actual shipped registration and passive Proxmox/WSL2 construction/binding, while
+forbidding process/network effects. Existing provider/Lima tests patch the canonical old dependency
+instead of its relocated incidental module global; all behavior assertions remain. The worker passes
+2,317 focused/adjacent cases with four skips, 68 relocated-patch cases, both Windows-selected
+fresh-process cases on Linux, 13-file typing/style, file quality and whitespace checks. This is
+integrated privately; whole-unit reviews and complete lead gates remain pending. Native Windows,
+other-platform binding/trust/provisioning, actual new-stack workflows and the complete additive
+RunContext remain open, so the broader factory checkbox is not completed.
 
 - [ ] Validate complete provisioning, native recovery without Tailscale, plugin operations, files,
       backup, host provisioning/rollback and interactive attachment through the new surface. Cover
