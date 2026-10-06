@@ -4,6 +4,11 @@ This internal adapter accepts explicit connection policy and a prepared invocati
 buffered and live byte delivery plus owned local forwarding. Terminal integration is not implemented
 yet. Production factories and RunContext still use the existing execution stack.
 
+The private `_terminal_posix` resource layer admits supplied readable terminal input and a terminal
+geometry descriptor, allocates its own PTY and restores borrowed input modes after all users stop.
+The geometry descriptor may be read-only. It starts no client or relay and does not enable terminal
+delivery. Shared terminal input, launch custody and supported-workstation proof remain required.
+
 ## Connection policy
 
 `SSHConnection` selects a literal host, port, POSIX account, identity, trust, optional lookup alias
