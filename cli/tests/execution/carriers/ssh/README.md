@@ -233,3 +233,16 @@ creation provenance and do not prove provider ownership, publication binding, pr
 use or native macOS/Windows behavior. Run them only under a separate authorized integration-test
 charter; collection and synthetic maintenance checks alone supply no installed-client workflow
 acceptance.
+
+The integration-marked authentication-offer tests retain the owned server's DEBUG2 packet logs. They
+compare every queried or signed wire key, including its algorithm and complete blob, with the
+configured fixture identity. A foreground owned agent contains independently verified multiple
+fixture keys. Rejected configured keys trap forbidden fallback offers; public-only IdentityFile
+cases distinguish an explicitly selected signer from an inherited agent. A matching sibling public
+key authenticates, while replacement with another fixture key refuses before authentication. A real
+sibling user certificate must never appear in the server's offers. Collection and synthetic log
+checks do not establish native acceptance. Native Linux runs require the authorized tester and own
+all keys, logs, server, agent and socket lifetimes. These cases do not place hostile default user or
+system SSH config: portable OpenSSH locates user config through the account's passwd home, so
+setting HOME to a fixture directory would not supply that evidence. Hostile default config, account
+startup and native macOS/Windows agent behavior remain separate platform acceptance gates.

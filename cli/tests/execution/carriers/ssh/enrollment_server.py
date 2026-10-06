@@ -9,9 +9,10 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -30,7 +31,9 @@ class LocalSSH:
 
 
 @contextmanager
-def enrollment_server(tmp_path: Path, scenario: str) -> Iterator[LocalSSH]:
+def enrollment_server(
+    tmp_path: Path, scenario: str, *, log_path: Path | None = None, log_level: Literal["ERROR", "DEBUG2"] = "ERROR"
+) -> Iterator[LocalSSH]:
     """Own one foreground loopback server and all keys; never read operator SSH policy."""
     if sys.platform != "linux":
         pytest.skip("Local unprivileged sshd fixture requires Linux")
@@ -125,35 +128,37 @@ def enrollment_server(tmp_path: Path, scenario: str) -> Iterator[LocalSSH]:
         f'Port {port}\nListenAddress 127.0.0.1\nHostKey "{host_key}"\n'
         f'AuthorizedKeysFile "{authorized}"\nPidFile "{tmp_path / "pid"}"\n'
         "StrictModes no\nUsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\n"
-        "PermitRootLogin prohibit-password\nPermitUserRC no\nLogLevel ERROR\n" + certificate_config
+        f"PermitRootLogin prohibit-password\nPermitUserRC no\nLogLevel {log_level}\n" + certificate_config
     )
-    server = subprocess.Popen([sshd, "-D", "-e", "-f", str(config)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-    try:
-        until = time.monotonic() + 3
-        while True:
-            if server.poll() is not None:
-                pytest.skip("Local unprivileged sshd unavailable")
-            try:
-                with socket.create_connection(("127.0.0.1", port), timeout=0.1):
-                    break
-            except OSError:
-                if time.monotonic() >= until:
-                    pytest.fail("Owned sshd did not become available")
-                time.sleep(0.01)
-        yield LocalSSH(
-            SSHConnection(
-                "127.0.0.1", pwd.getpwuid(os.getuid()).pw_name, identity, bundle, port=port, host_key_alias=alias
-            ),
-            SSHCreationProvenance("fixture-provider/creation-123", "127.0.0.1", port=port, host_key_alias=alias),
-            authorized,
-            host_public.encode(),
-            scenario,
-        )
-    finally:
-        server.kill()
-        server.wait(timeout=2)
-        assert server.stderr is not None
-        server.stderr.close()
-        with socket.socket() as listener:
-            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            listener.bind(("127.0.0.1", port))
+    with ExitStack() as logs:
+        diagnostics = subprocess.PIPE if log_path is None else logs.enter_context(log_path.open("wb"))
+        server = subprocess.Popen([sshd, "-D", "-e", "-f", str(config)], stdout=subprocess.DEVNULL, stderr=diagnostics)
+        try:
+            until = time.monotonic() + 3
+            while True:
+                if server.poll() is not None:
+                    pytest.skip("Local unprivileged sshd unavailable")
+                try:
+                    with socket.create_connection(("127.0.0.1", port), timeout=0.1):
+                        break
+                except OSError:
+                    if time.monotonic() >= until:
+                        pytest.fail("Owned sshd did not become available")
+                    time.sleep(0.01)
+            yield LocalSSH(
+                SSHConnection(
+                    "127.0.0.1", pwd.getpwuid(os.getuid()).pw_name, identity, bundle, port=port, host_key_alias=alias
+                ),
+                SSHCreationProvenance("fixture-provider/creation-123", "127.0.0.1", port=port, host_key_alias=alias),
+                authorized,
+                host_public.encode(),
+                scenario,
+            )
+        finally:
+            server.kill()
+            server.wait(timeout=2)
+            if server.stderr is not None:
+                server.stderr.close()
+            with socket.socket() as listener:
+                listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                listener.bind(("127.0.0.1", port))
