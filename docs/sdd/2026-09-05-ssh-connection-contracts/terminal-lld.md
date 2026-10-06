@@ -213,24 +213,35 @@ host fixture without changing host configuration.
 
 The private `_terminal_posix.PosixTerminal` implements native descriptor admission, owned PTY setup,
 mode copying, raw borrowed input, output-driven geometry refresh and one-shot resource release. It
-starts no process or relay and introduces no substitute shared terminal type. Release requires all
-descriptor users to have stopped, restores with `TCSANOW` and returns every cleanup failure,
-including control-flow interruptions. Acquisition preserves the primary exception and prior
-cause/context when cleanup also fails. An uncertain close is never retried against a possibly reused
-descriptor number.
+starts no process or relay and introduces no substitute shared terminal type. One retained non-main
+worker owns the complete native lifetime. Acquisition refuses main-thread use, and resize/release
+require the original `Thread` object before effects. Release requires all descriptor users to have
+stopped, restores with `TCSANOW` and returns native cleanup-call failures, including control-flow
+exceptions. Acquisition preserves the primary exception and prior cause/context when cleanup also
+fails. An uncertain close is never retried against a possibly reused descriptor number.
 
 The isolated implementation at `2307b75ed41b36db4b28a4b4537fb4b6cee9e847` passes 28 local Linux PTY
-cases and the broader SSH suite (299 passed, 5 skipped), plus Ruff, format, relevant mypy and file
-quality checks. These cases cover original nondefault modes, geometry from a distinct read-only
-endpoint, queued input, borrowed flags/lifetime, resize, admission refusal, interrupted effects and
-restoration/close failure. They establish resource behavior after known acquisition, not actual
-client delivery or native macOS/Windows acceptance.
+cases and the non-integration SSH suite (299 passed, 5 skipped), plus Ruff, format, relevant mypy
+and file quality checks. These cases cover original nondefault modes, geometry from a distinct
+read-only endpoint, queued input, borrowed flags/lifetime, resize, admission refusal, interrupted
+effects and restoration/close failure. They establish resource behavior after known acquisition, not
+actual client delivery or native macOS/Windows acceptance.
 
-Pure Python `os.openpty()` does not establish custody for an arbitrary asynchronous interruption
-between its native return and Python descriptor assignment. Production composition must settle that
-acquisition boundary alongside client launch ownership before enabling terminal support. The shared
-process owner still needs native stdin support; the actual relay, cleanup reduction, presentation
-sanitation and native acceptance remain open.
+Private project/correctness review then reproduced main-thread SIGINT gaps between release
+bookkeeping and restoration/close. Together with the identified allocation-custody boundary, this
+motivated the retained-worker correction at `c02faf60e884292ac7b782eccc5a43bafcf6afb7`, which
+excludes normal Python main-thread signal delivery from those transitions. Its 31 resource cases
+include main-thread acquisition refusal, wrong-owner resize/release refusal and an owned subprocess
+that interrupts its main thread while the retained worker remains able to restore modes and close
+descriptors. The non-integration SSH selection,
+`pytest tests/execution/carriers/ssh -m 'not integration'`, passes 302 cases with 5 skips. Ruff,
+format, relevant mypy and file checks pass at that isolated correction.
+
+Production composition must retain the native worker before acquisition and through interrupted
+caller waits, client launch and cleanup settlement. Moving acquisition into an anonymous thread does
+not establish that custody. Asynchronous thread injection, fatal signals and allocation exhaustion
+are outside this interruption guarantee. The shared process owner still needs native stdin support;
+the actual relay, cleanup reduction, presentation sanitation and native acceptance remain open.
 
 ## Remaining proof
 
