@@ -53,6 +53,7 @@ from agentworks.execution.profiles import Protection
 from agentworks.execution.result import ExitCode
 from agentworks.operations import OperationOwner
 from agentworks.vms.target_preparation import VMTargetPreparationStatus, prepare_managed_vm_target_from_platform
+from tests.execution._bound_carrier_support import fixture_dispatch
 from tests.execution.files._file_snapshot_support import install_fixture_bundle
 
 if TYPE_CHECKING:
@@ -164,7 +165,7 @@ class _LocalWSL2Dispatch:
         )
         completion = None if result.exit_status is None else ExitStatus(code=result.exit_status)
         return CarrierReport(
-            Dispatch.SENT if result.started else Dispatch.NOT_SENT,
+            fixture_dispatch(result),
             completion,
             result.local_status,
             result.stdout,
