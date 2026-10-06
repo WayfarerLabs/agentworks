@@ -683,6 +683,16 @@ native elevation. Distinct numeric bootstrap guards retain their separate tests.
 concurrency inspection, all three private reviews and full lead gates remain pending; neither
 capacity acceptance nor native/RunContext completion is claimed yet.
 
+Lead concurrency inspection then requests a deterministic verification: finalization could consume a
+call after its failed-bookkeeping flag became visible but before original terminal capture ended.
+The worker reproduces duplicate capture losing the safe control fact while preserving the original
+validation exception; no remote safety failure is demonstrated. Correction `453a66974` serializes
+terminal capture and failure-flag publication under the existing short admission guard, without
+holding it during carrier execution or nesting it inside finish retry. Four event/barrier
+regressions cover finish/retry against control capture and failed handoff. The worker passes 219
+focused/adjacent cases, scoped typing/style, full file quality and whitespace gates, exit 0.
+Integrated whole-unit re-review and final lead gates remain pending.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
