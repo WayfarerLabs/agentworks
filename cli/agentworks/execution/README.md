@@ -376,15 +376,21 @@ dispatching work. Once admitted, the owner constructs, observes and cleans up th
 the caller pumps its borrowed byte endpoints. A caller-side guard covers startup, admission and
 pumping, but does not make asynchronous interruption atomic. On handled cleanup paths, control-flow
 exceptions propagate after admitted ownership is settled or incomplete cleanup is reported. The
-owner relinquishes command data and pipe capabilities before publishing its terminal observation. An
-inert bootstrap or final native-thread return tail may finish later, but cannot use borrowed
-endpoints or launch work.
+owner relinquishes command data and published pipe capabilities before its first cleanup
+observation. An unclean observation can leave the exact native process held by that same owner
+thread. An inert bootstrap or final native-thread return tail may finish later, but cannot use
+borrowed endpoints or launch work.
 
 `LocalProcessOwner` exposes that same private ownership mechanism independently of byte pumping.
 Construct it before dispatch, call `start(LocalProcessRequest(...))` once, and observe immutable
 snapshots. One caller serializes start and close; other threads may read snapshots. Published pipes
 remain borrowed until every reader/writer has stopped, after which `close()` relinquishes them and
-returns stable terminal facts. A terminal with `admitted=False` records canceled admission without
+returns the immutable first cleanup observation. `close_bounded(Deadline)` instead bounds waiting
+for cleanup evidence and can return pending; it does not interrupt native construction or cleanup
+syscalls. After a retryable cleanup failure, another bounded close requests one serialized retry
+through the same owner. Signal-free natural-exit observation can settle cleanup later without
+changing the first observation. Lost native ownership remains unclean and cannot authorize another
+numeric-PID signal. A terminal with `admitted=False` records canceled admission without
 waiting for an inert bootstrap. Natural exit remains observable with stdin held open; closing stdin
 alone is EOF, not owner close. Status first learned during cleanup is never natural-exit evidence.
 The ordinary pump uses this interface. SSH forwarding adoption remains with its owning lane, which
@@ -393,9 +399,10 @@ must stop and join its pipe users before closing the common owner.
 `LocalProcessRequest.input` chooses `LocalProcessInput.EOF`, `LocalProcessInput.PIPE`, or one
 `BorrowedProcessStdin(descriptor)`. The borrowed descriptor can supply an adapter-owned PTY slave
 without combining stdout/stderr or installing terminal policy in the shared owner. Construction is
-passive; it neither inspects nor duplicates the descriptor. The caller retains the descriptor until
-the owner's terminal publication, including settlement after interrupted admission or process
-construction. The owner never closes it, and publishes no stdin pipe for that choice. A terminal
+passive; it neither inspects nor duplicates the descriptor. The caller retains it and any supplied
+`pass_fds` descriptors while construction remains pending, including after interrupted admission or
+bounded close. A pending return is not permission to close or reuse them. The owner never closes
+caller-owned descriptors, and publishes no stdin pipe for the borrowed choice. A terminal
 with incomplete process cleanup does not authorize restoring borrowed terminal modes. Terminal
 admission, relaying, geometry and restoration remain adapter responsibilities; native SSH and
 Windows terminal proof remain open.

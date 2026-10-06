@@ -2712,6 +2712,18 @@ and product deadlines. A local delayed-spawn probe reproduces the old barrier fa
 corrected fixture; it does not establish the original hosted failure's cause or native Windows
 acceptance. Fresh hosted verification remains required.
 
+The bounded-close core is integrated privately from worker `0a1068545`. All three independent lanes
+clear that whole source unit against `a2d27446c`: project passes 172 cases with one skip and three
+real-child control-identity probes; complexity passes 133 cases with one skip and reproduces the
+original interruption failure by restoring the old lookup; generic correctness passes 678 cases
+with one skip. Each exits 0 at the final pin. The worker passes 469 cases with one skip, 294 bundled
+guest/bootstrap cases (including distribution Python 3.11), Ruff/format and strict mypy (1,250
+sources). Corrections remove unused retained-status bookkeeping and preserve the immutable first
+cleanup observation when a later natural-exit cleanup is pending. These prove the private core,
+not caller-held carrier custody, Proxmox/keeper integration, native acceptance or full-scope
+completion. The matching permanent execution documentation now distinguishes first-close evidence
+from later cleanup settlement and retains caller-owned descriptors through pending construction.
+
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
       serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one
       in-flight exchange, exact uncertainty retention and drain before release/disposal. Bind it to
