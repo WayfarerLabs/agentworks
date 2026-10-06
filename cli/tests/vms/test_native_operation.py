@@ -1,12 +1,18 @@
-"""Real-claim checks for the private existing-VM native operation."""
+"""Real claims and simulated native composition with intact packed helpers.
+
+Privilege admission, external guest observations and the guest scratch parent
+are mocked. Native credential transitions and root-owned scratch are not proved.
+"""
 
 from __future__ import annotations
 
 import gc
 import json
 import os
+import subprocess
 import sys
 from contextlib import closing
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, cast
 
@@ -24,18 +30,37 @@ from agentworks.db import (
     VMStatus,
 )
 from agentworks.db.operations import OperationRepository
-from agentworks.errors import StateError, ValidationError
+from agentworks.errors import ExternalError, StateError, UncertainOutcomeError, ValidationError
 from agentworks.execution import _wsl2_owned_operation
+from agentworks.execution._file_obligation import decode_file_call_obligation
 from agentworks.execution._file_operation import _ActiveFileUpload
 from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+from agentworks.execution._target_identity import TargetIdentityPreparation, TargetIdentityStatus
+from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 from agentworks.execution._wsl2_lifecycle import GuestAnchorPresence
+from agentworks.execution._wsl2_owned_operation import WSL2OwnedOperation
 from agentworks.execution.binding import NativeExecutionBinding
-from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, EndOfInput, FiniteInput, PreparedInvocation
+from agentworks.execution.carrier import (
+    CapturedOutput,
+    CarrierIO,
+    CarrierReport,
+    Deadline,
+    Dispatch,
+    EndOfInput,
+    ExitStatus,
+    FiniteInput,
+    PreparedInvocation,
+    Retention,
+    SinkOutput,
+)
 from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
 from agentworks.execution.models import Command
 from agentworks.execution.profiles import Protection
+from agentworks.execution.result import CheckedExecutionError
 from agentworks.operations import OperationOwner
+from agentworks.vms import _native_operation
 from agentworks.vms._native_operation import NativeVMOperationControlFact, native_vm_operation
 from agentworks.vms.target_preparation import (
     VMTargetPreparation,
@@ -43,9 +68,9 @@ from agentworks.vms.target_preparation import (
     VMTargetPreparationFailure,
     VMTargetPreparationStatus,
 )
-from tests.execution.test_target_identity import LocalCarrier, SyntheticCarrier
-from tests.execution.test_wsl2_owned_download import GuestThenFileCarrier, _install_file_fixtures
-from tests.execution.test_wsl2_platform_hold import FakeNative, FakeObserver
+from tests.execution.test_target_identity import SyntheticCarrier
+from tests.execution.test_wsl2_owned_download import GuestThenFileCarrier
+from tests.execution.test_wsl2_platform_hold import BOOT, FakeNative, FakeObserver
 from tests.vms.test_target_preparation import _MARKER
 
 if TYPE_CHECKING:
@@ -192,16 +217,86 @@ def test_fresh_intent_and_power_gate_precedes_route_and_wake(
     assert database.operations.inspect(_scope()) is None
 
 
+# Mock privileged admission and external guest observations. A fixture-owned
+# scratch parent models the guest filesystem because host /tmp is not root-owned.
+# The delivered program, body credentials, prefix and protocols execute intact.
+_MOCK_ADMISSION = """
+import builtins,contextlib,json,os,sys
+real_exec=builtins.exec
+observed=json.loads(sys.argv[3])
+scratch=sys.argv[4]
+@contextlib.contextmanager
+def admit(uid,gid,groups):
+ assert (uid,gid,groups)==(os.geteuid(),os.getegid(),tuple(sorted(set(os.getgroups())|{os.getegid()})))
+ yield lambda:b'1 (init) S '+b'0 '*18+str(observed[2]).encode()+b'\\n'
+def enter(frame,event,arg):
+ if event=='call' and frame.f_code.co_filename=='<agentworks-root-bootstrap>' and frame.f_code.co_name=='main':
+  frame.f_globals['_admit']=admit
+  sys.setprofile(None)
+def execute(source,scope=None,local=None):
+ if scope is None:scope=sys._getframe(1).f_globals
+ real_exec(source,scope,local)
+ if scope.get('__name__','').endswith('._vm_guest_identity_guest'):
+  scope['_read_marker']=lambda *args:observed[0]
+  scope['_read_boot_id']=lambda *args:observed[1]
+ elif scope.get('__name__','').endswith('._scratch_root') and scratch:
+  scope['_LINUX_SCRATCH_ROOT']=scratch
+  scope['_EXPECTED_OWNER_UID']=os.geteuid()
+wrapper=sys.argv[2]
+sys.argv=['fixed-helper',sys.argv[1]]
+builtins.exec=execute
+sys.setprofile(enter)
+real_exec(compile(wrapper,'<delivered-wrapper>','exec'),{'__name__':'__main__'})
+"""
+
+
+class _PackedCarrier:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.observed = VMGuestIdentity(_MARKER, BOOT, 4096)
+        self.scratch: Path | None = None
+
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        assert isinstance(io.input, FiniteInput) and isinstance(io.output, SinkOutput)
+        self.calls += 1
+        nonce = invocation.argv[invocation.argv.index("agentworks-runtime-prerequisite") + 1]
+        guest = self.observed
+        completed = subprocess.run(
+            [
+                "/usr/bin/python3",
+                "-I",
+                "-S",
+                "-B",
+                "-c",
+                _MOCK_ADMISSION,
+                nonce,
+                invocation.argv[-2],
+                json.dumps((guest.instance_marker, guest.boot_id, guest.init_start_ticks)),
+                str(self.scratch) if self.scratch is not None else "",
+            ],
+            input=io.input.data,
+            capture_output=True,
+            timeout=deadline.remaining(),
+            check=False,
+        )
+        io.output.stdout.try_write(memoryview(f"AGW_RUNTIME_1:{nonce}:ready:0\n".encode() + completed.stdout))
+        io.output.stderr.try_write(memoryview(completed.stderr))
+        output = CapturedOutput(complete=True, retention=Retention.DELIVERED)
+        return CarrierReport(Dispatch.SENT, ExitStatus(code=completed.returncode), 0, output, output, None)
+
+
 class _RouteCarrier:
     def __init__(self, database: Database) -> None:
         self.guest = GuestThenFileCarrier(database)
         gid = os.getegid()
         identity = IdentityExpectation(os.geteuid(), gid, tuple(sorted(set(os.getgroups()) | {gid})))
         self.accounts = SyntheticCarrier({"admin": identity, "root": IdentityExpectation(0, 0, (0,))})
-        self.local = LocalCarrier()
+        self.local = _PackedCarrier()
         self.local_deadlines: list[Deadline] = []
         self.routes: list[WSL2Connection] = []
         self.ownership: OperationOwnership | None = None
+        self.file_records: list[bytes] = []
+        self.prepared_guest: VMGuestIdentity | None = None
 
     def execute(
         self, carrier: WSL2Carrier, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline
@@ -225,6 +320,10 @@ class _RouteCarrier:
             if isinstance(request, dict) and "account" in request:
                 return self.accounts.execute(invocation, io=io, deadline=deadline)
         self.local_deadlines.append(deadline)
+        for row in self.guest.database.operations.list_lifecycle_obligations(claim.ownership):
+            if row.obligation_kind == "file-call":
+                assert row.payload_version == 2
+                self.file_records.append(row.payload)
         return self.local.execute(invocation, io=io, deadline=deadline)
 
 
@@ -232,6 +331,13 @@ def _install_route(
     database: Database, platform: WSL2Platform, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[_RouteCarrier, FakeNative, FakeObserver]:
     route = _RouteCarrier(database)
+    original_start = WSL2OwnedOperation.start_and_prepare
+
+    def start(selected: WSL2OwnedOperation, deadline: Deadline) -> VMGuestIdentity | None:
+        route.prepared_guest = original_start(selected, deadline)
+        return route.prepared_guest
+
+    monkeypatch.setattr(WSL2OwnedOperation, "start_and_prepare", start)
     native = FakeNative([])
     observer = FakeObserver([])
     connection = WSL2Connection("Ubuntu", "admin", "wsl.exe")
@@ -260,9 +366,9 @@ def test_prepared_views_share_claim_and_clean_teardown(
     root.mkdir()
     root.joinpath("source").write_bytes(b"native-file")
     scratch = tmp_path / "scratch"
-    scratch.mkdir()
+    scratch.mkdir(mode=0o1777)
     scratch.chmod(0o1777)
-    _install_file_fixtures(monkeypatch, tmp_path, scratch)
+    route.local.scratch = scratch
     views = None
     body_deadline = Deadline.after(30)
     with native_vm_operation(
@@ -273,11 +379,28 @@ def test_prepared_views_share_claim_and_clean_teardown(
         assert claim is not None and claim.ownership == selected.owner.ownership
         assert selected.file_operation._owner is selected.owner
         assert selected.execution_operation._owner is selected.owner
+        bootstrap = selected.file_operation._bootstrap
+        assert bootstrap is not None and selected.execution_operation._bootstrap is bootstrap
+        assert bootstrap.guest == VMGuestIdentity(_MARKER, BOOT, route.guest.init_ticks)
+        assert bootstrap.guest is route.prepared_guest
+        assert bootstrap.root_entry is selected.files._elevated_plan is selected.execution._elevated_plan
+        assert selected.files._ordinary_plan is selected.execution._ordinary_plan
+        assert bootstrap.root_entry.mode is IdentityMode.SUDO_ROOT
+        assert bootstrap.root_entry.expected == IdentityExpectation(0, 0, (0,))
         assert selected.files.stat(PurePosixPath(root / "source")) is not None
         read = selected.files.read_file(PurePosixPath(root / "source"), max_bytes=64)
-        assert read is not None
-        result = selected.execution.run(Command(["/bin/true"]), profile=Protection.DIRECT, deadline=Deadline(None))
-        assert result is not None
+        assert read is not None and read.data == b"native-file"
+        code = (
+            "import json,os;print(json.dumps([os.geteuid(),os.getegid(),sorted(set(os.getgroups())|{os.getegid()})]))"
+        )
+        result = selected.execution.run(
+            Command(["/usr/bin/python3", "-I", "-S", "-B", "-c", code]),
+            profile=Protection.DIRECT,
+            deadline=Deadline(None),
+        )
+        assert result.ok
+        body = selected.execution._ordinary_plan.expected
+        assert json.loads(result.stdout.data) == [body.euid, body.egid, list(body.groups)]
         assert route.local_deadlines[-1] is body_deadline
     assert views is not None
     assert native.events and "dispatch" in native.events
@@ -297,6 +420,109 @@ def test_prepared_views_share_claim_and_clean_teardown(
         views.files.download(PurePosixPath(root / "source"), destination, max_bytes=64)
     assert not destination.exists()
     assert route.local.calls >= 3
+    assert not list(scratch.iterdir())
+    assert route.file_records
+    for payload in route.file_records:
+        record = decode_file_call_obligation(payload)
+        assert record.bootstrap == bootstrap
+        assert record.identity_plan.mode is IdentityMode.DIRECT
+        assert record.identity_plan.expected.euid == os.geteuid()
+
+
+@pytest.mark.parametrize("uncertain_hold", [False, True])
+@pytest.mark.parametrize("missing_account", [False, True])
+def test_missing_root_plan_refuses_before_views_and_preserves_hold_custody(
+    database: Database,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    uncertain_hold: bool,
+    missing_account: bool,
+) -> None:
+    platform = WSL2Platform("wsl2", {})
+    route, native, observer = _install_route(database, platform, monkeypatch)
+    if missing_account:
+        route.accounts.missing.add("root")
+    else:
+        ordinary = IdentityPlan(route.accounts.identities["admin"], IdentityMode.DIRECT)
+        prepared = TargetIdentityPreparation(TargetIdentityStatus.PREPARED, ordinary, None, None, None, None)
+        monkeypatch.setattr(_native_operation, "prepare_target_identity", lambda *args, **kwargs: prepared)
+    if uncertain_hold:
+        observer.presence = GuestAnchorPresence.UNKNOWN
+    with (
+        pytest.raises(StateError) as raised,
+        native_vm_operation(
+            database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=_root(tmp_path)
+        ),
+    ):
+        pytest.fail("missing root plan must not expose operation views")
+    assert route.local.calls == 0 and not route.file_records
+    assert route.guest.calls == 1 and native.events.count("dispatch") == 1
+    assert observer.events == ["observe"]
+    assert (database.operations.inspect(_scope()) is not None) is uncertain_hold
+    if uncertain_hold:
+        fact = raised.value.__cause__
+        assert isinstance(fact, NativeVMOperationControlFact)
+        assert fact._workflow.views is None
+        assert fact._workflow.identity is not None and fact._workflow.identity.elevated_plan is None
+        with pytest.raises(StateError):
+            fact._workflow.owner.borrow()
+        observer.presence = GuestAnchorPresence.ABSENT_CONFIRMED
+        fact.retry_cleanup(Deadline.after(10))
+        assert database.operations.inspect(_scope()) is None
+
+
+@pytest.mark.parametrize("field", ["instance_marker", "boot_id", "init_start_ticks"])
+@pytest.mark.parametrize("action", ["stat", "read", "remove", "command"])
+def test_full_guest_mismatch_prevents_file_and_command_application_effects(
+    database: Database,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    action: str,
+) -> None:
+    platform = WSL2Platform("wsl2", {})
+    route, _, observer = _install_route(database, platform, monkeypatch)
+    guest = route.local.observed
+    mismatched = {
+        "instance_marker": replace(guest, instance_marker="b" * 32),
+        "boot_id": replace(guest, boot_id="123e4567-e89b-12d3-a456-426614174000"),
+        "init_start_ticks": replace(guest, init_start_ticks=guest.init_start_ticks + 1),
+    }[field]
+    root = Path(_root(tmp_path))
+    root.mkdir()
+    source = root / "source"
+    source.write_bytes(b"unchanged")
+    command_effect = root / "command-effect"
+    with (
+        pytest.raises(StateError) as teardown,
+        native_vm_operation(
+            database, "box", platform, RunContext(), deadline=Deadline.after(30), trusted_root=PurePosixPath(root)
+        ) as views,
+    ):
+        metadata = views.files.stat(PurePosixPath(source))
+        assert metadata is not None
+        route.local.observed = mismatched
+        if action == "command":
+            with pytest.raises(CheckedExecutionError):
+                views.execution.run(
+                    Command(["/usr/bin/touch", str(command_effect)]), profile=Protection.DIRECT, check=True
+                )
+        else:
+            with pytest.raises(UncertainOutcomeError if action == "remove" else ExternalError):
+                if action == "stat":
+                    views.files.stat(PurePosixPath(source))
+                elif action == "read":
+                    views.files.read_file(PurePosixPath(source), max_bytes=64)
+                else:
+                    views.files.remove(PurePosixPath(source), expected_kind=metadata.kind, expected=metadata.revision)
+    assert source.read_bytes() == b"unchanged" and not command_effect.exists()
+    assert route.local.calls == 2
+    assert not observer.events and database.operations.inspect(_scope()) is not None
+    fact = teardown.value.__cause__
+    assert isinstance(fact, NativeVMOperationControlFact)
+    assert fact._workflow.views is views
+    with pytest.raises(StateError):
+        views.owner.borrow()
 
 
 def test_never_created_hold_releases_without_ready(

@@ -15,6 +15,7 @@ from agentworks.errors import NotFoundError, StateError, ValidationError
 from agentworks.execution._execution_operation import ExecutionOperation
 from agentworks.execution._file_operation import FileOperation
 from agentworks.execution._file_paths import normalized_root
+from agentworks.execution._runtime_prerequisite import _NumericGuestBootstrap
 from agentworks.execution._target_identity import (
     TargetIdentityControlFact,
     TargetIdentityPreparation,
@@ -234,10 +235,15 @@ def _prepare(
             workflow.identity = control.__cause__.preparation
         raise
     workflow.identity = identity
-    if identity.status is not TargetIdentityStatus.PREPARED or identity.ordinary_plan is None:
+    if (
+        identity.status is not TargetIdentityStatus.PREPARED
+        or identity.ordinary_plan is None
+        or identity.elevated_plan is None
+    ):
         raise StateError("Native VM account preparation is unavailable", entity_kind="vm", entity_name=vm_name)
-    file_operation = FileOperation(workflow.owner, target)
-    execution_operation = ExecutionOperation(workflow.owner, target)
+    bootstrap = _NumericGuestBootstrap(identity.elevated_plan, guest)
+    file_operation = FileOperation(workflow.owner, target, bootstrap=bootstrap)
+    execution_operation = ExecutionOperation(workflow.owner, target, bootstrap=bootstrap)
 
     def selected_deadline() -> Deadline:
         return workflow.deadline
