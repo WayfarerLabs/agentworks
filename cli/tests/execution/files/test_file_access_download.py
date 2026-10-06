@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path, PurePosixPath
-from threading import Event, Thread
+from threading import Event, Thread, current_thread
 
 import pytest
 
@@ -452,10 +452,14 @@ def test_closed_then_interrupted_borrow_keeps_old_call_and_refuses_new_stage_or_
     original_close = OperationBorrow.close
     original_publisher = local_download_module._publisher_for_host
     stage_calls = 0
+    closes = 0
 
     def close_then_interrupt(borrow: OperationBorrow) -> None:
+        nonlocal closes
+        closes += 1
         original_close(borrow)
-        raise interrupt
+        if closes == 1:
+            raise interrupt
 
     def publisher(path: Path, condition: Create | Replace):
         nonlocal stage_calls
@@ -496,17 +500,24 @@ def test_closed_then_interrupted_borrow_keeps_old_call_and_refuses_new_stage_or_
     assert stage_calls == 1 and stage.aborts == 0
 
 
-def test_release_return_window_refuses_next_call_before_retained_cleanup_retry(
-    bound_access: tuple[FileAccess, Path, OperationOwner, Database], monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("scenario", ["normal", "finalizer_interrupt", "original_interrupt"])
+def test_delayed_borrow_refuses_next_call_before_stage_or_retained_cleanup_retry(
+    scenario: str, bound_access: tuple[FileAccess, Path, OperationOwner, Database], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    access, root, _owner, _database = bound_access
+    access, root, owner, _database = bound_access
     source = root / "source"
     source.write_bytes(b"payload")
-    entered = Event()
-    proceed = Event()
-    returned: list[BaseException] = []
+    before_borrow = Event()
+    admit_second = Event()
+    released_first = Event()
+    finish_first = Event()
+    first_errors: list[BaseException] = []
+    second_errors: list[BaseException] = []
     stage_calls = 0
     original_release = release_borrow_after_custody
+    original_borrow = owner.borrow
+    finalizer_interrupt = KeyboardInterrupt()
+    original_interrupt = KeyboardInterrupt()
 
     class FailedAbortStage:
         published = False
@@ -519,6 +530,8 @@ def test_release_return_window_refuses_next_call_before_retained_cleanup_retry(
 
         def commit(self, *, verified_complete: bool, size: int, sha256: str, deadline: Deadline | None = None) -> None:
             del verified_complete, size, sha256, deadline
+            if scenario == "original_interrupt":
+                raise original_interrupt
             self.published = True
 
         def abort(self) -> None:
@@ -535,32 +548,63 @@ def test_release_return_window_refuses_next_call_before_retained_cleanup_retry(
 
     def paused_release(borrow: OperationBorrow, *, retain_effect: bool = False) -> None:
         original_release(borrow, retain_effect=retain_effect)
-        entered.set()
-        assert proceed.wait(10)
+        if current_thread().name == "first-local-download":
+            released_first.set()
+            assert finish_first.wait(10)
+            if scenario != "normal":
+                raise finalizer_interrupt
+
+    def delayed_borrow() -> OperationBorrow:
+        if current_thread().name == "second-local-download":
+            before_borrow.set()
+            assert admit_second.wait(10)
+        return original_borrow()
 
     def run_first() -> None:
         try:
             access.download(PurePosixPath(source), root.parent / "local-download")
         except BaseException as exc:
-            returned.append(exc)
+            first_errors.append(exc)
+
+    def run_second() -> None:
+        try:
+            access.download(PurePosixPath(source), root.parent / "second-download")
+        except BaseException as exc:
+            second_errors.append(exc)
 
     monkeypatch.setattr(local_download_module, "_publisher_for_host", publisher)
     monkeypatch.setattr(file_operation_module, "release_borrow_after_custody", paused_release)
-    worker = Thread(target=run_first, daemon=True)
-    worker.start()
+    monkeypatch.setattr(owner, "borrow", delayed_borrow)
+    second = Thread(target=run_second, name="second-local-download", daemon=True)
+    first = Thread(target=run_first, name="first-local-download", daemon=True)
+    second.start()
     try:
-        assert entered.wait(10)
+        assert before_borrow.wait(10)
+        first.start()
+        assert released_first.wait(10)
         old_call = access._operation._local_download_call
         assert old_call is not None
         assert access._operation.retained_local_download_stage is stage
-        with pytest.raises(StateError):
-            access.download(PurePosixPath(source), root.parent / "second-download")
+        admit_second.set()
+        second.join(10)
+        assert not second.is_alive()
+        assert len(second_errors) == 1 and isinstance(second_errors[0], StateError)
         assert access._operation._local_download_call is old_call
         assert stage_calls == 1 and stage.aborts == 1
     finally:
-        proceed.set()
-        worker.join(10)
-    assert not worker.is_alive()
-    assert len(returned) == 1 and isinstance(returned[0], ExternalError)
-    assert access._operation._local_download_call is None
+        admit_second.set()
+        finish_first.set()
+        first.join(10)
+        second.join(10)
+    assert not first.is_alive() and not second.is_alive()
+    assert len(first_errors) == 1
+    if scenario == "original_interrupt":
+        assert first_errors[0] is original_interrupt
+        assert isinstance(original_interrupt.__cause__, FileLocalDownloadControlFact)
+        assert original_interrupt.__cause__.outcome.unfinished_stage is stage
+    else:
+        assert isinstance(first_errors[0], ExternalError)
+        assert first_errors[0].details is not None
+        assert first_errors[0].details.reason is FileFailureReason.CLEANUP
+    assert access._operation._local_download_call is (old_call if scenario != "normal" else None)
     assert access._operation.retained_local_download_stage is stage

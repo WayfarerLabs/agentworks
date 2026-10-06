@@ -294,10 +294,10 @@ class FileOperation:
 
     def begin_local_download(self) -> _LocalDownloadCall:
         """Acquire whole-call serial admission before workstation effects."""
-        if self._local_download_call is not None:
-            raise StateError("A local download call still holds core custody")
         borrow = self._owner.borrow()
         try:
+            if self._local_download_call is not None:
+                raise StateError("A local download call still holds core custody")
             call = _LocalDownloadCall(borrow)
         except BaseException:
             borrow.close()
