@@ -745,6 +745,31 @@ whitespace gates, exit 0. Combined source review and final lead gates remain pen
 native PVE 8/9 acceptance, disabled-generation/adoption policy, request drain, production target
 composition or a completed plan checkbox.
 
+Whole-unit review at `3a6cc5436` finds one concrete authority-boundary defect: inherited VMID
+conversion accepts JSON booleans or truncates floats before constructing the new connection. The
+generic lane reproduces a positive locator for `true` through a mocked provider response; this is
+not dismissed because ordinary producers use decimal strings. Worker correction `101aa653f`
+validates raw stored VMID once before scoped secret lookup, accepting only positive exact integers
+or ASCII decimal strings; legacy conversion/callers remain unchanged. Invalid values refuse without
+secret/provider access, and supported integer/string forms preserve the same locator. Complexity
+review also replaces deadline-check call ordinals with elapsed fake time at preparation, response,
+hashing and failure boundaries (`d8e1a469a`). Deleting the final or post-request check still fails
+the revised tests, while a harmless added check no longer changes their meaning. A scoped-secret
+fixture now supplies a valid VMID so it continues to test its intended refusal. The corrected worker
+reports 275 adjacent tests, complete strict mypy (1,234 files), owned style, full file quality and
+whitespace checks, exit 0. The lead's pre-correction baseline passes 15,280 tests with 49 skips and
+27 existing fork warnings; it is not final correction acceptance. Corrected whole-unit reviews and
+lead gates remain pending.
+
+A separate private Proxmox existing-VM composition unit is assigned for already-running VMs only,
+under ownership acquired before observation and shared through file/DIRECT body and cleanup. Stopped
+startup remains refused until a bounded activation producer and its acknowledgment/unknown custody
+are implemented. Selected-binding preparation and full guest/numeric body guards are not
+per-dispatch provider-route freshness. Existing account preparation remains a bounded read-only
+probe; its facts cannot authorize body effects without the prepared full guest fence. These are
+explicit later composition/identity gates, not reasons to advertise complete platform availability
+or RunContext. No implementation or native acceptance of this separate unit is claimed yet.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
