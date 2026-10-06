@@ -131,6 +131,8 @@ def endpoint(tmp_path: Path) -> Iterator[_Endpoint]:
         def do_GET(self) -> None:
             if self.path.endswith("/status/current"):
                 self.reply(b'{"data":{"status":"running"}}')
+            elif self.path.endswith("/config?current=1"):
+                self.reply(b'{"data":{"vmgenid":"613ea898-8445-4e6e-82c7-f6e9ae8d7235"}}')
             else:
                 self.reply(b'{"data":{"exited":1,"exitcode":0}}')
 
@@ -166,20 +168,30 @@ def _execute(url: str, ca_bundle: Path | None):
 
 @pytest.mark.windows
 @pytest.mark.parametrize("trust", ["matching", "unknown-ca", "wrong-host", "system"])
-def test_passive_provider_power_preserves_ca_and_hostname_policy(endpoint: _Endpoint, trust: str) -> None:
+@pytest.mark.parametrize("current_config", [False, True])
+def test_passive_provider_observation_preserves_ca_and_hostname_policy(
+    endpoint: _Endpoint, trust: str, current_config: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+    monkeypatch.setenv("https_proxy", "http://127.0.0.1:1")
+    monkeypatch.setenv("NO_PROXY", "")
+    monkeypatch.setenv("no_proxy", "")
     url = endpoint.url.replace("localhost", "127.0.0.1") if trust == "wrong-host" else endpoint.url
     bundle: Path | None = endpoint.unknown_ca if trust == "unknown-ca" else endpoint.ca_bundle
     if trust == "system":
         bundle = None
     wire = _ProxmoxWire(ProxmoxConnection(url, "node1", 123, "test@pve!token", _TOKEN, ca_bundle=bundle))
+    observe = wire.request_current_config if current_config else wire.request_power
     if trust == "matching":
-        assert wire.request_power(timeout=30) == {"status": "running"}
+        expected = {"vmgenid": "613ea898-8445-4e6e-82c7-f6e9ae8d7235"} if current_config else {"status": "running"}
+        assert observe(timeout=30) == expected
+        route = "config?current=1" if current_config else "status/current"
         assert endpoint.requests == [
-            ("GET", "/api2/json/nodes/node1/qemu/123/status/current", f"PVEAPIToken=test@pve!token={_TOKEN}")
+            ("GET", f"/api2/json/nodes/node1/qemu/123/{route}", f"PVEAPIToken=test@pve!token={_TOKEN}")
         ]
     else:
         with pytest.raises(_WireFailure) as raised:
-            wire.request_power(timeout=30)
+            observe(timeout=30)
         assert _TOKEN not in str(raised.value)
         assert endpoint.requests == []
 

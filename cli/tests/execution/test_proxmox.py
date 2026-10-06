@@ -129,7 +129,10 @@ def test_wire_sends_json_and_uses_explicit_network_policy(monkeypatch: pytest.Mo
     assert response.closed
 
 
-def test_power_wire_uses_fixed_provider_get_and_verified_tls(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("current_config", [False, True])
+def test_observation_wire_uses_fixed_provider_get_and_verified_tls(
+    monkeypatch: pytest.MonkeyPatch, current_config: bool
+) -> None:
     import ssl
 
     response = io.BytesIO(b'{"data":{"status":"running"}}')
@@ -138,14 +141,15 @@ def test_power_wire_uses_fixed_provider_get_and_verified_tls(monkeypatch: pytest
     build = MagicMock(return_value=opener)
     monkeypatch.setattr(urllib.request, "build_opener", build)
     bundle = Path("cluster-ca.pem")
-    payload = {**worker_payload(), "method": "GET", "suffix": None, "body": None}
+    payload = {**worker_payload(), "method": "GET", "suffix": None, "body": None, "current_config": current_config}
     payload["connection"]["ca_bundle"] = str(bundle)
     context = ssl.create_default_context()
     trust = MagicMock(return_value=context)
     monkeypatch.setattr(ssl, "create_default_context", trust)
     assert _request(payload) == b'{"data":{"status":"running"}}'
     request = opener.open.call_args.args[0]
-    assert request.full_url == "https://pve.example:8006/api2/json/nodes/node1/qemu/123/status/current"
+    endpoint = "config?current=1" if current_config else "status/current"
+    assert request.full_url == f"https://pve.example:8006/api2/json/nodes/node1/qemu/123/{endpoint}"
     assert request.get_method() == "GET" and request.data is None
     assert request.get_header("Authorization") == "PVEAPIToken=user@pve!token=secret-canary"
     trust.assert_called_once_with(cafile=str(bundle))
@@ -158,12 +162,23 @@ def test_power_wire_uses_fixed_provider_get_and_verified_tls(monkeypatch: pytest
 
 
 @pytest.mark.parametrize("method,body", [("POST", None), ("GET", "{}")])
-def test_provider_power_route_refuses_mutating_shapes(method: str, body: str | None) -> None:
+@pytest.mark.parametrize("current_config", [False, True])
+def test_provider_observation_route_refuses_mutating_shapes(
+    method: str, body: str | None, current_config: bool
+) -> None:
     with pytest.raises(ValueError):
-        _request({**worker_payload(), "method": method, "suffix": None, "body": body})
+        _request({**worker_payload(), "method": method, "suffix": None, "body": body, "current_config": current_config})
 
 
-def test_power_worker_startup_subtracts_from_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_current_config_cannot_select_an_agent_endpoint() -> None:
+    with pytest.raises(ValueError):
+        _request({**worker_payload(), "method": "GET", "body": None, "current_config": True})
+
+
+@pytest.mark.parametrize("current_config", [False, True])
+def test_observation_worker_startup_subtracts_from_timeout(
+    monkeypatch: pytest.MonkeyPatch, current_config: bool
+) -> None:
     now = [100.0]
     monkeypatch.setattr("time.monotonic", lambda: now[0])
     process = stub_process(monkeypatch, b'{"data":{"status":"running"}}')
@@ -173,21 +188,23 @@ def test_power_worker_startup_subtracts_from_timeout(monkeypatch: pytest.MonkeyP
         return process
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
-    assert _ProxmoxWire(connection()).request_power(timeout=5) == {"status": "running"}
+    wire = _ProxmoxWire(connection())
+    request = wire.request_current_config if current_config else wire.request_power
+    assert request(timeout=5) == {"status": "running"}
     assert process.communicate.call_args.kwargs["timeout"] == 3
 
 
 @pytest.mark.parametrize("status", [301, 302, 303, 307, 308, 401, 500])
-@pytest.mark.parametrize("power", [False, True])
-def test_http_failure_is_not_replayed_or_exposed(monkeypatch: pytest.MonkeyPatch, status: int, power: bool) -> None:
+@pytest.mark.parametrize("route", ["agent", "power", "config"])
+def test_http_failure_is_not_replayed_or_exposed(monkeypatch: pytest.MonkeyPatch, status: int, route: str) -> None:
     response = io.BytesIO(b"secret-canary")
     error = urllib.error.HTTPError("https://pve.example", status, "secret-canary", {}, response)
     opener = MagicMock()
     opener.open.side_effect = error
     monkeypatch.setattr(urllib.request, "build_opener", lambda *args: opener)
     payload = worker_payload()
-    if power:
-        payload.update(method="GET", suffix=None, body=None)
+    if route != "agent":
+        payload.update(method="GET", suffix=None, body=None, current_config=route == "config")
     source = io.BytesIO(json.dumps(payload).encode())
     sink = io.BytesIO()
     with monkeypatch.context() as context:
@@ -200,14 +217,21 @@ def test_http_failure_is_not_replayed_or_exposed(monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.parametrize("body", [b"invalid", b"[]", b'{"data":null}', b'{"data":[]}'])
-def test_malformed_wire_envelope_is_not_execution_evidence(monkeypatch: pytest.MonkeyPatch, body: bytes) -> None:
+@pytest.mark.parametrize("current_config", [False, True])
+def test_malformed_wire_envelope_is_not_execution_evidence(
+    monkeypatch: pytest.MonkeyPatch, body: bytes, current_config: bool
+) -> None:
     stub_process(monkeypatch, body)
     with pytest.raises(_WireFailure):
-        _ProxmoxWire(connection()).request("GET", "exec-status?pid=42", timeout=1)
+        wire = _ProxmoxWire(connection())
+        if current_config:
+            wire.request_current_config(timeout=1)
+        else:
+            wire.request("GET", "exec-status?pid=42", timeout=1)
 
 
-@pytest.mark.parametrize("power", [False, True])
-def test_wire_bounds_response_before_parsing(monkeypatch: pytest.MonkeyPatch, power: bool) -> None:
+@pytest.mark.parametrize("route", ["agent", "power", "config"])
+def test_wire_bounds_response_before_parsing(monkeypatch: pytest.MonkeyPatch, route: str) -> None:
     monkeypatch.setattr("agentworks.execution.carriers._proxmox_http._MAX_RESPONSE_BYTES", 10)
     response = io.BytesIO(b"x" * 11)
     opener = MagicMock()
@@ -215,8 +239,8 @@ def test_wire_bounds_response_before_parsing(monkeypatch: pytest.MonkeyPatch, po
     monkeypatch.setattr(urllib.request, "build_opener", lambda *args: opener)
     with pytest.raises(ValueError):
         payload = worker_payload()
-        if power:
-            payload.update(method="GET", suffix=None, body=None)
+        if route != "agent":
+            payload.update(method="GET", suffix=None, body=None, current_config=route == "config")
         _request(payload)
     assert response.closed
 
@@ -226,11 +250,18 @@ def test_redirect_handler_never_follows() -> None:
     assert _NoRedirect().redirect_request(request, None, 307, "", {}, "https://other.example") is None
 
 
-def test_worker_credentials_use_only_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("current_config", [False, True])
+def test_worker_credentials_use_only_stdin(monkeypatch: pytest.MonkeyPatch, current_config: bool) -> None:
     process = stub_process(monkeypatch, b'{"data":{"pid":42}}')
     spawn = MagicMock(return_value=process)
     monkeypatch.setattr(subprocess, "Popen", spawn)
-    assert _ProxmoxWire(connection()).request("POST", "exec", body=b"{}", timeout=1) == {"pid": 42}
+    wire = _ProxmoxWire(connection())
+    result = (
+        wire.request_current_config(timeout=1)
+        if current_config
+        else wire.request("POST", "exec", body=b"{}", timeout=1)
+    )
+    assert result == {"pid": 42}
     payload = json.loads(process.communicate.call_args.args[0])
     assert payload["connection"]["token_secret"] == "secret-canary"
     assert "secret-canary" not in repr(spawn.call_args)
@@ -247,8 +278,8 @@ def test_ca_bundle_path_serializes_only_for_worker(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.windows
-@pytest.mark.parametrize("power", [False, True])
-def test_owned_http_worker_is_killed_and_reaped_at_deadline(monkeypatch: pytest.MonkeyPatch, power: bool) -> None:
+@pytest.mark.parametrize("route", ["agent", "power", "config"])
+def test_owned_http_worker_is_killed_and_reaped_at_deadline(monkeypatch: pytest.MonkeyPatch, route: str) -> None:
     original = subprocess.Popen
     children = []
 
@@ -260,7 +291,9 @@ def test_owned_http_worker_is_killed_and_reaped_at_deadline(monkeypatch: pytest.
     monkeypatch.setattr(subprocess, "Popen", spawn)
     with pytest.raises(subprocess.TimeoutExpired):
         wire = _ProxmoxWire(connection())
-        if power:
+        if route == "config":
+            wire.request_current_config(timeout=0.05)
+        elif route == "power":
             wire.request_power(timeout=0.05)
         else:
             wire.request("POST", "exec", body=b"{}", timeout=0.05)
@@ -271,21 +304,33 @@ def test_owned_http_worker_is_killed_and_reaped_at_deadline(monkeypatch: pytest.
 
 
 @pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit, GeneratorExit])
-def test_worker_interrupt_reaps_before_propagating(monkeypatch: pytest.MonkeyPatch, interruption: type) -> None:
+@pytest.mark.parametrize("current_config", [False, True])
+def test_worker_interrupt_reaps_before_propagating(
+    monkeypatch: pytest.MonkeyPatch, interruption: type, current_config: bool
+) -> None:
     process = stub_process(monkeypatch, b"")
     process.communicate.side_effect = [interruption(), (b"", None)]
     process.poll.return_value = None
     with pytest.raises(interruption):
-        _ProxmoxWire(connection()).request("POST", "exec", body=b"{}", timeout=1)
+        wire = _ProxmoxWire(connection())
+        if current_config:
+            wire.request_current_config(timeout=1)
+        else:
+            wire.request("POST", "exec", body=b"{}", timeout=1)
     process.kill.assert_called_once()
     assert process.communicate.call_count == 2
 
 
-def test_failed_worker_never_exposes_its_output(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("current_config", [False, True])
+def test_failed_worker_never_exposes_its_output(monkeypatch: pytest.MonkeyPatch, current_config: bool) -> None:
     process = stub_process(monkeypatch, b"secret-canary")
     process.returncode = 1
     with pytest.raises(_WireFailure) as raised:
-        _ProxmoxWire(connection()).request("POST", "exec", body=b"{}", timeout=1)
+        wire = _ProxmoxWire(connection())
+        if current_config:
+            wire.request_current_config(timeout=1)
+        else:
+            wire.request("POST", "exec", body=b"{}", timeout=1)
     assert "secret-canary" not in str(raised.value)
 
 

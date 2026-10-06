@@ -114,8 +114,18 @@ class _ProxmoxWire:
         """Read provider power through the fixed, passive status endpoint."""
         return self._request("GET", None, body=None, timeout=timeout)
 
+    def request_current_config(self, *, timeout: float) -> dict[str, object]:
+        """Read live provider configuration through one fixed, passive endpoint."""
+        return self._request("GET", None, body=None, timeout=timeout, current_config=True)
+
     def _request(
-        self, method: str, suffix: str | None, *, body: bytes | None, timeout: float | None
+        self,
+        method: str,
+        suffix: str | None,
+        *,
+        body: bytes | None,
+        timeout: float | None,
+        current_config: bool = False,
     ) -> dict[str, object]:
         """Own one HTTP worker until completion, timeout or propagated interruption."""
         started = time.monotonic()
@@ -128,6 +138,7 @@ class _ProxmoxWire:
                 "suffix": suffix,
                 "body": body.decode("ascii") if body is not None else None,
                 "timeout": timeout,
+                "current_config": current_config,
             }
         ).encode("ascii")
         process = subprocess.Popen(

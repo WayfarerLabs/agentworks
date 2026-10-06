@@ -41,7 +41,11 @@ def _request(payload: dict[str, Any]) -> bytes:
     node = urllib.parse.quote(connection["node"], safe="")
     origin = connection["api_url"].rstrip("/")
     base = f"{origin}/api2/json/nodes/{node}/qemu/{connection['vmid']}"
-    if payload["suffix"] is None:
+    if payload.get("current_config", False):
+        if payload["suffix"] is not None or payload["method"] != "GET" or payload["body"] is not None:
+            raise ValueError("Provider configuration observation requires a fixed body-free GET")
+        url = f"{base}/config?current=1"
+    elif payload["suffix"] is None:
         if payload["method"] != "GET" or payload["body"] is not None:
             raise ValueError("Provider power observation requires a body-free GET")
         url = f"{base}/status/current"
