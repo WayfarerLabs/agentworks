@@ -42,11 +42,7 @@ class FileLocalDownloadControlFact(Exception):
 
 
 def _ready_to_publish(download: FileDownloadOutcome, deadline: Deadline) -> bool:
-    return (
-        download.status is FileDownloadStatus.COMPLETE
-        and not download.deadline_exceeded
-        and not deadline.expired
-    )
+    return download.status is FileDownloadStatus.COMPLETE and not download.deadline_exceeded and not deadline.expired
 
 
 def download_to_local_file(
