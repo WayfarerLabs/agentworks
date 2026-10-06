@@ -132,10 +132,16 @@ and later job observation, enters the same platform availability boundary before
 retains it through routing, body and teardown. Passive readiness/preflight only observes
 already-existing availability; it cannot start or extend a hold or activate the VM. Admission and
 release remain in core's database-owned operation lifecycle; platform hooks supply their actual hold
-evidence. A stopped WSL2 distribution during a supposedly active independent job is a discontinuity
-to report and recover, not proof that the old job stayed alive. Whether a later observation may wake
-an already stopped VM solely to inspect terminal records is separate from the active-job
-availability guarantee and must be decided before public exposure.
+evidence. Entering the boundary means core has claimed and will account for the entire lifecycle; it
+does not mean starting a platform keep-awake process before checking stopped intent or performing
+authorized activation. The platform starts its active hold at the appropriate point after those
+checks and before guest work, and its exit contributes typed teardown evidence. Explicit VM stop and
+reboot are separate authorized lifecycle operations: they share conflict admission but do not
+acquire a hold that defeats the requested power transition. A stopped WSL2 distribution during a
+supposedly active independent job is a discontinuity to report and recover, not proof that the old
+job stayed alive. Whether a later observation may wake an already stopped VM solely to inspect
+terminal records is separate from the active-job availability guarantee and must be decided before
+public exposure.
 
 PTY is an I/O choice, not a background state. `attach(ref, terminal=...)` requires an attach grant
 and supported transport, and does not create a new run. A reusable detached terminal needs an owned
