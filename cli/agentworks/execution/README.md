@@ -743,10 +743,10 @@ gate observations through the bound reader. Every family entry forwards the same
 reconciliation and cleanup. Private download, upload, JSON and single-call bindings retain this
 context through their exchanges and outcomes. JSON gives each independently prepared upload child
 the same context, including after a publication conflict. Existing context-free private candidates
-remain unchanged; production VM composition has not yet bound this option through operation state
-or recovery. Inline execution and later service entry still need adoption. Complete provider envelopes include the
-selected prefix and encoded request; even a valid request can refuse before QGA dispatch when their
-aggregate exceeds the carrier limit.
+remain unchanged; production VM composition has not yet bound this option through operation state or
+recovery. Inline execution and later service entry still need adoption. Complete provider envelopes
+include the selected prefix and encoded request; even a valid request can refuse before QGA dispatch
+when their aggregate exceeds the carrier limit.
 
 The separate private `build_named_guest_bootstrap_argv` handles early fixed guest operations before
 numeric account preparation. It resolves a core-bound account name through the system account

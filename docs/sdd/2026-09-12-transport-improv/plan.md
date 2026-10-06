@@ -271,12 +271,24 @@ unexplained; a later green run does not establish its cause or a fix.
 The private workflow-context unit from `387859250` adds one optional final field to each existing
 binding. Download, upload, JSON and single-call workflows forward the same immutable context into
 every file exchange, including reconciliation and cleanup, and retain it in their ordinary and
-control outcomes. JSON derives upload children with that context rather than reinjecting it through
-a fixture. The worker's 48 focused cases and 625 related cases pass; its complete strict mypy pass
-covers 1,218 source and test files. The workflow tests use explicit local exchange doubles and do
-not establish privileged admission or native success. Independent integrated review and lead gates
+control outcomes. JSON derives upload children with that context rather than having a fixture supply
+it. The worker's 48 focused cases and 625 related cases pass; its complete strict mypy pass covers
+1,218 source and test files. The workflow tests use explicit local exchange doubles and do not
+establish privileged admission or native success. Independent integrated review and lead gates
 remain pending. Core ownership, actual envelope-version callers, fresh recovery and production
 composition still need implementation; no checkbox or public feedback/fix round closes here.
+
+All three independent lanes clear workflow code/test pin `2e9e92450`. Each passes the 48 new cases;
+the project lane also passes 196 adjacent cases. The complexity lane removes the JSON child forward
+and observes seven failures, then removes publication-cleanup forwarding and observes two failures;
+restoring both returns all 48 cases to passing. The lead's complete local suite passes 14,769
+non-integration tests with 49 skips. Complete Ruff/format, strict mypy (1,218 source and test
+files), typer isolation, file quality, locked-SDD, Rulesync and whitespace gates exit 0. Website
+validation passes 160 Python and 103 Node cases, four builds and both deterministic comparisons. No
+native backend was exercised. Publication changes only the validation record and prose formatting
+after that pin; operation-owned binding and exact envelope-version consumers are the next private
+unit. The earlier browser and Python 3.14 framing failures remain unexplained despite the later
+green gates. Public feedback/fix round 1 remains open, without a review/readiness signal.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
