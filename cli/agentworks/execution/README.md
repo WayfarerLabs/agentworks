@@ -113,9 +113,18 @@ required before that public surface exists.
 `ExecutionOperation` requires an explicit managed target matching its owner's scope. An optional
 numeric bootstrap must match that VM's derived boot identity; platform-host targets cannot select
 it. The operation forwards its immutable context before preparation and borrowing, while each call
-keeps its explicit body identity. The private WSL2 native factory constructs the shared bootstrap
-from its prepared elevated plan and actual full guest. Other platform composition and complete
-managed-helper adoption remain unimplemented. No target or root identity is inferred as a fallback.
+keeps its explicit body identity. The private native VM factory constructs the shared bootstrap from
+its prepared elevated plan and actual full guest for WSL2 and already-running Proxmox VMs. WSL2
+retains its actual platform hold; Proxmox needs no idle-stop hold and refuses stopped activation.
+Both retain the same exact owner through preparation, file and DIRECT operation execution, and
+aggregate cleanup. Proxmox retains one selected QGA binding and checks its locator before and after
+target preparation. The bounded read-only account probe is not itself guest-fenced; account facts
+grant no body authority without the prepared full guest and numeric identity checks at each body
+helper. Per-dispatch provider-route freshness, complete availability, public RunContext composition
+and native acceptance remain unproved. The native operation module imports without retired execution
+packages; fresh system-plugin registration still imports unrelated legacy SSH code. Identity
+preparation retains completed or partial account evidence and conservative custody on borrow-release
+failure, preserving original escaping control. No target or root identity is inferred as a fallback.
 
 One shared `ExecutionOperation` keeps one lazily registered empty carrier-dispatch row for its
 lifetime, rather than consuming a row per clean command. Every call still uses a fresh serial

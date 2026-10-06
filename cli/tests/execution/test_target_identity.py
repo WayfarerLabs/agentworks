@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.db import Database, OperationClaimState, OperationResourceKind, OperationScope
+from agentworks.db import Database, LifecycleObligationState, OperationClaimState, OperationResourceKind, OperationScope
+from agentworks.db.operations import OperationRepository
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._account_protocol import (
     AccountFailure,
@@ -664,6 +665,60 @@ def test_safe_failure_relinquishes_borrow_while_uncertain_attempt_retains_claim(
     assert retained.requires_owner_retention
     with pytest.raises(StateError):
         owner.borrow()
+
+
+@pytest.mark.parametrize("committed", [False, True])
+@pytest.mark.parametrize("primary_control", [False, True])
+def test_borrow_release_failure_preserves_observations_and_primary_control(
+    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch, committed: bool, primary_control: bool
+) -> None:
+    database, owner = owned
+    carrier = SyntheticCarrier({"worker": _WORKER})
+    control = ControlStop("primary-control")
+    cleanup = KeyboardInterrupt()
+    releases = 0
+    original_release = OperationRepository.resolve_lifecycle_obligation
+    original_settle = OperationAttempt.settle
+
+    def interrupt_release(repository, ownership, obligation_id):
+        nonlocal releases
+        releases += 1
+        if committed:
+            original_release(repository, ownership, obligation_id)
+        raise cleanup
+
+    def interrupt_after_settlement(attempt):
+        original_settle(attempt)
+        raise control
+
+    monkeypatch.setattr(OperationRepository, "resolve_lifecycle_obligation", interrupt_release)
+    if primary_control:
+        monkeypatch.setattr(OperationAttempt, "settle", interrupt_after_settlement)
+    with pytest.raises(ControlStop if primary_control else KeyboardInterrupt) as caught:
+        _prepare(owner, carrier)
+    assert caught.value is (control if primary_control else cleanup)
+    fact = caught.value.__cause__
+    assert isinstance(fact, TargetIdentityControlFact)
+    preparation = fact.preparation
+    assert preparation.status is TargetIdentityStatus.UNCERTAIN
+    assert preparation.delivery_result is not None
+    assert preparation.coordination_uncertain and preparation.requires_owner_retention
+    if primary_control:
+        assert preparation.ordinary_plan is None
+    else:
+        assert preparation.ordinary_plan is not None and preparation.workload_result is not None
+    assert carrier.calls == ["worker"] and releases == 1
+    claim = database.operations.inspect(owner.ownership.scope)
+    assert claim is not None
+    rows = owner.list_lifecycle_obligations()
+    assert len(rows) == 1
+    assert (rows[0].state is LifecycleObligationState.RESOLVED) is committed
+    with pytest.raises(StateError):
+        owner.borrow()
+    owner.stop_admission()
+    with pytest.raises(StateError):
+        owner.close()
+    assert releases == 1 and database.operations.inspect(owner.ownership.scope) is not None
 
 
 def test_default_representations_do_not_disclose_account_names(

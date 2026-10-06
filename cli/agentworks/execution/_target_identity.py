@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
@@ -25,6 +25,7 @@ from agentworks.operations import OperationOwner, release_borrow_after_custody
 if TYPE_CHECKING:
     from agentworks.execution._helper_identity import IdentityExpectation
     from agentworks.execution.carrier import Carrier
+    from agentworks.operations import OperationBorrow
 
 _VALIDATION_NONCE = "0" * 32
 
@@ -274,7 +275,7 @@ def prepare_target_identity(
     borrow = owner.borrow()
     operation = BorrowedFixedHelperCarrier(carrier, borrow)
     try:
-        return _prepare_target_identity_observations(
+        preparation = _prepare_target_identity_observations(
             operation,
             delivery_account=delivery_account,
             workload_account=workload_account,
@@ -282,8 +283,35 @@ def prepare_target_identity(
             runtime_selection=runtime_selection,
             deadline=deadline,
         )
-    finally:
+    except BaseException as control:
+        source = control.__cause__.preparation if isinstance(control.__cause__, TargetIdentityControlFact) else None
+        _release_identity_borrow(borrow, preparation=source, control=control)
+        raise
+    _release_identity_borrow(borrow, preparation=preparation)
+    return preparation
+
+
+def _release_identity_borrow(
+    borrow: OperationBorrow,
+    *,
+    preparation: TargetIdentityPreparation | None,
+    control: BaseException | None = None,
+) -> None:
+    """Release once, preserving observed account facts and original control."""
+    try:
         release_borrow_after_custody(borrow)
+    except BaseException as cleanup:
+        source = preparation or TargetIdentityPreparation(TargetIdentityStatus.FAILED, None, None, None, None, None)
+        uncertain = replace(
+            source, status=TargetIdentityStatus.UNCERTAIN, coordination_uncertain=True, requires_owner_retention=True
+        )
+        fact = TargetIdentityControlFact(uncertain)
+        if control is None:
+            raise cleanup from fact
+        fact.__cause__ = control.__cause__
+        control.__cause__ = fact
+        control.__suppress_context__ = True
+        control.add_note("Target identity preparation retained uncertain borrow-release custody")
 
 
 def _prepare_target_identity_observations(

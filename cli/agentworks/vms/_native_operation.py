@@ -8,10 +8,11 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from agentworks.capabilities.base import RunContext, ScopeLevel
-from agentworks.capabilities.vm_platform.base import VMPlatform
+from agentworks.capabilities.vm_platform.base import ProviderLocator, VMPlatform
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import Database, LifecycleObligationState, OperationResourceKind, OperationScope, VMStatus
 from agentworks.errors import NotFoundError, StateError, ValidationError
+from agentworks.execution._account_protocol import AccountRequest, AccountRequestError, encode_account_request
 from agentworks.execution._execution_operation import ExecutionOperation
 from agentworks.execution._file_operation import FileOperation
 from agentworks.execution._file_paths import normalized_root
@@ -28,16 +29,20 @@ from agentworks.execution.access import ExecutionAccess, FileAccess
 from agentworks.execution.carrier import Deadline
 from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
 from agentworks.operations import OperationOwner
+from agentworks.vms.identity import validate_vm_instance_marker
 from agentworks.vms.target_preparation import (
     VMTargetPreparation,
     VMTargetPreparationControlFact,
     VMTargetPreparationStatus,
+    prepare_managed_vm_target_from_platform,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from agentworks.db import VMRow
+    from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
+    from agentworks.execution.binding import NativeExecutionBinding
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +77,8 @@ class _Workflow:
     selected: WSL2OwnedOperation | None = None
     start_attempted: bool = False
     preparation_fact: VMTargetPreparation | None = None
+    selected_locator: ProviderLocator | None = None
+    selected_binding: NativeExecutionBinding | None = None
     identity: TargetIdentityPreparation | None = None
     views: NativeVMOperation | None = None
     finalizing: bool = False
@@ -181,6 +188,54 @@ def _require_vm_row(db: Database, vm_name: str, platform: VMPlatform, ctx: RunCo
     return vm
 
 
+def _prepare_running_proxmox(
+    workflow: _Workflow, vm: VMRow, platform: VMPlatform, ctx: RunContext, power: VMStatus
+) -> tuple[NativeExecutionBinding, VMTargetPreparation, VMGuestIdentity | None]:
+    """Prepare an existing running QGA route without an activation effect.
+
+    Proxmox has no idle-stop hold. The exact VM owner still covers preparation,
+    child obligations and aggregate teardown; stopped activation is unavailable.
+    """
+    from agentworks.execution.binding import NativeExecutionBinding
+    from agentworks.execution.carriers.proxmox import ProxmoxCarrier
+    from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+
+    if type(platform) is not ProxmoxPlatform:
+        raise StateError("Native VM operation is unavailable on this platform", entity_kind="vm", entity_name=vm.name)
+    if power is not VMStatus.RUNNING:
+        raise StateError("Native Proxmox activation is unavailable", entity_kind="vm", entity_name=vm.name)
+    locator = platform.observe_provider_locator(vm, ctx, deadline=workflow.deadline)
+    if workflow.deadline.expired:
+        raise StateError("Native VM locator observation exceeded its deadline", entity_kind="vm", entity_name=vm.name)
+    if type(locator) is not ProviderLocator:
+        raise StateError("Native VM route is unavailable", entity_kind="vm", entity_name=vm.name)
+    locator = ProviderLocator(locator.token)
+    workflow.selected_locator = locator
+    binding = platform.resolve_native_execution_binding(vm, ctx, deadline=workflow.deadline, config=ctx.config)
+    if workflow.deadline.expired:
+        raise StateError("Native VM binding resolution exceeded its deadline", entity_kind="vm", entity_name=vm.name)
+    if (
+        type(binding) is not NativeExecutionBinding
+        or type(binding.carrier) is not ProxmoxCarrier
+        or binding.delivery_account != "root"
+        or binding._early_guest_facts_route is not None
+    ):
+        raise ValidationError("Native Proxmox operation requires its selected root QGA binding")
+    workflow.selected_binding = binding
+    try:
+        preparation = prepare_managed_vm_target_from_platform(
+            vm, platform, ctx, locator, binding, deadline=workflow.deadline, owner=workflow.owner
+        )
+    except BaseException as control:
+        if isinstance(control.__cause__, VMTargetPreparationControlFact):
+            workflow.preparation_fact = control.__cause__.preparation
+        raise
+    workflow.preparation_fact = preparation
+    result = preparation.guest_result
+    observation = result.observation if result is not None else None
+    return binding, preparation, observation.identity if observation is not None else None
+
+
 def _prepare(
     workflow: _Workflow,
     db: Database,
@@ -190,6 +245,11 @@ def _prepare(
     trusted_root: PurePosixPath,
 ) -> NativeVMOperation:
     vm = _require_vm_row(db, vm_name, platform, ctx)
+    validate_vm_instance_marker(vm.instance_marker)
+    try:
+        encode_account_request(AccountRequest("0" * 32, vm.admin_username))
+    except AccountRequestError as error:
+        raise ValidationError("Native VM operation requires a valid administrative account") from error
     power = platform.observe_execution_power(vm, ctx, deadline=workflow.deadline)
     if workflow.deadline.expired:
         raise StateError("Native VM power observation exceeded its deadline", entity_kind="vm", entity_name=vm_name)
@@ -197,23 +257,24 @@ def _prepare(
         raise StateError("Native VM power cannot authorize activation", entity_kind="vm", entity_name=vm_name)
     if power is VMStatus.STOPPED and vm.operator_stopped:
         raise StateError("Operator-stopped VM cannot be started automatically", entity_kind="vm", entity_name=vm_name)
-    if type(platform) is not WSL2Platform:
-        raise StateError("Native VM operation is unavailable on this platform", entity_kind="vm", entity_name=vm_name)
-
-    selected = WSL2OwnedOperation.from_platform(
-        vm, platform, ctx, owner=workflow.owner, deadline=workflow.deadline, config=ctx.config
-    )
-    if selected is None:
-        raise StateError("Native VM route is unavailable", entity_kind="vm", entity_name=vm_name)
-    workflow.selected = selected
-    workflow.start_attempted = True
-    try:
-        guest = selected.start_and_prepare(workflow.deadline)
-    except BaseException as control:
-        if isinstance(control.__cause__, VMTargetPreparationControlFact):
-            workflow.preparation_fact = control.__cause__.preparation
-        raise
-    preparation = selected.preparation
+    if type(platform) is WSL2Platform:
+        selected = WSL2OwnedOperation.from_platform(
+            vm, platform, ctx, owner=workflow.owner, deadline=workflow.deadline, config=ctx.config
+        )
+        if selected is None:
+            raise StateError("Native VM route is unavailable", entity_kind="vm", entity_name=vm_name)
+        workflow.selected = selected
+        workflow.start_attempted = True
+        try:
+            guest = selected.start_and_prepare(workflow.deadline)
+        except BaseException as control:
+            if isinstance(control.__cause__, VMTargetPreparationControlFact):
+                workflow.preparation_fact = control.__cause__.preparation
+            raise
+        preparation = selected.preparation
+        binding = selected.binding
+    else:
+        binding, preparation, guest = _prepare_running_proxmox(workflow, vm, platform, ctx, power)
     if guest is None or preparation is None or preparation.status is not VMTargetPreparationStatus.PREPARED:
         raise StateError(
             "Native VM target preparation did not establish an exact guest", entity_kind="vm", entity_name=vm_name
@@ -221,7 +282,6 @@ def _prepare(
     target = preparation.target
     assert target is not None
 
-    binding = selected.binding
     try:
         identity = prepare_target_identity(
             binding.carrier,
