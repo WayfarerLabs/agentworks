@@ -29,6 +29,7 @@ from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState,
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, Dispatch, PreparedInvocation, SinkOutput
 from agentworks.execution.carriers.ssh.connection import SSHConnection, build_ssh_argv
+from agentworks.execution.carriers.ssh.trust import SSHTrustFiles
 from tests.execution.files._file_snapshot_support import LocalCarrier
 from tests.execution.files._fixed_bundle_support import fixture_file_bundle
 from tests.execution.files._runtime_support import runtime_selection
@@ -379,7 +380,8 @@ def test_windows_ssh_command_contains_only_fixed_bootstrap() -> None:
         fixed_source=FIXED_BUNDLE.bootstrap,
         nonce=_NONCE,
     )[0]
-    connection = SSHConnection("host.example", "agent", Path("/keys/identity"), Path("/keys/known-hosts"))
-    windows_command = subprocess.list2cmdline(build_ssh_argv(connection, PreparedInvocation(argv)))
+    trust = SSHTrustFiles((Path("/keys/known-hosts"),))
+    connection = SSHConnection("host.example", "agent", Path("/keys/identity"), trust)
+    windows_command = subprocess.list2cmdline(build_ssh_argv(connection, PreparedInvocation(argv), trust=trust))
     assert len(windows_command) < 32_767
     assert FIXED_BUNDLE.prefix.decode("ascii") not in windows_command
