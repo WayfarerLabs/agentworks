@@ -407,6 +407,21 @@ whitespace gates pass. Independent integrated review and lead gates remain pendi
 private WSL2 factory, not all-platform production adoption. Fresh recovery, service fencing,
 RunContext and native acceptance remain open.
 
+All three independent lanes clear final native pin `8abbf28e4`. Project passes 323 focused/adjacent
+cases and generic passes 33 native cases. Complexity passes the same 33 cases, observes four
+failures after deleting execution-bootstrap forwarding, and passes all 33 with an inert wrapper
+statement before restoring its experiments. The accepted correction fixes one earlier README
+paragraph that contradicted the implemented private producer. Code/test bytes are unchanged by that
+correction. The complete combined lead suite passes 14,854 non-integration tests with 49 skips and
+exit 0. Complete Ruff/format, strict mypy (1,221 source and test files), typer isolation, file
+quality, locked-SDD, Rulesync and whitespace gates exit 0. Website validation passes 160 Python and
+103 Node cases, four builds and both deterministic comparisons. Publication adds evidence only after
+that pin. SSH head `699c8517e` also passes hosted CI; this does not prove paired composition or
+production trust/provisioning workflows. Native successful transitions, fresh v2 recovery, service
+fencing, complete platform availability, terminal delivery and additive RunContext remain open. No
+database data was removed. The PR remains draft with no review-requested or ready signal; public
+feedback/fix round 1 stays open.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
