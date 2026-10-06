@@ -106,7 +106,7 @@ malicious Python endpoint cannot be made non-blocking or secret-safe by its type
 
 ## Terminal choice stays distinct
 
-The caller-facing terminal endpoint supplies explicit input and output. The proposed carrier shape
+The caller-facing terminal endpoint supplies explicit input and output. The private carrier shape
 below pairs borrowed terminal input with trusted stream sinks; preparation selects terminal
 presentation, not separate byte-exact guest stdout/stderr. There is no separate terminal field on
 `PreparedInvocation` and no second stdin source. Joint proof must settle native handle admission and
@@ -114,20 +114,21 @@ console-mode restoration before enabling the mode; the byte protocol alone does 
 terminal feasibility.
 
 The private `_terminal_handoff.py` host adapters and `_terminal_guest.py` Linux guest implement the
-two-gate preparation candidate below, without adding a carrier terminal mode. Preparation is
-workstation-neutral; Linux and `memfd` are destination requirements. Local same-PTY tests exercise
-the fixed Python 3.11 guest, payload secrecy during setup, separate script-source/terminal-input
-descriptors, split acknowledgments, flow control and pre-exec failure cleanup. These do not
-establish SSH delivery, supported native workstation mechanics or successful application entry.
+two-gate preparation candidate below, now connected to passive shared carrier values without
+enabling terminal delivery. Preparation is workstation-neutral; Linux and `memfd` are destination
+requirements. Local same-PTY tests exercise the fixed Python 3.11 guest, payload secrecy during
+setup, separate script-source/terminal-input descriptors, split acknowledgments, flow control and
+pre-exec failure cleanup. These do not establish SSH delivery, supported native workstation
+mechanics or successful application entry.
 
 The [lifecycle design](execution-lifecycle-lld.md#lifecycle-waiting-and-attachment) owns public
 start/attachment constraints. This extension adds neither an asynchronous pump handle nor a new
 detached-job protocol.
 
-### Proposed terminal input adapter
+### Private terminal input adapter
 
-The next shared-type candidate uses the existing byte source for preparation, not a second carrier
-parser or a callback that authorizes launch. Its proposed fields are:
+The implemented private shared type uses the existing byte source for preparation, not a second
+carrier parser or a callback that authorizes launch. Its fields are:
 
 ```python
 @dataclass(frozen=True)
@@ -196,14 +197,22 @@ sink, respecting short writes, then stops interpreting presentation bytes as rea
 explicitly bound terminal type affects client PTY metadata, not the application's independently
 composed environment. Admission validates the terminal type and supplied handles before dispatch.
 
-This is a concrete proposal for the joint proof, not an implemented or frozen terminal type. Prove
-native handle admission, two-gate ordering, short writes, early keyboard preservation, bounded
-presentation, restoration failure reporting and interruption before enabling it. The shared report
-must preserve known remote facts while exposing local cleanup uncertainty; terminal cleanup cannot
-be inferred from a successful remote exit. Stop all relay/client activity before input restoration
-and before the shared presentation adapter sanitizes the selected output emulator. Cleanup needs its
-own bounded allowance after observation expiry. Do not silently reuse the ordinary pipe pump for
-this mode: its stdin construction and unfinished-input rules do not model an interactive keyboard.
+Passive construction validates descriptors, terminal type, bootstrap endpoint shape and sensitivity,
+without descriptor I/O. `CarrierIO` requires sink output and propagates terminal input sensitivity.
+The preparation connector always marks its bootstrap sensitive and requires a distinct trusted
+diagnostic sink that cannot forward bytes to the stdout readiness collector. The direct alias check
+prevents an accidental wiring mistake, not malicious endpoint behavior. Existing non-terminal
+carriers and the generic pipe pump refuse terminal input before provider or client dispatch.
+
+These implemented shared values are a candidate for joint proof, not a frozen or enabled native
+terminal feature. Prove native handle admission, two-gate ordering, short writes, early keyboard
+preservation, bounded presentation, restoration failure reporting and interruption before enabling
+it. The shared report must preserve known remote facts while exposing local cleanup uncertainty;
+terminal cleanup cannot be inferred from a successful remote exit. Stop all relay/client activity
+before input restoration and before the shared presentation adapter sanitizes the selected output
+emulator. Cleanup needs its own bounded allowance after observation expiry. Do not silently reuse
+the ordinary pipe pump for this mode: its stdin construction and unfinished-input rules do not model
+an interactive keyboard.
 
 ### Same-terminal preparation experiment
 

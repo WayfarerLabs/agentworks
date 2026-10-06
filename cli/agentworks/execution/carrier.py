@@ -106,7 +106,7 @@ class LiveInput:
 
 @dataclass(frozen=True)
 class TerminalInput:
-    """Borrow explicit Python terminal descriptors after bootstrap handoff.
+    """Borrow explicit Python terminal descriptors for one terminal attempt.
 
     Adapter-author callers can be outside static typing. Construction checks
     only shape; native handle admission belongs to a terminal carrier.

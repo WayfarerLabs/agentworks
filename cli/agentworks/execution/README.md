@@ -926,12 +926,19 @@ that all later terminal bytes were observed.
 The preparation object has a single-use guard but does not dispatch or prove replay prevention by a
 carrier. Its readiness markers establish only handoff state, never application launch or exec
 evidence. Invalid ordering, truncated readiness and endpoint failures close the adapters without
-retaining payload or presentation causes. The candidate is private and is not a `TerminalInput`
-implementation or a production feature. SSH still owns native workstation PTY plumbing, terminal
-metadata, keyboard borrowing, resize, restoration and the joint acceptance proof before enablement.
-The future transport-owned execution wrapper must call the readiness sink's `finish()` when the
-carrier attempt ends. Neither the carrier nor the generic byte-sink protocol performs that
-finalization today; preparation-only tests are not production terminal acceptance.
+retaining payload or presentation causes. Its `carrier_io()` connector now binds the existing
+bootstrap and stdout collector to passive `TerminalInput` and `SinkOutput` values. Bootstrap is
+always sensitive; diagnostics require a distinct core-trusted sink that does not forward to the
+readiness collector. Direct collector aliasing refuses. Construction checks nonnegative Python
+descriptors, UTF-8 terminal type and endpoint shape without reading a descriptor or endpoint.
+Terminal input cannot use capture or discard, and its bootstrap and terminal type stay out of
+diagnostic representations. These shared values do not enable terminal delivery: Proxmox, WSL2, the
+inherited buffered SSH path and the ordinary subprocess pump refuse before provider or client
+dispatch. SSH still owns native workstation PTY plumbing, terminal metadata, keyboard borrowing,
+resize, restoration and the joint acceptance proof before enablement. The future transport-owned
+execution wrapper must call the readiness sink's `finish()` when the carrier attempt ends. Neither
+the carrier nor the generic byte-sink protocol performs that finalization today; preparation-only
+tests are not production terminal acceptance.
 
 ## Private JSON transformation
 

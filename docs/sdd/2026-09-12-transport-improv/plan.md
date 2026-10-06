@@ -335,6 +335,14 @@ separate sink/terminal extensions. SSH also owns correcting its incidental prepa
       interactive-ready follows terminal restoration. Premature input retains raw carriage-return
       semantics, while post-handoff input receives canonical translation. This is not SSH delivery,
       workstation-platform acceptance or application-start proof.
+- [x] Implement passive shared `TerminalInput` as the sole terminal input choice in CarrierIO and
+      bind the existing two-gate preparation endpoints through its private connector. Require
+      explicit borrowed Python descriptors, terminal type and trusted sink output; force sensitive
+      bootstrap in the prepared connector, refuse a directly aliased readiness diagnostic sink and
+      sanitize ordinary endpoint getter failures without swallowing control exceptions. Prove
+      pre-provider/client refusal in existing non-terminal paths. All three private lanes accept
+      `0472bcfab`; this does not enable terminal delivery or prove native handles, relay,
+      restoration, SSH acceptance or the execution-wrapper finalization gate.
 - [x] Compose a private same-identity Linux file read through one carrier attempt without staging,
       spool or lock creation. The implementation includes strict file-response collection and actual
       local Python 3.11 reads; the focused file, inline, terminal and import suite passes 404 cases.
@@ -867,7 +875,7 @@ Proxmox JSON body. The full local suite passes 10,934 tests with 12 skips, inclu
 actual distribution-Python-3.11 execution cases. Ruff, formatting, strict mypy and file lint pass.
 These are local delivery-size and compatibility facts, not native provider acceptance.
 
-The [terminal input proposal](carrier-io-lld.md#proposed-terminal-input-adapter) now gives bootstrap
+The [terminal input candidate](carrier-io-lld.md#private-terminal-input-adapter) now gives bootstrap
 EOF a terminal-only handoff meaning, preserves preparation-owned readiness parsing and keeps
 presentation above the carrier. Explicit input and output descriptors supply native terminal facts
 without process-global stdio lookup. This remains a candidate for joint native proof with SSH, not
