@@ -805,6 +805,24 @@ Sources:
 [PVE 8 worker result ordering](https://github.com/proxmox/pve-common/blob/91962804ffce2cdb70261f03b2df5c0b7a0a2c4d/src/PVE/RESTEnvironment.pm#L630-L648),
 [PVE 9 synchronous fork cleanup](https://github.com/proxmox/pve-common/blob/defd246f31f327463f901a2daaf8dc52efcc5a97/src/PVE/Tools.pm#L527-L616).
 
+### Proxmox passive guest-agent responsiveness
+
+The same PVE 8/9 QEMU pins expose `info` as GET and wrap its QGA response in `result`; `ping` is
+POST, not an interchangeable GET route. QEMU documents `guest-info` as returning a version string
+and supported-command array. Decision: after exact successful start-task settlement and fresh
+running power, bounded boot waiting uses only fixed `GET /agent/info`, without executing a helper.
+This establishes responsiveness, not guest identity, Python availability or workload authority. PVE
+8 requires `VM.Monitor`; PVE 9 accepts `VM.GuestAgent.Audit` or `VM.GuestAgent.Unrestricted`. Do not
+invent an additional audit grant for an already unrestricted token. Native restricted-token and boot
+timing proof on both majors remains open.
+
+Sources:
+[QEMU guest-info response](https://www.qemu.org/docs/master/interop/qemu-ga-ref.html#command-guest-info),
+[PVE 8 info and ping methods](https://github.com/proxmox/qemu-server/blob/5ccd363e5908aa5a7b969797babdff1df5159475/src/PVE/API2/Qemu/Agent.pm#L20-L31),
+[PVE 8 permission and result envelope](https://github.com/proxmox/qemu-server/blob/5ccd363e5908aa5a7b969797babdff1df5159475/src/PVE/API2/Qemu/Agent.pm#L136-L204),
+[PVE 9 info permission](https://github.com/proxmox/qemu-server/blob/80e0590e144359fd136a2ba1e3f44716bfc535b0/src/PVE/API2/Qemu/Agent.pm#L25-L37),
+[PVE 9 permission alternatives and envelope](https://github.com/proxmox/qemu-server/blob/80e0590e144359fd136a2ba1e3f44716bfc535b0/src/PVE/API2/Qemu/Agent.pm#L170-L240).
+
 ### Decisions still required
 
 The new-guest package and preinstalled macOS host runtime choices are settled, but their

@@ -721,6 +721,15 @@ running after aggregate operation release, and an HA handoff cannot use ordinary
 to discharge manager work. Native proof of the limited successful-worker interpretation remains
 required before production startup.
 
+Successful task settlement and fresh running power precede a separate passive guest-agent wait. Use
+only the fixed body-free `GET /agent/info` route, under the original finite deadline and selected
+verified connection. Its response must contain the required version string and supported-command
+array. A valid response proves channel responsiveness, not Python availability, target identity,
+account admission or permission for a body. Repeat only this read-only observation while boot is
+pending; never poll by launching guest helpers or replaying start. Exact guest/numeric preparation
+still follows once, under the same operation owner. Malformed, unavailable or late readiness cannot
+authorize guest work; settled activation does not make the whole workflow resolved.
+
 HA-managed VMs return a different handoff task. Completion of that handoff is not proof that the HA
 manager's activation work has ended. Native ownership/availability proof must cover that path rather
 than treating it as an ordinary completed start worker. Proxmox's public start API has no expected

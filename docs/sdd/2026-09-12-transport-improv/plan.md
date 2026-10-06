@@ -908,6 +908,16 @@ leaving actual wire-call assertions and cleanup behavior unchanged. Corrected se
 196 and 330 cases; owned typing/style, repository file quality and whitespace pass. Corrected
 whole-unit private clearance and stopped-VM composition remain pending.
 
+All three independent lanes clear corrected adapter pin `44d71d1a6`. Project and complexity each
+pass 196 adapter/wire cases; project also passes owned typing/style. Generic passes 317
+activation/wire/carrier cases. The project lane carries its prior 444-case whole-unit review and 25
+Windows-selected cases on Linux; these are not native Windows acceptance. Each review tree is
+restored clean at the exact pin. The stopped-VM consumer is now delegated as the same risk unit: one
+retained selected connection, activation custody, task settlement, fresh power, passive guest-agent
+responsiveness and one exact guest/numeric preparation, with aggregate cleanup and bookkeeping-only
+recovery. Whole-unit composition reviews, complete lead gates and native PVE acceptance remain
+pending. The adapter is not yet published; no public round or broader checklist is closed.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
