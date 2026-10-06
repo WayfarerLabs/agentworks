@@ -6,10 +6,12 @@ import hashlib
 import os
 import sys
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from agentworks.execution._local_download_publication_windows import (
+    LocalDownloadCleanupUncertainError,
     LocalDownloadPartialMutationError,
     WindowsLocalDownloadPublication,
     _WindowsAPI,
@@ -163,6 +165,155 @@ def test_replace_reports_partial_bytes_after_write_failure(tmp_path: Path, monke
     finally:
         writer.abort()
     assert destination.exists()
+
+
+def test_replace_close_failure_keeps_change_uncertain_and_cleans_other_handles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    destination = tmp_path / "download"
+    destination.write_bytes(b"old")
+    writer = WindowsLocalDownloadPublication(destination, condition=Replace())
+    writer.try_write(memoryview(b"new"))
+    target = writer._target
+    real_close = writer._api.close
+    failed = False
+
+    def close_then_interrupt(handle: int) -> None:
+        nonlocal failed
+        real_close(handle)
+        if handle == target and not failed:
+            failed = True
+            raise OSError("injected interruption after target close admission")
+
+    monkeypatch.setattr(writer._api, "close", close_then_interrupt)
+    with pytest.raises(LocalDownloadPartialMutationError):
+        _commit(writer, b"new")
+    assert writer.possible_local_change
+    assert writer.publication_uncertain
+    assert not writer.published
+    assert writer.cleanup_uncertain
+    with pytest.raises(LocalDownloadCleanupUncertainError):
+        writer.abort()
+    assert writer._stage is None
+    assert not writer._ancestors
+    assert not list(tmp_path.glob(".agw-download-*"))
+    assert destination.read_bytes() == b"new"
+
+
+def test_stage_close_uncertainty_does_not_block_ancestor_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    writer = WindowsLocalDownloadPublication(tmp_path / "download")
+    stage = writer._stage
+    real_close = writer._api.close
+    failed = False
+
+    def close_then_interrupt(handle: int) -> None:
+        nonlocal failed
+        real_close(handle)
+        if handle == stage and not failed:
+            failed = True
+            raise OSError("injected interruption after stage close admission")
+
+    monkeypatch.setattr(writer._api, "close", close_then_interrupt)
+    with pytest.raises(LocalDownloadCleanupUncertainError):
+        writer.abort()
+    assert writer.cleanup_uncertain
+    assert not writer._ancestors
+    assert not list(tmp_path.glob(".agw-download-*"))
+    with pytest.raises(LocalDownloadCleanupUncertainError):
+        writer.abort()
+
+
+def test_ancestor_close_uncertainty_does_not_block_other_ancestors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    writer = WindowsLocalDownloadPublication(tmp_path / "download")
+    assert len(writer._ancestors) > 1
+    first = writer._ancestors[-1]
+    real_close = writer._api.close
+    failed = False
+
+    def close_then_interrupt(handle: int) -> None:
+        nonlocal failed
+        real_close(handle)
+        if handle == first and not failed:
+            failed = True
+            raise OSError("injected interruption after ancestor close admission")
+
+    monkeypatch.setattr(writer._api, "close", close_then_interrupt)
+    with pytest.raises(LocalDownloadCleanupUncertainError):
+        writer.abort()
+    assert not writer._ancestors
+    assert writer.cleanup_uncertain
+    assert not list(tmp_path.glob(".agw-download-*"))
+
+
+@pytest.mark.parametrize("phase", ["truncate", "flush", "metadata", "close"])
+def test_replace_checks_deadline_after_each_final_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str
+) -> None:
+    class MutableDeadline:
+        expired = False
+
+    destination = tmp_path / "download"
+    destination.write_bytes(b"old")
+    writer = WindowsLocalDownloadPublication(destination, condition=Replace())
+    writer.try_write(memoryview(b"new"))
+    target = writer._target
+    deadline = MutableDeadline()
+    if phase == "truncate":
+        original = writer._api.truncate
+
+        def after_truncate(handle: int) -> None:
+            original(handle)
+            deadline.expired = True
+
+        monkeypatch.setattr(writer._api, "truncate", after_truncate)
+    elif phase == "flush":
+        original = writer._api.flush
+
+        def after_flush(handle: int) -> None:
+            original(handle)
+            if handle == target:
+                deadline.expired = True
+
+        monkeypatch.setattr(writer._api, "flush", after_flush)
+    elif phase == "metadata":
+        original = writer._api.security_descriptor
+
+        def after_metadata(handle: int) -> bytes:
+            result = original(handle)
+            if writer.possible_local_change:
+                deadline.expired = True
+            return result
+
+        monkeypatch.setattr(writer._api, "security_descriptor", after_metadata)
+    else:
+        original = writer._api.close
+
+        def after_close(handle: int) -> None:
+            original(handle)
+            if handle == target:
+                deadline.expired = True
+
+        monkeypatch.setattr(writer._api, "close", after_close)
+
+    try:
+        with pytest.raises(LocalDownloadPartialMutationError) as stopped:
+            writer.commit(
+                verified_complete=True,
+                size=3,
+                sha256=hashlib.sha256(b"new").hexdigest(),
+                deadline=cast("Deadline", deadline),
+            )
+        assert isinstance(stopped.value.__cause__, TimeoutError)
+        assert writer.possible_local_change
+        assert writer.publication_uncertain
+        assert not writer.published
+    finally:
+        writer.abort()
+    assert destination.read_bytes() == b"new"
 
 
 def test_unverified_replace_does_not_mutate_destination(tmp_path: Path) -> None:

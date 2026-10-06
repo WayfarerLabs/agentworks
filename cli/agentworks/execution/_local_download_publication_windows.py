@@ -378,7 +378,10 @@ class WindowsLocalDownloadPublication:
         self._original_security: bytes | None = None
         self._stage_identity: _Identity | None = None
         self._stage_delete_pending = False
-        self._close_uncertain = False
+        self._target_close_uncertain = False
+        self._stage_close_uncertain = False
+        self._ancestor_closes_uncertain: set[int] = set()
+        self._observation_close_uncertain = False
         self._size = 0
         self._digest = hashlib.sha256()
         self.published = False
@@ -409,7 +412,7 @@ class WindowsLocalDownloadPublication:
             else:
                 existing = self._open_observation(self._destination)
                 if existing is not None:
-                    self._close_owned(existing)
+                    self._close_observation(existing)
                     raise FileExistsError("Local download destination already exists")
             security, descriptor = self._api.private_security()
             try:
@@ -458,8 +461,6 @@ class WindowsLocalDownloadPublication:
         if len(raw) >= 260:
             raise LocalDownloadUnsupportedError("Local Windows rename path exceeds MAX_PATH")
         self._api.path(self._destination)
-        if "\x00" in raw:
-            raise LocalDownloadUnsupportedError("Local download destination name is unsupported")
 
     @staticmethod
     def _validate_file(info: _Observed) -> None:
@@ -478,14 +479,39 @@ class WindowsLocalDownloadPublication:
                 return None
             raise
 
-    def _close_owned(self, handle: int) -> None:
-        self._close_uncertain = True
+    def _close_observation(self, handle: int) -> None:
+        self._observation_close_uncertain = True
         self._api.close(handle)
-        self._close_uncertain = False
+        self._observation_close_uncertain = False
+
+    def _close_target(self) -> None:
+        assert self._target is not None
+        self._target_close_uncertain = True
+        self._api.close(self._target)
+        self._target = None
+        self._target_close_uncertain = False
+
+    def _close_stage(self) -> None:
+        assert self._stage is not None
+        self._stage_close_uncertain = True
+        self._api.close(self._stage)
+        self._stage = None
+        self._stage_path = None
+        self._stage_close_uncertain = False
+
+    def _close_ancestor(self, handle: int) -> None:
+        self._ancestor_closes_uncertain.add(handle)
+        self._api.close(handle)
+        self._ancestor_closes_uncertain.remove(handle)
 
     @property
     def cleanup_uncertain(self) -> bool:
-        return self._close_uncertain
+        return (
+            self._target_close_uncertain
+            or self._stage_close_uncertain
+            or bool(self._ancestor_closes_uncertain)
+            or self._observation_close_uncertain
+        )
 
     def try_write(self, data: memoryview) -> int:
         if self._stage is None or self.published or self.publication_uncertain or self.cleanup_uncertain:
@@ -510,7 +536,7 @@ class WindowsLocalDownloadPublication:
             if self._api.info(observed).identity != held.identity:
                 raise LocalDownloadUnsupportedError("Local download stage name changed")
         finally:
-            self._close_owned(observed)
+            self._close_observation(observed)
 
     def _recheck_target(self) -> None:
         target = self._target
@@ -526,7 +552,7 @@ class WindowsLocalDownloadPublication:
             if self._api.info(observed).identity != current.identity:
                 raise FileExistsError("Local download destination changed before replacement")
         finally:
-            self._close_owned(observed)
+            self._close_observation(observed)
 
     def commit(self, *, verified_complete: bool, size: int, sha256: str, deadline: Deadline | None = None) -> None:
         stage = self._stage
@@ -581,7 +607,11 @@ class WindowsLocalDownloadPublication:
                 self.possible_local_change = True
                 self.publication_uncertain = True
                 self._api.truncate(self._target)
+                if deadline is not None and deadline.expired:
+                    raise TimeoutError("Local download deadline expired during replacement")
                 self._api.flush(self._target)
+                if deadline is not None and deadline.expired:
+                    raise TimeoutError("Local download deadline expired during replacement")
                 final = self._api.info(self._target)
                 assert self._original is not None
                 if final.identity != self._original.identity or final.size != size or final.links != 1:
@@ -593,6 +623,11 @@ class WindowsLocalDownloadPublication:
                     raise LocalDownloadUnsupportedError("Local replacement file metadata changed")
                 if self._api.security_descriptor(self._target) != self._original_security:
                     raise LocalDownloadUnsupportedError("Local replacement access metadata changed")
+                if deadline is not None and deadline.expired:
+                    raise TimeoutError("Local download deadline expired during replacement")
+                self._close_target()
+                if deadline is not None and deadline.expired:
+                    raise TimeoutError("Local download deadline expired after replacement close")
             except BaseException as exc:
                 if self.possible_local_change:
                     raise LocalDownloadPartialMutationError("Local replacement may contain partial new bytes") from exc
@@ -613,21 +648,20 @@ class WindowsLocalDownloadPublication:
                     self.publication_uncertain = False
                     self._stage_path = None
             finally:
-                self._close_owned(observed)
+                self._close_observation(observed)
         except BaseException:
             pass
 
     def abort(self) -> None:
         """Clean owned stage and handles, retaining unknown close or publication facts."""
         first_error: BaseException | None = None
-        if self._target is not None and not self._close_uncertain:
-            handle = self._target
+        if self._target is not None and not self._target_close_uncertain:
             try:
-                self._close_owned(handle)
-                self._target = None
+                self._close_target()
             except BaseException as exc:
                 first_error = exc
-        if self._stage is not None and not self._close_uncertain:
+        if self._stage is not None and not self._stage_close_uncertain:
+            stage_ready_to_close = self._stage_path is None
             if self._stage_path is not None:
                 try:
                     if self.publication_uncertain:
@@ -635,23 +669,20 @@ class WindowsLocalDownloadPublication:
                     if not self._stage_delete_pending:
                         self._api.delete_on_close(self._stage)
                         self._stage_delete_pending = True
+                    stage_ready_to_close = True
                 except BaseException as exc:
                     first_error = first_error or exc
-            if first_error is None or self._stage_path is None:
+            if stage_ready_to_close:
                 try:
-                    self._close_owned(self._stage)
-                    self._stage = None
-                    self._stage_path = None
+                    self._close_stage()
                 except BaseException as exc:
                     first_error = first_error or exc
-        while self._ancestors and not self._close_uncertain:
-            handle = self._ancestors[-1]
+        while self._ancestors:
+            handle = self._ancestors.pop()
             try:
-                self._close_owned(handle)
-                self._ancestors.pop()
+                self._close_ancestor(handle)
             except BaseException as exc:
                 first_error = first_error or exc
-                break
         if self.cleanup_uncertain:
             raise LocalDownloadCleanupUncertainError(
                 "Local download handle close has an uncertain outcome"
