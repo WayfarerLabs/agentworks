@@ -387,14 +387,14 @@ The developer measures 21 focused synthetic cases passed with 1 native skip. Lin
 typing, Ruff and whitespace checks pass. Private project review finds missing reproduction
 collateral and passing-report visibility; `045d57efe052942464046471587988d5ab22ddd7` updates the
 README's scoped `-rP` command and limits. Its six comparison tests pass, including the optional
-report-propagation assertion alongside the independent ABI check. A narrowly scoped CI step repeats
-only the owned-console node with `-rP`; it retains the existing installed candidate, ordinary suite
-and parallel settings, exposing no unrelated tests' passing output. That collector remains local:
-GitHub rejected publication at `889d2f163` because the token lacks workflow scope. Published #832
-remains at `699c8517e`; no new-head CI started. The operator collection choice is pending between
-workflow access and the same scoped tester command, with no credential change attempted. All three
-independent source lanes clear the corrected combined pin
-`476e7c798de1953c42e52c8cda33c84945fa9728`.
+report-propagation assertion alongside the independent ABI check. All three independent source lanes
+clear the corrected combined pin `476e7c798de1953c42e52c8cda33c84945fa9728`, which also proposed a
+narrowly scoped CI collector. GitHub rejected publication at `889d2f163` because the token lacks
+workflow scope; no new-head CI started. The collector was unnecessary for this one-time
+investigation. After the operator questioned the recurring CI cost, the lead withdrew it and is
+separating the experiment from the ordinary native resource/polling regression. Collection belongs
+to an explicitly selected tester run with `-rP`, with no credential change required. The #845
+environment-data request was already fulfilled separately and did not call for this CI step.
 
 That pin rebases cleanly onto transport `51d5222d50cf04c38f1a5648d2bdd8b8f9bca8fd`, with no SSH
 source/test/CI byte changes relative to its pre-rebase pin `f1f02c377`. The dependency now binds
@@ -447,5 +447,6 @@ quality, locked-SDD, Rulesync and whitespace gates pass. This targeted validatio
 CLI or website run; their earlier complete results retain the pins recorded above. The exact settled
 fixture root is independently verified unused before removal.
 
-Publication and native comparison collection still await the operator choice above. No completed
+The later collector removal supersedes that publication hold. Native comparison collection remains
+an explicitly selected tester task; no measured values follow from this correction. No completed
 plan record, lockfile or public feedback round changes.
