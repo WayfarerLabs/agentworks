@@ -319,17 +319,27 @@ are for the pre-deletion pin, not a substitute for the corrected state. The publ
 `0be885044` now passes every hosted CI and CodeQL gate. Native, recovery and production-composition
 obligations remain open.
 
+All three independent lanes clear the corrected operation-context pin `713d57df1`. Project passes 41
+focused/adjacent cases, complexity passes 57 core/repository cases and generic passes the 34 new
+cases. The final complete lead suite passes 14,803 non-integration tests with 49 skips. Complete
+Ruff/format, strict mypy (1,219 source and test files), typer isolation, file quality, locked-SDD,
+Rulesync and whitespace gates exit 0. Final website validation passes 160 Python and 103 Node cases,
+four builds and both deterministic comparisons. Publication adds validation evidence only after that
+pin. Native backend behavior, fresh v2 recovery, production context construction, inline/service
+ownership and complete additive RunContext remain open. No database data was removed; public
+feedback/fix round 1 remains open without review-requested or ready.
+
 The private inline leaf at `d1bbdbbc9` accepts the explicit numeric-bootstrap context through the
 existing INLINE root program, without changing the manifest, stdin protocol or completion evidence.
-The worker passes 21 focused and 390 related cases, complete strict mypy (1,220 source and test
-files), changed Ruff/format and full file quality. Packed command/script success mocks privileged
-admission; the real non-root entry refuses before request consumption or application launch. The
-measured maximum manifest fits representative direct/sudo QGA envelopes and Windows argv quoting;
-valid oversized group aggregates still refuse before provider dispatch. The worker's full suite was
-interrupted with exit 130 to avoid overlapping the lead's complete run; its eleven failure markers
-have no node identities or traces and remain unclassified. Independent review and lead gates are
-pending. Operation-owned execution context, fresh recovery, service entry and native production
-proof remain open. No public handoff or feedback/fix round closes here.
+The worker passes 21 focused, 366 related and 24 resource/adoption cases, complete strict mypy
+(1,220 source and test files), changed Ruff/format and full file quality. Packed command/script
+success mocks privileged admission; the real non-root entry refuses before request consumption or
+application launch. The measured maximum manifest fits representative direct/sudo QGA envelopes and
+Windows argv quoting; valid oversized group aggregates still refuse before provider dispatch. The
+worker's full suite was interrupted with exit 130 to avoid overlapping the lead's complete run; its
+eleven failure markers have no node identities or traces and remain unclassified. Independent review
+and lead gates are pending. Operation-owned execution context, fresh recovery, service entry and
+native production proof remain open. No public handoff or feedback/fix round closes here.
 
 Project and generic review clear the first inline pin `79dda7ae8`. Project passes 21 focused and 357
 adjacent cases; generic passes the focused cases. The accepted complexity correction removes
