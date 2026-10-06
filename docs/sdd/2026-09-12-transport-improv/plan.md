@@ -451,6 +451,16 @@ existing aggregate bound. Independent integrated review and lead gates remain pe
 helpers, later workload-child admission, native acceptance and public RunContext remain open. This
 is private work, not a public handoff or feedback/fix round closure.
 
+The private support-admission unit at `ae1f8d02a` adds one owner/repository operation that
+atomically retains a new possible-effect row under exact sealed recovery ownership. Required
+caller-retained IDs support exact persistence retry, without uncertain dispatch replay or promotion
+of predecessor registered rows. It retains all old debts, existing row/payload bounds, generation
+fencing and serial custody. Its 99 focused/adjacent database/owner tests and complete strict mypy
+(1,222 source and test files), Ruff/format, full file quality and whitespace gates pass. No schema
+or data was changed. Independent integrated review and lead gates remain pending. The concrete
+availability span, read-only preparation, v2 adapter adoption and native proof remain unfinished;
+the support implementation gate stays unchecked until those scoped reviews and gates complete.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state

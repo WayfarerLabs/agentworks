@@ -82,7 +82,7 @@ class OperationOwner:
     ) -> OperationOwner:
         """Take over one exact predecessor without inferring remote quiescence.
 
-        Recovery seals new ledger registrations and restores only durable claim
+        Recovery seals ordinary ledger registrations and restores only durable claim
         facts. The caller still establishes every adapter and whole-operation
         no-further-effects fact before resolution or release.
         """

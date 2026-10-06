@@ -764,9 +764,9 @@ support obligation and excludes active or uncertain custody. The hold's durable 
 native object represent its lifetime; holding the serial recovery-dispatch guard for that entire
 lifetime would incorrectly exclude the preparation and file attempts it supports.
 
-This is the selected implementation response, not an already implemented recovery path. The current
-owner/repository still reject all new recovery registration; renewed availability and
-recovery-specific preparation require their own implementation and native acceptance.
+The private owner/repository now implement atomic support admission while ordinary registration
+remains sealed. This is not a complete recovery path: concrete renewed availability and
+recovery-specific preparation still require implementation and native acceptance.
 
 That contract uses a distinct internal recovery-dispatch object, not a recovery mode on the ordinary
 borrow. Admission requires the sealed recovery owner, its exact current generation, a

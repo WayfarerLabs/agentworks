@@ -196,6 +196,14 @@ within the existing 8,192-byte envelope. Fresh recovery preparation and producti
 are not yet connected. Existing private recovery adapters are not an accepted recovery path for
 bootstrap-bound records, and no old record is upgraded or granted execution authority.
 
+Core recovery can use `OperationOwner.admit_recovery_support_obligation` to retain a bounded new
+support effect under the exact sealed, unresolved recovery generation. It atomically creates a
+possible-effect row and arms the coarse claim. Exact ID/kind/version/bytes retries confirm only
+persistence; they do not repeat dispatch. Ordinary registration/borrowing and predecessor registered
+promotion remain forbidden, and all original/support rows survive later takeover. The existing
+serial guard excludes active or uncertain work. Concrete availability and read-only preparation
+adapters are not yet connected; this bookkeeping alone is neither a lease nor file-recovery proof.
+
 The bootstrap waits for source and stdin producers as well as output encoders. Unexpected producer
 failure invalidates delivery even if the command exits zero. Intentional early input closure is
 allowed; GNU env's `--default-signal=PIPE` ensures its SIGPIPE outcome is observable.
