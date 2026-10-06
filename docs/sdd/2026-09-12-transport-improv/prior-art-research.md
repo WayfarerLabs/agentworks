@@ -758,22 +758,23 @@ generation or configuration digest is accepted. The ordinary start worker loads 
 a later VM lock, so client-side observations are not an atomic precondition.
 
 Sources:
-[PVE 8 start API and HA branch](https://github.com/proxmox/qemu-server/blob/5ccd363e5908aa5a7b969797babdff1df5159475/src/PVE/API2/Qemu.pm#L3174-L3339),
-[PVE 9 start API](https://github.com/proxmox/qemu-server/blob/80e0590e144359fd136a2ba1e3f44716bfc535b0/src/PVE/API2/Qemu.pm#L3283-L3457),
-[PVE 8 locked configuration load](https://github.com/proxmox/qemu-server/blob/5ccd363e5908aa5a7b969797babdff1df5159475/src/PVE/QemuServer.pm#L5582-L5621).
+[PVE 8 start API and HA branch](https://github.com/proxmox/qemu-server/blob/5ccd363e5908aa5a7b969797babdff1df5159475/src/PVE/API2/Qemu.pm#L3389-L3565),
+[PVE 9 start API](https://github.com/proxmox/qemu-server/blob/80e0590e144359fd136a2ba1e3f44716bfc535b0/src/PVE/API2/Qemu.pm#L3505-L3690),
+[PVE 8 locked configuration load](https://github.com/proxmox/qemu-server/blob/5ccd363e5908aa5a7b969797babdff1df5159475/src/PVE/QemuServer.pm#L5964-L6006).
 
 Task status binds a retained UPID and node, distinguishes running from stopped by process start
-time, and reports exit status separately. A token can observe its own tasks; another observer needs
-node audit authority. Response normalization splits token identity into base user and token ID.
-Missing task logs refuse observation; task-list rotation supplies no durable receipt retention
-guarantee. The common decoder accepts eight or nine hexadecimal process-start digits and retains
-non-ASCII identity fields. Its log filename includes the UPID. The wire's 255 UTF-8-byte capacity is
-therefore a conservative local bound, not a declared API schema maximum. Completed warnings are
-non-errors, but remain distinct from an exact successful result.
+time, and reports exit status separately. A token or its owning user can observe that token's tasks;
+other observers need node audit authority. Response normalization splits token identity into base
+user and token ID. Missing task logs refuse observation; task-list rotation supplies no durable
+receipt retention guarantee. The common decoder accepts eight or nine hexadecimal process-start
+digits and retains non-ASCII identity fields. Its log filename includes the UPID. The wire's 255
+UTF-8-byte capacity is therefore a conservative local bound, not a declared API schema maximum.
+Completed warnings are non-errors, but remain distinct from an exact successful result.
 
 Sources:
 [PVE 8 task ownership and status](https://github.com/proxmox/pve-manager/blob/5aee9c094b1d5608e36fec9cf35c6f71c38a1bdc/PVE/API2/Tasks.pm),
-[PVE 9 task status](https://github.com/proxmox/pve-manager/blob/ac0c87dd37115e3046cbfa5756f2a02fc659e8cd/PVE/API2/Tasks.pm#L425-L514),
+[PVE 9 task status](https://github.com/proxmox/pve-manager/blob/ac0c87dd37115e3046cbfa5756f2a02fc659e8cd/PVE/API2/Tasks.pm#L513-L549),
+[PVE 9 token ownership](https://github.com/proxmox/pve-manager/blob/ac0c87dd37115e3046cbfa5756f2a02fc659e8cd/PVE/API2/Tasks.pm#L19-L37),
 [PVE 8 task ID and status decoding](https://github.com/proxmox/pve-common/blob/91962804ffce2cdb70261f03b2df5c0b7a0a2c4d/src/PVE/Tools.pm#L1182-L1286),
 [PVE 9 task ID and status decoding](https://github.com/proxmox/pve-common/blob/defd246f31f327463f901a2daaf8dc52efcc5a97/src/PVE/UPID.pm#L5-L97).
 
@@ -787,7 +788,7 @@ supply it.
 
 Sources:
 [PVE 8 worker acknowledgment ordering](https://github.com/proxmox/pve-common/blob/91962804ffce2cdb70261f03b2df5c0b7a0a2c4d/src/PVE/RESTEnvironment.pm#L665-L731),
-[PVE 9 worker acknowledgment ordering](https://github.com/proxmox/pve-common/blob/defd246f31f327463f901a2daaf8dc52efcc5a97/src/PVE/RESTEnvironment.pm#L635-L697).
+[PVE 9 worker acknowledgment ordering](https://github.com/proxmox/pve-common/blob/defd246f31f327463f901a2daaf8dc52efcc5a97/src/PVE/RESTEnvironment.pm#L715-L732).
 
 ### Decisions still required
 
