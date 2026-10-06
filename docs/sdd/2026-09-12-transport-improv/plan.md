@@ -821,6 +821,26 @@ existing fork warnings; complete static, file, Rulesync and website gates pass. 
 results do not accept the corrected source. Corrected whole-unit private reviews and complete lead
 gates remain pending. No public round, native gate or broader checklist is closed by this record.
 
+All three independent lanes clear corrected whole-unit pin `521c57cf2`. Project passes 360
+focused/adjacent cases and six-file typing/style, independently confirming original interruption,
+observed guest facts, exact owner retention and one carrier attempt before/after SQLite commit.
+Complexity passes 182 baseline/restored cases; reverting only the guest-preparation correction fails
+12 control/custody regressions. Generic passes 149 composition/preparation/identity cases. All
+review trees are restored clean at the exact pin, with whitespace checks passing.
+
+The lead's complete corrected suite passes 15,354 non-integration cases with 49 skips and 27
+existing fork warnings, exit 0. Complete Ruff/format (1,275 files), strict mypy (1,235 files), typer
+isolation, file quality, locked-SDD, Rulesync and whitespace checks pass. The initial command used
+an unsupported locked-SDD option; the corrected positional-base invocation passes against
+`cea5e8523`. Website gates pass 160 Python and 103 Node cases, four builds and both deterministic
+comparisons. Published predecessor `3d98a1a67` passes hosted CI and CodeQL. These are scripted
+provider/account and local packed-body results, not native PVE behavior, startup, provider
+freshness, account-probe fencing, plugin-registration independence or complete
+availability/RunContext acceptance. The evidence-only update changes no reviewed source/test bytes,
+closes no public round or broader checklist and introduces no schema or shared carrier contract. No
+database data was deleted or SSH branch changed. The approved explicit macOS/Windows in-place local
+Replace behavior and its partial-failure reporting remain unchanged.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
