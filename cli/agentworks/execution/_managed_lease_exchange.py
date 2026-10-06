@@ -72,9 +72,6 @@ class _DiagnosticSink:
         self.saw_data |= bool(data)
         return len(data)
 
-    def clear(self) -> None:
-        self.saw_data = False
-
 
 class _Collector:
     def __init__(self, request: LeaseRequest) -> None:
@@ -153,7 +150,6 @@ class _Collector:
         if issue is None and self.failed:
             issue = ManagedLeaseIssue.HELPER_FAILED
         result = self.result if issue is None else None
-        self.abort()
         return result, issue
 
 
@@ -231,7 +227,6 @@ def _exchange(
         runtime.clear()
         reader.abort()
         collector.abort()
-        stderr.clear()
 
 
 def observe_operation_clock(
