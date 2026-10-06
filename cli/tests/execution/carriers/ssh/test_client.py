@@ -12,7 +12,6 @@ import sys
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from subprocess import Popen
 from threading import Thread
 from typing import Any
 
@@ -370,17 +369,19 @@ def test_nonblocking_setup_failure_cleans_without_guessing_dispatch(
     synthetic.assert_closed()
 
 
-def test_failed_reap_is_explicit(synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch) -> None:
-    original = Popen.wait
+def test_failed_cleanup_retains_custody_until_explicit_retry(
+    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = _process._cleanup
 
-    def wait(process, timeout=None):
-        if len(synthetic.children) == 2 and process is synthetic.children[-1]:
-            raise subprocess.TimeoutExpired("secret-canary", timeout)
-        return original(process, timeout=timeout)
+    def cleanup(status):
+        if len(synthetic.children) == 2 and status.process is synthetic.children[-1]:
+            return False
+        return original(status)
 
     synthetic.command = "import time; time.sleep(30)"
     with monkeypatch.context() as context:
-        context.setattr(Popen, "wait", wait)
+        context.setattr(_process, "_cleanup", cleanup)
         report = synthetic.execute(seconds=0.1)
     assert report.failure == Failure.OBSERVATION
     assert report.completion is None
@@ -393,29 +394,30 @@ def test_failed_reap_is_explicit(synthetic: SyntheticSSH, monkeypatch: pytest.Mo
     synthetic.assert_closed()
 
 
-def test_interrupted_failed_reap_attaches_safe_evidence(
+def test_interrupted_failed_cleanup_retains_original_control_exception(
     synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    original_wait = Popen.wait
+    original_cleanup = _process._cleanup
     original_read = _process._Output.advance
+    interrupted = KeyboardInterrupt()
 
     def read(output, pipe):
         if len(synthetic.children) == 2:
-            raise KeyboardInterrupt()
+            raise interrupted
         return original_read(output, pipe)
 
-    def wait(process, timeout=None):
-        if len(synthetic.children) == 2 and process is synthetic.children[-1]:
-            raise subprocess.TimeoutExpired("secret-canary", timeout)
-        return original_wait(process, timeout=timeout)
+    def cleanup(status):
+        if len(synthetic.children) == 2 and status.process is synthetic.children[-1]:
+            return False
+        return original_cleanup(status)
 
     synthetic.command = "import time; time.sleep(30)"
     with monkeypatch.context() as context:
         context.setattr(_process._Output, "advance", read)
-        context.setattr(Popen, "wait", wait)
+        context.setattr(_process, "_cleanup", cleanup)
         with pytest.raises(KeyboardInterrupt) as raised:
             synthetic.execute()
-    assert raised.value.__notes__
+    assert raised.value is interrupted and raised.value.__notes__
     assert "secret-canary" not in repr(raised.value.__notes__)
     assert not synthetic.custody.settled
     synthetic.custody.close(Deadline.after(2))
