@@ -54,6 +54,7 @@ if TYPE_CHECKING:
 
     from agentworks.execution._file_object_protocol import FileObjectFailureControl
     from agentworks.execution._helper_launcher import IdentityPlan
+    from agentworks.execution._runtime_prerequisite import _NumericGuestBootstrap
     from agentworks.execution.carrier import Carrier
     from agentworks.execution.files import NewMetadata
 
@@ -106,6 +107,7 @@ class FileJsonBinding:
     max_depth: int
     identity_plan: IdentityPlan
     runtime_selection: RuntimeSelection
+    bootstrap: _NumericGuestBootstrap | None = None
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -458,6 +460,7 @@ class _JsonWorkflow:
             plan=self._state.binding.identity_plan,
             deadline=self._deadline,
             runtime_selection=self._state.binding.runtime_selection,
+            bootstrap=self._state.binding.bootstrap,
         )
         self._state.record_runtime(result.runtime_prerequisite)
         observation = result.observation
@@ -514,6 +517,7 @@ class _JsonWorkflow:
             plan=self._state.binding.identity_plan,
             deadline=self._deadline,
             runtime_selection=self._state.binding.runtime_selection,
+            bootstrap=self._state.binding.bootstrap,
         )
         self._state.record_runtime(result.runtime_prerequisite)
         observation = result.observation
@@ -579,6 +583,7 @@ class _JsonWorkflow:
             len(content),
             self._state.binding.identity_plan,
             self._state.binding.runtime_selection,
+            bootstrap=self._state.binding.bootstrap,
         )
         self._state.publication_attempts += 1
         upload = _prepare_upload_borrowed(

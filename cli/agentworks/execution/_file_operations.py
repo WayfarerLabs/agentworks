@@ -52,7 +52,7 @@ if TYPE_CHECKING:
     from agentworks.execution._file_objects import FileKind
     from agentworks.execution._file_stat import FileRevision
     from agentworks.execution._helper_launcher import IdentityPlan
-    from agentworks.execution._runtime_prerequisite import RuntimeSelection
+    from agentworks.execution._runtime_prerequisite import RuntimeSelection, _NumericGuestBootstrap
     from agentworks.execution.carrier import Carrier, Deadline, Dispatch, ExitStatus
     from agentworks.operations import OperationBorrow
 
@@ -73,6 +73,7 @@ class FileStatBinding:
     relative_path: str
     identity_plan: IdentityPlan
     runtime_selection: RuntimeSelection
+    bootstrap: _NumericGuestBootstrap | None = None
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -84,6 +85,7 @@ class FileInventoryBinding:
     max_encoded_bytes: int
     identity_plan: IdentityPlan
     runtime_selection: RuntimeSelection
+    bootstrap: _NumericGuestBootstrap | None = None
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -94,6 +96,7 @@ class FileRemoveBinding:
     expected_revision: FileRevision
     identity_plan: IdentityPlan
     runtime_selection: RuntimeSelection
+    bootstrap: _NumericGuestBootstrap | None = None
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -106,6 +109,7 @@ class FileMetadataBinding:
     mode: int
     identity_plan: IdentityPlan
     runtime_selection: RuntimeSelection
+    bootstrap: _NumericGuestBootstrap | None = None
 
 
 type OwnedFileBinding = FileStatBinding | FileInventoryBinding | FileRemoveBinding | FileMetadataBinding
@@ -192,6 +196,7 @@ class _PreparedStat:
                 plan=binding.identity_plan,
                 deadline=self.state.deadline,
                 runtime_selection=binding.runtime_selection,
+                bootstrap=binding.bootstrap,
             )
         )
 
@@ -214,6 +219,7 @@ class _PreparedInventory:
                 plan=binding.identity_plan,
                 deadline=self.state.deadline,
                 runtime_selection=binding.runtime_selection,
+                bootstrap=binding.bootstrap,
             )
         )
 
@@ -235,6 +241,7 @@ class _PreparedRemove:
                 plan=binding.identity_plan,
                 deadline=self.state.deadline,
                 runtime_selection=binding.runtime_selection,
+                bootstrap=binding.bootstrap,
             )
         )
 
@@ -288,6 +295,7 @@ class _PreparedMetadata:
             plan=binding.identity_plan,
             deadline=self.state.deadline,
             runtime_selection=binding.runtime_selection,
+            bootstrap=binding.bootstrap,
         )
         self.state.operation.settle(self.state.result.dispatch, self.state.result.carrier_completion)
         self.state.note_deadline()

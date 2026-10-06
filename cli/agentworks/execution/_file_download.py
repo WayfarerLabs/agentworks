@@ -41,6 +41,7 @@ from agentworks.operations import OperationBorrow
 
 if TYPE_CHECKING:
     from agentworks.execution._file_stat import FileRevision
+    from agentworks.execution._runtime_prerequisite import _NumericGuestBootstrap
     from agentworks.execution._scratch_receipt import ScratchCleanupDebt
     from agentworks.execution.carrier import ByteSink, Carrier
 
@@ -105,6 +106,7 @@ class FileDownloadBinding:
     identity_plan: IdentityPlan
     runtime_selection: RuntimeSelection
     effect_gate: FileEffectGateBinding | None = None
+    bootstrap: _NumericGuestBootstrap | None = None
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -368,6 +370,7 @@ class _DownloadWorkflow:
             deadline=self._deadline,
             runtime_selection=self._state.binding.runtime_selection,
             effect_gate=self._state.binding.effect_gate,
+            bootstrap=self._state.binding.bootstrap,
         )
         observation = result.observation
         if result.dispatch is not Dispatch.NOT_SENT:
@@ -444,6 +447,7 @@ class _DownloadWorkflow:
             deadline=self._deadline,
             runtime_selection=self._state.binding.runtime_selection,
             effect_gate=self._state.binding.effect_gate,
+            bootstrap=self._state.binding.bootstrap,
         )
         observation = result.observation
         if result.dispatch is not Dispatch.NOT_SENT:
@@ -508,6 +512,7 @@ class _DownloadWorkflow:
                 deadline=self._deadline,
                 runtime_selection=self._state.binding.runtime_selection,
                 effect_gate=self._state.binding.effect_gate,
+                bootstrap=self._state.binding.bootstrap,
             )
             observation = result.observation
             if result.dispatch is not Dispatch.NOT_SENT:
@@ -593,6 +598,7 @@ class _DownloadWorkflow:
                 deadline=self._deadline,
                 runtime_selection=self._state.binding.runtime_selection,
                 effect_gate=self._state.binding.effect_gate,
+                bootstrap=self._state.binding.bootstrap,
             )
             observation = result.observation
             if result.dispatch is not Dispatch.NOT_SENT:
@@ -631,6 +637,7 @@ class _DownloadWorkflow:
             deadline=self._deadline,
             runtime_selection=self._state.binding.runtime_selection,
             effect_gate=self._state.binding.effect_gate,
+            bootstrap=self._state.binding.bootstrap,
         )
         observation = result.observation
         if result.dispatch is not Dispatch.NOT_SENT:
