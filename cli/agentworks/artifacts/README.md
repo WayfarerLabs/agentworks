@@ -85,13 +85,13 @@ Use `agw artifact show --agent <agent-name> --integration shell` to inspect the 
 recorded handling. The templates themselves do not create instances. See `agw vm create --help`,
 `agw agent create --help` and `agw session create --help` for your normal instance workflow.
 
-For a session refusal, use `agw artifact show --session <session-name> --integration <integration-name>`.
-Read the VM, actual user, workspace, then session rows in that order. An incomplete ancestor has
-unfinished application or cleanup. A stale ancestor reports changed integration config keys,
-declared environment variable names by scope, or prepared artifact names, without their values.
-The session row names the ancestor blocking its artifact route. An inactive integration has no
-setup obligation for that facet. Inspection reports recorded application, not a fresh check of
-native files or model context.
+For a session refusal, use
+`agw artifact show --session <session-name> --integration <integration-name>`. Read the VM, actual
+user, workspace, then session rows in that order. An incomplete ancestor has unfinished application
+or cleanup. A stale ancestor reports changed integration config keys, declared environment variable
+names by scope, or prepared artifact names, without their values. The session row names the ancestor
+blocking its artifact route. An inactive integration has no setup obligation for that facet.
+Inspection reports recorded application, not a fresh check of native files or model context.
 
 ## Composition and names
 
