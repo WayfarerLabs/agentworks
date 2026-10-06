@@ -1,7 +1,7 @@
 """Private POSIX terminal relay using the shared held-process owner.
 
-The SSH carrier does not enable this path yet. Its composition must supply an
-owner-mediated resize notification before terminal delivery can be advertised.
+The SSH carrier does not enable this path yet. Local resize notification uses
+the shared process owner; real SSH and native platform acceptance remain open.
 Readiness interpretation and emulator sanitation remain preparation policy.
 """
 
@@ -19,8 +19,12 @@ from agentworks.execution._process import (
     LocalProcessOwner,
     LocalProcessRequest,
     LocalProcessTerminal,
+    ResizeNotification,
     SinkWriteError,
     try_write_to_sink,
+)
+from agentworks.execution._process import (
+    Deadline as ProcessDeadline,
 )
 from agentworks.execution.carrier import (
     CapturedOutput,
@@ -43,6 +47,7 @@ if TYPE_CHECKING:
 _CHUNK = 65_536
 _POLL_SECONDS = 0.01
 _EXIT_DRAIN_SECONDS = 0.1
+_RESIZE_SECONDS = 0.1
 
 
 @dataclass
@@ -352,11 +357,12 @@ class _Attempt:
                         return Failure.INPUT
                     try:
                         if terminal.refresh_dimensions():
-                            # Changing geometry without exact-client notification
-                            # cannot establish remote resize. Refuse this candidate
-                            # until the shared owner supplies the real operation.
-                            return Failure.OBSERVATION
-                    except Exception:
+                            resize_failure = self._notify_resize(owner)
+                            if resize_failure is not None:
+                                return resize_failure
+                    except BaseException as error:
+                        if not isinstance(error, Exception):
+                            self._record_control(error)
                         return Failure.OBSERVATION
                 if drain_at is not None:
                     drain_paused = stdout.pending is not None or stderr.pending is not None
@@ -364,6 +370,26 @@ class _Attempt:
                     self._pause()
         finally:
             input_state.pending = None
+
+    def _notify_resize(self, owner: LocalProcessOwner) -> Failure | None:
+        """Bound local notification without treating signal acceptance as remote proof."""
+        expires_at = time.monotonic() + _RESIZE_SECONDS
+        if self._deadline.expires_at is not None:
+            expires_at = min(expires_at, self._deadline.expires_at)
+        notification = owner.notify_resize(ProcessDeadline(expires_at))
+        if notification is ResizeNotification.REQUESTED:
+            return None
+        if notification is ResizeNotification.UNKNOWN:
+            # A claimed native request remains owned until process settlement.
+            return Failure.OBSERVATION
+        snapshot = owner.snapshot()
+        if snapshot.observation_failed:
+            return Failure.OBSERVATION
+        if self._deadline.expired or self._stop.is_set():
+            return Failure.DEADLINE
+        # Natural exit needs no new window size. Preserve its completion and
+        # continue bounded output draining rather than infer failed execution.
+        return None if snapshot.exit_status is not None else Failure.OBSERVATION
 
     def _pause(self) -> None:
         remaining = self._deadline.remaining()
@@ -400,9 +426,9 @@ def run_terminal_relay_candidate(
 ) -> ProcessResult:
     """Exercise private relay custody while the carrier terminal gate remains shut.
 
-    Initial geometry is copied. A detected geometry change refuses the attempt
-    because the shared process owner cannot yet notify its exact client. This
-    candidate neither constructs a substitute process owner nor interprets
+    Geometry changes request a bounded notification from the same process owner;
+    accepted local SIGWINCH does not prove remote resize. This candidate neither
+    constructs a substitute process owner nor interprets
     preparation readiness. Endpoint use ends before return. Native acquisition
     cleanup uncertainty becomes an observation fact and a safe control note;
     public control propagation suppresses raw native cause chains.
