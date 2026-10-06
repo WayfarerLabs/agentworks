@@ -21,6 +21,7 @@ from agentworks.capabilities.vm_platform.base import (
     ProvisionRequest,
     ProvisionResult,
     VMPlatform,
+    execution_power_remaining,
     provider_locator_remaining,
 )
 from agentworks.capabilities.vm_platform.debian_release import code_owned_release_value
@@ -328,6 +329,34 @@ def _wsl(args: list[str], *, check: bool = True, timeout: int = 300) -> str:
         stderr = result.stderr.replace("\x00", "").strip()
         raise RuntimeError(f"wsl command failed: {stderr}")
     return result.stdout.replace("\x00", "")
+
+
+def _decode_execution_power_listing(raw: bytes) -> str | None:
+    """Decode WSL's redirected UTF-16 or UTF-8 output without losing names."""
+    if len(raw) > 65_536:
+        return None
+    try:
+        if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+            return raw.decode("utf-16")
+        return raw.decode("utf-16-le") if b"\x00" in raw else raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _execution_power_from_listing(raw: bytes, distro_name: str) -> VMStatus:
+    listing = _decode_execution_power_listing(raw)
+    if listing is None:
+        return VMStatus.UNKNOWN
+    for line in listing.splitlines():
+        parts = line.strip().removeprefix("*").strip().rsplit(None, 2)
+        if len(parts) != 3 or parts[0] != distro_name or not parts[2].isdigit():
+            continue
+        if parts[1].casefold() == "running":
+            return VMStatus.RUNNING
+        if parts[1].casefold() == "stopped":
+            return VMStatus.STOPPED
+        return VMStatus.UNKNOWN
+    return VMStatus.UNKNOWN
 
 
 def _powershell(script: str, *, check: bool = True, timeout: int = 120) -> str:
@@ -1072,3 +1101,27 @@ class WSL2Platform(VMPlatform):
                 return VMStatus.STOPPED
             return VMStatus.UNKNOWN
         return VMStatus.UNKNOWN
+
+    def observe_execution_power(self, vm: VMRow, ctx: RunContext, *, deadline: Deadline) -> VMStatus:
+        """Read WSL registration power without invoking a distro or guest."""
+        del ctx
+        distro_name = self._distro_name(vm)
+        timeout = execution_power_remaining(deadline, vm_name=vm.name)
+        try:
+            result = subprocess.run(["wsl", "--list", "--verbose"], capture_output=True, timeout=timeout)
+        except subprocess.TimeoutExpired as error:
+            raise LimitExceededError(
+                f"WSL2 power observation timed out for VM '{vm.name}'",
+                entity_kind="vm",
+                entity_name=vm.name,
+            ) from error
+        except OSError as error:
+            raise ConnectivityError(
+                f"Could not observe WSL2 power for VM '{vm.name}'",
+                entity_kind="vm",
+                entity_name=vm.name,
+            ) from error
+        execution_power_remaining(deadline, vm_name=vm.name)
+        if result.returncode != 0 or type(result.stdout) is not bytes:
+            return VMStatus.UNKNOWN
+        return _execution_power_from_listing(result.stdout, distro_name)

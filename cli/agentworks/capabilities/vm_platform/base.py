@@ -93,6 +93,21 @@ def provider_locator_remaining(deadline: Deadline, *, vm_name: str) -> float:
     return remaining
 
 
+def execution_power_remaining(deadline: Deadline, *, vm_name: str) -> float:
+    """Return a positive finite passive-power observation budget."""
+    if type(deadline) is not Deadline or deadline.expires_at is None:
+        raise ValidationError("Execution power observation requires a finite Deadline")
+    remaining = deadline.remaining()
+    assert remaining is not None
+    if remaining <= 0:
+        raise LimitExceededError(
+            f"Execution power observation deadline expired for VM '{vm_name}'",
+            entity_kind="vm",
+            entity_name=vm_name,
+        )
+    return remaining
+
+
 class BootstrapProgress(Protocol):
     """Value-free progress sink for create-time VM bootstrap.
 
@@ -383,6 +398,19 @@ class VMPlatform(Capability):
         """Query the live observed status. Reads
         ``vm.platform_metadata`` (and any op secret via ``ctx``; see
         :meth:`create`)."""
+
+    def observe_execution_power(self, vm: VMRow, ctx: RunContext, *, deadline: Deadline) -> VMStatus:
+        """Passively observe power within a finite operation budget.
+
+        Platforms opt in only after proving this path cannot activate the guest
+        and rejects late observations. The legacy status hook is not a fallback.
+        """
+        del vm, ctx, deadline
+        raise StateError(
+            f"VM platform '{self.name}' has no bounded execution power observer",
+            entity_kind="vm-platform",
+            entity_name=self.name,
+        )
 
     @abstractmethod
     def display_backend_name(self, vm: VMRow) -> str:
