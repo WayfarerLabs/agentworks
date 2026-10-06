@@ -613,8 +613,9 @@ def test_resize_requires_finite_deadline_and_ready_posix_owner(
     assert owner.notify_resize(expired) is process_core.ResizeNotification.NOT_SENT
     assert owner.notify_resize(Deadline(time.monotonic() + 1)) is process_core.ResizeNotification.NOT_SENT
 
-    monkeypatch.setattr(process_core.os, "name", "nt")
-    assert owner.notify_resize(Deadline(time.monotonic() + 1)) is process_core.ResizeNotification.NOT_SENT
+    with monkeypatch.context() as unsupported_platform:
+        unsupported_platform.setattr(os, "name", "nt")
+        assert owner.notify_resize(Deadline(time.monotonic() + 1)) is process_core.ResizeNotification.NOT_SENT
 
 
 @pytest.mark.skipif(os.name != "posix", reason="SIGWINCH is POSIX-only")
