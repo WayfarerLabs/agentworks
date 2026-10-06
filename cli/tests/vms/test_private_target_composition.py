@@ -192,7 +192,7 @@ def composition(
 
 def _prepared_accesses(
     owner: OperationOwner, vm: VMRow, platform: WSL2Platform, root: Path, dispatch: _LocalWSL2Dispatch
-) -> tuple[ExecutionAccess, FileAccess]:
+) -> tuple[ExecutionOperation, ExecutionAccess, FileAccess]:
     """Prepare the private target and account plan under one existing owner."""
     binding = platform.resolve_native_execution_binding(vm, RunContext(), deadline=Deadline.after(30))
     dispatch.binding = binding
@@ -217,8 +217,9 @@ def _prepared_accesses(
     assert accounts.status is TargetIdentityStatus.PREPARED
     assert accounts.ordinary_plan is not None
     assert accounts.ordinary_plan.expected.euid == os.geteuid()
+    operation = ExecutionOperation(owner, prepared.target)
     execution = ExecutionAccess(
-        ExecutionOperation(owner, prepared.target),
+        operation,
         binding.carrier,
         runtime_selection=binding.runtime_selection,
         ordinary_plan=accounts.ordinary_plan,
@@ -238,14 +239,14 @@ def _prepared_accesses(
         entity_name=vm.name,
         deadline=lambda: Deadline.after(30),
     )
-    return execution, files
+    return operation, execution, files
 
 
 def test_prepared_wsl2_binding_drives_command_and_file_under_one_owner(
     composition: tuple[Database, OperationOwner, VMRow, WSL2Platform, _LocalWSL2Dispatch], tmp_path: Path
 ) -> None:
     database, owner, vm, platform, dispatch = composition
-    execution, files = _prepared_accesses(owner, vm, platform, tmp_path, dispatch)
+    operation, execution, files = _prepared_accesses(owner, vm, platform, tmp_path, dispatch)
 
     target = tmp_path / "observed.txt"
     target.write_bytes(b"observed")
@@ -256,6 +257,7 @@ def test_prepared_wsl2_binding_drives_command_and_file_under_one_owner(
     assert dispatch.calls == 4  # Guest identity, account, command, file metadata.
     assert dispatch.guest_calls == dispatch.account_calls == 1 and dispatch.local_calls == 2
     assert database.operations.inspect(owner.ownership.scope).state is OperationClaimState.POSSIBLE_DISPATCH  # type: ignore[union-attr]
+    operation.finish()
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
@@ -265,7 +267,7 @@ def test_uncertain_execution_prevents_following_file_custody(
     composition: tuple[Database, OperationOwner, VMRow, WSL2Platform, _LocalWSL2Dispatch], tmp_path: Path
 ) -> None:
     _, owner, vm, platform, dispatch = composition
-    execution, files = _prepared_accesses(owner, vm, platform, tmp_path, dispatch)
+    operation, execution, files = _prepared_accesses(owner, vm, platform, tmp_path, dispatch)
 
     dispatch.inline_uncertain = True
     result = execution.run(Command(("/bin/true",)), profile=Protection.DIRECT)
@@ -274,5 +276,7 @@ def test_uncertain_execution_prevents_following_file_custody(
     with pytest.raises(StateError):
         files.stat(PurePosixPath(tmp_path / "observed.txt"))
     assert dispatch.calls == calls
+    with pytest.raises(StateError):
+        operation.finish()
     with pytest.raises(StateError):
         owner.close()
