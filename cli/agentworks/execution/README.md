@@ -114,8 +114,8 @@ required before that public surface exists.
 numeric bootstrap must match that VM's derived boot identity; platform-host targets cannot select
 it. The operation forwards its immutable context before preparation and borrowing, while each call
 keeps its explicit body identity. The private WSL2 native factory constructs the shared bootstrap
-from its prepared elevated plan and actual full guest. Other platform composition and service entry
-remain unimplemented. No target or root identity is inferred as a fallback.
+from its prepared elevated plan and actual full guest. Other platform composition and complete
+managed-helper adoption remain unimplemented. No target or root identity is inferred as a fallback.
 
 `_execution_result.py` reduces an operation-owned inline outcome into those public facts. The fixed
 inline helper accepts retrospective normal completion only on CPython 3.11 through 3.14, after its
@@ -758,9 +758,13 @@ the same context, including after a publication conflict. Existing context-free 
 remain unchanged. Core file state binds this context once. The private WSL2 native factory
 constructs one context from the prepared elevated plan and actual full guest, requires both identity
 plans and shares it between file and buffered execution state. Missing preparation refuses before
-exposing views. Fresh recovery, later service entry and other platform composition still need
-adoption. Complete provider envelopes include the selected prefix and encoded request; even a valid
-request can refuse before QGA dispatch when their aggregate exceeds the carrier limit.
+exposing views. Fresh recovery, outer managed helpers and other platform composition still need
+adoption. The fixed managed service entry separately validates bounded controller/guest argv data
+and reuses numeric admission with an INLINE two-phase loader before controller modules and store
+effects. Tests simulate its admission and observations; native controller and later workload-child
+guest admission remain unproved. Complete provider envelopes include the selected prefix and encoded
+request; even a valid request can refuse before QGA dispatch when their aggregate exceeds the
+carrier limit.
 
 The separate private `build_named_guest_bootstrap_argv` handles early fixed guest operations before
 numeric account preparation. It resolves a core-bound account name through the system account

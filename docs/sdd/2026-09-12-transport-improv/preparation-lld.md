@@ -864,8 +864,12 @@ forwarding that context into preparation. Body identity remains call-specific. T
 native factory requires both prepared identity plans and constructs one bootstrap from the elevated
 plan and actual full guest. File and buffered execution state share that immutable context; missing
 preparation refuses before exposing views. Fresh recovery, other platform composition and the
-separately launched service boundary still need adoption. This private composition does not prove
-native credential transitions or complete production RunContext delivery.
+complete outer managed-helper boundary still need adoption. The fixed service controller entry
+separately uses numeric admission and the INLINE loader before controller modules or store effects,
+with its exact controller identity and full guest transported as bounded argv data. Its admission
+tests are simulated; native controller and later workload-child admission remain unproved. These
+private compositions do not prove native credential transitions or complete production RunContext
+delivery.
 
 ## Public result and check behavior
 

@@ -1,8 +1,9 @@
 """Fixed Linux service main for one independent managed run.
 
-Only the derived run ID crosses argv. Request material stays in protected
-assets and child process descriptors. Private injected boundaries support
-hermetic tests without claiming a live systemd service.
+The fixed service entry receives the derived run ID and bounded controller/guest
+admission facts. Workload request material stays in protected assets and child
+process descriptors. Private injected boundaries support hermetic tests without
+claiming a live systemd service.
 """
 
 from __future__ import annotations

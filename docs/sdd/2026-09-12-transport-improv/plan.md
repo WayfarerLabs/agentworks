@@ -440,6 +440,17 @@ review and native proof remain open.
       never treat observed guest or anchor facts as a lease. Then adopt actual record versions and
       fresh prepared facts in all retained-file adapters. Native acceptance remains required.
 
+The private service-entry unit at `5dc498d11` validates canonical bounded controller/guest argv
+data, then reuses the existing numeric admission and INLINE loader before controller/store modules.
+It transports actual controller credentials and the full guest without changing workload request or
+launch-fact schemas. Its 231 focused/adjacent tests pass, as do complete strict mypy (1,222 source
+and test files), Ruff/format and full file quality. Admission and guest observations are simulated,
+not native root/systemd proof. Representative complete Proxmox envelopes measure 64,127 bytes for
+10,000 workload-input bytes and pass; 12,000 input bytes produce 66,791 bytes and refuse the
+existing aggregate bound. Independent integrated review and lead gates remain pending. Outer managed
+helpers, later workload-child admission, native acceptance and public RunContext remain open. This
+is private work, not a public handoff or feedback/fix round closure.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state

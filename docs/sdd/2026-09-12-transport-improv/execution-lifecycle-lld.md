@@ -314,6 +314,16 @@ cgroup, applies the exact groups/GID/UID and verifies them before any caller-con
 startup or payload can run. Immediately before exec, the child restores the standard payload signal
 dispositions and clears the inherited signal mask.
 
+The fixed service process receives only the derived run ID and canonical bounded admission data: the
+prepared controller UID/GID/groups and full guest checkpoint. This is separate from workload request
+material, which remains in protected assets and descriptors. Before controller modules or
+store/cgroup access, the fixed entry validates that data and reuses numeric root admission plus the
+INLINE two-phase loader. The canonical observer loads once under the held init reader; a full guest
+mismatch or non-root entry refuses before controller effects. Root controller identity does not
+authorize a fallback body identity. The notify environment survives this bootstrap. Its tests
+simulate admission and observations, not native root/systemd success. Later workload-child guest
+admission and complete outer managed-helper adoption remain open.
+
 After placement and identity are proved, the controller publishes `launch`, sends `READY=1`, then
 releases the child gate. This ordering makes normal `systemd-run` return a launch acknowledgment
 without tying job lifetime or byte streams to the delivery connection. The controller concurrently
