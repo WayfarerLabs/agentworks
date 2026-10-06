@@ -444,6 +444,11 @@ store prevents interpreting that absence as proved non-dispatch. The guest runne
 settlement remains unchanged because its source descriptors do not have a host-side retention
 consumer.
 
+An unobserved command startup with an observation failure remains unknown dispatch even if local
+cleanup finishes before the carrier reduces that report. Later cleanup cannot prove that an already
+admitted constructor never started its client. SSH version probing remains separate: if no command
+was attempted, its remote command can still be reported as not sent.
+
 Local Linux tests exercise interrupted startup, admission and cleanup, including the interval after
 admission but before pumping. They do not establish native Windows/macOS acceptance. A separately
 reproduced SIGINT at entry to the cleanup loop can escape before the owner receives its stop

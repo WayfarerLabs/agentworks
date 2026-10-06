@@ -156,3 +156,66 @@ def test_actual_delayed_constructor_retained_and_never_replayed(
     assert custody.settled and len(children) == 1
     assert children[0].returncode is not None
     assert all(pipe is None or pipe.closed for pipe in (children[0].stdin, children[0].stdout, children[0].stderr))
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("kind", ["wsl", "ssh"])
+def test_late_cleanup_does_not_rewrite_unknown_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    entered, release = Event(), Event()
+    custody = LocalDeliveryCustody()
+    children: list[subprocess.Popen[bytes]] = []
+    marker = tmp_path / "client-entered"
+    original = subprocess.Popen
+    original_clock = time.monotonic
+    module = wsl2 if kind == "wsl" else client
+    pump = module.run_process
+    monkeypatch.setattr(time, "monotonic", lambda: original_clock() + (60 if entered.is_set() else 0))
+
+    def spawn(argv, **kwargs):
+        if kind == "ssh" and argv[-1] == "-V":
+            child = original([sys.executable, "-c", "import sys; sys.stderr.write('OpenSSH_9.9p1')"], **kwargs)
+        else:
+            entered.set()
+            assert release.wait(30)
+            child = original(
+                [sys.executable, "-c", f"import pathlib,time; pathlib.Path({str(marker)!r}).touch(); time.sleep(30)"],
+                **kwargs,
+            )
+            children.append(child)
+            until = original_clock() + 3
+            while not marker.exists() and original_clock() < until:
+                time.sleep(0.01)
+            assert marker.exists()
+            return child
+        children.append(child)
+        return child
+
+    def observe_after_cleanup(argv, **kwargs):
+        result = pump(argv, **kwargs)
+        if kind == "ssh" and argv[-1] == "-V":
+            return result
+        assert not result.started and result.failure is Failure.OBSERVATION
+        assert not custody.settled
+        release.set()
+        # The owner may settle between the pump's immutable observation and
+        # carrier reduction. It cannot retroactively prove non-dispatch.
+        assert custody.close(Deadline.after(3))
+        return result
+
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    monkeypatch.setattr(module, "run_process", observe_after_cleanup)
+    try:
+        report = _carrier(kind, tmp_path).execute(
+            PreparedInvocation(("/fixture",)), io=CarrierIO(), deadline=Deadline.after(30), custody=custody
+        )
+        assert marker.exists() and custody.settled
+        assert report.dispatch is Dispatch.UNKNOWN
+        assert report.completion is None and report.failure is Failure.OBSERVATION
+    finally:
+        release.set()
+        assert custody.close(Deadline.after(3))
+    assert len(children) == (1 if kind == "wsl" else 2)
+    assert all(child.returncode is not None for child in children)
+    assert all(pipe is None or pipe.closed for child in children for pipe in (child.stdin, child.stdout, child.stderr))

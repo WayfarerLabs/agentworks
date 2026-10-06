@@ -95,7 +95,7 @@ class SSHCarrier:
             Dispatch.SENT
             if completion is not None
             else Dispatch.UNKNOWN
-            if result.started or not custody.settled
+            if result.started or result.failure is Failure.OBSERVATION or not custody.settled
             else Dispatch.NOT_SENT
         )
         failure = result.failure
