@@ -33,3 +33,37 @@ trust custody, genuine provider creation receipts, production publication/writer
 rollback or additive RunContext use. Those remain required gates. The later rebase onto transport
 `833f1c280cc67f8d9b8f71f2e229ab69d20f7df5` carries this unit as `a975ce65f`; fresh combined
 validation follows the next actual resize/native-primitive integration batch.
+
+## Authentication offers and native fixture custody
+
+The developer's `c335e81ce603c25392dca7af0a28fb2bd12d1d18` supplies six Linux integration cases.
+They compare full key algorithm/blob observations from the owned server's authentication packet log.
+They cover inherited-agent exclusion, explicit selection of one public identity from a multi-key
+agent, matching versus stale sibling public keys and refusal to offer an automatic sibling
+certificate. Positive observed offers distinguish actual authentication from acceptance alone;
+unrecognized log syntax fails observation rather than becoming an absent-offer claim.
+
+The source-pure fixture worker enters passively and admits native work through an explicit guarded
+start. One retained worker owns each server/agent construction, borrowed lifetime and cleanup.
+Synthetic interruption cases cover delayed startup, construction, completion waiting and cleanup
+ordering. These helpers create no native resources at import or collection. Native execution
+requires a tester-owned account/home or independently verified startup-free configured shell;
+overriding HOME alone does not isolate OpenSSH's account-derived configuration.
+
+All three independent source lanes clear the combined private pin
+`fedaf2e8e9339d5212405f2d0ae69956fc67975e`, including these fixtures, installed POSIX terminal
+composition and bounded Windows diagnostics. The lead measures **415 non-integration SSH tests
+passed with 6 skips**, full Ruff/format (1,283 files), strict mypy (1,246 sources), selected Windows
+typing and file quality, all exit 0. Six authentication and two POSIX terminal cases collect without
+execution. A subsequent optional cleanup removes an unnecessary terminal fixture grouping marker.
+Rebase onto transport `75a59e15a` at `60c1fa3843c6ad45433da92ffba83349a8b1a968` preserves the entire
+SSH source/test tree after that cleanup. Fresh combined gates follow that dependency change.
+
+The complete suite at that rebased pin passes 14,801 non-integration tests with 51 skips (exit 0).
+Full Ruff/format, strict mypy (1,251 sources), typer isolation, file quality, locked-SDD, Rulesync
+and website gates also exit 0. The [terminal record](terminal-results.md) preserves the exact gate
+scope and the separately failed native Windows run requiring new diagnostic evidence.
+
+**The new native cases have not run.** No default account-configuration isolation, physical keyboard
+behavior, successful native offers, provider creation/publication, writer coexistence, rollback or
+RunContext acceptance is inferred from their source review or synthetic gates.

@@ -190,10 +190,12 @@ local validation separately from the remaining shared integration and platform a
 proof fixtures from native execution and genuine production publication.
 
 Shared subprocess adoption introduces an implementation dependency on transport #833. Current
-integration uses `73c75d38a61c76c51b7f0a33a388f4f18fd0d1ba`, adding reviewed bootstrap/file
-packaging and early named admission to owner-mediated POSIX resize, shared terminal input and
-explicit borrowed native stdin, structural preflight, managed-start and download mechanisms. Early
-named admission does not complete production composition or native guest-fencing acceptance. The
+integration uses `75a59e15a3ea2b1a7ba371fd4c0028c3bf7b62af`, adding reviewed WSL hold/query/probe
+adoption of named admission to bootstrap/file packaging, owner-mediated POSIX resize, shared
+terminal input and explicit borrowed native stdin, structural preflight, managed-start and download
+mechanisms. Early named admission separates root launch from the configured body account and
+preserves existing version-3 hold recovery. It does not complete production composition or native
+guest-fencing acceptance. The
 [Windows ancestor-sharing correction](phase2-results.md#windows-ancestor-sharing-correction) records
 that rebase and its remaining limits. The earlier
 [local-download stack refresh](phase2-results.md#private-local-download-stack-refresh) and

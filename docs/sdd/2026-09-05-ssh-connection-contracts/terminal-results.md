@@ -209,3 +209,49 @@ records remain unchanged. The private suite root is independently checked for re
 process/descriptor use and removed after completion. Native Windows execution follows publication,
 rather than being inferred from these synthetic checks. The terminal feature remains disabled and
 full Phase 2 gates remain open.
+
+## Native failure evidence and installed POSIX proof
+
+The first hosted native Windows run at published `5facf665c12c72bf0f2d8eb0a26491a8b83f1fbb`
+[fails](https://github.com/WayfarerLabs/agentworks/actions/runs/37428911658/job/112154892043) only
+`test_owned_console_resource_and_nowait_records`: its owned child returns 1. The job measures 815
+passed and 59 skipped; all Linux matrix and other hosted gates pass. The failed assertion omits the
+child's retained records and stderr, and no artifact exposes them. The cause is unknown; this result
+neither establishes a polling/restoration defect nor closes native primitive acceptance.
+
+The developer's `c9586c8c7c68488aeb9df307f4868eb755715842` adds bounded fixture-owned failure
+diagnostics. Original exceptions and native assertions remain intact. Synthetic failure cases verify
+that controlled child/parent observations survive cleanup. The next hosted run must supply the
+native diagnosis; better diagnostics alone are no behavioral correction.
+
+The POSIX developer's `bc9b887eb5b91afdb60068726ee407b0b5960d3d` supplies two Linux integration
+cases through actual shared preparation, strict admission, installed-client version probing and the
+private relay, all under the original 120-second operation deadline. The success case measures both
+readiness gates, withheld keyboard input, exact sensitive-byte delivery and two remote geometry
+changes. It checks client reaping, closed pipes, owned PTY closure and borrowed terminal restoration
+before failure cleanup. The refusal case selects an unavailable runtime and checks that setup cannot
+send payload or keyboard bytes. Guest cleanup observes the reported UID/PID/start identity within
+its own finite bound; it never signals that PID or treats parent reaping as guest absence.
+
+All three independent source lanes clear combined private
+`fedaf2e8e9339d5212405f2d0ae69956fc67975e`; they independently refute the concern that fallback
+fixture cleanup could convert a failing owner/restoration assertion into a passing case. Its focused
+SSH gates measure 415 passed with 6 skips, full Ruff/format and strict mypy, selected Windows typing
+and file quality, all exit 0. The eight new authentication/POSIX integration cases collect; none has
+run. The [trust proof record](trust-workflow-results.md) specifies native account/home and fixture
+custody prerequisites. Source review does not establish native terminal acceptance.
+
+Transport publishes WSL hold/query/probe named-admission adoption at
+`75a59e15a3ea2b1a7ba371fd4c0028c3bf7b62af`. All 123 carried SSH commits rebase cleanly onto it at
+`60c1fa3843c6ad45433da92ffba83349a8b1a968`. The SSH source/test tree is identical to the reviewed
+batch after optional grouping cleanup; the process-owner resize seam is unchanged. Successful native
+admission, shared Windows launch/preparation, presentation sanitation and additive production
+RunContext remain open. Terminal capability remains disabled.
+
+Fresh combined validation at `60c1fa3843c6ad45433da92ffba83349a8b1a968` passes **14,801
+non-integration tests with 51 skips** (exit 0), Ruff/format (1,288 files), strict mypy (1,251
+sources), typer isolation, file quality, locked-SDD and Rulesync. Website gates measure 160 Python
+and 103 Node tests; four builds and both deterministic comparisons exit 0. All 25 completed plan
+records remain unchanged. The owned suite/build roots are independently verified unused and removed
+after terminal completion. Publication follows these local gates; hosted Windows diagnostics and
+native authentication/POSIX execution remain separate pending evidence.
