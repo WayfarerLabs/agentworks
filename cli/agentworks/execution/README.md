@@ -141,6 +141,15 @@ trusted root; the service rejects the filesystem root because the helper require
 It has no public download, directory transfer, production factory or RunContext accessor. This bound
 assembly does not activate recipient grants or the core allowlist during coexistence.
 
+The private local-download publishers stage a verified transfer before changing the workstation
+destination. Create publishes caller-private access without overwriting an existing entry. Linux
+Replace uses same-directory rename and preserves supported local access metadata. macOS and Windows
+Replace copy into a held existing file; a later write, truncate, flush, close or deadline failure
+retains possible local change and cleanup uncertainty. macOS currently refuses ACLs, extended
+attributes, BSD flags and privilege-bearing modes. Windows uses native file identity, sharing and
+security-descriptor checks. Native macOS and Windows filesystem behavior still needs acceptance
+evidence before these candidates can supply production download access.
+
 ## File-call custody
 
 `FileOperation` requires a `ManagedTargetIdentity` that exactly matches its `OperationOwner` VM or

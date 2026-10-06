@@ -139,6 +139,12 @@ also refuse a destination whose directory ancestry another local user can rename
 validation and publication; trusted-owner sticky directories may be supported, while symlink
 ancestors refuse.
 
+The first local `Create` implementation publishes caller-private workstation access: mode 0600 on
+Linux/macOS and a protected caller-only DACL on Windows. It does not copy guest ownership or widen
+access through directory ACL inheritance. An inherited ACL that prevents private staging is an
+unsupported refusal. This local creation default is separate from preserving the ordinary
+direct-write access semantics of an existing `Replace` destination.
+
 For macOS and Windows, explicit local `Replace` first holds and verifies a single existing regular
 file under the workstation caller's ordinary authority. It refuses links, reparse points, hard
 links, directories, special objects, unsupported flags or access metadata before mutation. Only
