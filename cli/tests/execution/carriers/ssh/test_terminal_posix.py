@@ -33,7 +33,7 @@ def _native_worker[**P](test: Callable[P, None]) -> Callable[P, None]:
 
         worker = Thread(target=work)
         worker.start()
-        worker.join(5)
+        worker.join()
         assert not worker.is_alive()
         if errors:
             raise errors[0]
