@@ -179,10 +179,15 @@ The private file-call codec preserves version-one records byte-for-byte. Bootstr
 version two, retaining root-entry identity and the full guest separately from the body identity. It
 validates Linux system-Python selection, target boot and any gate's full guest before encoding or
 accepting persisted bytes. Each typed record exposes its actual payload version; installation and
-updates must use that version rather than a global latest-version assumption. Immutable bootstrap
-facts do not change the reserved recovery growth, and all records remain within the existing
-8,192-byte envelope. This codec is not yet connected to operation bindings or fresh recovery
-preparation, and does not upgrade old records or grant execution authority.
+updates use that version rather than a global latest-version assumption. `FileOperation` accepts one
+constructor-bound context, checks its selected VM boot, and gives each prepared binding that same
+context before registration or dispatch. Gate setup and bound promotion preserve it. JSON and
+package child publication, exact package retry and retained updates use the encoded record's
+version. Context-free private calls retain version-one semantics; bootstrap-bound calls use version
+two. Immutable bootstrap facts do not change the reserved recovery growth, and all records remain
+within the existing 8,192-byte envelope. Fresh recovery preparation and production VM composition
+are not yet connected. Existing private recovery adapters are not an accepted recovery path for
+bootstrap-bound records, and no old record is upgraded or granted execution authority.
 
 The bootstrap waits for source and stdin producers as well as output encoders. Unexpected producer
 failure invalidates delivery even if the command exits zero. Intentional early input closure is
@@ -743,10 +748,10 @@ gate observations through the bound reader. Every family entry forwards the same
 reconciliation and cleanup. Private download, upload, JSON and single-call bindings retain this
 context through their exchanges and outcomes. JSON gives each independently prepared upload child
 the same context, including after a publication conflict. Existing context-free private candidates
-remain unchanged; production VM composition has not yet bound this option through operation state or
-recovery. Inline execution and later service entry still need adoption. Complete provider envelopes
-include the selected prefix and encoded request; even a valid request can refuse before QGA dispatch
-when their aggregate exceeds the carrier limit.
+remain unchanged. Core file state can bind this context once, but production VM construction and
+fresh recovery have not yet adopted it. Inline execution and later service entry still need
+adoption. Complete provider envelopes include the selected prefix and encoded request; even a valid
+request can refuse before QGA dispatch when their aggregate exceeds the carrier limit.
 
 The separate private `build_named_guest_bootstrap_argv` handles early fixed guest operations before
 numeric account preparation. It resolves a core-bound account name through the system account

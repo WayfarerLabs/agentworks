@@ -903,9 +903,13 @@ Recovery must freshly prepare and compare the selected target, complete guest, r
 identity before using a bootstrap-bound record. A changed or unavailable fact refuses dispatch while
 retaining uncertainty and custody; it does not rewrite the old record to match the new environment.
 Admission still reserves every reachable retained payload within the existing 8,192-byte envelope.
-The private versioned codec now represents and validates those facts; its operation composition is
-not yet implemented. The current private adapters do not supply that fresh preparation or production
-recovery path.
+The private versioned codec now represents and validates those facts. `FileOperation` binds one
+optional context at construction, verifies the selected VM boot, and gives each prepared binding
+that context before registration or dispatch. Gate promotion preserves it, and all originating
+admissions, JSON/package child publications and retained updates use the typed record's actual
+version. Production VM construction has not yet adopted this composition. The current private
+recovery adapters do not supply fresh preparation and are not an accepted recovery path for
+bootstrap-bound records.
 
 JSON owns one parent `file-call` row. Before any nested upload can dispatch, it publishes that
 child's fresh token and attempt number into the same row. A retry may replace those fields only

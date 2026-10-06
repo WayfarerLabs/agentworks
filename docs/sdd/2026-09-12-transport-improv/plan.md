@@ -290,6 +290,18 @@ after that pin; operation-owned binding and exact envelope-version consumers are
 unit. The earlier browser and Python 3.14 framing failures remain unexplained despite the later
 green gates. Public feedback/fix round 1 remains open, without a review/readiness signal.
 
+The private operation-context unit at `a5678fe5b` now binds one immutable bootstrap in
+`FileOperation`, matching its VM boot before any call. Each preparation and all three gate setup
+paths receive that context before dispatch; bound promotion, JSON children and serial package
+children retain it. Admissions and every originating payload update use the typed record's actual
+version. Exact package-publication retry also confirms revision, bytes and version before the next
+child can dispatch. Context-free private calls retain their version-one behavior, not a production
+VM fallback. The worker passes 35 focused cases and its related 2,124-case selection with 25 skips;
+complete strict mypy passes 1,219 source and test files. Its exchange and consecutive-child evidence
+is simulated, not native credential or root-entry proof. Independent integrated review and full lead
+gates remain pending. Fresh recovery, production VM construction, inline and service entry, and
+complete RunContext remain open; no checkpoint or public round closes here.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
