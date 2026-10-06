@@ -276,6 +276,7 @@ class Carrier(Protocol):
         *,
         io: CarrierIO,
         deadline: Deadline,
+        custody: LocalDeliveryCustody,
     ) -> CarrierReport: ...
 ```
 
@@ -297,6 +298,30 @@ before dispatch when absent from the channel's one immutable feature description
 | `CarrierIO`          | One explicit input choice: EOF, finite source, live source, or terminal endpoint. Output is bounded capture, discard, explicit byte-stream sinks, or terminal presentation. Carries effective sensitivity and authorized presentation policy. |
 | `Deadline`           | Remaining total budget, passed through local startup, dispatch and observation; never restarted for each poll. An explicitly unbounded operation remains distinct from a default.                                                             |
 | `CarrierReport`      | Dispatch evidence (`not_sent`, `sent`, or `unknown`), completion evidence, observed guest status if known, carrier/local status separately, available output with completeness/provenance, and safe diagnostics.                              |
+
+`LocalDeliveryCustody` is caller-held storage for exact local cleanup ownership, installed before
+process admission. It is not another dispatch API, process owner, durable record or remote
+cancellation handle. The existing operation attempt holds it during ordinary delivery; the keeper
+and pre-target platform workflow hold theirs for their own lifetimes. Passing it is mandatory at
+actual delivery, including fixed provider reads that construct local workers. At most one unsettled
+local worker occupies it; sequential polling may replace a worker only after confirmed cleanup.
+Pending or lost-ownership cleanup prevents another exchange through that custody.
+
+The carrier stores its existing inert native process owner there before starting it. Bounded close
+may return while construction or cleanup remains pending, without dropping the exact owner. A later
+explicit serialized cleanup attempt or observed natural exit may establish local settlement; lost
+exclusive ownership remains uncertainty and never authorizes signaling a reused numeric PID. Reports
+remain immutable observations and exceptions remain control flow, rather than transporting live
+cleanup capabilities through result reducers or exception causes. Local settlement, remote
+completion and dispatch evidence remain independent facts. Neither `not_sent` nor remote exit zero
+alone clears an attempt with unsettled local custody.
+
+The owning aggregate retains this storage after an ordinary borrow hands back unresolved work. Its
+non-dispatch cleanup path can settle local custody without reopening that borrow, admitting more
+work or resolving unknown remote effects. Provider hooks receive storage held by the enclosing
+workflow, not a temporary hook-local object or a new RunContext accessor. This signature and its
+consumer integration are the next implementation contract, not a claim that the current buffered
+adapters already implement bounded retained close.
 
 `sent` means the delivery request was submitted, not that the application started or finished.
 `not_sent` requires positive evidence that no remote dispatch could have occurred. Raw completion
@@ -325,8 +350,10 @@ duration of `execute` and never closes them. The carrier alone consumes the sele
 attempt, and owns/closes the pipes and other local delivery resources it creates. EOF on a source
 closes the outgoing input channel, not the caller's stream; observation continues until completion
 or the operation deadline. Returning or raising leaves no background pump using a borrowed stream.
-The shared preparation layer owns its temporary finite sources and closes them after the carrier
-finishes. There is no hidden rewind, reuse, or retry of a consumed input source.
+The shared preparation layer owns its temporary finite sources. A borrowed native descriptor that an
+admitted but unfinished constructor can still inherit must remain held, with any associated terminal
+state, until that local custody settles. Returning pending cleanup is not permission to close, reuse
+or restore such resources. There is no hidden rewind, reuse, or retry of a consumed input source.
 
 Input pumping and output draining are concurrent where the carrier requires it. Flow control must
 bound buffering without deadlocking duplex commands. Supplied live sources and sinks must satisfy a
@@ -347,15 +374,16 @@ mechanism, including sensitive-input suppression and a readiness path that stage
 
 Each call makes at most one dispatch attempt. Idempotent status polling is allowed; reconnecting and
 resending the invocation is not. On timeout or connection loss, the carrier returns the available
-partial evidence after bounded local cleanup. Stopping the local SSH process does not claim remote
-cancellation. Operational exceptions must retain the same safe partial report; request validation
-may fail before dispatch. Only the owning operation can authorize a new attempt when it knows
-repetition is safe.
+partial evidence after a bounded local cleanup attempt, retaining unfinished local custody in the
+caller-held storage. Stopping the local SSH process does not claim remote cancellation. Operational
+exceptions must retain the same safe partial report; request validation may fail before dispatch.
+Only the owning operation can authorize a new attempt when it knows repetition is safe.
 
-Control-flow interruption, including `KeyboardInterrupt`, propagates after bounded local cleanup,
-regardless of `check`. Safe partial evidence may accompany it but must not convert it to an ordinary
-returned result or checked-command error. The owning operation's interrupt rollback must still run;
-remote cancellation remains a separate explicit action.
+Control-flow interruption, including `KeyboardInterrupt`, propagates after a bounded local cleanup
+attempt, with unfinished local ownership already retained by the caller, regardless of `check`. Safe
+partial evidence may accompany it but must not convert it to an ordinary returned result or
+checked-command error. The owning operation's interrupt rollback must still run; remote cancellation
+remains a separate explicit action.
 
 For the buffered PoC, the operator accepted deferring guest cancellation on 2026-09-17. Live
 deadline tests confirmed that ordinary guest processes and bootstrap descendants can remain running

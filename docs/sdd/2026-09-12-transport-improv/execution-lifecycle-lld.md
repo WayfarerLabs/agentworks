@@ -379,6 +379,18 @@ required. Proxmox's current raw worker construction precedes its cleanup guard, 
 `communicate()` has no timeout: the ordinary delivery deadline does not prove bounded local drain.
 Carry these into the existing launch/interruption and keeper-drain gates before making that claim.
 
+Use the carrier contract's explicit caller-held `LocalDeliveryCustody`, rather than adding cleanup
+handles to reports or escaping exception causes. Ordinary dispatch attaches it to the existing
+operation attempt before native admission; keeper and pre-target provider reads attach it to their
+existing enclosing lifetime. It holds at most one unsettled native owner, with no new owner thread,
+process registry or replay mechanism. Every temporary Proxmox wire consumer must pass that retained
+storage, including power, current configuration, activation and guest-info queries. Do not continue
+polling while its local worker remains unsettled. The aggregate must drain retained custody after
+borrow handoff without reopening dispatch or clearing remote debt. Keep guest-helper process
+settlement unchanged until an actual guest-side consumer can retain borrowed source descriptors;
+host custody cannot survive serialization into the guest. Implement and prove this complete path
+before claiming bounded keeper shutdown or owner release.
+
 ### First private managed service
 
 The first host-admitted service slice is Linux-only, `MANAGED` and `INDEPENDENT`. Its guest

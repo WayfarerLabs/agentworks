@@ -2724,6 +2724,15 @@ acceptance. Fresh hosted verification remains required.
       worker construction before its cleanup guard and unbounded post-kill `communicate()`; delivery
       timeout alone proves neither local drain nor guest-helper termination. Reuse the preceding
       launch/interruption gate and preserve exact route/guest fencing.
+- [ ] Implement mandatory caller-held local delivery custody through the carrier and provider-read
+      paths. Retain the existing native owner before admission, at most one unsettled worker per
+      attempt; pending or lost ownership refuses further exchanges. Keep reports as observations and
+      original exceptions unchanged. The existing operation attempt, keeper and pre-target workflow
+      retain their own storage. Add bounded close and a non-dispatch settlement path after borrow
+      handoff, with remote effects still independently retained. Prove delayed construction,
+      kill/reap failure, explicit cleanup retry, natural exit, external-reaper uncertainty, all
+      temporary Proxmox consumers and aggregate owner-release refusal. Do not silently add bounded
+      return to guest source-descriptor or unmigrated terminal consumers.
 - [ ] Reconcile #770's historical escape/relaunch proposal against the later exclusion of malicious
       target-user containment. Deliver DIRECT/MANAGED without a CONTAINED profile or
       per-run-user/jail implementation; retain future profile extensibility. Prove trusted
