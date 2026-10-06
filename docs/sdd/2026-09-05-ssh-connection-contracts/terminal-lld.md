@@ -1,7 +1,7 @@
 # SSH Terminal Delivery: Feasibility and Joint Interface
 
-- Status: SSH-owned implementation candidate; shared input/preparation published, relay/native
-  acceptance open
+- Status: SSH-owned implementation candidate; shared input/preparation and private POSIX relay /
+  Windows caller resource implemented, full composition and native acceptance open
 - Inspected SSH code: `678e487d`; transport bootstrap probe: `a885ef5a`, 2026-09-20
 - Requirements: [FRD R4/R5](frd.md#r4-one-attempt-byte-safe-io-and-truthful-evidence)
 - Shared boundary:
@@ -9,11 +9,12 @@
 
 ## Preparation must remain deliverable
 
-The current buffered `execution/preparation.py:113-118` places the invocation envelope in finite
-carrier stdin. It contains arguments, environment, script source and application input. Replacing
-that input with a borrowed terminal would discard the envelope. Sending it unmodified through an
-echoing remote PTY could expose sensitive bytes and change their interpretation. This is a source
-analysis of the unimplemented combination, not a reported secret disclosure by a supported mode.
+At the initial feasibility baseline, buffered `execution/preparation.py:113-118` placed the
+invocation envelope in finite carrier stdin. It contains arguments, environment, script source and
+application input. Replacing that input with a borrowed terminal would discard the envelope. Sending
+it unmodified through an echoing remote PTY could expose sensitive bytes and change their
+interpretation. This is a source analysis of the unimplemented combination, not a reported secret
+disclosure by a supported mode.
 
 Transport's #833 carrier I/O and preparation candidates leave terminal integration at a separate
 gate. The joint design must settle how prepared payload reaches its consumer before interactive
@@ -28,7 +29,10 @@ The endpoint must identify the supplied native input/output handles and grant ex
 call. No process-global stdin/stdout lookup belongs in the carrier. Admission verifies usable
 terminal handles, the agreed pairing and presentation policy, and the ordinary SSH connection/trust
 policy before dispatch. The caller retains handle lifetime; the carrier never closes those handles.
-Terminal presentation combines output rather than claiming separate byte-exact guest streams.
+Terminal presentation combines output rather than claiming separate byte-exact guest streams. The
+[implementation evidence](terminal-results.md) records the current shared terminal input and
+preparation, retained POSIX relay, Windows caller resource and their exact validation limits. Those
+increments leave the public terminal feature disabled until full composition and native acceptance.
 
 The POSIX resource layer treats input as readable native terminal input and output as an explicit
 geometry source. Geometry queries do not require write access; presentation uses the supplied sink.
@@ -66,6 +70,13 @@ queued-input flushing; input discard, if ever desired, requires an explicit agre
 timings do not establish a deadline guarantee for arbitrary terminal/device syscalls.
 
 ## Kernel modes and emulator presentation
+
+The
+[shared ownership split](../2026-09-12-transport-improv/carrier-io-lld.md#private-terminal-input-adapter)
+assigns emulator sanitation to the shared presentation adapter. SSH restores borrowed native input
+and settles client/relay custody; it does not inject display-policy bytes into a readiness
+collector. At transport `d9315847`, collector `finish()` only finalizes readiness evidence. The
+shared execution wrapper and bounded native presentation cleanup remain implementation gates.
 
 A `termios` or Windows console-mode snapshot does not capture the terminal emulator's alternate
 screen, mouse reporting or other escape-sequence state. Emulator sanitation applies a selected
