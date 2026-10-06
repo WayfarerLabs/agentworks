@@ -16,14 +16,14 @@ acceptance. The resource does not read keyboard events, select a Windows child-t
 enable the carrier's terminal feature. Native Windows selection must cover an independently cleaned
 owned console and then the complete supported Windows workflow.
 
-`test_terminal_windows_native.py` marks only its native case `windows`; other hosts skip that case
-and can check the fixed-width Win32 record ABI without native effects. On Windows, the fixture owns
-one fresh hidden console child with explicit `CONIN$` and `CONOUT$` descriptors. From `cli/`, retain
-its installed candidate without editable links or automatic synchronization:
+`test_terminal_windows_native.py` marks its native cases `windows`; other hosts skip those cases and
+can check the fixed-width Win32 record ABI without native effects. On Windows, the fixture owns one
+fresh hidden console child with explicit `CONIN$` and `CONOUT$` descriptors. From `cli/`, retain its
+installed candidate without editable links or automatic synchronization:
 
 ```bash
 uv sync --frozen --no-editable
-uv run --no-sync pytest tests/execution/carriers/ssh/test_terminal_windows_native.py::test_owned_console_resource_and_nowait_records -m windows -rP
+uv run --no-sync pytest tests/execution/carriers/ssh/test_terminal_windows_native.py::test_owned_console_resource_and_nowait_records -m windows
 ```
 
 It checks native resource admission, early raw input, viewport geometry and exact restoration with
@@ -36,15 +36,24 @@ production keyboard cancellation guarantee. These injections establish record po
 physical keyboard translation, virtual terminal key sequences, keyboard cancellation, SSH clients,
 pseudoconsole preparation and the complete Windows workflow still require separate proof.
 
-The same owned console supplies 48 record/character comparisons: six distinct input/output code-page
-pairs drawn from 437, 1252 and 932, VT input off/on, and four injected vectors per setting. Each
-vector contains a private-flagged `VK_MENU` release or an ordinary Unicode control, followed by an
-ordinary keydown sentinel. The low-level read reports kind, down, repeat, virtual key, UTF-16 unit
-and control state; `ReadConsoleW` consumes the byte-identical vector injected again and reports its
-actual returned UTF-16 batches. Native `MultiByteToWideChar` calls supply separate input-page and
-output-page conversion references. Packed two-byte private probes use only output page 932;
-single-byte private probes use output page 437 or 1252. The sentinel supplies a queued character
-when a release is ignored; the retained parent timeout bounds a stalled native call.
+The separate integration-marked `test_owned_console_input_comparison` is an explicitly selected
+research fixture. Ordinary Windows CI (`windows and not integration`) and the ordinary CLI suite
+(`not integration`) exclude it. From `cli/`, install the frozen candidate and select that node:
+
+```bash
+uv sync --frozen --no-editable
+uv run --no-sync pytest tests/execution/carriers/ssh/test_terminal_windows_native.py::test_owned_console_input_comparison -rP
+```
+
+Its fresh owned console supplies 48 record/character comparisons: six distinct input/output
+code-page pairs drawn from 437, 1252 and 932, VT input off/on, and four injected vectors per
+setting. Each vector contains a private-flagged `VK_MENU` release or an ordinary Unicode control,
+followed by an ordinary keydown sentinel. The low-level read reports kind, down, repeat, virtual
+key, UTF-16 unit and control state; `ReadConsoleW` consumes the byte-identical vector injected again
+and reports its actual returned UTF-16 batches. Native `MultiByteToWideChar` calls supply separate
+input-page and output-page conversion references. Packed two-byte private probes use only output
+page 932; single-byte private probes use output page 437 or 1252. The sentinel supplies a queued
+character when a release is ignored; the retained parent timeout bounds a stalled native call.
 
 The comparison runs on the retained fixture worker, using only its fresh hidden console and owned
 descriptors. It does not access the caller console, change global focus, generate physical
@@ -70,9 +79,9 @@ child releases the resource, restores its fixture modes and code pages, closes i
 detaches its console in cleanup. The parent observes only that reported console window for up to 10
 seconds; missing or unresolved window evidence fails the native case. It never scans or terminates
 unrelated console hosts. JSON observations and stderr remain under the test's owned temporary
-directory, including parent cleanup evidence. This is a native local primitive fixture for ordinary
-Windows CI, with no network, credentials or caller-console access; report its actual native result
-separately from synthetic passes and skips.
+directory, including parent cleanup evidence. The resource and polling case runs in ordinary Windows
+CI; the comparison requires explicit selection. Both use no network, credentials or caller-console
+access. Report actual native results separately from synthetic passes and skips.
 
 On failure, pytest also displays the controlled child stdout, stderr traceback and parent
 observations as an exception note. Each displayed log is bounded to 64 KiB; its complete contents

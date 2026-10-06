@@ -385,6 +385,8 @@ def main() -> None:
     errors: list[BaseException] = []
     baseline: tuple[int, int, tuple[int, int]] | None = None
     try:
+        assert sys.argv[2:] in ([], ["--input-comparison"])
+        input_comparison = sys.argv[2:] == ["--input-comparison"]
         assert count == 1 and processes[0] == os.getpid()
         assert window and not native.user.IsWindowVisible(window)
         _check_candidate_identity(_interpreter_identity(), json.loads(sys.argv[1]))
@@ -399,10 +401,11 @@ def main() -> None:
             assert input_fd is not None and output_fd is not None
             for custom in (False, True):
                 cases.append(_case(native, input_fd, output_fd, custom))
-            # Isolated startup deliberately omits checkout import paths. Load
-            # the sibling measurement by its exact path without changing them.
-            comparison = runpy.run_path(str(Path(__file__).with_name("windows_input_comparison.py")))
-            comparison["compare"](native, input_handle, _key_record, _emit)
+            if input_comparison:
+                # Isolated startup omits checkout import paths. Load the selected
+                # sibling measurement by its exact path without changing them.
+                comparison = runpy.run_path(str(Path(__file__).with_name("windows_input_comparison.py")))
+                comparison["compare"](native, input_handle, _key_record, _emit)
 
         # The parent owns the process timeout. Never release fds while a native
         # borrower may remain active, even if that means the parent must kill us.

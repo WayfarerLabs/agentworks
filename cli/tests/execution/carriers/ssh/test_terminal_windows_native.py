@@ -1,6 +1,6 @@
 """One owned hidden console proves native resource and record-poll primitives.
 
-On Windows, run this file with ``-rP`` to display passing comparison output.
+On Windows, select the integration comparison case with ``-rP`` to display its report.
 Private record measurements require that report; a captured green run is not evidence.
 """
 
@@ -11,6 +11,7 @@ import hashlib
 import io
 import json
 import os
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -145,9 +146,10 @@ def test_failed_borrower_finishes_before_outer_cleanup() -> None:
     assert order == [borrower_cleanup, outer_cleanup]
 
 
+@pytest.mark.parametrize("input_comparison", [False, True])
 @pytest.mark.parametrize("observer_failed", [False, True])
 def test_failing_owned_child_exposes_controlled_evidence_after_reaping(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, observer_failed: bool
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, observer_failed: bool, input_comparison: bool
 ) -> None:
     # Every process/window boundary is synthetic; invoke the actual supervisor
     # and failure reporting without launching any child or accessing a console.
@@ -185,6 +187,7 @@ def test_failing_owned_child_exposes_controlled_evidence_after_reaping(
         assert command[:3] == [expected["base_executable"], "-I", "-u"]
         assert command[3] == str(Path(probe.__file__).resolve())
         assert json.loads(command[4]) == expected
+        assert command[5:] == (["--input-comparison"] if input_comparison else [])
         assert kwargs["env"] == parent_env | {"__PYVENV_LAUNCHER__": "synthetic"}
         assert kwargs["creationflags"] == 16
         assert kwargs["close_fds"] is True
@@ -215,7 +218,10 @@ def test_failing_owned_child_exposes_controlled_evidence_after_reaping(
     )
     monkeypatch.setattr(module, "_window_cleanup", observe)
     with pytest.raises((AssertionError, BaseExceptionGroup)) as raised:
-        test_owned_console_resource_and_nowait_records(tmp_path)
+        if input_comparison:
+            test_owned_console_input_comparison(tmp_path)
+        else:
+            test_owned_console_resource_and_nowait_records(tmp_path)
     assert timeouts == [120, 10]
     assert os.environ == parent_env
     assert child.stdout.closed and child.stderr.closed
@@ -325,6 +331,88 @@ def test_child_admits_candidate_identity_before_descriptor_effects(
         assert isinstance(raised.value.exceptions[0], AssertionError)
 
 
+@pytest.mark.parametrize("input_comparison", [False, True])
+def test_owned_child_runs_comparison_only_when_selected(
+    monkeypatch: pytest.MonkeyPatch, input_comparison: bool
+) -> None:
+    # All native effects are fake; run the child's admission, retained worker
+    # and cleanup to prove selection reaches only its owned console borrower.
+    module = sys.modules[probe.__name__]
+    flags = SimpleNamespace(isolated=1, ignore_environment=1, no_user_site=1)
+    args = ["probe", "{}"] + (["--input-comparison"] if input_comparison else [])
+    monkeypatch.setattr(module, "sys", SimpleNamespace(platform="win32", flags=flags, argv=args))
+    monkeypatch.setattr(probe, "_interpreter_identity", lambda: {})
+    monkeypatch.setattr(probe, "_check_candidate_identity", lambda actual, expected: None)
+    records: list[dict[str, object]] = []
+    order: list[object] = []
+    monkeypatch.setattr(probe, "_emit", records.append)
+
+    class Native:
+        def __init__(self) -> None:
+            self.kernel = SimpleNamespace(
+                GetConsoleWindow=lambda: 0 if "detach" in order else 9181,
+                GetConsoleProcessList=self.processes,
+                FreeConsole=self.detach,
+                SetConsoleMode=lambda handle, mode: True,
+            )
+            self.user = SimpleNamespace(
+                GetWindowThreadProcessId=lambda window, pid: 1, IsWindowVisible=lambda window: False
+            )
+
+        def check(self, value: object) -> None:
+            assert value
+
+        def processes(self, processes: object, count: int) -> int:
+            ctypes.cast(processes, ctypes.POINTER(ctypes.c_uint32))[0] = os.getpid()
+            return 1
+
+        def handle(self, fd: int) -> int:
+            return fd
+
+        def mode(self, handle: int) -> int:
+            return 7
+
+        def pages(self) -> tuple[int, int]:
+            return 437, 932
+
+        def set_pages(self, pages: tuple[int, int]) -> None:
+            assert pages == self.pages()
+
+        def detach(self) -> int:
+            order.append("detach")
+            return 1
+
+    def case(native: Native, input_fd: int, output_fd: int, custom: bool) -> dict[str, object]:
+        assert (input_fd, output_fd) == (51, 52)
+        order.append(custom)
+        return {"custom": custom}
+
+    def compare(native: Native, handle: int, key_record: object, emit: object) -> None:
+        assert handle == 51
+        assert key_record is probe._key_record and emit == records.append
+        order.append("comparison")
+
+    def load(path: str) -> dict[str, object]:
+        assert Path(path) == Path(probe.__file__).with_name("windows_input_comparison.py")
+        order.append("load")
+        return {"compare": compare}
+
+    def open_descriptor(path: str, flags: int) -> int:
+        return {"CONIN$": 51, "CONOUT$": 52}[path]
+
+    monkeypatch.setattr(probe, "_Native", Native)
+    monkeypatch.setattr(probe, "_case", case)
+    monkeypatch.setattr(runpy, "run_path", load)
+    monkeypatch.setattr(os, "O_BINARY", 0x8000, raising=False)
+    monkeypatch.setattr(os, "open", open_descriptor)
+    monkeypatch.setattr(os, "close", lambda fd: order.append(fd))
+    probe.main()
+    assert order == [False, True] + (["load", "comparison"] if input_comparison else []) + [52, 51, "detach"]
+    assert records[-1]["error_types"] == []
+    assert records[-1]["closed_descriptors"] == [52, 51]
+    assert records[-2]["cases"] == [{"custom": False}, {"custom": True}]
+
+
 def test_resource_observation_hashes_exact_source_bytes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     resource = tmp_path / "resource.py"
     resource.write_bytes(b"synthetic-resource\r\n")
@@ -365,7 +453,7 @@ def _window_cleanup(identity: dict[str, object]) -> str:
     return "observed_remaining"
 
 
-def _run_owned_child(logs: Path) -> dict[str, object]:
+def _run_owned_child(logs: Path, *, input_comparison: bool = False) -> dict[str, object]:
     if sys.platform != "win32":
         raise OSError("Owned native console fixture requires Windows")
     startup = subprocess.STARTUPINFO()
@@ -377,7 +465,8 @@ def _run_owned_child(logs: Path) -> dict[str, object]:
     env = os.environ.copy()
     env["__PYVENV_LAUNCHER__"] = sys.executable
     process = subprocess.Popen(
-        [identity["base_executable"], "-I", "-u", str(Path(probe.__file__).resolve()), json.dumps(identity)],
+        [identity["base_executable"], "-I", "-u", str(Path(probe.__file__).resolve()), json.dumps(identity)]
+        + (["--input-comparison"] if input_comparison else []),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -453,14 +542,14 @@ def _failure_observations(logs: Path) -> str:
     return "\n".join(observations)
 
 
-def _owned_console_case(tmp_path: Path) -> None:
+def _owned_console_case(tmp_path: Path, *, input_comparison: bool = False) -> None:
     # Retain the parent supervisor before CreateProcess. Main-thread interruption
     # cannot orphan a constructor or skip child reaping. Its finite process timeout
     # bounds stalled native calls; no other console host is scanned or terminated.
     results: list[dict[str, object]] = []
 
     def work() -> None:
-        results.append(_run_owned_child(tmp_path))
+        results.append(_run_owned_child(tmp_path, input_comparison=input_comparison))
 
     probe._FixtureWorker(work).run()
     assert len(results) == 1
@@ -471,7 +560,8 @@ def _owned_console_case(tmp_path: Path) -> None:
     records = result["records"]
     assert isinstance(records, list)
     identity, *observations, measurements, cleanup = records
-    assert len(observations) == 48 and all(value["phase"] == "input_comparison" for value in observations)
+    assert len(observations) == (48 if input_comparison else 0)
+    assert all(value["phase"] == "input_comparison" for value in observations)
     assert identity["pid"] == result["child_pid"]
     assert identity["console_pids"] == [result["child_pid"]]
     probe._check_candidate_identity(identity["interpreter"], result["expected_interpreter"])
@@ -486,7 +576,8 @@ def _owned_console_case(tmp_path: Path) -> None:
         assert case["empty_count"] == case["after_non_key_count"] == 0
         assert 4 in case["non_key_types"] and 8 in case["non_key_types"]
         assert case["unicode_units"] == [0x0041, 0x03A9, 0xD83D, 0xDE03]
-    print(json.dumps({"phase": "injected_input_comparison_report", "observations": observations}), flush=True)
+    if input_comparison:
+        print(json.dumps({"phase": "injected_input_comparison_report", "observations": observations}), flush=True)
 
 
 @pytest.mark.windows
@@ -494,6 +585,17 @@ def _owned_console_case(tmp_path: Path) -> None:
 def test_owned_console_resource_and_nowait_records(tmp_path: Path) -> None:
     try:
         _owned_console_case(tmp_path)
+    except BaseException as error:
+        error.add_note(_failure_observations(tmp_path))
+        raise
+
+
+@pytest.mark.windows
+@pytest.mark.integration
+@pytest.mark.skipif(sys.platform != "win32", reason="Requires an owned native Windows console")
+def test_owned_console_input_comparison(tmp_path: Path) -> None:
+    try:
+        _owned_console_case(tmp_path, input_comparison=True)
     except BaseException as error:
         error.add_note(_failure_observations(tmp_path))
         raise
