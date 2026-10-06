@@ -612,7 +612,7 @@ def test_constructor_fstat_then_unlink_failure_retains_stage_for_retry(
     assert error.setup_error is setup_error and error.cleanup_error is cleanup_error
     assert not error.cleanup_uncertain
     writer = error.unfinished_stage
-    assert writer is not None and not writer.cleanup_uncertain
+    assert isinstance(writer, local.LocalDownloadPublication) and not writer.cleanup_uncertain
     assert writer._stage_identity is not None and writer._parent_fd is not None
     assert len(list(tmp_path.glob(".agw-download-*"))) == 1
     writer.abort()
@@ -639,7 +639,7 @@ def test_constructor_keeps_stage_descriptor_when_identity_cannot_be_inspected(
             local.LocalDownloadPublication(destination)
 
     writer = caught.value.unfinished_stage
-    assert writer is not None and not writer.cleanup_uncertain
+    assert isinstance(writer, local.LocalDownloadPublication) and not writer.cleanup_uncertain
     assert writer._stage_identity is None and writer._stage_fd is not None
     assert len(list(tmp_path.glob(".agw-download-*"))) == 1
     writer.abort()
