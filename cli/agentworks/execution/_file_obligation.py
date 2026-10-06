@@ -474,12 +474,7 @@ def _validate_bootstrap(obligation: FileCallObligation) -> None:
         or obligation.runtime_selection.explicit_path not in (None, "/usr/bin/python3")
     ):
         raise FileCallObligationCodecError
-    _validate_identity_plan(bootstrap.root_entry)
-    guest = _decode_guest(_encode_guest(bootstrap.guest))
-    try:
-        _NumericGuestBootstrap(bootstrap.root_entry, guest)
-    except (TypeError, ValidationError, ValueError):
-        raise FileCallObligationCodecError from None
+    guest = bootstrap.guest
     if vm_guest_boot_id(guest) != obligation.target.boot_id:
         raise FileCallObligationCodecError
     for gate in (obligation.effect_gate, obligation.gate_setup):

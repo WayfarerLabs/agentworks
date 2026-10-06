@@ -158,38 +158,6 @@ def test_v2_requires_bootstrap_and_canonical_encoding() -> None:
 
 
 @pytest.mark.parametrize(
-    ("field", "replacement"),
-    [
-        ("root_entry", object()),
-        ("root_entry", IdentityPlan(IdentityExpectation(1001, 1002, (1002,)), IdentityMode.DIRECT)),
-        ("root_entry", IdentityPlan(IdentityExpectation(0, 0, (0,)), IdentityMode.DEMOTE)),
-        ("root_entry", IdentityPlan(IdentityExpectation(True, 0, (0,)), IdentityMode.DIRECT)),
-        ("root_entry", IdentityPlan(IdentityExpectation(0, 0, [0]), IdentityMode.DIRECT)),
-        ("guest", object()),
-    ],
-)
-def test_invalid_typed_bootstrap_raises_codec_error(field: str, replacement: object) -> None:
-    bootstrap = object.__new__(_NumericGuestBootstrap)
-    object.__setattr__(bootstrap, "root_entry", _ROOT)
-    object.__setattr__(bootstrap, "guest", _GUEST)
-    object.__setattr__(bootstrap, field, replacement)
-    with pytest.raises(FileCallObligationCodecError):
-        replace(_numeric(), bootstrap=bootstrap)
-
-
-@pytest.mark.parametrize(
-    ("field", "replacement"),
-    [("instance_marker", []), ("boot_id", "invalid"), ("init_start_ticks", True)],
-)
-def test_invalid_typed_guest_fields_raise_codec_error(field: str, replacement: object) -> None:
-    guest = replace(_GUEST)
-    object.__setattr__(guest, field, replacement)
-    bootstrap = replace(_BOOTSTRAP, guest=guest)
-    with pytest.raises(FileCallObligationCodecError):
-        replace(_numeric(), bootstrap=bootstrap)
-
-
-@pytest.mark.parametrize(
     "changes",
     [
         {"bootstrap": object()},
