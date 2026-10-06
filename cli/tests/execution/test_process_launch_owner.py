@@ -63,7 +63,7 @@ def _assert_exact_cleanup(children: list[subprocess.Popen[bytes]]) -> None:
 def _request(source: str, *, input_piped: bool = False) -> process_core.LocalProcessRequest:
     return process_core.LocalProcessRequest(
         (sys.executable, "-I", "-S", "-B", "-c", source),
-        input_piped,
+        process_core.LocalProcessInput.PIPE if input_piped else process_core.LocalProcessInput.EOF,
     )
 
 
@@ -164,7 +164,7 @@ sys.addaudithook(deny_process_start)
 owner = process_core.LocalProcessOwner()
 marker = sys.argv[1]
 child = "import sys; from pathlib import Path; Path(sys.argv[1]).touch()"
-request = process_core.LocalProcessRequest((sys.executable, "-c", child, marker), input_piped=False)
+request = process_core.LocalProcessRequest((sys.executable, "-c", child, marker), process_core.LocalProcessInput.EOF)
 owner.start(request)
 first = owner.close()
 snapshot = owner.snapshot()

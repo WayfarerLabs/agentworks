@@ -68,12 +68,12 @@ factory, native availability proof or public RunContext surface. No database dat
 The correction at private `340bdf015` caps caller deadlines by the original operation deadline and
 retains the exact workflow through an exceptional cleanup fact, including failures before the
 context yields. Its finite cleanup retry cannot reopen body admission or repeat hold startup.
-Finalization resumes the owner's existing database-release reconciliation after an interrupted
-reply rather than reading a claim that may already have been removed. All three independent private
-review lanes clear these corrections; the lead's adjacent run passes 241 tests and strict mypy
-passes 1,196 sources after removal of the obsolete migration-guard test. The prepared-guest body
-fence and the other native gates above remain open. This private correction has not changed the
-published head or exposed a production RunContext surface.
+Finalization resumes the owner's existing database-release reconciliation after an interrupted reply
+rather than reading a claim that may already have been removed. All three independent private review
+lanes clear these corrections; the lead's adjacent run passes 241 tests and strict mypy passes 1,196
+sources after removal of the obsolete migration-guard test. The prepared-guest body fence and the
+other native gates above remain open. This private correction has not changed the published head or
+exposed a production RunContext surface.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
@@ -234,6 +234,12 @@ increment does not introduce global signal handling or declare launch conformanc
       audit-hook regression fails with the old publication order. All three lanes are clean at
       `ee2d0a8f`, whose full local suite passes 11,912 tests with 13 skips. SSH forwarding adoption,
       joint proof and the independent asynchronous-interruption/native gates remain open above.
+
+- [ ] Publish and prove the shared owner's explicit EOF/pipe/borrowed-descriptor stdin choice with
+      the SSH lane. Keep request construction passive, the adapter-owned descriptor retained through
+      interrupted launch settlement, stdout/stderr separate and terminal policy in the adapter.
+      Local Linux process tests do not complete supported-workstation terminal acceptance or close
+      the independent asynchronous cleanup-entry gate.
 
 ### Hierarchical coordination follow-up (#377)
 

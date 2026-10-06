@@ -265,6 +265,16 @@ alone is EOF, not owner close. Status first learned during cleanup is never natu
 The ordinary pump uses this interface. SSH forwarding adoption remains with its owning lane, which
 must stop and join its pipe users before closing the common owner.
 
+`LocalProcessRequest.input` chooses `LocalProcessInput.EOF`, `LocalProcessInput.PIPE`, or one
+`BorrowedProcessStdin(descriptor)`. The borrowed descriptor can supply an adapter-owned PTY slave
+without combining stdout/stderr or installing terminal policy in the shared owner. Construction is
+passive; it neither inspects nor duplicates the descriptor. The caller retains the descriptor until
+the owner's terminal publication, including settlement after interrupted admission or process
+construction. The owner never closes it, and publishes no stdin pipe for that choice. A terminal
+with incomplete process cleanup does not authorize restoring borrowed terminal modes. Terminal
+admission, relaying, geometry and restoration remain adapter responsibilities; native SSH and
+Windows terminal proof remain open.
+
 Local Linux tests exercise interrupted startup, admission and cleanup, including the interval after
 admission but before pumping. They do not establish native Windows/macOS acceptance or update the
 existing SSH-private copy. A separately reproduced SIGINT at entry to the cleanup loop can escape

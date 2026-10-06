@@ -308,16 +308,43 @@ class _Admission(StrEnum):
     CANCELLED = "cancelled"
 
 
+class LocalProcessInput(StrEnum):
+    """Owned stdin endpoint selected without native descriptor access."""
+
+    EOF = "eof"
+    PIPE = "pipe"
+
+
+@dataclass(frozen=True)
+class BorrowedProcessStdin:
+    """Caller-held descriptor retained until launch ownership settles.
+
+    Construction neither inspects nor duplicates the descriptor. The caller
+    must not close or reuse it before the owner's terminal publication.
+    """
+
+    descriptor: int = field(repr=False)
+
+    def __post_init__(self) -> None:
+        # Negative subprocess constants must not become borrowed descriptors.
+        if type(self.descriptor) is not int or self.descriptor < 0:
+            raise ValueError("borrowed process stdin requires a nonnegative descriptor")
+
+
 @dataclass(frozen=True)
 class LocalProcessRequest:
     """Immutable configuration for one local process admission."""
 
     argv: tuple[str, ...] = field(repr=False)
-    input_piped: bool
+    input: LocalProcessInput | BorrowedProcessStdin
     env: tuple[tuple[str, str], ...] | None = field(default=None, repr=False)
     cwd: str | None = field(default=None, repr=False)
     pass_fds: tuple[int, ...] = field(default=(), repr=False)
     start_new_session: bool = False
+
+    def __post_init__(self) -> None:
+        if type(self.input) not in {LocalProcessInput, BorrowedProcessStdin}:
+            raise ValueError("local process request requires an explicit stdin choice")
 
 
 @dataclass(frozen=True)
@@ -611,7 +638,13 @@ def _run_local_process_owner(owner: LocalProcessOwner) -> None:
         try:
             process = subprocess.Popen(
                 request.argv,
-                stdin=subprocess.PIPE if request.input_piped else subprocess.DEVNULL,
+                stdin=(
+                    request.input.descriptor
+                    if isinstance(request.input, BorrowedProcessStdin)
+                    else subprocess.PIPE
+                    if request.input is LocalProcessInput.PIPE
+                    else subprocess.DEVNULL
+                ),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 bufsize=0,
@@ -806,7 +839,7 @@ def run_owned_process(
     try:
         request = LocalProcessRequest(
             tuple(argv),
-            input.piped,
+            LocalProcessInput.PIPE if input.piped else LocalProcessInput.EOF,
             None if env is None else tuple(env.items()),
             cwd,
             tuple(pass_fds),

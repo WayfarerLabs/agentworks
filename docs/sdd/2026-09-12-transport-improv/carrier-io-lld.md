@@ -214,6 +214,17 @@ emulator. Cleanup needs its own bounded allowance after observation expiry. Do n
 the ordinary pipe pump for this mode: its stdin construction and unfinished-input rules do not model
 an interactive keyboard.
 
+The private launch owner accepts one explicit local stdin choice: owned EOF, an owned pipe, or a
+borrowed descriptor. `LocalProcessRequest.input` carries `LocalProcessInput.EOF`,
+`LocalProcessInput.PIPE`, or `BorrowedProcessStdin(descriptor)`; it does not select a keyboard relay
+or terminal policy. An adapter may supply its owned PTY slave while keeping the client's stdout and
+stderr as separate raw pipes. The adapter must retain that descriptor through admission, process
+construction and owner terminal publication, including interrupted startup. The owner neither
+duplicates it during request construction nor closes it during settlement. A cleanup failure does
+not authorize terminal restoration while a client may still run. The transport lead owns this
+mechanism; SSH owns the relay and its adoption. Local process tests are not native SSH, macOS or
+Windows terminal acceptance.
+
 ### Same-terminal preparation experiment
 
 The next proof starts with a single terminal session, not mandatory remote temporary-file staging.
