@@ -587,12 +587,13 @@ supported-workstation or production FileAccess acceptance; the checkbox stays op
       selection, as directed on 2026-10-05. Settle and prove workstation metadata/ACL handling,
       ordinary-file refusal, full-transfer verification and cleanup before publishing either form;
       never import guest ownership into the workstation or silently strip local metadata. Complete
-      supported-host publication and public result conversion remain required, including propagation
-      of timing failure alongside proved operation facts. The operator approved macOS/Windows
-      in-place `Replace` after complete verification and remote cleanup: preserve supported local
-      ACL/ownership semantics under ordinary authority, refuse unsupported cases before writing, and
-      report possible partial destination bytes on later local failure. Linux may retain rename
-      publication; no cross-platform atomic-replace guarantee is promised.
+      native supported-host acceptance and production delivery of the private typed reductions
+      remain required, including propagation of timing failure alongside proved operation facts. The
+      operator approved macOS/Windows in-place `Replace` after complete verification and remote
+      cleanup: preserve supported local ACL/ownership semantics under ordinary authority, refuse
+      unsupported cases before writing, and report possible partial destination bytes on later local
+      failure. Linux may retain rename publication; no cross-platform atomic-replace guarantee is
+      promised.
 - [ ] Complete the additive-surface gates below before exporting or wiring production RunContext
       access. The models-only checkpoint is not additive-surface completion.
 
