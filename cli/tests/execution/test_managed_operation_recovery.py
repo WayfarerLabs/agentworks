@@ -6,8 +6,11 @@ No native Windows endpoint or restore-incarnation proof is supplied here.
 from __future__ import annotations
 
 import gc
+import sys
 import weakref
 from dataclasses import replace
+from types import FrameType
+from typing import Any
 
 import pytest
 
@@ -98,9 +101,11 @@ def recovery_setup(tmp_path, monkeypatch, request):
     try:
         yield database, owner, row, span, prepared, helpers, recovery, repository
     finally:
-        recovery.drain(Deadline.after(1))
-        monkeypatch.setattr(WSL2Carrier, "execute", prior_execute)
-        fixture.close()
+        try:
+            recovery.drain(Deadline.after(1))
+        finally:
+            monkeypatch.setattr(WSL2Carrier, "execute", prior_execute)
+            fixture.close()
 
 
 def test_fresh_fixed_ceiling_and_current_poll_without_high_water_writes(recovery_setup) -> None:
@@ -393,3 +398,51 @@ def test_interrupted_abort_reply_can_be_drained_again_without_helper_replay(reco
     with span.action(Deadline.after(1)):
         pass
     assert recovery.dispatch is None and recovery.attempt is None and helpers.calls == 0
+
+
+@pytest.mark.parametrize("dispatch_cleared", [False, True])
+def test_interrupted_unreturned_begin_field_clear_preserves_repeat_drain(
+    recovery_setup, monkeypatch, dispatch_cleared
+) -> None:
+    _, owner, _, span, _, helpers, recovery, _ = recovery_setup
+    begin_error, drain_error = KeyboardInterrupt(), KeyboardInterrupt()
+    original = RecoveryDispatch.begin_attempt
+
+    def begin(dispatch):
+        original(dispatch)
+        raise begin_error
+
+    monkeypatch.setattr(RecoveryDispatch, "begin_attempt", begin)
+    with pytest.raises(KeyboardInterrupt) as caught, span.action(Deadline.after(2)) as context:
+        recovery.observe_clock(context, Deadline.after(1))
+    assert caught.value is begin_error and helpers.calls == 0
+    retained = recovery.dispatch
+    assert retained is not None
+
+    def interrupt(frame: FrameType, event: str, arg: object) -> Any:
+        del arg
+        boundary = (
+            recovery.dispatch is None if dispatch_cleared else not recovery._beginning and recovery.dispatch is retained
+        )
+        if (
+            event == "line"
+            and frame.f_code is ManagedOperationRecovery.drain.__code__
+            and retained._closed
+            and boundary
+        ):
+            raise drain_error
+        return interrupt
+
+    sys.settrace(interrupt)
+    try:
+        with pytest.raises(KeyboardInterrupt) as caught:
+            recovery.drain(Deadline.after(1))
+        assert caught.value is drain_error
+    finally:
+        sys.settrace(None)
+    assert owner._active_recovery_dispatch is None and owner._outstanding_attempt is None
+    facts = recovery.drain(Deadline.after(1))
+    assert facts.local_settled and facts.helper_termination_known and not facts.dispatch_retained
+    with span.action(Deadline.after(1)):
+        pass
+    assert recovery.dispatch is None and recovery.attempt is None and not recovery._beginning and helpers.calls == 0

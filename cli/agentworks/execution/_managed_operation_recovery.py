@@ -240,8 +240,8 @@ class ManagedOperationRecovery:
             assert self.dispatch is not None
             self.dispatch._abort_unreturned_attempt()
             self.attempt = None
-            self.dispatch = None
             self._beginning = False
+            self.dispatch = None
         attempt = self.attempt
         if attempt is not None:
             local = attempt.local_delivery.close(deadline)
