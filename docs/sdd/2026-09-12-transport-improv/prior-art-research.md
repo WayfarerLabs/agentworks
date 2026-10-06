@@ -975,6 +975,18 @@ select an authenticated guest account, rather than report the configured admin a
 `limactl shell`. This is source evidence only; direct guest SSH, remote-host forwarding and trust
 migration still require implementation and native proof.
 
+A 2026-10-06 refresh against Lima v2.2.1 retains the
+[login-shell wrapper](https://github.com/lima-vm/lima/blob/v2.2.1/cmd/limactl/shell.go). Its
+[instance shape](https://github.com/lima-vm/lima/blob/v2.2.1/pkg/limatype/lima_instance.go) includes
+configuration, SSH address and current local port, giving the independent adapter a concrete
+discovery candidate. It must still prove the actual account and authenticated route. The
+[exit handler](https://github.com/lima-vm/lima/blob/v2.2.1/pkg/osutil/exit.go) preserves an
+unwrapped child `exec.ExitError`; therefore claiming that every nonzero guest status is collapsed to
+one would be incorrect. That behavior does not identify guest execution separately from Lima or SSH
+failure. The next local-Lima unit remains endpoint/account discovery composed with the independent
+SSH policy, not a thin shell wrapper. Remote placement additionally retains separate host and guest
+observations. This refresh sets no new minimum Lima version and establishes no native acceptance.
+
 The
 [WSL command parser at a366853f](https://github.com/microsoft/WSL/blob/a366853fa06b46b0797a5d359321a870a6aafce0/src/windows/common/WslClient.cpp#L1803-L1842)
 supports a direct-exec path using Windows argument parsing instead of the user's shell. This makes
