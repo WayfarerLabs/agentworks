@@ -9,7 +9,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
-from agentworks.execution._file_inventory_bundle import FIXED_BUNDLE
+from agentworks.execution._file_inventory_bundle import FIXED_BUNDLE, ROOT_PROGRAM
 from agentworks.execution._file_inventory_protocol import (
     FileInventoryControlError,
     FileInventoryFailureCode,
@@ -28,6 +28,8 @@ from agentworks.execution._runtime_prerequisite import (
     RuntimePrerequisiteObservation,
     RuntimePrerequisiteState,
     RuntimeSelection,
+    _NumericGuestBootstrap,
+    build_root_guest_bootstrap_argv,
     build_runtime_identity_helper_argv,
 )
 from agentworks.execution.carrier import (
@@ -246,15 +248,25 @@ def list_directory(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> FileInventoryCandidateResult:
     """Inventory one confined directory through one fresh helper attempt."""
     nonce = secrets.token_hex(16)
-    fixed_argv, candidates, system_shim = build_runtime_identity_helper_argv(
-        plan,
-        selection=runtime_selection,
-        fixed_source=FIXED_BUNDLE.bootstrap,
-        nonce=nonce,
-    )
+    if bootstrap is None:
+        fixed_argv, candidates, system_shim = build_runtime_identity_helper_argv(
+            plan, selection=runtime_selection, fixed_source=FIXED_BUNDLE.bootstrap, nonce=nonce
+        )
+        prefix = FIXED_BUNDLE.prefix
+    else:
+        fixed_argv, candidates, system_shim = build_root_guest_bootstrap_argv(
+            bootstrap.root_entry,
+            plan.expected,
+            selection=runtime_selection,
+            program=ROOT_PROGRAM,
+            nonce=nonce,
+            expected_guest=bootstrap.guest,
+        )
+        prefix = ROOT_PROGRAM.prefix
     root = _validate_text(trusted_root_path)
     relative = _validate_text(relative_path)
     request_data = b""
@@ -287,7 +299,7 @@ def list_directory(
     runtime = RuntimePrefixSink(nonce, candidates, reader, system_shim)
     stderr = _DiagnosticSink()
     io = CarrierIO(
-        input=FiniteInput(FIXED_BUNDLE.prefix + request_data, sensitive=True),
+        input=FiniteInput(prefix + request_data, sensitive=True),
         output=SinkOutput(runtime, stderr, require_live=False),
         sensitive=True,
     )

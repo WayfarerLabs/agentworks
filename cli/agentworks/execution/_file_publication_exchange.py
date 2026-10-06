@@ -16,7 +16,7 @@ from agentworks.execution._file_publication import (
     PublicationPhase,
     Replace,
 )
-from agentworks.execution._file_publication_bundle import FIXED_BUNDLE
+from agentworks.execution._file_publication_bundle import FIXED_BUNDLE, ROOT_PROGRAM
 from agentworks.execution._file_publication_protocol import (
     FilePublicationCleanupRequest,
     FilePublicationControlError,
@@ -43,6 +43,8 @@ from agentworks.execution._runtime_prerequisite import (
     RuntimePrerequisiteObservation,
     RuntimePrerequisiteState,
     RuntimeSelection,
+    _NumericGuestBootstrap,
+    build_root_guest_bootstrap_argv,
     build_runtime_identity_helper_argv,
 )
 from agentworks.execution._scratch import ScratchPhase
@@ -347,20 +349,33 @@ def _exchange(
     plan: IdentityPlan,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
+    *,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> FilePublicationCandidateResult:
     data = _request_data(request)
-    fixed_argv, candidates, system_shim = build_runtime_identity_helper_argv(
-        plan,
-        selection=runtime_selection,
-        fixed_source=FIXED_BUNDLE.bootstrap,
-        nonce=request.nonce,
-    )
+    if bootstrap is None:
+        fixed_argv, candidates, system_shim = build_runtime_identity_helper_argv(
+            plan, selection=runtime_selection, fixed_source=FIXED_BUNDLE.bootstrap, nonce=request.nonce
+        )
+        prefix = FIXED_BUNDLE.prefix
+    else:
+        if request.effect_gate is not None and request.effect_gate.guest != bootstrap.guest:
+            raise ValidationError("File-publication effect-gate guest does not match its numeric bootstrap")
+        fixed_argv, candidates, system_shim = build_root_guest_bootstrap_argv(
+            bootstrap.root_entry,
+            plan.expected,
+            selection=runtime_selection,
+            program=ROOT_PROGRAM,
+            nonce=request.nonce,
+            expected_guest=bootstrap.guest,
+        )
+        prefix = ROOT_PROGRAM.prefix
     collector = _FilePublicationCollector(request)
     reader = FileRecordReader(request.nonce, collector.accept)
     runtime = RuntimePrefixSink(request.nonce, candidates, reader, system_shim)
     stderr = _DiagnosticSink()
     io = CarrierIO(
-        input=FiniteInput(FIXED_BUNDLE.prefix + data, sensitive=True),
+        input=FiniteInput(prefix + data, sensitive=True),
         output=SinkOutput(runtime, stderr, require_live=False),
         sensitive=True,
     )
@@ -416,6 +431,7 @@ def publish(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     effect_gate: FileEffectGateBinding | None = None,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> FilePublicationCandidateResult:
     """Publish one verified stage through one fresh non-replayed attempt."""
     request = FilePublishRequest(
@@ -431,7 +447,7 @@ def publish(
         deadline.remaining(),
         effect_gate,
     )
-    return _exchange(carrier, request, plan, deadline, runtime_selection)
+    return _exchange(carrier, request, plan, deadline, runtime_selection, bootstrap=bootstrap)
 
 
 def publication_reconcile(
@@ -445,6 +461,7 @@ def publication_reconcile(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     effect_gate: FileEffectGateBinding | None = None,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> FilePublicationCandidateResult:
     """Recover historical cleanup ownership without inferring publication."""
     request = FilePublicationReconcileRequest(
@@ -457,7 +474,7 @@ def publication_reconcile(
         deadline.remaining(),
         effect_gate,
     )
-    return _exchange(carrier, request, plan, deadline, runtime_selection)
+    return _exchange(carrier, request, plan, deadline, runtime_selection, bootstrap=bootstrap)
 
 
 def publication_cleanup(
@@ -472,6 +489,7 @@ def publication_cleanup(
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
     effect_gate: FileEffectGateBinding | None = None,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> FilePublicationCandidateResult:
     """Attempt one exact publication cleanup without a quiescence claim."""
     request = FilePublicationCleanupRequest(
@@ -485,4 +503,4 @@ def publication_cleanup(
         deadline.remaining(),
         effect_gate,
     )
-    return _exchange(carrier, request, plan, deadline, runtime_selection)
+    return _exchange(carrier, request, plan, deadline, runtime_selection, bootstrap=bootstrap)

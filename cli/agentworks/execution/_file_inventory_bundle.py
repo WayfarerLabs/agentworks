@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agentworks.execution._helper_bundle import build_file_helper_bundle
+from agentworks.execution._helper_bundle import RootGuestDelivery, build_file_helper_bundle, build_root_guest_program
 
 _PACKAGE = "_agw_file_inventory"
 _MODULE_NAMES = (
@@ -19,3 +19,6 @@ _MODULE_NAMES = (
 )
 
 FIXED_BUNDLE = build_file_helper_bundle(_PACKAGE, _MODULE_NAMES, "_file_inventory_guest")
+ROOT_PROGRAM = build_root_guest_program(
+    _PACKAGE, _MODULE_NAMES, "_file_inventory_guest", delivery=RootGuestDelivery.FIXED_PREFIX
+)
