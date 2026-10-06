@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 from pathlib import Path
 from threading import Event
 
@@ -126,10 +127,12 @@ def test_actual_delayed_constructor_retained_and_never_replayed(
     custody = LocalDeliveryCustody()
     children = []
     original = subprocess.Popen
+    original_clock = time.monotonic
+    monkeypatch.setattr(time, "monotonic", lambda: original_clock() + (60 if entered.is_set() else 0))
 
     def delayed(argv, **kwargs):
         entered.set()
-        assert release.wait(5)
+        assert release.wait(30)
         child = original([sys.executable, "-c", "import time; time.sleep(30)"], **kwargs)
         children.append(child)
         return child
@@ -138,7 +141,7 @@ def test_actual_delayed_constructor_retained_and_never_replayed(
     carrier = _carrier(kind, tmp_path)
     try:
         report = carrier.execute(
-            PreparedInvocation(("/fixture",)), io=CarrierIO(), deadline=Deadline.after(0.1), custody=custody
+            PreparedInvocation(("/fixture",)), io=CarrierIO(), deadline=Deadline.after(30), custody=custody
         )
         assert entered.is_set() and not children and not custody.settled
         assert report.dispatch == (Dispatch.UNKNOWN if kind == "wsl" else Dispatch.NOT_SENT)

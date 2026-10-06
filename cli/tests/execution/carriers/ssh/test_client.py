@@ -86,6 +86,7 @@ def synthetic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(subprocess, "Popen", spawn)
     yield value
     # Failed assertions must not leave synthetic processes running.
+    value.custody.close(Deadline.after(2))
     for child in value.children:
         if child.poll() is None:
             child.kill()
@@ -385,6 +386,9 @@ def test_failed_reap_is_explicit(synthetic: SyntheticSSH, monkeypatch: pytest.Mo
     assert report.completion is None
     assert report.dispatch == Dispatch.UNKNOWN
     assert "secret-canary" not in repr(report)
+    assert not synthetic.custody.settled
+    synthetic.custody.close(Deadline.after(2))
+    assert synthetic.custody.settled
     synthetic.children[-1].wait(timeout=2)
     synthetic.assert_closed()
 
@@ -413,6 +417,9 @@ def test_interrupted_failed_reap_attaches_safe_evidence(
             synthetic.execute()
     assert raised.value.__notes__
     assert "secret-canary" not in repr(raised.value.__notes__)
+    assert not synthetic.custody.settled
+    synthetic.custody.close(Deadline.after(2))
+    assert synthetic.custody.settled
     synthetic.children[-1].wait(timeout=2)
     synthetic.assert_closed()
 
