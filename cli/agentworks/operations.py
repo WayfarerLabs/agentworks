@@ -104,6 +104,11 @@ class OperationOwner:
     def ownership(self) -> OperationOwnership:
         return self._ownership
 
+    def stop_admission(self) -> None:
+        """Refuse new ordinary work without deciding whether effects are resolved."""
+        with self._guard:
+            self._close_requested = True
+
     def list_lifecycle_obligations(self) -> tuple[PersistedLifecycleObligation, ...]:
         """Read fenced lifecycle facts from this owner's claim and repository."""
         with self._guard:

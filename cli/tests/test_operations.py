@@ -1126,6 +1126,55 @@ def test_close_abandons_a_reserved_owner(db: Database) -> None:
     assert db.operations.inspect(_scope()) is None
 
 
+def test_stop_admission_keeps_reserved_claim_until_core_close(db: Database) -> None:
+    owner = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+
+    owner.stop_admission()
+
+    claim = db.operations.inspect(_scope())
+    assert claim is not None and claim.ownership == owner.ownership
+    assert claim.state is OperationClaimState.RESERVED
+    with pytest.raises(StateError):
+        owner.borrow()
+    with pytest.raises(StateError):
+        owner.register_lifecycle_obligation("late", payload_version=1, payload=b"")
+    owner.close()
+    assert db.operations.inspect(_scope()) is None
+
+
+def test_stop_admission_preserves_existing_attempt_and_obligation_teardown(db: Database) -> None:
+    owner = OperationOwner.acquire(db.operations, _scope(), "file-upload")
+    registered = owner.register_lifecycle_obligation("registered", payload_version=1, payload=b"pending")
+    possible = owner.register_lifecycle_obligation("possible", payload_version=1, payload=b"initial")
+    possible.mark_possible_effect()
+    borrow = owner.borrow()
+    attempt = borrow.begin_attempt()
+
+    owner.stop_admission()
+
+    claim = db.operations.inspect(_scope())
+    assert claim is not None and claim.ownership == owner.ownership
+    assert claim.state is OperationClaimState.POSSIBLE_DISPATCH
+    with pytest.raises(StateError):
+        owner.borrow()
+    with pytest.raises(StateError):
+        owner.register_lifecycle_obligation("late", payload_version=1, payload=b"")
+    with pytest.raises(StateError):
+        registered.mark_possible_effect()
+    with pytest.raises(StateError):
+        borrow.begin_attempt()
+
+    attempt.settle()
+    borrow.close()
+    possible.publish_payload(expected_revision=0, payload_version=1, payload=b"confirmed")
+    registered.resolve()
+    possible.resolve()
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+    assert db.operations.inspect(_scope()) is None
+
+
 def test_supplied_dispatch_obligation_replaces_carrier_row_across_attempts(db: Database) -> None:
     owner = OperationOwner.acquire(db.operations, _scope(), "file-upload")
     borrow = owner.borrow()

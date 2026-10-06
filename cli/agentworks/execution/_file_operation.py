@@ -346,6 +346,10 @@ class FileOperation:
         return tuple(self._active_uploads.values())
 
     @property
+    def active_package_uploads(self) -> tuple[_ActiveFileUpload, ...]:
+        return tuple(self._active_package_uploads.values())
+
+    @property
     def unfinished_uploads(self) -> tuple[UnfinishedFileUpload, ...]:
         return tuple(self._unfinished_uploads)
 
