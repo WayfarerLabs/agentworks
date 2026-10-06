@@ -5,10 +5,12 @@ from __future__ import annotations
 import _thread
 import dis
 import os
+import select
 import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -78,6 +80,16 @@ def _wait_snapshot(
             return snapshot
         time.sleep(0.01)
     pytest.fail("local process owner did not publish the expected state")
+
+
+def _wait_for_resize_request(owner: process_core.LocalProcessOwner) -> None:
+    until = time.monotonic() + 2
+    with owner._condition:
+        while owner._resize_request is None:
+            remaining = until - time.monotonic()
+            if remaining <= 0:
+                pytest.fail("local process owner did not publish the resize request")
+            owner._condition.wait(remaining)
 
 
 def _fake_process() -> Any:
@@ -584,3 +596,436 @@ def test_raw_owner_failure_is_reported_without_unraisable_payload(
     assert result.failure is ProcessFailure.DISPATCH
     assert canary not in repr(result)
     assert not unraisable
+
+
+def test_resize_requires_finite_deadline_and_ready_posix_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = process_core.LocalProcessOwner()
+    with pytest.raises(ValueError):
+        owner.notify_resize(Deadline(None))
+    with pytest.raises(ValueError):
+        owner.notify_resize(Deadline(float("nan")))
+    with pytest.raises(ValueError):
+        owner.notify_resize(Deadline(float("inf")))
+
+    expired = Deadline(time.monotonic() - 1)
+    assert owner.notify_resize(expired) is process_core.ResizeNotification.NOT_SENT
+    assert owner.notify_resize(Deadline(time.monotonic() + 1)) is process_core.ResizeNotification.NOT_SENT
+
+    with monkeypatch.context() as unsupported_platform:
+        unsupported_platform.setattr(os, "name", "nt")
+        assert owner.notify_resize(Deadline(time.monotonic() + 1)) is process_core.ResizeNotification.NOT_SENT
+
+
+@pytest.mark.skipif(os.name != "posix", reason="SIGWINCH is POSIX-only")
+def test_resize_delivers_sigwinch_to_the_owned_child(
+    children: list[subprocess.Popen[bytes]],
+) -> None:
+    owner = process_core.LocalProcessOwner()
+    source = (
+        "import os, signal, time; "
+        "signal.signal(signal.SIGWINCH, lambda *_: os.write(1, b'S')); "
+        "os.write(1, b'R'); "
+        "time.sleep(30)"
+    )
+    try:
+        owner.start(_request(source))
+        ready = _wait_snapshot(owner, lambda snapshot: snapshot.pipes is not None)
+        assert ready.pipes is not None
+        output_fd = ready.pipes.stdout.fileno()
+        assert select.select([output_fd], [], [], 2)[0]
+        assert os.read(output_fd, 1) == b"R"
+
+        result = owner.notify_resize(Deadline(time.monotonic() + 2))
+        assert result is process_core.ResizeNotification.REQUESTED
+        assert select.select([output_fd], [], [], 2)[0]
+        assert os.read(output_fd, 1) == b"S"
+        assert owner.snapshot().terminal is None
+        assert owner.close().cleaned
+        assert len(children) == 1
+    finally:
+        owner.close()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="exact wait ownership is POSIX-only")
+def test_resize_refuses_natural_exit_and_lost_exact_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exited = process_core.LocalProcessOwner()
+    process = _fake_process()
+    lost = process_core.LocalProcessOwner()
+    owner_started = threading.Event()
+    original_publish = process_core.LocalProcessOwner._publish_ready
+
+    def publish_ready(owner: process_core.LocalProcessOwner, pipes: process_core.LocalProcessPipes) -> None:
+        original_publish(owner, pipes)
+        owner_started.set()
+
+    monkeypatch.setattr(process_core.LocalProcessOwner, "_publish_ready", publish_ready)
+    try:
+        exited.start(_request("raise SystemExit(9)"))
+        _wait_snapshot(exited, lambda snapshot: snapshot.exit_status == 9)
+        assert exited.notify_resize(Deadline(time.monotonic() + 1)) is process_core.ResizeNotification.NOT_SENT
+        assert exited.close().exit_status == 9
+
+        monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+        monkeypatch.setattr(os, "waitpid", lambda pid, options: (_ for _ in ()).throw(ChildProcessError()))
+        lost.start(_request("pass"))
+        assert owner_started.wait(2)
+        snapshot = _wait_snapshot(lost, lambda value: value.observation_failed)
+        assert snapshot.exit_status is None
+        assert lost.notify_resize(Deadline(time.monotonic() + 1)) is process_core.ResizeNotification.NOT_SENT
+        assert lost.close().observation_failed
+    finally:
+        exited.close()
+        lost.close()
+        process.stdout.close()
+        process.stderr.close()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="SIGWINCH owner admission is POSIX-only")
+def test_resize_expiring_while_signal_is_in_flight_keeps_the_slot_until_settled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = _fake_process()
+    owner = process_core.LocalProcessOwner()
+    entered_signal = threading.Event()
+    release_signal = threading.Event()
+    borrowers_stopped = threading.Event()
+    close_finished = threading.Event()
+    signalled: list[int] = []
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(process_core._ProcessStatus, "poll", lambda status: None)
+    monkeypatch.setattr(process_core, "_cleanup", lambda status: True)
+    original_stop = process_core.LocalProcessOwner._stop_borrowers
+
+    def mark_borrowers_stopped(target: process_core.LocalProcessOwner) -> None:
+        original_stop(target)
+        borrowers_stopped.set()
+
+    monkeypatch.setattr(process_core.LocalProcessOwner, "_stop_borrowers", mark_borrowers_stopped)
+
+    def stalled_signal(pid: int, sig: int) -> None:
+        assert sig == signal.SIGWINCH
+        signalled.append(pid)
+        entered_signal.set()
+        assert release_signal.wait(2)
+
+    monkeypatch.setattr(os, "kill", stalled_signal)
+    closer: threading.Thread | None = None
+    caller: threading.Thread | None = None
+    try:
+        owner.start(_request("pass"))
+        _wait_snapshot(owner, lambda snapshot: snapshot.pipes is not None)
+        result: list[process_core.ResizeNotification] = []
+        caller = threading.Thread(target=lambda: result.append(owner.notify_resize(Deadline(time.monotonic() + 0.2))))
+        caller.start()
+        assert entered_signal.wait(2)
+        caller.join(1)
+        assert not caller.is_alive()
+        assert result == [process_core.ResizeNotification.UNKNOWN]
+        assert signalled == [process.pid]
+        assert owner.notify_resize(Deadline(time.monotonic() + 1)) is process_core.ResizeNotification.NOT_SENT
+        assert owner._resize_request is not None and owner._resize_request.claimed
+        closer = threading.Thread(target=lambda: (owner.close(), close_finished.set()))
+        closer.start()
+        assert borrowers_stopped.wait(1)
+        assert not close_finished.wait(0.05)
+        assert owner._resize_request is not None and owner._resize_request.claimed
+    finally:
+        release_signal.set()
+        if caller is not None:
+            caller.join(2)
+        if closer is None:
+            owner.close()
+        else:
+            closer.join(2)
+        try:
+            process.stdout.close()
+        finally:
+            process.stderr.close()
+    assert closer is not None and not closer.is_alive()
+    assert close_finished.is_set()
+    terminal = owner.snapshot().terminal
+    assert terminal is not None
+    assert terminal.started and terminal.cleaned
+    assert owner._resize_request is None
+
+
+@pytest.mark.skipif(os.name != "posix", reason="SIGWINCH owner admission is POSIX-only")
+def test_close_settles_pending_resize_before_owner_poll_returns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = _fake_process()
+    owner = process_core.LocalProcessOwner()
+    entered_poll = threading.Event()
+    release_poll = threading.Event()
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(process_core, "_cleanup", lambda status: True)
+
+    def stalled_poll(status: process_core._ProcessStatus) -> int | None:
+        entered_poll.set()
+        assert release_poll.wait(2)
+        return None
+
+    monkeypatch.setattr(process_core._ProcessStatus, "poll", stalled_poll)
+    caller: threading.Thread | None = None
+    result: list[process_core.ResizeNotification] = []
+    close_result: list[process_core.LocalProcessTerminal] = []
+    closer: threading.Thread | None = None
+    try:
+        owner.start(_request("pass"))
+        _wait_snapshot(owner, lambda snapshot: snapshot.pipes is not None)
+        assert entered_poll.wait(2)
+        caller = threading.Thread(target=lambda: result.append(owner.notify_resize(Deadline(time.monotonic() + 2))))
+        caller.start()
+        _wait_for_resize_request(owner)
+        closer = threading.Thread(target=lambda: close_result.append(owner.close()))
+        closer.start()
+        caller.join(1)
+        assert not caller.is_alive()
+        assert result == [process_core.ResizeNotification.NOT_SENT]
+        assert owner._resize_request is None
+    finally:
+        release_poll.set()
+        if closer is None:
+            owner.close()
+        else:
+            closer.join(2)
+        if caller is not None:
+            caller.join(2)
+        try:
+            process.stdout.close()
+        finally:
+            process.stderr.close()
+    assert closer is not None and not closer.is_alive()
+    assert close_result[0].cleaned
+
+
+@pytest.mark.skipif(os.name != "posix", reason="SIGWINCH owner admission is POSIX-only")
+def test_pending_resize_deadline_cancels_before_signal_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = _fake_process()
+    owner = process_core.LocalProcessOwner()
+    entered_poll = threading.Event()
+    release_poll = threading.Event()
+    signalled: list[tuple[int, int]] = []
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(process_core, "_cleanup", lambda status: True)
+    monkeypatch.setattr(os, "kill", lambda pid, sig: signalled.append((pid, sig)))
+
+    def stalled_poll(status: process_core._ProcessStatus) -> int | None:
+        entered_poll.set()
+        assert release_poll.wait(2)
+        return None
+
+    monkeypatch.setattr(process_core._ProcessStatus, "poll", stalled_poll)
+    result: list[process_core.ResizeNotification] = []
+    caller: threading.Thread | None = None
+    try:
+        owner.start(_request("pass"))
+        _wait_snapshot(owner, lambda snapshot: snapshot.pipes is not None)
+        assert entered_poll.wait(2)
+        caller = threading.Thread(target=lambda: result.append(owner.notify_resize(Deadline(time.monotonic() + 0.1))))
+        caller.start()
+        _wait_for_resize_request(owner)
+        caller.join(1)
+        assert not caller.is_alive()
+        assert result == [process_core.ResizeNotification.NOT_SENT]
+        assert owner._resize_request is None
+        assert signalled == []
+    finally:
+        release_poll.set()
+        if caller is not None:
+            caller.join(2)
+        try:
+            assert owner.close().cleaned
+        finally:
+            process.stdout.close()
+            process.stderr.close()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="SIGWINCH owner admission is POSIX-only")
+def test_interrupted_pending_resize_is_cancelled_before_owner_admission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = _fake_process()
+    owner = process_core.LocalProcessOwner()
+    entered_poll = threading.Event()
+    release_poll = threading.Event()
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(process_core, "_cleanup", lambda status: True)
+
+    def stalled_poll(status: process_core._ProcessStatus) -> int | None:
+        entered_poll.set()
+        assert release_poll.wait(2)
+        return None
+
+    monkeypatch.setattr(process_core._ProcessStatus, "poll", stalled_poll)
+    original_wait = owner._condition.wait
+    interruption = KeyboardInterrupt("resize-wait-interrupted")
+    wait_patched = False
+
+    def interrupt_wait(timeout: float | None = None) -> bool:
+        raise interruption
+
+    try:
+        owner.start(_request("pass"))
+        _wait_snapshot(owner, lambda snapshot: snapshot.pipes is not None)
+        assert entered_poll.wait(2)
+        monkeypatch.setattr(owner._condition, "wait", interrupt_wait)
+        wait_patched = True
+        with pytest.raises(KeyboardInterrupt) as caught:
+            owner.notify_resize(Deadline(time.monotonic() + 2))
+        assert caught.value is interruption
+        assert owner._resize_request is None
+    finally:
+        if wait_patched:
+            monkeypatch.setattr(owner._condition, "wait", original_wait)
+        release_poll.set()
+        try:
+            assert owner.close().cleaned
+        finally:
+            process.stdout.close()
+            process.stderr.close()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="SIGWINCH owner admission is POSIX-only")
+def test_interruption_after_slot_install_cancels_before_condition_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = _fake_process()
+    owner = process_core.LocalProcessOwner()
+    signalled: list[tuple[int, int]] = []
+    interruption = KeyboardInterrupt("resize-before-wait")
+    remaining_calls = 0
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(process_core._ProcessStatus, "poll", lambda status: None)
+    monkeypatch.setattr(process_core, "_cleanup", lambda status: True)
+    monkeypatch.setattr(os, "kill", lambda pid, sig: signalled.append((pid, sig)))
+
+    def interrupt_after_install(deadline: Deadline) -> float:
+        nonlocal remaining_calls
+        remaining_calls += 1
+        if remaining_calls == 2:
+            raise interruption
+        return 5.0
+
+    monkeypatch.setattr(Deadline, "remaining", interrupt_after_install)
+    try:
+        owner.start(_request("pass"))
+        _wait_snapshot(owner, lambda snapshot: snapshot.pipes is not None)
+        with pytest.raises(KeyboardInterrupt) as caught:
+            owner.notify_resize(Deadline(time.monotonic() + 5))
+
+        assert caught.value is interruption
+        assert remaining_calls == 2
+        assert owner._resize_request is None
+        assert signalled == []
+    finally:
+        try:
+            assert owner.close().cleaned
+        finally:
+            process.stdout.close()
+            process.stderr.close()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="SIGWINCH owner admission is POSIX-only")
+def test_owner_failure_after_claim_settles_resize_as_unknown_at_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = _fake_process()
+    owner = process_core.LocalProcessOwner()
+    claimed = threading.Event()
+    signalled: list[tuple[int, int]] = []
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(process_core, "_cleanup", lambda status: True)
+    monkeypatch.setattr(os, "kill", lambda pid, sig: signalled.append((pid, sig)))
+
+    def fail_after_claim(
+        target: process_core.LocalProcessOwner,
+        status: process_core._ProcessStatus,
+    ) -> tuple[bool, int | None]:
+        with target._condition:
+            while target._resize_request is None and not target._borrowers_stopped:
+                target._condition.wait(0.01)
+            if target._resize_request is None:
+                return False, None
+            assert not target._resize_request.claimed
+            target._resize_request.claimed = True
+            claimed.set()
+        raise RuntimeError("owner failed before native signal entry")
+
+    monkeypatch.setattr(process_core.LocalProcessOwner, "_wait_for_borrowers", fail_after_claim)
+    result: list[process_core.ResizeNotification] = []
+    caller = threading.Thread(target=lambda: result.append(owner.notify_resize(Deadline(time.monotonic() + 3))))
+    caller_started = False
+    try:
+        owner.start(_request("pass"))
+        _wait_snapshot(owner, lambda snapshot: snapshot.pipes is not None)
+        caller.start()
+        caller_started = True
+        assert claimed.wait(2)
+        terminal = owner.close()
+        caller.join(2)
+
+        assert not caller.is_alive()
+        assert result == [process_core.ResizeNotification.UNKNOWN]
+        assert terminal.observation_failed and terminal.cleaned
+        assert owner.snapshot().terminal is terminal
+        assert owner._resize_request is None
+        assert signalled == []
+    finally:
+        try:
+            owner.close()
+        finally:
+            if caller_started:
+                caller.join(2)
+            try:
+                process.stdout.close()
+            finally:
+                process.stderr.close()
+
+
+@pytest.mark.parametrize(
+    ("signal_error", "expected"),
+    [
+        (ProcessLookupError("gone"), process_core.ResizeNotification.NOT_SENT),
+        (PermissionError("private signal failure"), process_core.ResizeNotification.UNKNOWN),
+    ],
+)
+@pytest.mark.skipif(os.name != "posix", reason="SIGWINCH owner admission is POSIX-only")
+def test_failed_resize_does_not_replace_process_status_or_cleanup_facts(
+    monkeypatch: pytest.MonkeyPatch,
+    signal_error: OSError,
+    expected: process_core.ResizeNotification,
+) -> None:
+    process = _fake_process()
+    owner = process_core.LocalProcessOwner()
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(process_core._ProcessStatus, "poll", lambda status: None)
+
+    def fail_signal(pid: int, sig: int) -> None:
+        raise signal_error
+
+    def cleanup(status: process_core._ProcessStatus) -> bool:
+        status.status = 17
+        return True
+
+    monkeypatch.setattr(os, "kill", fail_signal)
+    monkeypatch.setattr(process_core, "_cleanup", cleanup)
+    try:
+        owner.start(_request("pass"))
+        _wait_snapshot(owner, lambda snapshot: snapshot.pipes is not None)
+        assert owner.notify_resize(Deadline(time.monotonic() + 1)) is expected
+        terminal = owner.close()
+        assert terminal.local_status == 17
+        assert terminal.exit_status is None
+        assert terminal.cleaned
+    finally:
+        owner.close()
+        process.stdout.close()
+        process.stderr.close()

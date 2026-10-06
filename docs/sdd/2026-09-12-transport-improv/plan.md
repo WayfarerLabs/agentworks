@@ -136,6 +136,16 @@ tree is identical to the full-suite pin `912a85328`, which passes 14,296 non-int
 remaining publication gates remain open. This does not close public feedback/fix round 1 or
 authorize merge readiness.
 
+The shared resize candidate at `099800b35` adds one owner-mediated POSIX SIGWINCH notification
+without another process owner, native handle exposure or a general signal API. Its local results
+distinguish refusal, kernel-call acceptance and uncertainty; remote terminal acknowledgment remains
+outside that evidence. Fresh Linux non-integration validation passes 14,263 tests with 50 skips. The
+private project and complexity lanes found a Windows test-selection error and a test scheduling
+race. Both are corrected, and all three independent lanes clear the final candidate. The unsupported
+platform mock now restores within a bounded context and uses the directly imported module; strict
+mypy passes all 1,198 source and test files. This record does not close native terminal,
+cleanup-entry interruption, production RunContext or public feedback/fix round 1.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state

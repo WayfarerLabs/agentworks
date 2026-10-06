@@ -445,6 +445,21 @@ does not ask a running drainer to stop: it asserts that pipe use has already end
 returns the same settled facts without another kill or reap. Immutable snapshots support observers;
 launch and relinquishment have one caller-side owner, not a new general concurrent-control API.
 
+POSIX PTY geometry updates do not themselves notify a child merely borrowing that PTY as stdin. The
+shared owner therefore supplies one fixed resize-notification operation, not a general signal API.
+`notify_resize` accepts a finite local process deadline and uses the existing retained worker and
+exact-status observation path. Its single request slot distinguishes pending cancellation from an
+admitted native call. A pending request can be denied on expiry, interruption, close, observed exit
+or lost ownership. Once admitted, expiry reports `UNKNOWN` while the same worker retains the request
+through signal or terminal settlement; an occupied slot refuses another request. Native polling and
+signaling occur outside the publication condition lock.
+
+`NOT_SENT` means no signal call was made or the kernel reported that the child was absent.
+`REQUESTED` means the local kernel accepted SIGWINCH, not that SSH transmitted a window change or
+the remote application observed one. Signal failure remains separate from process status and cleanup
+evidence. Unsupported hosts refuse without dispatch. The adapter still owns geometry, terminal
+endpoints and restoration. Actual SSH and native workstation delivery remain proof gates.
+
 This seam must not be advertised as fixing the independent cleanup-entry SIGINT gap above. Shared
 ownership removes forwarding's direct `Popen`-before-owner construction gap; global interrupt
 policy, native workstation proof and final production acceptance remain separate gates.
