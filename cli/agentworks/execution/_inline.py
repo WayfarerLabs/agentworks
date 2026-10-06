@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ValidationError
 from agentworks.execution._evidence_wire import FrameReader
 from agentworks.execution._helper_identity import IdentityExpectation
-from agentworks.execution._inline_bundle import FIXED_SOURCE
+from agentworks.execution._inline_bundle import FIXED_SOURCE, ROOT_PROGRAM
 from agentworks.execution._inline_observer import InlineObservation, InlineObserver
 from agentworks.execution._inline_request import (
     InlineManifest,
@@ -26,6 +26,8 @@ from agentworks.execution._runtime_prerequisite import (
     RuntimePrerequisiteObservation,
     RuntimePrerequisiteState,
     RuntimeSelection,
+    _NumericGuestBootstrap,
+    build_root_guest_bootstrap_argv,
     build_runtime_identity_helper_argv,
 )
 from agentworks.execution.carrier import (
@@ -184,15 +186,26 @@ def prepare_inline_candidate(
     capture_limit: int | None = 4_096,
     sensitive: bool = False,
     runtime_selection: RuntimeSelection,
+    bootstrap: _NumericGuestBootstrap | None = None,
 ) -> PreparedInlineCandidate:
     """Validate all payload data and build one file-free Linux helper attempt."""
     nonce = secrets.token_hex(16)
-    fixed_argv, candidates, system_shim = build_runtime_identity_helper_argv(
-        plan,
-        selection=runtime_selection,
-        fixed_source=FIXED_SOURCE,
-        nonce=nonce,
-    )
+    if bootstrap is None:
+        fixed_argv, candidates, system_shim = build_runtime_identity_helper_argv(
+            plan,
+            selection=runtime_selection,
+            fixed_source=FIXED_SOURCE,
+            nonce=nonce,
+        )
+    else:
+        fixed_argv, candidates, system_shim = build_root_guest_bootstrap_argv(
+            bootstrap.root_entry,
+            plan.expected,
+            selection=runtime_selection,
+            program=ROOT_PROGRAM,
+            nonce=nonce,
+            expected_guest=bootstrap.guest,
+        )
     if cwd is not None:
         _utf8(cwd)
         if not posixpath.isabs(cwd):

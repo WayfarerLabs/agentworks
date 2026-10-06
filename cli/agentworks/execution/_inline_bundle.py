@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agentworks.execution._helper_bundle import build_helper_modules
+from agentworks.execution._helper_bundle import RootGuestDelivery, build_helper_modules, build_root_guest_program
 
 _PACKAGE = "_agw_inline"
 _MODULE_NAMES = (
@@ -18,3 +18,4 @@ _MODULE_NAMES = (
 FIXED_SOURCE = build_helper_modules(_PACKAGE, _MODULE_NAMES) + (
     f"raise SystemExit(sys.modules[{(_PACKAGE + '._inline_guest')!r}].main(sys.argv[1]))\n"
 )
+ROOT_PROGRAM = build_root_guest_program(_PACKAGE, _MODULE_NAMES, "_inline_guest", delivery=RootGuestDelivery.INLINE)
