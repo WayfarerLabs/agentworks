@@ -11,6 +11,23 @@ provenance, completeness and retention. Completion can belong to an account shel
 before the bootstrap ran; it is not independent proof of bootstrap or application execution. Local
 status alone is not a guest exit. Payload fields have no diagnostic representation.
 
+Raw `Carrier.execute(..., custody=LocalDeliveryCustody)` requires storage retained by the caller
+before dispatch. `begin_process()` stores an inert native owner before returning it for admission;
+another exchange refuses until the latest cleanup observation proves it clean. `settled` is passive
+and `close(Deadline)` explicitly retries bounded cleanup, returning whether local settlement is
+confirmed. Pending construction and failed or lost native ownership retain the same storage. Reports
+remain observations, not cleanup handles. Local cleanup proves neither guest cancellation nor
+provider drain.
+
+Ordinary and recovery attempts retain this storage before concrete carrier dispatch and refuse
+settlement while it is unclean. Their existing bound helper wrappers supply it internally;
+`BoundHelperCarrier` describes that private, already-owned delivery boundary rather than an
+ownerless carrier fallback. The pre-target workflow and recovery span separately retain storage for
+platform queries, including temporary Proxmox wires. Aggregate cleanup can call
+`OperationOwner.close_local_delivery(Deadline)` after borrow handoff without reopening dispatch,
+clearing the outstanding attempt or resolving its durable remote debt. Proxmox activation receives
+the same pre-held provider-query storage from its enclosing workflow.
+
 `_proxmox_activation.py` retains a bounded non-secret obligation under a supplied exact VM owner
 before one start POST. Its selected route, original API identity and expected locator digest precede
 admission; a matching raw UPID is retained before durable publication. Lost bookkeeping replies can
@@ -358,11 +375,12 @@ or a sink requiring live delivery refuses before process creation. Buffered Prox
 feed the same sink interface without advertising live I/O, retaining truncation and deadline facts.
 
 The pump's result records local process facts with unknown stream provenance; each carrier owns
-interpretation as delivery evidence. It does not infer guest dispatch or termination. The SSH code
-in this branch still uses its private buffered pump; its owning implementation lane has adopted the
-shared pump separately. The buffered adapter refuses extended input/output modes before connection
-admission or dispatch. Joint SSH byte-I/O proof remains required before enabling them in SSH. No
-terminal support is enabled by these types.
+interpretation as delivery evidence. It does not infer guest dispatch or termination. The buffered
+SSH, WSL and Proxmox HTTP adapters share this pump and require caller-held cleanup custody. SSH
+retains the same storage across its version probe and command dispatch, refusing dispatch while
+probe cleanup is unsettled. The buffered adapters refuse unsupported extended input/output modes
+before connection admission or dispatch. Joint SSH byte-I/O proof remains required before enabling
+them in SSH. No terminal support is enabled by these types.
 
 On POSIX, the shared pump records terminal status from exact-child `waitpid` observations. A lost
 wait owner produces unknown status and observation failure, never a guessed zero exit. Once that
@@ -390,11 +408,11 @@ for cleanup evidence and can return pending; it does not interrupt native constr
 syscalls. After a retryable cleanup failure, another bounded close requests one serialized retry
 through the same owner. Signal-free natural-exit observation can settle cleanup later without
 changing the first observation. Lost native ownership remains unclean and cannot authorize another
-numeric-PID signal. A terminal with `admitted=False` records canceled admission without
-waiting for an inert bootstrap. Natural exit remains observable with stdin held open; closing stdin
-alone is EOF, not owner close. Status first learned during cleanup is never natural-exit evidence.
-The ordinary pump uses this interface. SSH forwarding adoption remains with its owning lane, which
-must stop and join its pipe users before closing the common owner.
+numeric-PID signal. A terminal with `admitted=False` records canceled admission without waiting for
+an inert bootstrap. Natural exit remains observable with stdin held open; closing stdin alone is
+EOF, not owner close. Status first learned during cleanup is never natural-exit evidence. The
+ordinary pump uses this interface. SSH forwarding adoption remains with its owning lane, which must
+stop and join its pipe users before closing the common owner.
 
 `LocalProcessRequest.input` chooses `LocalProcessInput.EOF`, `LocalProcessInput.PIPE`, or one
 `BorrowedProcessStdin(descriptor)`. The borrowed descriptor can supply an adapter-owned PTY slave
@@ -402,10 +420,10 @@ without combining stdout/stderr or installing terminal policy in the shared owne
 passive; it neither inspects nor duplicates the descriptor. The caller retains it and any supplied
 `pass_fds` descriptors while construction remains pending, including after interrupted admission or
 bounded close. A pending return is not permission to close or reuse them. The owner never closes
-caller-owned descriptors, and publishes no stdin pipe for the borrowed choice. A terminal
-with incomplete process cleanup does not authorize restoring borrowed terminal modes. Terminal
-admission, relaying, geometry and restoration remain adapter responsibilities; native SSH and
-Windows terminal proof remain open.
+caller-owned descriptors, and publishes no stdin pipe for the borrowed choice. A terminal with
+incomplete process cleanup does not authorize restoring borrowed terminal modes. Terminal admission,
+relaying, geometry and restoration remain adapter responsibilities; native SSH and Windows terminal
+proof remain open.
 
 `LocalProcessOwner.notify_resize(Deadline)` asks the existing owner thread to send one fixed POSIX
 SIGWINCH to its held child after the adapter updates PTY geometry. It requires a finite deadline and
@@ -419,14 +437,20 @@ lost observation refuse; close and terminal publication settle pending requests 
 process exit or cleanup facts. Local POSIX tests do not establish remote resize delivery or native
 macOS/Windows acceptance.
 
+The host adapter allows 0.5 seconds of fresh cleanup observation after pumping stops, including when
+execution has no deadline. It does not retry automatically or make native syscalls interruptible.
+Pending construction can therefore return without published pipes or a known local status; an
+unsettled store prevents interpreting that absence as proved non-dispatch. The guest runner's
+default waiting settlement remains unchanged because its source descriptors do not have a host-side
+retention consumer.
+
 Local Linux tests exercise interrupted startup, admission and cleanup, including the interval after
-admission but before pumping. They do not establish native Windows/macOS acceptance or update the
-existing SSH-private copy. A separately reproduced SIGINT at entry to the cleanup loop can escape
-before the owner receives its stop request, leaving a live child and open pipes. This remains an
-open production gate; adding nested Python guards does not establish interrupt-atomic cleanup. A
-deadline consumes startup time but cannot interrupt an OS process-creation call that has not
-returned; it is not a hard real-time bound over that call. This ownership mechanism does not contain
-descendants or cancel a guest workload.
+admission but before pumping. They do not establish native Windows/macOS acceptance. A separately
+reproduced SIGINT at entry to the cleanup loop can escape before the owner receives its stop
+request, leaving a live child and open pipes. This remains an open production gate; adding nested
+Python guards does not establish interrupt-atomic cleanup. A deadline consumes startup time but
+cannot interrupt an OS process-creation call that has not returned; it is not a hard real-time bound
+over that call. This ownership mechanism does not contain descendants or cancel a guest workload.
 
 `carriers/wsl2.py` is a private buffered candidate bound to an explicit local WSL executable,
 distribution and delivery user. It sends literal prepared argv through `--exec`, without selecting

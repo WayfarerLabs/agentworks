@@ -61,7 +61,6 @@ from agentworks.plugins.azure.network import (
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
-    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from collections.abc import Iterator, Mapping
 
     from azure.mgmt.compute import ComputeManagementClient
@@ -71,6 +70,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.carrier import Deadline
     from agentworks.transports import Transport
 

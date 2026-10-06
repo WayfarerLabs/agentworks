@@ -111,6 +111,8 @@ class _ActionCarrier:
         deadline: Deadline,
         custody: LocalDeliveryCustody,
     ) -> CarrierReport:
+        if not custody.settled:
+            raise StateError("Recovery carrier retains unsettled local delivery")
         self._require_action()
         action = self._action
         assert action is not None and action.deadline.expires_at is not None

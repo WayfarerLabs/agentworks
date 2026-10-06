@@ -128,9 +128,9 @@ class _RecoveryFixedObservationCarrier:
             if dispatch is not Dispatch.NOT_SENT:
                 batch._coordination_uncertain = True
             return False
-        if not attempt.local_delivery.settled:
-            return False
         if dispatch is Dispatch.NOT_SENT or (dispatch is Dispatch.SENT and completion == ExitStatus(code=0)):
+            if not attempt.local_delivery.settled:
+                return False
             try:
                 attempt.settle()
             except BaseException:

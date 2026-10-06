@@ -22,7 +22,6 @@ from agentworks.errors import LimitExceededError, ProvisioningError, StateError,
 from agentworks.execution.carrier import Deadline
 
 if TYPE_CHECKING:
-    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from collections.abc import Mapping
     from pathlib import Path
 
@@ -30,6 +29,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow, VMStatus
     from agentworks.debian import DebianRelease
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.transports import ExecTransport
 

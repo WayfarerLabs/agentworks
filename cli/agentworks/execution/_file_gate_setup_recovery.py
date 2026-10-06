@@ -23,6 +23,7 @@ from agentworks.execution._file_recovery_context import (
     require_record_version,
     require_recovery_context,
 )
+from agentworks.execution._fixed_helper_operation import AttemptBoundHelperCarrier
 from agentworks.execution._managed_runs import ManagedTargetIdentity
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState
 from agentworks.execution.carrier import Dispatch, ExitStatus
@@ -105,7 +106,7 @@ class FileGateSetupRecovery:
         try:
             attempt = dispatch.begin_attempt()
             result = exchange_file_effect_gate(
-                delivery,
+                AttemptBoundHelperCarrier(delivery, attempt),
                 operation=GateControlOperation.INSPECT,
                 path=setup.path,
                 guest=setup.guest,
@@ -118,7 +119,7 @@ class FileGateSetupRecovery:
             terminated = result.dispatch is Dispatch.NOT_SENT or (
                 result.dispatch is Dispatch.SENT and result.carrier_completion == ExitStatus(code=0)
             )
-            if not terminated:
+            if not terminated or not attempt.local_delivery.settled:
                 dispatch.handoff_unresolved()
                 return result
             attempt.settle()

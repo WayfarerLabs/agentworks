@@ -40,9 +40,10 @@ _MAX_RESPONSE_RECORDS = (
 )
 
 if TYPE_CHECKING:
+    from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
+
     from ._helper_launcher import IdentityPlan
     from ._vm_guest_identity_protocol import VMGuestIdentity
-    from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
     from .carrier import Deadline, ExitStatus
 
 

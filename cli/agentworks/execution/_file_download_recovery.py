@@ -30,6 +30,7 @@ from agentworks.execution._file_snapshot_exchange import (
     snapshot_cleanup,
     snapshot_reconcile,
 )
+from agentworks.execution._fixed_helper_operation import AttemptBoundHelperCarrier
 from agentworks.execution.carrier import Dispatch, ExitStatus
 from agentworks.operations import RecoveredLifecycleObligation
 
@@ -37,6 +38,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from agentworks.db.operations import LifecycleObligation, OperationOwnership
+    from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
     from agentworks.execution._managed_runs import ManagedTargetIdentity
     from agentworks.execution._scratch_receipt import ScratchCleanupDebt
     from agentworks.execution.carrier import Carrier, Deadline
@@ -141,15 +143,16 @@ class FileDownloadRecovery:
         token = self._call.token
         assert token is not None
         result = self._dispatch(
-            lambda: snapshot_reconcile(
-                delivery,
+            delivery,
+            lambda bound: snapshot_reconcile(
+                bound,
                 token=token,
                 plan=plan,
                 deadline=deadline,
                 runtime_selection=self._call.runtime_selection,
                 effect_gate=self._call.effect_gate,
                 bootstrap=bootstrap,
-            )
+            ),
         )
         observation = result.observation
         debt = None if observation is None else observation.cleanup_debt
@@ -173,8 +176,9 @@ class FileDownloadRecovery:
         token = self._call.token
         assert token is not None
         return self._dispatch(
-            lambda: snapshot_cleanup(
-                delivery,
+            delivery,
+            lambda bound: snapshot_cleanup(
+                bound,
                 token=token,
                 cleanup_debt=debt,
                 plan=plan,
@@ -182,16 +186,20 @@ class FileDownloadRecovery:
                 runtime_selection=self._call.runtime_selection,
                 effect_gate=self._call.effect_gate,
                 bootstrap=bootstrap,
-            )
+            ),
         )
 
-    def _dispatch(self, action: Callable[[], FileSnapshotCandidateResult]) -> FileSnapshotCandidateResult:
+    def _dispatch(
+        self, carrier: Carrier, action: Callable[[BoundHelperCarrier], FileSnapshotCandidateResult]
+    ) -> FileSnapshotCandidateResult:
         dispatch = self._bound.open_dispatch()
         attempt = None
         try:
             attempt = dispatch.begin_attempt()
-            result = action()
-            if _terminated_without_possible_effect(result.dispatch, result.carrier_completion):
+            result = action(AttemptBoundHelperCarrier(carrier, attempt))
+            if attempt.local_delivery.settled and _terminated_without_possible_effect(
+                result.dispatch, result.carrier_completion
+            ):
                 attempt.settle()
                 dispatch.close()
             else:

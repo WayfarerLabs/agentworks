@@ -8,15 +8,18 @@ import re
 from dataclasses import asdict, dataclass, replace
 from enum import StrEnum
 from threading import TIMEOUT_MAX, Lock
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES, LifecycleObligationState, OperationResourceKind
 from agentworks.errors import StateError, ValidationError
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.proxmox import ProxmoxConnection, _ProxmoxWire
 from agentworks.operations import LifecycleObligation, OperationOwner
+
+if TYPE_CHECKING:
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
 
 OBLIGATION_KIND = "proxmox-activation"
 PAYLOAD_VERSION = 1

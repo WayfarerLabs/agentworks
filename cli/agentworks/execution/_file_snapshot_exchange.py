@@ -66,10 +66,10 @@ if TYPE_CHECKING:
 
     from agentworks.execution._file_effect_gate import FileEffectGateBinding
     from agentworks.execution._file_spool import SpoolSnapshot
+    from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution._scratch import ReadyScratchReference
     from agentworks.execution._scratch_receipt import ScratchCleanupDebt
-    from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
     from agentworks.execution.carrier import Deadline, ExitStatus
 
 

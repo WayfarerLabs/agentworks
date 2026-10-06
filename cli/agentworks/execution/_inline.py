@@ -44,8 +44,8 @@ from agentworks.execution.models import Command, Script, Shell
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
+    from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution.carrier import Deadline, ExitStatus
 
 

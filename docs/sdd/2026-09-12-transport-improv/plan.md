@@ -2715,14 +2715,26 @@ acceptance. Fresh hosted verification remains required.
 The bounded-close core is integrated privately from worker `0a1068545`. All three independent lanes
 clear that whole source unit against `a2d27446c`: project passes 172 cases with one skip and three
 real-child control-identity probes; complexity passes 133 cases with one skip and reproduces the
-original interruption failure by restoring the old lookup; generic correctness passes 678 cases
-with one skip. Each exits 0 at the final pin. The worker passes 469 cases with one skip, 294 bundled
+original interruption failure by restoring the old lookup; generic correctness passes 678 cases with
+one skip. Each exits 0 at the final pin. The worker passes 469 cases with one skip, 294 bundled
 guest/bootstrap cases (including distribution Python 3.11), Ruff/format and strict mypy (1,250
 sources). Corrections remove unused retained-status bookkeeping and preserve the immutable first
-cleanup observation when a later natural-exit cleanup is pending. These prove the private core,
-not caller-held carrier custody, Proxmox/keeper integration, native acceptance or full-scope
-completion. The matching permanent execution documentation now distinguishes first-close evidence
-from later cleanup settlement and retains caller-owned descriptors through pending construction.
+cleanup observation when a later natural-exit cleanup is pending. These prove the private core, not
+caller-held carrier custody, Proxmox/keeper integration, native acceptance or full-scope completion.
+The matching permanent execution documentation now distinguishes first-close evidence from later
+cleanup settlement and retains caller-owned descriptors through pending construction.
+
+The next coupled source unit adds mandatory raw carrier custody, existing ordinary/recovery attempt
+storage, bound helper typing and explicit pre-target provider-query storage. Shared worker
+`726ed8526` passes 750 focused cases with one skip, including actual distribution Python 3.11, and
+scoped static gates; buffered worker `d8f033727` passes 233 cases with five skips and scoped static
+gates. Those are their own pinned results, not evidence for the complete integrated head. The lead's
+seven new ownership cases include actual delayed-constructor children under ordinary, recovery and
+pre-target workflows. Local cleanup leaves remote debt intact. A private composition finding moved
+the local-settlement guard into the positive remote-termination branch so unknown remote completion
+still records remote uncertainty while local cleanup is pending. Production-only strict typing
+passes 590 sources; test-fixture migration, full gates, whole-unit private reviews and native
+acceptance remain open. No public completion or new RunContext enablement is claimed.
 
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
       serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one

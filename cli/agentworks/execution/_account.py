@@ -43,8 +43,8 @@ from agentworks.execution.carrier import (
 )
 
 if TYPE_CHECKING:
-    from agentworks.execution._helper_identity import IdentityExpectation
     from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
+    from agentworks.execution._helper_identity import IdentityExpectation
     from agentworks.execution.carrier import CarrierReport, Deadline, ExitStatus
 
 

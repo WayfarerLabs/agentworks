@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from agentworks.errors import StateError
 from agentworks.execution.carrier import CarrierIO, Dispatch, ExitStatus
 from agentworks.operations import release_borrow_after_custody
 
@@ -16,7 +17,7 @@ if TYPE_CHECKING:
         Deadline,
         PreparedInvocation,
     )
-    from agentworks.operations import OperationAttempt, OperationBorrow
+    from agentworks.operations import OperationAttempt, OperationBorrow, RecoveryAttempt
 
 
 class BoundHelperCarrier(Protocol):
@@ -43,6 +44,30 @@ class FixedObservationCarrier(BoundHelperCarrier, Protocol):
     def requires_owner_retention(self) -> bool: ...
 
     def settle(self, dispatch: Dispatch, completion: ExitStatus | None) -> bool: ...
+
+
+class AttemptBoundHelperCarrier:
+    """Adapt an already-admitted attempt to fixed helper delivery.
+
+    This does not begin, settle or reopen an attempt. Its enclosing workflow
+    retains the supplied attempt before constructing this helper view.
+    """
+
+    def __init__(self, carrier: Carrier, attempt: OperationAttempt | RecoveryAttempt) -> None:
+        self._carrier = carrier
+        self._attempt = attempt
+
+    @property
+    def features(self) -> ChannelFeatures:
+        return self._carrier.features
+
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        self._carrier.validate(invocation, io=io)
+
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        if not self._attempt.local_delivery.settled:
+            raise StateError("Helper attempt retains unsettled local delivery")
+        return self._carrier.execute(invocation, io=io, deadline=deadline, custody=self._attempt.local_delivery)
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,9 +135,9 @@ class BorrowedFixedHelperCarrier:
             if dispatch is not Dispatch.NOT_SENT:
                 self.coordination_uncertain = True
             return False
-        if not attempt.local_delivery.settled:
-            return False
         if dispatch is Dispatch.NOT_SENT or (dispatch is Dispatch.SENT and completion == ExitStatus(code=0)):
+            if not attempt.local_delivery.settled:
+                return False
             try:
                 attempt.settle()
             except BaseException:

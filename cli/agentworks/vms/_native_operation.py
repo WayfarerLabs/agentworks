@@ -284,7 +284,11 @@ def _activate_proxmox(
     carrier = cast("ProxmoxCarrier", binding.carrier)
     wire = carrier._wire  # noqa: SLF001
     workflow.activation = ProxmoxActivation(
-        workflow.owner, vm.name, wire._connection, locator, custody=workflow.local_delivery  # noqa: SLF001
+        workflow.owner,
+        vm.name,
+        wire._connection,
+        locator,
+        custody=workflow.local_delivery,  # noqa: SLF001
     )
     try:
         workflow.activation.start(workflow.deadline)

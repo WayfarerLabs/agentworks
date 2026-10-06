@@ -34,8 +34,8 @@ from agentworks.execution.carrier import (
 )
 
 if TYPE_CHECKING:
-    from agentworks.execution.binding import _EarlyGuestFactsRoute
     from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
+    from agentworks.execution.binding import _EarlyGuestFactsRoute
     from agentworks.execution.carrier import CarrierReport, Deadline, ExitStatus
 
 

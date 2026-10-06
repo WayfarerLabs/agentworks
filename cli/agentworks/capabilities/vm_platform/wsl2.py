@@ -34,13 +34,13 @@ from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
-    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from collections.abc import Iterator, Mapping
     from contextlib import AbstractContextManager
 
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Deadline
     from agentworks.resources.graph import Readiness
@@ -1032,7 +1032,6 @@ class WSL2Platform(VMPlatform):
             custody=custody,
             env={**os.environ, "AGENTWORKS_WSL_DISTRO": distro_name},
         )
-        provider_locator_remaining(deadline, vm_name=vm.name)
         if result.failure is Failure.DEADLINE:
             raise LimitExceededError(
                 f"WSL2 provider locator observation timed out for VM '{vm.name}'",

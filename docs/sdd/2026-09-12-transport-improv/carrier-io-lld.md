@@ -8,15 +8,16 @@
 
 ## Keep the buffered boundary stable while proving extensions
 
-The implemented buffered baseline is
-`Carrier.execute(PreparedInvocation, io=CarrierIO, deadline=Deadline)`. The
-[next carrier contract](execution-contract.md#carrier-contract) adds mandatory caller-held local
-delivery custody without another delivery primitive. Coordinate that change with SSH while keeping
-the current finite input/capture/discard path working and proving the live and terminal extensions.
-Transport owns the reusable local subprocess pump, input/output and report types, shared parsing and
-acceptance vectors. SSH owns its client environment policy, delivery interpretation, call-site
-adaptation and borrowed-input terminal restoration. Neither lane silently changes this boundary.
-Connection/trust and forwarding work need not wait for these extensions.
+The private buffered implementation now follows
+`Carrier.execute(PreparedInvocation, io=CarrierIO, deadline=Deadline, custody=LocalDeliveryCustody)`.
+The [carrier contract](execution-contract.md#carrier-contract) requires caller-held local delivery
+custody without another delivery primitive. Its complete integration/private review and SSH-lane
+adaptation remain open. Coordinate that change with SSH while keeping the current finite
+input/capture/discard path working and proving the live and terminal extensions. Transport owns the
+reusable local subprocess pump, input/output and report types, shared parsing and acceptance
+vectors. SSH owns its client environment policy, delivery interpretation, call-site adaptation and
+borrowed-input terminal restoration. Neither lane silently changes this boundary. Connection/trust
+and forwarding work need not wait for these extensions.
 
 `Carrier.validate(invocation, io=...)` is a pure structural preflight for a fully prepared call, not
 a second delivery primitive. It may reject deterministic local incompatibility such as an

@@ -375,9 +375,10 @@ Give each keeper exchange separate delivery, preparation, nonce, collector and I
 generic concurrent-carrier capability is needed or inferred from immutable connection data.
 Operation-repository fencing is thread-safe; that does not make ordinary database repositories or
 RunContext dependencies safe to use from a background worker. Exact route and guest fencing remain
-required. Proxmox's current raw worker construction precedes its cleanup guard, and post-kill
-`communicate()` has no timeout: the ordinary delivery deadline does not prove bounded local drain.
-Carry these into the existing launch/interruption and keeper-drain gates before making that claim.
+required. The former raw Proxmox worker constructed before its cleanup guard and used unbounded
+post-kill `communicate()`. The private shared-owner implementation replaces that path with pre-held
+custody and bounded cleanup observation. Native drain and the complete launch/interruption and
+keeper-drain gates still need proof; an ordinary delivery deadline alone does not supply it.
 
 Use the carrier contract's explicit caller-held `LocalDeliveryCustody`, rather than adding cleanup
 handles to reports or escaping exception causes. Ordinary dispatch attaches it to the existing

@@ -25,8 +25,9 @@ from ._runtime_prerequisite import (
 from .carrier import CarrierIO, Deadline, Dispatch, Failure, FiniteInput, PreparedInvocation, Retention, SinkOutput
 
 if TYPE_CHECKING:
-    from ._vm_guest_identity_protocol import VMGuestIdentity
     from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
+
+    from ._vm_guest_identity_protocol import VMGuestIdentity
     from .carrier import ExitStatus
 
 

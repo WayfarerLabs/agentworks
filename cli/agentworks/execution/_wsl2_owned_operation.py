@@ -9,7 +9,6 @@ from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLo
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import LifecycleObligationState, OperationResourceKind
 from agentworks.errors import ValidationError
-from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._runtime_prerequisite import RuntimeSelection
 from agentworks.execution._vm_guest_identity import VMGuestIdentityObservationState
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
@@ -39,6 +38,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution._wsl2_lifecycle import GuestAnchorObserver
 
 
