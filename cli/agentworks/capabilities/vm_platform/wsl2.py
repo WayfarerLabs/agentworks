@@ -1069,14 +1069,13 @@ class WSL2Platform(VMPlatform):
     ) -> NativeExecutionBinding:
         """Bind literal local WSL delivery without probing or starting it."""
         from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
-        from agentworks.execution.binding import NativeExecutionBinding
-        from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
+        from agentworks.execution._wsl2_binding import _build_wsl2_native_binding
+        from agentworks.execution.carriers.wsl2 import WSL2Connection
 
         del ctx, deadline, config
         account = vm.admin_username
-        return NativeExecutionBinding(
-            WSL2Carrier(WSL2Connection(self._distro_name(vm), account, "wsl")),
-            account,
+        return _build_wsl2_native_binding(
+            WSL2Connection(self._distro_name(vm), account, "wsl"),
             RuntimeSelection(RuntimeTargetOS.LINUX),
         )
 

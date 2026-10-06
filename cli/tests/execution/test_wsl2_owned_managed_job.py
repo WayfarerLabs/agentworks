@@ -61,16 +61,14 @@ def _subject(
     def execute(
         selected: WSL2Carrier, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline
     ) -> CarrierReport:
-        assert selected.connection == CONNECTION
+        assert selected.connection == WSL2Connection(CONNECTION.distribution, "root", CONNECTION.wsl_executable)
         return guest_carrier.execute(invocation, io=io, deadline=deadline)
 
     monkeypatch.setattr(WSL2Carrier, "execute", execute)
     platform = Mock(spec=WSL2Platform)
     platform.site_name = "local"
     platform.observe_provider_locator.side_effect = locators or [ProviderLocator("wsl2:registration")] * 5
-    first = NativeExecutionBinding(
-        WSL2Carrier(CONNECTION), CONNECTION.user, RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable)
-    )
+    first = NativeExecutionBinding(WSL2Carrier(CONNECTION), CONNECTION.user, RuntimeSelection(RuntimeTargetOS.LINUX))
     platform.resolve_native_execution_binding.side_effect = bindings or [first, first]
     subject = WSL2OwnedManagedJob.from_platform(
         _vm(),
@@ -152,12 +150,10 @@ def test_changed_connection_refuses_before_reservation_and_releases_settled_hold
     with closing(Database(tmp_path / "state.db")) as database:
         owner = _acquire_owner(database)
         first = NativeExecutionBinding(
-            WSL2Carrier(CONNECTION), CONNECTION.user, RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable)
+            WSL2Carrier(CONNECTION), CONNECTION.user, RuntimeSelection(RuntimeTargetOS.LINUX)
         )
         changed = WSL2Connection("Debian", "admin", "wsl.exe")
-        second = NativeExecutionBinding(
-            WSL2Carrier(changed), changed.user, RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable)
-        )
+        second = NativeExecutionBinding(WSL2Carrier(changed), changed.user, RuntimeSelection(RuntimeTargetOS.LINUX))
         subject, _, carrier = _subject(database, owner, monkeypatch, bindings=[first, second])
         start = Mock(side_effect=AssertionError("managed start after route change"))
         monkeypatch.setattr(managed, "start_bound_managed_job", start)
@@ -221,13 +217,13 @@ def test_dispatch_route_callback_classifies_and_retains_owner(
         else:
             locators.append(stable)
         first = NativeExecutionBinding(
-            WSL2Carrier(CONNECTION), CONNECTION.user, RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable)
+            WSL2Carrier(CONNECTION), CONNECTION.user, RuntimeSelection(RuntimeTargetOS.LINUX)
         )
         changed_connection = WSL2Connection("Debian", "admin", "wsl.exe")
         second = NativeExecutionBinding(
             WSL2Carrier(changed_connection if change == "connection" else CONNECTION),
             CONNECTION.user,
-            RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3")
+            RuntimeSelection(RuntimeTargetOS.LINUX, "/different/python3")
             if change == "runtime"
             else first.runtime_selection,
         )
@@ -277,12 +273,12 @@ def test_changed_runtime_or_late_locator_refuses_before_managed_start(
     with closing(Database(tmp_path / "state.db")) as database:
         owner = _acquire_owner(database)
         first = NativeExecutionBinding(
-            WSL2Carrier(CONNECTION), CONNECTION.user, RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable)
+            WSL2Carrier(CONNECTION), CONNECTION.user, RuntimeSelection(RuntimeTargetOS.LINUX)
         )
         second = NativeExecutionBinding(
             WSL2Carrier(CONNECTION),
             CONNECTION.user,
-            RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3")
+            RuntimeSelection(RuntimeTargetOS.LINUX, "/different/python3")
             if change == "runtime"
             else first.runtime_selection,
         )

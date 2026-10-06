@@ -18,6 +18,7 @@ from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import VMRow
 from agentworks.errors import ConfigError, StateError, ValidationError
+from agentworks.execution._helper_launcher import IdentityMode
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier
@@ -96,6 +97,16 @@ def test_wsl2_binding_is_passive_and_uses_recorded_distribution_and_admin(
     )
     assert binding.delivery_account == "delivery-user"
     assert binding.runtime_selection == RuntimeSelection(RuntimeTargetOS.LINUX)
+    early = binding._early_guest_facts_route
+    assert early is not None
+    assert isinstance(early.carrier, WSL2Carrier)
+    assert early.carrier.connection.distribution == connection.distribution
+    assert early.carrier.connection.wsl_executable == connection.wsl_executable
+    assert early.carrier.connection.user == "root"
+    assert early.account == binding.delivery_account
+    assert early.root_entry.mode is IdentityMode.DIRECT
+    assert early.root_entry.expected.euid == 0
+    assert "_early_guest_facts_route" not in repr(binding)
 
 
 def test_wsl2_binding_imports_without_retired_execution_modules() -> None:
@@ -174,6 +185,7 @@ def test_proxmox_binding_uses_scoped_secret_platform_metadata_and_verified_conne
     assert connection.ca_bundle == Path("/trust/cluster-ca.pem")
     assert binding.delivery_account == "root"
     assert binding.runtime_selection == RuntimeSelection(RuntimeTargetOS.LINUX)
+    assert binding._early_guest_facts_route is None
 
 
 def test_proxmox_binding_uses_system_trust_when_ca_bundle_is_omitted() -> None:

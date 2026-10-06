@@ -12,6 +12,7 @@ from agentworks.errors import ValidationError
 from agentworks.execution._runtime_prerequisite import RuntimeSelection
 from agentworks.execution._vm_guest_identity import VMGuestIdentityObservationState
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
+from agentworks.execution._wsl2_binding import _build_wsl2_native_binding
 from agentworks.execution._wsl2_guest_observer import WSL2GuestObserver
 from agentworks.execution._wsl2_lifecycle import GuestAnchorPresence, OwnedHostClient, WSL2AnchorEvidence
 from agentworks.execution._wsl2_platform_hold import WSL2PlatformHold, decode_hold_payload, locator_digest
@@ -81,15 +82,14 @@ class WSL2OwnedOperation:
             selected_runtime = RuntimeSelection(runtime_selection.target_os, runtime_selection.explicit_path)
         except AttributeError as error:
             raise ValidationError(f"WSL2 {purpose} requires complete selected route facts") from error
-        selected_carrier = WSL2Carrier(selected_connection)
-        selected_binding = NativeExecutionBinding(selected_carrier, selected_connection.user, selected_runtime)
+        selected_binding = _build_wsl2_native_binding(selected_connection, selected_runtime)
         selected_native = WindowsWSL2HostClient() if native is None else native
         selected_observer = WSL2GuestObserver(selected_connection) if observer is None else observer
         self.owner = owner
         self._vm = vm
         self._locator = selected_locator
         self._connection = selected_connection
-        self._carrier = selected_carrier
+        self._carrier = selected_binding.carrier
         self._binding = selected_binding
         self._runtime = selected_runtime
         self._platform = platform

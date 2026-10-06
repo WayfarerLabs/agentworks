@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from agentworks.execution._named_guest_bootstrap import build_named_guest_bootstrap_argv
 from agentworks.execution._runtime_prerequisite import (
     RuntimePrefixSink,
     RuntimePrerequisiteObservation,
@@ -14,7 +15,7 @@ from agentworks.execution._runtime_prerequisite import (
     RuntimeSelection,
     build_runtime_helper_argv,
 )
-from agentworks.execution._vm_guest_identity_bundle import FIXED_SOURCE
+from agentworks.execution._vm_guest_identity_bundle import _NAMED_BODY_SOURCE, FIXED_SOURCE
 from agentworks.execution._vm_guest_identity_protocol import (
     MAX_VM_GUEST_IDENTITY_MESSAGE_BYTES,
     VMGuestIdentity,
@@ -33,6 +34,7 @@ from agentworks.execution.carrier import (
 )
 
 if TYPE_CHECKING:
+    from agentworks.execution.binding import _EarlyGuestFactsRoute
     from agentworks.execution.carrier import Carrier, CarrierReport, Deadline, ExitStatus
 
 
@@ -152,6 +154,7 @@ def observe_vm_guest_identity(
     *,
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
+    _bootstrap_route: _EarlyGuestFactsRoute | None = None,
 ) -> VMGuestIdentityObservationResult:
     """Make one no-replay fixed-helper attempt with no inherited stdin."""
     nonce = secrets.token_hex(16)
@@ -164,11 +167,20 @@ def observe_vm_guest_identity(
             RuntimePrerequisiteObservation(RuntimePrerequisiteState.UNKNOWN, None),
             None,
         )
-    argv, candidates, system_shim = build_runtime_helper_argv(
-        selection=runtime_selection,
-        fixed_source=FIXED_SOURCE,
-        nonce=nonce,
-    )
+    if _bootstrap_route is None:
+        argv, candidates, system_shim = build_runtime_helper_argv(
+            selection=runtime_selection,
+            fixed_source=FIXED_SOURCE,
+            nonce=nonce,
+        )
+    else:
+        argv, candidates, system_shim = build_named_guest_bootstrap_argv(
+            _bootstrap_route.root_entry,
+            _bootstrap_route.account,
+            selection=runtime_selection,
+            fixed_source=_NAMED_BODY_SOURCE,
+            nonce=nonce,
+        )
     invocation = PreparedInvocation(argv)
     response = _BoundedResponseSink()
     runtime = RuntimePrefixSink(nonce, candidates, response, system_shim)

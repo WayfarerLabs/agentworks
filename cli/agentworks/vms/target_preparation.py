@@ -257,13 +257,15 @@ def _prepare_managed_vm_target_with_borrow(
     borrow: OperationBorrow,
 ) -> VMTargetPreparation:
     """Run one guest attempt under custody acquired by either entry point."""
-    operation = BorrowedFixedHelperCarrier(binding.carrier, borrow)
+    early = binding._early_guest_facts_route
+    operation = BorrowedFixedHelperCarrier(binding.carrier if early is None else early.carrier, borrow)
     state = _State(operation)
     try:
         result = observe_vm_guest_identity(
             operation,
             runtime_selection=binding.runtime_selection,
             deadline=deadline,
+            _bootstrap_route=early,
         )
         state.guest_result = result
         normal = operation.settle(result.dispatch, result.carrier_completion)

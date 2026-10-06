@@ -162,7 +162,7 @@ def _platform_subject(
     binding = NativeExecutionBinding(
         WSL2Carrier(route),
         route.user,
-        RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable),
+        RuntimeSelection(RuntimeTargetOS.LINUX),
     )
     platform.resolve_native_execution_binding.return_value = binding
     platform.test_binding = binding
@@ -291,7 +291,8 @@ def test_selected_platform_download_rechecks_registration_with_owned_route(
         assert platform.observe_provider_locator.call_count == 3
         assert platform.resolve_native_execution_binding.call_count == 1
         assert carrier.calls > 1
-        assert routes and all(route == selected_route for route in routes)
+        assert routes[0] == WSL2Connection(selected_route.distribution, "root", selected_route.wsl_executable)
+        assert len(routes) > 1 and all(route == selected_route for route in routes[1:])
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
         _close_owner(owner)
         assert database.operations.inspect(subject.owner.ownership.scope) is None
@@ -325,8 +326,11 @@ def test_platform_carrier_mutation_cannot_redirect_file_dispatch(
         sink = BytesSink()
         assert _download(subject, root, sink) is WSL2DownloadStatus.COMPLETE
         assert bytes(sink.data) == b"held-wsl-download"
-        assert len(routes) > 1 and all(route == original for route in routes)
-        assert len(carriers) > 1 and all(selected is subject._carrier for selected in carriers)
+        assert routes[0] == WSL2Connection(original.distribution, "root", original.wsl_executable)
+        assert len(routes) > 1 and all(route == original for route in routes[1:])
+        early = subject.binding._early_guest_facts_route
+        assert early is not None and carriers[0] is early.carrier
+        assert len(carriers) > 1 and all(selected is subject._carrier for selected in carriers[1:])
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
         _close_owner(owner)
         assert database.operations.inspect(subject.owner.ownership.scope) is None
@@ -376,7 +380,7 @@ def test_registration_replacement_during_binding_resolution_refuses_before_guest
             return NativeExecutionBinding(
                 WSL2Carrier(connection),
                 connection.user,
-                RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable),
+                RuntimeSelection(RuntimeTargetOS.LINUX),
             )
 
         platform.resolve_native_execution_binding.side_effect = resolve

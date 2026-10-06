@@ -9,7 +9,17 @@ from agentworks.errors import ValidationError
 from agentworks.execution._runtime_prerequisite import RuntimeSelection
 
 if TYPE_CHECKING:
+    from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution.carrier import Carrier
+
+
+@dataclass(frozen=True, slots=True)
+class _EarlyGuestFactsRoute:
+    """Core-only root entry and named body for the initial fixed guest probe."""
+
+    carrier: Carrier = field(repr=False)
+    root_entry: IdentityPlan
+    account: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +29,7 @@ class NativeExecutionBinding:
     carrier: Carrier = field(repr=False)
     delivery_account: str
     runtime_selection: RuntimeSelection
+    _early_guest_facts_route: _EarlyGuestFactsRoute | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.delivery_account, str) or not self.delivery_account or "\0" in self.delivery_account:

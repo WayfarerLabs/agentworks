@@ -13,7 +13,9 @@ from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLo
 from agentworks.db import Database, OperationClaimState, OperationResourceKind, OperationScope, VMRow
 from agentworks.db.operations import OperationRepository
 from agentworks.errors import StateError, ValidationError
-from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState, RuntimeSelection, RuntimeTargetOS
 from agentworks.execution._vm_guest_identity import VMGuestIdentityObservationResult, observe_vm_guest_identity
 from agentworks.execution._vm_guest_identity_protocol import (
     VMGuestIdentity,
@@ -21,7 +23,7 @@ from agentworks.execution._vm_guest_identity_protocol import (
     encode_vm_guest_identity_failure,
     encode_vm_guest_identity_success,
 )
-from agentworks.execution.binding import NativeExecutionBinding
+from agentworks.execution.binding import NativeExecutionBinding, _EarlyGuestFactsRoute
 from agentworks.execution.carrier import (
     CapturedOutput,
     Carrier,
@@ -252,6 +254,72 @@ def test_prepares_identity_under_one_borrow_and_leaves_owner_open(
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
+
+
+@pytest.mark.parametrize(
+    ("dispatch", "code", "status", "retained"),
+    [
+        (Dispatch.SENT, 0, VMTargetPreparationStatus.PREPARED, False),
+        (Dispatch.SENT, 125, VMTargetPreparationStatus.UNCERTAIN, True),
+        (Dispatch.SENT, 1, VMTargetPreparationStatus.UNCERTAIN, True),
+        (Dispatch.UNKNOWN, None, VMTargetPreparationStatus.UNCERTAIN, True),
+        (Dispatch.NOT_SENT, None, VMTargetPreparationStatus.FAILED, False),
+    ],
+)
+def test_early_route_uses_the_same_borrow_without_ordinary_replay(
+    owned: tuple[Database, OperationOwner],
+    monkeypatch: pytest.MonkeyPatch,
+    dispatch: Dispatch,
+    code: int | None,
+    status: VMTargetPreparationStatus,
+    retained: bool,
+) -> None:
+    database, owner = owned
+    ordinary = TranscriptCarrier()
+    completion = None if code is None else ExitStatus(code=code)
+    report = CarrierReport(
+        dispatch,
+        completion,
+        stdout=CapturedOutput(complete=True, retention=Retention.DELIVERED),
+        stderr=CapturedOutput(complete=True, retention=Retention.DELIVERED),
+    )
+    early_carrier = TranscriptCarrier(_success_payload() if code == 0 else b"", report, deadlines=[])
+    early = _EarlyGuestFactsRoute(
+        early_carrier, IdentityPlan(IdentityExpectation(0, 0, (0,)), IdentityMode.DIRECT), "admin"
+    )
+    binding = NativeExecutionBinding(ordinary, "admin", _runtime(), early)
+    borrows, releases = _watch_custody(monkeypatch)
+    original = early_carrier.execute
+
+    def execute(invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+        assert len(borrows) == 1 and borrows[0].has_outstanding_attempt
+        assert releases == []
+        claim = database.operations.inspect(owner.ownership.scope)
+        assert claim is not None and claim.ownership == owner.ownership
+        return original(invocation, io=io, deadline=deadline)
+
+    monkeypatch.setattr(early_carrier, "execute", execute)
+    deadline = Deadline.after(10)
+    result = prepare_managed_vm_target(_vm(), ProviderLocator("opaque"), binding, deadline=deadline, owner=owner)
+
+    assert result.status is status
+    assert result.requires_owner_retention is retained
+    assert result.guest_result is not None
+    assert result.guest_result.dispatch is dispatch
+    assert result.guest_result.carrier_completion == completion
+    assert result.guest_result.runtime_prerequisite.state is (
+        RuntimePrerequisiteState.READY if dispatch is Dispatch.SENT else RuntimePrerequisiteState.UNKNOWN
+    )
+    assert early_carrier.calls == 1 and early_carrier.deadlines == [deadline]
+    assert ordinary.calls == 0
+    assert len(borrows) == 1 and releases == borrows
+    if retained:
+        with pytest.raises(StateError):
+            owner.close()
+    else:
+        owner.seal_lifecycle_obligations()
+        owner.record_effects_resolved()
+        owner.close()
 
 
 @pytest.mark.parametrize(
@@ -767,12 +835,21 @@ def test_platform_composition_passes_exact_inputs_and_leaves_outer_owner_open(
         return ProviderLocator("opaque")
 
     def probe(
-        selected_carrier: Carrier, *, runtime_selection: RuntimeSelection, deadline: Deadline
+        selected_carrier: Carrier,
+        *,
+        runtime_selection: RuntimeSelection,
+        deadline: Deadline,
+        _bootstrap_route: _EarlyGuestFactsRoute | None = None,
     ) -> VMGuestIdentityObservationResult:
         nonlocal probe_selection, probe_carrier
         probe_selection = runtime_selection
         probe_carrier = selected_carrier
-        return observe_vm_guest_identity(selected_carrier, runtime_selection=runtime_selection, deadline=deadline)
+        return observe_vm_guest_identity(
+            selected_carrier,
+            runtime_selection=runtime_selection,
+            deadline=deadline,
+            _bootstrap_route=_bootstrap_route,
+        )
 
     monkeypatch.setattr("agentworks.vms.target_preparation.observe_vm_guest_identity", probe)
     platform.observe_provider_locator.side_effect = observe

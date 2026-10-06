@@ -124,6 +124,7 @@ def test_hold_reads_and_settles_only_supplied_owners_database(
         def execute(
             selected: WSL2Carrier, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline
         ) -> CarrierReport:
+            assert selected.connection == WSL2Connection("Ubuntu", "root", "wsl.exe")
             return carrier.execute(invocation, io=io, deadline=deadline)
 
         monkeypatch.setattr(WSL2Carrier, "execute", execute)
@@ -131,7 +132,7 @@ def test_hold_reads_and_settles_only_supplied_owners_database(
         platform.site_name = "local"
         locator = ProviderLocator("wsl2:registration")
         connection = WSL2Connection("Ubuntu", "admin", "wsl.exe")
-        runtime = RuntimeSelection(RuntimeTargetOS.LINUX, sys.executable)
+        runtime = RuntimeSelection(RuntimeTargetOS.LINUX)
         platform.observe_provider_locator.return_value = locator
         platform.resolve_native_execution_binding.return_value = NativeExecutionBinding(
             WSL2Carrier(connection), connection.user, runtime
@@ -162,6 +163,15 @@ def test_hold_reads_and_settles_only_supplied_owners_database(
                 observer=observer,
             )
 
+        selected_binding = subject.binding
+        assert isinstance(selected_binding.carrier, WSL2Carrier)
+        assert selected_binding.carrier.connection == connection
+        assert selected_binding.delivery_account == connection.user
+        assert selected_binding.runtime_selection == runtime
+        early = selected_binding._early_guest_facts_route
+        assert early is not None and isinstance(early.carrier, WSL2Carrier)
+        assert early.carrier.connection == WSL2Connection(connection.distribution, "root", connection.wsl_executable)
+        assert early.account == connection.user
         assert subject.start_and_prepare(Deadline.after(30)) is not None
         assert carrier.owner_id == owner.ownership.operation_id
         rows = owner.list_lifecycle_obligations()
