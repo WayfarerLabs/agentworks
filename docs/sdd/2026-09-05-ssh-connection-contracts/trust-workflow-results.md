@@ -67,3 +67,54 @@ scope and the separately failed native Windows run requiring new diagnostic evid
 **The new native cases have not run.** No default account-configuration isolation, physical keyboard
 behavior, successful native offers, provider creation/publication, writer coexistence, rollback or
 RunContext acceptance is inferred from their source review or synthetic gates.
+
+## Isolated CA, KRL and source-rollback fixtures
+
+The developer's `8634ef40cf459654042d43b727c4a2c0c2a08525` completes two new Linux
+integration-marked fixtures. The CA case changes applicable authority policy while retaining the
+served replacement certificate. It distinguishes a source-file update from an explicit managed
+refresh, then checks that source rollback, stale writer revision and import over an existing bundle
+do not discard the retained complete policy. The KRL case publishes a learned creation candidate,
+revokes the actual served host key, preserves the previous snapshot before refresh, retains blocked
+admission after a failed update and repairs with the complete retained KRL and learned key.
+Restoring the old source bytes and timestamps does not restore an earlier managed generation.
+
+Every application attempt runs in a fresh isolated interpreter with retirement modules unavailable.
+Each refused invocation has a unique effect marker and is issued once. Refusal requires the complete
+expected upstream client sequence, status 255, the conservative observation failure and no
+application output. KRL evidence additionally matches the served key's SHA256 fingerprint and
+selected policy path. Marker absence alone or a generic 255 cannot substitute for evidence of the
+expected cause. Production carrier behavior still does not parse client diagnostics.
+
+Private review corrected the original generic-status classification and destructive controller
+timeout. The fixture now retains its admitted controller through cooperative interruption and SSH
+settlement; it does not kill that controller or its process group while borrowed fixture resources
+remain in use. Its 15-second observation expiry remains a failure even after a late successful exit.
+Cleanup has no finite completion guarantee; the owning test process or job supplies the hang bound.
+Controller output is discarded. A bounded report retains only validated classification, pass
+results, byte counts and retirement-import observations, excluding raw client diagnostics and key
+contents.
+
+The separate source-pure probe suite passes 25 cases at the developer pin. It exercises unrelated or
+incomplete refusal evidence, incorrect KRL fingerprints/paths, malformed and oversized metadata,
+privacy limits, late success, interruption faults and borrowed-resource settlement ordering. The
+developer's wider synthetic selection passes 122 cases with 1 skip; native collection finds both new
+cases without executing them. All three independent project, complexity and generic source lanes
+clear combined pin `c0d1beadbc0448a330b2542b4aa2967ec435938e`. Its rebase onto transport
+`0be8850447277adf8fce68bb6c887288251dfe67` changes no SSH source or test bytes relative to the
+resolved pre-rebase pin `e989974a6`.
+
+The lead's complete local CLI suite at that combined code/test pin passes **15,173 non-integration
+tests with 51 skips and 27 warnings**, exit 0 in 256.68 seconds. Full Ruff lint/format (1,295
+files), strict mypy (1,258 sources), selected Windows fixture typing, typer isolation, file quality,
+locked-SDD, Rulesync and whitespace checks exit 0 at the reviewed tree. Website validation passes
+160 Python and 103 Node tests, four builds and both deterministic comparisons, all exit 0. The
+owning suite has settled; an independent same-user process cwd/descriptor scan finds no references
+before removal of its exact scratch root. These checks do not execute the integration-marked cases.
+
+**Both new native fixtures have not run.** Source review and synthetic evidence do not establish
+installed-client CA/KRL acceptance, physical or supported-workstation behavior, genuine provider
+creation/publication, concurrent production writers, persisted-config rollback or additive
+RunContext delivery. Their owned loopback server and fixture creation identity cannot stand in for
+those production gates. No completed checkbox or public final-product feedback round follows from
+this increment.
