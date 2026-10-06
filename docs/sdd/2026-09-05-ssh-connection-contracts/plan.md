@@ -261,6 +261,13 @@ with three skips. Full strict mypy checks 1,299 sources and reports exactly the 
 enrollment errors, exit 1; file quality and locked-SDD checks exit 0. No public handoff or native
 acceptance follows, and all 25 completed records remain unchanged.
 
+The [enrollment resource proposal](enrollment-lld.md#proposed-maintenance-resource-interface) and
+[forwarding resource proposal](forwarding-lld.md#proposed-caller-held-forwarding-interface) at
+`aa48bfa9f` pass private project and complexity review. They specify explicit bounded cleanup,
+retained ownership and preservation of original control exceptions. Both operator ownership/API
+decisions remain pending; these documentation proposals authorize no implementation. File quality,
+locked-SDD and whitespace checks pass, with no executable changes or new completed plan records.
+
 Combined code pin `38934134e3b8d12af814f9371b62075daa49db3e` preserves all 64 Python paths in the
 SSH contribution, including deletions, from published `186458307b`. Its full suite passes 16,125
 non-integration tests with 51 skips and 27 warnings, exit 0 in 267.18 seconds. Full Ruff/format
