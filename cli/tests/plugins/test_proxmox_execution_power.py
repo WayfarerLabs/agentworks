@@ -171,12 +171,12 @@ def test_unsafe_trust_and_missing_metadata_are_preflight_errors(monkeypatch: pyt
 def test_control_exception_kills_and_reaps(monkeypatch: pytest.MonkeyPatch, interruption: type[BaseException]) -> None:
     local_delivery = LocalDeliveryCustody()
     control = interruption()
-    with interrupted_worker(monkeypatch, control) as children:
+    with interrupted_worker(monkeypatch, control, local_delivery) as children:
         with pytest.raises(interruption) as raised:
             platform().observe_execution_power(vm(), context(), deadline=Deadline.after(10), custody=local_delivery)
         assert raised.value is control
         assert local_delivery.close(Deadline.after(3))
-        assert len(children) == 1 and children[0].poll() is not None
+        assert len(children) == 1 and children[0].returncode is not None
         assert all(pipe is None or pipe.closed for pipe in (children[0].stdin, children[0].stdout, children[0].stderr))
 
 
