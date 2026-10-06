@@ -834,6 +834,86 @@ def test_interrupted_pending_resize_is_cancelled_before_owner_admission(
     process.stderr.close()
 
 
+def test_interruption_after_slot_install_cancels_before_condition_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = _fake_process()
+    owner = process_core.LocalProcessOwner()
+    signalled: list[tuple[int, int]] = []
+    interruption = KeyboardInterrupt("resize-before-wait")
+    remaining_calls = 0
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(process_core._ProcessStatus, "poll", lambda status: None)
+    monkeypatch.setattr(process_core, "_cleanup", lambda status: True)
+    monkeypatch.setattr(os, "kill", lambda pid, sig: signalled.append((pid, sig)))
+
+    def interrupt_after_install(deadline: Deadline) -> float:
+        nonlocal remaining_calls
+        remaining_calls += 1
+        if remaining_calls == 2:
+            raise interruption
+        return 5.0
+
+    monkeypatch.setattr(Deadline, "remaining", interrupt_after_install)
+    owner.start(_request("pass"))
+    _wait_snapshot(owner, lambda snapshot: snapshot.pipes is not None)
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        owner.notify_resize(Deadline(time.monotonic() + 5))
+
+    assert caught.value is interruption
+    assert remaining_calls == 2
+    assert owner._resize_request is None
+    assert signalled == []
+    assert owner.close().cleaned
+    process.stdout.close()
+    process.stderr.close()
+
+
+def test_owner_failure_after_claim_settles_resize_as_unknown_at_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = _fake_process()
+    owner = process_core.LocalProcessOwner()
+    claimed = threading.Event()
+    signalled: list[tuple[int, int]] = []
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(process_core, "_cleanup", lambda status: True)
+    monkeypatch.setattr(os, "kill", lambda pid, sig: signalled.append((pid, sig)))
+
+    def fail_after_claim(
+        target: process_core.LocalProcessOwner,
+        status: process_core._ProcessStatus,
+    ) -> tuple[bool, int | None]:
+        with target._condition:
+            while target._resize_request is None:
+                target._condition.wait(0.01)
+            assert not target._resize_request.claimed
+            target._resize_request.claimed = True
+            claimed.set()
+        raise RuntimeError("owner failed before native signal entry")
+
+    monkeypatch.setattr(process_core.LocalProcessOwner, "_wait_for_borrowers", fail_after_claim)
+    owner.start(_request("pass"))
+    _wait_snapshot(owner, lambda snapshot: snapshot.pipes is not None)
+    result: list[process_core.ResizeNotification] = []
+    caller = threading.Thread(target=lambda: result.append(owner.notify_resize(Deadline(time.monotonic() + 3))))
+    caller.start()
+    assert claimed.wait(2)
+
+    terminal = owner.close()
+    caller.join(2)
+
+    assert not caller.is_alive()
+    assert result == [process_core.ResizeNotification.UNKNOWN]
+    assert terminal.observation_failed and terminal.cleaned
+    assert owner.snapshot().terminal is terminal
+    assert owner._resize_request is None
+    assert signalled == []
+    process.stdout.close()
+    process.stderr.close()
+
+
 @pytest.mark.parametrize(
     ("signal_error", "expected"),
     [

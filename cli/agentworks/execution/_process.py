@@ -519,11 +519,11 @@ class LocalProcessOwner:
     def notify_resize(self, deadline: Deadline) -> ResizeNotification:
         """Request one bounded SIGWINCH through the existing process owner."""
         expires_at = deadline.expires_at
-        if expires_at is None or isinstance(expires_at, bool) or not isinstance(expires_at, (int, float)):
+        if expires_at is None:
             raise ValueError("resize notification requires a finite deadline")
         try:
             finite_deadline = math.isfinite(expires_at)
-        except OverflowError:
+        except (OverflowError, TypeError):
             finite_deadline = False
         if not finite_deadline:
             raise ValueError("resize notification requires a finite deadline")
@@ -542,27 +542,26 @@ class LocalProcessOwner:
             ):
                 return ResizeNotification.NOT_SENT
             request = _ResizeRequest(deadline)
-            self._resize_request = request
-            self._condition.notify_all()
-            while request.result is None:
-                remaining = deadline.remaining()
-                if remaining is not None and remaining <= 0:
-                    if not request.claimed and self._resize_request is request:
-                        request.result = ResizeNotification.NOT_SENT
-                        self._resize_request = None
-                        self._condition.notify_all()
-                        return request.result
-                    return ResizeNotification.UNKNOWN
-                assert remaining is not None
-                try:
+            try:
+                self._resize_request = request
+                self._condition.notify_all()
+                while request.result is None:
+                    remaining = deadline.remaining()
+                    if remaining is not None and remaining <= 0:
+                        if not request.claimed and self._resize_request is request:
+                            request.result = ResizeNotification.NOT_SENT
+                            self._resize_request = None
+                            self._condition.notify_all()
+                            return request.result
+                        return ResizeNotification.UNKNOWN
+                    assert remaining is not None
                     self._condition.wait(min(remaining, _POLL_SECONDS))
-                except BaseException:
-                    if not request.claimed and self._resize_request is request:
-                        request.result = ResizeNotification.NOT_SENT
-                        self._resize_request = None
-                        self._condition.notify_all()
-                    raise
-            return request.result
+                return request.result
+            except BaseException:
+                if request.result is None and not request.claimed and self._resize_request is request:
+                    request.result = ResizeNotification.NOT_SENT
+                    self._resize_request = None
+                raise
 
     def _stop_borrowers(self) -> None:
         with self._condition:
@@ -592,7 +591,13 @@ class LocalProcessOwner:
 
     def _publish_terminal(self, terminal: LocalProcessTerminal) -> None:
         with self._condition:
-            self._deny_pending_resize_locked()
+            resize_request = self._resize_request
+            if resize_request is not None:
+                if resize_request.result is None:
+                    resize_request.result = (
+                        ResizeNotification.UNKNOWN if resize_request.claimed else ResizeNotification.NOT_SENT
+                    )
+                self._resize_request = None
             self._request = None
             self._pipes = None
             self._terminal = terminal
