@@ -1,4 +1,4 @@
-<!-- cspell:ignore asdict pathlib -->
+<!-- cspell:ignore asdict pathlib pseudoconsole -->
 
 # SSH carrier tests and live handoff
 
@@ -15,6 +15,27 @@ launching a client. They run in the ordinary synthetic suite and supply no nativ
 acceptance. The resource does not read keyboard events, select a Windows child-terminal mechanism or
 enable the carrier's terminal feature. Native Windows selection must cover an independently cleaned
 owned console and then the complete supported Windows workflow.
+
+`test_terminal_windows_native.py` marks only its native case `windows`; other hosts skip that case
+and can check the fixed-width Win32 record ABI without native effects. On Windows, the fixture owns
+one fresh hidden console child with explicit `CONIN$` and `CONOUT$` descriptors. It checks native
+resource admission, early raw input, viewport geometry and exact restoration with original and
+custom modes, preserving output mode, code pages, handle flags and descriptor inheritability. Its
+[`ReadConsoleInputExW`](https://learn.microsoft.com/en-us/windows/console/readconsoleinputex) probe
+uses `CONSOLE_READ_NOWAIT` for empty queues, injected non-key events and injected UTF-16 key
+records. Each measured poll must finish within five seconds, a generous fixture bound rather than a
+production keyboard cancellation guarantee. These injections establish record polling behavior;
+physical keyboard translation, virtual terminal key sequences, keyboard cancellation, SSH clients,
+pseudoconsole preparation and the complete Windows workflow still require separate proof.
+
+The parent retains and reaps exactly its child, with a 120-second execution timeout and a 10-second
+reaping timeout. The child releases the resource, restores its fixture modes and code pages, closes
+its descriptors and detaches its console in cleanup. The parent observes only that reported console
+window for up to 10 seconds; missing or unresolved window evidence fails the native case. It never
+scans or terminates unrelated console hosts. JSON observations and stderr remain under the test's
+owned temporary directory, including parent cleanup evidence. This is a native local primitive
+fixture for ordinary Windows CI, with no network, credentials or caller-console access; report its
+actual native result separately from synthetic passes and skips.
 
 The process fixtures use synthetic Python children and temporary files. The shared conformance
 fixture substitutes a local POSIX-shell executable for SSH, exercising the real quoting and pipe
