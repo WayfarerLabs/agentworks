@@ -203,6 +203,16 @@ framing assertion failed; its cause is unknown, and the diagnostic correction re
 measurements, never payloads. No deadline or conformance assertion is weakened by that diagnostic
 change.
 
+The numeric leaf and payload-free conformance diagnostics pass the integrated full suite: 14,464
+non-integration tests with 50 skips at `28d504dd7`. The later collateral pin `059daebc0` has the
+same Python tree. Private project and generic reviews are clear; the project lane independently
+passes all 37 new-adoption and SSH conformance cases. Complete strict mypy passes 1,214 source and
+test files, and all local static, file, SDD, Rulesync, typer and website gates exit 0. Website
+validation passes 160 Python and 103 Node tests and both deterministic site-base comparisons. These
+local results do not resolve the preceding hosted Python 3.14 failure or establish successful native
+credentials. Operation-owned binding, recovery, remaining body families and complete RunContext
+composition remain open.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
