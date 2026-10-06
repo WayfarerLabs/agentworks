@@ -603,6 +603,19 @@ CodeQL. This completes local validation of passive power only; whole-platform co
 availability and provider identity acceptance remain open. Draft WIP publication closes no public
 round or broader plan gate.
 
+The private outer recovery-span unit at `9c3f53e05` composes one retained WSL2 hold and independent
+preparation batch under the existing sealed recovery owner, without another VM claim. It requires
+explicit administrative identity, fresh VM/site/marker/intent, exact bounded power, copied route and
+durable READY before preparation. Per-action guarded carriers bind the actual span, thread and
+finite budget and become inert afterward. Close stops only view admission; exact settled batch
+cleanup precedes idle validation, while every predecessor effect row must resolve before own hold
+release. No unknown probe replays or aggregate owner resolution occur. Lead inspection corrected
+plain-string power acceptance and cleanup ordering before the worker's final handoff. The worker
+passes 451 focused/adjacent cases, scoped strict mypy, Ruff/format, full file quality and whitespace
+gates, exit 0. Independent integrated reviews and lead gates remain pending. Retained-file
+version-two adoption, native predecessor drain, other platform availability and complete public
+recovery remain open; no broader checkbox or public round closes.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state

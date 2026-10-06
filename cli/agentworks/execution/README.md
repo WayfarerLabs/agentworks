@@ -577,6 +577,25 @@ malicious or engineered A-B-A host behavior is outside this checkpoint's threat 
 activation, hold, route and teardown, live WSL/SSH/QGA proof, recovery drain, adoption and public
 RunContext composition remain open.
 
+`vms/_recovery_vm_span.py` supplies private caller-retained availability under an existing sealed
+recovery owner, without acquiring another VM claim. Its first factory explicitly supports only
+administrative WSL2 recovery. Construct and retain the span before opening; it checks fresh VM/site,
+marker, administrative account, intent, bounded power and copied native route before support
+admission. Its own hold must have exact durable READY before a separate serial guest/account
+preparation batch runs. Prepared full guest, target, numeric plans and runtime stay bound to that
+span and its pinned carrier. This does not provide predecessor drain evidence.
+
+One finite action scope serializes with close and returns a guarded carrier bound to that action's
+thread and deadline; escaped carriers are inert after the action ends. Admission and execution
+recheck current owner, VM, selected route and exact hold custody. Cached host-client ACTIVE is only
+a negative failure screen, not continuing guest-liveness proof. Fixed helpers still require their
+full guest guards. Close stops this span's admission, not the owner's. It may reconcile only its
+settled preparation batch before idle validation and release its hold only after all other effect
+rows resolve. Unknown or conflicting custody retains the actual span; cleanup never repeats probes,
+resolves predecessor rows or finalizes the aggregate operation. Escaping control flow carries the
+span as safe custody. This private composition has SQLite/faked-native coverage only; retained-file
+adapter adoption, complete native drain, other platform spans and public recovery remain open.
+
 `_managed_job_wire.py` owns the Python 3.11, stdlib-only canonical version-one byte schema for
 private managed-job facts and reuses the portable `_helper_identity.py` validator. The host
 `_managed_job_protocol.py` maps its primitive facts to and from typed values. Exact-source bundle

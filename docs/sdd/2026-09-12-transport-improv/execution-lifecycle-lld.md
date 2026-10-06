@@ -802,6 +802,32 @@ handle. This narrow cleanup does not promise signal-atomic Python bookkeeping or
 private implementation does not establish that outer span, adopt retained-file records or supply
 native endpoint/drain proof.
 
+The private core `RecoveryVMSpan` now composes that outer lifetime under the caller's existing
+sealed recovered owner. Its first concrete factory requires explicit administrative WSL2 work; other
+platforms still refuse until their bounded power, route and availability adapters are implemented.
+The caller retains the span and fresh independent hold/preparation IDs before opening. Fresh
+persisted VM/site/marker/account and operator-stopped intent checks precede activation. The selected
+copied route and actual native object remain attached before recovery support admission; only exact
+durable READY permits the separate preparation batch. Prepared target, full guest, numeric plans and
+runtime cannot be substituted independently of that lifetime.
+
+A finite local action scope serializes against close and exposes a carrier usable only in that
+action and thread, under no later deadline. Admission and concrete carrier dispatch revalidate
+owner, VM, route and exact durable hold custody. An escaped action carrier refuses; cached
+host-client ACTIVE remains only a negative failure screen. This does not turn a READY history or
+power read into positive continuing guest identity or native queue-drain evidence. Individual
+retained-file adapters still own their recovery attempts and must supply applicable predecessor
+proof.
+
+Close stops only span/view admission. It first permits exact settled preparation cleanup, including
+an interrupted local opening or close, then requires idle ownership before hold teardown. Unknown
+attempts and conflicting dispatch remain retained; all other possible-effect rows must resolve
+before releasing the span's hold. A known never-created hold can reconcile its own noncreation
+without resolving predecessor debt. Cleanup neither repeats preparation, stops aggregate owner
+admission nor resolves another row. Original escaping exceptions carry the actual retained span.
+SQLite and fake-native tests cover this private composition, not native availability/drain or
+retained-file adoption; the complete production recovery and platform-neutral cutover remain open.
+
 That contract uses a distinct internal recovery-dispatch object, not a recovery mode on the ordinary
 borrow. Admission requires the sealed recovery owner, its exact current generation, a
 `possible-dispatch` coarse claim and the exact `possible-effect` obligation identity, state, payload
