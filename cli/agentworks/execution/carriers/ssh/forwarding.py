@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from types import TracebackType
     from typing import IO, Self
 
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.carrier import Deadline
     from agentworks.execution.carriers.ssh.connection import SSHConnection
 
@@ -320,7 +321,7 @@ class OwnedForwarding:
 
 
 def open_local_forwards(
-    connection: SSHConnection, forwards: Sequence[LocalForward], *, deadline: Deadline
+    connection: SSHConnection, forwards: Sequence[LocalForward], *, deadline: Deadline, custody: LocalDeliveryCustody
 ) -> OwnedForwarding:
     """Open once and require a POSIX held-session acknowledgment before return.
 
@@ -331,6 +332,8 @@ def open_local_forwards(
     requests = tuple(forwards)
     if not requests or any(not isinstance(forward, LocalForward) for forward in requests):
         raise ValidationError("SSH forwarding requires at least one explicit local forward")
+    if not custody.settled:
+        raise StateError("Local delivery custody is unsettled")
     if deadline.expired:
         raise ForwardingError(Failure.DEADLINE)
     try:
@@ -339,7 +342,7 @@ def open_local_forwards(
         raise ForwardingError(Failure.DISPATCH) from None
     if deadline.expired:
         raise ForwardingError(Failure.DEADLINE)
-    failure = check_client_version(connection, deadline=deadline)
+    failure = check_client_version(connection, deadline=deadline, custody=custody)
     if failure is not None:
         raise ForwardingError(failure)
     if deadline.expired:

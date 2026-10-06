@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
+from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.ssh.connection import SSHConnection
 from agentworks.execution.carriers.ssh.trust import SSHTrustFiles
 from tests.execution.carriers.ssh.enrollment_server import LocalSSH, enrollment_server
@@ -78,3 +80,11 @@ def enrollment_sshd(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[
     """Share one enrollment server owner without overriding the byte-delivery fixture."""
     with enrollment_server(tmp_path, request.param) as server:
         yield server
+
+
+@pytest.fixture
+def custody() -> Iterator[LocalDeliveryCustody]:
+    """Keep delivery ownership outside every probe through bounded teardown."""
+    retained = LocalDeliveryCustody()
+    yield retained
+    assert retained.close(Deadline.after(3))

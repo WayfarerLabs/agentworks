@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from agentworks.cli import app
 from agentworks.errors import StateError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import Capture, CarrierIO, Deadline, Dispatch, ExitStatus, PreparedInvocation
 from agentworks.execution.carriers.ssh.client import SSHCarrier
 from agentworks.execution.carriers.ssh.enrollment import enroll_new_target, recover_enrollment
@@ -38,20 +39,20 @@ def _invocation(marker: Path) -> PreparedInvocation:
     return PreparedInvocation(("/bin/sh", "-c", f"printf x >> {shlex.quote(str(marker))}; printf verified"))
 
 
-def _execute(carrier: SSHCarrier, invocation: PreparedInvocation):
-    return carrier.execute(invocation, io=CarrierIO(output=Capture(1024)), deadline=Deadline.after(10))
+def _execute(carrier: SSHCarrier, invocation: PreparedInvocation, *, custody: LocalDeliveryCustody):
+    return carrier.execute(invocation, io=CarrierIO(output=Capture(1024)), deadline=Deadline.after(10), custody=custody)
 
 
-def _strict_success(carrier: SSHCarrier, invocation: PreparedInvocation) -> None:
-    result = _execute(carrier, invocation)
+def _strict_success(carrier: SSHCarrier, invocation: PreparedInvocation, *, custody: LocalDeliveryCustody) -> None:
+    result = _execute(carrier, invocation, custody=custody)
     assert result.dispatch == Dispatch.SENT
     assert result.completion == ExitStatus(0)
     assert result.failure is None
     assert result.stdout.data == b"verified" and result.stdout.complete
 
 
-def _blocked(carrier: SSHCarrier, invocation: PreparedInvocation) -> None:
-    result = _execute(carrier, invocation)
+def _blocked(carrier: SSHCarrier, invocation: PreparedInvocation, *, custody: LocalDeliveryCustody) -> None:
+    result = _execute(carrier, invocation, custody=custody)
     assert result.dispatch == Dispatch.NOT_SENT
     assert result.completion is None and result.local_status is None
     assert result.failure is not None
@@ -59,7 +60,7 @@ def _blocked(carrier: SSHCarrier, invocation: PreparedInvocation) -> None:
 
 @pytest.mark.parametrize("enrollment_sshd", ["workflow", "workflow_alias"], indirect=True)
 def test_enrollment_publication_block_failed_refresh_repair_and_strict_reconnect(
-    enrollment_sshd: LocalSSH, tmp_path: Path
+    custody: LocalDeliveryCustody, enrollment_sshd: LocalSSH, tmp_path: Path
 ) -> None:
     connection = enrollment_sshd.connection
     assert connection.port != 22
@@ -77,7 +78,7 @@ def test_enrollment_publication_block_failed_refresh_repair_and_strict_reconnect
     invocation = _invocation(marker)
 
     # Unknown trust on an existing managed connection must not enroll or execute.
-    refused = _execute(carrier, invocation)
+    refused = _execute(carrier, invocation, custody=custody)
     assert refused.local_status == 255 and refused.completion is None
     assert not marker.exists()
     assert not tuple(bundle.directory.glob("enrollment-*"))
@@ -91,7 +92,7 @@ def test_enrollment_publication_block_failed_refresh_repair_and_strict_reconnect
     )
     assert candidate.known_hosts_file.read_bytes() == learned
     # A creation receipt alone cannot admit an ordinary command.
-    refused = _execute(carrier, invocation)
+    refused = _execute(carrier, invocation, custody=custody)
     assert refused.local_status == 255 and refused.completion is None
     assert not marker.exists()
 
@@ -127,12 +128,12 @@ def test_enrollment_publication_block_failed_refresh_repair_and_strict_reconnect
             )
         )
     )
-    _strict_success(carrier, invocation)
+    _strict_success(carrier, invocation, custody=custody)
     assert marker.read_bytes() == b"x"
 
     result = _maintenance("block-ssh-trust", bundle.directory, "--expected-generation", published.generation)
     assert result.exit_code == 0, result.exception
-    _blocked(carrier, invocation)
+    _blocked(carrier, invocation, custody=custody)
     assert marker.read_bytes() == b"x"
     generations_before = {path for path in bundle.directory.iterdir() if path.is_dir()}
     result = _maintenance(
@@ -157,7 +158,7 @@ def test_enrollment_publication_block_failed_refresh_repair_and_strict_reconnect
     assert (partial / "known-hosts-0").read_bytes() == learned
     assert (partial / "known-hosts-1").read_bytes() == initial.sources.known_hosts[0].read_bytes()
     retained.update(_snapshot(tuple(partial.iterdir())))
-    _blocked(carrier, invocation)
+    _blocked(carrier, invocation, custody=custody)
     assert marker.read_bytes() == b"x"
     _unchanged(retained)
     _unchanged(originals)
@@ -184,7 +185,7 @@ def test_enrollment_publication_block_failed_refresh_repair_and_strict_reconnect
     ]
     assert repaired_policy.revoked_host_keys is not None
     assert repaired_policy.revoked_host_keys.read_bytes() == current.revoked_host_keys.read_bytes()
-    _strict_success(carrier, invocation)
+    _strict_success(carrier, invocation, custody=custody)
     assert marker.read_bytes() == b"xx"
     _unchanged(retained)
     _unchanged(originals)
@@ -192,7 +193,7 @@ def test_enrollment_publication_block_failed_refresh_repair_and_strict_reconnect
 
 @pytest.mark.parametrize("enrollment_sshd", ["hashed", "hashed_alias"], indirect=True)
 def test_real_hashed_policy_matches_only_selected_alias_and_nondefault_port(
-    enrollment_sshd: LocalSSH, tmp_path: Path
+    custody: LocalDeliveryCustody, enrollment_sshd: LocalSSH, tmp_path: Path
 ) -> None:
     connection = enrollment_sshd.connection
     assert connection.port != 22
@@ -201,10 +202,10 @@ def test_real_hashed_policy_matches_only_selected_alias_and_nondefault_port(
     original = _snapshot(admitted.known_hosts)
     assert admitted.known_hosts[0].read_bytes().startswith(b"|1|")
     invocation = _invocation(tmp_path.resolve() / "hashed-executed")
-    _strict_success(SSHCarrier(connection), invocation)
+    _strict_success(SSHCarrier(connection), invocation, custody=custody)
     # Same server and identity, but another lookup identity must not match the hash.
     mismatched = replace(connection, host_key_alias="different-owned-fixture-alias")
-    refused = _execute(SSHCarrier(mismatched), invocation)
+    refused = _execute(SSHCarrier(mismatched), invocation, custody=custody)
     assert refused.local_status == 255 and refused.completion is None
     assert (tmp_path.resolve() / "hashed-executed").read_bytes() == b"x"
     _unchanged(original)

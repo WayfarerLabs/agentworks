@@ -85,7 +85,7 @@ class SSHCarrier:
             Dispatch.SENT
             if completion is not None
             else Dispatch.UNKNOWN
-            if result.started or result.failure is Failure.OBSERVATION or not custody.settled
+            if result.started or result.failure is Failure.OBSERVATION
             else Dispatch.NOT_SENT
         )
         failure = result.failure
@@ -101,9 +101,13 @@ class SSHCarrier:
         )
 
 
-def check_client_version(connection: SSHConnection, *, deadline: Deadline, custody: LocalDeliveryCustody) -> Failure | None:
+def check_client_version(
+    connection: SSHConnection, *, deadline: Deadline, custody: LocalDeliveryCustody
+) -> Failure | None:
     """Check the selected installed client within the original operation budget."""
-    version = run_process([connection.ssh_executable, "-V"], io=CarrierIO(output=Capture(4096)), deadline=deadline, custody=custody)
+    version = run_process(
+        [connection.ssh_executable, "-V"], io=CarrierIO(output=Capture(4096)), deadline=deadline, custody=custody
+    )
     if version.failure is not None:
         return version.failure
     if not custody.settled:

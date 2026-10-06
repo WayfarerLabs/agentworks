@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_read import FileReadObservationState, read_file
 from agentworks.execution._file_read_protocol import FileReadFailure
 from agentworks.execution._file_snapshot_exchange import (
@@ -43,6 +44,7 @@ from agentworks.execution.carrier import (
     Retention,
 )
 from agentworks.execution.carriers.ssh import SSHCarrier, SSHConnection
+from tests.execution._bound_carrier_support import FixtureBoundCarrier
 
 pytestmark = [
     pytest.mark.integration,
@@ -60,9 +62,11 @@ class _ObservedSSHCarrier(SSHCarrier):
         self.attempts: list[tuple[PreparedInvocation, CarrierIO]] = []
         self.reports: list[CarrierReport] = []
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(
+        self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline, custody: LocalDeliveryCustody
+    ) -> CarrierReport:
         self.attempts.append((invocation, io))
-        report = super().execute(invocation, io=io, deadline=deadline)
+        report = super().execute(invocation, io=io, deadline=deadline, custody=custody)
         assert report.stdout.retention is Retention.DELIVERED
         assert report.stderr.retention is Retention.DELIVERED
         assert report.stdout.data == report.stderr.data == b""
@@ -97,6 +101,7 @@ def _all_attempts_succeeded(carrier: _ObservedSSHCarrier) -> bool:
 def test_file_read_delivers_binary_and_typed_noncontent_outcomes_over_real_ssh(
     tmp_path: Path,
     local_sshd: SSHConnection,
+    custody: LocalDeliveryCustody,
 ) -> None:
     root = tmp_path / "read-root"
     root.mkdir()
@@ -105,10 +110,11 @@ def test_file_read_delivers_binary_and_typed_noncontent_outcomes_over_real_ssh(
     oversized = b"oversized-content-canary"
     (root / "oversized").write_bytes(oversized)
     carrier = _ObservedSSHCarrier(local_sshd)
+    delivery = FixtureBoundCarrier(carrier, custody)
     plan = _direct_plan()
 
     present = read_file(
-        carrier,
+        delivery,
         trusted_root_path=str(root),
         relative_path="payload",
         max_bytes=len(payload),
@@ -117,7 +123,7 @@ def test_file_read_delivers_binary_and_typed_noncontent_outcomes_over_real_ssh(
         runtime_selection=_RUNTIME,
     )
     absent = read_file(
-        carrier,
+        delivery,
         trusted_root_path=str(root),
         relative_path="absent",
         max_bytes=1,
@@ -126,7 +132,7 @@ def test_file_read_delivers_binary_and_typed_noncontent_outcomes_over_real_ssh(
         runtime_selection=_RUNTIME,
     )
     refused = read_file(
-        carrier,
+        delivery,
         trusted_root_path=str(root),
         relative_path="oversized",
         max_bytes=1,
@@ -168,6 +174,7 @@ def test_file_read_delivers_binary_and_typed_noncontent_outcomes_over_real_ssh(
 def test_file_stage_round_trip_and_exact_cleanup_over_real_ssh(
     tmp_path: Path,
     local_sshd: SSHConnection,
+    custody: LocalDeliveryCustody,
 ) -> None:
     root = tmp_path / "stage-root"
     root.mkdir()
@@ -176,10 +183,11 @@ def test_file_stage_round_trip_and_exact_cleanup_over_real_ssh(
     second = b"stage-payload-canary\x00\xff\r\n"
     payload = first + second
     carrier = _ObservedSSHCarrier(local_sshd)
+    delivery = FixtureBoundCarrier(carrier, custody)
     plan = _direct_plan()
 
     begun = stage_begin(
-        carrier,
+        delivery,
         trusted_root_path=str(root),
         relative_path="destination",
         token=token,
@@ -199,7 +207,7 @@ def test_file_stage_round_trip_and_exact_cleanup_over_real_ssh(
     chunks = []
     for offset, data in ((0, first), (len(first), second)):
         result = stage_chunk(
-            carrier,
+            delivery,
             trusted_root_path=str(root),
             relative_path="destination",
             token=token,
@@ -220,7 +228,7 @@ def test_file_stage_round_trip_and_exact_cleanup_over_real_ssh(
 
     scratch = root / scratch_name(token)
     readback = read_file(
-        carrier,
+        delivery,
         trusted_root_path=str(scratch),
         relative_path="data",
         max_bytes=len(payload),
@@ -238,7 +246,7 @@ def test_file_stage_round_trip_and_exact_cleanup_over_real_ssh(
     assert readback.observation.snapshot.digest == hashlib.sha256(payload).digest()
 
     recovered = stage_reconcile(
-        carrier,
+        delivery,
         trusted_root_path=str(root),
         relative_path="destination",
         token=token,
@@ -254,7 +262,7 @@ def test_file_stage_round_trip_and_exact_cleanup_over_real_ssh(
     debt = recovered.observation.cleanup_debt
     assert debt is not None
     cleaned = stage_cleanup(
-        carrier,
+        delivery,
         trusted_root_path=str(root),
         relative_path="destination",
         token=token,
@@ -282,6 +290,7 @@ def test_file_stage_round_trip_and_exact_cleanup_over_real_ssh(
 def test_file_snapshot_download_and_exact_cleanup_over_real_ssh(
     tmp_path: Path,
     local_sshd: SSHConnection,
+    custody: LocalDeliveryCustody,
 ) -> None:
     scratch_root = os.lstat("/tmp")
     if not (
@@ -298,13 +307,14 @@ def test_file_snapshot_download_and_exact_cleanup_over_real_ssh(
     scratch = Path("/tmp") / scratch_name(token)
     assert not scratch.exists()
     carrier = _ObservedSSHCarrier(local_sshd)
+    delivery = FixtureBoundCarrier(carrier, custody)
     plan = _direct_plan()
     cleanup_debt: ScratchCleanupDebt | None = None
     cleanup_result = None
 
     try:
         begun = snapshot_begin(
-            carrier,
+            delivery,
             trusted_root_path=str(source_root),
             relative_path="payload",
             max_bytes=len(payload),
@@ -328,7 +338,7 @@ def test_file_snapshot_download_and_exact_cleanup_over_real_ssh(
         for offset in range(0, len(payload), MAX_SNAPSHOT_CHUNK_BYTES):
             length = min(MAX_SNAPSHOT_CHUNK_BYTES, len(payload) - offset)
             result = snapshot_chunk(
-                carrier,
+                delivery,
                 token=token,
                 ready=snapshot.ready,
                 offset=offset,
@@ -353,7 +363,7 @@ def test_file_snapshot_download_and_exact_cleanup_over_real_ssh(
         assert hashlib.sha256(downloaded).digest() == snapshot.ready._digest
 
         recovered = snapshot_reconcile(
-            carrier,
+            delivery,
             token=token,
             plan=plan,
             deadline=Deadline.after(15),
@@ -373,7 +383,7 @@ def test_file_snapshot_download_and_exact_cleanup_over_real_ssh(
                 pytest.fail(f"snapshot helper completion is unknown; retained owned scratch at {scratch}")
             if cleanup_debt is None:
                 recovery = snapshot_reconcile(
-                    carrier,
+                    delivery,
                     token=token,
                     plan=plan,
                     deadline=Deadline.after(15),
@@ -387,7 +397,7 @@ def test_file_snapshot_download_and_exact_cleanup_over_real_ssh(
                 cleanup_debt = recovery.observation.cleanup_debt
             assert cleanup_debt is not None
             cleanup_result = snapshot_cleanup(
-                carrier,
+                delivery,
                 token=token,
                 cleanup_debt=cleanup_debt,
                 plan=plan,

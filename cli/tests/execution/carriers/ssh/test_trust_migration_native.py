@@ -71,6 +71,7 @@ class BlockRetired(importlib.abc.MetaPathFinder):
             raise ImportError("Retired execution module is unavailable: " + fullname)
 
 sys.meta_path.insert(0, BlockRetired())
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import Capture, CarrierIO, Deadline, Dispatch, ExitStatus, Failure, PreparedInvocation
 from agentworks.execution.carriers.ssh import SSHCarrier, SSHConnection
 from agentworks.execution.carriers.ssh.trust import ManagedSSHTrust
@@ -83,7 +84,13 @@ connection = SSHConnection(
 invocation = PreparedInvocation((
     "/bin/sh", "-c", "printf x >> " + shlex.quote(value["marker"]) + "; printf verified",
 ))
-result = SSHCarrier(connection).execute(invocation, io=CarrierIO(output=Capture(4096)), deadline=Deadline.after(10))
+custody = LocalDeliveryCustody()
+try:
+    result = SSHCarrier(connection).execute(
+        invocation, io=CarrierIO(output=Capture(4096)), deadline=Deadline.after(10), custody=custody,
+    )
+finally:
+    assert custody.close(Deadline.after(3))
 classification = _policy_refusal(
     result.stderr.data, value["unknown_ca_line"].encode(),
     value["revoked_line"].encode() if value["revoked_line"] is not None else None,

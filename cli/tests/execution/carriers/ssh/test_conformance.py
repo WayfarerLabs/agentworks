@@ -37,6 +37,7 @@ from agentworks.execution.carriers.ssh import SSHCarrier, SSHConnection
 from agentworks.execution.carriers.ssh.connection import build_ssh_argv
 from agentworks.execution.carriers.ssh.trust import SSHTrustFiles
 from agentworks.execution.models import Command
+from tests.execution._bound_carrier_support import FixtureBoundCarrier
 from tests.execution.conformance import check_buffered_contract
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Shared bootstrap requires Linux userspace")
@@ -92,7 +93,7 @@ def test_framing_failure_diagnostics_do_not_include_payloads() -> None:
             *,
             io: CarrierIO,
             deadline: Deadline,
-            custody: LocalDeliveryCustody | None = None,
+            custody: LocalDeliveryCustody,
         ) -> CarrierReport:
             del invocation, io, deadline
             return CarrierReport(
@@ -108,7 +109,7 @@ def test_framing_failure_diagnostics_do_not_include_payloads() -> None:
     assert payload.decode("ascii") not in str(failure.value)
 
 
-def _check_literal_environment_delivery(connection: SSHConnection) -> None:
+def _check_literal_environment_delivery(connection: SSHConnection, custody: LocalDeliveryCustody) -> None:
     environment = {
         "AGW_ISSUE_845_JSON": json.dumps(
             {
@@ -139,7 +140,9 @@ def _check_literal_environment_delivery(connection: SSHConnection) -> None:
     assert all(value not in argument for value in environment.values() if value for argument in argv)
     assert "fixture%40project" not in subprocess.list2cmdline(argv)
 
-    result = execute_inline_candidate(SSHCarrier(connection), prepared, deadline=Deadline.after(15))
+    result = execute_inline_candidate(
+        FixtureBoundCarrier(SSHCarrier(connection), custody), prepared, deadline=Deadline.after(15)
+    )
     assert result.dispatch is Dispatch.SENT
     assert result.carrier_completion == ExitStatus(code=0)
     assert result.carrier_failure is None
@@ -153,13 +156,17 @@ def _check_literal_environment_delivery(connection: SSHConnection) -> None:
     assert observation.stderr is not None and observation.stderr.complete and observation.stderr.data == b""
 
 
-def test_inline_environment_preserves_percent_json_through_ssh_process(local_binding: SSHConnection) -> None:
-    _check_literal_environment_delivery(local_binding)
+def test_inline_environment_preserves_percent_json_through_ssh_process(
+    local_binding: SSHConnection, custody: LocalDeliveryCustody
+) -> None:
+    _check_literal_environment_delivery(local_binding, custody)
 
 
 @pytest.mark.integration
-def test_installed_ssh_inline_environment_preserves_percent_json(local_sshd: SSHConnection) -> None:
-    _check_literal_environment_delivery(local_sshd)
+def test_installed_ssh_inline_environment_preserves_percent_json(
+    local_sshd: SSHConnection, custody: LocalDeliveryCustody
+) -> None:
+    _check_literal_environment_delivery(local_sshd, custody)
 
 
 def test_ssh_executes_in_fresh_process_without_legacy(local_binding: SSHConnection) -> None:

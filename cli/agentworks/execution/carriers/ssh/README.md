@@ -150,10 +150,17 @@ modes the adapter cannot deliver. Managed-start composition must call it before 
 installed-client probing and process work stay in `execute`, which also calls the validator before
 those effects.
 
-`SSHCarrier.execute` dispatches once. Captured bytes preserve their provenance; client/guest mixed
-stderr is never relabeled as guest stderr. Exit 255 remains ambiguous. Local timeout and process
-cleanup do not prove guest termination or authorize replay. Shared preparation and public outcome
-interpretation belong above this adapter.
+`SSHCarrier.execute` requires caller-held `LocalDeliveryCustody` and dispatches once. The same store
+covers discovery and command delivery. Unsettled storage refuses admission; unfinished discovery
+never dispatches the command. A bounded return can leave construction or cleanup pending. The caller
+retains the store and retries `close` with a finite deadline until cleanup is proved complete.
+Selected identity and trust files must remain stable through that settlement, including pending
+construction. Command admission uncertainty remains unknown even if subsequent local cleanup
+settles.
+
+Captured bytes preserve their provenance; client/guest mixed stderr is never relabeled as guest
+stderr. Exit 255 remains ambiguous. Local timeout and process cleanup do not prove guest termination
+or authorize replay. Shared preparation and public outcome interpretation belong above this adapter.
 
 The carrier advertises `live_stdio` and accepts the shared `LiveInput` and `SinkOutput` modes.
 `CarrierIO` validates the published mode shapes. SSH separately admits supported byte input so a new
@@ -164,14 +171,16 @@ environment filter and stream provenance. Delivered output is not retained in th
 failure is reported on its input or output boundary and still performs bounded local client cleanup.
 
 The shared process core owns client construction separately from caller-driven byte I/O. Its
-remaining cleanup-interruption and native-platform gates also apply to this adapter. Buffered/live
-execution and forwarding use the same process owner. Local cleanup never establishes remote
-cancellation.
+native-platform gates also apply to this adapter. Buffered/live execution retains its exact owner in
+the supplied delivery store. Forwarding keeps its separately explicit session owner. Local cleanup
+never establishes remote cancellation.
 
-`open_local_forwards` accepts explicit `LocalForward` values with numeric bind addresses and literal
-destinations. The returned `OwnedForwarding` is a context manager with `wait()` and idempotent
-`close()`. Its startup deadline covers connection and readiness; the returned resource remains owned
-until close or client exit. Call close even when wait is never used.
+`open_local_forwards` requires caller-held `LocalDeliveryCustody` for installed-client discovery and
+accepts explicit `LocalForward` values with numeric bind addresses and literal destinations. The
+caller retains discovery custody through failure and bounded cleanup. The returned `OwnedForwarding`
+is a context manager with `wait()` and idempotent `close()`. Its startup deadline covers connection
+and readiness; the returned resource remains owned until close or client exit. Call close even when
+wait is never used.
 
 Forwarding uses one foreground client and a held POSIX shell session. It requires compatible
 account-shell execution and an available `sh`. A nonce acknowledgment after listener setup proves an

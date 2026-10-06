@@ -15,6 +15,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState, RuntimeSelection, RuntimeTargetOS
 from agentworks.execution._terminal_guest import INTERACTIVE_READY, PAYLOAD_READY, READINESS_MAGIC
 from agentworks.execution._terminal_handoff import (
@@ -225,6 +226,7 @@ def run_case(root: Path, monkeypatch: pytest.MonkeyPatch, *, refusal: bool) -> N
     server_logs: list[Any] = []
     native_launch, native_acquire = subprocess.Popen, PosixTerminal.acquire
     trace: Trace | None = None
+    custody = LocalDeliveryCustody()
     deadline = Deadline.after(120)
 
     def launch(*args: Any, **kwargs: Any) -> subprocess.Popen[bytes]:
@@ -251,7 +253,10 @@ def run_case(root: Path, monkeypatch: pytest.MonkeyPatch, *, refusal: bool) -> N
             with enrollment_server(workdir / "server", "matching") as server:
                 assert not deadline.expired
                 trust = admit_connection(server.connection)
-                assert check_client_version(server.connection, deadline=deadline) is None
+                try:
+                    assert check_client_version(server.connection, deadline=deadline, custody=custody) is None
+                finally:
+                    assert custody.close(Deadline.after(3))
                 with ExitStack() as endpoints:
                     master, slave = os.openpty()
                     endpoints.callback(os.close, master)

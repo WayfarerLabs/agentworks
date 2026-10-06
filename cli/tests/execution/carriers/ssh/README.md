@@ -8,6 +8,12 @@ Run the local tests from `cli/`:
 uv run pytest tests/execution/carriers/ssh/ -m 'not integration'
 ```
 
+Synthetic client tests reuse transport's delayed-construction and cleanup-retry vectors at SSH's
+version and command boundaries. Test fixtures retain the exact `LocalDeliveryCustody` before
+admission and close that store with a finite deadline during teardown. Cached child status is
+inspected only after owned cleanup; fixtures do not rescue a delivery by signaling a cached PID. The
+installed-client pipe-handle probe is integration-marked and requires a separate native run.
+
 `test_terminal_windows.py` uses synthetic Win32 and CRT boundaries on every host, including Windows.
 It exercises endpoint-kind refusal, raw input policy, exact restoration, viewport queries, native
 failure codes, cleanup uncertainty and same-worker lifetime without accessing a caller console or

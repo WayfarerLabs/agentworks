@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import pytest
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import (
     CarrierIO,
     Deadline,
@@ -63,7 +64,7 @@ class ShortSink:
 
 
 @pytest.fixture
-def children(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[subprocess.Popen[bytes]]]:
+def children(monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody) -> Iterator[list[subprocess.Popen[bytes]]]:
     started: list[subprocess.Popen[bytes]] = []
     original = subprocess.Popen
 
@@ -74,19 +75,16 @@ def children(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[subprocess.Popen[
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
     yield started
+    assert custody.close(Deadline.after(3))
     for child in started:
-        if child.poll() is None:
-            child.kill()
-        child.wait(timeout=2)
-        for pipe in (child.stdin, child.stdout, child.stderr):
-            if pipe is not None:
-                pipe.close()
+        assert child.returncode is not None
+        assert all(pipe is None or pipe.closed for pipe in (child.stdin, child.stdout, child.stderr))
 
 
-def execute(monkeypatch: pytest.MonkeyPatch, script: str, io: CarrierIO):
+def execute(monkeypatch: pytest.MonkeyPatch, script: str, io: CarrierIO, custody: LocalDeliveryCustody):
     connection = cast("SSHConnection", object())
     monkeypatch.setattr(client, "admit_connection", lambda unused: object())
-    monkeypatch.setattr(client, "check_client_version", lambda unused, *, deadline: None)
+    monkeypatch.setattr(client, "check_client_version", lambda unused, *, deadline, custody: None)
     monkeypatch.setattr(
         client,
         "build_ssh_argv",
@@ -96,19 +94,20 @@ def execute(monkeypatch: pytest.MonkeyPatch, script: str, io: CarrierIO):
         PreparedInvocation(("/synthetic/program",)),
         io=io,
         deadline=Deadline.after(5),
+        custody=custody,
     )
 
 
 def assert_closed(children: list[subprocess.Popen[bytes]]) -> None:
     assert children
     for child in children:
-        assert child.poll() is not None
+        assert child.returncode is not None
         assert all(pipe is None or pipe.closed for pipe in (child.stdin, child.stdout, child.stderr))
 
 
 @pytest.mark.windows
 def test_live_duplex_preserves_binary_streams_under_backpressure(
-    children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
+    custody: LocalDeliveryCustody, children: list[subprocess.Popen[bytes]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     data = bytes(range(256)) * 512
     chunks: list[bytes | None] = [None]
@@ -125,6 +124,7 @@ def test_live_duplex_preserves_binary_streams_under_backpressure(
         "sys.stderr.buffer.write(b'\\x80err\\n'*10000); sys.stderr.buffer.flush(); "
         "data=sys.stdin.buffer.read(); sys.stdout.buffer.write(hashlib.sha256(data).digest()); sys.exit(23)",
         CarrierIO(input=LiveInput(source), output=SinkOutput(stdout, stderr, require_live=True)),
+        custody=custody,
     )
 
     assert bytes(stdout.data) == b"\x00\xffout\r\n" * 10_000 + hashlib.sha256(data).digest()
@@ -139,12 +139,13 @@ def test_live_duplex_preserves_binary_streams_under_backpressure(
     assert report.stderr.provenance == Provenance.MIXED_STDERR
     assert source.limits and max(stdout.offers + stderr.offers) <= 65_536
     assert not source.closed and not stdout.closed and not stderr.closed
+    assert custody.settled
     assert_closed(children)
 
 
 @pytest.mark.integration
 def test_installed_ssh_live_duplex_preserves_sensitive_binary_delivery(
-    local_sshd: SSHConnection, monkeypatch: pytest.MonkeyPatch
+    custody: LocalDeliveryCustody, local_sshd: SSHConnection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     payload = (b"sensitive-live-canary\x00\xff\r\n" + bytes(range(256))) * 512
     chunks: list[bytes | None] = [None]
@@ -158,7 +159,7 @@ def test_installed_ssh_live_duplex_preserves_sensitive_binary_delivery(
 
     def spawn(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
         if argv[0] == local_sshd.ssh_executable and argv[-1] != "-V":
-            assert all(process.poll() is not None for unused, process in clients)
+            assert all(process.returncode is not None for unused, process in clients)
         process = original(argv, **kwargs)
         if argv[0] == local_sshd.ssh_executable:
             clients.append((argv, process))
@@ -177,6 +178,7 @@ def test_installed_ssh_live_duplex_preserves_sensitive_binary_delivery(
             output=SinkOutput(stdout, stderr, require_live=True),
         ),
         deadline=Deadline.after(10),
+        custody=custody,
     )
 
     assert bytes(stdout.data) == b"\x00out\xff" + payload
@@ -195,7 +197,8 @@ def test_installed_ssh_live_duplex_preserves_sensitive_binary_delivery(
     assert not source.closed and not stdout.closed and not stderr.closed
     command_clients = [process for argv, process in clients if argv[-1] != "-V"]
     assert len(command_clients) == 1
-    assert all(process.poll() is not None for unused, process in clients)
+    assert custody.settled
+    assert all(process.returncode is not None for unused, process in clients)
     assert all(
         pipe is None or pipe.closed
         for unused, process in clients

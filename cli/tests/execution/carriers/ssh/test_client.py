@@ -33,8 +33,7 @@ from agentworks.execution.carrier import (
     Provenance,
     Retention,
 )
-from agentworks.execution.carriers import _subprocess
-from agentworks.execution.carriers.ssh import client
+from agentworks.execution.carriers.ssh import _io, client
 from agentworks.execution.carriers.ssh.client import SSHCarrier
 from agentworks.execution.carriers.ssh.connection import SSHConnection, admit_connection
 from agentworks.execution.carriers.ssh.trust import (
@@ -181,7 +180,7 @@ def test_status_and_raw_stream_evidence(synthetic: SyntheticSSH, code: int) -> N
 def test_native_status_outside_posix_exit_range_is_not_guest_completion(
     synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
-    original = _subprocess.run_process
+    original = _io.run_process
 
     def run(argv, **kwargs):
         result = original(argv, **kwargs)
@@ -642,6 +641,7 @@ def test_child_environment_preserves_parent_and_unrelated_values(
     assert os.environ["OPENSSH_STDIO_MODE"] == "nonsock"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("inherited_mode", [None, "stdio", "descriptors"])
 def test_installed_ssh_owns_fresh_pipe_handles(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, inherited_mode: str | None
@@ -772,7 +772,7 @@ def test_expiry_during_local_checks_prevents_dispatch(
             clock[0] = 2.0
         return trust
 
-    def version(connection: SSHConnection, *, deadline: Deadline) -> None:
+    def version(connection: SSHConnection, *, deadline: Deadline, custody: LocalDeliveryCustody) -> None:
         clock[0] = 2.0
 
     monkeypatch.setattr(client, "admit_connection", admit)
@@ -794,3 +794,64 @@ def test_admission_preserves_control_flow(
     with pytest.raises(interruption):
         synthetic.execute()
     assert synthetic.calls == []
+
+
+@pytest.mark.parametrize("stage", ["version", "command"])
+@pytest.mark.parametrize("settle_before_reduction", [False, True])
+def test_pending_constructor_keeps_dispatch_history_and_exact_custody(
+    synthetic: SyntheticSSH,
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+    settle_before_reduction: bool,
+) -> None:
+    """Exercise the shared delayed-constructor vector at SSH's two dispatch boundaries."""
+    from threading import Event
+
+    from agentworks.errors import StateError
+    from agentworks.execution.carriers import _subprocess
+
+    release = Event()
+    entered = Event()
+    spawn = subprocess.Popen
+    pump = _subprocess.run_process
+    stores: list[LocalDeliveryCustody] = []
+
+    def delayed(argv, **kwargs):
+        if (argv[-1] == "-V") == (stage == "version"):
+            entered.set()
+            assert release.wait(5)
+        return spawn(argv, **kwargs)
+
+    def observe(argv, *, custody, **kwargs):
+        stores.append(custody)
+        result = pump(argv, custody=custody, **kwargs)
+        if entered.is_set() and settle_before_reduction:
+            release.set()
+            assert custody.close(Deadline.after(3))
+        return result
+
+    monkeypatch.setattr(subprocess, "Popen", delayed)
+    monkeypatch.setattr(_subprocess, "run_process", observe)
+    try:
+        report = synthetic.execute(seconds=0.2)
+        assert entered.is_set()
+        assert stores == [synthetic.custody] * (1 if stage == "version" else 2)
+        assert report.failure is Failure.OBSERVATION
+        assert report.dispatch is (Dispatch.NOT_SENT if stage == "version" else Dispatch.UNKNOWN)
+        assert report.completion is None
+        if not settle_before_reduction:
+            assert not synthetic.custody.settled
+            assert not synthetic.custody.close(Deadline.after(0))
+            calls = list(synthetic.calls)
+
+            def forbidden(*args, **kwargs):
+                raise AssertionError("unsettled delivery performed trust admission")
+
+            monkeypatch.setattr(client, "admit_connection", forbidden)
+            with pytest.raises(StateError):
+                synthetic.execute()
+            assert synthetic.calls == calls
+    finally:
+        release.set()
+        assert synthetic.custody.close(Deadline.after(3))
+    synthetic.assert_closed()

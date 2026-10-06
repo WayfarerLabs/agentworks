@@ -20,6 +20,7 @@ import pytest
 
 from agentworks.errors import ValidationError
 from agentworks.execution import _process as process_core
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import Deadline, Failure
 from agentworks.execution.carriers.ssh import forwarding
 from agentworks.execution.carriers.ssh.connection import SSHConnection, admit_connection
@@ -43,27 +44,32 @@ def _forward(port: int = 12345) -> LocalForward:
 @dataclass
 class SyntheticForwarding:
     connection: SSHConnection
+    custody: LocalDeliveryCustody
     script: str = "os.write(1, marker); sys.stdin.buffer.read()"
     version: str = "import sys; sys.stderr.write('OpenSSH_9.2p1\\n')"
     children: list[subprocess.Popen[bytes]] = field(default_factory=list)
     calls: list[list[str]] = field(default_factory=list)
 
     def open(self, seconds: float | None = 5) -> forwarding.OwnedForwarding:
-        return open_local_forwards(self.connection, [_forward()], deadline=Deadline.after(seconds))
+        return open_local_forwards(
+            self.connection, [_forward()], deadline=Deadline.after(seconds), custody=self.custody
+        )
 
     def assert_closed(self) -> None:
         for child in self.children:
-            assert child.poll() is not None
+            assert child.returncode is not None
             assert all(pipe is None or pipe.closed for pipe in (child.stdin, child.stdout, child.stderr))
 
 
 @pytest.fixture
-def synthetic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SyntheticForwarding]:
+def synthetic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, custody: LocalDeliveryCustody
+) -> Iterator[SyntheticForwarding]:
     tmp_path = tmp_path.resolve()
     identity, trust = tmp_path / "identity", tmp_path / "trust"
     identity.write_bytes(b"synthetic")
     trust.write_bytes(b"synthetic")
-    value = SyntheticForwarding(SSHConnection("fixture.invalid", "fixture", identity, SSHTrustFiles((trust,))))
+    value = SyntheticForwarding(SSHConnection("fixture.invalid", "fixture", identity, SSHTrustFiles((trust,))), custody)
     original = subprocess.Popen
 
     def spawn(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
@@ -81,13 +87,8 @@ def synthetic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Synth
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
     yield value
-    for child in value.children:
-        if child.poll() is None:
-            child.kill()
-        child.wait(timeout=2)
-        for pipe in (child.stdin, child.stdout, child.stderr):
-            if pipe is not None:
-                pipe.close()
+    assert custody.close(Deadline.after(3))
+    value.assert_closed()
 
 
 @pytest.mark.parametrize(
@@ -176,9 +177,11 @@ def test_missing_acknowledgment_obeys_deadline(synthetic: SyntheticForwarding) -
     synthetic.assert_closed()
 
 
-def test_empty_or_expired_request_never_dispatches(synthetic: SyntheticForwarding) -> None:
+def test_empty_or_expired_request_never_dispatches(
+    custody: LocalDeliveryCustody, synthetic: SyntheticForwarding
+) -> None:
     with pytest.raises(ValidationError):
-        open_local_forwards(synthetic.connection, [], deadline=Deadline.after(1))
+        open_local_forwards(synthetic.connection, [], deadline=Deadline.after(1), custody=custody)
     with pytest.raises(ForwardingError) as caught:
         synthetic.open(seconds=0)
     assert caught.value.failure == Failure.DEADLINE
@@ -450,7 +453,9 @@ def test_setup_failure_releases_partial_owned_listener(synthetic: SyntheticForwa
 
 
 @pytest.mark.integration
-def test_installed_ssh_forwards_bytes_and_releases_listener(local_sshd: SSHConnection) -> None:
+def test_installed_ssh_forwards_bytes_and_releases_listener(
+    custody: LocalDeliveryCustody, local_sshd: SSHConnection
+) -> None:
     with socket.socket() as destination:
         destination.bind(("127.0.0.1", 0))
         destination.listen()
@@ -470,7 +475,7 @@ def test_installed_ssh_forwards_bytes_and_releases_listener(local_sshd: SSHConne
         spec = LocalForward(IPv4Address("127.0.0.1"), port, "127.0.0.1", destination.getsockname()[1])
         try:
             with (
-                open_local_forwards(local_sshd, [spec], deadline=Deadline.after(5)),
+                open_local_forwards(local_sshd, [spec], deadline=Deadline.after(5), custody=custody),
                 socket.create_connection(("127.0.0.1", port), timeout=2) as peer,
             ):
                 peer.sendall(b"\x00\xffowned-forward\n")
@@ -486,7 +491,9 @@ def test_installed_ssh_forwards_bytes_and_releases_listener(local_sshd: SSHConne
 
 @pytest.mark.integration
 @pytest.mark.parametrize("occupied_first", [True, False])
-def test_installed_ssh_partial_failure_releases_listeners(local_sshd: SSHConnection, occupied_first: bool) -> None:
+def test_installed_ssh_partial_failure_releases_listeners(
+    custody: LocalDeliveryCustody, local_sshd: SSHConnection, occupied_first: bool
+) -> None:
     with socket.socket() as occupied:
         occupied.bind(("127.0.0.1", 0))
         occupied.listen()
@@ -495,22 +502,26 @@ def test_installed_ssh_partial_failure_releases_listeners(local_sshd: SSHConnect
         if occupied_first:
             specs.reverse()
         with pytest.raises(ForwardingError):
-            open_local_forwards(local_sshd, specs, deadline=Deadline.after(5))
+            open_local_forwards(local_sshd, specs, deadline=Deadline.after(5), custody=custody)
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", free_port))
 
 
 @pytest.mark.integration
-def test_installed_ssh_readiness_does_not_claim_destination_health(local_sshd: SSHConnection) -> None:
+def test_installed_ssh_readiness_does_not_claim_destination_health(
+    custody: LocalDeliveryCustody, local_sshd: SSHConnection
+) -> None:
     spec = LocalForward(IPv4Address("127.0.0.1"), _unused_port(), "127.0.0.1", _unused_port())
-    with open_local_forwards(local_sshd, [spec], deadline=Deadline.after(5)) as resource:
+    with open_local_forwards(local_sshd, [spec], deadline=Deadline.after(5), custody=custody) as resource:
         with socket.create_connection(("127.0.0.1", spec.local_port), timeout=2) as peer:
             assert peer.recv(1) == b""
         assert resource._owner.snapshot().exit_status is None
 
 
 @pytest.mark.integration
-def test_installed_ssh_ipv6_success_cannot_hide_ipv4_failure(local_sshd: SSHConnection) -> None:
+def test_installed_ssh_ipv6_success_cannot_hide_ipv4_failure(
+    custody: LocalDeliveryCustody, local_sshd: SSHConnection
+) -> None:
     with socket.socket(socket.AF_INET6) as ipv6:
         try:
             ipv6.bind(("::1", 0))
@@ -525,14 +536,16 @@ def test_installed_ssh_ipv6_success_cannot_hide_ipv4_failure(local_sshd: SSHConn
             _forward(occupied.getsockname()[1]),
         ]
         with pytest.raises(ForwardingError):
-            open_local_forwards(local_sshd, specs, deadline=Deadline.after(5))
+            open_local_forwards(local_sshd, specs, deadline=Deadline.after(5), custody=custody)
     with socket.socket(socket.AF_INET6) as released:
         released.bind(("::1", ipv6_port))
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("refusal", ["trust", "identity", "exec"])
-def test_installed_ssh_refusal_releases_requested_port(local_sshd: SSHConnection, refusal: str) -> None:
+def test_installed_ssh_refusal_releases_requested_port(
+    custody: LocalDeliveryCustody, local_sshd: SSHConnection, refusal: str
+) -> None:
     assert isinstance(local_sshd.trust, SSHTrustFiles)
     if refusal == "trust":
         local_sshd.trust.known_hosts[0].write_bytes(b"")
@@ -544,7 +557,7 @@ def test_installed_ssh_refusal_releases_requested_port(local_sshd: SSHConnection
             authorized.write_bytes(b'command="exit 1" ' + authorized.read_bytes())
     port = _unused_port()
     with pytest.raises(ForwardingError):
-        open_local_forwards(local_sshd, [_forward(port)], deadline=Deadline.after(5))
+        open_local_forwards(local_sshd, [_forward(port)], deadline=Deadline.after(5), custody=custody)
     with socket.socket() as released:
         released.bind(("127.0.0.1", port))
 
@@ -596,7 +609,7 @@ def test_forwarding_checks_expiry_after_local_work(
             clock[0] = 2.0
         return trust
 
-    def version(connection: SSHConnection, *, deadline: Deadline) -> None:
+    def version(connection: SSHConnection, *, deadline: Deadline, custody: LocalDeliveryCustody) -> None:
         clock[0] = 2.0
 
     monkeypatch.setattr(forwarding, "admit_connection", admit)
@@ -748,4 +761,40 @@ def test_repeated_close_interruptions_preserve_first_and_finish_cleanup(
     assert caught.value is first
     resource.close()
     assert not resource._thread.is_alive()
+    synthetic.assert_closed()
+
+
+def test_pending_discovery_refuses_forwarding_and_repeated_admission(
+    synthetic: SyntheticForwarding, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentworks.errors import StateError
+
+    release = threading.Event()
+    entered = threading.Event()
+    spawn = subprocess.Popen
+
+    def delayed(argv, **kwargs):
+        assert argv[-1] == "-V"
+        entered.set()
+        assert release.wait(5)
+        return spawn(argv, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", delayed)
+    try:
+        with pytest.raises(ForwardingError) as caught:
+            synthetic.open(seconds=0.05)
+        assert entered.is_set()
+        assert caught.value.failure is Failure.OBSERVATION
+        assert not synthetic.custody.settled
+
+        def forbidden(*args, **kwargs):
+            raise AssertionError("unsettled discovery performed trust admission")
+
+        monkeypatch.setattr(forwarding, "admit_connection", forbidden)
+        with pytest.raises(StateError):
+            synthetic.open()
+    finally:
+        release.set()
+        assert synthetic.custody.close(Deadline.after(3))
+    assert len(synthetic.calls) == 1 and synthetic.calls[0][-1] == "-V"
     synthetic.assert_closed()
