@@ -863,10 +863,10 @@ Create cannot overwrite an entry; explicit Replace requires an ordinary writable
 and preserves supported local access metadata or refuses before publication. It records publication
 separately from cleanup, so a cleanup error cannot turn a changed destination into an unchanged
 claim. An interrupted close retains `cleanup_uncertain` without retrying a descriptor number that
-may have been reused; failed construction reports that fact in its exception because no writer can
-be returned. The stage does not consume a guest result or establish the caller's deadline and
-ownership facts. It is not wired to public `FileAccess.download`, and Windows and macOS local
-publication remain unaccepted.
+may have been reused. If construction itself leaves unfinished cleanup, its typed exception retains
+the stage for an explicit retry and reports any close uncertainty. The stage does not consume a
+guest result or establish the caller's deadline and ownership facts. It is not wired to public
+`FileAccess.download`, and Windows and macOS local publication remain unaccepted.
 
 `_file_local_download.py` privately composes that Linux stage with the owned snapshot download. It
 uses one deadline, admits publication only after complete verified transfer and remote cleanup, and

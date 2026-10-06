@@ -82,7 +82,10 @@ associated pending acceptance gates are superseded by this ruling.
       hold before guest work. Explicit stop/reboot share conflict admission but cannot acquire a
       hold that defeats the requested power transition. Cover file, execution, recovery and later
       job actions, not only foreground command paths. Passive readiness/preflight only inspects
-      already-existing availability; it cannot activate a VM or start or extend a hold.
+      already-existing availability; it cannot activate a VM or start or extend a hold. Preserve the
+      distinction between stopped intent and observed power: intent forbids automatic startup of a
+      definitively stopped VM, but an already-running VM can still be used. Treat transitional and
+      unknown provider states explicitly rather than assuming they are stopped.
 - [ ] Cover pre-context activation and nested teardown when wiring ownership. At `806741ca`,
       `gated_vm_boundary` enters `activation_gate` before assembling its ordinary operation context,
       and `LiveVMNode` constructs a separate gate context. Context factories, harness setup's

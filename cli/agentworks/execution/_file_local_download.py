@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from agentworks.execution._file_download import FileDownloadControlFact, FileDownloadOutcome, FileDownloadStatus
-from agentworks.execution._local_download_publication import LocalDownloadPublication
+from agentworks.execution._local_download_publication import LocalDownloadCleanupError, LocalDownloadPublication
 from agentworks.execution.files import Create, Replace
 
 _CREATE = Create()
@@ -76,6 +76,7 @@ def download_to_local_file(
     control: BaseException | None = None
     cleanup_failed = False
     construction_cleanup_uncertain = False
+    construction_cleanup_failed = False
     try:
         writer = LocalDownloadPublication(destination, condition=condition)
         if not deadline.expired:
@@ -104,8 +105,12 @@ def download_to_local_file(
             download = exc.__cause__.outcome
         if writer is None:
             construction_cleanup_uncertain = bool(getattr(exc, "cleanup_uncertain", False))
+            if isinstance(exc, LocalDownloadCleanupError) and exc.unfinished_stage is not None:
+                writer = exc.unfinished_stage
+                construction_cleanup_failed = True
+                cleanup_failed = True
     finally:
-        if writer is not None:
+        if writer is not None and not construction_cleanup_failed:
             try:
                 writer.abort()
             except BaseException as exc:

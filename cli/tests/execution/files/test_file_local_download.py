@@ -238,6 +238,39 @@ def test_default_create_refuses_existing_destination_before_remote_call(tmp_path
     assert operation.calls == 0 and destination.read_bytes() == b"old"
 
 
+def test_constructor_cleanup_failure_retains_stage_custody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fstat = os.fstat
+    unlink = os.unlink
+    inspect_failed = False
+
+    def fail_first_inspection(fd: int) -> os.stat_result:
+        nonlocal inspect_failed
+        if not inspect_failed:
+            inspect_failed = True
+            raise OSError("stage inspection failed")
+        return fstat(fd)
+
+    def fail_unlink(path: str, *, dir_fd: int | None = None) -> None:
+        raise OSError("stage unlink failed")
+
+    monkeypatch.setattr(os, "fstat", fail_first_inspection)
+    monkeypatch.setattr(os, "unlink", fail_unlink)
+    operation = _FakeOperation(_download(b"payload"))
+    with pytest.raises(OSError) as raised:
+        _run_fake(tmp_path / "destination", operation)
+    fact = raised.value.__cause__
+    assert isinstance(fact, local.FileLocalDownloadControlFact)
+    assert fact.outcome.download is None and operation.calls == 0
+    assert fact.outcome.cleanup_failed and not fact.outcome.cleanup_uncertain
+    assert fact.outcome.unfinished_stage is not None
+    monkeypatch.setattr(os, "fstat", fstat)
+    monkeypatch.setattr(os, "unlink", unlink)
+    fact.outcome.unfinished_stage.abort()
+    assert not list(tmp_path.iterdir())
+
+
 def test_explicit_replace_preserves_existing_access_metadata(tmp_path: Path) -> None:
     destination = tmp_path / "destination"
     destination.write_bytes(b"old")

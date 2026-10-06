@@ -141,7 +141,10 @@ acquire a hold that defeats the requested power transition. A stopped WSL2 distr
 supposedly active independent job is a discontinuity to report and recover, not proof that the old
 job stayed alive. Whether a later observation may wake an already stopped VM solely to inspect
 terminal records is separate from the active-job availability guarantee and must be decided before
-public exposure.
+public exposure. The operator-stopped flag forbids automatic startup of a definitively stopped VM;
+it does not by itself make an already-running VM unavailable. Preserve that existing intent
+distinction when converging platform power, and do not treat transitional or unknown provider status
+as definitive stopped evidence.
 
 PTY is an I/O choice, not a background state. `attach(ref, terminal=...)` requires an attach grant
 and supported transport, and does not create a new run. A reusable detached terminal needs an owned
