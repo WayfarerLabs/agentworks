@@ -919,8 +919,14 @@ that context before registration or dispatch. Gate promotion preserves it, and a
 admissions, JSON/package child publications and retained updates use the typed record's actual
 version. The private WSL2 native factory now shares the actual prepared root/full guest context
 between file and buffered execution state; other platform and production RunContext composition
-remain unimplemented. The current private recovery adapters do not supply fresh preparation and are
-not an accepted recovery path for bootstrap-bound records.
+remain unimplemented. The three private retained-file adapters now accept version-two records only
+under a live prepared action view from the actual caller-retained `RecoveryVMSpan`. They reject a
+free replacement carrier, compare exact numeric authority and use the fresh selected launcher while
+preserving the historical record's plans and version. The span validates its actual owner, guarded
+carrier and canonical facts; each action revalidates before publication or dispatch. Version one
+retains its original explicit-carrier meaning. DOWNLOAD drain evidence remains separate and has no
+production producer. SQLite/faked-native transcript coverage proves private composition only; native
+privilege, fencing/drain and production recovery acceptance remain open.
 
 JSON owns one parent `file-call` row. Before any nested upload can dispatch, it publishes that
 child's fresh token and attempt number into the same row. A retry may replace those fields only

@@ -997,6 +997,23 @@ be reconciled only against the same proposal. The row stays a possible effect: t
 prove helper exit, stop non-gated or predecessor-controller effects, replay the child, reconcile its
 application checkpoint, clean up, or release ownership.
 
+The three private file-recovery adapters now distinguish the encoded record version from its
+database envelope and require an exact match. Version-two bootstrap-bound records require `context=`
+from a live `RecoveryVMSpan.action()` at `open`; their actions derive delivery from that view and
+reject a caller-supplied carrier. The span checks its actual owner, protected action, pinned carrier
+and canonical prepared facts before rebind or mutation. Each later action rechecks the live view
+before proposal publication, debt retry or dispatch; an escaped view cannot authorize another
+action. Reopen the exact latest record under a new action view for later reconciliation.
+
+Fresh target, full guest, runtime, root and body UID/GID/complete groups must match the retained
+record. The fresh selected route may use different identity transition modes, but cannot substitute
+a different numeric authority or fall back to root. Current delivery uses its fresh root launcher;
+the old record's plans and version remain unchanged through intended debt/generation publications.
+Version one retains its original explicit carrier and plan semantics, with no inferred bootstrap or
+upgrade. DOWNLOAD still requires separate exact drain evidence; neither readiness nor a live action
+creates that evidence. SQLite/faked-native transcript tests establish this private composition, not
+native privilege transitions, predecessor drain or production recovery acceptance.
+
 ## Private inline file reads
 
 `_file_read.py` composes a bounded, identity-bound Linux file read through one carrier attempt. The

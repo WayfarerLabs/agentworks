@@ -659,6 +659,18 @@ adoption, independent-job availability, remaining native factories, complete Run
 integration acceptance remain open. Draft WIP publication closes no public round or broader plan
 gate; no database data or SSH branch is changed.
 
+The version-two retained-file worker at `bb650a15b` delivers the three private adapters with an
+actual span-bound action context, exact envelope/encoded version checks and fresh numeric delivery.
+Each action revalidates before proposal publication, debt retry or dispatch; free carriers,
+escaped/swapped contexts and changed authority refuse. Historical plans/versions survive intended
+CAS updates and exact reply-loss adoption. Version one keeps its explicit carrier semantics. The
+worker passes 675 adjacent cases, including 82 new SQLite/span and synthetic-wire cases, scoped
+strict mypy, Ruff/format, full file quality and whitespace gates, exit 0. Five separate fresh
+interpreters import the helper, adapters and span successfully. Integrated private reviews and lead
+gates remain pending. DOWNLOAD has no production drain producer; native privilege transitions,
+fencing/drain, other platform spans and production recovery remain open. No broader plan gate or
+public feedback/fix round closes.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
