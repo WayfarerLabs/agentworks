@@ -124,7 +124,9 @@ connection = SSHConnection(
 )
 prepared = prepare(Command(("/bin/cat",)), stdin=b"\x00\xff\r\n")
 custody = LocalDeliveryCustody()
-result = SSHCarrier(connection).execute(prepared.invocation, io=prepared.io, deadline=Deadline.after(10), custody=custody)
+result = SSHCarrier(connection).execute(
+    prepared.invocation, io=prepared.io, deadline=Deadline.after(10), custody=custody,
+)
 if not custody.settled:
     raise AssertionError("SSH fixture retained local delivery")
 output = decode_output(prepared, result.stdout)

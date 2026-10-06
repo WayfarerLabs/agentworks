@@ -5,7 +5,14 @@ from collections.abc import Callable, Iterator
 import pytest
 
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
-from agentworks.execution.carrier import Carrier, CarrierIO, CarrierReport, ChannelFeatures, Deadline, PreparedInvocation
+from agentworks.execution.carrier import (
+    Carrier,
+    CarrierIO,
+    CarrierReport,
+    ChannelFeatures,
+    Deadline,
+    PreparedInvocation,
+)
 
 
 class FixtureBoundCarrier:

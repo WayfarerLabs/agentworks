@@ -94,7 +94,7 @@ class Startup:
             if row.obligation_kind == OBLIGATION_KIND
         )
 
-    def start(self, wire, *, timeout) -> str:
+    def start(self, wire, *, timeout, custody) -> str:
         assert timeout > 0 and wire._connection.vmid == 101
         row = self.activation_row()
         assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
@@ -105,7 +105,7 @@ class Startup:
             raise self.receipt
         return self.receipt
 
-    def poll(self, upid, *, timeout) -> dict[str, object]:
+    def poll(self, upid, *, timeout, custody) -> dict[str, object]:
         assert timeout > 0 and upid == self.receipt
         assert decode_activation_payload(self.activation_row().payload).upid == upid
         assert not self.route.guest.calls and not self.route.accounts.calls
@@ -115,12 +115,12 @@ class Startup:
             raise response
         return response
 
-    def current_power(self, *, timeout) -> dict[str, object]:
+    def current_power(self, *, timeout, custody) -> dict[str, object]:
         assert timeout > 0 and self.activation_row().state is LifecycleObligationState.RESOLVED
         self.events.append("power")
         return self.power
 
-    def info(self, *, timeout) -> dict[str, object]:
+    def info(self, *, timeout, custody) -> dict[str, object]:
         assert timeout > 0 and self.activation_row().state is LifecycleObligationState.RESOLVED
         assert not self.route.guest.calls and not self.route.accounts.calls
         self.events.append("info")

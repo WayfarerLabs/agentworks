@@ -55,6 +55,7 @@ from agentworks.execution.carrier import (
     SinkOutput,
 )
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
+from tests.execution._bound_carrier_support import bind_carrier as bind_carrier
 from tests.execution.files._file_snapshot_support import LocalCarrier
 from tests.execution.files._runtime_support import runtime_nonce, runtime_ready_record
 
@@ -500,11 +501,13 @@ def test_generated_nonroot_entry_refuses_on_python311(family: str) -> None:
 def test_numeric_exchange_keeps_actual_provider_aggregate_preflight(
     family: str,
     monkeypatch: pytest.MonkeyPatch,
+    bind_carrier,
 ) -> None:
     carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.example:8006", "node-a", 101, "root@pam!token", "secret"))
+    delivery = bind_carrier(carrier)
     monkeypatch.setattr(carrier._wire, "request", lambda *_a, **_kw: pytest.fail("provider dispatch reached"))
     # The closed manifest fits; the actual launcher plus input exceeds the provider envelope.
     groups = tuple(sorted({1001} | {(index * 2654435761) % (2**32) for index in range(2900)}))
     oversized = IdentityPlan(IdentityExpectation(1001, 1001, groups), IdentityMode.DIRECT)
     with pytest.raises(ValidationError):
-        _call(family, carrier, plan=oversized, bootstrap=_NumericGuestBootstrap(_ROOT, _GUEST))
+        _call(family, delivery, plan=oversized, bootstrap=_NumericGuestBootstrap(_ROOT, _GUEST))

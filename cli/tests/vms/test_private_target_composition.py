@@ -185,7 +185,7 @@ def composition(
     vm = _vm(pwd.getpwuid(os.geteuid()).pw_name)
     platform = WSL2Platform("wsl2", {})
 
-    def observe(_vm: VMRow, _ctx: RunContext, *, deadline: Deadline) -> ProviderLocator:
+    def observe(_vm: VMRow, _ctx: RunContext, *, deadline: Deadline, custody: LocalDeliveryCustody) -> ProviderLocator:
         assert not deadline.expired
         return _LOCATOR
 

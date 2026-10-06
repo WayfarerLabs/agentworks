@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,6 +27,7 @@ from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.proxmox import ProxmoxConnection, _ProxmoxWire
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+from tests.execution.test_proxmox import stub_process
 
 _GENERATION = "613ea898-8445-4e6e-82c7-f6e9ae8d7235"
 
@@ -172,15 +172,12 @@ def test_actual_connection_and_fixed_request_use_scoped_token_without_legacy_loo
     platform = _platform(token_secret="locator-token", node="configured-node")
     for method in ("_api", "native_transport", "status", "start"):
         monkeypatch.setattr(platform, method, MagicMock(side_effect=AssertionError("unexpected legacy or active call")))
-    process = MagicMock(returncode=0)
-    process.communicate.return_value = (json.dumps({"data": {"vmgenid": _GENERATION}}).encode(), None)
-    spawn = MagicMock(return_value=process)
-    monkeypatch.setattr(subprocess, "Popen", spawn)
+    process = stub_process(monkeypatch, json.dumps({"data": {"vmgenid": _GENERATION}}).encode())
     secret = MagicMock(return_value="secret-canary")
     ctx = RunContext(secrets=SimpleNamespace(get=secret))
     result = platform.observe_provider_locator(_vm(), ctx, deadline=Deadline.after(10), custody=local_delivery)
     assert isinstance(result, ProviderLocator)
-    payload = json.loads(process.communicate.call_args.args[0])
+    payload = json.loads(process.exchange.call_args.args[0])
     assert payload["endpoint"] == "current-config"
     assert payload["method"] == "GET" and payload["suffix"] is None and payload["body"] is None
     assert payload["connection"]["api_url"] == platform.config.api_url
@@ -188,9 +185,10 @@ def test_actual_connection_and_fixed_request_use_scoped_token_without_legacy_loo
     assert payload["connection"]["vmid"] == 123
     assert payload["connection"]["token_secret"] == "secret-canary"
     secret.assert_called_once_with("locator-token")
-    spawn.assert_called_once()
-    assert "secret-canary" not in repr(spawn.call_args)
-    assert 0 < process.communicate.call_args.kwargs["timeout"] <= payload["timeout"] <= 10
+    process.run_process.assert_called_once()
+    assert process.run_process.call_args.kwargs["custody"] is local_delivery
+    assert "secret-canary" not in repr(process.run_process.call_args.args)
+    assert 0 < process.exchange.call_args.kwargs["timeout"] <= payload["timeout"] <= 10
 
 
 @pytest.mark.parametrize(
@@ -258,14 +256,11 @@ def test_exact_integer_and_decimal_persisted_vmid_identify_the_same_vm(
 )
 def test_invalid_provider_envelope_is_sanitized_without_retry(monkeypatch: pytest.MonkeyPatch, body: bytes) -> None:
     local_delivery = LocalDeliveryCustody()
-    process = MagicMock(returncode=0)
-    process.communicate.return_value = (body, None)
-    spawn = MagicMock(return_value=process)
-    monkeypatch.setattr(subprocess, "Popen", spawn)
+    process = stub_process(monkeypatch, body)
     ctx = RunContext(secrets=SimpleNamespace(get=lambda _name: "secret-canary"))
     with pytest.raises(ConnectivityError) as raised:
         _platform().observe_provider_locator(_vm(), ctx, deadline=Deadline.after(10), custody=local_delivery)
-    spawn.assert_called_once()
+    process.run_process.assert_called_once()
     assert "secret-canary" not in str(raised.value)
     assert raised.value.__cause__ is None and raised.value.__context__ is None
 
@@ -307,7 +302,7 @@ def test_expiry_after_preparation_or_response_refuses_observation(
         monkeypatch.setattr(platform, "_execution_connection", prepare)
     elif expire_during == "response":
 
-        def respond(*, timeout: float) -> dict[str, object]:
+        def respond(*, timeout: float, custody: LocalDeliveryCustody) -> dict[str, object]:
             now[0] = 106.0
             return {"vmgenid": _GENERATION}
 
@@ -361,7 +356,7 @@ def test_late_provider_failure_still_checks_deadline(
     now = [100.0]
     monkeypatch.setattr("time.monotonic", lambda: now[0])
 
-    def fail(*, timeout: float) -> dict[str, object]:
+    def fail(*, timeout: float, custody: LocalDeliveryCustody) -> dict[str, object]:
         now[0] = 106.0
         raise failure("secret-canary")
 

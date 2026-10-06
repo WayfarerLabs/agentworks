@@ -108,7 +108,7 @@ def test_wsl2_locator_uses_one_bounded_registration_probe(monkeypatch: pytest.Mo
     command = cast(list[str], args[0])
     assert isinstance(kwargs["io"].output, Capture)
     assert kwargs["custody"] is local_delivery
-    assert cast(Deadline, kwargs["deadline"]).remaining > 0
+    assert cast(Deadline, kwargs["deadline"]).remaining() > 0
     assert "test-distro" not in command
     assert env["AGENTWORKS_WSL_DISTRO"] == "test-distro"
 

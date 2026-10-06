@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import MagicMock
@@ -17,6 +18,7 @@ from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.proxmox import _ProxmoxWire
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+from tests.execution.test_proxmox import interrupted_worker, stub_process
 
 _UNKNOWN_STATUSES: tuple[object, ...] = ("paused", "starting", "RUNNING", " stopped", "", None, 1, True, [], {})
 
@@ -56,35 +58,30 @@ def test_exact_status_and_passive_route(monkeypatch: pytest.MonkeyPatch, data: d
     value = platform()
     for method in ("_api", "native_transport", "status", "start"):
         monkeypatch.setattr(value, method, MagicMock(side_effect=AssertionError("legacy or active call")))
-    process = MagicMock(returncode=0)
-    process.communicate.return_value = (json.dumps({"data": data}).encode(), None)
-    spawn = MagicMock(return_value=process)
-    monkeypatch.setattr(subprocess, "Popen", spawn)
+    process = stub_process(monkeypatch, json.dumps({"data": data}).encode())
     assert (
         value.observe_execution_power(vm(), context(), deadline=Deadline.after(10), custody=local_delivery) == expected
     )
-    payload = json.loads(process.communicate.call_args.args[0])
+    payload = json.loads(process.exchange.call_args.args[0])
     assert payload["method"] == "GET" and payload["suffix"] is None and payload["body"] is None
     assert payload["connection"]["node"] == "recorded-node"
     assert payload["connection"]["vmid"] == 123
     assert payload["connection"]["token_secret"] == "power-secret-canary"
-    assert "power-secret-canary" not in repr(spawn.call_args)
-    assert spawn.call_count == 1
-    assert 0 < process.communicate.call_args.kwargs["timeout"] <= payload["timeout"] <= 10
+    assert "power-secret-canary" not in repr(process.run_process.call_args.args)
+    assert process.run_process.call_count == 1
+    assert process.run_process.call_args.kwargs["custody"] is local_delivery
+    assert 0 < process.exchange.call_args.kwargs["timeout"] <= payload["timeout"] <= 10
 
 
 @pytest.mark.parametrize("body", [b"invalid", b"[]", b'{"data":null}', b'{"data":[]}', b'{"data":"stopped"}'])
 def test_bad_envelope_is_unknown_without_retry(monkeypatch: pytest.MonkeyPatch, body: bytes) -> None:
     local_delivery = LocalDeliveryCustody()
-    process = MagicMock(returncode=0)
-    process.communicate.return_value = (body, None)
-    spawn = MagicMock(return_value=process)
-    monkeypatch.setattr(subprocess, "Popen", spawn)
+    process = stub_process(monkeypatch, body)
     assert (
         platform().observe_execution_power(vm(), context(), deadline=Deadline.after(10), custody=local_delivery)
         == VMStatus.UNKNOWN
     )
-    spawn.assert_called_once()
+    process.run_process.assert_called_once()
 
 
 @pytest.mark.parametrize("deadline,error", [(Deadline(None), ValidationError), (Deadline(0), LimitExceededError)])
@@ -173,40 +170,33 @@ def test_unsafe_trust_and_missing_metadata_are_preflight_errors(monkeypatch: pyt
 @pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit, GeneratorExit])
 def test_control_exception_kills_and_reaps(monkeypatch: pytest.MonkeyPatch, interruption: type[BaseException]) -> None:
     local_delivery = LocalDeliveryCustody()
-    process = MagicMock()
-    process.communicate.side_effect = [interruption(), (b"", None)]
-    process.poll.return_value = None
-    spawn = MagicMock(return_value=process)
-    monkeypatch.setattr(subprocess, "Popen", spawn)
-    with pytest.raises(interruption):
-        platform().observe_execution_power(vm(), context(), deadline=Deadline.after(10), custody=local_delivery)
-    process.kill.assert_called_once()
-    assert process.communicate.call_count == 2
-    spawn.assert_called_once()
+    control = interruption()
+    with interrupted_worker(monkeypatch, control) as children:
+        with pytest.raises(interruption) as raised:
+            platform().observe_execution_power(vm(), context(), deadline=Deadline.after(10), custody=local_delivery)
+        assert raised.value is control
+        assert local_delivery.close(Deadline.after(3))
+        assert len(children) == 1 and children[0].poll() is not None
+        assert all(pipe is None or pipe.closed for pipe in (children[0].stdin, children[0].stdout, children[0].stderr))
 
 
 def test_worker_timeout_reaps_and_raises_safe_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
     local_delivery = LocalDeliveryCustody()
-    now = [100.0]
-    monkeypatch.setattr("time.monotonic", lambda: now[0])
-    process = MagicMock()
-    process.poll.return_value = None
-    calls = []
+    original = subprocess.Popen
+    children: list[subprocess.Popen[bytes]] = []
 
-    def communicate(payload=None, *, timeout=None):
-        calls.append((payload, timeout))
-        if timeout is not None:
-            now[0] += timeout
-            raise subprocess.TimeoutExpired("power-secret-canary", timeout)
-        return b"", None
+    def spawn(argv, **kwargs):
+        child = original([sys.executable, "-c", "import time; time.sleep(30)"], **kwargs)
+        children.append(child)
+        return child
 
-    process.communicate.side_effect = communicate
-    spawn = MagicMock(return_value=process)
     monkeypatch.setattr(subprocess, "Popen", spawn)
-    with pytest.raises(LimitExceededError) as raised:
-        platform().observe_execution_power(vm(), context(), deadline=Deadline(105), custody=local_delivery)
-    process.kill.assert_called_once()
-    assert len(calls) == 2 and calls[1] == (None, None)
+    try:
+        with pytest.raises(LimitExceededError) as raised:
+            platform().observe_execution_power(vm(), context(), deadline=Deadline.after(0.1), custody=local_delivery)
+    finally:
+        assert local_delivery.close(Deadline.after(3))
+    assert len(children) == 1 and children[0].poll() is not None
+    assert all(pipe is None or pipe.closed for pipe in (children[0].stdin, children[0].stdout, children[0].stderr))
     assert "power-secret-canary" not in str(raised.value)
     assert raised.value.__cause__ is None and raised.value.__context__ is None
-    spawn.assert_called_once()

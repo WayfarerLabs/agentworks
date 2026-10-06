@@ -55,6 +55,7 @@ from agentworks.execution._scratch import _cleanup_debt
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 from agentworks.execution.carrier import CarrierIO, Deadline, ExitStatus, FiniteInput, PreparedInvocation, SinkOutput
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
+from tests.execution._bound_carrier_support import bind_carrier as bind_carrier
 from tests.execution.files._file_stage_support import LocalCarrier
 from tests.execution.files._runtime_support import runtime_nonce
 from tests.execution.files.test_file_publication_protocol import _receipt_debt, _reference, _revision
@@ -378,7 +379,9 @@ def test_complete_maximum_manifest_uses_actual_provider_bound(
 
 
 @pytest.mark.parametrize("case", _FIRST_CASES)
-def test_valid_aggregate_excess_refuses_before_provider_dispatch(case: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_valid_aggregate_excess_refuses_before_provider_dispatch(
+    case: str, monkeypatch: pytest.MonkeyPatch, bind_carrier
+) -> None:
     groups = tuple(sorted({1001} | {(index * 2654435761) % (2**32) for index in range(2900)}))
     plan = IdentityPlan(IdentityExpectation(1001, 1001, groups), IdentityMode.DIRECT)
     captured = _CapturedCarrier()
@@ -389,9 +392,10 @@ def test_valid_aggregate_excess_refuses_before_provider_dispatch(case: str, monk
     assert len(manifest) <= 32768
     _DECODERS[case.split(".")[0]](manifest)
     carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.example:8006", "node-a", 101, "root@pam!token", "secret"))
+    delivery = bind_carrier(carrier)
     monkeypatch.setattr(carrier._wire, "request", lambda *_a, **_kw: pytest.fail("provider dispatch reached"))
     with pytest.raises(ValidationError):
-        _call(case, carrier, plan=plan, bootstrap=_NumericGuestBootstrap(_ROOT, _GUEST))
+        _call(case, delivery, plan=plan, bootstrap=_NumericGuestBootstrap(_ROOT, _GUEST))
 
 
 @pytest.mark.parametrize("case", ["stage.chunk", "publication.publish"])
