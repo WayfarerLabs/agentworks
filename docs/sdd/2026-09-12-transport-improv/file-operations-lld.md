@@ -134,10 +134,12 @@ destination, not guest publication. The default create-only choice cannot overwr
 path, while explicit replace requires an existing ordinary regular destination. The local staging
 writer must finish and verify the full transfer before publication, refuse symlinks and hard links,
 and specify how existing local ACLs, modes and other metadata survive replacement or produce an
-explicit unsupported refusal. It must not silently strip them. `download.max_bytes` is an optional
-caller safety bound, not a core file-size cap. JSON byte/depth limits bound the source, existing
-snapshot, and result; defaults are caller-overridable, not authorization or a universal file
-ceiling.
+explicit unsupported refusal. It must not silently strip them. A pathname-based private stage must
+also refuse a destination whose directory ancestry another local user can rename through between
+validation and publication; trusted-owner sticky directories may be supported, while symlink
+ancestors refuse. `download.max_bytes` is an optional caller safety bound, not a core file-size cap.
+JSON byte/depth limits bound the source, existing snapshot, and result; defaults are
+caller-overridable, not authorization or a universal file ceiling.
 
 Paths are absolute, normalized POSIX paths without NUL, empty, `.` or `..` components. A write does
 not create parents. `ensure_directory` creates exactly one missing final component with restrictive

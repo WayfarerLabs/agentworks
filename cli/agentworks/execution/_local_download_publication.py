@@ -129,6 +129,23 @@ def _metadata(fd: int) -> _Metadata:
     )
 
 
+def _validate_directory_custody(observed: os.stat_result) -> None:
+    if not stat.S_ISDIR(observed.st_mode):
+        raise LocalDownloadUnsupportedError("Local download ancestor is not a directory")
+    # An id-mapped host can expose the machine root directory under a UID
+    # other than zero. Its owner is still the local filesystem authority.
+    if observed.st_uid not in (os.geteuid(), os.lstat("/").st_uid):
+        raise LocalDownloadUnsupportedError("Local download directory owner is not trusted")
+    if observed.st_mode & 0o022 and not observed.st_mode & stat.S_ISVTX:
+        raise LocalDownloadUnsupportedError("Local download directory allows unsafe stage replacement")
+
+
+def _validate_ancestor_custody(parent: Path) -> None:
+    """Prove each pathname component cannot be swapped by another local user."""
+    for ancestor in reversed((parent, *parent.parents)):
+        _validate_directory_custody(os.lstat(ancestor))
+
+
 class LocalDownloadPublication:
     """Owned same-directory stage with a ByteSink-compatible try_write method.
 
@@ -160,7 +177,9 @@ class LocalDownloadPublication:
         self.published = False
         self.publication_uncertain = False
         try:
+            _validate_ancestor_custody(self._destination.parent)
             self._parent_fd = os.open(self._destination.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            _validate_directory_custody(os.fstat(self._parent_fd))
             if isinstance(condition, Replace):
                 self._original = self._destination_metadata()
             else:

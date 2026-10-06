@@ -238,17 +238,15 @@ def test_default_create_refuses_existing_destination_before_remote_call(tmp_path
     assert operation.calls == 0 and destination.read_bytes() == b"old"
 
 
-def test_constructor_cleanup_failure_retains_stage_custody(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_constructor_cleanup_failure_retains_stage_custody(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fstat = os.fstat
     unlink = os.unlink
-    inspect_failed = False
+    inspections = 0
 
     def fail_first_inspection(fd: int) -> os.stat_result:
-        nonlocal inspect_failed
-        if not inspect_failed:
-            inspect_failed = True
+        nonlocal inspections
+        inspections += 1
+        if inspections == 2:
             raise OSError("stage inspection failed")
         return fstat(fd)
 

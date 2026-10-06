@@ -546,8 +546,9 @@ supported-workstation or production FileAccess acceptance; the checkbox stays op
       ordinary destination write authority, ordinary single-link objects and same-directory staging;
       preserve supported local access metadata or refuse before replacement, and retain exact
       cleanup and published-effect facts separately. Native local tests cover ACLs, metadata and
-      failure boundaries. This is a host primitive, not public FileAccess download or non-Linux
-      acceptance.
+      failure boundaries. A directory-ancestry custody gate now refuses paths in which another local
+      user could swap the verified stage name or displace its parent before publication. This is a
+      host primitive, not public FileAccess download or non-Linux acceptance.
 - [x] Compose that private Linux stage with the owned snapshot download under one deadline. Admit
       publication only after complete transfer verification and remote cleanup; retain independent
       remote, local publication, local cleanup and late-deadline facts, including on exceptional

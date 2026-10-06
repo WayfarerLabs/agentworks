@@ -18,11 +18,67 @@ from agentworks.execution import _local_download_publication as local
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.files import Create, Replace
 
-pytestmark = [pytest.mark.windows, pytest.mark.skipif(sys.platform != "linux", reason="Linux publication evidence")]
+pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux publication evidence")
 
 
 def commit(writer: local.LocalDownloadPublication, data: bytes) -> None:
     writer.commit(verified_complete=True, size=len(data), sha256=hashlib.sha256(data).hexdigest())
+
+
+def test_rejects_parent_where_other_user_can_replace_stage(tmp_path: Path) -> None:
+    tmp_path.chmod(0o777)
+    try:
+        with pytest.raises(local.LocalDownloadUnsupportedError):
+            local.LocalDownloadPublication(tmp_path / "download")
+        assert not list(tmp_path.iterdir())
+    finally:
+        tmp_path.chmod(0o700)
+
+
+def test_rejects_unsafe_ancestor_even_when_parent_is_private(tmp_path: Path) -> None:
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o700)
+    parent = shared / "private"
+    parent.mkdir(mode=0o700)
+    shared.chmod(0o777)
+    try:
+        with pytest.raises(local.LocalDownloadUnsupportedError):
+            local.LocalDownloadPublication(parent / "download")
+        assert not list(parent.iterdir())
+    finally:
+        shared.chmod(0o700)
+
+
+def test_rejects_symlink_ancestor(tmp_path: Path) -> None:
+    actual = tmp_path / "actual"
+    actual.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(actual, target_is_directory=True)
+    with pytest.raises(local.LocalDownloadUnsupportedError):
+        local.LocalDownloadPublication(alias / "download")
+    assert not list(actual.iterdir())
+
+
+def test_allows_trusted_sticky_parent(tmp_path: Path) -> None:
+    tmp_path.chmod(0o1777)
+    try:
+        writer = local.LocalDownloadPublication(tmp_path / "download")
+        writer.abort()
+        assert not list(tmp_path.iterdir())
+    finally:
+        tmp_path.chmod(0o700)
+
+
+def test_rejects_untrusted_parent_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fstat = os.fstat
+    observed = list(tmp_path.stat())
+    observed[4] = next(uid for uid in range(3) if uid not in (os.geteuid(), os.lstat("/").st_uid))
+    untrusted = os.stat_result(observed)
+    monkeypatch.setattr(os, "fstat", lambda fd: untrusted)
+    with pytest.raises(local.LocalDownloadUnsupportedError):
+        local.LocalDownloadPublication(tmp_path / "download")
+    monkeypatch.setattr(os, "fstat", fstat)
+    assert not list(tmp_path.iterdir())
 
 
 @pytest.mark.parametrize("data", [b"", b"downloaded bytes\x00\xff"])
@@ -538,7 +594,7 @@ def test_constructor_fstat_then_unlink_failure_retains_stage_for_retry(
     def fail_first_inspection(fd: int) -> os.stat_result:
         nonlocal inspections
         inspections += 1
-        if inspections == 1:
+        if inspections == 2:
             raise setup_error
         return fstat(fd)
 
@@ -567,8 +623,14 @@ def test_constructor_keeps_stage_descriptor_when_identity_cannot_be_inspected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     destination = tmp_path / "download"
+    fstat = os.fstat
+    inspections = 0
 
     def fail_inspection(fd: int) -> os.stat_result:
+        nonlocal inspections
+        inspections += 1
+        if inspections == 1:
+            return fstat(fd)
         raise OSError("stage inspection failed")
 
     with monkeypatch.context() as failure:
