@@ -635,10 +635,11 @@ propagates its original control exception. This narrows the dispatch gap but can
 observation atomic with carrier delivery; this sibling has no production caller or native WSL2
 proof. Production still needs an owner before activation, a locator-bound route lifetime, typed
 whole-span cleanup evidence and native proof. WSL2 supplies the first positive locator and binding
-pair; Proxmox returns locator unavailable, while SSH-backed cloud and Lima bindings remain later
-work. Malicious or engineered A-B-A host behavior is outside this checkpoint's threat scope. Future
-hierarchical admission replaces exact-VM equality with a core-owned coverage decision rather than a
-target-local ancestry guess.
+pair. Proxmox now supplies a private current-generation locator hook under the exact configured
+verified authority; native PVE 8/9 generation/adoption policy and whole-span composition remain
+unproved. SSH-backed cloud and Lima bindings remain later work. Malicious or engineered A-B-A host
+behavior is outside this checkpoint's threat scope. Future hierarchical admission replaces exact-VM
+equality with a core-owned coverage decision rather than a target-local ancestry guess.
 
 New VM creation generates and persists one non-secret marker before provider dispatch. The marker is
 exactly 32 lowercase hexadecimal characters and the shared create bootstrap writes that same value
