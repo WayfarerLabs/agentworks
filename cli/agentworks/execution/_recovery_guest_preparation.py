@@ -172,7 +172,10 @@ class RecoveryGuestPreparationBatch:
             self._identity,
             self._pending_remote_effects,
             self._coordination_uncertain,
-            self._started and not self._resolved,
+            self._pending_remote_effects
+            or self._coordination_uncertain
+            or self._attempt is not None
+            or (self._started and not self._resolved),
         )
 
     def prepare(
@@ -298,6 +301,6 @@ class RecoveryGuestPreparationBatch:
                 self._coordination_uncertain = True
                 raise control from RecoveryGuestPreparationControlFact(self.preparation)
             self._resolved = True
-            self._dispatch = None
-            self._coordination_uncertain = False
+        self._dispatch = None
+        self._coordination_uncertain = False
         return self.preparation

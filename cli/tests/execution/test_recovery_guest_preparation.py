@@ -588,3 +588,43 @@ def test_local_close_retry_cannot_resolve_after_takeover(recovery, monkeypatch):
     assert batch.preparation.requires_owner_retention
     assert _row(successor).state is LifecycleObligationState.POSSIBLE_EFFECT
     assert carrier.calls == ["guest", "admin", "root"]
+
+
+def test_post_resolution_interruption_retains_until_local_normalization(recovery, monkeypatch):
+    _, owner, _, _ = recovery
+    carrier = FixedCarrier()
+    batch = _batch(owner, carrier)
+
+    def interrupt(frame: FrameType, event: str, arg: object) -> Any:
+        del arg
+        if (
+            event == "line"
+            and frame.f_code is RecoveryGuestPreparationBatch._finish_settled_batch.__code__  # noqa: SLF001
+            and batch._resolved  # noqa: SLF001
+        ):
+            raise KeyboardInterrupt
+        return interrupt
+
+    sys.settrace(interrupt)
+    try:
+        with pytest.raises(KeyboardInterrupt) as stopped:
+            _prepare(batch)
+    finally:
+        sys.settrace(None)
+    assert isinstance(stopped.value.__cause__, RecoveryGuestPreparationControlFact)
+    fact = stopped.value.__cause__.preparation
+    assert fact.coordination_uncertain and fact.requires_owner_retention
+    assert _row(owner).state is LifecycleObligationState.RESOLVED
+    dispatch = batch._dispatch  # noqa: SLF001
+    assert dispatch is not None
+    with pytest.raises(StateError):
+        dispatch.begin_attempt()
+    rows = owner.list_lifecycle_obligations()
+    monkeypatch.setattr(LifecycleObligation, "resolve", Mock(side_effect=AssertionError("Unexpected resolution")))
+    monkeypatch.setattr(RecoveryDispatch, "close", Mock(side_effect=AssertionError("Unexpected close")))
+    normalized = batch.retry_resolution()
+    assert batch._dispatch is None  # noqa: SLF001
+    assert not normalized.coordination_uncertain
+    assert not normalized.requires_owner_retention
+    assert owner.list_lifecycle_obligations() == rows
+    assert carrier.calls == ["guest", "admin", "root"]
