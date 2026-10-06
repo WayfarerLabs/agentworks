@@ -759,6 +759,36 @@ expansion-enabled 10.x client, plus supported Linux/macOS workstations, before c
 delivery complete. Any urgent compatibility correction to the legacy path requires its own native
 reproduction and disposition; no legacy runtime correction is made in this increment.
 
+### Native environment delivery on four clients
+
+The
+[integration tester's report](https://github.com/WayfarerLabs/agentworks/issues/845#issuecomment-6009410929)
+exercises exact SSH `4e32a9f9eece7ce3abb87a63f28f196547c7b947`, containing transport
+`08bf36fd6ce270862ceceb3450e6a282039faaa2`. Its private preparation, carrier and output-decoder
+composition delivers all **14 cases byte-exact on all four clients**, with complete framing and exit
+code zero. The workstation/client pairs are Debian 12 with OpenSSH 9.2p1, Windows Server 2022 with
+OpenSSH-for-Windows 9.5p2 and 10.0p2, and macOS 26.3 with OpenSSH 10.2p1. All reach Debian 13 guests
+over SSH. This adds native Windows and macOS evidence for the stdin-envelope environment boundary;
+it does not exercise the production RunContext surface or terminal delivery.
+
+The same report drives the unchanged production `agw agent exec` path on main `cea5e852` using
+synthetic data. Both 9.x clients deliver every case exactly, including Windows 9.5p2. Both 10.x
+clients reject invalid percent tokens and silently expand valid percent tokens and `${HOME}`. The
+captured Windows argument boundaries and client configuration parse preserve embedded quotes. This
+reproduction therefore attributes its failures to client option expansion, without reproducing the
+original reporter's claimed 9.5p2 failure. The reporter's Windows 11 environment and exact resolved
+executable remain untested.
+
+The isolated percent-doubling experiment corrupts percent-bearing values on both 9.x clients while
+correcting those values on 10.x; it leaves workstation dollar-variable expansion intact. A synthetic
+workstation-only variable also reaches the guest through the old macOS 10.2 path. These observations
+support retaining literal environment data outside SSH options. They neither authorize a legacy
+compatibility patch nor close the issue while production callers still use that path.
+
+Proxy configurations, other Windows SSH distributions and larger values were not exercised. The
+tester reports no repository changes or pushes. Production new-path environment acceptance remains
+part of the open workflow gate, with this exact-pin native vector evidence available for comparison.
+
 ## Workstation download transport refresh
 
 SSH code head `1de533873f13f6cef363ea252b05c6e7dd724f65` rebases all 88 SSH commits onto transport
