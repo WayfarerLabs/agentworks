@@ -309,20 +309,43 @@ uncertain. A stalled controller cannot promise a wall-clock cleanup bound.
 
 Core owns the keeper as an already admitted lifecycle effect, like a retained platform hold. It
 registers and arms exact run custody before first possible publication, owns its background worker
-and separate fixed-helper delivery, and checks current database generation before each renewal.
-Renewal is not a second public command borrowing the owner's ordinary serial-use boundary. This does
-not permit concurrent arbitrary calls: the keeper can only observe the bound guest clock and renew
-this exact run's lease, and retains each uncertain exchange before doing anything further. Prove
-this support-effect composition against an ordinary long-running command rather than relaxing
-serialization globally. A wait timeout does not end the keeper or stop the job.
+and separate fixed-helper delivery. Independently fence the clock observation and publication; after
+a clean clock reply, recheck database generation and closing admission immediately before possible
+publication. An expired or failed clock reply, uncertain database read/update, or uncertain
+publication stops renewal until that custody settles. This is not an atomic database-plus-remote
+dispatch transaction: a takeover after the last check can still race an already admitted exchange.
+The supplied sampled expiry bounds that exchange's possible extension; it is not instant target
+fencing.
 
-Ending the owning operation stops new keeper work, drains its local worker/exchange, requests the
-existing exact-run stop and observes cleanup under an explicit cleanup budget. Closing a borrowed
-view or returning from `start` does none of those things. Keeper loss, database takeover or a
-partition stops renewal, and the guest independently reaches expiry. Recovery may stop/observe the
-old run but never resumes its keeper or renews an old lease. Boundary emptiness alone does not drain
-an admitted publisher: uncertain publication and support-worker custody must also settle before
-whole-owner release or disposal. Platform availability remains a separate held effect.
+Renewal is not a second public command borrowing the owner's ordinary serial-use boundary. The
+support effect has two closed phases: LIVE admits only the bound clock/renewal exchanges; CLOSING
+admits only exact-run stop and observation after draining renewal. Neither permits arbitrary calls
+or reopens ordinary admission. Prove this composition against an ordinary long-running command
+rather than relaxing serialization globally. A wait timeout does not end the keeper or stop the job.
+
+The proposed internal policy gives each clock-plus-publication cycle one total five-second delivery
+budget and nominal ten-second start-to-start cadence, without catch-up bursts. This budget is
+independent of a caller's wait deadline. The 60-second guest lease leaves arithmetic margin, not a
+native latency guarantee: measure SSH and QGA exchanges, including their polling, before advertising
+this combination. Late replies cannot reset the cycle budget or replace the sampled clock value.
+
+Before possible publication, a fenced compare-and-swap retains the last possibly granted expiry as
+one high-water value in the existing run obligation, not a history or another table. Deliver its
+recovery consumer with the keeper: fresh same-boot guest-clock observation and exact run facts let
+recovery bound the old keeper's possible remaining lease authority and budget its observation. That
+bound alone proves neither workload emptiness nor publisher drain. A boot change or unavailable
+clock leaves the reconciliation uncertain; recovery never resumes the old keeper or renews its
+lease. Do not add metadata without this consumer.
+
+Ending the owning operation closes new keeper work, drains its local worker/exchange, then requests
+the existing exact-run stop and observes cleanup under an explicit cleanup budget. Ordinary
+admission has already closed: use the support effect's already-admitted exact-run cleanup custody,
+not a new public borrow. Closing a borrowed view or returning from `start` does none of those
+things. Keeper loss, database takeover or a partition stops renewal, and the guest independently
+reaches expiry. Boundary emptiness alone does not drain an admitted publisher: uncertain publication
+and support-worker custody must also settle before whole-owner release or disposal. Outstanding
+ordinary dispatch debt remains separate and cannot be cleared by keeper settlement. Platform
+availability remains a separate held effect.
 
 The first proof must cover initial expiry before launch and between placement/release, renewal
 during ordinary serialized work, normal scope close, wait timeout, host death, partition, controller
