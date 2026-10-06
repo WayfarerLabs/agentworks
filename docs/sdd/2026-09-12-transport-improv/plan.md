@@ -24,6 +24,47 @@ transport-side implementation, local tests and successive joint live reports. Th
 [proof evidence](proof-lld.md) records acceptance of the finite-input slice and its limits. No
 broad-build or production-cutover gate is completed by those measurements.
 
+### Current acceptance checkpoint, 2026-10-06
+
+Public feedback/fix round 1 of the operator-authorized 3 began after the one-hour collection window
+and the complete
+[native round-9 report](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6008723722).
+The PR is draft with `review-requested` removed while the fixed feedback batch is corrected. Its
+published head remains `08bf36fd6`; private implementation does not change that handoff.
+
+Native Linux, macOS and Windows measurements establish the tested caller-private Create and explicit
+Replace behavior, not complete supported-path or production acceptance. Stock macOS home ancestor
+ACLs still refuse; hardened guest admins cannot read PID 1 through `hidepid=1`; and the bounded
+snapshot exchanges produce about 20 KiB/s over remote SSH. The report's SSH composition used
+`508192ac`. Current SSH `dfe02e81` already contains transport `08bf36fd6`, so the next report must
+identify fresh integrated pins instead of carrying forward that older test-file conflict.
+
+- [ ] Correct macOS ancestor ACL admission and share POSIX custody, staging and Create mechanics
+      without weakening caller-private staging or the approved host-specific Replace semantics.
+      Prove ordinary home paths and conservative metadata/object refusals natively. State the
+      Windows guarantee under existing caller authority, including already-enabled backup
+      privileges.
+- [ ] Make fresh boot/init observation work on hardened guests for preparation, WSL holds and
+      selected-UID file effect gates. Preserve the fence and perform ordinary file effects as the
+      target user. A privileged initial probe alone does not fix later same-UID gate observations.
+- [ ] Add one bounded live stream of an already-held snapshot between the existing begin and exact
+      cleanup exchanges. Keep buffered carriers' bounded chunk path; no replay or alternate-path
+      fallback after possible dispatch. Require digest, stream completion, cleanup and normal
+      carrier termination before local publication, and measure remote SSH throughput natively.
+- [ ] Share managed stop/disposal attempt registration and exceptional settlement while keeping
+      action-specific exchanges, accepted states and results explicit. Specify common local-stage
+      abort guarantees, not identical host cleanup ordering.
+- [ ] Complete private core composition corrections before publishing that increment: cap explicit
+      execution deadlines by the original operation budget, retain an exact caller cleanup handle on
+      unresolved pre-yield failure, and fence each body invocation to the prepared guest rather than
+      merely its distribution name. A host-only precheck does not close the dispatch race.
+
+The private core composition at `152b8cec8` acquires the actual database claim before bounded
+passive power observation and selected WSL hold startup. Its full local suite passes 14,184 tests
+with 50 skips; strict mypy passes 1,197 sources. Three private reviews found the deadline,
+cleanup-handoff and stale-body gaps above. This is an implementation checkpoint, not a completed
+factory, native availability proof or public RunContext surface. No database data has been deleted.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
