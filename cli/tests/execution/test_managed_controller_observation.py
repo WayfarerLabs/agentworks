@@ -6,6 +6,7 @@ import json
 import selectors
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import replace
 
 import pytest
@@ -319,10 +320,17 @@ def test_host_preserves_raw_carrier_faults_and_original_deadline(failure: Failur
     assert carrier.calls == 1
 
 
-def test_reap_fault_preserves_original_interruption_and_does_not_claim_success(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("fault", ["wait", "close"])
+@pytest.mark.parametrize("interrupted", [True, False])
+def test_cleanup_fault_preserves_original_interruption_and_does_not_claim_success(
+    monkeypatch: pytest.MonkeyPatch,
+    fault: str,
+    interrupted: bool,
+) -> None:
     original_spawn = subprocess.Popen
     owned: list[subprocess.Popen[bytes]] = []
     original_waits = []
+    original_closes: list[Callable[[], None]] = []
     interruption = KeyboardInterrupt()
 
     def spawn(
@@ -334,8 +342,9 @@ def test_reap_fault_preserves_original_interruption_and_does_not_claim_success(m
         close_fds: bool,
         env: dict[str, str],
     ) -> subprocess.Popen[bytes]:
+        source = "import time; time.sleep(10)" if interrupted else "import os; os.write(1," + repr(_properties()) + ")"
         child = original_spawn(
-            (sys.executable, "-I", "-S", "-c", "import time; time.sleep(10)"),
+            (sys.executable, "-I", "-S", "-c", source),
             stdin=stdin,
             stdout=stdout,
             stderr=stderr,
@@ -344,24 +353,37 @@ def test_reap_fault_preserves_original_interruption_and_does_not_claim_success(m
         )
         owned.append(child)
         original_waits.append(child.wait)
+        assert child.stdout is not None and child.stderr is not None
+        original_closes.extend((child.stdout.close, child.stderr.close))
 
         def reap_failure(*_args: object, **_kwargs: object) -> int:
             raise OSError
 
-        monkeypatch.setattr(child, "wait", reap_failure)
+        if fault == "wait":
+            monkeypatch.setattr(child, "wait", reap_failure)
+        else:
+            monkeypatch.setattr(child.stdout, "close", reap_failure)
         return child
 
     def interrupt(*_args: object) -> object:
         raise interruption
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
-    monkeypatch.setattr(selectors.EpollSelector, "select", interrupt)
+    if interrupted:
+        monkeypatch.setattr(selectors.EpollSelector, "select", interrupt)
     try:
-        with pytest.raises(KeyboardInterrupt) as error:
-            native.observe_controller(RUN)
-        assert error.value is interruption
+        if interrupted:
+            with pytest.raises(KeyboardInterrupt) as error:
+                native.observe_controller(RUN)
+            assert error.value is interruption
+        else:
+            with pytest.raises(OSError):
+                native.observe_controller(RUN)
+        assert all(child.stderr is not None and child.stderr.closed for child in owned)
     finally:
         for child, wait in zip(owned, original_waits, strict=True):
             if child.poll() is None:
                 child.kill()
             wait(timeout=2)
+        for close in original_closes:
+            close()

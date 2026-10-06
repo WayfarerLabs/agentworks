@@ -48,6 +48,8 @@ def _query(argv: tuple[str, ...]) -> bytes | None:
     The caller's deadline bounds local observation, not guest cancellation. Request
     I/O, fact reads and response framing are outside this finite child budget.
     """
+    data = bytearray()
+    deadline = time.monotonic() + _QUERY_SECONDS
     try:
         child = subprocess.Popen(
             argv,
@@ -59,10 +61,8 @@ def _query(argv: tuple[str, ...]) -> bytes | None:
         )
     except OSError:
         return None
-    assert child.stdout is not None and child.stderr is not None
-    data = bytearray()
-    deadline = time.monotonic() + _QUERY_SECONDS
     try:
+        assert child.stdout is not None and child.stderr is not None
         with selectors.DefaultSelector() as selector:
             selector.register(child.stdout, selectors.EVENT_READ)
             selector.register(child.stderr, selectors.EVENT_READ)
@@ -89,17 +89,23 @@ def _query(argv: tuple[str, ...]) -> bytes | None:
     finally:
         # Cleanup must not replace an interruption with a query-success response.
         interrupted = sys.exc_info()[0] is not None
+        cleanup_error: BaseException | None = None
         try:
             if child.poll() is None:
                 child.kill()
             child.wait(timeout=_REAP_SECONDS)
-        except BaseException:
-            if not interrupted:
-                raise
-        finally:
-            child.stdout.close()
-            child.stderr.close()
-            data.clear()
+        except BaseException as error:
+            cleanup_error = error
+        for stream in (child.stdout, child.stderr):
+            if stream is not None:
+                try:
+                    stream.close()
+                except BaseException as error:
+                    if cleanup_error is None:
+                        cleanup_error = error
+        data.clear()
+        if cleanup_error is not None and not interrupted:
+            raise cleanup_error
 
 
 def _native_state(data: bytes, unit: str) -> ControllerState:
