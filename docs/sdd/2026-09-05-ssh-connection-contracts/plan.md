@@ -196,7 +196,7 @@ partial-update custody. Production writer coexistence and rollback through both 
 paths still require transport composition and native acceptance.
 
 Shared subprocess adoption introduces an implementation dependency on transport #833. Current
-integration uses `1a5441722c995ea5c54095c7c8a47360a4b1c6f4`. Its shared carrier, process,
+integration uses `73ac89eef2367d1ab3a5d5b81c57d50a1903c172`. Its shared carrier, process,
 preparation and terminal-input interfaces remain unchanged from the preceding SSH integration.
 Private execution binds the selected owner scope and bootstrap boot; the WSL2 native factory
 requires both prepared identity plans and shares one elevated-plan/full-guest bootstrap between file
@@ -205,15 +205,25 @@ version. New private recovery/lifecycle candidates and fixed body-free Proxmox g
 observation advance transport's composition, with source and faked-provider evidence recorded in its
 plan. Its latest private already-running Proxmox composition retains one VM owner and numeric
 bootstrap, while account and guest preparation preserve observed facts and original interruption
-when borrow release fails. Stopped startup still refuses. Native recovery, provider freshness at
-dispatch, fencing/drain, complete platform availability, Windows terminal delivery and additive
-RunContext remain open. These private increments supply no new SSH terminal or production
-acceptance. Rebased code pin `e38f5fcff35bd85d099129fdbe5dd8480017c007` passes 15,768
-non-integration tests with 51 skips and 27 warnings, full Ruff/format, strict mypy (1,277 sources),
-exact CI typer isolation, file quality, locked-SDD, Rulesync and whitespace checks. Website
-validation passes 160 Python and 103 Node tests, four builds and both deterministic comparisons. The
-first build target was refused inside the checkout; corrected external owned output roots pass. No
-SSH code changes or native acceptance follow from this dependency refresh. The
+when borrow release fails. Its private HTTP worker now supplies fixed start/task-status methods;
+activation custody and production callers remain pending. A pre/post read does not establish atomic
+stale-request prevention or queued-request drain. Stopped startup still refuses. Native recovery,
+provider freshness at dispatch, fencing/drain, complete platform availability, Windows terminal
+delivery and additive RunContext remain open. These private increments supply no new SSH terminal or
+production acceptance. Earlier rebased code pin `e38f5fcff35bd85d099129fdbe5dd8480017c007` passes
+15,768 non-integration tests with 51 skips and 27 warnings, full Ruff/format, strict mypy (1,277
+sources), exact CI typer isolation, file quality, locked-SDD, Rulesync and whitespace checks.
+Website validation passes 160 Python and 103 Node tests, four builds and both deterministic
+comparisons. The first build target was refused inside the checkout; corrected external owned output
+roots pass. No SSH code changes or native acceptance follow from that dependency refresh.
+
+The latest code pin `7e88676faaf5566f9f7b75a394e6e94ac4c6ab9d` preserves every SSH source and test
+byte from published `f4dccab54`. Its complete suite passes 15,881 non-integration tests with 51
+skips and 27 warnings, exit 0 in 257.82 seconds. Full Ruff/format (1,316 files), strict mypy (1,279
+sources), exact CI typer isolation, file quality, locked-SDD, Rulesync and whitespace checks pass.
+Website validation passes 160 Python and 103 Node tests, four builds and both deterministic
+comparisons. This proves the local combined dependency refresh, not native activation or new SSH
+terminal/production acceptance. The
 [Windows ancestor-sharing correction](phase2-results.md#windows-ancestor-sharing-correction) records
 that rebase and its remaining limits. The earlier
 [local-download stack refresh](phase2-results.md#private-local-download-stack-refresh) and
