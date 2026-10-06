@@ -319,6 +319,16 @@ are for the pre-deletion pin, not a substitute for the corrected state. The publ
 `0be885044` now passes every hosted CI and CodeQL gate. Native, recovery and production-composition
 obligations remain open.
 
+All three independent lanes clear the corrected operation-context pin `713d57df1`. Project passes 41
+focused/adjacent cases, complexity passes 57 core/repository cases and generic passes the 34 new
+cases. The final complete lead suite passes 14,803 non-integration tests with 49 skips. Complete
+Ruff/format, strict mypy (1,219 source and test files), typer isolation, file quality, locked-SDD,
+Rulesync and whitespace gates exit 0. Final website validation passes 160 Python and 103 Node cases,
+four builds and both deterministic comparisons. Publication adds validation evidence only after that
+pin. Native backend behavior, fresh v2 recovery, production context construction, inline/service
+ownership and complete additive RunContext remain open. No database data was removed; public
+feedback/fix round 1 remains open without review-requested or ready.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
