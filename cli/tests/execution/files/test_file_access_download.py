@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from threading import Event, Thread, current_thread
 
@@ -13,6 +14,7 @@ from agentworks.errors import ConflictError, ExternalError, StateError, Uncertai
 from agentworks.execution import _file_local_download as local_download_module
 from agentworks.execution import _file_operation as file_operation_module
 from agentworks.execution import access as access_module
+from agentworks.execution._file_download import FileDownloadFailure, FileDownloadFailurePhase
 from agentworks.execution._file_local_download import (
     FileLocalDownloadControlFact,
     FileLocalDownloadOutcome,
@@ -26,13 +28,73 @@ from agentworks.execution._local_download_stage import (
     LocalDownloadUnsupportedError,
 )
 from agentworks.execution.access import FileAccess
-from agentworks.execution.carrier import Deadline
+from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, PreparedInvocation
 from agentworks.execution.files import Change, Create, FileFailureReason, FileOperationPhase, Replace
 from agentworks.operations import OperationBorrow, OperationOwner, release_borrow_after_custody
 from tests.execution.files._file_access_support import bound_access as bound_access
 from tests.execution.files._file_access_support import plan as plan
+from tests.execution.files._file_snapshot_support import LocalCarrier as SnapshotLocalCarrier
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the fixed file helpers require Linux")
+
+
+@pytest.mark.parametrize("method", ["memory", "local"])
+@pytest.mark.parametrize("fault", ["missing_completion", "scratch_refusal"])
+def test_live_stream_file_access_reduction_preserves_typed_failure_and_remote_custody(
+    bound_access: tuple[FileAccess, Path, OperationOwner, Database],
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+    fault: str,
+) -> None:
+    access, root, _owner, _database = bound_access
+    source = root / "source"
+    content = b"private-content-canary" * 500
+    source.write_bytes(content)
+    scratch = root.parent / "scratch"
+    destination = root.parent / "local-download"
+
+    class FaultedLiveCarrier(SnapshotLocalCarrier):
+        def __init__(self) -> None:
+            super().__init__(live_stdio=True)
+
+        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+            if self.calls == 1 and fault == "scratch_refusal":
+                held = tuple(scratch.iterdir())
+                assert len(held) == 1
+                (held[0] / "data").write_bytes(b"changed-scratch-canary")
+            report = super().execute(invocation, io=io, deadline=deadline)
+            if self.calls == 2 and fault == "missing_completion":
+                return replace(report, completion=None)
+            if self.calls == 3 and fault == "scratch_refusal":
+                return replace(report, completion=None)
+            return report
+
+    carrier = FaultedLiveCarrier()
+    monkeypatch.setattr(access, "_carrier", carrier)
+    expected_error = ExternalError if fault == "missing_completion" else StateError
+    expected_reason = FileFailureReason.TERMINATION if fault == "missing_completion" else FileFailureReason.REFUSED
+    with pytest.raises(expected_error) as raised:
+        if method == "memory":
+            access.read_file(PurePosixPath(source), max_bytes=len(content))
+        else:
+            access.download(PurePosixPath(source), destination, max_bytes=len(content))
+
+    details = raised.value.details
+    assert details is not None
+    assert details.phase is FileOperationPhase.TRANSFER and details.reason is expected_reason
+    assert raised.value.__cause__ is None
+    assert "private-content-canary" not in str(raised.value)
+    assert "changed-scratch-canary" not in str(raised.value)
+    assert not destination.exists()
+    assert len(access._operation.unfinished_downloads) == 1
+    outcome = access._operation.unfinished_downloads[0].outcome
+    assert outcome.failure_phase is FileDownloadFailurePhase.SNAPSHOT_STREAM
+    assert outcome.failure is (
+        FileDownloadFailure.TERMINATION if fault == "missing_completion" else FileDownloadFailure.SNAPSHOT
+    )
+    assert outcome.cleanup_debt is not None and outcome.requires_owner_retention
+    assert outcome.pending_remote_effects
+    assert carrier.calls == (2 if fault == "missing_completion" else 3)
 
 
 def test_download_publishes_held_snapshot_and_reports_source_metadata(

@@ -183,6 +183,7 @@ def _download_phase(outcome: FileDownloadOutcome) -> FileOperationPhase:
         return {
             FileDownloadFailurePhase.SNAPSHOT_BEGIN: FileOperationPhase.OBSERVATION,
             FileDownloadFailurePhase.SNAPSHOT_CHUNK: FileOperationPhase.TRANSFER,
+            FileDownloadFailurePhase.SNAPSHOT_STREAM: FileOperationPhase.TRANSFER,
             FileDownloadFailurePhase.SNAPSHOT_RECONCILE: FileOperationPhase.CLEANUP,
             FileDownloadFailurePhase.SNAPSHOT_CLEANUP: FileOperationPhase.CLEANUP,
         }[outcome.failure_phase]
