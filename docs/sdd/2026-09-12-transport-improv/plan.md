@@ -671,6 +671,18 @@ gates remain pending. DOWNLOAD has no production drain producer; native privileg
 fencing/drain, other platform spans and production recovery remain open. No broader plan gate or
 public feedback/fix round closes.
 
+The inline-lifetime worker at `98a69107d` implements one lazily registered empty row shared by the
+execution state. Fresh borrows explicitly install/arm and retain that row across clean calls;
+bookkeeping retry never replays the request. Final resolution closes only execution admission and
+its row, before native aggregate teardown. A first registration lost reply is reconciled by exact
+fenced observation during finish without creating a new row. The worker passes 215 adjacent cases,
+including 20 new custody cases with 160 actual LocalCarrier commands/scripts and eight actual file
+stats, scoped strict mypy, Ruff/format, full file quality and whitespace gates, exit 0. Shared
+ordinary/elevated views in that local fixture use the same actual host identity; they do not prove
+native elevation. Distinct numeric bootstrap guards retain their separate tests. Integrated
+concurrency inspection, all three private reviews and full lead gates remain pending; neither
+capacity acceptance nor native/RunContext completion is claimed yet.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state

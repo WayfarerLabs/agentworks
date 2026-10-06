@@ -117,6 +117,22 @@ keeps its explicit body identity. The private WSL2 native factory constructs the
 from its prepared elevated plan and actual full guest. Other platform composition and complete
 managed-helper adoption remain unimplemented. No target or root identity is inferred as a fallback.
 
+One shared `ExecutionOperation` keeps one lazily registered empty carrier-dispatch row for its
+lifetime, rather than consuming a row per clean command. Every call still uses a fresh serial
+borrow, explicitly installs and arms that row before carrier validation, and hands the retained
+effect back after recording supported helper termination. File operations may borrow between calls.
+Ordinary and elevated views share the same execution state; creating a new operation for each call
+defeats this boundary.
+
+Core calls `finish()` before aggregate teardown. It permanently closes inline admission and resolves
+only this execution row after its local custody is settled; unused state creates no row.
+`retry_inline_bookkeeping()` reconciles exact retained registration/admission or known local
+settlement/handoff without executing the candidate again. Unknown helper custody refuses new calls
+and final resolution. Resolved rows are never reopened and the database bounds are unchanged. The
+native workflow finishes execution before availability and whole-ledger cleanup. A clean per-call
+outcome does not imply this lifetime row or the outer operation has already been released. These
+mechanics retain DIRECT's existing helper-evidence limits, not a new descendant-cleanup guarantee.
+
 `_execution_result.py` reduces an operation-owned inline outcome into those public facts. The fixed
 inline helper accepts retrospective normal completion only on CPython 3.11 through 3.14, after its
 trusted terminal records an exact normal wait and the operation owner has settled. This produces a
