@@ -23,6 +23,7 @@ from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._managed_job_protocol import encode_managed_job_fact
 from agentworks.execution._managed_job_request import ManagedJobRequest
 from agentworks.execution._managed_job_store import FactName, ManagedJobStore, RequestAsset
+from agentworks.execution._managed_lease_wire import sampled_lease
 from agentworks.execution._managed_runs import (
     ManagedLaunchState,
     ManagedOutputMode,
@@ -714,6 +715,36 @@ def test_proxmox_complete_service_envelope_fits_with_bounded_workload_input(
         assert isinstance(prepared.io, CarrierIO)
         carrier.validate(prepared.invocation, io=prepared.io)
         assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
+    finally:
+        prepared.discard()
+
+
+def test_proxmox_real_leased_service_envelope_fits_with_bounded_workload_input(reserved) -> None:
+    repository, original = reserved
+    spec = replace(
+        original.spec,
+        owner=ManagedRunOwner(ManagedRunOwnerKind.OPERATION, "f" * 32),
+        lifetime=ManagedRunLifetime.OPERATION,
+    )
+    identity = ManagedRunIdentity("e" * 32)
+    record = repository.reserve(spec, output_policy=original.output_policy, identity=identity)
+    request = _request(record)
+    request = replace(request, stdin=b"x" * 8192, operation_lease=sampled_lease(request.launch, 1000))
+    carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.example", "node", 101, "operator!token", "secret"))
+    prepared = prepare_managed_start(
+        carrier,
+        identity,
+        spec,
+        record.output_policy,
+        request,
+        IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
+        Deadline.after(10),
+        RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+        GUEST,
+    )
+    try:
+        carrier.validate(prepared.invocation, io=prepared.io)
+        assert repository.inspect(identity) == record
     finally:
         prepared.discard()
 

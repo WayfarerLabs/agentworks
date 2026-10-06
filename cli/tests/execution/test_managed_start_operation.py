@@ -18,6 +18,7 @@ from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._managed_job_protocol import encode_managed_job_fact
 from agentworks.execution._managed_job_request import ManagedJobRequest
 from agentworks.execution._managed_job_store import FactName
+from agentworks.execution._managed_lease_wire import sampled_lease
 from agentworks.execution._managed_runs import (
     ManagedLaunchState,
     ManagedOutputMode,
@@ -69,6 +70,48 @@ RUN = ManagedRunIdentity("a" * 32)
 OBLIGATION = "b" * 32
 ROOT = IdentityExpectation(0, 0, (0,))
 GUEST = VMGuestIdentity("d" * 32, "00000000-0000-4000-8000-000000000001", 1234)
+
+
+@pytest.mark.windows
+def test_operation_start_requires_actual_operation_owner(owned) -> None:
+    _, repository, original, owner = owned
+    spec = replace(
+        original.spec,
+        owner=ManagedRunOwner(ManagedRunOwnerKind.OPERATION, "f" * 32),
+        lifetime=ManagedRunLifetime.OPERATION,
+    )
+    identity = ManagedRunIdentity("e" * 32)
+    record = repository.reserve(spec, output_policy=original.output_policy, identity=identity)
+    request = _request(record)
+    request = replace(request, operation_lease=sampled_lease(request.launch, 1000))
+    carrier = Carrier(lambda request: _records(request, receipt=True))
+    deadline = Deadline.after(1)
+    prepared = prepare_managed_start(
+        carrier,
+        identity,
+        spec,
+        record.output_policy,
+        request,
+        IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
+        deadline,
+        RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+        GUEST,
+    )
+    try:
+        with pytest.raises(ValidationError):
+            start_owned_managed_run(
+                repository,
+                record,
+                carrier,
+                prepared=prepared,
+                deadline=deadline,
+                owner=owner,
+                obligation_id=OBLIGATION,
+            )
+        assert carrier.calls == 0 and owner.list_lifecycle_obligations() == ()
+        assert repository.inspect(identity) == record
+    finally:
+        prepared.discard()
 
 
 @pytest.fixture

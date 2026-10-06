@@ -1,4 +1,4 @@
-"""Temporary core custody for one resource-owned independent managed start."""
+"""Core custody for one exact resource-owned or operation-owned managed start."""
 
 from __future__ import annotations
 
@@ -91,10 +91,16 @@ def start_owned_managed_run(
         or spec.target.kind is not ManagedTargetKind.VM
         or scope.resource_kind is not OperationResourceKind.VM
         or scope.resource_name != spec.target.name
-        or spec.lifetime is not ManagedRunLifetime.INDEPENDENT
-        or spec.owner.kind is not ManagedRunOwnerKind.RESOURCE
+        or not (
+            (spec.lifetime is ManagedRunLifetime.INDEPENDENT and spec.owner.kind is ManagedRunOwnerKind.RESOURCE)
+            or (
+                spec.lifetime is ManagedRunLifetime.OPERATION
+                and spec.owner.kind is ManagedRunOwnerKind.OPERATION
+                and spec.owner.owner_id == owner.ownership.operation_id
+            )
+        )
     ):
-        raise ValidationError("Managed start requires an exact VM and independent resource owner")
+        raise ValidationError("Managed start requires an exact VM and matching run owner")
     if type(prepared) is not _PreparedAttempt:
         raise ValidationError("Managed start requires exact preparation")
     payload = encode_managed_start_obligation(reserved.identity.run_id)

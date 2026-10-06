@@ -1,21 +1,27 @@
-"""Private mapping from finite execution values to an independent managed request."""
+"""Pure frozen managed bodies and complete private request composition."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from itertools import islice
+from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
 
 from ._managed_job_protocol import ManagedJobFactError, encode_managed_job_fact
 from ._managed_job_request import (
     MAX_CAPTURE_PREFIX_BYTES,
+    MAX_CONTROL_BYTES,
     MAX_ENVIRONMENT_ENTRIES,
     MAX_SOURCE_BYTES,
     ManagedJobRequest,
     RequestError,
+    _encode_request_assets,
+    decode_request_launch,
     encode_request,
 )
+from ._managed_lease_wire import MAX_LEASE_BYTES
 from ._managed_runs import (
     ManagedOutputMode,
     ManagedOutputPolicy,
@@ -25,8 +31,36 @@ from ._managed_runs import (
 )
 from .models import Command, Input, Output, Script
 
+if TYPE_CHECKING:
+    from ._managed_lease_wire import OperationLease
 
-def compose_managed_request(
+OPERATION_LEASE_CONTROL_HEADROOM = MAX_LEASE_BYTES + len(b',"operation_lease":')
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class _ManagedBody:
+    """Validated immutable caller body, deliberately lacking lease authority."""
+
+    request: ManagedJobRequest
+    output_policy: ManagedOutputPolicy
+
+    def __post_init__(self) -> None:
+        if self.request.operation_lease is not None:
+            raise RequestError("prepared body cannot carry an operation lease")
+        size = len(_encode_request_assets(self.request, body_only=True)["request-control"])
+        if (
+            decode_request_launch(self.request.launch)["lifetime"] == "operation"
+            and size + OPERATION_LEASE_CONTROL_HEADROOM > MAX_CONTROL_BYTES
+        ):
+            raise RequestError("operation control exceeds bound with lease headroom")
+        if (
+            self.request.output_mode != self.output_policy.mode.value
+            or self.request.capture_prefix_bytes != self.output_policy.capture_prefix_bytes
+        ):
+            raise RequestError("prepared body output policy mismatch")
+
+
+def compose_managed_body(
     invocation: Command | Script,
     *,
     input: Input,
@@ -36,8 +70,8 @@ def compose_managed_request(
     sensitive: bool,
     identity: ManagedRunIdentity,
     spec: ManagedRunSpec,
-) -> tuple[ManagedJobRequest, ManagedOutputPolicy]:
-    """Validate one complete request before its caller reserves a durable run."""
+) -> _ManagedBody:
+    """Snapshot and validate caller input before reservation or clock effects."""
     if (
         type(input) is not Input
         or type(output) is not Output
@@ -45,7 +79,7 @@ def compose_managed_request(
         or type(identity) is not ManagedRunIdentity
         or type(spec) is not ManagedRunSpec
     ):
-        raise ValidationError("Invalid independent managed request")
+        raise ValidationError("Invalid managed body")
 
     if isinstance(invocation, Command):
         kind, argv, source = "command", invocation.argv, b""
@@ -102,7 +136,37 @@ def compose_managed_request(
             source,
             input.data,
         )
-        encode_request(request)
+        return _ManagedBody(request, policy)
     except (ManagedJobFactError, RequestError):
         raise ValidationError("Invalid managed request") from None
-    return request, policy
+
+
+def compose_managed_request(
+    invocation: Command | Script,
+    *,
+    input: Input,
+    output: Output,
+    env: Mapping[str, str] | None,
+    cwd: str | None,
+    sensitive: bool,
+    identity: ManagedRunIdentity,
+    spec: ManagedRunSpec,
+    operation_lease: OperationLease | None = None,
+) -> tuple[ManagedJobRequest, ManagedOutputPolicy]:
+    """Validate one complete request before its caller reserves a durable run."""
+    body = compose_managed_body(
+        invocation,
+        input=input,
+        output=output,
+        env=env,
+        cwd=cwd,
+        sensitive=sensitive,
+        identity=identity,
+        spec=spec,
+    )
+    request = replace(body.request, operation_lease=operation_lease)
+    try:
+        encode_request(request)
+    except RequestError:
+        raise ValidationError("Invalid managed request") from None
+    return request, body.output_policy

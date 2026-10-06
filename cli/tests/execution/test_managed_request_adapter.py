@@ -8,12 +8,20 @@ from agentworks.errors import ValidationError
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._managed_job_request import (
     MAX_ARGV,
+    MAX_CONTROL_BYTES,
     MAX_SOURCE_BYTES,
     MAX_STDIN_BYTES,
+    RequestError,
     decode_request,
     encode_request,
 )
-from agentworks.execution._managed_request_adapter import compose_managed_request
+from agentworks.execution._managed_lease_wire import sampled_lease
+from agentworks.execution._managed_request_adapter import (
+    OPERATION_LEASE_CONTROL_HEADROOM,
+    _ManagedBody,
+    compose_managed_body,
+    compose_managed_request,
+)
 from agentworks.execution._managed_runs import (
     ManagedOutputMode,
     ManagedRunIdentity,
@@ -28,6 +36,7 @@ from agentworks.execution._managed_runs import (
 from agentworks.execution.models import Command, Input, Output, Script, Shell
 
 RUN = ManagedRunIdentity("a" * 32)
+pytestmark = pytest.mark.windows
 
 
 def _spec(shell: ManagedShellIdentity | None = None) -> ManagedRunSpec:
@@ -134,7 +143,69 @@ def test_oversize_script_source_refuses_during_preparation() -> None:
         _compose(Script("x" * (MAX_SOURCE_BYTES + 1), Shell.SH), spec=_spec(ManagedShellIdentity(Shell.SH, "/bin/sh")))
 
 
-def test_operation_lifetime_refuses() -> None:
+def _operation_spec() -> ManagedRunSpec:
+    return replace(
+        _spec(),
+        lifetime=ManagedRunLifetime.OPERATION,
+        owner=ManagedRunOwner(ManagedRunOwnerKind.OPERATION, "e" * 32),
+    )
+
+
+def _body(invocation, *, spec=None, env=None) -> _ManagedBody:
+    return compose_managed_body(
+        invocation,
+        input=Input.bytes(b"stdin"),
+        output=Output.capture(4096),
+        env=env,
+        cwd="/tmp",
+        sensitive=False,
+        identity=RUN,
+        spec=spec or _operation_spec(),
+    )
+
+
+def test_operation_body_freezes_environment_and_complete_encoder_still_requires_lease() -> None:
+    environment = {"LANG": "C"}
+    body = _body(Command(["/bin/true"]), env=environment)
+    environment["LANG"] = "changed"
+    environment["NEW"] = "later"
+    assert body.request.environment == (("LANG", "C"),)
+    assert body.request.operation_lease is None
+    with pytest.raises(RequestError):
+        encode_request(body.request)
+    lease = sampled_lease(body.request.launch, 123)
+    completed = replace(body.request, operation_lease=lease)
+    assert decode_request(encode_request(completed)) == completed
+    request, policy = _compose(Command(["/bin/true"]), spec=_operation_spec(), operation_lease=lease)
+    assert request.operation_lease is lease and policy == body.output_policy
+
+
+def test_operation_body_headroom_accepts_exact_bound_and_refuses_one_byte_more() -> None:
+    argv = ("/bin/true",) + ("x" * 4000,) * 7 + ("",)
+    independent = _body(Command(argv), spec=_spec())
+    size = len(encode_request(independent.request)["request-control"])
+    remaining = MAX_CONTROL_BYTES - OPERATION_LEASE_CONTROL_HEADROOM - size
+    assert 0 < remaining <= 4096
+    exact = _body(Command(argv[:-1] + ("x" * remaining,)))
+    lease = sampled_lease(exact.request.launch, 123)
+    completed = replace(exact.request, operation_lease=lease)
+    assert len(encode_request(completed)["request-control"]) <= MAX_CONTROL_BYTES
+    with pytest.raises(ValidationError):
+        _body(Command(argv[:-1] + ("x" * (remaining + 1),)))
+    # The independent body keeps the full existing control ceiling.
+    _body(Command(argv[:-1] + ("x" * (remaining + 1),)), spec=_spec())
+
+
+@pytest.mark.parametrize(
+    "selection,resolved", [(Shell.SH, "/bin/sh"), (Shell.BASH, "/bin/bash"), (Shell.USER_DEFAULT, "/usr/bin/bash")]
+)
+def test_operation_body_uses_supplied_resolved_shell(selection, resolved) -> None:
+    spec = replace(_operation_spec(), shell=ManagedShellIdentity(selection, resolved, True))
+    body = _body(Script("printf 'ready'\n", selection, login=True), spec=spec)
+    assert body.request.kind == "script" and body.request.source == b"printf 'ready'\n"
+
+
+def test_operation_complete_wrapper_requires_real_lease() -> None:
     spec = replace(
         _spec(),
         owner=ManagedRunOwner(ManagedRunOwnerKind.OPERATION, "b" * 32),

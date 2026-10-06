@@ -21,7 +21,6 @@ from ._managed_runs import (
     ManagedLaunchState,
     ManagedOutputPolicy,
     ManagedRunIdentity,
-    ManagedRunLifetime,
     ManagedRunReceipt,
     ManagedRunRecord,
     ManagedRunRepository,
@@ -281,8 +280,6 @@ def prepare_managed_start(
         or type(output_policy) is not ManagedOutputPolicy
     ):
         raise ValidationError("Managed start requires exact planned run facts")
-    if spec.lifetime is not ManagedRunLifetime.INDEPENDENT:
-        raise ValidationError("Managed start supports only independent lifetime")
     if type(plan) is not IdentityPlan or type(deadline) is not Deadline or deadline.expires_at is None:
         raise ValidationError("Managed start requires a bound identity and deadline")
     if (

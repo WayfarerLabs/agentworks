@@ -220,16 +220,18 @@ def _metadata(data: bytes) -> dict[str, object]:
     return {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
 
 
-def encode_request(request: ManagedJobRequest) -> dict[str, bytes]:
-    """Validate a caller request and return only the five fixed asset leaves."""
+def _encode_request_assets(request: ManagedJobRequest, *, body_only: bool) -> dict[str, bytes]:
+    """Shared validation; body-only assets are internal preparation, not dispatch."""
     if type(request) is not ManagedJobRequest:
         raise RequestError("invalid request")
     launch = decode_request_launch(request.launch)
     try:
         if launch["lifetime"] == "operation":
             if request.operation_lease is None:
-                raise RequestError("operation lease required")
-            checked_lease(request.operation_lease, request.launch)
+                if not body_only:
+                    raise RequestError("operation lease required")
+            else:
+                checked_lease(request.operation_lease, request.launch)
         elif request.operation_lease is not None:
             raise RequestError("independent request cannot carry operation lease")
     except LeaseError:
@@ -291,6 +293,11 @@ def encode_request(request: ManagedJobRequest) -> dict[str, bytes]:
     if len(control) > MAX_CONTROL_BYTES:
         raise RequestError("control exceeds bound")
     return dict(zip(_ASSETS, (request.launch, control, environment, request.source, request.stdin), strict=True))
+
+
+def encode_request(request: ManagedJobRequest) -> dict[str, bytes]:
+    """Validate a complete caller request and return the five fixed asset leaves."""
+    return _encode_request_assets(request, body_only=False)
 
 
 def decode_request(assets: dict[str, bytes]) -> ManagedJobRequest:
