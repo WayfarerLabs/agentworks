@@ -720,6 +720,22 @@ job-length availability where needed, genuine creation/publication binding, full
 SSH workflows, and exact-head native integration still remain open. The earlier native results
 retain their pinned revisions and do not validate this new head.
 
+## Private local-download stack refresh
+
+SSH #832 rebases its 86 SSH commits from transport `ad960430a558882022df217e23d48aa4012c9754` onto
+`1dbb6245d96cf7dc76299c57088602b52d2cf60d`. Transport's new private Linux download composition
+connects verified remote transfer to local create or explicit-replace publication under one
+deadline, and tightens pathname-ancestry custody. It also records the requirement for a concrete
+activation producer and selected availability hold. This transport increment changes no shared SSH
+carrier contract, terminal endpoint or public RunContext surface. The rebase needed no SSH source or
+test adaptation.
+
+The combined CLI suite passed **14,301 tests with 26 skips**. Full Ruff and format checks passed on
+1,238 files, mypy passed 1,201 source files, and repository file lint passed. These are local
+combined-tree results. The preceding hosted CI and native reports retain their exact historical
+heads; neither validates this new SSH head. Public FileAccess and RunContext composition, terminal
+delivery, genuine binding and supported-platform SSH workflows remain open.
+
 ## Remaining integration and acceptance
 
 Earlier integration `fefc2b9e` uses transport `f3339f3d3cccace129be58711dc7eeb30ec66dc2`, which adds
