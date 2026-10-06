@@ -319,13 +319,30 @@ stale-generation refresh and an attempted import over an existing bundle cannot 
 learned keys or generations or reactivate superseded policy. Complete forward repair retains the
 learned key, CA/revoked records and applicable KRL. Each application attempt uses an isolated
 interpreter with retired execution modules unavailable and an effect marker proving refused commands
-did not execute. Bounded probe logs retain status/count observations without client diagnostics or
-key contents. These fixtures retain the server's 120-second lifetime, ten-second
-operation/key-generator bounds and a 15-second subprocess observation bound. They require the same
-authorized tester and account/home prerequisite as the other native enrollment fixtures. Collection
-does not perform native work. They do not measure a live server CA rotation, production creation or
-writer ownership, persisted configuration rollback, provider/RunContext composition, or native
-macOS/Windows acceptance.
+did not execute. Refusal requires complete external OpenSSH policy diagnostics identifying absent CA
+policy or KRL revocation, with the revocation bound to the served key's fingerprint and selected KRL
+file. Authentication, connection, malformed policy and incomplete diagnostic evidence fail these
+checks. Client diagnostics remain within a 4096-byte capture; only validated booleans,
+classification and counts reach the probe's 2048-byte observation file. Controller stdout/stderr are
+discarded, including failure tracebacks.
+
+These fixtures retain the server's 120-second lifetime and ten-second operation/key-generator
+bounds. The controller's 15-second observation deadline triggers at most one cooperative SIGINT to
+that exact owned Linux child. Expiry fails even if the child later succeeds. The admitted fixture
+worker keeps the controller and borrowed server/key paths until the SSH owner settles and the
+controller is reaped; no controller or process-group kill supplies settlement evidence. Cleanup
+completion has no promised finite bound. A separately authorized tester process/job timeout is a
+hang backstop, and its expiry leaves cleanup uncertain. Synthetic probe tests cover late success,
+cooperative-request and wait failures, retained borrowed resources, complete refusal classification
+and bounded safe metadata; they send no actual signals or SSH traffic.
+
+Native runs require the same authorized tester and account/home prerequisite as the other enrollment
+fixtures. Install the exact combined candidate with `uv sync --project cli --frozen --no-editable`
+in the tester's isolated environment, retain both branch pins and the installed revision, and use
+`uv run --no-sync` so invocation preserves that installation. Record actual parent/controller import
+origins alongside client/server versions. Collection does not perform native work. These fixtures do
+not measure a live server CA rotation, production creation or writer ownership, persisted
+configuration rollback, provider/RunContext composition, or native macOS/Windows acceptance.
 
 The integration-marked authentication-offer tests retain the owned server's DEBUG2 packet logs. They
 compare every queried or signed wire key, including its algorithm and complete blob, with the
