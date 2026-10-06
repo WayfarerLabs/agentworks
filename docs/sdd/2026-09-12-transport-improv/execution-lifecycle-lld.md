@@ -361,6 +361,14 @@ publication and disposal. Tests use controlled clocks; native Linux SSH/QGA proo
 observe body admission, descendant cleanup and retained uncertainty. Keep public exposure and
 broader completion checkboxes open until these obligations are proved.
 
+Give each keeper exchange separate delivery, preparation, nonce, collector and I/O custody. No
+generic concurrent-carrier capability is needed or inferred from immutable connection data.
+Operation-repository fencing is thread-safe; that does not make ordinary database repositories or
+RunContext dependencies safe to use from a background worker. Exact route and guest fencing remain
+required. Proxmox's current raw worker construction precedes its cleanup guard, and post-kill
+`communicate()` has no timeout: the ordinary delivery deadline does not prove bounded local drain.
+Carry these into the existing launch/interruption and keeper-drain gates before making that claim.
+
 ### First private managed service
 
 The first production-shaped service slice is Linux-only, `MANAGED` and `INDEPENDENT`. It does not

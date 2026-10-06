@@ -2674,6 +2674,11 @@ does not enable a production target/RunContext, settle old debts or complete the
       same-boot clock plus fixed-window ceiling without per-renewal database payload writes; initial
       start and renewal both need the post-clock generation fence. Keep native SSH/QGA, controller
       death, partition, suspend/boot and body-admission proof open until measured.
+- [ ] Prove separate keeper delivery and exchange custody alongside an ordinary borrow, without
+      background access to thread-affine database/context dependencies. Account for Proxmox's raw
+      worker construction before its cleanup guard and unbounded post-kill `communicate()`; delivery
+      timeout alone proves neither local drain nor guest-helper termination. Reuse the preceding
+      launch/interruption gate and preserve exact route/guest fencing.
 - [ ] Reconcile #770's historical escape/relaunch proposal against the later exclusion of malicious
       target-user containment. Deliver DIRECT/MANAGED without a CONTAINED profile or
       per-run-user/jail implementation; retain future profile extensibility. Prove trusted
