@@ -2323,11 +2323,16 @@ and whitespace checks pass. Live SSH/QGA and production route tests remain open.
       evidence; this hook alone does not establish the private guest observation/composition
       checkpoint below or third-party managed target identity.
 - [ ] Settle Proxmox restore/rollback incarnation policy before replacing its unavailable locator. A
-      candidate combines the observed cluster CA fingerprint, VMID and current SMBIOS UUID, but a
-      default restore can preserve those values and the guest marker. Prove the selected policy on
-      PVE 8 and 9 with the intended restricted token, including `VM.Audit`, `current=1`, ordinary
-      recreation, restore and rollback; absent or malformed evidence must refuse without dispatch.
-      The [prior-art finding](prior-art-research.md) does not authorize a positive locator or
+      live candidate combines the verified configured authority namespace, VMID and nonzero current
+      `vmgenid`, with the node retained only as a route. The independent marker/full guest checks
+      still apply. Version-pinned official source shows ordinary enabled-ID create, clone, restore
+      and rollback generation; it does not prove native observation or a disabled/absent-ID policy.
+      Prove the selected policy on PVE 8 and 9 with the intended restricted token and `VM.Audit`,
+      `current=1`, recreation, default/unique restore, disk/RAM rollback, clone, stop/start,
+      migration and VMID reuse. Settle explicit adoption/alternative handling for missing, disabled
+      or manually preserved IDs without synthetic identity or readiness repair. Do not impose an
+      uncopyable-cluster requirement or infer positive generation from configured addresses. The
+      [prior-art finding](prior-art-research.md) is response input, not native acceptance or
       recovery cutover by itself.
 - [ ] Complete and prove Linux supervisor launch through SSH and native QGA: protected identity,
       secret/source delivery, privilege changes, foreground wait, independent launch, output

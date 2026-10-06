@@ -678,16 +678,16 @@ Sources: [SQLite network-filesystem guidance](https://www.sqlite.org/useovernet.
 [systemd cleanup implementation](https://raw.githubusercontent.com/systemd/systemd/main/src/shared/clean-ipc.c),
 [Linux tmpfs documentation](https://docs.kernel.org/filesystems/tmpfs.html).
 
-Proxmox target identity is a separate open proof. The upstream
+The first Proxmox target-identity research checkpoint considered stronger namespaces. The upstream
 [Qemu API](https://github.com/proxmox/qemu-server/blob/master/src/PVE/API2/Qemu.pm) and
 [QemuServer configuration](https://github.com/proxmox/qemu-server/blob/master/src/PVE/QemuServer.pm)
 do not provide a documented, immutable cluster-plus-VM-incarnation locator that automatically
 survives or distinguishes every reuse, clone, migration and restore. Node plus VMID is an address,
 not such an identity. Do not infer one from SMBIOS UUID or VM generation ID without an explicit
-adoption/uniqueness policy and native proof; until then the Proxmox locator stays unavailable and
-recovery remains fail-closed.
+adoption/uniqueness policy and native proof. At that checkpoint the Proxmox locator remained
+unavailable; the revised candidate below does not require an uncopyable cluster identifier.
 
-A narrower candidate is the exact cluster CA fingerprint from the read-only
+The earlier, now superseded candidate combined the exact cluster CA fingerprint from the read-only
 [`certificates/info` endpoint](https://github.com/proxmox/pve-manager/blob/master/PVE/API2/Certificates.pm),
 VMID, and the current VM configuration's SMBIOS UUID. The cluster CA is separate from a replaceable
 API leaf certificate; the node must remain a route, not part of the identity. However, the
@@ -701,7 +701,41 @@ configuration as the running VM's identity; it requires `VM.Audit`, which the in
 token must prove on PVE 8 and 9. The certificate endpoint can omit a failed certificate read from an
 otherwise successful response, so absence of exactly one valid cluster CA entry is failed evidence,
 not an unavailable locator. Until restore/rollback incarnation policy and native proof are settled,
-no positive Proxmox locator is enabled from this candidate.
+no positive Proxmox locator was enabled from this candidate.
+
+An October 6 read-only audit inspects official Proxmox source commits
+`5ccd363e5908aa5a7b969797babdff1df5159475` (`stable-bookworm`, qemu-server 8.4.10) and
+`80e0590e144359fd136a2ba1e3f44716bfc535b0` (qemu-server 9.2.10, trixie). Both API create paths
+generate a UUID when `vmgenid` is absent or `1`, except for aarch64. The schema accepts `0` to
+disable, `1` to request API/CLI autogeneration, or a UUID; manually editing configuration does not
+perform that generation. Both restore transforms replace a configured nonzero ID, independently of
+the separate `unique` MAC/SMBIOS option. Clone and snapshot rollback likewise regenerate an enabled
+ID; saved-RAM rollback is therefore a distinct native coverage case, not something the guest boot
+UUID alone proves. The config endpoint requires `VM.Audit`; explicit `current=1` selects current
+instead of pending config.
+
+Sources:
+[PVE 8 create and generation](https://github.com/proxmox/qemu-server/blob/5ccd363e5908aa5a7b969797babdff1df5159475/src/PVE/API2/Qemu.pm#L1447-L1452),
+[PVE 8 generation schema](https://github.com/proxmox/qemu-server/blob/5ccd363e5908aa5a7b969797babdff1df5159475/src/PVE/QemuServer.pm#L680-L696),
+[PVE 8 restore transform](https://github.com/proxmox/qemu-server/blob/5ccd363e5908aa5a7b969797babdff1df5159475/src/PVE/QemuServer.pm#L7333-L7339),
+[PVE 8 rollback hook](https://github.com/proxmox/qemu-server/blob/5ccd363e5908aa5a7b969797babdff1df5159475/src/PVE/QemuConfig.pm#L468-L473),
+[PVE 8 current config API](https://github.com/proxmox/qemu-server/blob/5ccd363e5908aa5a7b969797babdff1df5159475/src/PVE/API2/Qemu.pm#L1700-L1758),
+[PVE 9 create](https://github.com/proxmox/qemu-server/blob/80e0590e144359fd136a2ba1e3f44716bfc535b0/src/PVE/API2/Qemu.pm#L1521-L1525),
+[PVE 9 restore](https://github.com/proxmox/qemu-server/blob/80e0590e144359fd136a2ba1e3f44716bfc535b0/src/PVE/QemuServer.pm#L6706-L6712),
+[PVE 9 rollback](https://github.com/proxmox/qemu-server/blob/80e0590e144359fd136a2ba1e3f44716bfc535b0/src/PVE/QemuConfig.pm#L474-L478),
+[PVE 9 current config API](https://github.com/proxmox/qemu-server/blob/80e0590e144359fd136a2ba1e3f44716bfc535b0/src/PVE/API2/Qemu.pm#L1790-L1851).
+
+The shared contract permits a bounded live route-scoped observation plus independent marker/full
+guest checks, not a permanent provider identity. The selected implementation candidate combines the
+configured verified authority namespace, VMID and live current nonzero `vmgenid`; node remains part
+of the selected route, not an incarnation component. Missing, disabled or malformed IDs are not
+successful generation evidence and require a separately settled adoption/alternative policy, never a
+synthetic UUID or readiness-time repair. Native testing on both majors must cover the restricted
+token, default/unique restore, clone, disk/RAM rollback, stop/start, migration and VMID reuse.
+Manual replacement preserving every provider and guest fact is an explicit trusted-platform adoption
+boundary, not a malicious-platform containment guarantee. The PVE 9 changelog pin is not an
+independently checked binary-package provenance claim. This research does not establish a positive
+production locator, native acceptance or recovery cutover.
 
 ### Decisions still required
 
