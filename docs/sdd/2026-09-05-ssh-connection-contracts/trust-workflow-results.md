@@ -118,3 +118,37 @@ creation/publication, concurrent production writers, persisted-config rollback o
 RunContext delivery. Their owned loopback server and fixture creation identity cannot stand in for
 those production gates. No completed checkbox or public final-product feedback round follows from
 this increment.
+
+## Local persisted-configuration restoration
+
+The bounded regression `cli/tests/execution/carriers/ssh/test_config_rollback.py`, added on base
+`e38f5fcff35bd85d099129fdbe5dd8480017c007`, uses isolated persisted TOML and the actual config and
+managed-trust APIs. Two cases load the original configuration, deliberately add `[operator.ssh]`,
+import complete multi-file policy, then refresh with an additional retained learned-key fixture and
+updated binary revocation bytes. One case also fails a refresh with an unavailable revocation file.
+The fixtures are opaque custody inputs; no installed client interprets them and no enrollment or
+provider creation is claimed.
+
+Restoring the original TOML bytes restores all legacy operator fields and leaves new settings
+absent. Both cases reopen config and the explicitly retained bundle in a fresh interpreter that
+refuses retired SSH, transport, runner and database imports. Reopening preserves the entire managed
+file snapshot, including the current manifest, earlier generations, learned-key/revocation bytes and
+partial failed-update evidence. The active case admits the newer complete generation; the failed
+case remains blocked. A stale writer using the initial generation refuses without changing state.
+Re-adding settings for the same bundle preserves current policy; the blocked case requires explicit
+complete-policy forward repair. Original legacy identity, aliases and trust files remain unchanged
+throughout.
+
+The developer measured **2 new cases passed**, then **168 focused non-integration tests passed with
+1 skip**, both exit 0. The focused selection includes the new regression, config settings, managed
+trust, interruptions, enrollment and migration probe tests. Changed-test Ruff lint/format and strict
+scoped mypy (one source file) pass, as do the two affected documents' pinned Prettier 3.8.3,
+markdownlint and spelling checks. These are local API/persistence observations on Linux, not native
+Windows or macOS evidence.
+
+**All previously pending native fixtures still have not run.** This increment establishes only the
+local persisted-configuration/state boundary described in the
+[configuration LLD](configuration-lld.md). It does not establish actual old/new delivery,
+installed-client CA/KRL acceptance, production writer ownership/coexistence, genuine
+creation/publication, production rollback or additive RunContext use. Transport composition and
+operator-owned native acceptance remain open; no completion checkbox is changed.

@@ -56,6 +56,38 @@ explain import, strict existing-target verification, refresh/block/recovery and 
 already-admitted connections when policy changes. No automatic discovery or background
 synchronization is part of configuration loading.
 
+## Persisted configuration restoration
+
+The operator's editor owns adding or restoring `[operator.ssh]`; neither configuration loading nor
+trust maintenance rewrites TOML. Preserve an isolated copy of the original configuration and the
+legacy identity, alias and trust files before changing settings. Adding the table selects explicit
+new-path prerequisites while retaining every legacy field. Restoring the original bytes removes
+those prerequisites: `OperatorConfig.ssh` becomes `None`, and composition must report unavailable
+new-path policy. Restoring a configuration file does not select, restore or delete a managed trust
+generation, or authorize enrollment. Transport owns making both paths available through RunContext
+and proving that the chosen production path can still honor current policy.
+
+Import and refresh require complete caller-owned snapshots, including retained learned keys and
+applicable revocations. Quiesce source writers or supply stable snapshots before copying; local
+identity/size/time checks cannot prove consistency against an uncooperative writer. The bundle's
+named maintenance authority remains responsible for updates after configuration restoration.
+Re-adding settings for the same bundle resolves its current manifest, including any durable block;
+it never automatically reactivates the generation that accompanied the old TOML. A stale expected
+generation refuses even when the caller restored its configuration.
+
+If a refresh failed after recording a block, retain the complete last generation and partial update
+evidence, then explicitly refresh from complete current policy under the expected current
+generation. Configuration restoration cannot repair the block. If storage could not durably record
+blocking, quiesce new use externally and repair storage before proceeding. If the selected old path
+cannot preserve newly learned trust or revocations, stop for operator-approved forward repair rather
+than restore incomplete policy. Already-admitted connections retain their selected policy and
+require explicit settlement when the operator needs them ended.
+
+The local persistence regression in [trust workflow evidence](trust-workflow-results.md) checks this
+configuration/state boundary using isolated TOML and actual managed-trust APIs. It does not exercise
+old SSH delivery, installed-client trust interpretation, production writer coexistence or RunContext
+composition.
+
 ## Acceptance
 
 Verify old config files still load with unchanged legacy values, new settings reject invalid shapes
