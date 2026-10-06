@@ -391,9 +391,9 @@ report-propagation assertion alongside the independent ABI check. All three inde
 clear the corrected combined pin `476e7c798de1953c42e52c8cda33c84945fa9728`, which also proposed a
 narrowly scoped CI collector. GitHub rejected publication at `889d2f163` because the token lacks
 workflow scope; no new-head CI started. The collector was unnecessary for this one-time
-investigation. After the operator questioned the recurring CI cost, the lead withdrew it and is
-separating the experiment from the ordinary native resource/polling regression. Collection belongs
-to an explicitly selected tester run with `-rP`, with no credential change required. The #845
+investigation. After the operator questioned the recurring CI cost, the lead withdrew it and
+separated the experiment from the ordinary native resource/polling regression. Collection belongs to
+an explicitly selected tester run with `-rP`, with no credential change required. The #845
 environment-data request was already fulfilled separately and did not call for this CI step.
 
 That pin rebases cleanly onto transport `51d5222d50cf04c38f1a5648d2bdd8b8f9bca8fd`, with no SSH
@@ -450,3 +450,21 @@ fixture root is independently verified unused before removal.
 The later collector removal supersedes that publication hold. Native comparison collection remains
 an explicitly selected tester task; no measured values follow from this correction. No completed
 plan record, lockfile or public feedback round changes.
+
+## One-time collection separated from routine CI
+
+Developer `763b1ebebe5b7440e37a0494044a33bb9a1efde6`, integrated as `94b414507`, adds an explicitly
+selected Windows integration case carrying `--input-comparison` to the isolated child. Ordinary
+resource/polling coverage keeps its original/custom modes and cleanup checks without the comparison.
+Both selections retain candidate admission, sole-process custody, worker settlement, exact-child
+reaping and independent window cleanup. The report prints after successful controls and cleanup. The
+helper and its six synthetic comparison cases are unchanged. The proposed six-line CI step was
+removed from unpublished branch history; the workflow matches the existing published workflow.
+
+The developer passes 69 focused synthetic cases with 1 Linux native skip, style checks, full strict
+Linux typing, scoped strict Windows typing with silent imports and pinned README quality gates.
+Windows full import traversal reports eight existing POSIX-symbol errors in production files; those
+files remain untouched and that check is not a claimed pass. Actual collection at the developer pin
+includes only the ordinary native fixture in both normal CI selections, and the explicit comparison
+node collects separately. These observations do not execute either native case. New native
+comparison values remain unobserved. The README now names the one-time command.
