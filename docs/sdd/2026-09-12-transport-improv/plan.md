@@ -559,6 +559,26 @@ from a freshly prepared current launcher; no mode fallback, changed non-root bod
 reinterpretation or drain inference is permitted. This is response clarification, not implemented
 adapter adoption or native privilege proof.
 
+Independent project and complexity lanes clear local-cleanup pin `7652235c9`. Project passes 320
+focused/adjacent cases and confirms that normalization after a resolved row does not touch a
+successor owner's rows or dispatch. Complexity passes 120 after restoring deletion experiments;
+removing either truthful retention or completed-resolution normalization breaks its regression.
+Generic passes 63 and identifies the corrected post-resolution interruption: cleanup retry now
+clears retained local coordination without another close, row update or guest probe. A separate
+repeated interrupted opening on one low-level binding is outside this private cleanup contract:
+the sole production caller retains a fresh exclusive binding, opens once and retries cleanup,
+never opening. Project independently confirms this reachability boundary; preserving a prior
+candidate on every refused reuse would instead permit closing an earlier legitimate caller's
+dispatcher. No general resumption framework is added.
+
+The lead's complete suite at this pin passes 14,972 non-integration tests with 49 skips and 27
+existing fork warnings, exit 0. Complete Ruff/format, strict mypy (1,227 source and test files),
+file quality, locked-SDD and whitespace gates exit 0. Website validation passes 160 Python and 103
+Node cases, four builds and both deterministic comparisons. The published predecessor `a424fe3f6`
+passes hosted CI and CodeQL. Outer retained availability, fresh version-two file-adapter adoption,
+native predecessor drain and full integration acceptance remain open. Publication is draft WIP;
+no ready/review-requested signal, broader completion checkbox or public round closure is claimed.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
