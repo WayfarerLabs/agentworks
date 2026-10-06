@@ -140,9 +140,19 @@ proof that sensitive reflection ran.
 The private terminal relay tests use synthetic Python children and owned PTYs only. They cover
 binary preparation followed by queued keys, initial modes/geometry, explicit TERM, partial writes,
 stalls, fair duplex delivery, endpoint failures and unchanged borrowed resources. No SSH client,
-server, operator terminal or infrastructure participates in these cases. A changed geometry
-explicitly refuses because the shared owner lacks exact-client resize notification; this is not a
-passing remote resize case, and the carrier terminal feature remains disabled.
+server, operator terminal or infrastructure participates in these cases. Repeated geometry changes
+reach a synthetic child's stdin PTY through the actual process owner's SIGWINCH operation, with
+borrowed modes and descriptor flags independently checked. This proves local signal/dimension
+delivery, not remote SSH resize; the carrier terminal feature remains disabled.
+
+Resize boundary faults cover finite notification expiry during bounded and unbounded operations,
+unknown outcomes, a late accepted signal, natural client exit races and control interruption. Unsent
+requests use fresh process facts and known completion survives uncertainty. Faults are injected at
+the actual public notification/close boundaries without replacing process ownership or reaching into
+its private notification state. Held settlement checks retain the borrowed terminal and owned slave
+until the shared owner settles, preserve the first control object through repeated caller
+interruption and report cleanup uncertainty without native diagnostics. Transport's separate owner
+tests establish claimed notification custody.
 
 The signal case confines real repeated SIGINT to an owned subprocess. It holds client cleanup open,
 interrupts the main thread while waiting, and proves the caller waits for worker completion,
