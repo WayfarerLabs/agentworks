@@ -1436,6 +1436,10 @@ teardown are quiescent. Explicit close stops admission and releases only a never
 or an explicitly resolved claim; it does not infer remote quiescence from local return or from the
 absence of an open child attempt.
 
+`stop_admission()` publishes a monotonic close signal without waiting for the owner guard or a
+database transition. Already-admitted work can finish its transition afterward; the signal proves
+neither cancellation nor quiescence. Bookkeeping, settlement and release remain serialized.
+
 Recovery may construct a new owner only by rotating the persisted generation from an exact
 predecessor. That atomically seals the stable operation ledger and restores persisted reserved,
 possible-dispatch, or resolved state without inferring remote quiescence. A recovery adapter may

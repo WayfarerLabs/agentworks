@@ -358,6 +358,15 @@ dispatch transaction: a takeover after the last check can still race an already 
 The supplied sampled expiry bounds that exchange's possible extension; it is not instant target
 fencing.
 
+Register the run-ID-only support obligation on the main path before borrowing ordinary work. Bind
+OPERATION lifetime and owner kind to the actual operation ID, exact VM and full guest identity once,
+then pass immutable facts and a separately prepared carrier to the worker. Reuse the retained
+lifecycle handle's admission check after each clock sample; compare its returned persisted identity
+with the fixed kind, version, payload and revision before publishing. An already possible effect
+needs no renewal payload update or new owner API. Start the renewal worker only after a clean
+acknowledged initial launch and settled local start delivery. An admitted but uncertain start gets
+no worker, retains its original debt and receives no renewal or replay.
+
 Renewal is not a second public command borrowing the owner's ordinary serial-use boundary. The
 support effect has two closed phases: LIVE admits only the bound clock/renewal exchanges; CLOSING
 admits only exact-run stop and observation after draining the local renewal worker and delivery. An
@@ -365,6 +374,13 @@ unresolved guest publication does not prevent the exact stop that establishes it
 fence. Neither phase permits arbitrary calls or reopens ordinary admission. Prove this composition
 against an ordinary long-running command rather than relaxing serialization globally. A wait timeout
 does not end the keeper or stop the job.
+
+Publish ordinary close intent through the owner's monotonic event before signaling and joining the
+keeper. The event does not wait for a keeper-held owner guard or a database transition; an already
+admitted transition may finish afterward. Bound the join and drain the keeper's exact local custody
+before any guarded execution finish, owner cleanup, ledger read or resolution. An alive worker
+retains the enclosing operation and prevents those later teardown steps. This does not interrupt
+blocked lock waits or turn the signal into remote cancellation.
 
 The proposed internal policy gives each clock-plus-publication cycle one total five-second delivery
 budget and nominal ten-second start-to-start cadence, without catch-up bursts. This budget is

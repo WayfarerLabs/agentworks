@@ -2783,6 +2783,16 @@ proof, not broader store locking or a claim that terminal artifact safety means 
 exited. Retained and collected units both need native proof; original activation reconciliation and
 workload emptiness remain separate obligations.
 
+The keeper design audit proves that the existing lifecycle admission method can fence an already
+possible effect while ordinary work holds its borrow, without changing the durable row. The worker
+must correlate the returned persisted binding and use only immutable prepared facts, not a
+thread-affine managed repository. Initial renewal starts only after a clean acknowledged launch;
+uncertain starts retain their debt without renewal. A blocked repository fence also demonstrates why
+ordinary close intent now uses one monotonic event instead of waiting for the owner guard. Keeper
+join and local drain must precede all later guarded teardown. The private close-signal
+implementation passes 428 coherent cases; independent implementation review and complete keeper
+composition remain open.
+
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
       serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one
       in-flight exchange, exact uncertainty retention and drain before release/disposal. Bind it to
