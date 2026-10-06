@@ -862,9 +862,11 @@ remain separate integration work.
 Create cannot overwrite an entry; explicit Replace requires an ordinary writable single-link file
 and preserves supported local access metadata or refuses before publication. It records publication
 separately from cleanup, so a cleanup error cannot turn a changed destination into an unchanged
-claim. The stage does not consume a guest result or establish the caller's deadline and ownership
-facts. It is not wired to public `FileAccess.download`, and Windows and macOS local publication
-remain unaccepted.
+claim. An interrupted close retains `cleanup_uncertain` without retrying a descriptor number that
+may have been reused; failed construction reports that fact in its exception because no writer can
+be returned. The stage does not consume a guest result or establish the caller's deadline and
+ownership facts. It is not wired to public `FileAccess.download`, and Windows and macOS local
+publication remain unaccepted.
 
 ## Private terminal handoff preparation
 
@@ -1146,7 +1148,7 @@ failures retain closed facts, not raw exception text; escaping control flow carr
 facts. Private completion and absence can coexist with `deadline_exceeded`; callers must preserve
 that timing fact rather than interpret the status alone as in-budget success. Upload and JSON
 composition retain the same independent timing fact. This private entry requires a finite positive
-source bound. Public optional bounds, local staging/publication and local cleanup remain
+source bound. Public optional bounds and integration with the private Linux local stage remain
 unimplemented; the coordinator cannot publish a local file or provide public FileAccess on its own.
 
 ## Private object observation and removal
@@ -1328,5 +1330,6 @@ Reconciliation recovers cleanup ownership only, never ready content or proof tha
 has stopped. Known cleanup debt survives deadline failure. Cleanup accepts the original token and
 identity-bound objects; delayed chunks refuse after receipt removal. The caller must serialize the
 complete logical operation and retain its token and known references. `_file_download.py` supplies
-that private composition; local publication and public FileAccess remain unimplemented. Local helper
-tests and serialized request-size measurements do not establish native carrier acceptance.
+that private composition; local publication exists only as a separate Linux primitive and public
+FileAccess remains unimplemented. Local helper tests and serialized request-size measurements do not
+establish native carrier acceptance.

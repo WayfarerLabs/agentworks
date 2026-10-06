@@ -585,6 +585,25 @@ def test_metadata_close_interruption_before_admission_cleans_with_retry(
     assert destination.read_bytes() == b"old"
 
 
+def test_metadata_close_interruption_does_not_lose_custody_on_commit_retry(tmp_path: Path) -> None:
+    destination = tmp_path / "download"
+    destination.write_bytes(b"old")
+    writer = _InterruptBeforeCloseAdmission(destination, condition=Replace())
+    writer.try_write(memoryview(b"new"))
+    writer.interrupt_name = "_metadata_close_uncertain"
+    with pytest.raises(KeyboardInterrupt):
+        commit(writer, b"new")
+    metadata_fd = writer._metadata_fd
+    assert metadata_fd is not None and not writer.cleanup_uncertain
+    with pytest.raises(ValueError, match="descriptor is unavailable"):
+        commit(writer, b"new")
+    assert writer._metadata_fd == metadata_fd
+    writer.abort()
+    with pytest.raises(OSError):
+        os.fstat(metadata_fd)
+    assert destination.read_bytes() == b"old"
+
+
 @pytest.mark.parametrize("during_construction", [False, True])
 @pytest.mark.parametrize("effect", [False, True])
 def test_ambiguous_metadata_close_is_visible_and_never_retried(
