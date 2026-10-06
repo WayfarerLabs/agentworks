@@ -1,14 +1,19 @@
 """Owned POSIX PTY input and borrowed terminal mode restoration.
 
-No process or relay is started here. The caller must stop every user of these
-descriptors before release; kernel mode restoration does not sanitize an emulator.
+One retained non-main thread owns the native lifetime. No process or relay is
+started here. The caller must stop every borrower before that thread releases the
+resource; kernel mode restoration does not sanitize an emulator.
 """
 
 from __future__ import annotations
 
 import os
-from copy import deepcopy
 from dataclasses import dataclass, field
+from threading import current_thread, main_thread
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from threading import Thread
 
 type _TerminalMode = list[int | list[bytes | int]]
 
@@ -20,6 +25,7 @@ class PosixTerminal:
     _input_fd: int
     _output_fd: int
     _saved_mode: _TerminalMode
+    _owner_thread: Thread
     _master_fd: int | None = None
     _slave_fd: int | None = None
     _restore_needed: bool = False
@@ -29,9 +35,14 @@ class PosixTerminal:
     def acquire(cls, input_fd: int, output_fd: int) -> PosixTerminal:
         """Admit supplied native fds and make input raw without flushing queued bytes.
 
-        Preparation owns endpoint pairing and exclusive use. Admission checks the
-        actual supplied descriptors, never process-global standard streams.
+        Preparation owns endpoint pairing and exclusive use. The caller retains
+        this non-main worker through cleanup, so normal main-thread signal delivery
+        cannot interrupt native resource bookkeeping. Asynchronous thread injection
+        and fatal process termination are outside this ownership guarantee.
         """
+        owner_thread = current_thread()
+        if owner_thread is main_thread():
+            raise RuntimeError("Terminal acquisition requires a retained non-main worker")
         if os.name != "posix":
             raise OSError("POSIX terminal resources are unavailable on this host")
         import fcntl
@@ -41,15 +52,14 @@ class PosixTerminal:
         if fcntl.fcntl(input_fd, fcntl.F_GETFL) & os.O_ACCMODE == os.O_WRONLY:
             raise OSError("Terminal input is not readable")
         saved_mode: _TerminalMode = termios.tcgetattr(input_fd)
-        termios.tcgetattr(output_fd)
         dimensions = termios.tcgetwinsize(output_fd)
-        terminal = cls(input_fd, output_fd, saved_mode)
+        terminal = cls(input_fd, output_fd, saved_mode, owner_thread)
         try:
             terminal._master_fd, terminal._slave_fd = os.openpty()
             termios.tcsetattr(terminal._slave_fd, termios.TCSANOW, saved_mode)
             termios.tcsetwinsize(terminal._slave_fd, dimensions)
             os.set_blocking(terminal._master_fd, False)
-            raw_mode = deepcopy(saved_mode)
+            raw_mode = list(saved_mode)
             tty.cfmakeraw(raw_mode)
             # Mark before the syscall: interruption can follow its native effect.
             terminal._restore_needed = True
@@ -79,6 +89,7 @@ class PosixTerminal:
 
     def refresh_dimensions(self) -> bool:
         """Copy a changed output-terminal size; the caller owns client notification."""
+        self._require_owner()
         import termios
 
         slave_fd = self.slave_fd
@@ -95,6 +106,7 @@ class PosixTerminal:
         control flow and incorporates these errors into its cleanup evidence.
         Repeated release returns the same evidence without retrying uncertain closes.
         """
+        self._require_owner()
         if self._release_errors is not None:
             return self._release_errors
         import termios
@@ -116,3 +128,7 @@ class PosixTerminal:
                     errors.append(error)
         self._release_errors = tuple(errors)
         return self._release_errors
+
+    def _require_owner(self) -> None:
+        if current_thread() is not self._owner_thread:
+            raise RuntimeError("Terminal mutation requires its retained native worker")
