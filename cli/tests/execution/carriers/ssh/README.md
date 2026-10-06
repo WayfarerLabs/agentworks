@@ -127,6 +127,24 @@ needs the shared framing checks; suppressed output supplies no framing proof. Us
 sensitive vector, including its expected status, rather than treating empty retained output alone as
 proof that sensitive reflection ran.
 
+## POSIX terminal candidate fixtures
+
+The private terminal relay tests use synthetic Python children and owned PTYs only. They cover
+binary preparation followed by queued keys, initial modes/geometry, explicit TERM, partial writes,
+stalls, fair duplex delivery, endpoint failures and unchanged borrowed resources. No SSH client,
+server, operator terminal or infrastructure participates in these cases. A changed geometry
+explicitly refuses because the shared owner lacks exact-client resize notification; this is not a
+passing remote resize case, and the carrier terminal feature remains disabled.
+
+The signal case confines real repeated SIGINT to an owned subprocess. It holds client cleanup open,
+interrupts the main thread while waiting, and proves the caller waits for worker completion,
+restoration and shared-owner settlement while preserving the first control exception. Synthetic
+cases separately cover interrupted worker start and process admission, and restoration uncertainty.
+Supply an explicit temporary root in the developer or review worktree for these runs. An owning
+process/job timeout bounds fixture hangs; thread status after interrupted join is not a completion
+fact. Native macOS/Windows, real SSH terminal delivery and emulator sanitation require separate
+integration evidence.
+
 ## Trust maintenance and forwarding fixtures
 
 Trust tests operate only on isolated snapshots and owned temporary destinations. They cover complete
