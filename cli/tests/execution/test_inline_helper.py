@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._execution_operation import OwnedInlineOutcome
 from agentworks.execution._execution_result import reduce_owned_inline_result
 from agentworks.execution._helper_identity import IdentityExpectation
@@ -49,6 +50,7 @@ class LocalCarrier:
     def __init__(self) -> None:
         self.calls = 0
         self.last_report: CarrierReport | None = None
+        self.custody = LocalDeliveryCustody()
 
     @property
     def features(self) -> ChannelFeatures:
@@ -57,10 +59,18 @@ class LocalCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         pass
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
-        result = run_process(list(invocation.argv), io=io, deadline=deadline)
+        held = self.custody if custody is None else custody
+        result = run_process(list(invocation.argv), io=io, deadline=deadline, custody=held)
         completion = None
         if result.exit_status is not None:
             completion = (
@@ -69,7 +79,7 @@ class LocalCarrier:
                 else ExitStatus(code=result.exit_status)
             )
         report = CarrierReport(
-            Dispatch.SENT if result.started else Dispatch.NOT_SENT,
+            Dispatch.UNKNOWN if not held.settled else Dispatch.SENT if result.started else Dispatch.NOT_SENT,
             completion,
             result.local_status,
             result.stdout,
