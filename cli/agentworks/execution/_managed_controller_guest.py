@@ -124,7 +124,7 @@ def _native_state(data: bytes, unit: str) -> ControllerState:
         numbers: dict[str, int] = {}
         for name in _FIELDS[4:]:
             value = fields[name]
-            if not value.isascii() or not value.isdecimal() or len(value) > 20:
+            if not value.isdecimal() or len(value) > 20:
                 raise ValueError
             number = int(value)
             if str(number) != value or number > 2**64 - 1:
@@ -167,7 +167,7 @@ def _native_state(data: bytes, unit: str) -> ControllerState:
             and main == control == 0
             and executed > 0
             and 0 < start <= exit_time
-            and ((code == 1 and status <= 255) or (code in (2, 3) and 0 < status <= 64))
+            and (code == 1 or (code in (2, 3) and 0 < status <= 64))
         ):
             return ControllerState.EXITED
     except (ValueError, UnicodeError):
