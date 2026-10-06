@@ -12,11 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.db import Database
+from agentworks.db import Database, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution import _managed_start_guest as guest
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_wire import FileRecord, FileRecordKind, encode_file_record
+from agentworks.execution._fixed_helper_operation import BorrowedFixedHelperCarrier
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._managed_job_protocol import encode_managed_job_fact
@@ -68,6 +69,7 @@ from agentworks.execution.carrier import (
     SinkOutput,
 )
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
+from agentworks.operations import OperationOwner
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux managed store")
 RUN = ManagedRunIdentity("a" * 32)
@@ -203,13 +205,25 @@ def _start(repository: ManagedRunRepository, record: ManagedRunRecord, carrier: 
         GUEST,
     )
     prepared.claim(record, carrier, deadline)
-    return start_managed_run(
-        repository,
-        record,
-        carrier,
-        prepared=prepared,
-        deadline=deadline,
+    owner = OperationOwner.acquire(
+        repository._database.operations,  # noqa: SLF001
+        OperationScope(OperationResourceKind.VM, record.spec.target.name),
+        "managed-start-exchange-proof",
     )
+    delivery = BorrowedFixedHelperCarrier(carrier, owner.borrow())
+    try:
+        result = start_managed_run(repository, record, delivery, prepared=prepared, deadline=deadline)
+        delivery.settle(result.candidate.dispatch, result.candidate.carrier_completion)
+        return result
+    finally:
+        custody, error = delivery.release()
+        if error is not None:
+            raise error
+        if not custody.requires_owner_retention:
+            # This transcript fixture creates no guest effects.
+            owner.seal_lifecycle_obligations()
+            owner.record_effects_resolved()
+            owner.close()
 
 
 @pytest.mark.parametrize("fault", ["discarded", "other_carrier"])

@@ -146,6 +146,8 @@ def _platform_subject(
     observed_routes: list[WSL2Connection] | None = None,
     observed_carriers: list[WSL2Carrier] | None = None,
 ) -> tuple[WSL2OwnedDownload | None, Mock]:
+    local_delivery = LocalDeliveryCustody()
+
     def execute(
         selected: WSL2Carrier,
         invocation: PreparedInvocation,
@@ -187,6 +189,7 @@ def _platform_subject(
         deadline=Deadline.after(30),
         native=FakeNative([]) if native is None else native,
         observer=observer,
+        provider_custody=local_delivery,
     )
     if subject is not None:
         assert subject.owner is owner
@@ -377,6 +380,7 @@ def test_registration_replacement_during_binding_resolution_refuses_before_guest
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    local_delivery = LocalDeliveryCustody()
     setup = Mock(side_effect=AssertionError("gate setup before target preparation"))
     monkeypatch.setattr(FileEffectGateSetup, "for_target", setup)
     with closing(Database(tmp_path / "state.db")) as database:
@@ -405,6 +409,7 @@ def test_registration_replacement_during_binding_resolution_refuses_before_guest
             deadline=Deadline.after(30),
             native=FakeNative([]),
             observer=FakeObserver([]),
+            provider_custody=local_delivery,
         )
         assert subject is not None
         assert _download(subject, tmp_path, BytesSink()) is WSL2DownloadStatus.REFUSED
@@ -436,6 +441,7 @@ def test_selected_platform_unavailable_locator_preserves_caller_owner(
 
 
 def test_selected_platform_invalid_locator_preserves_caller_owner(tmp_path: Path) -> None:
+    local_delivery = LocalDeliveryCustody()
     with closing(Database(tmp_path / "state.db")) as database:
         owner = _acquire_owner(database)
         platform = Mock(spec=WSL2Platform)
@@ -450,6 +456,7 @@ def test_selected_platform_invalid_locator_preserves_caller_owner(tmp_path: Path
                 cast(RunContext, object()),
                 owner=owner,
                 deadline=Deadline.after(30),
+                provider_custody=local_delivery,
             )
         platform.resolve_native_execution_binding.assert_not_called()
         assert database.operations.inspect(OperationScope(OperationResourceKind.VM, "box")) is not None
@@ -458,6 +465,7 @@ def test_selected_platform_invalid_locator_preserves_caller_owner(tmp_path: Path
 
 
 def test_selected_platform_invalid_binding_preserves_caller_owner(tmp_path: Path) -> None:
+    local_delivery = LocalDeliveryCustody()
     with closing(Database(tmp_path / "state.db")) as database:
         owner = _acquire_owner(database)
         platform = Mock(spec=WSL2Platform)
@@ -475,6 +483,7 @@ def test_selected_platform_invalid_binding_preserves_caller_owner(tmp_path: Path
                 cast(RunContext, object()),
                 owner=owner,
                 deadline=Deadline.after(30),
+                provider_custody=local_delivery,
             )
         assert database.operations.inspect(OperationScope(OperationResourceKind.VM, "box")) is not None
         _close_owner(owner)
@@ -482,6 +491,8 @@ def test_selected_platform_invalid_binding_preserves_caller_owner(tmp_path: Path
 
 
 def test_selected_platform_subclass_carrier_preserves_caller_owner(tmp_path: Path) -> None:
+    local_delivery = LocalDeliveryCustody()
+
     class SubclassCarrier(WSL2Carrier):
         pass
 
@@ -502,6 +513,7 @@ def test_selected_platform_subclass_carrier_preserves_caller_owner(tmp_path: Pat
                 cast(RunContext, object()),
                 owner=owner,
                 deadline=Deadline.after(30),
+                provider_custody=local_delivery,
             )
         assert database.operations.inspect(OperationScope(OperationResourceKind.VM, "box")) is not None
         _close_owner(owner)

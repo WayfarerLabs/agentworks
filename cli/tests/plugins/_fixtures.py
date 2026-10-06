@@ -134,6 +134,7 @@ class ConformingVMPlatform(VMPlatform):
         ctx: RunContext,
         *,
         deadline: Deadline,
+        custody=None,
     ) -> ProviderLocatorObservation:
         raise NotImplementedError
 

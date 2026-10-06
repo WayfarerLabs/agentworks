@@ -14,6 +14,7 @@ from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLo
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.errors import ConfigError, ConnectivityError, LimitExceededError, StateError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import Deadline
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
@@ -38,24 +39,29 @@ def _proxmox() -> ProxmoxPlatform:
 
 
 def test_lima_locator_is_unavailable_without_provider_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    local_delivery = LocalDeliveryCustody()
     platform = LimaPlatform("lima", {})
     monkeypatch.setattr(platform, "_run_lima", lambda *_args, **_kwargs: pytest.fail("unexpected lookup"))
 
     assert (
-        platform.observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))
+        platform.observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10), custody=local_delivery)
         == ProviderLocatorUnavailable()
     )
 
 
 def test_proxmox_locator_requires_scoped_configuration_without_legacy_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    local_delivery = LocalDeliveryCustody()
     platform = _proxmox()
     monkeypatch.setattr(platform, "_api", lambda _ctx: pytest.fail("unexpected lookup"))
 
     with pytest.raises(ConfigError):
-        platform.observe_provider_locator(_vm(metadata={"vmid": "123"}), RunContext(), deadline=Deadline.after(10))
+        platform.observe_provider_locator(
+            _vm(metadata={"vmid": "123"}), RunContext(), deadline=Deadline.after(10), custody=local_delivery
+        )
 
 
 def test_wsl2_locator_uses_one_bounded_registration_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    local_delivery = LocalDeliveryCustody()
     calls: list[dict[str, object]] = []
 
     def run(*args: object, **kwargs: object) -> SimpleNamespace:
@@ -77,6 +83,7 @@ def test_wsl2_locator_uses_one_bounded_registration_probe(monkeypatch: pytest.Mo
         _vm(metadata={"distro_name": "test-distro"}),
         RunContext(),
         deadline=Deadline.after(10),
+        custody=local_delivery,
     )
 
     assert result == ProviderLocator(
@@ -93,26 +100,33 @@ def test_wsl2_locator_uses_one_bounded_registration_probe(monkeypatch: pytest.Mo
 
 
 def test_wsl2_locator_rejects_invalid_provider_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    local_delivery = LocalDeliveryCustody()
     monkeypatch.setattr(
         "agentworks.capabilities.vm_platform.wsl2.subprocess.run",
         lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout='{"machine_guid":"not-guid"}'),
     )
 
     with pytest.raises(StateError):
-        WSL2Platform("wsl2", {}).observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))
+        WSL2Platform("wsl2", {}).observe_provider_locator(
+            _vm(), RunContext(), deadline=Deadline.after(10), custody=local_delivery
+        )
 
 
 def test_wsl2_locator_maps_process_failure_to_connectivity(monkeypatch: pytest.MonkeyPatch) -> None:
+    local_delivery = LocalDeliveryCustody()
     monkeypatch.setattr(
         "agentworks.capabilities.vm_platform.wsl2.subprocess.run",
         lambda *_args, **_kwargs: SimpleNamespace(returncode=1, stdout=""),
     )
 
     with pytest.raises(ConnectivityError):
-        WSL2Platform("wsl2", {}).observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))
+        WSL2Platform("wsl2", {}).observe_provider_locator(
+            _vm(), RunContext(), deadline=Deadline.after(10), custody=local_delivery
+        )
 
 
 def test_wsl2_locator_maps_missing_or_duplicate_registration_to_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    local_delivery = LocalDeliveryCustody()
     from agentworks.capabilities.vm_platform import wsl2
 
     monkeypatch.setattr(
@@ -124,20 +138,27 @@ def test_wsl2_locator_maps_missing_or_duplicate_registration_to_state(monkeypatc
     )
 
     with pytest.raises(StateError):
-        WSL2Platform("wsl2", {}).observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))
+        WSL2Platform("wsl2", {}).observe_provider_locator(
+            _vm(), RunContext(), deadline=Deadline.after(10), custody=local_delivery
+        )
 
 
 def test_wsl2_locator_maps_process_timeout_to_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    local_delivery = LocalDeliveryCustody()
+
     def timeout(*_args: object, **_kwargs: object) -> SimpleNamespace:
         raise subprocess.TimeoutExpired("powershell", 1)
 
     monkeypatch.setattr("agentworks.capabilities.vm_platform.wsl2.subprocess.run", timeout)
 
     with pytest.raises(LimitExceededError):
-        WSL2Platform("wsl2", {}).observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))
+        WSL2Platform("wsl2", {}).observe_provider_locator(
+            _vm(), RunContext(), deadline=Deadline.after(10), custody=local_delivery
+        )
 
 
 def test_wsl2_locator_rejects_a_late_provider_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    local_delivery = LocalDeliveryCustody()
     from agentworks.capabilities.vm_platform import wsl2
 
     calls = 0
@@ -156,12 +177,15 @@ def test_wsl2_locator_rejects_a_late_provider_result(monkeypatch: pytest.MonkeyP
     )
 
     with pytest.raises(LimitExceededError):
-        WSL2Platform("wsl2", {}).observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))
+        WSL2Platform("wsl2", {}).observe_provider_locator(
+            _vm(), RunContext(), deadline=Deadline.after(10), custody=local_delivery
+        )
 
     assert calls == 2
 
 
 def test_wsl2_locator_keeps_observed_process_failure_over_late_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    local_delivery = LocalDeliveryCustody()
     from agentworks.capabilities.vm_platform import wsl2
 
     calls = 0
@@ -180,6 +204,8 @@ def test_wsl2_locator_keeps_observed_process_failure_over_late_deadline(monkeypa
     )
 
     with pytest.raises(ConnectivityError):
-        WSL2Platform("wsl2", {}).observe_provider_locator(_vm(), RunContext(), deadline=Deadline.after(10))
+        WSL2Platform("wsl2", {}).observe_provider_locator(
+            _vm(), RunContext(), deadline=Deadline.after(10), custody=local_delivery
+        )
 
     assert calls == 1

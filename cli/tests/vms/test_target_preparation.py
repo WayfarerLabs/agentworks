@@ -203,7 +203,9 @@ def _compose(
     ctx: object = None,
     expected_locator: ProviderLocator = _DEFAULT_LOCATOR,
     binding: NativeExecutionBinding | None = None,
+    custody=None,
 ):
+    local_delivery = LocalDeliveryCustody()
     return prepare_managed_vm_target_from_platform(
         vm or _vm(),
         platform,
@@ -212,6 +214,7 @@ def _compose(
         binding if binding is not None else platform.test_binding,
         deadline=deadline or Deadline.after(10),
         owner=owner,
+        provider_custody=local_delivery,
     )
 
 
@@ -893,7 +896,12 @@ def test_platform_composition_passes_exact_inputs_and_leaves_outer_owner_open(
     assert carrier.deadlines == [deadline]
     assert len(borrows) == 1 and releases == borrows
     assert platform.observe_provider_locator.call_count == 2
-    assert platform.observe_provider_locator.call_args_list == [call(_vm(), ctx, deadline=deadline)] * 2
+    provider_custody = platform.observe_provider_locator.call_args.kwargs["custody"]
+    assert isinstance(provider_custody, LocalDeliveryCustody)
+    assert (
+        platform.observe_provider_locator.call_args_list
+        == [call(_vm(), ctx, deadline=deadline, custody=provider_custody)] * 2
+    )
     platform.resolve_native_execution_binding.assert_not_called()
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
@@ -996,6 +1004,7 @@ def test_expected_locator_mismatch_refuses_before_guest_probe(
 def test_locator_replacement_during_binding_resolution_refuses_before_probe(
     owned: tuple[Database, OperationOwner],
 ) -> None:
+    local_delivery = LocalDeliveryCustody()
     _, owner = owned
     carrier = TranscriptCarrier(_success_payload())
     platform = _platform(carrier)
@@ -1008,7 +1017,7 @@ def test_locator_replacement_during_binding_resolution_refuses_before_probe(
         return _binding(carrier)
 
     platform.resolve_native_execution_binding.side_effect = replace_during_binding
-    expected = platform.observe_provider_locator(_vm(), None, deadline=Deadline.after(10))
+    expected = platform.observe_provider_locator(_vm(), None, deadline=Deadline.after(10), custody=local_delivery)
     binding = platform.resolve_native_execution_binding(_vm(), None, deadline=Deadline.after(10))
     result = _compose(owner, platform, expected_locator=expected, binding=binding)
 

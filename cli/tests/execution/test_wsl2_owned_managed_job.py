@@ -57,6 +57,7 @@ def _subject(
     bindings: list[NativeExecutionBinding] | None = None,
     locators: list[object] | None = None,
 ) -> tuple[WSL2OwnedManagedJob, Mock, GuestThenFileCarrier]:
+    local_delivery = LocalDeliveryCustody()
     guest_carrier = GuestThenFileCarrier(database)
 
     def execute(
@@ -84,6 +85,7 @@ def _subject(
         deadline=Deadline.after(30),
         native=FakeNative([]),
         observer=FakeObserver([]),
+        provider_custody=local_delivery,
     )
     assert subject is not None
     assert subject.owner is owner

@@ -3,6 +3,7 @@
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import (
     CarrierIO,
     Deadline,
@@ -24,6 +25,7 @@ class UnusedEndpoint:
 @pytest.mark.parametrize("sensitive", [False, True])
 @pytest.mark.parametrize("mode", ["live_input", "sink", "live_sink"])
 def test_real_extended_modes_refuse_before_connection_access(mode: str, sensitive: bool) -> None:
+    custody = LocalDeliveryCustody()
     endpoint = UnusedEndpoint()
     io = (
         CarrierIO(input=LiveInput(endpoint, sensitive=sensitive))
@@ -36,4 +38,4 @@ def test_real_extended_modes_refuse_before_connection_access(mode: str, sensitiv
     with pytest.raises(ValidationError):
         carrier.validate(invocation, io=io)
     with pytest.raises(ValidationError):
-        carrier.execute(invocation, io=io, deadline=Deadline.after(10))
+        carrier.execute(invocation, io=io, deadline=Deadline.after(10), custody=custody)

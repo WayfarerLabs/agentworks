@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.execution import _runtime_prerequisite
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._runtime_prerequisite import (
     RuntimePrefixSink,
     RuntimePrerequisiteObservation,
@@ -72,6 +73,7 @@ def _run(
     helper_source: str = "",
     timeout: float = 5,
 ) -> tuple[RuntimePrerequisiteObservation, _Sink, _Sink, ProcessResult]:
+    local_delivery = LocalDeliveryCustody()
     argv, candidates, system_shim = build_runtime_helper_argv(
         selection=selection,
         fixed_source=helper_source,
@@ -88,11 +90,13 @@ def _run(
             sensitive=True,
         ),
         deadline=Deadline.after(timeout),
+        custody=local_delivery,
     )
     return prefix.observation, output, stderr, result
 
 
 def _run_trampoline(preamble: str) -> tuple[RuntimePrerequisiteObservation, _Sink, _Sink, ProcessResult]:
+    local_delivery = LocalDeliveryCustody()
     helper = "import os\nos.write(1,b'helper-entered')\n"
     # Exercise Windows text translation on every test host; protocol output is binary.
     harness = (
@@ -119,6 +123,7 @@ def _run_trampoline(preamble: str) -> tuple[RuntimePrerequisiteObservation, _Sin
         ],
         io=CarrierIO(output=SinkOutput(prefix, stderr), sensitive=True),
         deadline=Deadline.after(5),
+        custody=local_delivery,
     )
     return prefix.observation, output, stderr, result
 

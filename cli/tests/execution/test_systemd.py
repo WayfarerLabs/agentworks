@@ -289,11 +289,12 @@ def test_fixed_unit_shape_has_no_stdio_properties_or_caller_controls(identity: I
 
 
 def test_fresh_identity_and_malformed_boundary_marker_are_not_reused(identity: IdentityExpectation) -> None:
+    local_delivery = LocalDeliveryCustody()
     first, second = _prepared(identity), _prepared(identity)
     assert first.run != second.run
     assert first.run.unit.startswith("agw-managed-")
     fake = SystemdFake(marker="not-a-boundary-marker")
-    result = run_managed_candidate(fake, first, deadline=Deadline.after(1))
+    result = run_managed_candidate(fake, first, deadline=Deadline.after(1), custody=local_delivery)
     assert result.boundary.state is BoundaryState.INVALID
     assert not result.complete
 
@@ -302,14 +303,18 @@ def test_fresh_identity_and_malformed_boundary_marker_are_not_reused(identity: I
 def test_boundary_marker_rejects_invalid_helper_status_without_raising(
     identity: IdentityExpectation, marker: str
 ) -> None:
-    result = run_managed_candidate(SystemdFake(marker=marker), _prepared(identity), deadline=Deadline.after(1))
+    local_delivery = LocalDeliveryCustody()
+    result = run_managed_candidate(
+        SystemdFake(marker=marker), _prepared(identity), deadline=Deadline.after(1), custody=local_delivery
+    )
     assert result.boundary.state is BoundaryState.INVALID
     assert result.boundary.helper_completion is None
 
 
 def test_boundary_marker_preserves_unknown_helper_status(identity: IdentityExpectation) -> None:
+    local_delivery = LocalDeliveryCustody()
     result = run_managed_candidate(
-        SystemdFake(marker="empty:unknown:0"), _prepared(identity), deadline=Deadline.after(1)
+        SystemdFake(marker="empty:unknown:0"), _prepared(identity), deadline=Deadline.after(1), custody=local_delivery
     )
     assert result.boundary.state is BoundaryState.EMPTY
     assert result.boundary.helper_completion is None
@@ -422,12 +427,15 @@ def test_nonempty_boundary_is_not_complete(boundary_state: BoundaryState) -> Non
 
 
 def test_missing_or_lost_launch_is_not_boundary_success(identity: IdentityExpectation) -> None:
+    local_delivery = LocalDeliveryCustody()
     prepared = _prepared(identity)
-    result = run_managed_candidate(SystemdFake(dispatch=Dispatch.UNKNOWN), prepared, deadline=Deadline.after(1))
+    result = run_managed_candidate(
+        SystemdFake(dispatch=Dispatch.UNKNOWN), prepared, deadline=Deadline.after(1), custody=local_delivery
+    )
     assert result.boundary.state is BoundaryState.UNKNOWN
     assert not result.complete
     with pytest.raises(ValidationError):
-        run_managed_candidate(SystemdFake(), prepared, deadline=Deadline.after(1))
+        run_managed_candidate(SystemdFake(), prepared, deadline=Deadline.after(1), custody=local_delivery)
 
 
 def test_candidate_claim_is_atomic_before_dispatch(identity: IdentityExpectation) -> None:
@@ -456,8 +464,9 @@ def test_candidate_claim_is_atomic_before_dispatch(identity: IdentityExpectation
     prepared._claim_lock = cast(Any, AttemptLock())
 
     def invoke() -> None:
+        local_delivery = LocalDeliveryCustody()
         try:
-            run_managed_candidate(carrier, prepared, deadline=Deadline.after(1))
+            run_managed_candidate(carrier, prepared, deadline=Deadline.after(1), custody=local_delivery)
         except ValidationError as error:
             errors.append(error)
 
@@ -479,8 +488,9 @@ def test_candidate_claim_is_atomic_before_dispatch(identity: IdentityExpectation
 
 
 def test_private_input_and_output_bounds_do_not_leak_through_fake_dispatch(identity: IdentityExpectation) -> None:
+    local_delivery = LocalDeliveryCustody()
     prepared = _prepared(identity, sensitive=True)
-    result = run_managed_candidate(SystemdFake(), prepared, deadline=Deadline.after(1))
+    result = run_managed_candidate(SystemdFake(), prepared, deadline=Deadline.after(1), custody=local_delivery)
     assert not result.complete
     assert "private-payload-canary" not in repr(result)
     assert "private-input-canary" not in repr(result)
@@ -494,8 +504,12 @@ def test_private_input_and_output_bounds_do_not_leak_through_fake_dispatch(ident
 
 
 def test_prerequisite_requires_root_v252_and_cgroup_v2() -> None:
+    local_delivery = LocalDeliveryCustody()
     current = SystemdFake()
-    assert check_systemd_prerequisites(current, deadline=Deadline.after(1)) is PrerequisiteState.READY
+    assert (
+        check_systemd_prerequisites(current, deadline=Deadline.after(1), custody=local_delivery)
+        is PrerequisiteState.READY
+    )
     assert all("cgroup.kill" not in part for call in current.calls for part in call)
 
     class Older(SystemdFake):
@@ -512,7 +526,10 @@ def test_prerequisite_requires_root_v252_and_cgroup_v2() -> None:
                 return _report(b"systemd 251\n")
             return super().execute(invocation, io=io, deadline=deadline, custody=custody)
 
-    assert check_systemd_prerequisites(Older(), deadline=Deadline.after(1)) is PrerequisiteState.UNSUPPORTED
+    assert (
+        check_systemd_prerequisites(Older(), deadline=Deadline.after(1), custody=local_delivery)
+        is PrerequisiteState.UNSUPPORTED
+    )
 
     class Newer(SystemdFake):
         def execute(
@@ -528,7 +545,10 @@ def test_prerequisite_requires_root_v252_and_cgroup_v2() -> None:
                 return _report(b"systemd 253\n")
             return super().execute(invocation, io=io, deadline=deadline, custody=custody)
 
-    assert check_systemd_prerequisites(Newer(), deadline=Deadline.after(1)) is PrerequisiteState.READY
+    assert (
+        check_systemd_prerequisites(Newer(), deadline=Deadline.after(1), custody=local_delivery)
+        is PrerequisiteState.READY
+    )
 
     class Unprivileged(SystemdFake):
         def execute(
@@ -545,7 +565,8 @@ def test_prerequisite_requires_root_v252_and_cgroup_v2() -> None:
             return super().execute(invocation, io=io, deadline=deadline, custody=custody)
 
     assert (
-        check_systemd_prerequisites(Unprivileged(), deadline=Deadline.after(1)) is PrerequisiteState.CONTROL_UNAVAILABLE
+        check_systemd_prerequisites(Unprivileged(), deadline=Deadline.after(1), custody=local_delivery)
+        is PrerequisiteState.CONTROL_UNAVAILABLE
     )
 
 
@@ -695,6 +716,7 @@ def test_bundled_supervisor_preserves_payload_exit(tmp_path: Path) -> None:
 
 @_LINUX_ONLY
 def test_nonzero_helper_status_rejects_plausible_terminal_payload_frames(tmp_path: Path) -> None:
+    local_delivery = LocalDeliveryCustody()
     prepared = prepare_managed_candidate(
         Command(("/bin/true",)),
         identity=_current_identity(),
@@ -702,7 +724,10 @@ def test_nonzero_helper_status_rejects_plausible_terminal_payload_frames(tmp_pat
     )
     transcript = _run_prepared_supervisor(tmp_path, prepared)
     result = run_managed_candidate(
-        SystemdFake(marker="empty:exit:9", launch=transcript.stdout), prepared, deadline=Deadline.after(1)
+        SystemdFake(marker="empty:exit:9", launch=transcript.stdout),
+        prepared,
+        deadline=Deadline.after(1),
+        custody=local_delivery,
     )
     assert result.helper is not None and result.helper.trusted_terminal
     assert result.boundary.helper_completion == ExitStatus(code=9)
@@ -713,6 +738,7 @@ def test_nonzero_helper_status_rejects_plausible_terminal_payload_frames(tmp_pat
 
 @_LINUX_ONLY
 def test_systemd_completion_remains_separate_from_helper_and_boundary_evidence(tmp_path: Path) -> None:
+    local_delivery = LocalDeliveryCustody()
     prepared = prepare_managed_candidate(
         Command(("/bin/true",)),
         identity=_current_identity(),
@@ -720,7 +746,10 @@ def test_systemd_completion_remains_separate_from_helper_and_boundary_evidence(t
     )
     transcript = _run_prepared_supervisor(tmp_path, prepared)
     result = run_managed_candidate(
-        SystemdFake(launch=transcript.stdout, completion=1), prepared, deadline=Deadline.after(1)
+        SystemdFake(launch=transcript.stdout, completion=1),
+        prepared,
+        deadline=Deadline.after(1),
+        custody=local_delivery,
     )
     assert result.launch_completion == ExitStatus(code=1)
     assert result.boundary.helper_completion == ExitStatus(code=0)

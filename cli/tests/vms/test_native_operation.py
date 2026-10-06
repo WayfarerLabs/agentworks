@@ -105,7 +105,7 @@ def test_conflicting_claim_prevents_passive_provider_work(
     platform = WSL2Platform("wsl2", {})
     observed = False
 
-    def observe(vm: VMRow, ctx: RunContext, *, deadline: Deadline) -> VMStatus:
+    def observe(vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody=None) -> VMStatus:
         nonlocal observed
         observed = True
         return VMStatus.RUNNING
@@ -130,7 +130,7 @@ def test_site_mismatch_refuses_before_power_observation(
     platform = WSL2Platform("other-site", {})
     observed = False
 
-    def observe(vm: VMRow, ctx: RunContext, *, deadline: Deadline) -> VMStatus:
+    def observe(vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody=None) -> VMStatus:
         nonlocal observed
         observed = True
         return VMStatus.RUNNING
@@ -154,12 +154,12 @@ def test_late_power_result_refuses_before_route(
     deadline = Deadline.after(10)
     routed = False
 
-    def observe(vm: VMRow, ctx: RunContext, *, deadline: Deadline) -> VMStatus:
+    def observe(vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody=None) -> VMStatus:
         assert database.operations.inspect(_scope()) is not None
         object.__setattr__(deadline, "expires_at", 0.0)
         return VMStatus.RUNNING
 
-    def locator(vm: VMRow, ctx: RunContext, *, deadline: Deadline) -> ProviderLocator:
+    def locator(vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody=None) -> ProviderLocator:
         nonlocal routed
         routed = True
         return ProviderLocator("wsl2:registration")
@@ -195,13 +195,13 @@ def test_fresh_intent_and_power_gate_precedes_route_and_wake(
     database.set_operator_stopped("box", stopped)
     events: list[str] = []
 
-    def observe(vm: VMRow, ctx: RunContext, *, deadline: Deadline) -> VMStatus:
+    def observe(vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody=None) -> VMStatus:
         assert database.operations.inspect(_scope()) is not None
         assert vm.operator_stopped is stopped
         events.append("power")
         return power
 
-    def locator(vm: VMRow, ctx: RunContext, *, deadline: Deadline) -> ProviderLocator:
+    def locator(vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody=None) -> ProviderLocator:
         events.append("route")
         raise StateError("test route stop")
 
@@ -356,17 +356,25 @@ def _install_route(
     observer = FakeObserver([])
     connection = WSL2Connection("Ubuntu", "admin", "wsl.exe")
     binding = NativeExecutionBinding(WSL2Carrier(connection), "admin", RuntimeSelection(RuntimeTargetOS.LINUX))
-    monkeypatch.setattr(platform, "observe_execution_power", lambda vm, ctx, *, deadline: VMStatus.RUNNING)
     monkeypatch.setattr(
-        platform, "observe_provider_locator", lambda vm, ctx, *, deadline: ProviderLocator("wsl2:registration")
+        platform, "observe_execution_power", lambda vm, ctx, *, deadline, custody=None: VMStatus.RUNNING
     )
-    monkeypatch.setattr(platform, "resolve_native_execution_binding", lambda vm, ctx, *, deadline, config: binding)
+    monkeypatch.setattr(
+        platform,
+        "observe_provider_locator",
+        lambda vm, ctx, *, deadline, custody=None: ProviderLocator("wsl2:registration"),
+    )
+    monkeypatch.setattr(
+        platform, "resolve_native_execution_binding", lambda vm, ctx, *, deadline, config, custody=None: binding
+    )
     monkeypatch.setattr(_wsl2_owned_operation, "WindowsWSL2HostClient", lambda: native)
     monkeypatch.setattr(_wsl2_owned_operation, "WSL2GuestObserver", lambda connection: observer)
     monkeypatch.setattr(
         WSL2Carrier,
         "execute",
-        lambda selected, invocation, *, io, deadline: route.execute(selected, invocation, io=io, deadline=deadline),
+        lambda selected, invocation, *, io, deadline, custody: route.execute(
+            selected, invocation, io=io, deadline=deadline, custody=custody
+        ),
     )
     return route, native, observer
 

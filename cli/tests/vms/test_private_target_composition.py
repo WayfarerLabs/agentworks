@@ -194,7 +194,9 @@ def composition(
     monkeypatch.setattr(
         WSL2Carrier,
         "execute",
-        lambda carrier, invocation, *, io, deadline: dispatch.execute(carrier, invocation, io=io, deadline=deadline),
+        lambda carrier, invocation, *, io, deadline, custody: dispatch.execute(
+            carrier, invocation, io=io, deadline=deadline, custody=custody
+        ),
     )
     install_fixture_bundle(monkeypatch, tmp_path / "scratch")
     try:
@@ -207,10 +209,18 @@ def _prepared_accesses(
     owner: OperationOwner, vm: VMRow, platform: WSL2Platform, root: Path, dispatch: _LocalWSL2Dispatch
 ) -> tuple[ExecutionOperation, ExecutionAccess, FileAccess]:
     """Prepare the private target and account plan under one existing owner."""
+    local_delivery = LocalDeliveryCustody()
     binding = platform.resolve_native_execution_binding(vm, RunContext(), deadline=Deadline.after(30))
     dispatch.binding = binding
     prepared = prepare_managed_vm_target_from_platform(
-        vm, platform, RunContext(), _LOCATOR, binding, deadline=Deadline.after(30), owner=owner
+        vm,
+        platform,
+        RunContext(),
+        _LOCATOR,
+        binding,
+        deadline=Deadline.after(30),
+        owner=owner,
+        provider_custody=local_delivery,
     )
     assert prepared.status is VMTargetPreparationStatus.PREPARED
     assert prepared.target is not None

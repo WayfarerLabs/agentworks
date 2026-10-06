@@ -115,6 +115,7 @@ class BlockRetired(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, BlockRetired())
 from agentworks.execution.carriers.ssh import SSHCarrier, SSHConnection
 from agentworks.execution.carrier import Deadline
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.preparation import Command, prepare, decode_output
 
 connection = SSHConnection(
@@ -122,7 +123,10 @@ connection = SSHConnection(
     identity_file=Path(sys.argv[2]), known_hosts_file=Path(sys.argv[3]),
 )
 prepared = prepare(Command(("/bin/cat",)), stdin=b"\x00\xff\r\n")
-result = SSHCarrier(connection).execute(prepared.invocation, io=prepared.io, deadline=Deadline.after(10))
+custody = LocalDeliveryCustody()
+result = SSHCarrier(connection).execute(prepared.invocation, io=prepared.io, deadline=Deadline.after(10), custody=custody)
+if not custody.settled:
+    raise AssertionError("SSH fixture retained local delivery")
 output = decode_output(prepared, result.stdout)
 if result.failure is not None or result.completion is None or result.completion.code != 0:
     raise AssertionError("SSH fixture did not complete")

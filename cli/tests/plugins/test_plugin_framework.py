@@ -266,7 +266,7 @@ class _PlatformWithoutNativeTransport(VMPlatform):
     def display_backend_name(self, vm: Any) -> str:
         raise NotImplementedError
 
-    def observe_provider_locator(self, vm: Any, ctx: Any, *, deadline: Any) -> Any:
+    def observe_provider_locator(self, vm: Any, ctx: Any, *, deadline: Any, custody=None) -> Any:
         raise NotImplementedError
 
 

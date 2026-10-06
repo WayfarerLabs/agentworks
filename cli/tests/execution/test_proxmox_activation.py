@@ -15,6 +15,7 @@ from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.db import Database
 from agentworks.db.operations import LifecycleObligationState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._proxmox_activation import (
     ActivationPayload,
     ProxmoxActivation,
@@ -57,13 +58,17 @@ def payload(**kwargs) -> ActivationPayload:
 
 @pytest.fixture
 def owned(tmp_path: Path, monkeypatch):
+    local_delivery = LocalDeliveryCustody()
     with closing(Database(tmp_path / "activation.db")) as database:
         repository = database.operations
         owner = OperationOwner.acquire(repository, OperationScope(OperationResourceKind.VM, "vm-one"), "proof")
-        adapter = ProxmoxActivation(owner, "vm-one", CONNECTION, ProviderLocator("selected-provider-locator"))
+        adapter = ProxmoxActivation(
+            owner, "vm-one", CONNECTION, ProviderLocator("selected-provider-locator"), custody=local_delivery
+        )
         calls = []
 
-        def start(wire, *, timeout):
+        def start(wire, *, timeout, custody):
+            assert custody is local_delivery
             assert 0 < timeout <= 5
             row = next(row for row in owner.list_lifecycle_obligations() if row.obligation_id == adapter.obligation_id)
             assert row.obligation_id == adapter.obligation_id
@@ -72,7 +77,8 @@ def owned(tmp_path: Path, monkeypatch):
             calls.append("start")
             return UPID
 
-        def poll(wire, upid, *, timeout):
+        def poll(wire, upid, *, timeout, custody):
+            assert custody is local_delivery
             assert upid == UPID
             calls.append("poll")
             return status()
@@ -120,7 +126,7 @@ def test_exact_armed_single_post_and_terminal_request_only(owned):
 def test_foreign_or_malformed_receipt_never_polls_or_replays(owned, monkeypatch, upid):
     _, owner, adapter, calls = owned
 
-    def start(wire, *, timeout):
+    def start(wire, *, timeout, custody):
         calls.append("start")
         return upid
 

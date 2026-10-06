@@ -31,6 +31,7 @@ from tests.vms.test_target_preparation import _vm
 
 
 def test_durable_ready_requires_the_full_selected_anchor_payload(tmp_path: Path) -> None:
+    local_delivery = LocalDeliveryCustody()
     from dataclasses import replace
 
     from agentworks.execution._wsl2_platform_hold import decode_hold_payload, encode_hold_payload
@@ -49,6 +50,7 @@ def test_durable_ready_requires_the_full_selected_anchor_payload(tmp_path: Path)
             owner=owner,
             native=FakeNative([]),
             observer=FakeObserver([]),
+            provider_custody=local_delivery,
         )
         ready = selected.hold.start(Deadline.after(10))
         assert selected._ready_is_durable(ready)  # noqa: SLF001
@@ -70,6 +72,8 @@ def test_durable_ready_requires_the_full_selected_anchor_payload(tmp_path: Path)
 def test_invalid_owner_refuses_before_route_selection_or_native_effects(
     tmp_path: Path, composition: type[WSL2OwnedOperation], entry: str, invalid: str
 ) -> None:
+    local_delivery = LocalDeliveryCustody()
+
     class SubclassOwner(OperationOwner):
         pass
 
@@ -95,6 +99,7 @@ def test_invalid_owner_refuses_before_route_selection_or_native_effects(
                     deadline=Deadline.after(30),
                     native=native,
                     observer=observer,
+                    provider_custody=local_delivery,
                 )
             else:
                 composition(
@@ -107,6 +112,7 @@ def test_invalid_owner_refuses_before_route_selection_or_native_effects(
                     owner=supplied,
                     native=native,
                     observer=observer,
+                    provider_custody=local_delivery,
                 )
         platform.observe_provider_locator.assert_not_called()
         platform.resolve_native_execution_binding.assert_not_called()
@@ -121,6 +127,7 @@ def test_invalid_owner_refuses_before_route_selection_or_native_effects(
 
 
 def test_factory_exception_preserves_unsealed_caller_claim(tmp_path: Path) -> None:
+    local_delivery = LocalDeliveryCustody()
     with closing(Database(tmp_path / "state.db")) as database:
         owner = _acquire_owner(database)
         platform = Mock(spec=WSL2Platform)
@@ -134,6 +141,7 @@ def test_factory_exception_preserves_unsealed_caller_claim(tmp_path: Path) -> No
                 cast(RunContext, object()),
                 owner=owner,
                 deadline=Deadline.after(30),
+                provider_custody=local_delivery,
             )
         assert caught.value is original
         platform.resolve_native_execution_binding.assert_not_called()
@@ -153,6 +161,7 @@ def test_hold_reads_and_settles_only_supplied_owners_database(
     entry: str,
     runtime_path: str | None,
 ) -> None:
+    local_delivery = LocalDeliveryCustody()
     with (
         closing(Database(tmp_path / "owner.db")) as database,
         closing(Database(tmp_path / "other.db")) as other_database,
@@ -194,6 +203,7 @@ def test_hold_reads_and_settles_only_supplied_owners_database(
                 deadline=Deadline.after(30),
                 native=native,
                 observer=observer,
+                provider_custody=local_delivery,
             )
             assert subject is not None
         else:
@@ -207,6 +217,7 @@ def test_hold_reads_and_settles_only_supplied_owners_database(
                 owner=owner,
                 native=native,
                 observer=observer,
+                provider_custody=local_delivery,
             )
 
         selected_binding = subject.binding
@@ -244,6 +255,7 @@ def test_unsupported_runtime_refuses_before_hold_construction_or_native_activati
     entry: str,
     runtime: RuntimeSelection,
 ) -> None:
+    local_delivery = LocalDeliveryCustody()
     with closing(Database(tmp_path / "state.db")) as database:
         owner = _acquire_owner(database)
         platform = Mock(spec=WSL2Platform)
@@ -271,6 +283,7 @@ def test_unsupported_runtime_refuses_before_hold_construction_or_native_activati
                     owner=owner,
                     native=native,
                     observer=observer,
+                    provider_custody=local_delivery,
                 )
             else:
                 composition.from_platform(
@@ -281,6 +294,7 @@ def test_unsupported_runtime_refuses_before_hold_construction_or_native_activati
                     deadline=Deadline.after(30),
                     native=native,
                     observer=observer,
+                    provider_custody=local_delivery,
                 )
 
         hold.assert_not_called()

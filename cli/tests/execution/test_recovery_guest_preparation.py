@@ -162,11 +162,12 @@ def recovery(tmp_path: Path):
 
 
 def _batch(owner: OperationOwner, carrier: FixedCarrier, *, delivery: str = "admin", early: FixedCarrier | None = None):
+    local_delivery = LocalDeliveryCustody()
     route = None if early is None else _EarlyGuestFactsRoute(early, IdentityPlan(_ROOT, IdentityMode.DIRECT), delivery)
     binding = NativeExecutionBinding(
         carrier, delivery, RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"), route
     )
-    return RecoveryGuestPreparationBatch(binding, owner, _BATCH_ID)
+    return RecoveryGuestPreparationBatch(binding, owner, _BATCH_ID, provider_custody=local_delivery)
 
 
 def _prepare(batch: RecoveryGuestPreparationBatch, *, workload: str = "admin", elevated: bool = True, **kwargs):

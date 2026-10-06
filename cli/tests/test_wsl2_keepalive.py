@@ -340,7 +340,7 @@ def test_base_platform_vm_active_is_nullcontext() -> None:
         def native_transport(self, vm: Any, ctx: Any, *, config: Any = None) -> Any:
             raise NotImplementedError
 
-        def observe_provider_locator(self, vm: Any, ctx: Any, *, deadline: Any) -> Any:
+        def observe_provider_locator(self, vm: Any, ctx: Any, *, deadline: Any, custody=None) -> Any:
             raise NotImplementedError
 
     # Patch Popen at the wsl2 module level; the base default must NOT touch it.

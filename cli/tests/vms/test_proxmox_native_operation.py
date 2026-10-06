@@ -117,11 +117,11 @@ def _install(database: Database, monkeypatch: pytest.MonkeyPatch) -> tuple[Proxm
         RuntimeSelection(RuntimeTargetOS.LINUX),
     )
 
-    def locator(vm, ctx, *, deadline):
+    def locator(vm, ctx, *, deadline, custody=None):
         assert database.operations.inspect(_scope()) is not None
         return route.locators.pop(0) if route.locators else ProviderLocator("pve:generation")
 
-    def resolve(vm, ctx, *, deadline, config):
+    def resolve(vm, ctx, *, deadline, config, custody=None):
         assert database.operations.inspect(_scope()) is not None
         route.resolutions += 1
         return binding
@@ -132,7 +132,9 @@ def _install(database: Database, monkeypatch: pytest.MonkeyPatch) -> tuple[Proxm
     monkeypatch.setattr(
         ProxmoxCarrier,
         "execute",
-        lambda self, invocation, *, io, deadline: route.execute(invocation, io=io, deadline=deadline),
+        lambda self, invocation, *, io, deadline, custody: route.execute(
+            invocation, io=io, deadline=deadline, custody=custody
+        ),
     )
     return platform, route
 

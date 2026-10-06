@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import CarrierIO, Deadline, PreparedInvocation, SinkOutput, TerminalInput
 from agentworks.execution.carriers import _subprocess, wsl2
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
@@ -32,6 +33,7 @@ def _io() -> CarrierIO:
 
 
 def test_proxmox_refuses_terminal_before_provider_access(monkeypatch: pytest.MonkeyPatch) -> None:
+    local_delivery = LocalDeliveryCustody()
     carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.example", "node1", 123, "token", "secret"))
     request = MagicMock(side_effect=AssertionError("provider accessed"))
     monkeypatch.setattr(carrier._wire, "request", request)
@@ -41,11 +43,12 @@ def test_proxmox_refuses_terminal_before_provider_access(monkeypatch: pytest.Mon
     with pytest.raises(ValidationError):
         carrier.validate(invocation, io=io)
     with pytest.raises(ValidationError):
-        carrier.execute(invocation, io=io, deadline=Deadline(None))
+        carrier.execute(invocation, io=io, deadline=Deadline(None), custody=local_delivery)
     request.assert_not_called()
 
 
 def test_wsl2_refuses_terminal_before_local_spawn(monkeypatch: pytest.MonkeyPatch) -> None:
+    local_delivery = LocalDeliveryCustody()
     carrier = WSL2Carrier(WSL2Connection("debian", "user", "wsl.exe"))
     run = MagicMock(side_effect=AssertionError("local client spawned"))
     monkeypatch.setattr(wsl2, "run_process", run)
@@ -55,11 +58,12 @@ def test_wsl2_refuses_terminal_before_local_spawn(monkeypatch: pytest.MonkeyPatc
     with pytest.raises(ValidationError):
         carrier.validate(invocation, io=io)
     with pytest.raises(ValidationError):
-        carrier.execute(invocation, io=io, deadline=Deadline(None))
+        carrier.execute(invocation, io=io, deadline=Deadline(None), custody=local_delivery)
     run.assert_not_called()
 
 
 def test_buffered_ssh_refuses_terminal_before_connection_access(monkeypatch: pytest.MonkeyPatch) -> None:
+    local_delivery = LocalDeliveryCustody()
     carrier = SSHCarrier(SSHConnection("host.example", "user", Path("/missing/key"), Path("/missing/hosts")))
     validate_files = MagicMock(side_effect=AssertionError("connection files accessed"))
     run = MagicMock(side_effect=AssertionError("local client spawned"))
@@ -71,14 +75,17 @@ def test_buffered_ssh_refuses_terminal_before_connection_access(monkeypatch: pyt
     with pytest.raises(ValidationError):
         carrier.validate(invocation, io=io)
     with pytest.raises(ValidationError):
-        carrier.execute(invocation, io=io, deadline=Deadline(None))
+        carrier.execute(invocation, io=io, deadline=Deadline(None), custody=local_delivery)
     validate_files.assert_not_called()
     run.assert_not_called()
 
 
 def test_generic_subprocess_refuses_terminal_before_spawn(monkeypatch: pytest.MonkeyPatch) -> None:
+    local_delivery = LocalDeliveryCustody()
     run = MagicMock(side_effect=AssertionError("local child spawned"))
     monkeypatch.setattr(_subprocess, "run_owned_process", run)
     with pytest.raises(ValidationError):
-        _subprocess.run_process(["/bin/true"], io=_io(), deadline=Deadline(None), live_stdio=True)
+        _subprocess.run_process(
+            ["/bin/true"], io=_io(), deadline=Deadline(None), live_stdio=True, custody=local_delivery
+        )
     run.assert_not_called()

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import Capture, CarrierIO, Deadline
 from agentworks.execution.carriers._subprocess import run_process
 
@@ -143,6 +144,7 @@ def observe_runtime_prerequisite(
     fixture_system_shim: Path | None = None,
 ) -> PrerequisiteObservation:
     """Run one fixture-injectable, carrier-shaped prerequisite observation."""
+    local_delivery = LocalDeliveryCustody()
     if timeout <= 0:
         raise ValueError("timeout must be positive")
     candidates: tuple[Path, ...]
@@ -171,6 +173,7 @@ def observe_runtime_prerequisite(
         io=CarrierIO(output=Capture(_MAX_CAPTURE)),
         deadline=Deadline.after(timeout),
         env=_MINIMAL_ENV,
+        custody=local_delivery,
     )
     if result.failure is not None or result.exit_status != 0 or not result.stdout.complete:
         return _unknown()

@@ -6,6 +6,8 @@ import sys
 
 import pytest
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
+
 if sys.platform != "linux":  # pragma: no cover - platform guard
     pytest.skip("the terminal handoff candidate requires Linux", allow_module_level=True)
 
@@ -183,6 +185,7 @@ def test_carrier_io_preserves_diagnostic_control_exception() -> None:
 
 
 def test_carrier_io_is_refused_by_nonterminal_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    local_delivery = LocalDeliveryCustody()
     prepared, _ = _prepared()
     io = prepared.carrier_io(input_fd=0, output_fd=1, term="xterm", diagnostics=CollectSink())
     assert isinstance(io, CarrierIO)
@@ -192,7 +195,7 @@ def test_carrier_io_is_refused_by_nonterminal_process(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(_subprocess, "run_owned_process", forbidden)
     with pytest.raises(ValidationError):
-        _subprocess.run_process(["/bin/true"], io=io, deadline=Deadline(None), live_stdio=True)
+        _subprocess.run_process(["/bin/true"], io=io, deadline=Deadline(None), live_stdio=True, custody=local_delivery)
     assert prepared.bootstrap.try_read(1) is None
 
 
