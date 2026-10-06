@@ -880,7 +880,7 @@ retains the approved supported-metadata preservation and partial-failure reporti
 
 The next private unit integrates activation-custody worker `caa0fd5e9`: one fresh versioned ledger
 row before at most one start POST, receipt retention before publication, exact bookkeeping-only
-reconciliation and fenced task observation under finite budgets. Its 330 focused/adjacent cases (88
+reconciliation and fenced task observation under finite budgets. Its 330 focused/adjacent cases (87
 adapter cases), owned typing/style, repository file quality and whitespace checks pass. Whole-unit
 source reviews, stopped-VM composition and complete lead validation remain pending.
 
@@ -891,6 +891,22 @@ QEMU. Project and complexity independently verify the pinned source and clear co
 warnings may settle this request. Unknown/error/missing evidence and HA handoff retain custody.
 Native interrupted-launch and successful/warning acceptance remains open. This corrects the private
 draft before publication; no requirement, shared API, schema or broader completion changes.
+
+Project and generic clear whole adapter unit `f19e5fe7f`; project passes 444 focused/adjacent cases
+plus 25 Windows-selected cases on Linux, and generic passes 355 cases. Complexity passes 196
+baseline/deletion/restored adapter/wire cases, but requests deleting redundant locator construction
+and an unused dispatch flag. Removing the successful-outcome condition fails three unknown-result
+cases. Its count check also finds an arithmetic error in the worker handoff: the adapter has 87
+cases, not 88. The worker confirms the correction; the broader 330-case selection remains accurate.
+The lead passes 313 focused/adjacent cases, independently passes all 87 adapter cases and passes
+complete typing/style, file quality, locked-SDD, Rulesync and whitespace checks. These do not accept
+the pending simplification or stopped-VM composition, and no full new-source suite or native
+acceptance is claimed.
+
+Worker correction `c0596c5dc` removes the repeated locator construction and unused dispatch state,
+leaving actual wire-call assertions and cleanup behavior unchanged. Corrected selections pass 87,
+196 and 330 cases; owned typing/style, repository file quality and whitespace pass. Corrected
+whole-unit private clearance and stopped-VM composition remain pending.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
