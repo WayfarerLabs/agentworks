@@ -350,6 +350,22 @@ corrected mock. The owner passes all 390 focused/related cases and all 21 pertur
 complete strict mypy and scoped/file gates; production bytes are unchanged. Corrected integrated
 re-review and lead gates remain pending, without any native or production adoption claim.
 
+All three lanes clear corrected inline code/test pin `919c54156`. Project passes 378
+focused/adjacent cases; generic passes 21 focused cases. Complexity passes the same 21 cases both
+normally and after an inert wrapper statement, then restores its experiment. The final lead state at
+`644960423` has identical CLI and website bytes and incorporates the preceding published operation
+evidence. Its complete suite passes 14,824 non-integration tests with 49 skips, complete
+Ruff/format, strict mypy (1,220 source and test files), typer isolation, file quality, locked-SDD,
+Rulesync and whitespace gates. Website validation passes 160 Python and 103 Node cases, four builds
+and both deterministic comparisons. Representative maximum-manifest QGA envelopes measure
+57,225/57,267 bytes for direct/sudo entry, with Windows quoting at 24,266/24,296 characters; valid
+large-group aggregates exceed the carrier bound and refuse. These are sizing and mocked-admission
+results, not native Windows or privileged acceptance. The interrupted worker's unidentified failure
+markers remain unclassified, not diagnosed by this clean complete run. The published
+operation-context head `51d5222d5` passes all hosted CI and CodeQL gates. Operation-owned execution
+context, fresh recovery, service entry and native production composition remain open; no review
+signal or public round closes.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
