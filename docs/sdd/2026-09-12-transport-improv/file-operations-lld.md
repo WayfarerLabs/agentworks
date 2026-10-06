@@ -145,6 +145,16 @@ access through directory ACL inheritance. An inherited ACL that prevents private
 unsupported refusal. This local creation default is separate from preserving the ordinary
 direct-write access semantics of an existing `Replace` destination.
 
+The private POSIX stages share held ancestry, private staging, Create and cleanup custody while
+keeping Linux rename publication and macOS held-file Replace separate. Linux uses search-only
+ancestor handles; macOS reads held-directory ACL metadata and permits deny-only ACL entries on
+ancestors and newly created private stages. An access-granting entry or failed/unknown ACL
+inspection refuses; the implementation neither evaluates arbitrary ACL policy nor clears it.
+Existing macOS Replace targets still refuse all extended ACLs and other unsupported metadata.
+Windows uses the caller's existing OS authority, including already-enabled backup/restore
+privileges, rather than promising an ACL denial can defeat that authority; it enables no privilege.
+Ordinary stock-home and inherited-ACL behavior still need native proof.
+
 For macOS and Windows, explicit local `Replace` first holds and verifies a single existing regular
 file under the workstation caller's ordinary authority. It refuses links, reparse points, hard
 links, directories, special objects, unsupported flags or access metadata before mutation. Only
@@ -454,6 +464,16 @@ may its bounded bytes reach the private download composition. The host also chec
 length and digest. Zero-byte snapshots require no nonempty range. Raw carrier output, truncated
 framing or conflicting ready facts cannot become file bytes or a successful download.
 
+For a carrier advertising live stdio, `snapshot_stream` instead carries the same already-READY
+reference and emits bounded sequenced DATA records, an exact length/digest result and FINISHED over
+one helper invocation. It opens that held private snapshot once and keeps the file effect gate, when
+supplied, across data and terminal emission. The collector writes only to the private composition
+sink and validates total length and digest against both the ready reference and the source revision.
+Closed transcript and normal carrier completion are required before verification; exact remote
+cleanup must settle before any local publication. The route is selected once before transfer. A
+possibly dispatched stream cannot replay or fall back to chunks. Buffered carriers keep the bounded
+range exchanges, and native throughput/retention acceptance remains open.
+
 `snapshot_reconcile` needs only the original core token and identity; `snapshot_cleanup` adds the
 known exact cleanup debt. Both operate under the same operation ownership and fixed scratch root,
 independently of whether the source still exists or is readable. Reconciliation returns historical
@@ -528,31 +548,33 @@ private raw-capture mode, decides which typed content may survive.
 
 Closed helper operations are `stage_begin`, `stage_chunk`, `stage_reconcile`, `stage_cleanup`,
 `publish`, `publication_reconcile`, `publication_cleanup`, `snapshot_begin`, `snapshot_chunk`,
-`snapshot_reconcile`, `snapshot_cleanup`, `stat`, `list`, `ensure_directory`, `set_metadata`, and
-`remove`. Staging is created beside the destination with mode 0600 and an unpredictable helper-owned
-name. Chunks use exact offsets and hashes; final size and SHA-256 must match before publication.
-Snapshot chunks come from a private complete spool, not repeated reads of a changing source. The
-host checks the end-to-end size/digest too. No helper operation accepts executable names, arbitrary
-flags, environment, cwd, source text, callbacks, or a destination outside its single request.
+`snapshot_stream`, `snapshot_reconcile`, `snapshot_cleanup`, `stat`, `list`, `ensure_directory`,
+`set_metadata`, and `remove`. Staging is created beside the destination with mode 0600 and an
+unpredictable helper-owned name. Chunks use exact offsets and hashes; final size and SHA-256 must
+match before publication. Snapshot chunks come from a private complete spool, not repeated reads of
+a changing source. The host checks the end-to-end size/digest too. No helper operation accepts
+executable names, arbitrary flags, environment, cwd, source text, callbacks, or a destination
+outside its single request.
 
 ### Owned download composition
 
-The private download coordinator composes snapshot creation, verified bounded chunks and exact
-scratch cleanup under one borrowed core operation. It reuses the concrete file dispatch gate used by
-upload and JSON; it does not introduce another claim or release ownership between chunks. One
-original deadline covers the whole transfer and any follow-on cleanup. The initial private entry
-requires a finite positive source bound supported by the snapshot protocol. The private bound
-FileAccess view maps `max_bytes=None` to the protocol's representable size. The held snapshot then
-supplies the actual transfer size before chunks are requested; there is no separate pathname stat
-race or undocumented application file-size ceiling.
+The private download coordinator composes snapshot creation, bounded transfer and exact scratch
+cleanup under one borrowed core operation. It reuses the concrete file dispatch gate used by upload
+and JSON; it does not introduce another claim or release ownership between chunks. One original
+deadline covers the whole transfer and any follow-on cleanup. The initial private entry requires a
+finite positive source bound supported by the snapshot protocol. The private bound FileAccess view
+maps `max_bytes=None` to the protocol's representable size. The held snapshot then supplies the
+actual transfer size before chunks are requested; there is no separate pathname stat race or
+undocumented application file-size ceiling.
 
-The coordinator writes only complete, verified chunk observations to a borrowed byte sink, handling
-short writes and temporary stalls without retaining the whole file. It tracks accepted bytes and the
-whole-stream digest, including an empty snapshot. The sink is a private composition seam, not a new
-public download overload: FileAccess must supply an owned local staging writer and publish only
-after successful transfer and verification. A partial or failed transfer never authorizes publishing
-that staging file. The coordinator neither closes the borrowed sink nor changes the local
-destination itself.
+The buffered route writes complete verified chunk observations to a borrowed byte sink. The live
+route writes sequenced bounded DATA records to that same private sink before final transcript
+verification. Both handle short writes and temporary stalls without retaining the whole file. The
+coordinator tracks accepted bytes and the whole-stream digest, including an empty snapshot. The sink
+is a private composition seam, not a new public download overload: FileAccess must supply an owned
+local staging writer and publish only after successful transfer and verification. A partial or
+failed transfer never authorizes publishing that staging file. The coordinator neither closes the
+borrowed sink nor changes the local destination itself.
 
 Record source revision, ready reference, cleanup debt and runtime observations before settling each
 carrier attempt. Missing normal-chain completion stops further exchanges, even if a chunk arrived.

@@ -890,10 +890,16 @@ The private macOS and Windows stages implement the same local publication bounda
 caller-private access without overwriting an existing entry: mode 0600 on Linux/macOS and a
 caller-only protected DACL on Windows. macOS and Windows Replace copy into a held existing file; a
 later write, truncate, flush, close or deadline failure retains publication uncertainty. macOS
-currently refuses ACLs, extended attributes, BSD flags and privilege-bearing modes. Windows uses
+Replace currently refuses extended ACLs, extended attributes, BSD flags and privilege-bearing modes.
+POSIX stages share held-directory walking, private staging, Create and cleanup custody; Linux keeps
+search-only ancestor traversal, while macOS needs read access for ACL inspection. macOS admits
+deny-only ACLs on ancestors and newly created private stages, but rejects access-granting entries or
+failed inspection. This does not permit extended ACLs on an existing Replace target. Windows uses
 native file identity, sharing and security-descriptor checks; its ancestor holds require ordinary
-directory-list access, not metadata-only access. Native macOS and Windows filesystem behavior still
-needs acceptance evidence before these candidates can supply production download access.
+directory-list access, not metadata-only access. Existing enabled backup/restore privileges can
+affect the caller's OS authority; the stage enables none and does not promise DACL denials override
+that authority. Native macOS and Windows filesystem behavior still needs acceptance evidence before
+these candidates can supply production download access.
 
 `_file_local_download.py` privately selects the workstation's stage through a shared stage protocol
 and composes it with the owned snapshot download. Unsupported hosts are refused before remote
@@ -1186,11 +1192,15 @@ publication/staging validation precedes ownership lookup and source consumption.
 download and JSON composition. Only the outer workflow closes its borrow; a nested upload cannot
 release the JSON operation's ownership between observation and conditional publication.
 
-`_file_download.py` creates one private source snapshot, streams verified chunks to a borrowed byte
-sink, and cleans up the exact snapshot under the same owner. Only complete chunk observations with
-independent normal-zero completion reach the sink. Short writes and temporary stalls consume the
-original deadline; the sink is never closed by the coordinator. The final byte count and digest must
-match the source revision, including for empty files. Confirmed absence returns no bytes.
+`_file_download.py` creates one private source snapshot and selects its transfer route once from the
+carrier's live-stdio feature. A live route streams the held READY copy in one helper attempt;
+buffered routes use verified bounded chunks. Both clean up the exact snapshot under the same owner.
+Sequenced live DATA records reach only the private sink before final transcript verification;
+length, digest, closed framing and independent normal-zero completion must all agree before the
+stream is verified. There is no chunk fallback or replay after possible stream dispatch. Short
+writes and temporary stalls consume the original deadline; the coordinator never closes its sink.
+The final byte count and digest match the source revision, including for empty files. Confirmed
+absence returns no bytes.
 
 The outcome separates accepted bytes, whole-stream verification, remote cleanup debt and possible
 future effects. A verified stream is not complete while required cleanup remains unresolved. Sink
@@ -1198,8 +1208,10 @@ failures retain closed facts, not raw exception text; escaping control flow carr
 facts. Private completion and absence can coexist with `deadline_exceeded`; callers must preserve
 that timing fact rather than interpret the status alone as in-budget success. Upload and JSON
 composition retain the same independent timing fact. This private entry requires a finite positive
-source bound. Public optional bounds and integration with the private Linux local stage remain
-unimplemented; the coordinator cannot publish a local file or provide public FileAccess on its own.
+source bound. The private bound FileAccess maps an optional caller limit to that protocol bound and
+composes a private memory sink or selected-host local stage. Whole-stream verification and remote
+cleanup must settle before bytes return or local publication starts. Production RunContext exposure
+and native streaming performance acceptance remain open.
 
 ## Private object observation and removal
 

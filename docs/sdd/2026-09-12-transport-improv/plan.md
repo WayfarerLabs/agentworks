@@ -75,6 +75,22 @@ sources after removal of the obsolete migration-guard test. The prepared-guest b
 other native gates above remain open. This private correction has not changed the published head or
 exposed a production RunContext surface.
 
+The private POSIX correction at `363e2b368` clears project, Muntz and generic review. The lead's
+publisher/coordinator run passes 174 tests with one skip, including actual Linux search-only
+ancestor permissions. macOS deny-only ACL inspection remains synthetic evidence pending stock-home
+native validation. The snapshot-stream unit at `c74f093d` likewise clears all three lanes after
+correcting the public reducer's missing stream-phase mapping; four real FileAccess failure cases now
+preserve typed sanitized transfer errors and retained scratch custody rather than raising KeyError.
+Native paired SSH throughput and heap/retention evidence remain open.
+
+The lead's separate shared native-stdin candidate at `7059b8a83` passes 104 adjacent process tests
+with one skip, the full local non-integration suite (14,226 passed, 50 skipped), strict mypy (1,198
+sources), Ruff/format and file/SDD/Rulesync/website gates. Independent review and actual SSH/Windows
+terminal proof remain pending; those local gates neither publish the contract nor complete terminal
+delivery. The hardened-guest bootstrap is a separate private prototype with explicit root entry and
+exact target credentials, not a completed body fence or permission-policy surface. No production
+consumer uses that entry yet and no database data has been deleted.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
