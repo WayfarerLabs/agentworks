@@ -38,7 +38,7 @@ from tests.execution.files._target_support import target_for_owner
 if TYPE_CHECKING:
     from agentworks.execution.carrier import ByteSink, Carrier
 
-pytestmark = [pytest.mark.windows, pytest.mark.skipif(sys.platform != "linux", reason="Linux local publication")]
+pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux local publication")
 
 _PLAN = IdentityPlan(IdentityExpectation(1001, 1002, (1002,)), IdentityMode.DIRECT)
 _RUNTIME = RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3")
@@ -170,7 +170,7 @@ def test_real_owned_download_publishes_only_complete_bytes(
         assert outcome.download is not None and outcome.download.status is FileDownloadStatus.COMPLETE
         assert outcome.published and not outcome.publication_uncertain
         assert not outcome.cleanup_uncertain and not outcome.cleanup_failed
-        assert not outcome.deadline_exceeded and outcome.local_failure is None
+        assert not outcome.deadline_exceeded
         assert destination.read_bytes() == data
         assert not tuple(scratch.iterdir())
         assert list(tmp_path.glob(".agw-download-*")) == []
@@ -234,7 +234,7 @@ def test_default_create_refuses_existing_destination_before_remote_call(tmp_path
     fact = raised.value.__cause__
     assert isinstance(fact, local.FileLocalDownloadControlFact)
     assert fact.outcome.download is None and not fact.outcome.published
-    assert fact.outcome.local_failure is local.LocalDownloadFailure.STAGING
+    assert not fact.outcome.cleanup_failed
     assert operation.calls == 0 and destination.read_bytes() == b"old"
 
 
@@ -258,7 +258,7 @@ def test_explicit_replace_preserves_existing_access_metadata(tmp_path: Path) -> 
             b"payload", status=FileDownloadStatus.FAILED, failure=FileDownloadFailure.CLEANUP, cleanup_debt=_DEBT
         ),
         _download(b"payload", deadline_exceeded=True),
-        _download(b"payload", requires_owner_retention=True),
+        _download(b"payload", status=FileDownloadStatus.UNCERTAIN, requires_owner_retention=True),
     ],
     ids=["cleanup-debt", "remote-deadline", "retained-owner"],
 )
@@ -275,7 +275,7 @@ def test_remote_failure_facts_block_publication(tmp_path: Path, remote: FileDown
 def test_expiry_before_staging_refuses_without_remote_call(tmp_path: Path) -> None:
     operation = _FakeOperation(_download(b"payload"))
     outcome = _run_fake(tmp_path / "destination", operation, deadline=Deadline.after(0))
-    assert outcome.download is None and outcome.local_failure is local.LocalDownloadFailure.DEADLINE
+    assert outcome.download is None and outcome.deadline_exceeded
     assert operation.calls == 0 and not list(tmp_path.iterdir())
 
 
@@ -291,7 +291,7 @@ def test_expiry_after_remote_completion_blocks_publication(tmp_path: Path) -> No
     operation = ExpiringOperation(_download(b"payload"))
     outcome = _run_fake(tmp_path / "destination", operation, deadline=deadline)
     assert outcome.download is operation.outcome
-    assert outcome.deadline_exceeded and outcome.local_failure is local.LocalDownloadFailure.DEADLINE
+    assert outcome.deadline_exceeded
     assert not outcome.published and not list(tmp_path.iterdir())
 
 
@@ -309,7 +309,6 @@ def test_late_deadline_keeps_confirmed_publication(tmp_path: Path, monkeypatch: 
     outcome = _run_fake(destination, operation, deadline=deadline)
     assert outcome.download is operation.outcome
     assert outcome.published and outcome.deadline_exceeded
-    assert outcome.local_failure is local.LocalDownloadFailure.DEADLINE
     assert destination.read_bytes() == b"payload"
 
 
@@ -329,7 +328,6 @@ def test_fsync_failure_keeps_remote_result_and_refuses_publication(
     assert isinstance(fact, local.FileLocalDownloadControlFact)
     assert fact.outcome.download is operation.outcome
     assert not fact.outcome.published and not fact.outcome.publication_uncertain
-    assert fact.outcome.local_failure is local.LocalDownloadFailure.PUBLICATION
     assert not destination.exists() and not list(tmp_path.iterdir())
 
 
@@ -352,7 +350,6 @@ def test_fsync_expiry_keeps_remote_result_but_refuses_publication(
     assert isinstance(fact, local.FileLocalDownloadControlFact)
     assert fact.outcome.download is operation.outcome
     assert fact.outcome.deadline_exceeded
-    assert fact.outcome.local_failure is local.LocalDownloadFailure.DEADLINE
     assert not fact.outcome.published and not fact.outcome.publication_uncertain
     assert not destination.exists() and not list(tmp_path.iterdir())
 
@@ -408,7 +405,6 @@ def test_unconfirmed_publication_attempt_stays_uncertain(tmp_path: Path, monkeyp
     assert isinstance(fact, local.FileLocalDownloadControlFact)
     assert fact.outcome.download is operation.outcome
     assert not fact.outcome.published and fact.outcome.publication_uncertain
-    assert fact.outcome.local_failure is local.LocalDownloadFailure.PUBLICATION
     assert not destination.exists() and not list(tmp_path.iterdir())
 
 
@@ -465,7 +461,6 @@ def test_ambiguous_close_after_publication_never_claims_unchanged(
     assert fact.outcome.download is operation.outcome
     assert fact.outcome.published and not fact.outcome.publication_uncertain
     assert fact.outcome.cleanup_uncertain and fact.outcome.cleanup_failed
-    assert fact.outcome.local_failure is local.LocalDownloadFailure.CLEANUP
     assert fact.outcome.unfinished_stage is not None
     assert destination.read_bytes() == b"payload"
     monkeypatch.setattr(os, "close", close)

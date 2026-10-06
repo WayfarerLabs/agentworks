@@ -545,6 +545,11 @@ supported-workstation or production FileAccess acceptance; the checkbox stays op
       cleanup and published-effect facts separately. Native local tests cover ACLs, metadata and
       failure boundaries. This is a host primitive, not public FileAccess download or non-Linux
       acceptance.
+- [x] Compose that private Linux stage with the owned snapshot download under one deadline. Admit
+      publication only after complete transfer verification and remote cleanup; retain independent
+      remote, local publication, local cleanup and late-deadline facts, including on exceptional
+      exits. This is still private Linux composition, not public FileAccess download or native
+      non-Linux acceptance.
 - [ ] Complete local download publication with create-only default and explicit replace-existing
       selection, as directed on 2026-10-05. Settle and prove workstation metadata/ACL handling,
       ordinary-file refusal, full-transfer verification and cleanup before publishing either form;

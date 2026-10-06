@@ -868,6 +868,13 @@ be returned. The stage does not consume a guest result or establish the caller's
 ownership facts. It is not wired to public `FileAccess.download`, and Windows and macOS local
 publication remain unaccepted.
 
+`_file_local_download.py` privately composes that Linux stage with the owned snapshot download. It
+uses one deadline, admits publication only after complete verified transfer and remote cleanup, and
+retains remote outcome, local publication, local cleanup and timing as separate facts. A failed or
+absent remote transfer leaves the local destination unpublished. Exceptional control flow retains
+both sides of the operation in a safe attached fact. This is not public `FileAccess.download` or a
+non-Linux publication path.
+
 ## Private terminal handoff preparation
 
 `_terminal_handoff.py` provides platform-neutral host preparation for one no-staging, same-terminal

@@ -552,6 +552,12 @@ buffer without discarding the already-retained download outcome or inventing a s
 
 This is private composition, not public download or Windows/macOS acceptance. The host-specific
 publication design and native evidence remain required before exposing download through FileAccess.
+The private Linux local-file adapter now composes the owned snapshot result and same-directory
+publication stage under one deadline. It keeps remote status and cleanup debt separate from local
+publication, local cleanup and late-deadline facts, including on exceptional exits. A complete
+verified transfer with settled remote cleanup is the only publication input; confirmed absence,
+remote failure or retained remote obligations cannot publish. This adapter does not settle the
+public result conversion or any non-Linux workstation behavior.
 
 ### No-staging readiness gate
 

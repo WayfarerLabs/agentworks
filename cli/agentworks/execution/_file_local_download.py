@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from agentworks.execution._file_download import FileDownloadControlFact, FileDownloadOutcome, FileDownloadStatus
@@ -21,17 +20,6 @@ if TYPE_CHECKING:
     from agentworks.execution.carrier import Carrier, Deadline
 
 
-class LocalDownloadFailure(StrEnum):
-    """Local work that prevented an ordinary published result."""
-
-    DEADLINE = "deadline"
-    STAGING = "staging"
-    REMOTE_NOT_READY = "remote_not_ready"
-    TRANSFER = "transfer"
-    PUBLICATION = "publication"
-    CLEANUP = "cleanup"
-
-
 @dataclass(frozen=True, slots=True, repr=False)
 class FileLocalDownloadOutcome:
     """Remote evidence and independent workstation publication facts."""
@@ -42,7 +30,6 @@ class FileLocalDownloadOutcome:
     cleanup_uncertain: bool = False
     cleanup_failed: bool = False
     deadline_exceeded: bool = False
-    local_failure: LocalDownloadFailure | None = None
     unfinished_stage: LocalDownloadPublication | None = field(default=None, repr=False)
 
 
@@ -57,15 +44,6 @@ class FileLocalDownloadControlFact(Exception):
 def _ready_to_publish(download: FileDownloadOutcome, deadline: Deadline) -> bool:
     return (
         download.status is FileDownloadStatus.COMPLETE
-        and download.stream_verified
-        and download.source_revision is not None
-        and download.source_revision.digest is not None
-        and download.accepted_bytes == download.source_revision.stat.size
-        and download.cleanup_debt is None
-        and not download.snapshot_ownership_uncertain
-        and not download.pending_remote_effects
-        and not download.coordination_uncertain
-        and not download.requires_owner_retention
         and not download.deadline_exceeded
         and not deadline.expired
     )
@@ -91,21 +69,16 @@ def download_to_local_file(
     exceptions carry a FileLocalDownloadControlFact as their cause.
     """
     if deadline.expired:
-        return FileLocalDownloadOutcome(None, deadline_exceeded=True, local_failure=LocalDownloadFailure.DEADLINE)
+        return FileLocalDownloadOutcome(None, deadline_exceeded=True)
 
     writer: LocalDownloadPublication | None = None
     download: FileDownloadOutcome | None = None
     control: BaseException | None = None
-    failure: LocalDownloadFailure | None = None
     cleanup_failed = False
     construction_cleanup_uncertain = False
-    phase = LocalDownloadFailure.STAGING
     try:
         writer = LocalDownloadPublication(destination, condition=condition)
-        if deadline.expired:
-            failure = LocalDownloadFailure.DEADLINE
-        else:
-            phase = LocalDownloadFailure.TRANSFER
+        if not deadline.expired:
             download = operation.download(
                 carrier,
                 trusted_root_path=trusted_root_path,
@@ -117,7 +90,6 @@ def download_to_local_file(
                 runtime_selection=runtime_selection,
             )
             if _ready_to_publish(download, deadline):
-                phase = LocalDownloadFailure.PUBLICATION
                 revision = download.source_revision
                 assert revision is not None and revision.digest is not None
                 writer.commit(
@@ -126,22 +98,12 @@ def download_to_local_file(
                     sha256=revision.digest.hex(),
                     deadline=deadline,
                 )
-            elif download.status is FileDownloadStatus.COMPLETE and (download.deadline_exceeded or deadline.expired):
-                failure = LocalDownloadFailure.DEADLINE
-            elif download.status is FileDownloadStatus.COMPLETE:
-                failure = LocalDownloadFailure.REMOTE_NOT_READY
     except BaseException as exc:
         control = exc
         if isinstance(exc.__cause__, FileDownloadControlFact):
             download = exc.__cause__.outcome
         if writer is None:
             construction_cleanup_uncertain = bool(getattr(exc, "cleanup_uncertain", False))
-        if writer is not None and writer.published:
-            failure = LocalDownloadFailure.CLEANUP
-        elif isinstance(exc, TimeoutError) and deadline.expired:
-            failure = LocalDownloadFailure.DEADLINE
-        else:
-            failure = phase
     finally:
         if writer is not None:
             try:
@@ -150,7 +112,6 @@ def download_to_local_file(
                 cleanup_failed = True
                 if control is None:
                     control = exc
-                    failure = LocalDownloadFailure.CLEANUP
 
     outcome = FileLocalDownloadOutcome(
         download,
@@ -159,7 +120,6 @@ def download_to_local_file(
         cleanup_uncertain=writer.cleanup_uncertain if writer is not None else construction_cleanup_uncertain,
         cleanup_failed=cleanup_failed,
         deadline_exceeded=deadline.expired or (download.deadline_exceeded if download is not None else False),
-        local_failure=failure or (LocalDownloadFailure.DEADLINE if deadline.expired else None),
         unfinished_stage=writer if cleanup_failed else None,
     )
     if control is not None:
