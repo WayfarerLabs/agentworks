@@ -131,6 +131,8 @@ def download_to_local_file(
                 cleanup_failed = True
                 if control is None:
                     control = exc
+        if cleanup_failed and writer is not None:
+            operation.retain_local_download_stage(writer)
 
     outcome = FileLocalDownloadOutcome(
         download,

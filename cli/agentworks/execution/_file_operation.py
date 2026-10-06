@@ -294,8 +294,6 @@ class FileOperation:
         stage = self._unfinished_local_download
         if stage is None:
             return True
-        if stage.cleanup_uncertain:
-            return False
         try:
             stage.abort()
         except Exception:

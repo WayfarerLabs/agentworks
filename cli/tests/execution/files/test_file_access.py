@@ -23,7 +23,10 @@ from agentworks.execution._file_operation import FileOperation
 from agentworks.execution._file_result_transfer import reduce_file_local_download
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
-from agentworks.execution._local_download_stage import LocalDownloadUnsupportedError
+from agentworks.execution._local_download_stage import (
+    LocalDownloadCleanupUncertainError,
+    LocalDownloadUnsupportedError,
+)
 from agentworks.execution.access import FileAccess
 from agentworks.execution.carrier import (
     CarrierIO,
@@ -390,8 +393,14 @@ def test_download_preserves_interrupt_and_attached_local_custody(
         publication_uncertain = False
         cleanup_uncertain = True
 
+        def __init__(self) -> None:
+            self.known_cleanup_done = False
+            self.aborts = 0
+
         def abort(self) -> None:
-            raise AssertionError("uncertain close must not be retried")
+            self.aborts += 1
+            self.known_cleanup_done = True
+            raise LocalDownloadCleanupUncertainError("ambiguous close remains")
 
         def try_write(self, data: memoryview) -> int:
             return len(data)
@@ -415,6 +424,8 @@ def test_download_preserves_interrupt_and_attached_local_custody(
     assert access._operation.unfinished_local_download is stage
     with pytest.raises(ExternalError):
         access.download(PurePosixPath(source), root.parent / "second-download")
+    assert stage.known_cleanup_done and stage.aborts == 1
+    assert access._operation.unfinished_local_download is stage
 
 
 def test_download_reduces_local_failures_without_path_details(

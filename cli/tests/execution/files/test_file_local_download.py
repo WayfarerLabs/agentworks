@@ -26,7 +26,11 @@ from agentworks.execution._file_stat import FileRevision, FileStat
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._local_download_publication import LocalDownloadPublication
-from agentworks.execution._local_download_stage import LocalDownloadCleanupError, LocalDownloadUnsupportedError
+from agentworks.execution._local_download_stage import (
+    LocalDownloadCleanupError,
+    LocalDownloadStage,
+    LocalDownloadUnsupportedError,
+)
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution._scratch_receipt import ScratchCleanupDebt
 from agentworks.execution.carrier import Deadline
@@ -85,6 +89,11 @@ class _FakeOperation:
         self.control = control
         self.calls = 0
         self.deadline: Deadline | None = None
+        self.unfinished_local_download: LocalDownloadStage | None = None
+
+    def retain_local_download_stage(self, stage: LocalDownloadStage) -> None:
+        assert self.unfinished_local_download in (None, stage)
+        self.unfinished_local_download = stage
 
     def download(
         self,
@@ -660,3 +669,55 @@ def test_constructor_cleanup_custody_survives_host_selection(
     assert fact.outcome.unfinished_stage is stage
     assert fact.outcome.cleanup_failed and fact.outcome.cleanup_uncertain
     assert not stage.aborted and operation.calls == 0
+
+
+@pytest.mark.parametrize("construction_failure", [False, True])
+def test_local_stage_is_retained_before_final_outcome_allocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, construction_failure: bool
+) -> None:
+    class FailedAbortStage(_HostStage):
+        aborts = 0
+
+        def abort(self) -> None:
+            self.aborts += 1
+            raise OSError("owned stage cleanup failed")
+
+    stage = FailedAbortStage(tmp_path / "destination")
+
+    def publisher(destination: Path, condition: Create | Replace) -> FailedAbortStage:
+        del destination, condition
+        if construction_failure:
+            raise LocalDownloadCleanupError("construction cleanup failed", unfinished_stage=stage)
+        return stage
+
+    def failed_download(*args: object, **kwargs: object) -> FileDownloadOutcome:
+        del args, kwargs
+        return _download(b"", status=FileDownloadStatus.FAILED)
+
+    def allocation_failure(*args: object, **kwargs: object) -> local.FileLocalDownloadOutcome:
+        del args, kwargs
+        raise MemoryError("synthetic final-outcome allocation failure")
+
+    database = Database(tmp_path / "state.db")
+    operation_owner = owner(database)
+    operation = FileOperation(operation_owner, target_for_owner(operation_owner))
+    monkeypatch.setattr(operation, "download", failed_download)
+    monkeypatch.setattr(local, "_publisher_for_host", publisher)
+    monkeypatch.setattr(local, "FileLocalDownloadOutcome", allocation_failure)
+    try:
+        with pytest.raises(MemoryError):
+            local.download_to_local_file(
+                LocalCarrier(),
+                trusted_root_path="/approved",
+                relative_path="source",
+                destination=tmp_path / "destination",
+                max_bytes=1024,
+                plan=_PLAN,
+                deadline=Deadline.after(30),
+                runtime_selection=_RUNTIME,
+                operation=operation,
+            )
+        assert operation.unfinished_local_download is stage
+        assert stage.aborts == (0 if construction_failure else 1)
+    finally:
+        database.close()
