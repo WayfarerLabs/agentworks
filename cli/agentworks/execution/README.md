@@ -113,8 +113,9 @@ required before that public surface exists.
 `ExecutionOperation` requires an explicit managed target matching its owner's scope. An optional
 numeric bootstrap must match that VM's derived boot identity; platform-host targets cannot select
 it. The operation forwards its immutable context before preparation and borrowing, while each call
-keeps its explicit body identity. Native composition currently supplies its prepared target but does
-not yet construct this bootstrap. No target or root identity is inferred as a fallback.
+keeps its explicit body identity. The private WSL2 native factory constructs the shared bootstrap
+from its prepared elevated plan and actual full guest. Other platform composition and service entry
+remain unimplemented. No target or root identity is inferred as a fallback.
 
 `_execution_result.py` reduces an operation-owned inline outcome into those public facts. The fixed
 inline helper accepts retrospective normal completion only on CPython 3.11 through 3.14, after its
