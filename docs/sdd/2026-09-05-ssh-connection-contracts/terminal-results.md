@@ -167,10 +167,10 @@ synthetic child, deadline races and retained settlement. This is local signal ev
 SSH resize. The developer reports 396 SSH tests passed with 5 skips and local quality gates.
 
 The Windows developer's `f3d8cf8c1a3eeeb44ed637b2451cb06bfa7ac44e` adds an owned hidden-console
-fixture. It measures raw-mode restoration, unchanged output mode/code pages/handle flags, NOWAIT
-empty and non-key records, injected UTF-16 units and exact child/window cleanup. Linux proves the
-external record ABI; it skips the native case. Physical keyboard translation, a production reader,
-SSH/ConPTY and native Windows acceptance remain unproved.
+fixture. It measures raw-mode restoration, unchanged output mode/code pages/handle flags, empty and
+non-key polling, injected UTF-16 units and exact child/window cleanup. Linux proves the external
+record ABI; it skips the native case. Physical keyboard translation, a production reader, SSH/ConPTY
+and native Windows acceptance remain unproved.
 
 All three independent source lanes identify the same material startup-custody gap in the Windows
 fixture at the combined private pin `57139913e1a3a888d3f88de10140be12c28241b8`: both supervisors
@@ -190,3 +190,22 @@ Transport subsequently publishes the shared bootstrap/file-packaging increment a
 `2b27c5050d3cb45e914750f65e11ffb57de9aab4`, with an identical SSH source/test tree. The earlier
 full-suite count belongs to the earlier shared dependency. Fresh combined validation and the fixture
 correction remain required; this rebase raises no public review/readiness signal.
+
+The Windows correction at `e8c455d13e20f4acc4ca9c06e4a0076f6ce9b81a`, integrated as
+`76ab1e75bf64cf438c3ad5659918ceb45a2a170f`, puts both supervisors under one inert admission,
+cancellation and explicit completion guard. Four synthetic cases cover failed startup before/after
+thread creation, delayed canceled tails, interrupted completion waiting and cleanup ordering. All
+three independent source lanes clear that exact combined pin and confirm the earlier finding is
+resolved. This is private-increment clearance, not approval of the full implementation.
+
+Fresh combined validation at `76ab1e75b` passes **14,715 non-integration tests with 51 skips** (exit
+0), Ruff/format (1,275 files) and strict mypy (1,238 sources). The developer's correction selection
+passes 109 tests with one native skip, including strict Linux/Windows type checks. The lead's
+website gates at the rebased `2b27c5050` pass 160 Python and 103 Node tests; four builds and both
+deterministic comparisons exit 0. Locked-SDD, Rulesync, typer isolation and final file quality
+exit 0. The lead also passes strict Windows typing on all four resource/native-fixture files and
+collects the one native case selected by Windows CI without running it. All 25 completed plan
+records remain unchanged. The private suite root is independently checked for remaining
+process/descriptor use and removed after completion. Native Windows execution follows publication,
+rather than being inferred from these synthetic checks. The terminal feature remains disabled and
+full Phase 2 gates remain open.
