@@ -573,14 +573,15 @@ The private memory-read adapter uses the shared `FileOperation` download boundar
 unfinished facts before final byte/result allocation. Failed allocation discards the temporary
 buffer without discarding the already-retained download outcome or inventing a second claim.
 
-This is private composition, not public download or Windows/macOS acceptance. The host-specific
-publication design and native evidence remain required before exposing download through FileAccess.
-The private Linux local-file adapter now composes the owned snapshot result and same-directory
-publication stage under one deadline. It keeps remote status and cleanup debt separate from local
-publication, local cleanup and late-deadline facts, including on exceptional exits. A complete
-verified transfer with settled remote cleanup is the only publication input; confirmed absence,
-remote failure or retained remote obligations cannot publish. This adapter does not settle the
-public result conversion or any non-Linux workstation behavior.
+This is private composition, not public download or Windows/macOS acceptance. The local-file
+adapter selects the workstation's Linux, macOS or Windows publication stage through one private
+protocol and refuses unsupported hosts before remote dispatch. It composes the owned snapshot
+result and selected stage under one deadline, keeping remote status and cleanup debt separate from
+local publication, local cleanup and late-deadline facts, including on exceptional exits. A
+complete verified transfer with settled remote cleanup is the only publication input; confirmed
+absence, remote failure or retained remote obligations cannot publish. The Linux stage uses
+same-directory publication; macOS and Windows use the approved held-file in-place Replace. This
+adapter does not settle public result conversion or native macOS/Windows filesystem acceptance.
 
 ### No-staging readiness gate
 

@@ -141,15 +141,6 @@ trusted root; the service rejects the filesystem root because the helper require
 It has no public download, directory transfer, production factory or RunContext accessor. This bound
 assembly does not activate recipient grants or the core allowlist during coexistence.
 
-The private local-download publishers stage a verified transfer before changing the workstation
-destination. Create publishes caller-private access without overwriting an existing entry. Linux
-Replace uses same-directory rename and preserves supported local access metadata. macOS and Windows
-Replace copy into a held existing file; a later write, truncate, flush, close or deadline failure
-retains possible local change and cleanup uncertainty. macOS currently refuses ACLs, extended
-attributes, BSD flags and privilege-bearing modes. Windows uses native file identity, sharing and
-security-descriptor checks. Native macOS and Windows filesystem behavior still needs acceptance
-evidence before these candidates can supply production download access.
-
 ## File-call custody
 
 `FileOperation` requires a `ManagedTargetIdentity` that exactly matches its `OperationOwner` VM or
@@ -879,12 +870,22 @@ for an explicit retry and reports any close uncertainty. The stage does not cons
 or establish the caller's deadline and ownership facts. It is not wired to public
 `FileAccess.download`, and Windows and macOS local publication remain unaccepted.
 
-`_file_local_download.py` privately composes that Linux stage with the owned snapshot download. It
-uses one deadline, admits publication only after complete verified transfer and remote cleanup, and
-retains remote outcome, local publication, local cleanup and timing as separate facts. A failed or
-absent remote transfer leaves the local destination unpublished. Exceptional control flow retains
-both sides of the operation in a safe attached fact. This is not public `FileAccess.download` or a
-non-Linux publication path.
+The private macOS and Windows stages implement the same local publication boundary. Create
+publishes caller-private access without overwriting an existing entry: mode 0600 on Linux/macOS and
+a caller-only protected DACL on Windows. macOS and Windows Replace copy into a held existing file;
+a later write, truncate, flush, close or deadline failure retains publication uncertainty. macOS
+currently refuses ACLs, extended attributes, BSD flags and privilege-bearing modes. Windows uses
+native file identity, sharing and security-descriptor checks. Native macOS and Windows filesystem
+behavior still needs acceptance evidence before these candidates can supply production download
+access.
+
+`_file_local_download.py` privately selects the workstation's stage through a shared stage protocol
+and composes it with the owned snapshot download. Unsupported hosts are refused before remote
+dispatch. It uses one deadline, admits publication only after complete verified transfer and remote
+cleanup, and retains remote outcome, local publication, local cleanup and timing as separate facts.
+A failed or absent remote transfer leaves the local destination unpublished. Exceptional control
+flow retains both sides of the operation in a safe attached fact. This is not public
+`FileAccess.download` or native macOS/Windows acceptance.
 
 ## Private terminal handoff preparation
 
