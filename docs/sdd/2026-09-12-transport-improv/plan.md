@@ -2736,11 +2736,14 @@ and drain standalone custody before treating cached results as usable. The packa
 correction at worker `54518ebb7` retains every original recovered owner before opening dispatch and
 drains those owners before database closure, using the existing holding fixture rather than another
 registry. Its actual-child negative changes a silently passing test into a cleanup teardown failure.
-The local full suite at `c12eefd5` passes 15,801 tests with 50 skips; strict mypy passes 1,255 sources.
-The later composition-fixture and package-recovery corrections still need final integrated gates and
-whole-unit private review. Native acceptance, keeper/recovery composition, complete RunContext and
-the public feedback round remain open. No new RunContext enablement or full-scope completion is
-claimed.
+All three private review lanes clear the coupled unit at `837a7bdcc`. Its fresh local full suite
+passes 15,802 tests with 50 skips and 27 existing fork warnings; the Windows-selected suite run on
+Linux passes 1,014 tests with 47 skips. Both exit 0. Strict mypy passes 1,255 sources; Ruff/format,
+typer isolation, locked-SDD, Rulesync and whitespace gates exit 0. File quality passes after
+formatting this plan. Website Python (160 tests), Node (103 tests), all four builds and both
+deterministic comparisons exit 0. These are local source and ownership proofs, not native
+acceptance. Keeper/recovery composition, complete RunContext and public feedback/fix round 1 of 3
+remain open. No new RunContext enablement or full-scope completion is claimed.
 
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
       serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one
