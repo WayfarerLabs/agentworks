@@ -91,6 +91,26 @@ integration-required shared correction remains a separable contribution. Transpo
 and RunContext ownership. The startup, repeated-interruption, natural-exit, cleanup-uncertainty and
 native-platform proof gates remain open until their measured results are recorded.
 
+## Retained cleanup adoption gap
+
+Transport's retained cleanup source at `12dcb01b` separates the first immutable cleanup observation
+from an explicitly bounded retry. The current forwarding close path still requests the former;
+repeated public close cannot retry a failed native cleanup. Failed startup also propagates its error
+before returning the forwarding resource. The caller's discovery custody holds only the version
+probe and cannot settle that separate forwarding session.
+
+A focused synthetic proof at SSH `91027e61` reproduces both branches using owned local Python
+children. Discovery custody settles while forwarding cleanup remains retryable; repeated public
+close requests no retry. A separately retained test-only reference can close the exact native owner
+through the bounded API, reap the child and close its pipes. That rescue is proof safety, not an
+existing production capability or native SSH acceptance.
+
+The enclosing forwarding lifetime must retain the same native owner before admission, including when
+startup fails before readiness. After stopping pipe use it must support serialized bounded cleanup
+retries, retaining pending or lost ownership. Adding retries only to an already returned resource
+leaves failed startup unresolved. This remains an implementation/design gate; no second native owner
+or cleanup capability inside reports or exceptions is introduced.
+
 ## Evidence
 
 Focused tests cover split acknowledgment reads, missing/wrong/noisy acknowledgment, auth/trust and

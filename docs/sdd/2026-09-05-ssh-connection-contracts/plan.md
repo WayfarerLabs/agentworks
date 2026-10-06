@@ -383,7 +383,10 @@ and supported-workstation gates below are unchanged.
       establishes no remote cancellation or dispatch-debt resolution. Enrollment must retain its
       same acquired candidate writer lock alongside native custody until settlement; its enclosing
       creation/maintenance resource consumer remains unresolved as recorded in the
-      [enrollment LLD](enrollment-lld.md#caller-held-delivery-custody-adoption).
+      [enrollment LLD](enrollment-lld.md#caller-held-delivery-custody-adoption). Forwarding must
+      retain its native lifetime before admission, including failed startup, and expose bounded
+      cleanup retries through that same retained lifetime; the
+      [forwarding gap](forwarding-lld.md#retained-cleanup-adoption-gap) records the synthetic proof.
 - [ ] Implement and validate connection/trust migration with isolated copies: supported operator
       policy, authentication offers, strict verification, genuine creation provenance, concurrent
       writer ownership and rollback evidence. Follow the
