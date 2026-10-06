@@ -1,11 +1,14 @@
-"""Fixed Linux root entry that drops credentials before loading a helper."""
+"""Fixed Linux credential admission before numeric or named guest helpers."""
 
 from __future__ import annotations
 
 import os
 import sys
-from contextlib import suppress
-from typing import Any
+from contextlib import contextmanager, suppress
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
 
 _INIT_PATH = "/proc/1/stat"
 _STATUS_PATH = "/proc/self/status"
@@ -57,13 +60,12 @@ def _drop_and_verify(uid: int, gid: int, groups: tuple[int, ...]) -> None:
         raise ValueError("credential verification failed")
 
 
-def _run(
+@contextmanager
+def _admit(
     uid: int,
     gid: int,
     groups: tuple[int, ...],
-    loader_source: str,
-    expected_guest: tuple[str, str, int],
-) -> int:
+) -> Iterator[Callable[[], bytes]]:
     """Verify root, open the sole privileged descriptor, then drop credentials."""
     if os.getresuid() != (0, 0, 0):
         raise _BootstrapRefusal
@@ -86,6 +88,20 @@ def _run(
             _drop_and_verify(uid, gid, groups)
         except (OSError, ValueError, RuntimeError):
             raise _BootstrapRefusal from None
+        yield read_init
+    finally:
+        with suppress(OSError):
+            os.close(descriptor)
+
+
+def _run(
+    uid: int,
+    gid: int,
+    groups: tuple[int, ...],
+    loader_source: str,
+    expected_guest: tuple[str, str, int],
+) -> int:
+    with _admit(uid, gid, groups) as read_init:
         scope: dict[str, Any] = {
             "__name__": "__main__",
         }
@@ -104,9 +120,49 @@ def _run(
         if type(result) is not int:
             raise TypeError("fixed helper returned an invalid exit status")
         return result
-    finally:
-        with suppress(OSError):
-            os.close(descriptor)
+
+
+def _run_named(account: str, body_source: str) -> int:
+    if os.getresuid() != (0, 0, 0):
+        raise _BootstrapRefusal
+    try:
+        import pwd
+
+        entry = pwd.getpwnam(account)
+        uid, gid = entry.pw_uid, entry.pw_gid
+        groups = tuple(sorted(set(os.getgrouplist(account, gid)) | {gid}))
+        if (
+            type(uid) is not int
+            or not 0 <= uid <= 2**32 - 1
+            or type(gid) is not int
+            or not 0 <= gid <= 2**32 - 1
+            or len(groups) > 65_536
+            or any(type(group) is not int or not 0 <= group <= 2**32 - 1 for group in groups)
+        ):
+            raise ValueError("invalid account identity")
+    except Exception:
+        raise _BootstrapRefusal from None
+    with _admit(uid, gid, groups) as read_init:
+        scope: dict[str, Any] = {"__name__": "__main__", "_agw_read_init": read_init}
+        exec(compile(body_source, "<agentworks-fixed-early-body>", "exec"), scope)
+        result = scope["main"](sys.argv[1])
+        if type(result) is not int:
+            raise TypeError("fixed helper returned an invalid exit status")
+        return result
+
+
+def main_named(account: str, body_source: str) -> int:
+    """Admit a core-bound account before loading its fixed early operation.
+
+    The source is trusted first-party code. It receives a fresh bounded init
+    reader and defines main(nonce); request stdin belongs only to that body.
+    """
+    if sys.platform != "linux":
+        return _REFUSAL
+    try:
+        return _run_named(account, body_source)
+    except _BootstrapRefusal:
+        return _REFUSAL
 
 
 def main(
