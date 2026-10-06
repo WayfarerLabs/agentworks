@@ -50,10 +50,11 @@ class AdmittedTimeoutCarrier:
         self._carrier = LocalCarrier()
         self._admitted = threading.Event()
         self._startup_delay = startup_delay
+        self._execution_expires_at: float | None = None
         original_remaining = _process.Deadline.remaining
 
         def controlled_remaining(deadline: _process.Deadline) -> float | None:
-            if self._admitted.is_set():
+            if self._admitted.is_set() and deadline.expires_at == self._execution_expires_at:
                 return 0.0
             return original_remaining(deadline)
 
@@ -88,6 +89,7 @@ class AdmittedTimeoutCarrier:
         custody: LocalDeliveryCustody | None = None,
     ) -> CarrierReport:
         self.validate(invocation, io=io)
+        self._execution_expires_at = deadline.expires_at
         if self._startup_delay:
             time.sleep(self._startup_delay)
         assert isinstance(io.output, SinkOutput)

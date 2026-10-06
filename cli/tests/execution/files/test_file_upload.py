@@ -1109,6 +1109,7 @@ def test_real_carrier_timeout_records_deadline_without_staging_or_source_consump
         assert outcome.requires_owner_retention
         assert not root.joinpath("target").exists()
     finally:
+        assert owner.close_local_delivery(Deadline.after(3))
         database.close()
 
 
