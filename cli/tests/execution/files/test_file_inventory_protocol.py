@@ -63,6 +63,7 @@ from agentworks.execution.carrier import (
 )
 from agentworks.execution.carriers._proxmox_http import _request as _http_request
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
+from tests.execution._bound_carrier_support import bind_carrier as bind_carrier
 from tests.execution.files._runtime_support import (
     runtime_nonce,
     runtime_ready_record,
@@ -446,6 +447,7 @@ def test_exchange_uses_sensitive_finite_input_and_releases_verified_entries(monk
 
 def test_maximum_inventory_response_crosses_http_and_carrier_into_typed_entries(
     monkeypatch: pytest.MonkeyPatch,
+    bind_carrier,
 ) -> None:
     encoded_inventory, expected_entries = _maximum_encoded_inventory()
     stream = io.BytesIO()
@@ -489,8 +491,11 @@ def test_maximum_inventory_response_crosses_http_and_carrier_into_typed_entries(
     monkeypatch.setattr(urllib.request, "build_opener", MagicMock(return_value=opener))
     monkeypatch.setattr("agentworks.execution._file_inventory_exchange.secrets.token_hex", lambda _size: _NONCE)
     carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.example:8006", "node1", 123, "token", "secret"))
+    delivery = bind_carrier(carrier)
 
-    def request(method: str, suffix: str, *, body: bytes | None = None, timeout: float | None) -> dict[str, object]:
+    def request(
+        method: str, suffix: str, *, body: bytes | None = None, timeout: float | None, custody: LocalDeliveryCustody
+    ) -> dict[str, object]:
         del timeout
         if method == "POST":
             assert body is not None
@@ -519,7 +524,7 @@ def test_maximum_inventory_response_crosses_http_and_carrier_into_typed_entries(
 
     monkeypatch.setattr(carrier._wire, "request", request)
     result = list_directory(
-        carrier,
+        delivery,
         trusted_root_path="/srv/workspace",
         relative_path="target",
         max_entries=MAX_ENTRIES,

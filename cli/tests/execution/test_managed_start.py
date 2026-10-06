@@ -543,7 +543,7 @@ def test_start_keeps_ack_separate_from_exact_receipt(
     )
     assert attempt.candidate.observation.state is expected
     assert attempt.candidate.observation.launch_fact == (launch if with_launch else None)
-    assert carrier.validations == 2
+    assert carrier.validations == 3
     with pytest.raises((StateError, ValidationError)):
         _start(repository, record, ScriptedCarrier(response))
 

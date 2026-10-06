@@ -52,6 +52,7 @@ from agentworks.execution.carrier import (
 )
 from agentworks.execution.carriers._subprocess import run_process
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
+from tests.execution._bound_carrier_support import bind_carrier as bind_carrier
 from tests.execution.files._runtime_support import runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the inventory helper requires Linux")
@@ -396,7 +397,7 @@ def test_maximum_framed_candidate_fits_qemu_7_2_capture_as_local_sizing_evidence
 
 
 def test_complete_proxmox_envelope_fits_and_delivers_real_helper_response(
-    tmp_path: Path, plan: IdentityPlan, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, plan: IdentityPlan, monkeypatch: pytest.MonkeyPatch, bind_carrier
 ) -> None:
     source = FIXED_BUNDLE
     approved = tmp_path / "approved"
@@ -404,10 +405,13 @@ def test_complete_proxmox_envelope_fits_and_delivers_real_helper_response(
     target.mkdir(parents=True)
     (target / "alpha").write_bytes(b"content")
     carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.invalid", "node1", 101, "token", "synthetic"))
+    delivery = bind_carrier(carrier)
     body_sizes: list[int] = []
     status: dict[str, object] = {}
 
-    def request(method: str, suffix: str, *, body: bytes | None = None, timeout: float | None) -> dict[str, object]:
+    def request(
+        method: str, suffix: str, *, body: bytes | None = None, timeout: float | None, custody: LocalDeliveryCustody
+    ) -> dict[str, object]:
         if method == "POST":
             assert body is not None and body.isascii()
             body_sizes.append(len(body))
@@ -431,7 +435,7 @@ def test_complete_proxmox_envelope_fits_and_delivers_real_helper_response(
     monkeypatch.setattr(carrier._wire, "request", request)
     with patch("agentworks.execution._file_inventory_exchange.FIXED_BUNDLE", source):
         result = list_directory(
-            carrier,
+            delivery,
             trusted_root_path=str(approved),
             relative_path="target",
             max_entries=8,

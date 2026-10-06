@@ -39,6 +39,7 @@ from agentworks.execution.carrier import (
 )
 from agentworks.execution.carriers._subprocess import run_process
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
+from tests.execution._bound_carrier_support import bind_carrier as bind_carrier
 from tests.execution.files._runtime_support import runtime_selection
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the file-object helper requires Linux")
@@ -296,15 +297,18 @@ def test_stat_reports_directory_and_socket_metadata_without_content(tmp_path: Pa
 
 
 def test_complete_proxmox_post_fits_provider_bound_and_returns_typed_outcome(
-    tmp_path: Path, plan: IdentityPlan, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, plan: IdentityPlan, monkeypatch: pytest.MonkeyPatch, bind_carrier
 ) -> None:
     root = tmp_path / "root"
     root.mkdir()
     carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.invalid", "node1", 101, "token", "synthetic"))
+    delivery = bind_carrier(carrier)
     body_sizes: list[int] = []
     status: dict[str, object] = {}
 
-    def request(method: str, suffix: str, *, body: bytes | None = None, timeout: float | None) -> dict[str, object]:
+    def request(
+        method: str, suffix: str, *, body: bytes | None = None, timeout: float | None, custody: LocalDeliveryCustody
+    ) -> dict[str, object]:
         if method == "POST":
             assert body is not None and body.isascii()
             body_sizes.append(len(body))
@@ -331,7 +335,7 @@ def test_complete_proxmox_post_fits_provider_bound_and_returns_typed_outcome(
         IdentityMode.DIRECT,
     )
     result = stat_file(
-        carrier,
+        delivery,
         trusted_root_path=str(root),
         relative_path="leaf",
         plan=mismatched_plan,

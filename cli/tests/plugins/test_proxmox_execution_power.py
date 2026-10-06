@@ -120,7 +120,7 @@ def test_secret_resolution_consumes_original_budget(monkeypatch: pytest.MonkeyPa
         )
         == VMStatus.RUNNING
     )
-    read.assert_called_once_with(timeout=3.0)
+    read.assert_called_once_with(timeout=3.0, custody=local_delivery)
     read.reset_mock()
     with pytest.raises(LimitExceededError):
         platform().observe_execution_power(
@@ -134,7 +134,7 @@ def test_late_result_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     now = [100.0]
     monkeypatch.setattr("time.monotonic", lambda: now[0])
 
-    def read(_wire: _ProxmoxWire, *, timeout: float) -> dict[str, object]:
+    def read(_wire: _ProxmoxWire, *, timeout: float, custody: LocalDeliveryCustody) -> dict[str, object]:
         now[0] += timeout
         return {"status": "stopped"}
 

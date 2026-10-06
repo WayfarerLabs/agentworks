@@ -676,6 +676,7 @@ def test_complete_requests_fit_real_windows_ssh_and_qga_bounds(plan: IdentityPla
 
 
 def test_aggregate_oversize_refuses_before_proxmox_wire(plan: IdentityPlan, monkeypatch: pytest.MonkeyPatch) -> None:
+    local_delivery = LocalDeliveryCustody()
     request = _requests(plan)[0]
     invocation = PreparedInvocation(
         build_runtime_identity_helper_argv(
@@ -698,7 +699,7 @@ def test_aggregate_oversize_refuses_before_proxmox_wire(plan: IdentityPlan, monk
         sensitive=True,
     )
     with pytest.raises(ValidationError):
-        carrier.execute(invocation, io=io, deadline=Deadline.after(1))
+        carrier.execute(invocation, io=io, deadline=Deadline.after(1), custody=local_delivery)
 
 
 class _NullSink:
@@ -765,6 +766,7 @@ def test_two_phase_root_publication_long_path_body_fits(
 
 
 def test_two_phase_root_publication_valid_near_ceiling_refuses_before_wire(monkeypatch: pytest.MonkeyPatch) -> None:
+    local_delivery = LocalDeliveryCustody()
     target = IdentityExpectation(1001, 1002, tuple(range(1002, 4302)))
     reference = _reference(IdentityPlan(target, IdentityMode.DIRECT))
     request = FilePublishRequest(
@@ -803,6 +805,6 @@ def test_two_phase_root_publication_valid_near_ceiling_refuses_before_wire(monke
 
     monkeypatch.setattr(carrier._wire, "request", unexpected_wire)
     with pytest.raises(ValidationError):
-        carrier.execute(invocation, io=io, deadline=Deadline.after(1))
+        carrier.execute(invocation, io=io, deadline=Deadline.after(1), custody=local_delivery)
     assert len(serialized_lengths) == 1
     assert serialized_lengths[0] > 65_536

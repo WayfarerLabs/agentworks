@@ -37,6 +37,7 @@ from agentworks.execution._scratch import ScratchFailureKind, ScratchPhase
 from agentworks.execution._scratch_receipt import _Identity, scratch_name
 from agentworks.execution.carrier import CarrierIO, Deadline, Dispatch, SinkOutput
 from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
+from tests.execution._bound_carrier_support import bind_carrier as bind_carrier
 from tests.execution.files._file_stage_support import LocalCarrier, fixture_source, install_fixture_bundle
 from tests.execution.files._runtime_support import runtime_selection
 
@@ -788,14 +789,18 @@ def test_complete_proxmox_bodies_fit_for_transfer_and_recovery(
     plan: IdentityPlan,
     monkeypatch: pytest.MonkeyPatch,
     fixed_source: str,
+    bind_carrier,
 ) -> None:
     root = tmp_path / "approved"
     root.mkdir()
     carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.invalid", "node1", 101, "token", "synthetic"))
+    delivery = bind_carrier(carrier)
     body_sizes: list[int] = []
     status: dict[str, object] = {}
 
-    def request(method: str, suffix: str, *, body: bytes | None = None, timeout: float | None) -> dict[str, object]:
+    def request(
+        method: str, suffix: str, *, body: bytes | None = None, timeout: float | None, custody: LocalDeliveryCustody
+    ) -> dict[str, object]:
         if method == "POST":
             assert body is not None and body.isascii()
             body_sizes.append(len(body))
@@ -820,7 +825,7 @@ def test_complete_proxmox_bodies_fit_for_transfer_and_recovery(
     monkeypatch.setattr(carrier._wire, "request", request)
     with patch("agentworks.execution._file_stage_exchange.FIXED_BUNDLE", fixed_source):
         begun = stage_begin(
-            carrier,
+            delivery,
             trusted_root_path=str(root),
             relative_path="destination",
             token=_TOKEN,
@@ -835,7 +840,7 @@ def test_complete_proxmox_bodies_fit_for_transfer_and_recovery(
         assert reference is not None
         payload = b"x" * MAX_STAGE_CHUNK_BYTES
         written = stage_chunk(
-            carrier,
+            delivery,
             trusted_root_path=str(root),
             relative_path="destination",
             token=_TOKEN,
@@ -848,7 +853,7 @@ def test_complete_proxmox_bodies_fit_for_transfer_and_recovery(
             runtime_selection=runtime_selection(sys.executable),
         )
         recovered = stage_reconcile(
-            carrier,
+            delivery,
             trusted_root_path=str(root),
             relative_path="destination",
             token=_TOKEN,
@@ -861,7 +866,7 @@ def test_complete_proxmox_bodies_fit_for_transfer_and_recovery(
         debt = recovered_observation.cleanup_debt
         assert debt is not None
         cleaned = stage_cleanup(
-            carrier,
+            delivery,
             trusted_root_path=str(root),
             relative_path="destination",
             token=_TOKEN,

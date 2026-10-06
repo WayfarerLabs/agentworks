@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from types import SimpleNamespace
 from typing import cast
 
@@ -15,8 +14,21 @@ from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.errors import ConfigError, ConnectivityError, LimitExceededError, StateError
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
-from agentworks.execution.carrier import Deadline
+from agentworks.execution.carrier import Capture, CapturedOutput, Deadline, Failure
+from agentworks.execution.carriers._subprocess import ProcessResult
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+
+
+def _process_result(status: int = 0, stdout: bytes | str = b"", failure: Failure | None = None) -> ProcessResult:
+    data = stdout.encode("utf-8") if isinstance(stdout, str) else stdout
+    return ProcessResult(
+        True,
+        status,
+        status if failure is None else None,
+        CapturedOutput(data, complete=True),
+        CapturedOutput(complete=True),
+        failure,
+    )
 
 
 def _vm(*, metadata: dict[str, str] | None = None) -> SimpleNamespace:
@@ -66,8 +78,8 @@ def test_wsl2_locator_uses_one_bounded_registration_probe(monkeypatch: pytest.Mo
 
     def run(*args: object, **kwargs: object) -> SimpleNamespace:
         calls.append({"args": args, "kwargs": kwargs})
-        return SimpleNamespace(
-            returncode=0,
+        return _process_result(
+            status=0,
             stdout=json.dumps(
                 {
                     "machine_guid": "2f1b1ed8-a629-4fc5-93ef-504e9a780a37",
@@ -77,7 +89,7 @@ def test_wsl2_locator_uses_one_bounded_registration_probe(monkeypatch: pytest.Mo
             ),
         )
 
-    monkeypatch.setattr("agentworks.capabilities.vm_platform.wsl2.subprocess.run", run)
+    monkeypatch.setattr("agentworks.capabilities.vm_platform.wsl2.run_process", run)
 
     result = WSL2Platform("wsl2", {}).observe_provider_locator(
         _vm(metadata={"distro_name": "test-distro"}),
@@ -94,7 +106,9 @@ def test_wsl2_locator_uses_one_bounded_registration_probe(monkeypatch: pytest.Mo
     kwargs = cast(dict[str, object], calls[0]["kwargs"])
     env = cast(dict[str, str], kwargs["env"])
     command = cast(list[str], args[0])
-    assert cast(float, kwargs["timeout"]) > 0
+    assert isinstance(kwargs["io"].output, Capture)
+    assert kwargs["custody"] is local_delivery
+    assert cast(Deadline, kwargs["deadline"]).remaining > 0
     assert "test-distro" not in command
     assert env["AGENTWORKS_WSL_DISTRO"] == "test-distro"
 
@@ -102,8 +116,8 @@ def test_wsl2_locator_uses_one_bounded_registration_probe(monkeypatch: pytest.Mo
 def test_wsl2_locator_rejects_invalid_provider_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     local_delivery = LocalDeliveryCustody()
     monkeypatch.setattr(
-        "agentworks.capabilities.vm_platform.wsl2.subprocess.run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout='{"machine_guid":"not-guid"}'),
+        "agentworks.capabilities.vm_platform.wsl2.run_process",
+        lambda *_args, **_kwargs: _process_result(status=0, stdout='{"machine_guid":"not-guid"}'),
     )
 
     with pytest.raises(StateError):
@@ -115,8 +129,8 @@ def test_wsl2_locator_rejects_invalid_provider_payload(monkeypatch: pytest.Monke
 def test_wsl2_locator_maps_process_failure_to_connectivity(monkeypatch: pytest.MonkeyPatch) -> None:
     local_delivery = LocalDeliveryCustody()
     monkeypatch.setattr(
-        "agentworks.capabilities.vm_platform.wsl2.subprocess.run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=1, stdout=""),
+        "agentworks.capabilities.vm_platform.wsl2.run_process",
+        lambda *_args, **_kwargs: _process_result(status=1, stdout=""),
     )
 
     with pytest.raises(ConnectivityError):
@@ -130,9 +144,9 @@ def test_wsl2_locator_maps_missing_or_duplicate_registration_to_state(monkeypatc
     from agentworks.capabilities.vm_platform import wsl2
 
     monkeypatch.setattr(
-        "agentworks.capabilities.vm_platform.wsl2.subprocess.run",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            returncode=wsl2._WSL2_LOCATOR_REGISTRATION_MISMATCH_EXIT,
+        "agentworks.capabilities.vm_platform.wsl2.run_process",
+        lambda *_args, **_kwargs: _process_result(
+            status=wsl2._WSL2_LOCATOR_REGISTRATION_MISMATCH_EXIT,
             stdout="",
         ),
     )
@@ -147,9 +161,9 @@ def test_wsl2_locator_maps_process_timeout_to_limit(monkeypatch: pytest.MonkeyPa
     local_delivery = LocalDeliveryCustody()
 
     def timeout(*_args: object, **_kwargs: object) -> SimpleNamespace:
-        raise subprocess.TimeoutExpired("powershell", 1)
+        return _process_result(failure=Failure.DEADLINE)
 
-    monkeypatch.setattr("agentworks.capabilities.vm_platform.wsl2.subprocess.run", timeout)
+    monkeypatch.setattr("agentworks.capabilities.vm_platform.wsl2.run_process", timeout)
 
     with pytest.raises(LimitExceededError):
         WSL2Platform("wsl2", {}).observe_provider_locator(
@@ -172,8 +186,8 @@ def test_wsl2_locator_rejects_a_late_provider_result(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(wsl2, "provider_locator_remaining", remaining)
     monkeypatch.setattr(
-        "agentworks.capabilities.vm_platform.wsl2.subprocess.run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="{}"),
+        "agentworks.capabilities.vm_platform.wsl2.run_process",
+        lambda *_args, **_kwargs: _process_result(status=0, stdout="{}"),
     )
 
     with pytest.raises(LimitExceededError):
@@ -199,8 +213,8 @@ def test_wsl2_locator_keeps_observed_process_failure_over_late_deadline(monkeypa
 
     monkeypatch.setattr(wsl2, "provider_locator_remaining", remaining)
     monkeypatch.setattr(
-        "agentworks.capabilities.vm_platform.wsl2.subprocess.run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=1, stdout=""),
+        "agentworks.capabilities.vm_platform.wsl2.run_process",
+        lambda *_args, **_kwargs: _process_result(status=1, stdout=""),
     )
 
     with pytest.raises(ConnectivityError):

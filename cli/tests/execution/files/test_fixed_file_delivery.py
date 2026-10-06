@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_effect_gate_bundle import FIXED_BUNDLE as GATE_BUNDLE
 from agentworks.execution._file_effect_gate_protocol import parse_gate_control_failure
 from agentworks.execution._file_inventory_bundle import FIXED_BUNDLE as INVENTORY_BUNDLE
@@ -267,6 +268,7 @@ def test_complete_provider_body_fits_and_oversize_refuses_before_wire(
     plan: IdentityPlan,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    local_delivery = LocalDeliveryCustody()
     invocation = _invocation(bundle, plan)
     maximum_manifest = b"x" * 32_768
     representative = json.dumps(
@@ -295,7 +297,7 @@ def test_complete_provider_body_fits_and_oversize_refuses_before_wire(
         sensitive=True,
     )
     with pytest.raises(ValidationError):
-        carrier.execute(invocation, io=io, deadline=Deadline.after(1))
+        carrier.execute(invocation, io=io, deadline=Deadline.after(1), custody=local_delivery)
 
 
 @pytest.mark.parametrize("root_mode", [IdentityMode.DIRECT, IdentityMode.SUDO_ROOT])

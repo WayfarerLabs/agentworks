@@ -12,6 +12,7 @@ import pytest
 
 from agentworks.db import Database, OperationClaimState, OperationResourceKind, OperationScope
 from agentworks.errors import StateError, ValidationError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._execution_operation import ExecutionOperation
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
@@ -40,6 +41,7 @@ type Bound = tuple[Database, OperationOwner, ExecutionOperation, "LocalCarrier",
 
 class LocalCarrier:
     def __init__(self) -> None:
+        self.local_delivery = LocalDeliveryCustody()
         self.calls = 0
         self.deadlines: list[Deadline] = []
 
@@ -50,11 +52,23 @@ class LocalCarrier:
     def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
         pass
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
         self.deadlines.append(deadline)
-        result = run_process(list(invocation.argv), io=io, deadline=deadline)
+        result = run_process(
+            list(invocation.argv),
+            io=io,
+            deadline=deadline,
+            custody=custody if custody is not None else self.local_delivery,
+        )
         completion = None
         if result.exit_status is not None:
             completion = (
@@ -73,7 +87,14 @@ class LocalCarrier:
 
 
 class UnknownCarrier(LocalCarrier):
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody | None = None,
+    ) -> CarrierReport:
         self.validate(invocation, io=io)
         del invocation, io
         self.calls += 1

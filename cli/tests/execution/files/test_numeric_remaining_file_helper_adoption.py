@@ -26,6 +26,7 @@ from agentworks.execution import (
     _file_stage_bundle,
     _guest_bootstrap,
 )
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_inventory_exchange import list_directory
 from agentworks.execution._file_inventory_protocol import decode_file_inventory_request
 from agentworks.execution._file_metadata_exchange import ensure_file_directory, set_file_metadata
@@ -354,6 +355,7 @@ def test_complete_maximum_manifest_uses_actual_provider_bound(
     mode: IdentityMode,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    local_delivery = LocalDeliveryCustody()
     captured = _CapturedCarrier()
     _call(case, captured, bootstrap=_NumericGuestBootstrap(replace(_ROOT, mode=mode), _GUEST))
     assert captured.invocation is not None and captured.io is not None
@@ -372,7 +374,7 @@ def test_complete_maximum_manifest_uses_actual_provider_bound(
     monkeypatch.setattr(carrier._wire, "request", lambda *_a, **_kw: pytest.fail("provider dispatch reached"))
     oversized = replace(io, input=FiniteInput(bundle.ROOT_PROGRAM.prefix + b"x" * 65536, sensitive=True))
     with pytest.raises(ValidationError):
-        carrier.execute(captured.invocation, io=oversized, deadline=Deadline.after(1))
+        carrier.execute(captured.invocation, io=oversized, deadline=Deadline.after(1), custody=local_delivery)
 
 
 @pytest.mark.parametrize("case", _FIRST_CASES)

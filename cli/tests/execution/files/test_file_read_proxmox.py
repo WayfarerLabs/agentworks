@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._file_read import FileReadObservationState, read_file
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
@@ -22,6 +23,7 @@ from agentworks.execution.carriers.proxmox import (
     ProxmoxCarrier,
     ProxmoxConnection,
 )
+from tests.execution._bound_carrier_support import bind_carrier as bind_carrier
 from tests.execution.files._runtime_support import runtime_selection
 
 if TYPE_CHECKING:
@@ -54,8 +56,9 @@ def test_proxmox_capacity_budget_rejects_before_provider_dispatch() -> None:
     assert len(worst_case_status) + 1_048_576 < _MAX_RESPONSE_BYTES
 
 
-def test_file_read_rejects_unfit_proxmox_response_before_post(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_file_read_rejects_unfit_proxmox_response_before_post(monkeypatch: pytest.MonkeyPatch, bind_carrier) -> None:
     carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.invalid", "node1", 101, "token", "synthetic"))
+    delivery = bind_carrier(carrier)
 
     def unexpected_request(*args: object, **kwargs: object) -> dict[str, object]:
         raise AssertionError("provider request after failed capacity preflight")
@@ -63,7 +66,7 @@ def test_file_read_rejects_unfit_proxmox_response_before_post(monkeypatch: pytes
     monkeypatch.setattr(carrier._wire, "request", unexpected_request)
     with pytest.raises(ValidationError):
         read_file(
-            carrier,
+            delivery,
             trusted_root_path="/tmp",
             relative_path="file",
             max_bytes=1_048_576,
@@ -82,14 +85,18 @@ def test_file_read_through_buffered_proxmox_delivery(
     monkeypatch: pytest.MonkeyPatch,
     fault: str | None,
     large: bool,
+    bind_carrier,
 ) -> None:
     data = bytes(range(256)) * 2_900 if large else b"file-content-canary\x00\xff\r\n" * 1_024
     (tmp_path / "file-path-canary").write_bytes(data)
     carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.invalid", "node1", 101, "token", "synthetic"))
+    delivery = bind_carrier(carrier)
     requests: list[tuple[str, str]] = []
     status: dict[str, object] = {}
 
-    def request(method: str, suffix: str, *, body: bytes | None = None, timeout: float | None) -> dict[str, object]:
+    def request(
+        method: str, suffix: str, *, body: bytes | None = None, timeout: float | None, custody: LocalDeliveryCustody
+    ) -> dict[str, object]:
         requests.append((method, suffix))
         if method == "POST":
             assert suffix == "exec" and body is not None and body.isascii()
@@ -128,7 +135,7 @@ def test_file_read_through_buffered_proxmox_delivery(
 
     monkeypatch.setattr(carrier._wire, "request", request)
     result = read_file(
-        carrier,
+        delivery,
         trusted_root_path=str(tmp_path),
         relative_path="file-path-canary",
         max_bytes=len(data),
