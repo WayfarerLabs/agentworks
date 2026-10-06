@@ -693,6 +693,15 @@ regressions cover finish/retry against control capture and failed handoff. The w
 focused/adjacent cases, scoped typing/style, full file quality and whitespace gates, exit 0.
 Integrated whole-unit re-review and final lead gates remain pending.
 
+The lead's complete baseline at `66a245bb1` passes 15,189 cases with 49 skips and 27 existing
+warnings, but fails one private target-composition cleanup test. That test still seals and resolves
+the aggregate owner without first finishing the newly retained execution lifetime. The actual
+native workflow already finishes execution before aggregate cleanup. The delegated correction
+retains the execution state explicitly in the standalone fixture, finishes the clean lifetime and
+also checks that uncertain execution refuses finish. Existing dispatch, file and ownership
+assertions remain. This failed baseline is not a green gate or correction proof; final combined
+reviews and full gates remain required.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
@@ -2352,7 +2361,7 @@ and whitespace checks pass. Live SSH/QGA and production route tests remain open.
       Prove the selected policy on PVE 8 and 9 with the intended restricted token and `VM.Audit`,
       `current=1`, recreation, default/unique restore, disk/RAM rollback, clone, stop/start,
       migration and VMID reuse. Settle explicit adoption/alternative handling for missing, disabled
-      or manually preserved IDs without synthetic identity or readiness repair. Do not impose an
+      or manually preserved IDs without synthetic identity or readiness repair. Do not impose a
       requirement for a cluster identifier that cannot be copied or infer positive generation from
       configured addresses. The [prior-art finding](prior-art-research.md) is response input, not
       native acceptance or recovery cutover by itself.
