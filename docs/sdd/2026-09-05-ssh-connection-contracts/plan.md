@@ -258,6 +258,13 @@ cwd/fd references and are removed; logs are retained. All 25 completed plan reco
 unchanged, and the SDD remains unlocked. This refresh closes no native SSH, terminal, trust or
 production RunContext acceptance gate.
 
+Hosted CI `37514481493` passes every required job for published SSH `2ef07cd6e`. Its actual merge
+`7441230222828189a56ee8d5392d46d47831a7d3` has transport `16a6cecba` and SSH `2ef07cd6e` as parents
+and exactly the published SSH tree. Linux Python 3.12-3.14 each pass 15,972 tests with 202 skips and
+27 warnings; Windows Server 2025/Python 3.13 passes 1,142 tests with 59 skips and 25 warnings. This
+verifies that earlier code pin, not native terminal, trust or production RunContext acceptance, and
+does not attribute its hosted run to the later custody design response.
+
 The preceding combined code pin `a38e5814fd180fe65899001d5a74426c4587dcf0` preserves all 64 Python
 files in the SSH contribution, including retained deletions, from published `47013bcf2`. Its full
 suite passes 16,046 non-integration tests with 51 skips and 27 warnings, exit 0 in 251.43 seconds.

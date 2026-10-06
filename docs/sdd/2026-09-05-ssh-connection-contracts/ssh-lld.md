@@ -140,14 +140,15 @@ cleanup leaves its exact ownership in the caller's enclosing lifetime. Pending o
 prevents another exchange through that storage; lost ownership never permits signaling a reused PID.
 Local settlement does not establish remote cancellation or clear uncertain remote dispatch.
 
-The SSH adaptation must preserve borrowed native descriptors and associated terminal state until an
-unfinished constructor can no longer inherit them. Returning or raising is no authority to close,
-reuse or restore those resources. Borrowed byte endpoints remain caller-pumped, with no background
-pump after return. Aggregate cleanup must retain and drain custody after ordinary borrow handoff
-without reopening dispatch. Transport owns the concrete storage type and aggregate integration; SSH
-owns its carrier call sites and terminal resource adaptation. The current runtime signature and
-settlement behavior remain unchanged until that shared implementation and its actual consumers are
-available. Forwarding retains its separately explicit lifetime through the shared native owner.
+The SSH adaptation must preserve borrowed native descriptors and associated terminal state until
+local custody settles, including while an unfinished constructor can still inherit them. Returning
+or raising is no authority to close, reuse or restore those resources. Borrowed byte endpoints
+remain caller-pumped, with no background pump after return. Aggregate cleanup must retain and drain
+custody after ordinary borrow handoff without reopening dispatch. Transport owns the concrete
+storage type and aggregate integration; SSH owns its carrier call sites and terminal resource
+adaptation. The current runtime signature and settlement behavior remain unchanged until that shared
+implementation and its actual consumers are available. Forwarding retains its separately explicit
+lifetime through the shared native owner.
 
 Live measurements confirm that guest workloads and bootstrap descendants can survive local
 observation expiry. The shared
