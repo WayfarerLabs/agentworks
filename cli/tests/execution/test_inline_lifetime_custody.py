@@ -367,6 +367,7 @@ def test_terminal_capture_serializes_concurrent_bookkeeping(
             self.lock.release()
 
     monkeypatch.setattr(operation, "_admission_guard", ObservedGuard())
+    carrier: RecordingCarrier
     if terminal == "control":
         original = operation._outcome
 

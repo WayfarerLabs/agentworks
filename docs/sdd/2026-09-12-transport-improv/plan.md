@@ -695,12 +695,12 @@ Integrated whole-unit re-review and final lead gates remain pending.
 
 The lead's complete baseline at `66a245bb1` passes 15,189 cases with 49 skips and 27 existing
 warnings, but fails one private target-composition cleanup test. That test still seals and resolves
-the aggregate owner without first finishing the newly retained execution lifetime. The actual
-native workflow already finishes execution before aggregate cleanup. The delegated correction
-retains the execution state explicitly in the standalone fixture, finishes the clean lifetime and
-also checks that uncertain execution refuses finish. Existing dispatch, file and ownership
-assertions remain. This failed baseline is not a green gate or correction proof; final combined
-reviews and full gates remain required.
+the aggregate owner without first finishing the newly retained execution lifetime. The actual native
+workflow already finishes execution before aggregate cleanup. The delegated correction retains the
+execution state explicitly in the standalone fixture, finishes the clean lifetime and also checks
+that uncertain execution refuses finish. Existing dispatch, file and ownership assertions remain.
+This failed baseline is not a green gate or correction proof; final combined reviews and full gates
+remain required.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
