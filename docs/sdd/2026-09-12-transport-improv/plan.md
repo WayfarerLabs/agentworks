@@ -294,13 +294,30 @@ The private operation-context unit at `a5678fe5b` now binds one immutable bootst
 `FileOperation`, matching its VM boot before any call. Each preparation and all three gate setup
 paths receive that context before dispatch; bound promotion, JSON children and serial package
 children retain it. Admissions and every originating payload update use the typed record's actual
-version. Exact package-publication retry also confirms revision, bytes and version before the next
-child can dispatch. Context-free private calls retain their version-one behavior, not a production
-VM fallback. The worker passes 35 focused cases and its related 2,124-case selection with 25 skips;
-complete strict mypy passes 1,219 source and test files. Its exchange and consecutive-child evidence
-is simulated, not native credential or root-entry proof. Independent integrated review and full lead
-gates remain pending. Fresh recovery, production VM construction, inline and service entry, and
-complete RunContext remain open; no checkpoint or public round closes here.
+version. Exact package-publication retry repeats the record's version and bytes; the existing
+revision/bytes confirmation remains before the next child dispatch. Context-free private calls
+retain their version-one behavior, not a production VM fallback. The worker passes 35 focused cases
+and its related 2,124-case selection with 25 skips; complete strict mypy passes 1,219 source and
+test files. Its exchange and consecutive-child evidence is simulated, not native credential or
+root-entry proof. Independent integrated review and full lead gates remain pending. Fresh recovery,
+production VM construction, inline and service entry, and complete RunContext remain open; no
+checkpoint or public round closes here.
+
+Private project and generic review are clear at `93e134600`; the project passes 35 new and 312
+adjacent cases, while generic passes the new cases and a 148-case related selection. The complexity
+lane's accepted correction removes an extra returned-version comparison and the test that published
+a correct row before substituting a contradictory internal return. The concrete repository already
+checks or writes version and bytes together within its transaction. All typed version writes and the
+lost-both-publication-replies custody test remain. The corrected worker selection passes 34 new and
+2,123 related cases with 25 skips, plus complete strict mypy and file/static gates. Integrated
+re-review and final lead gates remain pending.
+
+The preceding lead run at `93e134600` passes 14,804 non-integration tests with 49 skips, complete
+strict mypy (1,219 source and test files) and all static/file/SDD/Rulesync gates. Website validation
+passes 160 Python and 103 Node cases, four builds and both deterministic comparisons. These results
+are for the pre-deletion pin, not a substitute for the corrected state. The published workflow head
+`0be885044` now passes every hosted CI and CodeQL gate. Native, recovery and production-composition
+obligations remain open.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
