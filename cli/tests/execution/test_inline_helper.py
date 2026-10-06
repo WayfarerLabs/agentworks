@@ -33,7 +33,6 @@ from agentworks.execution.carrier import (
     CarrierReport,
     ChannelFeatures,
     Deadline,
-    Dispatch,
     ExitStatus,
     PreparedInvocation,
     Retention,
