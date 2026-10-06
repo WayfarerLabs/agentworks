@@ -286,13 +286,14 @@ def _tainted_baseline_writer(path: Path, committed: Any, release: Any, released:
 
     lock = _acquire_migration_lock(path, timeout=5.0)
     assert lock is not None
-    connection = sqlite3.connect(path)
-    connection.execute("ALTER TABLE vms ADD COLUMN cpus INTEGER")
-    connection.commit()
-    connection.close()
-    committed.set()
-    assert release.wait(timeout=5)
-    _release_sqlite_lock(lock)
+    try:
+        with closing(sqlite3.connect(path)) as connection:
+            connection.execute("ALTER TABLE vms ADD COLUMN cpus INTEGER")
+            connection.commit()
+        committed.set()
+        assert release.wait(timeout=30)
+    finally:
+        _release_sqlite_lock(lock)
     released.set()
 
 
@@ -705,24 +706,36 @@ def test_prepare_refuses_identical_tainted_baseline_after_lock_released_before_f
     released = context.Event()
     writer = context.Process(target=_tainted_baseline_writer, args=(path, committed, release, released))
     writer.start()
-    assert committed.wait(timeout=5)
-    real_inspect = backup_module.inspect_schema
     observed_tokens: list[tuple[int, int | None]] = []
+    try:
+        # Spawn imports and fixture coordination can be slow on a loaded Windows runner.
+        # These barriers order the scenario; they do not measure product lock deadlines.
+        assert committed.wait(timeout=30), f"Writer did not commit; exitcode={writer.exitcode}"
+        real_inspect = backup_module.inspect_schema
 
-    def _inspect_then_release(database_path: Path):
-        result = real_inspect(database_path)
-        observed_tokens.append((result.current_version, result.schema_cookie))
-        if len(observed_tokens) == 1:
-            release.set()
-            assert released.wait(timeout=5)
-        return result
+        def _inspect_then_release(database_path: Path):
+            result = real_inspect(database_path)
+            observed_tokens.append((result.current_version, result.schema_cookie))
+            if len(observed_tokens) == 1:
+                release.set()
+                assert released.wait(timeout=30), f"Writer did not release; exitcode={writer.exitcode}"
+            return result
 
-    monkeypatch.setattr(backup_module, "inspect_schema", _inspect_then_release)
+        monkeypatch.setattr(backup_module, "inspect_schema", _inspect_then_release)
 
-    with pytest.raises(StateError, match="unexpected columns for completed schema version 1: cpus") as raised:
-        prepare_database_open(path)
+        with pytest.raises(StateError, match="unexpected columns for completed schema version 1: cpus") as raised:
+            prepare_database_open(path)
+    finally:
+        release.set()
+        writer.join(timeout=30)
+        if writer.is_alive():
+            writer.terminate()
+            writer.join(timeout=5)
+        if writer.is_alive():
+            writer.kill()
+            writer.join(timeout=5)
+        assert not writer.is_alive()
 
-    writer.join(timeout=10)
     assert writer.exitcode == 0
     assert len(observed_tokens) == 2
     assert observed_tokens[0] == observed_tokens[1]
