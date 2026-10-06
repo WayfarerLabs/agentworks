@@ -366,6 +366,18 @@ operation-context head `51d5222d5` passes all hosted CI and CodeQL gates. Operat
 context, fresh recovery, service entry and native production composition remain open; no review
 signal or public round closes.
 
+The private execution-state unit at `864ad91dd` requires an explicit managed target matching the
+owner scope, validates the optional bootstrap's full derived VM boot, and forwards one immutable
+context before preparation/borrowing. Body identity remains explicit per call. Its four existing
+constructor callers now supply an actual prepared or fixture target, with no optional target shim.
+The native caller supplies its prepared target only; it still does not construct the bootstrap. The
+worker passes 96 focused/adjacent cases, including 14 new cases, complete strict mypy (1,221 source
+and test files), changed Ruff/format, full file quality and whitespace. Packed success uses the
+existing simulated-admission test helper, not a new fixture framework or native privilege proof.
+Independent integrated review and lead gates remain pending. Fresh recovery, native context
+construction, service entry, full availability and additive RunContext remain open; no completion
+checkbox or public feedback/fix round closes here.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state

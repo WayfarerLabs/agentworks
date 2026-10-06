@@ -110,6 +110,12 @@ uses the contextual result reducer. It is not exported from the package root, pl
 `ExecutionTarget`, or supplied through RunContext. Jobs and complete target composition remain
 required before that public surface exists.
 
+`ExecutionOperation` requires an explicit managed target matching its owner's scope. An optional
+numeric bootstrap must match that VM's derived boot identity; platform-host targets cannot select
+it. The operation forwards its immutable context before preparation and borrowing, while each call
+keeps its explicit body identity. Native composition currently supplies its prepared target but does
+not yet construct this bootstrap. No target or root identity is inferred as a fallback.
+
 `_execution_result.py` reduces an operation-owned inline outcome into those public facts. The fixed
 inline helper accepts retrospective normal completion only on CPython 3.11 through 3.14, after its
 trusted terminal records an exact normal wait and the operation owner has settled. This produces a
@@ -749,10 +755,10 @@ reconciliation and cleanup. Private download, upload, JSON and single-call bindi
 context through their exchanges and outcomes. JSON gives each independently prepared upload child
 the same context, including after a publication conflict. Existing context-free private candidates
 remain unchanged. Core file state can bind this context once, but production VM construction and
-fresh recovery have not yet adopted it. Buffered inline preparation also accepts this context;
-operation-owned execution and later service entry still need adoption. Complete provider envelopes
-include the selected prefix and encoded request; even a valid request can refuse before QGA dispatch
-when their aggregate exceeds the carrier limit.
+fresh recovery have not yet adopted it. Buffered inline preparation and operation state also accept
+this context; native construction and later service entry still need adoption. Complete provider
+envelopes include the selected prefix and encoded request; even a valid request can refuse before
+QGA dispatch when their aggregate exceeds the carrier limit.
 
 The separate private `build_named_guest_bootstrap_argv` handles early fixed guest operations before
 numeric account preparation. It resolves a core-bound account name through the system account
@@ -847,8 +853,8 @@ prefix or changing the manifest. Its full guest checkpoint precedes remaining he
 request consumption; the body still checks its intended identity. Application stdin stays separate
 from script source, and normal completion still requires the original terminal evidence and exact
 wait. A bootstrap exit without that evidence leaves application state unknown. Private packed tests
-mock privileged admission; native credential transitions and operation-owned context construction
-remain unproved.
+mock privileged admission; native credential transitions and production context construction remain
+unproved.
 
 The current private inline access captures at most 4,096 bytes per application stream and defaults
 to that limit. This is a checkpoint-local helper bound, not the proposed production caller default
