@@ -11,7 +11,7 @@ import pytest
 from tests.execution.carriers.ssh.fixture_worker import FixtureWorker
 from tests.execution.carriers.ssh.posix_terminal_probe import run_case
 
-pytestmark = [pytest.mark.integration, pytest.mark.xdist_group("ssh-posix-terminal-native")]
+pytestmark = pytest.mark.integration
 
 
 @pytest.mark.parametrize("refusal", [False, True], ids=["handoff-resize", "runtime-refusal"])
