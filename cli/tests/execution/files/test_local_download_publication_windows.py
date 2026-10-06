@@ -57,19 +57,19 @@ def test_create_refuses_existing_entry_even_if_it_arrives_after_staging(tmp_path
     assert list(tmp_path.iterdir()) == [destination]
 
 
-def test_held_ancestor_blocks_directory_rename_access(tmp_path: Path) -> None:
+def test_held_ancestor_blocks_directory_rename(tmp_path: Path) -> None:
     parent = tmp_path / "held"
     parent.mkdir()
-    api = _WindowsAPI()
+    renamed = tmp_path / "renamed"
     writer = WindowsLocalDownloadPublication(parent / "download")
     try:
         with pytest.raises(OSError) as blocked:
-            api.open(parent, 0x10000, 1 | 2 | 4, 3, 0x02000000 | 0x00200000)
+            parent.rename(renamed)
         assert cast("Any", blocked.value).winerror == 32  # ERROR_SHARING_VIOLATION.
     finally:
         writer.abort()
-    handle = api.open(parent, 0x10000, 1 | 2 | 4, 3, 0x02000000 | 0x00200000)
-    api.close(handle)
+    parent.rename(renamed)
+    assert renamed.is_dir() and not parent.exists()
 
 
 @pytest.mark.parametrize("data", [b"", b"n", b"a replacement longer than the old bytes"])

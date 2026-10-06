@@ -34,6 +34,7 @@ _WRITE = 0x40000000
 _DELETE = 0x00010000
 _READ_CONTROL = 0x00020000
 _READ_ATTRIBUTES = 0x80
+_LIST_DIRECTORY = 1
 _SHARE_READ = 1
 _SHARE_WRITE = 2
 _SHARE_DELETE = 4
@@ -392,7 +393,8 @@ class WindowsLocalDownloadPublication:
             for path in reversed((self._destination.parent, *self._destination.parent.parents)):
                 handle = self._api.open(
                     path,
-                    _READ_ATTRIBUTES,
+                    # Metadata-only opens do not participate in share checks.
+                    _READ_ATTRIBUTES | _LIST_DIRECTORY,
                     _SHARE_READ | _SHARE_WRITE,
                     _OPEN_EXISTING,
                     _BACKUP_SEMANTICS | _OPEN_REPARSE,
