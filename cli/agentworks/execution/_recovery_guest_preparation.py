@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform.base import ProviderLocator, VMPlatform
     from agentworks.db import VMRow
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import (
         Carrier,
@@ -114,7 +115,8 @@ class _RecoveryFixedObservationCarrier:
                 pass
             raise
         try:
-            return self._carrier.execute(invocation, io=io, deadline=deadline)
+            assert batch._attempt is not None
+            return self._carrier.execute(invocation, io=io, deadline=deadline, custody=batch._attempt.local_delivery)
         except BaseException:
             batch._pending_remote_effects = True
             raise
@@ -125,6 +127,8 @@ class _RecoveryFixedObservationCarrier:
         if attempt is None:
             if dispatch is not Dispatch.NOT_SENT:
                 batch._coordination_uncertain = True
+            return False
+        if not attempt.local_delivery.settled:
             return False
         if dispatch is Dispatch.NOT_SENT or (dispatch is Dispatch.SENT and completion == ExitStatus(code=0)):
             try:
@@ -145,9 +149,17 @@ class RecoveryGuestPreparationBatch:
     object; no takeover path can replay its guest or account probes.
     """
 
-    def __init__(self, binding: NativeExecutionBinding, owner: OperationOwner, obligation_id: str) -> None:
+    def __init__(
+        self,
+        binding: NativeExecutionBinding,
+        owner: OperationOwner,
+        obligation_id: str,
+        *,
+        provider_custody: LocalDeliveryCustody,
+    ) -> None:
         self._binding = binding
         self._owner = owner
+        self._provider_custody = provider_custody
         self._obligation_id = obligation_id
         self._started = False
         self._obligation: LifecycleObligation | None = None
@@ -222,6 +234,7 @@ class RecoveryGuestPreparationBatch:
                     self._binding,
                     _RecoveryFixedObservationCarrier(guest_carrier, self),
                     deadline=deadline,
+                    provider_custody=self._provider_custody,
                 )
                 if self._guest.status is VMTargetPreparationStatus.PREPARED:
                     self._identity = _prepare_target_identity_observations(

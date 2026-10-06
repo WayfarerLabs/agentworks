@@ -45,6 +45,7 @@ from agentworks.schema import AgwModel, NonEmptyStr
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
@@ -849,6 +850,7 @@ class LimaPlatform(VMPlatform):
         ctx: RunContext,
         *,
         deadline: Deadline,
+        custody: LocalDeliveryCustody,
     ) -> ProviderLocatorObservation:
         """Lima names lack a provider namespace stable across placements."""
         del vm, ctx, deadline

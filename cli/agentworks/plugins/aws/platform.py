@@ -75,6 +75,7 @@ from agentworks.plugins.aws.network import (
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from collections.abc import Iterator, Mapping
 
     from agentworks.capabilities.base import RunContext
@@ -706,6 +707,7 @@ class EC2Platform(VMPlatform):
         ctx: RunContext,
         *,
         deadline: Deadline,
+        custody: LocalDeliveryCustody,
     ) -> ProviderLocatorObservation:
         """Read the exact EC2 instance and bind its live account namespace."""
         instance_id, region, account_id = self._locator_metadata(vm)

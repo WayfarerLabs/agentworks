@@ -28,10 +28,13 @@ from agentworks.capabilities.vm_platform.debian_release import code_owned_releas
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
 from agentworks.errors import ConnectivityError, LimitExceededError, StateError
+from agentworks.execution.carrier import Capture, CarrierIO, Failure
+from agentworks.execution.carriers._subprocess import run_process
 from agentworks.schema import AgwModel
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from collections.abc import Iterator, Mapping
     from contextlib import AbstractContextManager
 
@@ -1016,47 +1019,48 @@ class WSL2Platform(VMPlatform):
         ctx: RunContext,
         *,
         deadline: Deadline,
+        custody: LocalDeliveryCustody,
     ) -> ProviderLocatorObservation:
         """Observe the exact local WSL registration without touching the guest."""
         del ctx
         distro_name = self._distro_name(vm)
-        timeout = provider_locator_remaining(deadline, vm_name=vm.name)
-        try:
-            result = subprocess.run(
-                ["powershell", "-NoProfile", "-NonInteractive", "-Command", _WSL2_LOCATOR_SCRIPT],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=timeout,
-                env={**os.environ, "AGENTWORKS_WSL_DISTRO": distro_name},
-            )
-        except subprocess.TimeoutExpired as error:
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        result = run_process(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", _WSL2_LOCATOR_SCRIPT],
+            io=CarrierIO(output=Capture(65_536)),
+            deadline=deadline,
+            custody=custody,
+            env={**os.environ, "AGENTWORKS_WSL_DISTRO": distro_name},
+        )
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        if result.failure is Failure.DEADLINE:
             raise LimitExceededError(
                 f"WSL2 provider locator observation timed out for VM '{vm.name}'",
                 entity_kind="vm",
                 entity_name=vm.name,
-            ) from error
-        except OSError as error:
+            )
+        if result.failure is not None or not result.stdout.complete or not custody.settled:
             raise ConnectivityError(
                 f"Could not observe WSL2 provider locator for VM '{vm.name}'",
                 entity_kind="vm",
                 entity_name=vm.name,
-            ) from error
-        if result.returncode == _WSL2_LOCATOR_REGISTRATION_MISMATCH_EXIT:
+            )
+        if result.exit_status == _WSL2_LOCATOR_REGISTRATION_MISMATCH_EXIT:
             raise StateError(
                 f"WSL2 registration for VM '{vm.name}' is missing or ambiguous",
                 entity_kind="vm",
                 entity_name=vm.name,
             )
-        if result.returncode != 0:
+        if result.exit_status != 0:
             raise ConnectivityError(
                 f"Could not observe WSL2 provider locator for VM '{vm.name}'",
                 entity_kind="vm",
                 entity_name=vm.name,
             )
         provider_locator_remaining(deadline, vm_name=vm.name)
-        machine_guid, user_sid, registration_guid = _parse_wsl2_locator_payload(result.stdout, vm_name=vm.name)
+        machine_guid, user_sid, registration_guid = _parse_wsl2_locator_payload(
+            result.stdout.data.decode("utf-8", errors="replace"), vm_name=vm.name
+        )
         return ProviderLocator(f"wsl2:{machine_guid}:{user_sid}:{registration_guid}")
 
     def resolve_native_execution_binding(
@@ -1101,26 +1105,32 @@ class WSL2Platform(VMPlatform):
             return VMStatus.UNKNOWN
         return VMStatus.UNKNOWN
 
-    def observe_execution_power(self, vm: VMRow, ctx: RunContext, *, deadline: Deadline) -> VMStatus:
+    def observe_execution_power(
+        self, vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody: LocalDeliveryCustody
+    ) -> VMStatus:
         """Read WSL registration power without invoking a distro or guest."""
         del ctx
         distro_name = self._distro_name(vm)
-        timeout = execution_power_remaining(deadline, vm_name=vm.name)
-        try:
-            result = subprocess.run(["wsl", "--list", "--verbose"], capture_output=True, timeout=timeout)
-        except subprocess.TimeoutExpired as error:
+        execution_power_remaining(deadline, vm_name=vm.name)
+        result = run_process(
+            ["wsl", "--list", "--verbose"],
+            io=CarrierIO(output=Capture(1_048_576)),
+            deadline=deadline,
+            custody=custody,
+        )
+        execution_power_remaining(deadline, vm_name=vm.name)
+        if result.failure is Failure.DEADLINE:
             raise LimitExceededError(
                 f"WSL2 power observation timed out for VM '{vm.name}'",
                 entity_kind="vm",
                 entity_name=vm.name,
-            ) from error
-        except OSError as error:
+            )
+        if result.failure is Failure.DISPATCH:
             raise ConnectivityError(
                 f"Could not observe WSL2 power for VM '{vm.name}'",
                 entity_kind="vm",
                 entity_name=vm.name,
-            ) from error
-        execution_power_remaining(deadline, vm_name=vm.name)
-        if result.returncode != 0 or type(result.stdout) is not bytes:
+            )
+        if result.failure is not None or result.exit_status != 0 or not result.stdout.complete or not custody.settled:
             return VMStatus.UNKNOWN
-        return _execution_power_from_listing(result.stdout, distro_name)
+        return _execution_power_from_listing(result.stdout.data, distro_name)

@@ -64,7 +64,8 @@ if TYPE_CHECKING:
     from agentworks.execution._file_stat import FileRevision
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution._scratch import ScratchReference
-    from agentworks.execution.carrier import Carrier, Deadline, ExitStatus
+    from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
+    from agentworks.execution.carrier import Deadline, ExitStatus
 
 
 class FilePublicationObservationState(StrEnum):
@@ -344,7 +345,7 @@ def _request_data(request: FilePublicationRequest) -> bytes:
 
 
 def _exchange(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     request: FilePublicationRequest,
     plan: IdentityPlan,
     deadline: Deadline,
@@ -418,7 +419,7 @@ def _exchange(
 
 
 def publish(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     trusted_root_path: str,
     relative_path: str,
@@ -451,7 +452,7 @@ def publish(
 
 
 def publication_reconcile(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     trusted_root_path: str,
     relative_path: str,
@@ -478,7 +479,7 @@ def publication_reconcile(
 
 
 def publication_cleanup(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     trusted_root_path: str,
     relative_path: str,

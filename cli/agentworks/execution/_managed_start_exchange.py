@@ -51,6 +51,8 @@ from .carrier import CarrierIO, Deadline, Dispatch, Failure, FiniteInput, Prepar
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
+
     from .carrier import Carrier, ExitStatus
 
 
@@ -140,10 +142,8 @@ class _PreparedAttempt:
         ):
             raise ValidationError("Managed start preparation does not match reservation and carrier")
 
-    def matches_delivery(self, carrier: Carrier) -> bool:
-        return carrier is self.carrier or (
-            isinstance(carrier, BorrowedFixedHelperCarrier) and carrier.wraps(self.carrier)
-        )
+    def matches_delivery(self, carrier: BoundHelperCarrier) -> bool:
+        return isinstance(carrier, BorrowedFixedHelperCarrier) and carrier.wraps(self.carrier)
 
     def claim(self, reserved: ManagedRunRecord, carrier: Carrier, deadline: Deadline) -> None:
         self.verify(reserved, carrier, deadline)
@@ -349,7 +349,7 @@ def prepare_managed_start(
     return prepared
 
 
-def _exchange(carrier: Carrier, prepared: _PreparedAttempt, deadline: Deadline) -> ManagedStartCandidate:
+def _exchange(carrier: BoundHelperCarrier, prepared: _PreparedAttempt, deadline: Deadline) -> ManagedStartCandidate:
     if deadline.expired:
         return ManagedStartCandidate(
             Dispatch.NOT_SENT,
@@ -390,7 +390,7 @@ def _exchange(carrier: Carrier, prepared: _PreparedAttempt, deadline: Deadline) 
 def start_managed_run(
     repository: ManagedRunRepository,
     reserved: ManagedRunRecord,
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     prepared: _PreparedAttempt,
     deadline: Deadline,

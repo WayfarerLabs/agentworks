@@ -45,7 +45,8 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.execution._helper_launcher import IdentityPlan
-    from agentworks.execution.carrier import Carrier, Deadline, ExitStatus
+    from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
+    from agentworks.execution.carrier import Deadline, ExitStatus
 
 
 class _DiscardSink:
@@ -258,7 +259,7 @@ def prepare_inline_candidate(
 
 
 def execute_inline_candidate(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     prepared: PreparedInlineCandidate,
     *,
     deadline: Deadline,

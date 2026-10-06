@@ -51,7 +51,8 @@ from agentworks.execution.carrier import (
 if TYPE_CHECKING:
     from agentworks.execution._file_stat import FileStat
     from agentworks.execution._helper_launcher import IdentityPlan
-    from agentworks.execution.carrier import Carrier, Deadline, ExitStatus
+    from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
+    from agentworks.execution.carrier import Deadline, ExitStatus
 
 
 class FileReadObservationState(StrEnum):
@@ -259,7 +260,7 @@ def _max_success_stdout_bytes(max_bytes: int) -> int:
 
 
 def read_file(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     trusted_root_path: str,
     relative_path: str,

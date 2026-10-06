@@ -22,6 +22,7 @@ from agentworks.errors import LimitExceededError, ProvisioningError, StateError,
 from agentworks.execution.carrier import Deadline
 
 if TYPE_CHECKING:
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from collections.abc import Mapping
     from pathlib import Path
 
@@ -399,13 +400,15 @@ class VMPlatform(Capability):
         ``vm.platform_metadata`` (and any op secret via ``ctx``; see
         :meth:`create`)."""
 
-    def observe_execution_power(self, vm: VMRow, ctx: RunContext, *, deadline: Deadline) -> VMStatus:
+    def observe_execution_power(
+        self, vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody: LocalDeliveryCustody
+    ) -> VMStatus:
         """Passively observe power within a finite operation budget.
 
         Platforms opt in only after proving this path cannot activate the guest
         and rejects late observations. The legacy status hook is not a fallback.
         """
-        del vm, ctx, deadline
+        del vm, ctx, deadline, custody
         raise StateError(
             f"VM platform '{self.name}' has no bounded execution power observer",
             entity_kind="vm-platform",
@@ -448,6 +451,7 @@ class VMPlatform(Capability):
         ctx: RunContext,
         *,
         deadline: Deadline,
+        custody: LocalDeliveryCustody,
     ) -> ProviderLocatorObservation:
         """Read this VM's opaque provider locator, or declare it unavailable.
 

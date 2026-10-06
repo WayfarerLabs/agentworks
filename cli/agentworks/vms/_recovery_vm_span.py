@@ -16,6 +16,7 @@ from agentworks.capabilities.base import ScopeLevel
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.db import LifecycleObligationState, OperationClaimState, OperationResourceKind, VMStatus
 from agentworks.errors import StateError, ValidationError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._recovery_guest_preparation import RecoveryGuestPreparationBatch
 from agentworks.execution._target_identity import TargetIdentityStatus, _validate_inputs
 from agentworks.execution._wsl2_lifecycle import GuestAnchorPresence, HandleSettlement, HostClientStatus, JobAssignment
@@ -102,7 +103,14 @@ class _ActionCarrier:
         self._require_action()
         self._carrier.validate(invocation, io=io)
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody,
+    ) -> CarrierReport:
         self._require_action()
         action = self._action
         assert action is not None and action.deadline.expires_at is not None
@@ -113,7 +121,7 @@ class _ActionCarrier:
         ):
             raise ValidationError("Recovery carrier deadline exceeds its bound action budget")
         self._span._revalidate_action(deadline)
-        return self._carrier.execute(invocation, io=io, deadline=deadline)
+        return self._carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
 
 
 class RecoveryVMSpan:
@@ -148,6 +156,7 @@ class RecoveryVMSpan:
         self._platform = platform
         self._ctx = ctx
         self._owner = owner
+        self._local_delivery = LocalDeliveryCustody()
         self._hold_id = hold_id
         self._preparation_id = preparation_id
         self._workload_account = workload_account
@@ -169,7 +178,7 @@ class RecoveryVMSpan:
     @property
     def requires_owner_retention(self) -> bool:
         """Report this span's local custody, not aggregate predecessor debt."""
-        return self._hold_started and not self._closed
+        return not self._closed and (self._hold_started or not self._local_delivery.settled)
 
     def _acquire(self, deadline: Deadline) -> None:
         try:
@@ -228,7 +237,7 @@ class RecoveryVMSpan:
                 or pinned.platform_metadata != vm.platform_metadata
             ):
                 raise StateError("Recovery span persisted VM identity changed")
-        power = self._platform.observe_execution_power(vm, self._ctx, deadline=deadline)
+        power = self._platform.observe_execution_power(vm, self._ctx, deadline=deadline, custody=self._local_delivery)
         if deadline.expired or type(power) is not VMStatus or power not in (VMStatus.RUNNING, VMStatus.STOPPED):
             raise StateError("Recovery span power observation is unavailable")
         if power is VMStatus.STOPPED and (vm.operator_stopped or action):
@@ -258,12 +267,15 @@ class RecoveryVMSpan:
                 config=self._ctx.config,
                 native=self._native,
                 observer=self._observer,
+                provider_custody=self._local_delivery,
             )
             selected = self._selected
             if selected is None:
                 raise StateError("Recovery span native route is unavailable")
             binding = selected.binding
-            self._batch = RecoveryGuestPreparationBatch(binding, self._owner, self._preparation_id)
+            self._batch = RecoveryGuestPreparationBatch(
+                binding, self._owner, self._preparation_id, provider_custody=self._local_delivery
+            )
             _validate_inputs(
                 delivery_account=binding.delivery_account,
                 workload_account=self._workload_account,
@@ -399,6 +411,8 @@ class RecoveryVMSpan:
         try:
             if self._closed:
                 return
+            if not self._local_delivery.close(deadline) or not self._owner.close_local_delivery(deadline):
+                raise StateError("Recovery span retains unsettled local delivery")
             selected, batch = self._selected, self._batch
             if selected is None or not self._hold_started:
                 self._closed = True

@@ -42,7 +42,8 @@ _MAX_RESPONSE_RECORDS = (
 if TYPE_CHECKING:
     from ._helper_launcher import IdentityPlan
     from ._vm_guest_identity_protocol import VMGuestIdentity
-    from .carrier import Carrier, Deadline, ExitStatus
+    from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
+    from .carrier import Deadline, ExitStatus
 
 
 class ManagedObservationState(StrEnum):
@@ -254,7 +255,7 @@ class _Collector:
 
 
 def _exchange(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     operation: ManagedOperation,
     expected_launch: bytes,
@@ -326,7 +327,7 @@ def _exchange(
 
 
 def observe_managed_run(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     expected_launch: bytes,
     plan: IdentityPlan,
@@ -348,7 +349,7 @@ def observe_managed_run(
 
 
 def read_managed_output(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     expected_launch: bytes,
     stream: Stream,

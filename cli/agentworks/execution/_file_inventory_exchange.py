@@ -45,7 +45,8 @@ from agentworks.execution.carrier import (
 if TYPE_CHECKING:
     from agentworks.execution._file_inventory import FileInventoryEntry
     from agentworks.execution._helper_launcher import IdentityPlan
-    from agentworks.execution.carrier import Carrier, Deadline, ExitStatus
+    from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
+    from agentworks.execution.carrier import Deadline, ExitStatus
 
 
 class FileInventoryObservationState(StrEnum):
@@ -238,7 +239,7 @@ def _validate_text(value: object) -> str:
 
 
 def list_directory(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     trusted_root_path: str,
     relative_path: str,

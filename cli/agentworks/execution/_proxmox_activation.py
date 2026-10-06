@@ -13,6 +13,7 @@ from uuid import uuid4
 from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.db.operations import MAX_LIFECYCLE_PAYLOAD_BYTES, LifecycleObligationState, OperationResourceKind
 from agentworks.errors import StateError, ValidationError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.proxmox import ProxmoxConnection, _ProxmoxWire
 from agentworks.operations import LifecycleObligation, OperationOwner
@@ -204,7 +205,13 @@ class ProxmoxActivation:
     """
 
     def __init__(
-        self, owner: OperationOwner, vm_name: str, connection: ProxmoxConnection, expected_locator: ProviderLocator
+        self,
+        owner: OperationOwner,
+        vm_name: str,
+        connection: ProxmoxConnection,
+        expected_locator: ProviderLocator,
+        *,
+        custody: LocalDeliveryCustody,
     ) -> None:
         if owner.ownership.scope.resource_kind is not OperationResourceKind.VM:
             raise ValidationError("Proxmox activation requires VM ownership")
@@ -223,6 +230,7 @@ class ProxmoxActivation:
         )
         encode_activation_payload(self._payload)
         self._owner = owner
+        self._local_delivery = custody
         self._wire = _ProxmoxWire(connection)
         self._lock = Lock()
         self._obligation_id = uuid4().hex
@@ -275,7 +283,7 @@ class ProxmoxActivation:
             self._mark_began = True
             self._obligation.mark_possible_effect()
             remaining = self._remaining(deadline)
-            upid = self._wire.request_vm_start(timeout=remaining)
+            upid = self._wire.request_vm_start(timeout=remaining, custody=self._local_delivery)
             receipt = decode_receipt(upid, self._payload)
             # Retain a matching response before CAS, including a late response.
             self._payload = replace(self._payload, upid=receipt.upid)
@@ -342,7 +350,9 @@ class ProxmoxActivation:
             if obligation.state is not LifecycleObligationState.POSSIBLE_EFFECT:
                 raise StateError("Proxmox activation has no admitted custody")
             receipt = decode_receipt(self._payload.upid, self._payload)
-            data = self._wire.request_task_status(receipt.upid, timeout=self._remaining(deadline))
+            data = self._wire.request_task_status(
+                receipt.upid, timeout=self._remaining(deadline), custody=self._local_delivery
+            )
             self._remaining(deadline)
             # Fence again after the read, including takeover during the exchange.
             self._reconcile_locked()

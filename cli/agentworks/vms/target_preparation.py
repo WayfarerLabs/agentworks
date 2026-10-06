@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform.base import ProviderLocatorObservation, VMPlatform
     from agentworks.db import VMRow
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Deadline
     from agentworks.operations import OperationBorrow, OperationOwner
@@ -144,6 +145,7 @@ def prepare_managed_vm_target_from_platform(
     *,
     deadline: Deadline,
     owner: OperationOwner,
+    provider_custody: LocalDeliveryCustody,
 ) -> VMTargetPreparation:
     """Prepare one selected target using the caller's observed route and binding.
 
@@ -161,7 +163,14 @@ def prepare_managed_vm_target_from_platform(
     borrow = owner.borrow()
     try:
         result = _prepare_selected_platform_with_borrow(
-            vm, platform, ctx, expected_locator, binding, deadline=deadline, borrow=borrow
+            vm,
+            platform,
+            ctx,
+            expected_locator,
+            binding,
+            deadline=deadline,
+            borrow=borrow,
+            provider_custody=provider_custody,
         )
     except BaseException as control:
         _release_preparation_borrow(borrow, control=control)
@@ -179,11 +188,19 @@ def _prepare_selected_platform_with_borrow(
     *,
     deadline: Deadline,
     borrow: OperationBorrow,
+    provider_custody: LocalDeliveryCustody,
 ) -> VMTargetPreparation:
     early = binding._early_guest_facts_route
     operation = BorrowedFixedHelperCarrier(binding.carrier if early is None else early.carrier, borrow)
     return _prepare_selected_platform_observations(
-        vm, platform, ctx, expected_locator, binding, operation, deadline=deadline
+        vm,
+        platform,
+        ctx,
+        expected_locator,
+        binding,
+        operation,
+        deadline=deadline,
+        provider_custody=provider_custody,
     )
 
 
@@ -196,9 +213,10 @@ def _prepare_selected_platform_observations(
     operation: FixedObservationCarrier,
     *,
     deadline: Deadline,
+    provider_custody: LocalDeliveryCustody,
 ) -> VMTargetPreparation:
     """Confirm the selected locator around a caller-owned fixed guest probe."""
-    locator = platform.observe_provider_locator(vm, ctx, deadline=deadline)
+    locator = platform.observe_provider_locator(vm, ctx, deadline=deadline, custody=provider_custody)
     if deadline.expired:
         return _failed(VMTargetPreparationFailure.DEADLINE, deadline_exceeded=True)
     if type(locator) is ProviderLocatorUnavailable:
@@ -212,7 +230,7 @@ def _prepare_selected_platform_observations(
         return preparation
 
     try:
-        confirmation = platform.observe_provider_locator(vm, ctx, deadline=deadline)
+        confirmation = platform.observe_provider_locator(vm, ctx, deadline=deadline, custody=provider_custody)
         if deadline.expired:
             return _failed_after_guest(preparation, VMTargetPreparationFailure.DEADLINE, deadline_exceeded=True)
         if type(confirmation) is ProviderLocatorUnavailable:

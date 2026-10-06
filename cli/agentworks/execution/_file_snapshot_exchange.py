@@ -69,7 +69,8 @@ if TYPE_CHECKING:
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution._scratch import ReadyScratchReference
     from agentworks.execution._scratch_receipt import ScratchCleanupDebt
-    from agentworks.execution.carrier import Carrier, Deadline, ExitStatus
+    from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
+    from agentworks.execution.carrier import Deadline, ExitStatus
 
 
 class FileSnapshotObservationState(StrEnum):
@@ -375,7 +376,7 @@ def _request_data(request: FileSnapshotRequest) -> bytes:
 
 
 def _exchange(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     request: FileSnapshotRequest,
     plan: IdentityPlan,
     deadline: Deadline,
@@ -452,7 +453,7 @@ def _exchange(
 
 
 def snapshot_begin(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     trusted_root_path: str,
     relative_path: str,
@@ -479,7 +480,7 @@ def snapshot_begin(
 
 
 def snapshot_chunk(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     token: bytes,
     ready: ReadyScratchReference,
@@ -506,7 +507,7 @@ def snapshot_chunk(
 
 
 def snapshot_stream(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     token: bytes,
     ready: ReadyScratchReference,
@@ -527,7 +528,7 @@ def snapshot_stream(
 
 
 def snapshot_reconcile(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     token: bytes,
     plan: IdentityPlan,
@@ -548,7 +549,7 @@ def snapshot_reconcile(
 
 
 def snapshot_cleanup(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     token: bytes,
     cleanup_debt: ScratchCleanupDebt,

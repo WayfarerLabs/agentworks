@@ -35,7 +35,8 @@ from agentworks.execution.carrier import (
 
 if TYPE_CHECKING:
     from agentworks.execution.binding import _EarlyGuestFactsRoute
-    from agentworks.execution.carrier import Carrier, CarrierReport, Deadline, ExitStatus
+    from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
+    from agentworks.execution.carrier import CarrierReport, Deadline, ExitStatus
 
 
 class VMGuestIdentityObservationState(StrEnum):
@@ -150,7 +151,7 @@ def _observation(
 
 
 def observe_vm_guest_identity(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     runtime_selection: RuntimeSelection,
     deadline: Deadline,

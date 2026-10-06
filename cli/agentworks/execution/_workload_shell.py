@@ -35,7 +35,8 @@ from agentworks.execution.carrier import (
 
 if TYPE_CHECKING:
     from agentworks.execution._helper_launcher import IdentityPlan
-    from agentworks.execution.carrier import Carrier, CarrierReport, Deadline, ExitStatus
+    from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
+    from agentworks.execution.carrier import CarrierReport, Deadline, ExitStatus
 
 
 class WorkloadShellObservationState(StrEnum):
@@ -141,7 +142,7 @@ def _observation(
 
 
 def observe_workload_shell(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     plan: IdentityPlan,
     runtime_selection: RuntimeSelection,

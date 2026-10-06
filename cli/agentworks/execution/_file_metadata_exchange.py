@@ -48,7 +48,8 @@ from agentworks.execution.carrier import (
 if TYPE_CHECKING:
     from agentworks.execution._file_stat import FileRevision
     from agentworks.execution._helper_launcher import IdentityPlan
-    from agentworks.execution.carrier import Carrier, Deadline, ExitStatus
+    from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
+    from agentworks.execution.carrier import Deadline, ExitStatus
 
 
 class FileMetadataObservationState(StrEnum):
@@ -240,7 +241,7 @@ def _validate_text(value: object) -> str:
 
 
 def _exchange(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     operation: FileMetadataOperation,
     trusted_root_path: str,
@@ -346,7 +347,7 @@ def _exchange(
 
 
 def set_file_metadata(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     trusted_root_path: str,
     relative_path: str,
@@ -375,7 +376,7 @@ def set_file_metadata(
 
 
 def ensure_file_directory(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     trusted_root_path: str,
     relative_path: str,

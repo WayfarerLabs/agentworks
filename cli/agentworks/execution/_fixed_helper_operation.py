@@ -5,11 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from agentworks.execution.carrier import Carrier, CarrierIO, Dispatch, ExitStatus
+from agentworks.execution.carrier import CarrierIO, Dispatch, ExitStatus
 from agentworks.operations import release_borrow_after_custody
 
 if TYPE_CHECKING:
     from agentworks.execution.carrier import (
+        Carrier,
         CarrierReport,
         ChannelFeatures,
         Deadline,
@@ -18,7 +19,18 @@ if TYPE_CHECKING:
     from agentworks.operations import OperationAttempt, OperationBorrow
 
 
-class FixedObservationCarrier(Carrier, Protocol):
+class BoundHelperCarrier(Protocol):
+    """Prepared helper delivery under custody already held by its wrapper."""
+
+    @property
+    def features(self) -> ChannelFeatures: ...
+
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None: ...
+
+    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport: ...
+
+
+class FixedObservationCarrier(BoundHelperCarrier, Protocol):
     """Concrete fixed-observation dispatch and its local custody facts."""
 
     @property
@@ -86,7 +98,7 @@ class BorrowedFixedHelperCarrier:
             self.coordination_uncertain = self._borrow.has_outstanding_attempt
             raise
         try:
-            return self._carrier.execute(invocation, io=io, deadline=deadline)
+            return self._carrier.execute(invocation, io=io, deadline=deadline, custody=attempt.local_delivery)
         except BaseException:
             self.pending_remote_effects = True
             raise
@@ -97,6 +109,8 @@ class BorrowedFixedHelperCarrier:
         if attempt is None:
             if dispatch is not Dispatch.NOT_SENT:
                 self.coordination_uncertain = True
+            return False
+        if not attempt.local_delivery.settled:
             return False
         if dispatch is Dispatch.NOT_SENT or (dispatch is Dispatch.SENT and completion == ExitStatus(code=0)):
             try:

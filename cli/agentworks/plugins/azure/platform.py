@@ -61,6 +61,7 @@ from agentworks.plugins.azure.network import (
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from collections.abc import Iterator, Mapping
 
     from azure.mgmt.compute import ComputeManagementClient
@@ -805,6 +806,7 @@ class AzureVMPlatform(VMPlatform):
         ctx: RunContext,
         *,
         deadline: Deadline,
+        custody: LocalDeliveryCustody,
     ) -> ProviderLocatorObservation:
         """Read the persisted ARM resource once and require its exact identity."""
         resource_id = _resource_id(vm)

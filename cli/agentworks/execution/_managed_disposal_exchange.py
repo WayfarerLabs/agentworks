@@ -26,7 +26,8 @@ from .carrier import CarrierIO, Deadline, Dispatch, Failure, FiniteInput, Prepar
 
 if TYPE_CHECKING:
     from ._vm_guest_identity_protocol import VMGuestIdentity
-    from .carrier import Carrier, ExitStatus
+    from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
+    from .carrier import ExitStatus
 
 
 class DisposalState(StrEnum):
@@ -118,7 +119,7 @@ class _Collector:
 
 
 def dispose_managed_run(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     expected_launch: bytes,
     plan: IdentityPlan,

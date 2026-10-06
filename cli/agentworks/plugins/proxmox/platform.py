@@ -42,6 +42,7 @@ from agentworks.schema import AgwModel, NonEmptyStr, PositiveInt, SecretRef
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from collections.abc import Mapping
 
     from agentworks.capabilities.base import RunContext
@@ -566,6 +567,7 @@ class ProxmoxPlatform(VMPlatform):
         ctx: RunContext,
         *,
         deadline: Deadline,
+        custody: LocalDeliveryCustody,
     ) -> ProviderLocatorObservation:
         """Observe current generation under the exact configured verified authority.
 
@@ -581,7 +583,7 @@ class ProxmoxPlatform(VMPlatform):
         connection = self._execution_connection(vm, ctx)
         timeout = provider_locator_remaining(deadline, vm_name=vm.name)
         try:
-            response = _ProxmoxWire(connection).request_current_config(timeout=timeout)
+            response = _ProxmoxWire(connection).request_current_config(timeout=timeout, custody=custody)
         except Exception:
             response = None
         provider_locator_remaining(deadline, vm_name=vm.name)
@@ -641,7 +643,9 @@ class ProxmoxPlatform(VMPlatform):
             RuntimeSelection(RuntimeTargetOS.LINUX),
         )
 
-    def observe_execution_power(self, vm: VMRow, ctx: RunContext, *, deadline: Deadline) -> VMStatus:
+    def observe_execution_power(
+        self, vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody: LocalDeliveryCustody
+    ) -> VMStatus:
         """Observe provider power without starting a VM or contacting its guest.
 
         The owned HTTP worker bounds DNS, TLS and response delivery. Local
@@ -654,7 +658,7 @@ class ProxmoxPlatform(VMPlatform):
         connection = self._execution_connection(vm, ctx)
         timeout = execution_power_remaining(deadline, vm_name=vm.name)
         try:
-            response = _ProxmoxWire(connection).request_power(timeout=timeout)
+            response = _ProxmoxWire(connection).request_power(timeout=timeout, custody=custody)
         except Exception:
             response = {}
         execution_power_remaining(deadline, vm_name=vm.name)

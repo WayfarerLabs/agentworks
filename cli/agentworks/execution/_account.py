@@ -44,7 +44,8 @@ from agentworks.execution.carrier import (
 
 if TYPE_CHECKING:
     from agentworks.execution._helper_identity import IdentityExpectation
-    from agentworks.execution.carrier import Carrier, CarrierReport, Deadline, ExitStatus
+    from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
+    from agentworks.execution.carrier import CarrierReport, Deadline, ExitStatus
 
 
 class AccountObservationState(StrEnum):
@@ -209,7 +210,7 @@ def _observe_file_ownership(
 
 
 def resolve_account(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     trusted_account: str,
     deadline: Deadline,
     runtime_selection: RuntimeSelection,
@@ -263,7 +264,7 @@ def resolve_account(
 
 
 def resolve_file_ownership(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     trusted_owner: str,
     trusted_group: str,
     deadline: Deadline,

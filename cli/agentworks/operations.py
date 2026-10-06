@@ -18,10 +18,12 @@ from agentworks.db.operations import (
     OperationScope,
 )
 from agentworks.errors import StateError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 
 if TYPE_CHECKING:
     from agentworks.db.database import Database
     from agentworks.db.operations import OperationRepository
+    from agentworks.execution.carrier import Deadline
 
 
 _recovery_owners_lock = threading.Lock()
@@ -108,6 +110,17 @@ class OperationOwner:
         """Refuse new ordinary work without deciding whether effects are resolved."""
         with self._guard:
             self._close_requested = True
+
+    def close_local_delivery(self, deadline: Deadline) -> bool:
+        """Drain the held attempt without reopening dispatch or resolving effects.
+
+        This remains available after borrow handoff. The outstanding attempt
+        and durable remote debt are unchanged, even when local cleanup succeeds.
+        Callers must have stopped all pipe use before requesting cleanup.
+        """
+        with self._guard:
+            attempt = self._outstanding_attempt
+            return attempt is None or attempt.local_delivery.close(deadline)
 
     def list_lifecycle_obligations(self) -> tuple[PersistedLifecycleObligation, ...]:
         """Read fenced lifecycle facts from this owner's claim and repository."""
@@ -695,6 +708,7 @@ class RecoveryAttempt:
     """One local recovery attempt that never settles a durable obligation."""
 
     _dispatch: RecoveryDispatch
+    local_delivery: LocalDeliveryCustody = field(default_factory=LocalDeliveryCustody, init=False, repr=False)
 
     def settle(self) -> None:
         """Release only this adapter attempt after its own termination proof."""
@@ -702,6 +716,8 @@ class RecoveryAttempt:
         owner = dispatch._owner  # noqa: SLF001
         with owner._guard:  # noqa: SLF001
             dispatch._require_active_locked()  # noqa: SLF001
+            if not self.local_delivery.settled:
+                raise StateError("recovery attempt retains unsettled local delivery")
             if owner._outstanding_attempt is not self:  # noqa: SLF001
                 raise StateError(
                     "recovery attempt is no longer outstanding",
@@ -1000,6 +1016,7 @@ class OperationAttempt:
     """The sole outstanding attempt originated by one serial borrow."""
 
     _borrow: OperationBorrow
+    local_delivery: LocalDeliveryCustody = field(default_factory=LocalDeliveryCustody, init=False, repr=False)
 
     def settle(self) -> None:
         """Acknowledge caller-established no-further-effects evidence."""
@@ -1007,6 +1024,8 @@ class OperationAttempt:
         owner = borrow._owner  # noqa: SLF001
         with owner._guard:  # noqa: SLF001
             borrow._require_active_locked()  # noqa: SLF001
+            if not self.local_delivery.settled:
+                raise StateError("operation attempt retains unsettled local delivery")
             if owner._outstanding_attempt is not self:  # noqa: SLF001
                 raise StateError(
                     "operation attempt is no longer outstanding",

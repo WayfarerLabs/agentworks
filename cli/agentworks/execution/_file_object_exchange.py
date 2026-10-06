@@ -47,7 +47,8 @@ from agentworks.execution.carrier import (
 if TYPE_CHECKING:
     from agentworks.execution._file_stat import FileRevision
     from agentworks.execution._helper_launcher import IdentityPlan
-    from agentworks.execution.carrier import Carrier, Deadline, ExitStatus
+    from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
+    from agentworks.execution.carrier import Deadline, ExitStatus
 
 
 class FileObjectObservationState(StrEnum):
@@ -228,7 +229,7 @@ def _validate_text(value: object) -> str:
 
 
 def _exchange(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     operation: FileObjectOperation,
     trusted_root_path: str,
@@ -331,7 +332,7 @@ def _exchange(
 
 
 def stat_file(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     trusted_root_path: str,
     relative_path: str,
@@ -354,7 +355,7 @@ def stat_file(
 
 
 def remove_file(
-    carrier: Carrier,
+    carrier: BoundHelperCarrier,
     *,
     trusted_root_path: str,
     relative_path: str,

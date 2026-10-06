@@ -12,9 +12,12 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from agentworks.errors import ValidationError
+
+if TYPE_CHECKING:
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
 
 
 @dataclass(frozen=True)
@@ -275,7 +278,7 @@ class CarrierReport:
 
 
 class Carrier(Protocol):
-    """Dispatch at most once; clean local resources before return or interrupt."""
+    """Dispatch at most once under caller-held local cleanup custody."""
 
     @property
     def features(self) -> ChannelFeatures: ...
@@ -284,4 +287,11 @@ class Carrier(Protocol):
         """Check deterministic structural limits without discovery or effects."""
         ...
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport: ...
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody,
+    ) -> CarrierReport: ...

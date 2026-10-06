@@ -40,6 +40,7 @@ from agentworks.execution.carrier import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.carrier import Carrier
     from agentworks.execution.models import Command, Script
 
@@ -417,12 +418,15 @@ def prepare_managed_candidate(
     )
 
 
-def check_systemd_prerequisites(carrier: Carrier, *, deadline: Deadline) -> PrerequisiteState:
+def check_systemd_prerequisites(
+    carrier: Carrier, *, deadline: Deadline, custody: LocalDeliveryCustody
+) -> PrerequisiteState:
     """Require root control, systemd v252 floor and cgroup v2."""
     control = carrier.execute(
         PreparedInvocation((_PYTHON, "-I", "-S", "-B", "-c", _CONTROL_PROBE)),
         io=CarrierIO(output=Capture(64)),
         deadline=deadline,
+        custody=custody,
     )
     if control.dispatch is not Dispatch.SENT:
         return PrerequisiteState.UNKNOWN
@@ -436,7 +440,10 @@ def check_systemd_prerequisites(carrier: Carrier, *, deadline: Deadline) -> Prer
     if control.stdout.data != b"AGW_MANAGED_CONTROL_1:root\n":
         return PrerequisiteState.CONTROL_UNAVAILABLE
     version = carrier.execute(
-        PreparedInvocation((_SYSTEMD_RUN, "--version")), io=CarrierIO(output=Capture(4_096)), deadline=deadline
+        PreparedInvocation((_SYSTEMD_RUN, "--version")),
+        io=CarrierIO(output=Capture(4_096)),
+        deadline=deadline,
+        custody=custody,
     )
     match = _VERSION_RE.match(version.stdout.data)
     if (
@@ -453,6 +460,7 @@ def check_systemd_prerequisites(carrier: Carrier, *, deadline: Deadline) -> Prer
         PreparedInvocation(("/usr/bin/test", "-f", f"{_CGROUP_ROOT}/cgroup.controllers")),
         io=CarrierIO(output=Capture(0)),
         deadline=deadline,
+        custody=custody,
     )
     if cgroup.dispatch is not Dispatch.SENT:
         return PrerequisiteState.UNKNOWN
@@ -465,6 +473,7 @@ def run_managed_candidate(
     prepared: PreparedManagedCandidate,
     *,
     deadline: Deadline,
+    custody: LocalDeliveryCustody,
 ) -> ManagedForegroundResult:
     """Dispatch exactly once and retain helper and boundary observations separately."""
     if prepared.prerequisite is not PrerequisiteState.READY:
@@ -479,7 +488,7 @@ def run_managed_candidate(
         )
     prepared.claim()
     try:
-        launch = carrier.execute(prepared.invocation, io=prepared.io, deadline=deadline)
+        launch = carrier.execute(prepared.invocation, io=prepared.io, deadline=deadline, custody=custody)
     finally:
         prepared._reader.finish()
     delivered = launch.stdout.retention is Retention.DELIVERED and launch.stderr.retention is Retention.DELIVERED

@@ -84,6 +84,7 @@ from agentworks.plugins.gcp.network import (
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from collections.abc import Iterator, Mapping
 
     from agentworks.capabilities.base import RunContext
@@ -587,6 +588,7 @@ class GCEPlatform(VMPlatform):
         ctx: RunContext,
         *,
         deadline: Deadline,
+        custody: LocalDeliveryCustody,
     ) -> ProviderLocatorObservation:
         """Read one owned GCE incarnation and return its provider namespace."""
         metadata = vm.platform_metadata
