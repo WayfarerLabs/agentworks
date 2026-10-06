@@ -800,6 +800,47 @@ their earlier pins; this Windows-only correction does not repeat them. Native CI
 combined head is required before treating the sharing failure as resolved. Production and complete
 native workflow acceptance remain open.
 
+## Native workstation report and remaining delivery findings
+
+The
+[complete round-9 report](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6008723722)
+tests transport `08bf36fd6ce270862ceceb3450e6a282039faaa2`. Its Linux and macOS SSH cells use a
+local composition with older SSH `508192acdc451c5934e598a6002725dcd76b60c4`; Windows Server 2022
+uses WSL2Carrier. The report measures private publisher and coordinator behavior, not production
+RunContext or native Windows SSH. Its test-file merge conflict does not require another SSH rebase:
+published SSH `dfe02e81d8434a50b4f83b4ce87120c8c1c8339c` already contains the exact transport head.
+The only SSH runtime difference from the tested pin is its unsupported-input guard.
+
+Native Create/Replace cells establish exact content, truncation, metadata preservation or refusal,
+and local staging cleanup on Linux ext4, macOS APFS outside the home directory and Windows NTFS.
+Windows independently blocks ancestor rename while held and permits it after release. Failed or
+uncertain remote transfers are not published; retained guest scratch and unresolved operation
+ownership remain explicit. These observations do not establish recovery of that retained debt.
+
+Three material transport-owned findings remain dependencies of usable SSH-backed workflows:
+
+- The macOS publisher rejects extended ACLs on ancestors, including the measured stock home
+  directory policy. Successful publication outside home does not establish ordinary home paths.
+- The guest boot-fence probe reads `/proc/1/stat`, which shipped `hidepid=1` hardening denies to the
+  VM admin. The earlier round-7 proof ran as root and does not establish ordinary admin composition.
+  The hardened test host also reports four related local-suite failures.
+- A 3 MiB SSH download takes 152.9 seconds and exceeds a 120-second deadline with retained debt. The
+  current transport protocol requests 12 KiB chunks through repeated carrier executions. SSH
+  supplies live sink delivery; useful transfer performance is still unproved at the shared file
+  boundary. No connection-sharing or alternate file protocol is introduced by this evidence record.
+
+The report also observes that an administrative Windows SSH session can inherit already enabled
+backup/restore privileges, weakening the stated ancestor-access refusal. The code enables no
+privilege; transport owns the caller-authority disposition. Native terminal, public composition,
+full SSH workstation acceptance and reviewed corrections with fresh live evidence remain open.
+
+The
+[input-admission checkpoint](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6008564312)
+at `dfe02e81d` passed all hosted checks, including **806 Windows tests with 48 skips**, and both
+private review lanes. It refuses unsupported input before admission or process activity while
+terminal capability remains disabled. This does not resolve the native delivery findings or close
+Phase 2. Recording the report consumes no SSH public feedback/fix round.
+
 ## Remaining integration and acceptance
 
 Earlier integration `fefc2b9e` uses transport `f3339f3d3cccace129be58711dc7eeb30ec66dc2`, which adds
