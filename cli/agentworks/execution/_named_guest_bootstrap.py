@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import base64
-import bz2
 from importlib.resources import files
 
 from agentworks.errors import ValidationError
-from agentworks.execution import _helper_bundle, _helper_launcher, _runtime_prerequisite
+from agentworks.execution import _helper_launcher, _runtime_prerequisite
 
 
 def build_named_guest_bootstrap_argv(
@@ -40,14 +38,6 @@ def build_named_guest_bootstrap_argv(
         raise ValidationError("Named guest bootstrap requires a UTF-8 account name") from None
     bootstrap = files(__package__).joinpath("_guest_bootstrap.py").read_text(encoding="utf-8")
     source = bootstrap + f"\nraise SystemExit(main_named({account!r},{fixed_source!r}))\n"
-    compressed = base64.b64encode(bz2.compress(_helper_bundle._compact_fixed_source(source).encode("utf-8")))
-    wrapper = (
-        "import base64,bz2\n"
-        f"exec(compile(bz2.decompress(base64.b64decode({compressed!r})),"
-        "'<agentworks-named-bootstrap>','exec'))\n"
+    return _runtime_prerequisite._build_root_bootstrap_argv(
+        root_entry, selection=selection, fixed_source=source, nonce=nonce
     )
-    argv, candidates, shim = _runtime_prerequisite.build_runtime_helper_argv(
-        selection=selection, fixed_source=wrapper, nonce=nonce
-    )
-    capped = ("/usr/bin/setpriv", "--inh-caps=-all", "--ambient-caps=-all", "--", *argv)
-    return _helper_launcher.build_identity_argv(root_entry, capped), candidates, shim

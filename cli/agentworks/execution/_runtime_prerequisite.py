@@ -229,15 +229,24 @@ def build_root_guest_bootstrap_argv(
         + f"{target_identity.euid!r},{target_identity.egid!r},{target_identity.groups!r},"
         + f"{program.loader_source!r},{guest_tuple!r}))\n"
     )
-    compressed = base64.b64encode(bz2.compress(_compact_fixed_source(source).encode("utf-8"))).decode("ascii")
-    fixed_source = (
+    return _build_root_bootstrap_argv(root_entry, selection=selection, fixed_source=source, nonce=nonce)
+
+
+def _build_root_bootstrap_argv(
+    root_entry: IdentityPlan,
+    *,
+    selection: RuntimeSelection,
+    fixed_source: str,
+    nonce: str,
+) -> tuple[tuple[str, ...], tuple[str, ...], str | None]:
+    """Package assembled core source with one system-Python root launcher."""
+    compressed = base64.b64encode(bz2.compress(_compact_fixed_source(fixed_source).encode("utf-8"))).decode("ascii")
+    wrapper = (
         "import base64,bz2\n"
         f"exec(compile(bz2.decompress(base64.b64decode({compressed!r})),"
         "'<agentworks-root-bootstrap>','exec'))\n"
     )
-    argv, candidates, system_shim = build_runtime_helper_argv(
-        selection=selection, fixed_source=fixed_source, nonce=nonce
-    )
+    argv, candidates, system_shim = build_runtime_helper_argv(selection=selection, fixed_source=wrapper, nonce=nonce)
     if candidates != (_SYSTEM_LINUX_PYTHON,):
         raise ValidationError("Root guest bootstrap requires system Python")
     capped = ("/usr/bin/setpriv", "--inh-caps=-all", "--ambient-caps=-all", "--", *argv)
