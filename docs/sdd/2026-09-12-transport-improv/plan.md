@@ -130,8 +130,11 @@ root snapshot bodies of 64,048/64,090 bytes with a 32 KiB manifest. The separate
 slightly different root values at the earlier pin; these fixture measurements are not fixed sizes or
 a promise for every identity. A valid large-group publication request is refused before provider
 dispatch by the aggregate carrier bound. No protocol/carrier limit was reduced, test weakened or
-database data removed. Final re-review, complete CLI gates, native root behavior and producer/body
-fencing remain open. This does not close public feedback/fix round 1 or authorize merge readiness.
+database data removed. Final code and collateral re-reviews are clear at `6781521f3`; its Python
+tree is identical to the full-suite pin `912a85328`, which passes 14,296 non-integration tests with
+50 skips. Strict mypy passes 1,206 source files. Native root behavior, producer/body fencing and the
+remaining publication gates remain open. This does not close public feedback/fix round 1 or
+authorize merge readiness.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
