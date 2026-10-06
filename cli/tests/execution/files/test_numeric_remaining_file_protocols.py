@@ -227,7 +227,12 @@ def test_gated_body_refreshes_the_bound_reader_before_effect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     namespace = tmp_path / "run" / "agentworks" / "file-gates-v1"
-    (namespace / str(os.geteuid())).mkdir(parents=True, mode=0o700)
+    for directory in (tmp_path / "run", namespace.parent, namespace, namespace / str(os.geteuid())):
+        directory.mkdir(mode=0o700)
+        for attribute in ("system.posix_acl_access", "system.posix_acl_default"):
+            if attribute in os.listxattr(directory, follow_symlinks=False):
+                os.removexattr(directory, attribute, follow_symlinks=False)
+        directory.chmod(0o700)
     monkeypatch.setattr(_file_effect_gate, "_GATE_NAMESPACE", str(namespace))
     monkeypatch.setattr(_file_effect_gate, "_ROOT_UID", os.geteuid())
     path = namespace / str(os.geteuid()) / ("a" * 64 + ".db")
