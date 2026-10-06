@@ -366,3 +366,52 @@ decoder and complete terminal workflows remain open. The public terminal feature
 Authentication/POSIX fixtures and trust-policy migration cases still need their separately
 authorized native runs. This result changes no completed plan record or final-product feedback-round
 count.
+
+## Injected record and character-read comparison
+
+The developer's `53589fec8385079c026e98efc9904ab0baa7386d` adds a comparison inside the existing
+fresh hidden console and retained native worker. Six directed input/output code-page pairs, two VT
+input states and four injected record types produce 48 observations. Separate byte-identical
+injections feed low-level record polling and `ReadConsoleW`; the report preserves returned record
+fields, actual UTF-16 batches, native input/output-page conversion references, timings and remaining
+records. Private-flagged Alt releases are synthetic records, not physical key input. Packed two-byte
+input is confined to output code page 932, matching the inspected source's lead-byte requirement.
+
+An ordinary character sentinel supplies queued input when a release is ignored. Native reads may
+still block; the existing parent owns its exact pure-primitive child through timeout and reaping,
+and the worker settles before descriptor, mode and page cleanup. This adds no SSH process, caller
+console access, new production keyboard reader or second process owner. The isolated child loads
+only the named sibling comparison file without changing import paths.
+
+The developer measures 21 focused synthetic cases passed with 1 native skip. Linux and Windows
+typing, Ruff and whitespace checks pass. Private project review finds missing reproduction
+collateral and passing-report visibility; `045d57efe052942464046471587988d5ab22ddd7` updates the
+README's scoped `-rP` command and limits. Its six comparison tests pass, including the optional
+report-propagation assertion alongside the independent ABI check. A narrowly scoped CI step repeats
+only the owned-console node with `-rP`; it retains the existing installed candidate, ordinary suite
+and parallel settings, exposing no unrelated tests' passing output. All three independent source
+lanes clear the corrected combined pin `476e7c798de1953c42e52c8cda33c84945fa9728`.
+
+That pin rebases cleanly onto transport `51d5222d50cf04c38f1a5648d2bdd8b8f9bca8fd`, with no SSH
+source/test/CI byte changes relative to its pre-rebase pin `f1f02c377`. The dependency now binds
+private operation context and typed envelope versions; fresh recovery, production context,
+inline/service fencing and additive RunContext remain open. The preceding published SSH head
+`699c8517e99e21dc8726f1c0ae5601deaef6f86a` passes
+[all hosted CI gates](https://github.com/WayfarerLabs/agentworks/actions/runs/37443870414),
+including 816 Windows tests passed and 59 skipped. That run exercises the earlier primitive, not
+this comparison.
+
+Complete local validation at the reviewed combined pin passes **15,213 non-integration tests with 51
+skips and 27 warnings**, exit 0 in 237.63 seconds. Full Ruff/format (1,298 files), strict mypy
+(1,261 sources), selected Windows typing, typer isolation, file quality, locked-SDD, Rulesync and
+whitespace gates exit 0. Website validation passes 160 Python and 103 Node cases, four builds and
+both deterministic comparisons, all exit 0. The scoped native-report node collects without
+execution. All 25 completed plan records remain unchanged. Independent same-user process
+cwd/descriptor scans find no references before removal of the exact settled suite scratch root.
+
+**Comparison values have not been observed natively.** Collection or a skipped Linux case does not
+establish them. Even a passing captured run cannot establish specific private-flag values without
+the scoped report. The experiment will measure only this Windows binary's injected-record behavior;
+physical keyboard input, Server 2022, production decoding, SSH/ConPTY launch/preparation and full
+native terminal acceptance remain separate gates. Public terminal delivery stays disabled. No
+completed checkbox, lockfile or final-product public feedback round follows from this increment.
