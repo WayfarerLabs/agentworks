@@ -738,36 +738,6 @@ Begin integration with the two private account lookups, then adopt the same boun
 inline and terminal paths. Their distinct operation protocols and evidence rules remain unchanged.
 Native macOS acceptance and existing-guest bootstrap remain separate gates.
 
-### Private Linux guest bootstrap packaging
-
-Hardened guests require a narrow system-fact boundary without running ordinary file effects as root.
-The private numeric bootstrap uses explicit root entry only to open the fixed read-only init-stat
-descriptor, then irreversibly sets and verifies the actual target's numeric credentials and
-capabilities before consuming stdin or loading operation code. It permits only system Python on
-Linux; platform hosts do not select this path.
-
-`RootGuestProgram` selects inline fixed source or one fixed stdin prefix. After exact prefix
-verification, its loader installs only the canonical guest-identity pair. The bootstrap binds a
-fresh bounded reader from the held descriptor and requires the full expected guest before loading
-remaining trusted modules in dependency order and entering the family body once. The packager
-supplies the canonical pair even where a family lacks it, rejects duplicate modules, and rejects
-unknown local dependencies in that early pair before dispatch. The identity module is not reloaded.
-The outer descriptor cleanup encloses every phase; application exec cannot inherit the descriptor.
-Runtime readiness is not this guest checkpoint, and errors after the checkpoint retain body-failure
-semantics rather than becoming admission refusals.
-
-The ordinary file bundle keeps host response parsing, gate control and materialized reads outside
-guest families that do not consume them. Trusted fixed root source uses the existing compaction and
-compressed ASCII delivery; there is no additional stdin codec, duplicate observer prefix, staged
-executable or automatic fallback. Carrier preflight still counts actual aggregate input, argv,
-quoting and provider serialization. A valid protocol request can exceed a carrier's envelope and
-must refuse before provider dispatch; its decoder ceiling is not a delivery guarantee.
-
-This is a private packaging increment, not production adoption. The early WSL hold/query/probe needs
-an explicit named-account drop path before numeric preparation; ordinary helper and later service
-entry still need production guest fencing and durable cleanup composition. Native post-drop init
-reads, credential transitions and complete workflows remain acceptance gates.
-
 The private account implementation now uses this boundary for both lookup kinds. Its local tests
 exercise Linux selection, real Python 3.11 lookup and fixture-based Darwin selection, not native
 macOS acceptance. The seven file exchange families also adopt it, applying the selected identity
@@ -810,6 +780,36 @@ finalize readiness when the carrier attempt ends, including a truncated pre-hand
 carrier does not parse these control records. The inspected SSH snapshot `34a4eb71` has no terminal
 endpoint or production caller of this preparation helper. Candidate tests therefore cannot stand in
 for the joint terminal implementation and native acceptance gates.
+
+### Private Linux guest bootstrap packaging
+
+Hardened guests require a narrow system-fact boundary without running ordinary file effects as root.
+The private numeric bootstrap uses explicit root entry only to open the fixed read-only init-stat
+descriptor, then irreversibly sets and verifies the actual target's numeric credentials and
+capabilities before consuming stdin or loading operation code. It permits only system Python on
+Linux; platform hosts do not select this path.
+
+`RootGuestProgram` selects inline fixed source or one fixed stdin prefix. After establishing the
+selected fixed delivery, its loader installs only the canonical guest-identity pair. The bootstrap
+binds a fresh bounded reader from the held descriptor and requires the full expected guest before
+loading remaining trusted modules in dependency order and entering the family body once. The
+packager supplies the canonical pair even where a family lacks it, rejects duplicate modules, and
+rejects unknown local dependencies in that early pair before dispatch. The identity module is not
+reloaded. The outer descriptor cleanup encloses every phase; application exec cannot inherit the
+descriptor. Runtime readiness is not this guest checkpoint, and errors after the checkpoint retain
+body-failure semantics rather than becoming admission refusals.
+
+The ordinary file bundle keeps host response parsing, gate control and materialized reads outside
+guest families that do not consume them. Trusted fixed root source uses the existing compaction and
+compressed ASCII delivery; there is no additional stdin codec, duplicate observer prefix, staged
+executable or automatic fallback. Carrier preflight still counts actual aggregate input, argv,
+quoting and provider serialization. A valid protocol request can exceed a carrier's envelope and
+must refuse before provider dispatch; its decoder ceiling is not a delivery guarantee.
+
+This is a private packaging increment, not production adoption. The early WSL hold/query/probe needs
+an explicit named-account drop path before numeric preparation; ordinary helper and later service
+entry still need production guest fencing and durable cleanup composition. Native post-drop init
+reads, credential transitions and complete workflows remain acceptance gates.
 
 ## Public result and check behavior
 
