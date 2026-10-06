@@ -14,6 +14,7 @@ import pytest
 from agentworks.execution import _managed_controller_guest as native
 from agentworks.execution import _managed_observation_guest as guest
 from agentworks.execution._managed_job_store import FactName, ManagedJobStore, Stream
+from agentworks.execution._managed_observation_exchange import ManagedObservationIssue, ManagedObservationState
 from agentworks.execution._managed_observation_protocol import (
     FACT_ORDER,
     MAX_CONTROL_BYTES,
@@ -31,6 +32,8 @@ from agentworks.execution.carrier import (
     CarrierIO,
     CarrierReport,
     Deadline,
+    Dispatch,
+    ExitStatus,
     Failure,
     PreparedInvocation,
 )
@@ -172,6 +175,20 @@ def test_native_external_values_and_correlation(field: str) -> None:
     with pytest.raises(ManagedObservationError):
         result = decode_result(data)
         checked_controller(result.controller, _launch())  # type: ignore[arg-type]
+    if field != "state":
+        control = decode_result(data)
+        carrier = ScriptedCarrier(lambda request: _records(request.nonce, control, (request.expected_launch,)))
+        candidate = _exchange(carrier)
+        assert carrier.request is not None and carrier.request.expected_launch == _launch()
+        assert candidate.dispatch is Dispatch.SENT
+        assert candidate.carrier_completion == ExitStatus(code=0)
+        assert candidate.carrier_local_status is None
+        assert candidate.carrier_failure is None
+        assert candidate.observation is not None
+        assert candidate.observation.state is ManagedObservationState.INVALID
+        assert candidate.observation.issue is ManagedObservationIssue.CONTROL
+        assert candidate.observation.controller is None
+        assert candidate.observation.facts == ()
     del value["controller"][field]
     with pytest.raises(ManagedObservationError):
         decode_result(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
