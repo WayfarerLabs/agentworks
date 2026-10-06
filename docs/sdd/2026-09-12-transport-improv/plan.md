@@ -461,9 +461,9 @@ or data was changed. Independent integrated review and lead gates remain pending
 availability span, read-only preparation, v2 adapter adoption and native proof remain unfinished;
 the support implementation gate stays unchecked until those scoped reviews and gates complete.
 
-All three independent lanes clear the combined service/admission pin `e1128eb96`. Project passes
-344 focused/adjacent cases; generic passes 128 service/owner/repository cases and 41 controller
-cases. Complexity passes 128 scoped cases, observes two relevant failures after removing the serial
+All three independent lanes clear the combined service/admission pin `e1128eb96`. Project passes 344
+focused/adjacent cases; generic passes 128 service/owner/repository cases and 41 controller cases.
+Complexity passes 128 scoped cases, observes two relevant failures after removing the serial
 admission and requested-root guards, and restores its experiments. The lead's complete combined
 suite passes 14,885 non-integration tests with 49 skips, 27 existing fork warnings and exit 0.
 Complete Ruff/format, strict mypy (1,223 source and test files), typer isolation, file quality,
