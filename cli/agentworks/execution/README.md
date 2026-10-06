@@ -175,6 +175,15 @@ credentials, commands, routes and connection objects. This is private, additive 
 not claim production orchestration, recovery takeover, RunContext adoption, permission enforcement
 or the future #377 lock hierarchy.
 
+The private file-call codec preserves version-one records byte-for-byte. Bootstrap-bound records use
+version two, retaining root-entry identity and the full guest separately from the body identity. It
+validates Linux system-Python selection, target boot and any gate's full guest before encoding or
+accepting persisted bytes. Each typed record exposes its actual payload version; installation and
+updates must use that version rather than a global latest-version assumption. Immutable bootstrap
+facts do not change the reserved recovery growth, and all records remain within the existing
+8,192-byte envelope. This codec is not yet connected to operation bindings or fresh recovery
+preparation, and does not upgrade old records or grant execution authority.
+
 The bootstrap waits for source and stdin producers as well as output encoders. Unexpected producer
 failure invalidates delivery even if the command exits zero. Intentional early input closure is
 allowed; GNU env's `--default-signal=PIPE` ensures its SIGPIPE outcome is observable.
@@ -726,13 +735,16 @@ checkpoint remain body failures. Existing ordinary helpers do not select this bu
 Native hardened-guest behavior, complete body fencing, recovery and production consumer wiring
 remain unproved.
 
-Gate-control and snapshot exchanges have an explicit private numeric-bootstrap option. It binds the
-prepared root-entry plan and full observed guest while leaving the request's body identity separate.
-The exchange selects matching fixed argv and stdin prefix, refuses conflicting guest facts before
-dispatch and preserves the body's fresh gate observations through the bound reader. All snapshot
-operations forward the same context. Existing context-free private candidates remain unchanged;
-production VM composition has not yet bound this option through operation state, continuations or
-recovery. Other file families, inline execution and later service entry still need adoption.
+Gate-control, snapshot, staging, publication, read, inventory, object and metadata exchanges have an
+explicit private numeric-bootstrap option. It binds the prepared root-entry plan and full observed
+guest while leaving the request's body identity separate. Each exchange selects matching fixed argv
+and stdin prefix, refuses conflicting guest facts before dispatch and preserves the body's fresh
+gate observations through the bound reader. Every family entry forwards the same context, including
+reconciliation and cleanup. Existing context-free private candidates remain unchanged; production VM
+composition has not yet bound this option through operation state, continuations or recovery. Inline
+execution and later service entry still need adoption. Complete provider envelopes include the
+selected prefix and encoded request; even a valid request can refuse before QGA dispatch when their
+aggregate exceeds the carrier limit.
 
 The separate private `build_named_guest_bootstrap_argv` handles early fixed guest operations before
 numeric account preparation. It resolves a core-bound account name through the system account

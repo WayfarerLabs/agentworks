@@ -213,14 +213,29 @@ local results do not resolve the preceding hosted Python 3.14 failure or establi
 credentials. Operation-owned binding, recovery, remaining body families and complete RunContext
 composition remain open.
 
-The next bounded units extend the numeric context to the remaining file exchange families and add
-an explicit version-two durable file-call codec. Version-one bytes and semantics remain unchanged;
-new bootstrap-bound records retain root entry and the full guest separately from body identity.
+The next bounded units extend the numeric context to the remaining file exchange families and add an
+explicit version-two durable file-call codec. Version-one bytes and semantics remain unchanged; new
+bootstrap-bound records retain root entry and the full guest separately from body identity.
 Context-free records remain private candidates or historical evidence, not a production VM fallback.
 The codec unit owns only serialization and validation. Operation-owned binding, correct envelope
 versions on every update, child/continuation custody, fresh recovery preparation, native acceptance
 and public RunContext wiring remain subsequent integration work. No database migration or data
 removal is implied by this record extension.
+
+The remaining six exchange families are privately integrated from `c6047bf52`. Their related
+selection passes 933 tests, including 139 new cases. Representative maximum-path staging and
+publication requests fit the complete QGA envelope, while valid oversized aggregates refuse before
+dispatch without fallback. Real packed protocols retain binary transfer, publication conditions,
+reconciliation, cleanup and fresh gated observations; successful admission remains mocked.
+
+The separate codec unit at `868014766` preserves version-one bytes and adds explicit version-two
+bootstrap records with a derived payload version. Its 170 codec tests and related 1,669-test
+selection pass with 25 skips. Immutable bootstrap facts add the same bytes to initial and retained
+records, so recovery-growth reserves are unchanged; exact maximum retained records reach 8,192
+bytes. These units await independent integrated review and full lead gates. Neither binds production
+operation state, migrates envelope-version callers, prepares fresh recovery facts or proves native
+success. The preceding public `a128c09eb` now passes every hosted CI and CodeQL gate, including
+Python 3.14; the earlier framing failure remains unexplained rather than classified as fixed.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.

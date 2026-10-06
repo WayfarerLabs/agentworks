@@ -903,8 +903,9 @@ Recovery must freshly prepare and compare the selected target, complete guest, r
 identity before using a bootstrap-bound record. A changed or unavailable fact refuses dispatch while
 retaining uncertainty and custody; it does not rewrite the old record to match the new environment.
 Admission still reserves every reachable retained payload within the existing 8,192-byte envelope.
-This versioned codec and its composition are under implementation; the current private adapters do
-not yet supply that fresh preparation or production recovery path.
+The private versioned codec now represents and validates those facts; its operation composition is
+not yet implemented. The current private adapters do not supply that fresh preparation or production
+recovery path.
 
 JSON owns one parent `file-call` row. Before any nested upload can dispatch, it publishes that
 child's fresh token and attempt number into the same row. A retry may replace those fields only
