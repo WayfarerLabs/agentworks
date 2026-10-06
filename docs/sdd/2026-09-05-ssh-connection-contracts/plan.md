@@ -305,6 +305,22 @@ follows. Transport's new publication leaves the carrier contract unchanged and r
 production RunContext, aggregate cleanup and native evidence. Neither pending SSH resource decision
 is disposed.
 
+Transport's subsequent
+[fixture coordination](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6027469928)
+corrects the earlier ownership assumption: its independently green PoC constructor still takes a
+bare path, so the typed-trust fixture adaptation must accompany the SSH API change on this branch.
+Source comparison confirms that distinction. The three-line correction at `9ff370da8` uses
+`SSHTrustFiles` and gives pending-cleanup version evidence `Failure.OBSERVATION`, matching the
+existing native core. It preserves all custody assertions, WSL cases and production files. Private
+project and complexity reviews clear that exact unit. The complexity lane independently passes all
+10 fixture cases and observes the expected failure after removing version-failure propagation. The
+lead's adjacent selection passes 201 tests with three skips; the full Linux Python 3.12 suite passes
+16,495 tests with 49 skips and 27 warnings, exit 0 in 217.02 seconds. Full mypy repeats the three
+held enrollment errors across 1,312 sources. Scoped typing, Ruff and formatting pass. This resolves
+the six shared fixture failures; it neither implements the retained resources nor closes native,
+terminal, production RunContext or whole-PR acceptance. No public final-product fix round is
+consumed.
+
 Combined code pin `38934134e3b8d12af814f9371b62075daa49db3e` preserves all 64 Python paths in the
 SSH contribution, including deletions, from published `186458307b`. Its full suite passes 16,125
 non-integration tests with 51 skips and 27 warnings, exit 0 in 267.18 seconds. Full Ruff/format
