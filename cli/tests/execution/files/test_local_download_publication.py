@@ -525,6 +525,96 @@ def test_abort_refuses_changed_stage_identity(tmp_path: Path, monkeypatch: pytes
     assert not list(tmp_path.iterdir())
 
 
+class _InterruptBeforeCloseAdmission(local.LocalDownloadPublication):
+    interrupt_name: str | None = None
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name == self.interrupt_name and value is True:
+            super().__setattr__("interrupt_name", None)
+            raise KeyboardInterrupt
+        super().__setattr__(name, value)
+
+
+@pytest.mark.parametrize("handle", ["stage", "parent"])
+@pytest.mark.parametrize("publish", [False, True])
+def test_interruption_before_close_admission_retains_retry_custody(tmp_path: Path, handle: str, publish: bool) -> None:
+    writer = _InterruptBeforeCloseAdmission(tmp_path / "download")
+    writer.try_write(memoryview(b"new"))
+    fd = writer._stage_fd if handle == "stage" else writer._parent_fd
+    assert fd is not None
+    identity = os.fstat(fd)
+    writer.interrupt_name = f"_{handle}_close_uncertain"
+    with pytest.raises(KeyboardInterrupt):
+        if publish:
+            commit(writer, b"new")
+        else:
+            writer.abort()
+    assert not writer.cleanup_uncertain
+    assert os.fstat(fd).st_ino == identity.st_ino
+    writer.abort()
+    with pytest.raises(OSError):
+        os.fstat(fd)
+    assert not writer.cleanup_uncertain
+    assert writer.published is publish
+    assert not writer.publication_uncertain
+    assert not list(tmp_path.glob(".agw-download-*"))
+
+
+@pytest.mark.parametrize("handle", ["stage", "parent"])
+@pytest.mark.parametrize("effect", [False, True])
+@pytest.mark.parametrize("publish", [False, True])
+def test_ambiguous_close_never_retries_a_possibly_reused_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, handle: str, effect: bool, publish: bool
+) -> None:
+    writer = local.LocalDownloadPublication(tmp_path / "download")
+    writer.try_write(memoryview(b"new"))
+    fd = writer._stage_fd if handle == "stage" else writer._parent_fd
+    assert fd is not None
+    identity = os.fstat(fd)
+    close = os.close
+    attempts: list[int] = []
+    unrelated = tmp_path / "unrelated"
+
+    def interrupt(closing: int) -> None:
+        attempts.append(closing)
+        if closing != fd:
+            close(closing)
+            return
+        assert writer.cleanup_uncertain
+        if effect:
+            close(closing)
+            replacement = os.open(unrelated, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            if replacement != fd:
+                os.dup2(replacement, fd)
+                close(replacement)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(os, "close", interrupt)
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            if publish:
+                commit(writer, b"new")
+            else:
+                writer.abort()
+        with pytest.raises(local.LocalDownloadUnsupportedError):
+            writer.abort()
+        assert attempts.count(fd) == 1
+        assert writer.cleanup_uncertain
+        assert writer.published is publish
+        assert not writer.publication_uncertain
+        remaining = os.fstat(fd)
+        assert (remaining.st_dev, remaining.st_ino) == (
+            (unrelated.stat().st_dev, unrelated.stat().st_ino) if effect else (identity.st_dev, identity.st_ino)
+        )
+        with pytest.raises(ValueError):
+            writer.try_write(memoryview(b"more"))
+        assert not list(tmp_path.glob(".agw-download-*"))
+    finally:
+        # The injected effect is known to this fixture; the writer cannot know
+        # whether its descriptor closed and must not attempt this recovery.
+        close(fd)
+
+
 def test_unsupported_host_refuses_before_staging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "win32")
     with pytest.raises(local.LocalDownloadUnsupportedError):

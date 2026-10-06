@@ -7,6 +7,10 @@ writer records publication_uncertain. An interrupted call confirms published onl
 if the destination has the exact staged inode; otherwise uncertainty remains.
 Both facts survive abort. A cleanup error may follow successful publication;
 abort can retry removing the remaining stage without erasing publication evidence.
+Cleanup retains descriptors until close returns. An interruption after close
+admission leaves cleanup_uncertain: that descriptor number is diagnostic state,
+not safe recovery custody, and is never closed again because it may be reused.
+Other known cleanup can proceed without erasing that uncertainty.
 
 Replace requires ordinary write access and preserves local mode, owner, group and
 non-security xattrs (including Linux POSIX ACLs), or refuses before publication.
@@ -116,6 +120,8 @@ class LocalDownloadPublication:
         self._stage_fd: int | None = None
         self._stage_name: str | None = None
         self._stage_identity: tuple[int, int] | None = None
+        self._stage_close_uncertain = False
+        self._parent_close_uncertain = False
         self._original: _Metadata | None = None
         self._digest = hashlib.sha256()
         self._size = 0
@@ -167,9 +173,14 @@ class LocalDownloadPublication:
         finally:
             os.close(fd)
 
+    @property
+    def cleanup_uncertain(self) -> bool:
+        """An admitted close has no established outcome; abort cannot resolve it."""
+        return self._stage_close_uncertain or self._parent_close_uncertain
+
     def try_write(self, data: memoryview) -> int:
         """Accept one synchronous write, retaining only size and digest state."""
-        if self._stage_fd is None or self.published or self.publication_uncertain:
+        if self._stage_fd is None or self.published or self.publication_uncertain or self.cleanup_uncertain:
             raise ValueError("Local download stage is closed")
         written = os.write(self._stage_fd, data)
         self._digest.update(data[:written])
@@ -213,7 +224,14 @@ class LocalDownloadPublication:
         fd = self._stage_fd
         parent_fd = self._parent_fd
         name = self._stage_name
-        if fd is None or parent_fd is None or name is None or self.published or self.publication_uncertain:
+        if (
+            fd is None
+            or parent_fd is None
+            or name is None
+            or self.published
+            or self.publication_uncertain
+            or self.cleanup_uncertain
+        ):
             raise ValueError("Local download stage is closed")
         if not verified_complete or size != self._size or sha256 != self._digest.hexdigest():
             raise ValueError("Local download is not completely verified")
@@ -260,14 +278,19 @@ class LocalDownloadPublication:
     def abort(self) -> None:
         """Remove only the owned stage and close handles; safe after publication.
 
-        Cleanup errors propagate, retaining the parent handle and stage name for
-        a retry. Publication facts are retained. The destination is never removed,
-        even after commit fails or its effect cannot be established.
+        Name cleanup errors retain safe parent custody for retry. An admitted
+        close with no established outcome retains cleanup_uncertain and its
+        descriptor number only as diagnostic state; it must never be reused for
+        cleanup. Other known cleanup proceeds on a subsequent abort, which then
+        explicitly refuses if close uncertainty remains. Publication facts are
+        retained, and the destination is never removed.
         """
-        if self._stage_fd is not None:
-            fd, self._stage_fd = self._stage_fd, None
-            os.close(fd)
-        if self._stage_name is not None and self._parent_fd is not None:
+        if self._stage_fd is not None and not self._stage_close_uncertain:
+            self._stage_close_uncertain = True
+            os.close(self._stage_fd)
+            self._stage_fd = None
+            self._stage_close_uncertain = False
+        if self._stage_name is not None and self._parent_fd is not None and not self._parent_close_uncertain:
             with suppress(FileNotFoundError):
                 staged = os.stat(self._stage_name, dir_fd=self._parent_fd, follow_symlinks=False)
                 if (staged.st_dev, staged.st_ino) != self._stage_identity:
@@ -275,6 +298,10 @@ class LocalDownloadPublication:
                 os.unlink(self._stage_name, dir_fd=self._parent_fd)
             self._stage_name = None
             self._stage_identity = None
-        if self._parent_fd is not None:
-            fd, self._parent_fd = self._parent_fd, None
-            os.close(fd)
+        if self._parent_fd is not None and not self._parent_close_uncertain:
+            self._parent_close_uncertain = True
+            os.close(self._parent_fd)
+            self._parent_fd = None
+            self._parent_close_uncertain = False
+        if self.cleanup_uncertain:
+            raise LocalDownloadUnsupportedError("Local download descriptor cleanup has an uncertain close outcome")
