@@ -196,7 +196,7 @@ partial-update custody. Production writer coexistence and rollback through both 
 paths still require transport composition and native acceptance.
 
 Shared subprocess adoption introduces an implementation dependency on transport #833. Current
-integration uses `3dce50474f6d4d349d411d379fc5174be1ae241c`. Its shared carrier, process,
+integration uses `8ab2d4acdaf9980c52c5b1ff5f7f1f316ebd48c6`. Its shared carrier, process,
 preparation and terminal-input interfaces remain unchanged from the preceding SSH integration.
 Private execution binds the selected owner scope and bootstrap boot; the WSL2 native factory
 requires both prepared identity plans and shares one elevated-plan/full-guest bootstrap between file
@@ -222,7 +222,20 @@ four builds and both deterministic comparisons. The first build target was refus
 checkout; corrected external owned output roots pass. No SSH code changes or native acceptance
 follow from that dependency refresh.
 
-The current combined code pin `a38e5814fd180fe65899001d5a74426c4587dcf0` preserves all 64 Python
+The latest dependency changes only transport's lifecycle LLD and unchecked plan. Its proposed
+operation keeper uses one exact-launch/boot-bound guest lease, expiring 60 seconds after an earlier
+guest-clock sample. Generation/admission checks fence both clock observation and publication,
+including a post-clock check before dispatch. Scope close drains renewal before exact-run cleanup;
+wait timeout does not stop the keeper. Expiry bounds possible extension but proves neither workload
+emptiness nor publisher drain. The keeper and recovery consumer are not implemented at this pin; the
+proposed five-second exchange budget and ten-second cadence still need native SSH/QGA proof. No
+shared SSH interface changed. The rebased CLI, website, workflow, script and policy trees are
+identical to published SSH `2f7e28dc3fb0d9cc178c34469f56b183c764e4a0`, preserving the code-gate
+evidence below and its successful hosted run `37501965297`. That run's synthetic merge has the same
+Git tree as the preceding published SSH head; it does not validate the newly changed design prose.
+The refresh completes no implementation or native acceptance gate.
+
+The preceding combined code pin `a38e5814fd180fe65899001d5a74426c4587dcf0` preserves all 64 Python
 files in the SSH contribution, including retained deletions, from published `47013bcf2`. Its full
 suite passes 16,046 non-integration tests with 51 skips and 27 warnings, exit 0 in 251.43 seconds.
 Full Ruff/format (1,320 files), strict mypy (1,283 sources), exact CI typer isolation, file quality,
