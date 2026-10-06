@@ -31,7 +31,7 @@ from agentworks.execution._file_publication_wire import (
 from agentworks.execution._helper_identity import IdentityExpectation, decode_identity
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTargetKind
-from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS, _NumericGuestBootstrap
 from agentworks.execution._scratch import ScratchReference
 from agentworks.execution._scratch_receipt import ScratchCleanupDebt, ScratchOperation, ScratchReceiptContext
 from agentworks.execution._scratch_wire import (
@@ -44,6 +44,7 @@ from agentworks.execution._scratch_wire import (
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 
 FILE_CALL_OBLIGATION_PAYLOAD_VERSION = 1
+NUMERIC_FILE_CALL_OBLIGATION_PAYLOAD_VERSION = 2
 MAX_PACKAGE_UPLOAD_MEMBERS = 4096
 _TOKEN_BYTES = 16
 _MAX_JSON_ATTEMPTS = 8
@@ -59,6 +60,7 @@ _RUNTIME_FIELDS = frozenset({"explicit_path", "target_os"})
 _SCRATCH_FIELDS = frozenset({"cleanup_debt", "reference"})
 _GATE_SETUP_FIELDS = frozenset({"guest", "path"})
 _GUEST_FIELDS = frozenset({"boot_id", "init_start_ticks", "instance_marker"})
+_BOOTSTRAP_FIELDS = frozenset({"guest", "root_entry"})
 
 
 class FileCallFamily(StrEnum):
@@ -89,6 +91,8 @@ class FileCallUncertainty(StrEnum):
 # upload, 1205 JSON, and 50 for each other single call. Typed maximum-object
 # and exact-boundary tests prove these values. A bound gate reserves its
 # proposed generation separately.
+# Immutable numeric bootstrap identity appears in both payloads, so its
+# presence does not change these growth reserves.
 _FILE_CALL_RECOVERY_HEADROOM_BYTES = {
     FileCallFamily.DOWNLOAD: 814,
     FileCallFamily.UPLOAD: 1150,
@@ -128,9 +132,17 @@ class FileCallObligation:
     effect_gate: FileEffectGateBinding | None = None
     gate_setup: FileEffectGateSetup | None = None
     uncertainty: frozenset[FileCallUncertainty] = frozenset()
+    bootstrap: _NumericGuestBootstrap | None = None
 
     def __post_init__(self) -> None:
         _validate_obligation(self)
+
+    @property
+    def payload_version(self) -> int:
+        """Select the durable format without reinterpreting legacy records."""
+        if self.bootstrap is not None:
+            return NUMERIC_FILE_CALL_OBLIGATION_PAYLOAD_VERSION
+        return FILE_CALL_OBLIGATION_PAYLOAD_VERSION
 
 
 def encode_file_call_obligation(obligation: FileCallObligation) -> bytes:
@@ -205,6 +217,8 @@ def _validate_obligation(obligation: FileCallObligation) -> None:
     _validate_path(obligation.relative_path, root=False)
     _validate_identity_plan(obligation.identity_plan)
     _validate_runtime_selection(obligation.runtime_selection)
+    if obligation.bootstrap is not None:
+        _validate_bootstrap(obligation)
     if type(obligation.uncertainty) is not frozenset or any(
         type(item) is not FileCallUncertainty for item in obligation.uncertainty
     ):
@@ -321,8 +335,13 @@ def _encode_obligation(obligation: FileCallObligation) -> dict[str, object]:
         "runtime": _encode_runtime_selection(obligation.runtime_selection),
         "target": _encode_target(obligation.target),
         "uncertainty": sorted(item.value for item in obligation.uncertainty),
-        "version": FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
+        "version": obligation.payload_version,
     }
+    if obligation.bootstrap is not None:
+        value["bootstrap"] = {
+            "root_entry": _encode_identity_plan(obligation.bootstrap.root_entry),
+            "guest": _encode_guest(obligation.bootstrap.guest),
+        }
     if obligation.token is not None:
         value["token"] = obligation.token.hex()
     if obligation.attempt is not None:
@@ -341,23 +360,25 @@ def _encode_obligation(obligation: FileCallObligation) -> dict[str, object]:
     if obligation.effect_gate is not None:
         value["effect_gate"] = encode_file_effect_gate(obligation.effect_gate)
     if obligation.gate_setup is not None:
-        guest = obligation.gate_setup.guest
         value["gate_setup"] = {
-            "guest": {
-                "boot_id": guest.boot_id,
-                "init_start_ticks": guest.init_start_ticks,
-                "instance_marker": guest.instance_marker,
-            },
+            "guest": _encode_guest(obligation.gate_setup.guest),
             "path": obligation.gate_setup.path,
         }
     return value
 
 
 def _decode_obligation(value: object) -> FileCallObligation:
-    if type(value) is not dict or not _BASE_FIELDS <= set(value) <= _BASE_FIELDS | _OPTIONAL_FIELDS:
+    if type(value) is not dict or type(value.get("version")) is not int:
         raise FileCallObligationCodecError
-    if value["version"] != FILE_CALL_OBLIGATION_PAYLOAD_VERSION or type(value["version"]) is not int:
+    if value["version"] == FILE_CALL_OBLIGATION_PAYLOAD_VERSION:
+        required = _BASE_FIELDS
+    elif value["version"] == NUMERIC_FILE_CALL_OBLIGATION_PAYLOAD_VERSION:
+        required = _BASE_FIELDS | {"bootstrap"}
+    else:
         raise FileCallObligationCodecError
+    if not required <= set(value) <= required | _OPTIONAL_FIELDS:
+        raise FileCallObligationCodecError
+    bootstrap = _decode_bootstrap(value["bootstrap"]) if "bootstrap" in value else None
     try:
         family = FileCallFamily(value["family"])
     except (TypeError, ValueError):
@@ -383,15 +404,10 @@ def _decode_obligation(value: object) -> FileCallObligation:
         setup_value = value["gate_setup"]
         if type(setup_value) is not dict or set(setup_value) != _GATE_SETUP_FIELDS:
             raise FileCallObligationCodecError
-        guest_value = setup_value["guest"]
-        if type(guest_value) is not dict or set(guest_value) != _GUEST_FIELDS:
-            raise FileCallObligationCodecError
         try:
             gate_setup = FileEffectGateSetup(
                 setup_value["path"],
-                VMGuestIdentity(
-                    guest_value["instance_marker"], guest_value["boot_id"], guest_value["init_start_ticks"]
-                ),
+                _decode_guest(setup_value["guest"]),
             )
         except (TypeError, ValueError):
             raise FileCallObligationCodecError from None
@@ -412,11 +428,63 @@ def _decode_obligation(value: object) -> FileCallObligation:
             effect_gate=effect_gate,
             gate_setup=gate_setup,
             uncertainty=uncertainty,
+            bootstrap=bootstrap,
         )
     except FileCallObligationCodecError:
         raise
     except (TypeError, ValidationError, ValueError):
         raise FileCallObligationCodecError from None
+
+
+def _encode_guest(guest: VMGuestIdentity) -> dict[str, object]:
+    if type(guest) is not VMGuestIdentity:
+        raise FileCallObligationCodecError
+    return {
+        "boot_id": guest.boot_id,
+        "init_start_ticks": guest.init_start_ticks,
+        "instance_marker": guest.instance_marker,
+    }
+
+
+def _decode_guest(value: object) -> VMGuestIdentity:
+    if type(value) is not dict or set(value) != _GUEST_FIELDS:
+        raise FileCallObligationCodecError
+    try:
+        return VMGuestIdentity(value["instance_marker"], value["boot_id"], value["init_start_ticks"])
+    except (TypeError, ValueError):
+        raise FileCallObligationCodecError from None
+
+
+def _decode_bootstrap(value: object) -> _NumericGuestBootstrap:
+    if type(value) is not dict or set(value) != _BOOTSTRAP_FIELDS:
+        raise FileCallObligationCodecError
+    try:
+        return _NumericGuestBootstrap(_decode_identity_plan(value["root_entry"]), _decode_guest(value["guest"]))
+    except (TypeError, ValidationError, ValueError):
+        raise FileCallObligationCodecError from None
+
+
+def _validate_bootstrap(obligation: FileCallObligation) -> None:
+    """Validate numeric launch identity at the persisted recovery boundary."""
+    bootstrap = obligation.bootstrap
+    if (
+        type(bootstrap) is not _NumericGuestBootstrap
+        or obligation.target.kind is not ManagedTargetKind.VM
+        or obligation.runtime_selection.target_os is not RuntimeTargetOS.LINUX
+        or obligation.runtime_selection.explicit_path not in (None, "/usr/bin/python3")
+    ):
+        raise FileCallObligationCodecError
+    _validate_identity_plan(bootstrap.root_entry)
+    guest = _decode_guest(_encode_guest(bootstrap.guest))
+    try:
+        _NumericGuestBootstrap(bootstrap.root_entry, guest)
+    except (TypeError, ValidationError, ValueError):
+        raise FileCallObligationCodecError from None
+    if vm_guest_boot_id(guest) != obligation.target.boot_id:
+        raise FileCallObligationCodecError
+    for gate in (obligation.effect_gate, obligation.gate_setup):
+        if gate is not None and (type(gate) not in (FileEffectGateBinding, FileEffectGateSetup) or gate.guest != guest):
+            raise FileCallObligationCodecError
 
 
 def _encode_target(target: ManagedTargetIdentity) -> dict[str, str]:
