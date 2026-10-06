@@ -60,9 +60,12 @@ def test_wsl2_refuses_terminal_before_local_spawn(monkeypatch: pytest.MonkeyPatc
     run.assert_not_called()
 
 
-def test_buffered_ssh_refuses_terminal_before_connection_access(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.windows
+def test_buffered_ssh_refuses_terminal_before_connection_access(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     carrier = SSHCarrier(
-        SSHConnection("host.example", "user", Path("/missing/key"), SSHTrustFiles((Path("/missing/hosts"),)))
+        SSHConnection("host.example", "user", tmp_path / "missing-key", SSHTrustFiles((tmp_path / "missing-hosts",)))
     )
     validate_files = MagicMock(side_effect=AssertionError("connection files accessed"))
     run = MagicMock(side_effect=AssertionError("local client spawned"))
