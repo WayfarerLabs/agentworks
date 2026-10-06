@@ -868,11 +868,7 @@ class FileOperation:
                             payload_version=record.payload_version,
                             payload=intended_payload,
                         )
-                    if (
-                        published.payload_revision != expected_revision + 1
-                        or published.payload != intended_payload
-                        or published.payload_version != record.payload_version
-                    ):
+                    if published.payload_revision != expected_revision + 1 or published.payload != intended_payload:
                         raise StateError("Package upload child publication did not advance exactly once")
                 except BaseException:
                     # The row may name either the checkpointed predecessor or

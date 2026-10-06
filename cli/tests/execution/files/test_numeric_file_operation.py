@@ -488,9 +488,8 @@ def test_configured_root_body_is_separate_from_root_entry(tmp_path: Path, monkey
     _row(database, owner, body=body)
 
 
-@pytest.mark.parametrize("failure", ["lost", "wrong-version"])
 def test_package_unconfirmed_publication_retains_next_child_before_dispatch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database, owner, operation = _context(tmp_path)
     publications: list[tuple[int, int, bytes]] = []
@@ -499,11 +498,7 @@ def test_package_unconfirmed_publication_retains_next_child_before_dispatch(
 
     def publish(self: LifecycleObligation, *, expected_revision: int, payload_version: int, payload: bytes):
         publications.append((expected_revision, payload_version, payload))
-        published = original_publish(
-            self, expected_revision=expected_revision, payload_version=payload_version, payload=payload
-        )
-        if failure == "wrong-version":
-            return replace(published, payload_version=1)
+        original_publish(self, expected_revision=expected_revision, payload_version=payload_version, payload=payload)
         raise RuntimeError("both publication replies lost")
 
     def run(self: _PreparedUpload) -> FileUploadOutcome:
@@ -516,7 +511,7 @@ def test_package_unconfirmed_publication_retains_next_child_before_dispatch(
 
     monkeypatch.setattr(LifecycleObligation, "publish_payload", publish)
     monkeypatch.setattr(_PreparedUpload, "run", run)
-    with pytest.raises((RuntimeError, StateError)):
+    with pytest.raises(RuntimeError):
         operation.upload_package(
             EvidenceCarrier(completion=ExitStatus(code=0)),
             trusted_root_path="/data",
@@ -529,9 +524,7 @@ def test_package_unconfirmed_publication_retains_next_child_before_dispatch(
             deadline=Deadline.after(30),
             runtime_selection=RuntimeSelection(RuntimeTargetOS.LINUX),
         )
-    assert len(publications) == (2 if failure == "lost" else 1)
-    if failure == "lost":
-        assert publications[0] == publications[1]
+    assert len(publications) == 2 and publications[0] == publications[1]
     (active,) = operation.active_package_uploads
     assert active.binding.bootstrap is _BOOTSTRAP
     assert isinstance(active.prepared, _PreparedUpload)
