@@ -18,6 +18,7 @@ from agentworks.execution._wsl2_lifecycle import (
     GuestAnchorObserver,
     GuestAnchorPresence,
     HostClientStatus,
+    LocalResourceSnapshot,
     OwnedHostClient,
     WSL2AnchorEvidence,
     WSL2GuestAnchorOwner,
@@ -208,6 +209,10 @@ class WSL2PlatformHold:
     @property
     def evidence(self) -> WSL2AnchorEvidence:
         return self._anchor.evidence
+
+    def _current_local_snapshot(self) -> LocalResourceSnapshot:
+        """Observe retained native custody without refreshing guest evidence."""
+        return self._native.snapshot()
 
     def start(self, deadline: Deadline) -> WSL2AnchorEvidence:
         """Register, commit possible effect, dispatch once, and publish READY."""

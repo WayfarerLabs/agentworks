@@ -273,16 +273,13 @@ class RecoveryVMSpan:
                 owner=self._owner,
             )
             current = self._fresh_vm(deadline)
-            if current.instance_marker != vm.instance_marker or current.platform_metadata != vm.platform_metadata:
-                raise StateError("Recovery span VM changed during route selection")
             selected.require_selected_route(deadline)
             self._require_owner(idle=True)
             self._hold_started = True
             ready = selected.hold.start_recovery(deadline, obligation_id=self._hold_id)
             selected.ready = ready
-            self._require_ready_hold(selected)
-            if self._fresh_vm(deadline, action=True).instance_marker != current.instance_marker:
-                raise StateError("Recovery span VM changed during hold startup")
+            self._require_ready_hold(selected, deadline)
+            self._fresh_vm(deadline, action=True)
             preparation = self._batch.prepare(
                 current,
                 self._platform,
@@ -329,17 +326,19 @@ class RecoveryVMSpan:
         if selected is None or self._prepared is None or self._closed:
             raise StateError("Recovery span is not prepared")
         selected.require_selected_route(deadline)
-        self._require_ready_hold(selected)
+        self._require_ready_hold(selected, deadline)
 
     @staticmethod
-    def _require_ready_hold(selected: WSL2OwnedOperation) -> None:
+    def _require_ready_hold(selected: WSL2OwnedOperation, deadline: Deadline) -> None:
         ready = selected.ready
         if ready is None or not selected._ready_is_durable(ready):  # noqa: SLF001
             raise StateError("Recovery span durable hold is unavailable")
-        # Cached ACTIVE is only a negative failure screen. It supplies no
+        # Current host custody is only a negative failure screen. It supplies no
         # continuing guest-liveness or queued native-dispatch drain proof.
         evidence = selected.hold.evidence
-        local = evidence.local
+        local = selected.hold._current_local_snapshot()  # noqa: SLF001
+        if deadline.expired:
+            raise TimeoutError("Recovery span hold observation exceeded its deadline")
         if (
             local.host_client_status is not HostClientStatus.ACTIVE
             or local.job_assignment is not JobAssignment.ASSIGNED_AT_CREATION

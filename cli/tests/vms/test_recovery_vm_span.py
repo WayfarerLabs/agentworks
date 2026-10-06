@@ -21,7 +21,7 @@ from agentworks.errors import StateError, ValidationError
 from agentworks.execution._account import resolve_account
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
-from agentworks.execution._wsl2_lifecycle import HostClientStatus
+from agentworks.execution._wsl2_lifecycle import HandleSettlement, HostClientStatus
 from agentworks.execution._wsl2_owned_operation import WSL2OwnedOperation, WSL2RouteRefusal
 from agentworks.execution._wsl2_platform_hold import WSL2PlatformHold
 from agentworks.execution.binding import NativeExecutionBinding
@@ -246,7 +246,7 @@ def test_start_and_preparation_failures_retain_actual_span(setup, monkeypatch, f
 
 @pytest.mark.parametrize("fault", ["route", "marker", "metadata", "manual", "raw", "host", "takeover", "owner_stop"])
 def test_action_revalidation_rejects_changed_or_closed_custody(setup, fault):
-    database, owner, _, platform, carrier, _, _, span, _ = setup
+    database, owner, _, platform, carrier, native, _, span, _ = setup
     span.open(Deadline.after(10))
     if fault == "route":
         platform.observe_provider_locator.return_value = ProviderLocator("other")
@@ -261,8 +261,7 @@ def test_action_revalidation_rejects_changed_or_closed_custody(setup, fault):
     elif fault == "raw":
         platform.observe_execution_power.return_value = "running"
     elif fault == "host":
-        hold = span._selected.hold
-        hold._anchor._local = replace(hold.evidence.local, host_client_status=HostClientStatus.EXITED)
+        native.local = replace(native.local, host_client_status=HostClientStatus.EXITED)
     elif fault == "takeover":
         OperationOwner.recover(database.operations, owner.ownership, "f" * 32)
     else:
@@ -271,6 +270,100 @@ def test_action_revalidation_rejects_changed_or_closed_custody(setup, fault):
     with pytest.raises((StateError, WSL2RouteRefusal)), span.action(Deadline.after(10)):
         pass
     assert carrier.calls == before
+
+
+@pytest.mark.parametrize("boundary", ["preparation", "action", "execute"])
+@pytest.mark.parametrize("fault", ["exited", "unknown", "host_closed", "job_closed"])
+def test_current_native_custody_refuses_without_new_guest_probes(setup, monkeypatch, boundary, fault):
+    _, _, _, _, carrier, native, _, span, _ = setup
+
+    def change() -> None:
+        if fault in ("exited", "unknown"):
+            status = HostClientStatus.EXITED if fault == "exited" else HostClientStatus.UNKNOWN
+            native.local = replace(native.local, host_client_status=status)
+        elif fault == "host_closed":
+            native.local = replace(native.local, host_handle_settlement=HandleSettlement.CLOSED)
+        else:
+            native.local = replace(native.local, job_handle_settlement=HandleSettlement.CLOSED)
+
+    if boundary == "preparation":
+        original = WSL2PlatformHold.start_recovery
+
+        def changed(self, deadline, **kwargs):
+            ready = original(self, deadline, **kwargs)
+            change()
+            return ready
+
+        monkeypatch.setattr(WSL2PlatformHold, "start_recovery", changed)
+        with pytest.raises(StateError):
+            span.open(Deadline.after(10))
+        assert carrier.calls == []
+    else:
+        span.open(Deadline.after(10))
+        snapshots = native.snapshot_calls
+        deadline = Deadline.after(10)
+        if boundary == "action":
+            change()
+            with pytest.raises(StateError), span.action(deadline):
+                pass
+        else:
+            with span.action(deadline) as context:
+                change()
+                with pytest.raises(StateError):
+                    resolve_account(context.carrier, "admin", deadline, context.runtime_selection)
+        assert native.snapshot_calls > snapshots
+        assert carrier.calls == ["guest", "admin", "root"]
+    assert span.requires_owner_retention
+    assert "eof" not in native.events
+
+
+@pytest.mark.parametrize("boundary", ["preparation", "action", "execute"])
+@pytest.mark.parametrize("fault", ["error", "control", "late"])
+def test_current_native_snapshot_failure_retains_span_before_dispatch(setup, monkeypatch, boundary, fault):
+    _, _, _, _, carrier, native, _, span, _ = setup
+    deadline = Deadline.after(10)
+    original = native.snapshot
+    failure = KeyboardInterrupt() if fault == "control" else OSError("snapshot failed")
+
+    def fail():
+        if fault == "late":
+            local = original()
+            object.__setattr__(deadline, "expires_at", 0.0)
+            return local
+        raise failure
+
+    def install() -> None:
+        monkeypatch.setattr(native, "snapshot", fail)
+
+    expected = TimeoutError if fault == "late" else type(failure)
+    if boundary == "preparation":
+        start = WSL2PlatformHold.start_recovery
+
+        def started(self, deadline, **kwargs):
+            ready = start(self, deadline, **kwargs)
+            install()
+            return ready
+
+        monkeypatch.setattr(WSL2PlatformHold, "start_recovery", started)
+        with pytest.raises(expected) as caught:
+            span.open(deadline)
+        assert carrier.calls == []
+    else:
+        span.open(deadline)
+        if boundary == "action":
+            install()
+            with pytest.raises(expected) as caught, span.action(deadline):
+                pass
+        else:
+            with pytest.raises(expected) as caught, span.action(deadline) as context:
+                install()
+                resolve_account(context.carrier, "admin", deadline, context.runtime_selection)
+        assert carrier.calls == ["guest", "admin", "root"]
+    assert isinstance(caught.value.__cause__, RecoveryVMSpanControlFact)
+    assert caught.value.__cause__.span is span
+    assert span.requires_owner_retention and "eof" not in native.events
+    if fault != "late":
+        assert caught.value is failure
 
 
 def test_route_changes_inside_action_refuse_before_actual_carrier(setup):
