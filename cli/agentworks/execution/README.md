@@ -740,9 +740,11 @@ explicit private numeric-bootstrap option. It binds the prepared root-entry plan
 guest while leaving the request's body identity separate. Each exchange selects matching fixed argv
 and stdin prefix, refuses conflicting guest facts before dispatch and preserves the body's fresh
 gate observations through the bound reader. Every family entry forwards the same context, including
-reconciliation and cleanup. Existing context-free private candidates remain unchanged; production VM
-composition has not yet bound this option through operation state, continuations or recovery. Inline
-execution and later service entry still need adoption. Complete provider envelopes include the
+reconciliation and cleanup. Private download, upload, JSON and single-call bindings retain this
+context through their exchanges and outcomes. JSON gives each independently prepared upload child
+the same context, including after a publication conflict. Existing context-free private candidates
+remain unchanged; production VM composition has not yet bound this option through operation state
+or recovery. Inline execution and later service entry still need adoption. Complete provider envelopes include the
 selected prefix and encoded request; even a valid request can refuse before QGA dispatch when their
 aggregate exceeds the carrier limit.
 

@@ -264,6 +264,20 @@ native, production-binding, recovery or RunContext gates. Public feedback/fix ro
 and the PR remains draft without a review/readiness signal. The next private unit forwards the same
 context through file workflow bindings and JSON children before operation-owned adoption.
 
+Hosted run `37437893374` at `e0ad14ded` subsequently passes every required check, including Windows
+Python 3.13 and Linux Python 3.12/3.13/3.14. The earlier Python 3.14 framing failure remains
+unexplained; a later green run does not establish its cause or a fix.
+
+The private workflow-context unit from `387859250` adds one optional final field to each existing
+binding. Download, upload, JSON and single-call workflows forward the same immutable context into
+every file exchange, including reconciliation and cleanup, and retain it in their ordinary and
+control outcomes. JSON derives upload children with that context rather than reinjecting it through
+a fixture. The worker's 48 focused cases and 625 related cases pass; its complete strict mypy pass
+covers 1,218 source and test files. The workflow tests use explicit local exchange doubles and do
+not establish privileged admission or native success. Independent integrated review and lead gates
+remain pending. Core ownership, actual envelope-version callers, fresh recovery and production
+composition still need implementation; no checkbox or public feedback/fix round closes here.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
