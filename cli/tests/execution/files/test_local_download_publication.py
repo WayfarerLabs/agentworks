@@ -49,6 +49,36 @@ def test_rejects_unsafe_ancestor_even_when_parent_is_private(tmp_path: Path) -> 
         shared.chmod(0o700)
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="search-only permission evidence requires an ordinary caller")
+@pytest.mark.parametrize("condition", [Create(), Replace()])
+def test_search_only_ancestor_allows_known_destination(tmp_path: Path, condition: Create | Replace) -> None:
+    ancestor = tmp_path / "search-only"
+    ancestor.mkdir()
+    parent = ancestor / "writable"
+    parent.mkdir(mode=0o700)
+    destination = parent / "download"
+    if isinstance(condition, Replace):
+        destination.write_bytes(b"previous content")
+        destination.chmod(0o640)
+    ancestor.chmod(0o111)
+    try:
+        with pytest.raises(PermissionError):
+            list(ancestor.iterdir())
+        writer = local.LocalDownloadPublication(destination, condition=condition)
+        try:
+            data = b"new\x00\xff"
+            assert writer.try_write(memoryview(data)) == len(data)
+            commit(writer, data)
+            assert writer.published
+        finally:
+            writer.abort()
+        assert destination.read_bytes() == data
+        assert list(parent.iterdir()) == [destination]
+        assert stat.S_IMODE(destination.stat().st_mode) == (0o640 if isinstance(condition, Replace) else 0o600)
+    finally:
+        ancestor.chmod(0o700)
+
+
 def test_rejects_symlink_ancestor(tmp_path: Path) -> None:
     actual = tmp_path / "actual"
     actual.mkdir()

@@ -127,7 +127,7 @@ class LocalDownloadPublication(_PosixLocalDownloadStage):
         self._metadata_close_uncertain = False
         self._original: _Metadata | None = None
         try:
-            self._open_parent()
+            self._open_parent(access_mode=os.O_PATH)
             if isinstance(condition, Replace):
                 self._original = self._destination_metadata()
             else:

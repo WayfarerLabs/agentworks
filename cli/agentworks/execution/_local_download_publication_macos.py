@@ -174,7 +174,7 @@ class MacOSLocalDownloadPublication(_PosixLocalDownloadStage):
         self._original: _Metadata | None = None
         self._target_close_uncertain: bool = False
         try:
-            self._open_parent(unsupported_acl=_has_non_deny_acl)
+            self._open_parent(access_mode=os.O_RDONLY, unsupported_acl=_has_non_deny_acl)
             if isinstance(condition, Replace):
                 self._hold_target()
             else:

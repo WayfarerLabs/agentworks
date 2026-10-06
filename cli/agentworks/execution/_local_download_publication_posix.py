@@ -62,9 +62,10 @@ class _PosixLocalDownloadStage:
     def cleanup_uncertain(self) -> bool:
         return self._stage_close_uncertain or self._parent_close_uncertain or self._ancestor_close_uncertain
 
-    def _open_parent(self, *, unsupported_acl: Callable[[int], bool] | None = None) -> None:
+    def _open_parent(self, *, access_mode: int, unsupported_acl: Callable[[int], bool] | None = None) -> None:
         """Walk from root, holding and checking each directory before the next open."""
-        self._parent_fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        flags = access_mode | os.O_DIRECTORY | os.O_NOFOLLOW
+        self._parent_fd = os.open("/", flags)
         for component in ("", *self._destination.parent.parts[1:]):
             assert self._parent_fd is not None
             _validate_directory_custody(os.fstat(self._parent_fd))
@@ -73,7 +74,7 @@ class _PosixLocalDownloadStage:
             if not component:
                 continue
             try:
-                child_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=self._parent_fd)
+                child_fd = os.open(component, flags, dir_fd=self._parent_fd)
             except OSError as exc:
                 if exc.errno in (errno.ELOOP, errno.ENOTDIR):
                     raise LocalDownloadUnsupportedError("Local download ancestor is not a held directory") from exc
