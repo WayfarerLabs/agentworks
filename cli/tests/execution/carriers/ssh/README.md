@@ -37,6 +37,11 @@ owned temporary directory, including parent cleanup evidence. This is a native l
 fixture for ordinary Windows CI, with no network, credentials or caller-console access; report its
 actual native result separately from synthetic passes and skips.
 
+Both fixture workers begin inert. Only a successful start admits effects; a failed or interrupted
+start cancels even a delayed thread tail. Every admitted borrower settles before outer console or
+process cleanup can proceed. Synthetic tests on every host exercise failures before and after thread
+startup, interrupted completion waits and cleanup ordering without native console effects.
+
 The process fixtures use synthetic Python children and temporary files. The shared conformance
 fixture substitutes a local POSIX-shell executable for SSH, exercising the real quoting and pipe
 pump without authentication or a server. SSH-boundary live-I/O regressions exercise borrowed input,

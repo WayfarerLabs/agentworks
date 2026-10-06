@@ -9,10 +9,14 @@ import sys
 from pathlib import Path
 from threading import Event, Thread
 from time import monotonic, sleep
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tests.execution.carriers.ssh import windows_console_probe as probe
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def test_windows_record_abi_preserves_utf16_units_on_any_host() -> None:
@@ -26,6 +30,110 @@ def test_windows_record_abi_preserves_utf16_units_on_any_host() -> None:
         assert bytes(record) == expected
         assert record.event.key.character == unit
         assert ctypes.sizeof(record) == 20
+
+
+@pytest.mark.parametrize("started", [False, True])
+def test_failed_worker_start_cancels_even_a_late_tail(monkeypatch: pytest.MonkeyPatch, started: bool) -> None:
+    effect = Event()
+    interruption = KeyboardInterrupt()
+    threads: list[tuple[Thread, Callable[[], None]]] = []
+
+    def make_thread(*, target: Callable[[], None]) -> Thread:
+        thread = Thread(target=target)
+        start = thread.start
+
+        def fail_start() -> None:
+            if started:
+                start()
+            raise interruption
+
+        monkeypatch.setattr(thread, "start", fail_start)
+        threads.append((thread, start))
+        return thread
+
+    monkeypatch.setattr(probe, "Thread", make_thread)
+    with pytest.raises(BaseExceptionGroup) as raised:
+        probe._FixtureWorker(effect.set).run()
+    assert raised.value.exceptions == (interruption,)
+    thread, start = threads[0]
+    # A failed start can publish a real native tail after caller cleanup returns.
+    # Exercise that schedule too: its cancelled admission must remain inert.
+    if not started:
+        start()
+    thread.join(timeout=2)
+    assert not thread.is_alive()
+    assert not effect.is_set()
+
+
+def test_interrupted_admitted_wait_settles_borrower_before_outer_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
+    interruption = KeyboardInterrupt()
+    interrupted, settling, active, release = Event(), Event(), Event(), Event()
+    borrower_cleanup, outer_cleanup = object(), object()
+    order: list[object] = []
+    errors: list[BaseException] = []
+
+    class InterruptedCompletion(Event):
+        def wait(self, timeout: float | None = None) -> bool:
+            if not interrupted.is_set():
+                interrupted.set()
+                raise interruption
+            settling.set()
+            return super().wait(timeout)
+
+    def borrow() -> None:
+        try:
+            active.set()
+            assert release.wait(timeout=5)
+        finally:
+            order.append(borrower_cleanup)
+
+    monkeypatch.setattr(probe, "Event", InterruptedCompletion)
+    attempt = probe._FixtureWorker(borrow)
+
+    def supervise() -> None:
+        try:
+            attempt.run()
+        except BaseException as error:
+            errors.append(error)
+        finally:
+            order.append(outer_cleanup)
+
+    supervisor = Thread(target=supervise)
+    supervisor.start()
+    try:
+        assert interrupted.wait(timeout=2)
+        assert settling.wait(timeout=2)
+        assert active.wait(timeout=2)
+        assert order == []
+    finally:
+        release.set()
+        supervisor.join(timeout=2)
+    assert not supervisor.is_alive()
+    assert order == [borrower_cleanup, outer_cleanup]
+    assert len(errors) == 1
+    error = errors[0]
+    assert isinstance(error, BaseExceptionGroup)
+    assert error.exceptions == (interruption,)
+
+
+def test_failed_borrower_finishes_before_outer_cleanup() -> None:
+    failure = OSError()
+    borrower_cleanup, outer_cleanup = object(), object()
+    order: list[object] = []
+
+    def borrow() -> None:
+        try:
+            raise failure
+        finally:
+            order.append(borrower_cleanup)
+
+    with pytest.raises(BaseExceptionGroup) as raised:
+        try:
+            probe._FixtureWorker(borrow).run()
+        finally:
+            order.append(outer_cleanup)
+    assert raised.value.exceptions == (failure,)
+    assert order == [borrower_cleanup, outer_cleanup]
 
 
 def _window_cleanup(identity: dict[str, object]) -> str:
@@ -117,28 +225,12 @@ def test_owned_console_resource_and_nowait_records(tmp_path: Path) -> None:
     # Retain the parent supervisor before CreateProcess. Main-thread interruption
     # cannot orphan a constructor or skip child reaping. Its finite process timeout
     # bounds stalled native calls; no other console host is scanned or terminated.
-    done = Event()
     results: list[dict[str, object]] = []
-    errors: list[BaseException] = []
 
     def work() -> None:
-        try:
-            results.append(_run_owned_child(tmp_path))
-        except BaseException as error:
-            errors.append(error)
-        finally:
-            done.set()
+        results.append(_run_owned_child(tmp_path))
 
-    worker = Thread(target=work)
-    worker.start()
-    while not done.is_set():
-        try:
-            done.wait()
-        except BaseException as error:
-            errors.append(error)
-    worker.join()
-    if errors:
-        raise BaseExceptionGroup("Owned console supervisor failed", errors)
+    probe._FixtureWorker(work).run()
     assert len(results) == 1
     result = results[0]
     assert result["returncode"] == 0
