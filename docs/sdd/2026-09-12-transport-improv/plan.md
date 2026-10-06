@@ -642,6 +642,23 @@ sequential commands with mixed file operations while preserving exact uncertaint
 registration/resolution retry and recovery fencing. No implementation or capacity acceptance is
 claimed at this checkpoint.
 
+All three independent lanes clear the corrected whole span at `d3cc1d970`. Project passes 356
+focused/adjacent cases with 9 skips and scoped typing/style, and independently confirms its original
+EXITED reproducer now refuses without another query. Complexity passes 197 baseline and restored
+cases; substituting historical local custody makes 12 cases fail, while deleting the post-snapshot
+budget check produces three failures and six passes. Generic passes 203 cases and finds no
+additional issue. Each review tree is restored clean at the exact pin.
+
+The lead passes 15,088 non-integration tests with 49 skips and 27 existing fork warnings, exit 0.
+Complete Ruff/format, strict mypy (1,230 source and test files), typer isolation, file quality,
+locked-SDD, Rulesync and whitespace gates exit 0. Website validation passes 160 Python and 103 Node
+cases, four builds and both deterministic comparisons. Published predecessor `118983e1b` passes
+hosted CI and CodeQL. These gates validate private composition and the corrected negative failure
+screen, not native continuing availability or predecessor drain. Version-two retained-file adapter
+adoption, independent-job availability, remaining native factories, complete RunContext and full
+integration acceptance remain open. Draft WIP publication closes no public round or broader plan
+gate; no database data or SSH branch is changed.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
