@@ -2802,6 +2802,17 @@ warnings on the Linux Python 3.12 workstation. The run uses a private short test
 the workspace's inherited default ACL; no production file checks are weakened. This is not native
 Windows, systemd, SSH or QGA acceptance.
 
+The private retained keeper kernel at `6c64d103c` now passes all three independent review lanes with
+no material findings: project 37 Windows-selected cases on Linux, complexity 258 related cases and
+generic 236 related cases plus four native-start refusal probes. The corrections remove a redundant
+startup event, distinguish known native thread-creation refusal from uncertain startup, and replace
+bespoke temporary-directory checks with portable fixtures. Independent completion evidence remains
+required after an interrupted native join. Removing it fails both the simulated and real POSIX
+SIGINT regressions. The lead's integrated selection passes 382 cases; Ruff, formatting, CI's strict
+type-check selection of 1,264 sources and file lint all return zero. The kernel retains the fixed
+LIVE/CLOSING boundary and never resolves original start or keeper debt. Main-thread start
+composition is being implemented; recovery, aggregate settlement and native proof remain open.
+
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
       serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one
       in-flight exchange, exact uncertainty retention and drain before release/disposal. Bind it to
