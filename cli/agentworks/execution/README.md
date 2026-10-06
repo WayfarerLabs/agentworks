@@ -751,8 +751,8 @@ the same context, including after a publication conflict. Existing context-free 
 remain unchanged. Core file state can bind this context once, but production VM construction and
 fresh recovery have not yet adopted it. Buffered inline preparation also accepts this context;
 operation-owned execution and later service entry still need adoption. Complete provider envelopes
-include the selected prefix and encoded request; even a valid
-request can refuse before QGA dispatch when their aggregate exceeds the carrier limit.
+include the selected prefix and encoded request; even a valid request can refuse before QGA dispatch
+when their aggregate exceeds the carrier limit.
 
 The separate private `build_named_guest_bootstrap_argv` handles early fixed guest operations before
 numeric account preparation. It resolves a core-bound account name through the system account
@@ -842,13 +842,13 @@ acknowledgment. Preparation remains single-use and clears the prerequisite parse
 including carrier exceptions. This candidate is not wired to production RunContext and does not yet
 supply staging, terminal I/O or managed lifetime.
 
-Explicit numeric-bootstrap preparation uses the existing INLINE root program without adding a
-stdin prefix or changing the manifest. Its full guest checkpoint precedes remaining helper modules
-and request consumption; the body still checks its intended identity. Application stdin stays
-separate from script source, and normal completion still requires the original terminal evidence
-and exact wait. A bootstrap exit without that evidence leaves application state unknown. Private
-packed tests mock privileged admission; native credential transitions and operation-owned context
-construction remain unproved.
+Explicit numeric-bootstrap preparation uses the existing INLINE root program without adding a stdin
+prefix or changing the manifest. Its full guest checkpoint precedes remaining helper modules and
+request consumption; the body still checks its intended identity. Application stdin stays separate
+from script source, and normal completion still requires the original terminal evidence and exact
+wait. A bootstrap exit without that evidence leaves application state unknown. Private packed tests
+mock privileged admission; native credential transitions and operation-owned context construction
+remain unproved.
 
 The current private inline access captures at most 4,096 bytes per application stream and defaults
 to that limit. This is a checkpoint-local helper bound, not the proposed production caller default

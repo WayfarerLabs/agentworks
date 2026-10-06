@@ -325,11 +325,11 @@ The worker passes 21 focused and 390 related cases, complete strict mypy (1,220 
 files), changed Ruff/format and full file quality. Packed command/script success mocks privileged
 admission; the real non-root entry refuses before request consumption or application launch. The
 measured maximum manifest fits representative direct/sudo QGA envelopes and Windows argv quoting;
-valid oversized group aggregates still refuse before provider dispatch. The worker's full suite
-was interrupted with exit 130 to avoid overlapping the lead's complete run; its eleven failure
-markers have no node identities or traces and remain unclassified. Independent review and lead
-gates are pending. Operation-owned execution context, fresh recovery, service entry and native
-production proof remain open. No public handoff or feedback/fix round closes here.
+valid oversized group aggregates still refuse before provider dispatch. The worker's full suite was
+interrupted with exit 130 to avoid overlapping the lead's complete run; its eleven failure markers
+have no node identities or traces and remain unclassified. Independent review and lead gates are
+pending. Operation-owned execution context, fresh recovery, service entry and native production
+proof remain open. No public handoff or feedback/fix round closes here.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
