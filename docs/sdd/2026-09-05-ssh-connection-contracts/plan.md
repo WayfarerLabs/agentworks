@@ -185,12 +185,14 @@ consumer migration and retirement do not gate this implementation PR. SSH does n
 transport's files, shared supervision or consumer migration.
 
 The [implementation progress record](phase2-results.md) pins the completed independent code and
-local validation separately from the remaining shared integration and platform acceptance.
+local validation separately from the remaining shared integration and platform acceptance. The
+[trust workflow record](trust-workflow-results.md) distinguishes newly composed installed-client
+proof fixtures from native execution and genuine production publication.
 
 Shared subprocess adoption introduces an implementation dependency on transport #833. Current
-integration uses `d9315847cd2c2d6300bc90f9cf3d20789ac6b973`, adding shared terminal input and
-explicit borrowed native stdin to the shared structural preflight, managed-start and download
-mechanisms. The
+integration uses `833f1c280cc67f8d9b8f71f2e229ab69d20f7df5`, adding owner-mediated POSIX resize to
+the published shared terminal input and explicit borrowed native stdin, structural preflight,
+managed-start and download mechanisms. The
 [Windows ancestor-sharing correction](phase2-results.md#windows-ancestor-sharing-correction) records
 that rebase and its remaining limits. The earlier
 [local-download stack refresh](phase2-results.md#private-local-download-stack-refresh) and
@@ -222,17 +224,22 @@ resource worker through interrupted waits and relay cleanup. An
 [owner-mediated resize boundary](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6010061812)
 is now
 [accepted by transport](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6010143834),
-with its reviewed pin still pending. SSH does not access a private client PID or add a second
-process owner. The
+with its
+[reviewed pin now published](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6010798164).
+SSH is integrating that actual finite-budget notification API; an accepted local signal does not
+prove remote geometry propagation. SSH does not access a private client PID or add a second process
+owner. Transport's
+[Windows response](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6010798696)
+accepts native launch/preparation ownership while leaving selection and native proof open. The
 [SSH reading](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6009208568) records
 the current resource increment and remaining proof separately from that planned shared seam.
 
 ### Complete the carrier and migration
 
-The [POSIX resource implementation](terminal-lld.md#posix-resource-implementation) advances native
-terminal acquisition and restoration independently of the shared input and process-owner work. It is
-a private resource increment, with acquisition-custody and full terminal delivery still open; the
-completed-carrier and supported-workstation gates below are unchanged.
+The [POSIX resource implementation](terminal-lld.md#posix-resource-implementation) and privately
+reviewed relay advance acquisition, cleanup evidence and retained restoration. Resize composition,
+shared presentation cleanup and complete native terminal delivery remain open; the completed-carrier
+and supported-workstation gates below are unchanged.
 
 - [x] Adopt transport #833's shared finite-input subprocess pump at `e85e9f5c` while preserving SSH
       environment policy and report provenance. Integration code `1b2c6832` passes the combined
