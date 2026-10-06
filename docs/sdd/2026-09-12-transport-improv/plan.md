@@ -2668,14 +2668,23 @@ does not enable a production target/RunContext, settle old debts or complete the
       until the keeper and aggregate lifecycle are delivered; no disconnected protocol scaffold is a
       completed slice. The private guest implementation now supplies that protocol and its
       controller consumer, including packed Python 3.11/3.12 real-child tests under a synthetic
-      process-group boundary. The focused managed/bootstrap selection passes 810 cases with 27
+      process-group boundary. The corrected managed/bootstrap selection passes 819 cases with 27
       existing fork warnings. It preserves refused host OPERATION admission. The 10 KiB workload
-      fixture fits the unchanged 65,536-byte Proxmox HTTP envelope: 64,903 bytes for independent and
-      65,267 for private operation requests, leaving only 633 and 269 bytes respectively. Larger
+      fixture fits the unchanged 65,536-byte Proxmox HTTP envelope: 64,891 bytes for independent and
+      65,255 for private operation requests, leaving only 645 and 281 bytes respectively. Larger
       metadata or workloads still face pure carrier validation; this does not establish a general
       native request size or native delivery proof. First-party service source is derived with the
       existing docstring compaction, including service admission, rather than bundling every
       original source byte verbatim. Keeper, recovery and native gates remain open.
+
+All three independent private lanes reproduced a delayed-record-read expiry gap. The controller now
+keeps its early expiry refusal, samples the guest clock again after successful or failed store
+reads, and checks remembered expiry before accepting renewal. It reuses the store's validated
+binding instead of repeating codec work. The wire boundary remains unchanged. Before correction, the
+new deterministic selection fails six cases and passes two at `1357eefc5`; the corrected selection
+includes nine new cases, including early expiry without a read and no revival after closure. The
+earlier full lead suite passes 15,696 cases with 49 skips at that initial pin, not the corrected
+head; corrected whole-unit review and full validation are required before publication.
 
 The latest hosted Windows failure stopped at the migration fixture's five-second child-commit
 barrier before its database assertions. The private fixture correction uses generous finite
