@@ -782,10 +782,10 @@ protocol refusal can settle a helper without granting preparation facts. The bat
 dispatcher and resolves only its own row after it stops and every admitted query is accounted for;
 unknown dispatch, interruption or uncertain bookkeeping stops further queries and retains debt.
 Another takeover inherits that row independently of the availability hold. Anchor absence, a newer
-successful preparation or hold release cannot discharge an earlier uncertain batch. This requires
-no new schema, codec, query counter or row per individual query. The empty row retains uncertainty;
-it cannot reconstruct native endpoint identity or prove complete predecessor drain after process
-loss. Until concrete adapter evidence supplies that proof, retain the claim without replay.
+successful preparation or hold release cannot discharge an earlier uncertain batch. This requires no
+new schema, codec, query counter or row per individual query. The empty row retains uncertainty; it
+cannot reconstruct native endpoint identity or prove complete predecessor drain after process loss.
+Until concrete adapter evidence supplies that proof, retain the claim without replay.
 
 That contract uses a distinct internal recovery-dispatch object, not a recovery mode on the ordinary
 borrow. Admission requires the sealed recovery owner, its exact current generation, a
