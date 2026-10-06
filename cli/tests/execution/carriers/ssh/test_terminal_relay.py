@@ -7,7 +7,7 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from threading import Event, Thread, current_thread
+from threading import Event, current_thread
 from typing import Any, cast
 
 import pytest
@@ -237,26 +237,6 @@ def test_pending_payload_drains_before_source_repoll(
     )
     assert result.failure is None
     assert len(observed_calls) == 6 and len(set(observed_calls)) == 1
-
-
-def test_resize_explicitly_refuses_unavailable_owner_notification(endpoint: tuple[int, int]) -> None:
-    import termios
-
-    termios.tcsetwinsize(endpoint[1], (31, 97))
-    io, source, _, _ = _io(endpoint, [None] * 100)
-
-    def resize() -> None:
-        source.ready.wait()
-        termios.tcsetwinsize(endpoint[1], (42, 113))
-
-    worker = Thread(target=resize)
-    worker.start()
-    result = relay.run_terminal_relay_candidate(
-        _argv(_RAW_READY + "__import__('time').sleep(30)"), io=io, deadline=Deadline.after(3)
-    )
-    worker.join()
-    assert result.failure is Failure.OBSERVATION and result.started
-    assert result.exit_status is None
 
 
 @pytest.mark.parametrize("bad", [b"x" * (relay._CHUNK + 1), 3, "secret-canary"])

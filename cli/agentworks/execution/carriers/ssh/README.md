@@ -24,9 +24,17 @@ exception. It suppresses native cause chains at its public boundary so cleanup d
 disclose endpoint data. Ordinary acquisition failures whose cleanup succeeds remain dispatch
 failures.
 
-This candidate copies initial geometry but stops with observation failure when geometry changes: the
-shared owner cannot yet notify its exact client. It is not enabled by `SSHCarrier`; actual resize,
-real SSH integration, native workstations and presentation policy remain required.
+This candidate copies initial geometry and subsequent changes from the supplied output endpoint. The
+same worker requests SIGWINCH through its existing process owner, with a finite 0.1-second budget
+for each notification and the operation's original absolute deadline as an upper bound. Even an
+unbounded operation gives notification a finite allowance. Accepted local signaling is not proof of
+remote resize. An unknown notification or interrupted geometry/notification boundary reports
+observation uncertainty; an unsent notification uses fresh process and deadline facts. Natural
+client exit needs no new geometry and still permits bounded output draining. Claimed notification
+custody remains with the shared owner through settlement before terminal release.
+
+It is not enabled by `SSHCarrier`; real SSH resize, native workstations and transport-owned
+presentation sanitation remain required.
 
 The private `_terminal_windows` resource layer translates supplied CRT descriptors to borrowed
 native console handles. It admits readable console input without consuming events and queries the
