@@ -196,7 +196,7 @@ partial-update custody. Production writer coexistence and rollback through both 
 paths still require transport composition and native acceptance.
 
 Shared subprocess adoption introduces an implementation dependency on transport #833. Current
-integration uses `8ab2d4acdaf9980c52c5b1ff5f7f1f316ebd48c6`. Its shared carrier, process,
+integration uses `16a6cecba3bad7efe7e65f985e22220d801a8655`. Its shared carrier, process,
 preparation and terminal-input interfaces remain unchanged from the preceding SSH integration.
 Private execution binds the selected owner scope and bootstrap boot; the WSL2 native factory
 requires both prepared identity plans and shares one elevated-plan/full-guest bootstrap between file
@@ -222,18 +222,30 @@ four builds and both deterministic comparisons. The first build target was refus
 checkout; corrected external owned output roots pass. No SSH code changes or native acceptance
 follow from that dependency refresh.
 
-The latest dependency changes only transport's lifecycle LLD and unchecked plan. Its proposed
-operation keeper uses one exact-launch/boot-bound guest lease, expiring 60 seconds after an earlier
-guest-clock sample. Generation/admission checks fence both clock observation and publication,
-including a post-clock check before dispatch. Scope close drains renewal before exact-run cleanup;
-wait timeout does not stop the keeper. Expiry bounds possible extension but proves neither workload
-emptiness nor publisher drain. The keeper and recovery consumer are not implemented at this pin; the
-proposed five-second exchange budget and ten-second cadence still need native SSH/QGA proof. No
-shared SSH interface changed. The rebased CLI, website, workflow, script and policy trees are
-identical to published SSH `2f7e28dc3fb0d9cc178c34469f56b183c764e4a0`, preserving the code-gate
-evidence below and its successful hosted run `37501965297`. That run's synthetic merge has the same
-Git tree as the preceding published SSH head; it does not validate the newly changed design prose.
-The refresh completes no implementation or native acceptance gate.
+The latest dependency implements the private guest operation lease and its controller consumer.
+Expiry remains bound to one launch/boot and an earlier guest-clock sample plus 60 seconds. Fresh
+clock checks after renewal reads and immediately before workload release prevent delayed I/O from
+reviving expired work or admitting an expired initial lease. Packed Python 3.11/3.12 real-child
+fixtures observe body exclusion under a synthetic process-group boundary; they supply no native
+cgroup, SSH or QGA proof. Host OPERATION admission still refuses. The keeper, recovery and aggregate
+lifecycle remain open, including measured exchange budgets and publisher drain. Service admission
+uses existing trusted-source docstring compaction without changing other helper callers' default.
+The exact 10,000-byte workload fixture fits Proxmox's unchanged 65,536-byte HTTP cap with only 581
+bytes of independent-request margin and 217 bytes of private-operation margin; this is no general
+workload-size or native envelope proof. The Windows migration fixture now uses bounded coordination
+and failure-path child cleanup without changing product deadlines or schema assertions. Transport
+records all three private lanes clear at `a2d27446c`; its final head changes only evidence from that
+source pin. No shared SSH interface changed.
+
+Combined code pin `38934134e3b8d12af814f9371b62075daa49db3e` preserves all 64 Python paths in the
+SSH contribution, including deletions, from published `186458307b`. Its full suite passes 16,125
+non-integration tests with 51 skips and 27 warnings, exit 0 in 267.18 seconds. Full Ruff/format
+(1,329 files), strict mypy (1,292 sources), exact CI typer isolation, file quality, locked-SDD,
+Rulesync and whitespace checks pass. Website validation passes 160 Python and 103 Node tests, four
+builds and both deterministic comparisons. Exact settled test/build roots have no same-user live
+cwd/fd references and are removed; logs are retained. All 25 completed plan records remain
+unchanged, and the SDD remains unlocked. This refresh closes no native SSH, terminal, trust or
+production RunContext acceptance gate.
 
 The preceding combined code pin `a38e5814fd180fe65899001d5a74426c4587dcf0` preserves all 64 Python
 files in the SSH contribution, including retained deletions, from published `47013bcf2`. Its full
