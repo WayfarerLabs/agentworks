@@ -2670,8 +2670,10 @@ does not enable a production target/RunContext, settle old debts or complete the
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
       serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one
       in-flight exchange, exact uncertainty retention and drain before release/disposal. Bind it to
-      the actual owning operation, not a borrowed view or a wait deadline. Keep native SSH/QGA,
-      controller death, partition, suspend/boot and body-admission proof open until measured.
+      the actual owning operation, not a borrowed view or a wait deadline. Deliver recovery's fresh
+      same-boot clock plus fixed-window ceiling without per-renewal database payload writes; initial
+      start and renewal both need the post-clock generation fence. Keep native SSH/QGA, controller
+      death, partition, suspend/boot and body-admission proof open until measured.
 - [ ] Reconcile #770's historical escape/relaunch proposal against the later exclusion of malicious
       target-user containment. Deliver DIRECT/MANAGED without a CONTAINED profile or
       per-run-user/jail implementation; retain future profile extensibility. Prove trusted

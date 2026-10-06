@@ -280,9 +280,11 @@ a proof of VM pause/resume behavior on any platform.
 
 Core first makes a fixed, read-only guest clock observation under the exact prepared guest identity.
 It derives an expiry 60 seconds after that observed value and supplies it with the operation-owned
-start request. Admission checks expiry before staging or starting systemd; the controller checks it
-again before releasing the child. A delayed request cannot acquire a fresh lifetime merely because
-its helper finally runs. Independent starts have no lease and retain their current behavior.
+start request. After the clean clock reply, recheck database generation and closing admission before
+possible start dispatch, just as for renewal. Guest admission checks expiry before staging or
+starting systemd; the controller checks it again before releasing the child. A delayed request
+cannot acquire a fresh lifetime merely because its helper finally runs. Independent starts have no
+lease and retain their current behavior.
 
 Renewal uses the same two steps: observe the guest clock, then publish that observation plus the
 fixed 60-second window for the exact run. The guest publisher never substitutes its execution time
@@ -329,13 +331,18 @@ independent of a caller's wait deadline. The 60-second guest lease leaves arithm
 native latency guarantee: measure SSH and QGA exchanges, including their polling, before advertising
 this combination. Late replies cannot reset the cycle budget or replace the sampled clock value.
 
-Before possible publication, a fenced compare-and-swap retains the last possibly granted expiry as
-one high-water value in the existing run obligation, not a history or another table. Deliver its
-recovery consumer with the keeper: fresh same-boot guest-clock observation and exact run facts let
-recovery bound the old keeper's possible remaining lease authority and budget its observation. That
-bound alone proves neither workload emptiness nor publisher drain. A boot change or unavailable
-clock leaves the reconciliation uncertain; recovery never resumes the old keeper or renews its
-lease. Do not add metadata without this consumer.
+Recovery does not persist a high-water expiry on every renewal. After confirmed takeover, sample the
+exact guest's same-boot clock and add the fixed 60-second window to obtain a conservative ceiling
+for all old possibly admitted lease authority. Every admitted old sample preceded its successful
+generation check, which preceded takeover; the recovery sample follows takeover. An old helper can
+still execute later, but cannot move its supplied expiry beyond this ceiling. Reading only the
+current lease leaf is insufficient because an admitted publication may still replace it.
+
+Deliver this recovery consumer with the keeper. It may allow up to one extra 60-second observation
+window, not delay an explicit stop or disregard stronger evidence. An exhausted caller budget, boot
+change or unavailable clock retains uncertainty. The ceiling proves neither workload emptiness nor
+publisher drain. Recovery never resumes the old keeper or renews its lease, and no per-renewal
+database payload update or new table is needed.
 
 Ending the owning operation closes new keeper work, drains its local worker/exchange, then requests
 the existing exact-run stop and observes cleanup under an explicit cleanup budget. Ordinary
