@@ -280,6 +280,20 @@ not change borrowed code pages or add a blocked reader thread to hide those sema
 Server 2022 and the transport-owned child-launch/preparation boundary remain separate acceptance
 gates. Public terminal delivery remains disabled.
 
+The injected-input comparison fixture now reads byte-identical vectors separately through record
+polling and `ReadConsoleW`, across distinct input/output code pages and VT input states. The
+[pinned Microsoft host source](https://github.com/microsoft/terminal/blob/dc8ae365847d41f62d1ebca93815bb00959bc12f/src/host/stream.cpp#L170-L198)
+handles private-flagged Alt key releases through packed-byte conversion; its
+[conversion boundary](https://github.com/microsoft/terminal/blob/dc8ae365847d41f62d1ebca93815bb00959bc12f/src/host/misc.cpp#L19-L28)
+uses the output code page and requires an applicable lead byte for two-byte input. The fixture
+restricts its packed two-byte vector to code page 932 and records native conversion references for
+both pages. An ordinary character sentinel supplies queued input when a release is ignored, while
+the retained parent timeout remains the backstop for a blocked fixture read. Passing comparison data
+requires the scoped `-rP` report; ordinary captured CI success alone does not establish those
+values. Native comparison values remain unobserved, and injected records cannot prove physical
+numeric keypad input or the behavior of a different Windows binary. This selects no production
+decoder.
+
 ## Remaining proof
 
 The host experiment used bounded small writes and captured output, not a production relay. The
