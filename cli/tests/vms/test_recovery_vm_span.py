@@ -20,6 +20,7 @@ from agentworks.db import Database, LifecycleObligationState, OperationResourceK
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._account import resolve_account
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
+from agentworks.execution._fixed_helper_operation import AttemptBoundHelperCarrier
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 from agentworks.execution._wsl2_lifecycle import HandleSettlement, HostClientStatus
@@ -31,6 +32,7 @@ from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
 from agentworks.operations import LifecycleObligation, OperationOwner, RecoveredLifecycleObligation, RecoveryDispatch
 from agentworks.vms._recovery_vm_span import RecoveryVMSpan, RecoveryVMSpanControlFact
 from tests.execution import test_recovery_guest_preparation as preparation_fixtures
+from tests.execution._bound_carrier_support import bind_carrier as bind_carrier
 from tests.execution.test_recovery_guest_preparation import FixedCarrier
 from tests.execution.test_wsl2_platform_hold import BOOT, FakeNative, FakeObserver
 from tests.vms.test_target_preparation import _MARKER
@@ -121,7 +123,8 @@ def test_existing_recovery_claim_retains_hold_through_exact_bound_action(setup, 
             support.obligation_id, "carrier-dispatch", payload_version=1, payload=b"", payload_revision=0
         ).open_dispatch()
         attempt = dispatch.begin_attempt()
-        result = resolve_account(context.carrier, "admin", action_deadline, context.runtime_selection)
+        delivery = AttemptBoundHelperCarrier(context.carrier, attempt)
+        result = resolve_account(delivery, "admin", action_deadline, context.runtime_selection)
         assert result.observation is not None
         assert result.observation.identity == context.ordinary_plan.expected
         attempt.settle()
@@ -275,7 +278,7 @@ def test_action_revalidation_rejects_changed_or_closed_custody(setup, fault):
 
 @pytest.mark.parametrize("boundary", ["preparation", "action", "execute"])
 @pytest.mark.parametrize("fault", ["exited", "unknown", "host_closed", "job_closed"])
-def test_current_native_custody_refuses_without_new_guest_probes(setup, monkeypatch, boundary, fault):
+def test_current_native_custody_refuses_without_new_guest_probes(setup, monkeypatch, boundary, fault, bind_carrier):
     _, _, _, _, carrier, native, _, span, _ = setup
 
     def change() -> None:
@@ -311,7 +314,7 @@ def test_current_native_custody_refuses_without_new_guest_probes(setup, monkeypa
             with span.action(deadline) as context:
                 change()
                 with pytest.raises(StateError):
-                    resolve_account(context.carrier, "admin", deadline, context.runtime_selection)
+                    resolve_account(bind_carrier(context.carrier), "admin", deadline, context.runtime_selection)
         assert native.snapshot_calls > snapshots
         assert carrier.calls == ["guest", "admin", "root"]
     assert span.requires_owner_retention
@@ -320,7 +323,9 @@ def test_current_native_custody_refuses_without_new_guest_probes(setup, monkeypa
 
 @pytest.mark.parametrize("boundary", ["preparation", "action", "execute"])
 @pytest.mark.parametrize("fault", ["error", "control", "late"])
-def test_current_native_snapshot_failure_retains_span_before_dispatch(setup, monkeypatch, boundary, fault):
+def test_current_native_snapshot_failure_retains_span_before_dispatch(
+    setup, monkeypatch, boundary, fault, bind_carrier
+):
     _, _, _, _, carrier, native, _, span, _ = setup
     deadline = Deadline.after(10)
     original = native.snapshot
@@ -358,7 +363,7 @@ def test_current_native_snapshot_failure_retains_span_before_dispatch(setup, mon
         else:
             with pytest.raises(expected) as caught, span.action(deadline) as context:
                 install()
-                resolve_account(context.carrier, "admin", deadline, context.runtime_selection)
+                resolve_account(bind_carrier(context.carrier), "admin", deadline, context.runtime_selection)
         assert carrier.calls == ["guest", "admin", "root"]
     assert isinstance(caught.value.__cause__, RecoveryVMSpanControlFact)
     assert caught.value.__cause__.span is span
@@ -367,14 +372,14 @@ def test_current_native_snapshot_failure_retains_span_before_dispatch(setup, mon
         assert caught.value is failure
 
 
-def test_route_changes_inside_action_refuse_before_actual_carrier(setup):
+def test_route_changes_inside_action_refuse_before_actual_carrier(setup, bind_carrier):
     _, _, _, platform, carrier, _, _, span, _ = setup
     span.open(Deadline.after(10))
     deadline = Deadline.after(10)
     with span.action(deadline) as context:
         platform.observe_provider_locator.return_value = ProviderLocator("changed")
         with pytest.raises(WSL2RouteRefusal):
-            resolve_account(context.carrier, "admin", deadline, context.runtime_selection)
+            resolve_account(bind_carrier(context.carrier), "admin", deadline, context.runtime_selection)
     assert carrier.calls == ["guest", "admin", "root"]
 
 
@@ -452,7 +457,7 @@ def test_settled_preparation_cleanup_retry_precedes_hold_release(setup, monkeypa
 
 
 @pytest.mark.parametrize("budget", [None, 30, 0, "foreign"])
-def test_guarded_carrier_cannot_extend_or_outlive_action_budget(setup, budget):
+def test_guarded_carrier_cannot_extend_or_outlive_action_budget(setup, budget, bind_carrier):
     _, _, _, _, carrier, _, _, span, _ = setup
     span.open(Deadline.after(10))
     action_deadline = Deadline.after(10)
@@ -461,7 +466,7 @@ def test_guarded_carrier_cannot_extend_or_outlive_action_budget(setup, budget):
         if budget == 0:
             object.__setattr__(action_deadline, "expires_at", 0.0)
         with pytest.raises((StateError, ValidationError)):
-            resolve_account(context.carrier, "admin", deadline, context.runtime_selection)
+            resolve_account(bind_carrier(context.carrier), "admin", deadline, context.runtime_selection)
     assert carrier.calls == ["guest", "admin", "root"]
 
 
