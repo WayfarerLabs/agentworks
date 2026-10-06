@@ -191,6 +191,18 @@ changes no Python bytes. Native successful transitions, ordinary file/service fe
 availability and complete additive RunContext composition remain open. This draft checkpoint does
 not close public feedback/fix round 1 or request merge readiness; no database data was removed.
 
+The next private numeric helper unit at `7bfc10603` binds a prepared root-entry plan and full
+verified guest in one immutable context. Gate-control and all five snapshot exchanges select their
+corresponding fixed-prefix root program when given that context, retaining the ordinary carrier
+and the body's independent numeric identity. The worker's related selection passes 559 tests,
+including 34 new adoption cases. Success exercises real packed family modules with mocked
+credentials; actual non-root Python 3.11 entry refuses. Complete snapshot QGA sizing remains
+64,568/64,610 bytes. Operation-owned binding, remaining families, recovery, independent review,
+complete integration gates and native success remain pending. The preceding published head's
+Python 3.14 SSH exit-255 framing assertion failed; its cause is unknown, and the diagnostic
+correction records only safe measurements, never payloads. No deadline or conformance assertion
+is weakened by that diagnostic change.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
