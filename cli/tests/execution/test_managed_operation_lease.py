@@ -41,6 +41,11 @@ from .test_managed_start import GUEST, NONCE, ROOT
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux protected guest control")
 
 
+@pytest.fixture(autouse=True)
+def publication_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(store_wire, "boottime_ns", lambda: 30_000_000_000)
+
+
 def launch() -> bytes:
     value = wire.decode_fact(_launch())
     value["owner"] = {"kind": "operation", "owner_id": "c" * 32}
@@ -150,7 +155,7 @@ def test_exact_publisher_stores_original_sample_and_duplicate_is_idempotent(
     receipt = launch()
     initial = lease_wire.sampled_lease(receipt, 1000)
     renewal = lease_wire.sampled_lease(receipt, 2000)
-    monkeypatch.setattr(guest, "boottime_ns", lambda: 3000)
+    monkeypatch.setattr(store_wire, "boottime_ns", lambda: 3000)
     with _store(tmp_path) as store:
         store.publish_request(job())
         store.publish_fact(FactName.LAUNCH, receipt)
@@ -176,6 +181,7 @@ def test_invalid_record_never_extends_remembered_expiry(
     monkeypatch.setattr(controller, "boottime_ns", lambda: clock[0])
     with _store(tmp_path) as store:
         store.publish_request(job())
+        store.publish_fact(FactName.LAUNCH, receipt)
         if fault != "absent":
             store_wire.publish_lease(store, receipt, initial)
         if fault in {"malformed", "wrong-boot"}:
@@ -204,6 +210,7 @@ def test_remembered_expiry_checked_before_new_record_and_stop_latches(
     monkeypatch.setattr(controller, "boottime_ns", lambda: clock[0])
     with _store(tmp_path) as store:
         store.publish_request(job())
+        store.publish_fact(FactName.LAUNCH, receipt)
         store_wire.publish_lease(store, receipt, renewal)
         control = controller.LeaseControl(receipt, initial.expires_ns)
         assert not control.stop_due(store) and control.expires_ns == renewal.expires_ns
@@ -246,6 +253,7 @@ def test_read_crossing_remembered_expiry_latches_before_renewal(
     monkeypatch.setattr(controller, "read_lease", delayed_read)
     with _store(tmp_path) as store:
         store.publish_request(job(0))
+        store.publish_fact(FactName.LAUNCH, receipt)
         if fault != "absent":
             store_wire.publish_lease(store, receipt, renewal)
         if fault == "malformed":
@@ -280,6 +288,7 @@ def test_read_candidate_freshness_uses_post_read_clock(
     monkeypatch.setattr(controller, "read_lease", delayed_read)
     with _store(tmp_path) as store:
         store.publish_request(job(10_000_000_000))
+        store.publish_fact(FactName.LAUNCH, receipt)
         store_wire.publish_lease(store, receipt, candidate)
         control = controller.LeaseControl(receipt, initial.expires_ns)
         assert not control.stop_due(store) and not control.closed
@@ -302,6 +311,7 @@ def test_interrupted_replacement_leaves_bounded_recognized_custody(
 
     with _store(tmp_path) as store:
         store.publish_request(job())
+        store.publish_fact(FactName.LAUNCH, receipt)
         store_wire.publish_lease(store, receipt, initial)
         monkeypatch.setattr(os, "replace", fail)
         with pytest.raises(KeyboardInterrupt) as raised:
@@ -322,6 +332,7 @@ def test_unsafe_control_inventory_refuses(tmp_path: Path, fault: str) -> None:
     receipt = launch()
     with _store(tmp_path) as store:
         store.publish_request(job())
+        store.publish_fact(FactName.LAUNCH, receipt)
         store_wire.publish_lease(store, receipt, lease_wire.sampled_lease(receipt, 1000))
         root = tmp_path / "managed" / RUN
         leaf = root / store_wire.LEASE_LEAF
@@ -406,12 +417,12 @@ def test_publisher_rejects_without_replacing_control(
     initial = lease_wire.sampled_lease(receipt, 1000)
     renewal = lease_wire.sampled_lease(receipt, 2000)
     now = 1999 if fault == "future" else renewal.expires_ns if fault == "expired" else 2000
-    monkeypatch.setattr(guest, "boottime_ns", lambda: now)
     with _store(tmp_path) as store:
         store.publish_request(job())
+        store_wire.publish_initial_lease(store, receipt, initial)
         store.publish_fact(FactName.LAUNCH, _launch() if fault == "foreign-launch" else receipt)
-        store_wire.publish_lease(store, receipt, initial)
-        with pytest.raises(lease_wire.LeaseError):
+        monkeypatch.setattr(store_wire, "boottime_ns", lambda: now)
+        with pytest.raises((lease_wire.LeaseError, StoreError)):
             guest._publish(LeaseRequest(NONCE, ROOT, GUEST, receipt, renewal), store)
         assert store_wire.read_lease(store, receipt) == initial
 
@@ -479,6 +490,7 @@ def test_interrupted_fsync_does_not_fabricate_publication_or_disposal(
 
     with _store(tmp_path) as store:
         store.publish_request(job())
+        store.publish_fact(FactName.LAUNCH, receipt)
         store_wire.publish_lease(store, receipt, initial)
         monkeypatch.setattr(os, "fsync", sync)
         with pytest.raises(SystemExit) as raised:

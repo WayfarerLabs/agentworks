@@ -7,7 +7,7 @@ import sys
 
 from ._file_wire import FileRecordKind, FileRecordWriter
 from ._helper_identity import matches_current_identity
-from ._managed_job_store import FactName, ManagedJobStore, StoreError
+from ._managed_job_store import ManagedJobStore, StoreError
 from ._managed_lease_protocol import (
     MAX_REQUEST_BYTES,
     ClockObservation,
@@ -17,7 +17,7 @@ from ._managed_lease_protocol import (
     encode_result,
 )
 from ._managed_lease_store import publish_lease
-from ._managed_lease_wire import LeaseError, boottime_ns, checked_lease
+from ._managed_lease_wire import LeaseError, boottime_ns
 from ._vm_guest_identity_guest import _GuestRefusal, _identity
 
 
@@ -33,9 +33,6 @@ def _read_request() -> LeaseRequest:
 
 def _publish(request: LeaseRequest, store: ManagedJobStore) -> LeasePublication:
     assert request.lease is not None and request.expected_launch is not None
-    if store.read_fact(FactName.LAUNCH) != request.expected_launch:
-        raise LeaseError("lease launch binding mismatch")
-    checked_lease(request.lease, request.expected_launch, boottime_ns())
     publish_lease(store, request.expected_launch, request.lease)
     return LeasePublication(request.lease.expires_ns)
 

@@ -203,6 +203,16 @@ def _refuse_disposal(directory: int) -> None:
     raise StoreError("run disposal committed")
 
 
+def _acquire_mutation_gate(directory: int) -> None:
+    """Try once on an independently opened run directory; close releases custody."""
+    import fcntl
+
+    try:
+        fcntl.flock(directory, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as exc:
+        raise StoreError("run mutation gate unavailable") from exc
+
+
 class ManagedJobStore:
     """One run's fixed facts and bounded closed capture spools."""
 
@@ -397,9 +407,16 @@ class ManagedJobStore:
     def publish_stop_request(self, expected_launch: bytes) -> None:
         """Publish durable intent only for the exact immutable launch fact."""
         self._checked_fact(FactName.LAUNCH, expected_launch)
-        if self.read_fact(FactName.LAUNCH) != expected_launch:
-            raise StoreError("launch binding mismatch")
-        self._publish_immutable(StopAsset.REQUEST, b"")
+        directory = self._run_dir(create=False)
+        if directory is None:
+            raise StoreError("missing run store")
+        try:
+            _acquire_mutation_gate(directory)
+            if self.read_fact(FactName.LAUNCH) != expected_launch:
+                raise StoreError("launch binding mismatch")
+            self._publish_immutable(StopAsset.REQUEST, b"")
+        finally:
+            os.close(directory)
 
     def read_request_asset(self, name: RequestAsset) -> bytes | None:
         """Read one protected fixed leaf without treating absence as evidence."""

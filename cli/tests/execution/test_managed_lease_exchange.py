@@ -364,6 +364,8 @@ def test_actual_packed_bookworm_clock_and_publication(
         f"_identity=lambda:_test_protocol.VMGuestIdentity({GUEST.instance_marker!r},{GUEST.boot_id!r},"
         f"{GUEST.init_start_ticks + (fault == 'guest')})\n"
         "boottime_ns=lambda:1000\n"
+        "_test_store_module=__import__(__package__+'._managed_lease_store',fromlist=['boottime_ns'])\n"
+        "_test_store_module.boottime_ns=boottime_ns\n"
     )
     if fault == "post_publication_fsync":
         injection += (

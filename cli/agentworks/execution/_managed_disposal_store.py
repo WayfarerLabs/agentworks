@@ -17,6 +17,7 @@ from ._managed_job_store import (
     StopAsset,
     StoreError,
     Stream,
+    _acquire_mutation_gate,
     _open_leaf,
     _read_all,
 )
@@ -186,13 +187,13 @@ def dispose(store: ManagedJobStore, expected_launch: bytes) -> bool:
     if directory is None:
         raise StoreError("missing launch and receipt")
     try:
+        _acquire_mutation_gate(directory)
         inventory = _inventory(directory, store._owner_uid)
         _validate_request_finals(inventory, expected_launch, store.run_id)
         if not _validate_facts(inventory, expected_launch):
             return False
         if "disposal" not in inventory:
-            # An exact disposer may commit and remove launch between inventory
-            # and this link. The next inventory decides whether its receipt won.
+            # The permanent receipt closes lease publication before stop removal.
             with suppress(FileExistsError, FileNotFoundError):
                 os.link("launch", "disposal", src_dir_fd=directory, dst_dir_fd=directory, follow_symlinks=False)
         os.fsync(directory)

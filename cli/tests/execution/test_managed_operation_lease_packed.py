@@ -15,9 +15,10 @@ from pathlib import Path
 import pytest
 
 from agentworks.execution import _managed_lease_guest as lease_guest
+from agentworks.execution import _managed_lease_store as lease_store
 from agentworks.execution import _managed_service_bundle as service_bundle
 from agentworks.execution._helper_bundle import build_helper_modules
-from agentworks.execution._managed_job_store import FactName
+from agentworks.execution._managed_job_store import FactName, StoreError
 from agentworks.execution._managed_lease_protocol import LeaseRequest
 from agentworks.execution._managed_lease_store import publish_lease, read_lease
 from agentworks.execution._managed_lease_wire import WINDOW_NS, sampled_lease
@@ -112,7 +113,6 @@ if phase in {'release-read','release-stop-read'}:
             until=time.monotonic()+1
             while not (root/'entered').exists() and time.monotonic()<until:time.sleep(0.001)
         return result
-    store.read_stop_request=delayed_stop_read
 def notify():
     if phase=='release':(root/'clock').write_text('60000000000')
     if phase=='release-read':(root/'clock').write_text('59000000000')
@@ -121,6 +121,7 @@ def notify():
         store.publish_stop_request(request.job.launch)
 def runner(argv):
     assert argv[-2]==request.job.operation_lease.run_id
+    if phase in {'release-read','release-stop-read'}:store.read_stop_request=delayed_stop_read
     return g.run(request.job.operation_lease.run_id,_store=store,_boundary=boundary,
                  _notify=notify,_identity_check=False,_apply_identity=False)
 try:
@@ -175,7 +176,7 @@ def test_packed_operation_start_lease_and_existing_cleanup(
                 assert initial is not None and initial.expires_ns == WINDOW_NS
                 if phase == "renewal":
                     _set_clock(clock, WINDOW_NS // 2)
-                    monkeypatch.setattr(lease_guest, "boottime_ns", lambda: int(clock.read_text()))
+                    monkeypatch.setattr(lease_store, "boottime_ns", lambda: int(clock.read_text()))
                     renewal = sampled_lease(launch(), WINDOW_NS // 2)
                     lease_guest._publish(LeaseRequest(NONCE, ROOT, GUEST, launch(), renewal), store)
                     _wait_file(tmp_path / "renewed")
@@ -186,8 +187,8 @@ def test_packed_operation_start_lease_and_existing_cleanup(
                     _set_clock(clock, renewal.expires_ns)
                 elif phase == "stop":
                     store.publish_stop_request(launch())
-                    # Publication may finish after stop; the controller never resumes.
-                    publish_lease(store, launch(), sampled_lease(launch(), 1))
+                    with pytest.raises(StoreError):
+                        publish_lease(store, launch(), sampled_lease(launch(), 1))
                 else:
                     _set_clock(clock, WINDOW_NS)
         stdout, stderr = worker.communicate(timeout=5)
