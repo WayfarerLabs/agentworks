@@ -474,6 +474,19 @@ preparation, retained-file adapter adoption, native service proof and additive R
 open. No schema or database data was changed. Publication remains draft WIP without ready or
 review-requested; public feedback/fix round 1 remains open.
 
+The private recovery-hold unit at `4d58174fc` adds an explicit startup entry under the existing
+sealed recovery owner, then reuses the same single-use anchor, transition lock, READY publication
+and exact release. Independent project/complexity design review rejected another launch-custody
+coordinator: an unresolved support row and retained native object own the intentional live effect.
+Takeover between admission and launch inherits debt rather than promising a remote dispatch fence.
+The worker passes 238 focused/adjacent cases, including 24 new SQLite cases, complete strict mypy
+(1,224 source and test files), Ruff/format, file quality and whitespace gates. The sole initial
+fixture failure was corrected to inject sibling work once at READY, not again at EXITING; no
+production semantics changed. Its base sync adopts the lead's published plan-only formatting fix
+without changing owned source/test bytes. Native calls remain faked. Integrated code reviews and
+lead gates are pending. Outer availability composition, fixed fresh preparation and retained-file
+adapters remain open; no broader completion checkbox or public round closes.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state

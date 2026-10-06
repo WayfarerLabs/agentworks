@@ -380,6 +380,17 @@ acknowledged guest identity. It does not close the outer owner or keep a borrow 
 lifetime. A production observer, crash recovery factory, activation, platform wiring, target
 identity and RunContext integration remain open gates.
 
+The explicit private `start_recovery(deadline, obligation_id=...)` entry uses atomic
+recovery-support admission under the existing sealed owner, then shares the same single-use anchor,
+READY publication and release path. Core retains the fresh ID and hold before admission. Its live
+custody is the unresolved row and native object, not a finite recovery attempt. Preparation must
+wait for successful startup and durable READY publication, then retain the hold through its final
+action. A takeover after admission can precede the already admitted launch; the successor retains
+that debt and the stale controller cannot publish or resolve it. Missing READY is not absence.
+Release only settles this support hold, never predecessor file debt or the entire owner. This entry
+has portable SQLite/faked-native coverage; renewed recovery composition and native availability
+acceptance remain open.
+
 New private hold payloads use version 4: `launch_user` is root and `user` is the configured body
 account. Existing version-3 records retain their same-user launch and query meaning. Recovery checks
 the envelope against the canonical payload and preserves that version through rebind and
