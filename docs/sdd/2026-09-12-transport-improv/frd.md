@@ -241,6 +241,10 @@ or cleanup never authorizes the first local mutation. Linux may retain stronger 
 Native metadata and failure proof remain gates; this choice does not authorize implicit replacement
 or deletion of existing local data.
 
+The operator explicitly confirmed the macOS/Windows publication choice on 2026-10-06:
+
+> Allow in-place Replace with explicit partial-failure reporting (Recommended)
+
 For the unreleased transport migrations 39–41, the operator directed removal of the special
 branch-built-schema guard. Known development databases are retained until separate approval for any
 deletion. Ordinary released-database migration and interrupted-migration recovery remain required.

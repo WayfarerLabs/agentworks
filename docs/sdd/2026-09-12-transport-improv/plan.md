@@ -2745,6 +2745,22 @@ deterministic comparisons exit 0. These are local source and ownership proofs, n
 acceptance. Keeper/recovery composition, complete RunContext and public feedback/fix round 1 of 3
 remain open. No new RunContext enablement or full-scope completion is claimed.
 
+The next private unit supplies closed guest-clock and exact lease-publication exchanges at
+`c0d86f45e`. Every call uses the caller's existing total deadline and retained local custody, with
+separate nonce, collectors and I/O. All three independent private lanes clear the 38-case helper
+unit. The project lane also passes 781 response vectors; generic correctness passes 341 ordering and
+nine adverse vectors. The lead's adjacent lease/start/disposal selection passes 203 cases, exit 0.
+An actual packed Python 3.11 helper proves that failure after replacement but during directory sync
+can leave the requested lease visible: helper failure is not a no-effects refusal. These are private
+source/protocol results, not keeper, recovery or native acceptance. The helper remains unpublished
+until its actual keeper/recovery consumer is composed.
+
+Read-only recovery scouting also reproduces a late publisher creating a private stage after disposal
+has returned success. Local client cleanup and the old-authority lease ceiling establish neither
+guest publisher exit nor absence of further mutations. The keeper/recovery unit must settle or
+cooperatively fence this separate publication effect before release/disposal; its exact mechanism
+and native proof remain open. No machine-wide lock or hostile-user containment is implied.
+
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
       serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one
       in-flight exchange, exact uncertainty retention and drain before release/disposal. Bind it to
