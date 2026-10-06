@@ -188,9 +188,10 @@ The [implementation progress record](phase2-results.md) pins the completed indep
 local validation separately from the remaining shared integration and platform acceptance.
 
 Shared subprocess adoption introduces an implementation dependency on transport #833. Current
-integration uses `f937cac098c43e81e9bea2e5daa6f9520ae4ca96`, including the shared structural
-preflight contract and private managed-start caller; completed records retain the pins they
-validated. The
+integration uses `ad960430a558882022df217e23d48aa4012c9754`, including the shared structural
+preflight contract, private managed-start caller and later private transport work. The
+[advanced-stack refresh](phase2-results.md#advanced-transport-stack-refresh) records the rebase and
+its remaining limits; earlier records retain the pins they validated. The
 [structural preflight integration](phase2-results.md#structural-preflight-integration) records the
 combined SSH result. The
 [private-access dependency update](phase2-results.md#private-access-and-paired-plan-dependency-update)
