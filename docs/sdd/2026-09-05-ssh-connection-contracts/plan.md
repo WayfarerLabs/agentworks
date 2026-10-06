@@ -196,8 +196,9 @@ partial-update custody. Production writer coexistence and rollback through both 
 paths still require transport composition and native acceptance.
 
 Shared subprocess adoption introduces an implementation dependency on transport #833. Current
-integration uses `e1d4c9b1189edbc247210c6c900975c6290ac531`. Its shared carrier, process,
-preparation and terminal-input interfaces remain unchanged from the preceding SSH integration.
+private integration uses `12dcb01b8f76575a55e515940022f0a14a74e34f`, which adds mandatory
+caller-held `LocalDeliveryCustody`. The preceding published SSH head `dda32ee69` remains based on
+`e1d4c9b1189edbc247210c6c900975c6290ac531`; its hosted evidence does not validate this adoption.
 Private execution binds the selected owner scope and bootstrap boot; the WSL2 native factory
 requires both prepared identity plans and shares one elevated-plan/full-guest bootstrap between file
 and execution state. Numeric file workflows retain that context and each record's actual envelope
@@ -237,13 +238,17 @@ and failure-path child cleanup without changing product deadlines or schema asse
 records all three private lanes clear at `a2d27446c`; its final head changes only evidence from that
 source pin. No shared SSH interface changed.
 
-Transport's next carrier contract requires caller-held `LocalDeliveryCustody` at actual delivery. It
+Transport's carrier contract requires caller-held `LocalDeliveryCustody` at actual delivery. It
 retains the existing inert native process owner before admission, so bounded local cleanup may
 return with exact ownership still held by the enclosing operation, keeper or provider workflow.
 Pending/lost local ownership prevents another exchange; remote effects remain separate. The SSH LLD
-records native descriptor/terminal retention and aggregate drain without reopening dispatch. This is
-planned integration, not an implemented adapter guarantee. The design-only dependency and SSH
-response preserve executable/configuration trees from published `2ef07cd6e`; the code-gate evidence
+records native descriptor/terminal retention and aggregate drain without reopening dispatch. Private
+buffered/live and forwarding-discovery adoption at `28679a6f4` passes 558 focused non-integration
+tests with five skips and focused strict mypy. Full mypy still reports three missing enrollment
+custody arguments in two files; merely threading those arguments would release the candidate writer
+lock before native settlement. Enrollment resource retention, bounded terminal integration and
+native/production acceptance remain open. The earlier design-only dependency and SSH response
+preserved executable/configuration trees from published `2ef07cd6e`; earlier code-gate evidence
 below retains its measured pin. The preceding transport source's hosted CI `37513250709` and CodeQL
 `37513246961` pass, including the corrected Windows fixture. Its original failure's cause remains
 unknown. No native gate follows from these hosted results.
@@ -375,7 +380,10 @@ and supported-workstation gates below are unchanged.
       adapter-local storage. Prove bounded pending construction/cleanup, serialized settlement,
       refusal while ownership is pending/lost, native descriptor/terminal retention and aggregate
       drain after borrow handoff. Retain immutable evidence and original interruption; local cleanup
-      establishes no remote cancellation or dispatch-debt resolution.
+      establishes no remote cancellation or dispatch-debt resolution. Enrollment must retain its
+      same acquired candidate writer lock alongside native custody until settlement; its enclosing
+      creation/maintenance resource consumer remains unresolved as recorded in the
+      [enrollment LLD](enrollment-lld.md#caller-held-delivery-custody-adoption).
 - [ ] Implement and validate connection/trust migration with isolated copies: supported operator
       policy, authentication offers, strict verification, genuine creation provenance, concurrent
       writer ownership and rollback evidence. Follow the

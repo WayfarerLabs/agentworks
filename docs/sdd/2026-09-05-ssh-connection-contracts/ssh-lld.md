@@ -117,22 +117,19 @@ applies. Completeness requires actual EOF and delivery of pending output. An exp
 operation can therefore still wait on a stalled sink; inherited descendant pipe collection alone
 cannot extend it indefinitely.
 
-Transport's shared core now constructs the client in a private launch owner, publishing pipe and
-status observations through a condition lock. The caller alone pumps borrowed byte endpoints; return
-waits for the owner's terminal cleanup observation. This addresses the measured Linux interruption
-during client construction without moving borrowed endpoint access to a background task. It does not
-establish complete interruption safety: transport still records a reproduced asynchronous
-interruption at cleanup-loop entry that can leave a child and pipes live. Its
+Transport's shared core constructs the client in a private launch owner, publishing pipe and status
+observations through a condition lock. The caller alone pumps borrowed byte endpoints. Bounded
+return or interruption can leave construction or cleanup unsettled; caller-held custody retains the
+exact native owner for explicit cleanup. Its
 [startup evidence](../2026-09-12-transport-improv/prior-art-research.md#local-process-startup-and-interruption)
-and [lifecycle design](../2026-09-12-transport-improv/execution-lifecycle-lld.md) retain the current
-limits. Concurrent external reaping can also make exact local ownership uncertain. Native platform
-proof and correction of the cleanup gap remain acceptance work. Forwarding adopts the same
-`LocalProcessOwner` with a separately gated drain worker; its
+and [lifecycle design](../2026-09-12-transport-improv/execution-lifecycle-lld.md) distinguish
+measured interruption gaps from retained cleanup ownership. Concurrent external reaping can also
+make exact local ownership uncertain. Native platform proof remains acceptance work. Forwarding
+adopts the same `LocalProcessOwner` with a separately gated drain worker; its
 [ownership design](forwarding-lld.md#launch-ownership-integration) and measured evidence distinguish
 this adoption from complete native acceptance.
 
-That return-and-cleanup behavior describes the implemented baseline and its open gaps. Transport's
-next carrier contract adds mandatory caller-held `LocalDeliveryCustody` to `execute`. SSH consumes
+The shared carrier contract requires caller-held `LocalDeliveryCustody` in `execute`. SSH consumes
 that shared storage directly; it does not create temporary adapter-local storage, another process
 owner or live cleanup capabilities inside reports or exception causes. The existing inert native
 owner must be retained before process admission. A bounded return with pending construction or
@@ -146,9 +143,12 @@ or raising is no authority to close, reuse or restore those resources. Borrowed 
 remain caller-pumped, with no background pump after return. Aggregate cleanup must retain and drain
 custody after ordinary borrow handoff without reopening dispatch. Transport owns the concrete
 storage type and aggregate integration; SSH owns its carrier call sites and terminal resource
-adaptation. The current runtime signature and settlement behavior remain unchanged until that shared
-implementation and its actual consumers are available. Forwarding retains its separately explicit
-lifetime through the shared native owner.
+adaptation. Buffered/live delivery and installed-client discovery forward the same caller-held
+storage. Forwarding retains its separately explicit session lifetime through the shared native
+owner; its version discovery uses the supplied delivery custody. Public terminal delivery remains
+disabled, and the private terminal relay still waits for complete native closure before restoring
+its resources. The bounded terminal resource consumer and enrollment's candidate-lock retention
+remain unfinished integration work, as recorded in their LLDs.
 
 Live measurements confirm that guest workloads and bootstrap descendants can survive local
 observation expiry. The shared

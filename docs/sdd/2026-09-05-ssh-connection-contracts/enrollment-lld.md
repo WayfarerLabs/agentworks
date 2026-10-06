@@ -28,6 +28,24 @@ another `accept-new` attempt. Missing or incomplete metadata refuses automatic r
 explicit maintenance. No enrollment registry or pending state is added to the managed bundle.
 Unrelated targets can continue using its active policy.
 
+## Caller-held delivery custody adoption
+
+Transport's shared `LocalDeliveryCustody` retains the native process owner across bounded return or
+interruption. Enrollment must also retain the same acquired candidate lock until that custody
+settles. Flushing candidate bytes does not prove that an admitted constructor or client has stopped
+writing. Releasing the lexical lock on an observation failure would allow recovery with fresh
+custody to read or verify the candidate while the earlier client can still write it.
+
+The enclosing creation or maintenance lifetime must hold both resources before writer admission and
+provide serialized, explicitly bounded cleanup. Unsuccessful cleanup keeps the lock and native
+custody held; pending or lost ownership continues excluding competing recovery. After confirmed
+settlement, flush the final candidate bytes before releasing the lock and surface any flush failure
+without claiming durable evidence. Evidence receipts, reports and exception causes do not carry
+cleanup capabilities. Preserve the one first-contact attempt, strict-only recovery and stable
+candidate identity. The concrete enclosing resource consumer remains unresolved, so threading the
+shared custody argument alone is insufficient to complete enrollment adoption or enable production
+creation.
+
 ## Authentication and retained trust are separate observations
 
 The initial bounded installed-client operation uses the candidate as its first known-host file,
