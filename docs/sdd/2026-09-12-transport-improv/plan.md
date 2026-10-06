@@ -386,6 +386,27 @@ production change is needed. The owner again passes all 96 scoped cases and full
 gates. Corrected integrated re-review and final lead gates remain pending, without native acceptance
 or a public handoff.
 
+All three lanes clear corrected execution-state pin `8e31905e7`. Project passes 96 scoped cases,
+generic passes 14 new cases, and complexity confirms the owner-kind mutation fails the corrected
+test before restoring its experiment. The complete lead test log reports 14,838 passed with 49
+skips; the retained terminal handle expired before its exit status could be recovered, so that log
+is not claimed as an exit-code gate. Complete Ruff/format and strict mypy (1,221 source and test
+files), plus four website builds and both deterministic comparisons, exit 0 at that pin. The
+preceding production-identical pin passes file quality, locked-SDD, Rulesync and website tests (160
+Python, 103 Node). The next combined native state receives a fresh complete gate run. Published
+inline head `f49d060bc` passes hosted CI and CodeQL. No public round or merge handoff closes here.
+
+The private native unit at `f7d821c0c` requires ordinary and elevated identity plans before exposing
+operation views. It constructs one numeric bootstrap from the prepared elevated plan and the actual
+full guest, then shares that object between file and buffered execution state. Its 627 scoped tests
+pass, including intact packed stat/read/command success, v2 file obligations, missing-root refusal,
+full guest mismatches and cleanup/custody regressions. Privileged admission, external guest
+observations and a fixture-owned scratch parent are explicitly simulated; body credentials and
+packed helper protocols execute locally. Strict mypy, scoped Ruff/format, full file quality and
+whitespace gates pass. Independent integrated review and lead gates remain pending. This is the
+private WSL2 factory, not all-platform production adoption. Fresh recovery, service fencing,
+RunContext and native acceptance remain open.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state

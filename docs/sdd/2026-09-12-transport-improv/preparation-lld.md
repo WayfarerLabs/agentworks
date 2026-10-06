@@ -860,10 +860,12 @@ INLINE root program, with no stdin prefix or manifest change. The full guest che
 body entry and request consumption; existing identity and exact-wait evidence remain required.
 Missing terminal evidence after bootstrap refusal leaves the application unknown. Private execution
 state now requires the exact selected target and validates its owner scope and bootstrap boot before
-forwarding that context into preparation. Body identity remains call-specific. Native composition
-supplies its prepared target but does not yet construct the bootstrap; that construction and the
-separately launched service boundary still need adoption. These private leaves do not complete those
-gates or prove native credential transitions.
+forwarding that context into preparation. Body identity remains call-specific. The private WSL2
+native factory requires both prepared identity plans and constructs one bootstrap from the elevated
+plan and actual full guest. File and buffered execution state share that immutable context; missing
+preparation refuses before exposing views. Fresh recovery, other platform composition and the
+separately launched service boundary still need adoption. This private composition does not prove
+native credential transitions or complete production RunContext delivery.
 
 ## Public result and check behavior
 
