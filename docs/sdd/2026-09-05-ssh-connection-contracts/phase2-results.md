@@ -689,6 +689,31 @@ decision may change its later head. SSH #832 has not rebased onto this database-
 earlier composed SSH proof retains its explicit pins. Public RunContext composition, trust
 migration, terminal delivery, lost-hold recovery and full SSH workflow acceptance remain open.
 
+## Advanced transport stack refresh
+
+SSH #832 rebases its 84 SSH commits from transport `f937cac0` onto transport
+`ad960430a558882022df217e23d48aa4012c9754`. Transport's intervening private work changes file
+operations, VM availability, lifecycle ownership and local download preparation. It also adds
+`SinkOutput.required_complete_stdout_bytes`: a finite-buffering carrier must refuse an unsupported
+complete-success stdout requirement before dispatch. SSH's existing `SinkOutput` path streams raw
+output through the shared subprocess pump, so it needs no finite ceiling or SSH runtime change.
+
+The rebase resolved one overlapping test import by retaining both the transport file-bundle fixture
+and SSH's explicit trust policy. A new transport helper-sizing test used the retired bare-path SSH
+constructor and omitted the required admitted `trust` argument. It now constructs `SSHTrustFiles`
+and passes that same policy to the pure argv builder. The isolated combined checkout first passed
+**419 focused tests with 6 skips** at transport runtime head `b65444d2`; after this rebase and test
+adaptation, the full CLI suite passed **14,298 tests with 27 skips**. Full Ruff and format checks
+passed; mypy reported no issues in **1,199 source files**. These are local composed-tree results,
+not hosted CI or native platform acceptance for the new SSH head.
+
+Transport's new draft head removes its branch-specific migration 39–41 guard without deleting the
+historical development databases. Those databases are not migration acceptance evidence. Production
+RunContext, ExecutionAccess, FileAccess and JobAccess composition, terminal delivery, recoverable
+job-length availability where needed, genuine creation/publication binding, full Linux/macOS/Windows
+SSH workflows, and exact-head native integration still remain open. The earlier native results
+retain their pinned revisions and do not validate this new head.
+
 ## Remaining integration and acceptance
 
 Earlier integration `fefc2b9e` uses transport `f3339f3d3cccace129be58711dc7eeb30ec66dc2`, which adds
