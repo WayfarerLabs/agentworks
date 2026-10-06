@@ -201,6 +201,54 @@ process/job timeout bounds fixture hangs; thread status after interrupted join i
 fact. Native macOS/Windows, real SSH terminal delivery and emulator sanitation require separate
 integration evidence.
 
+The integration-marked `test_terminal_installed.py` cases compose the private POSIX relay with
+transport's actual terminal handoff, strict connection admission, the installed-client version check
+and fixed SSH argv. They use one owned Linux loopback server and one connected SSH client per case,
+plus the offline client version check. Generated keys exist only during native execution. The
+successful case observes binary source/environment/argument canaries after the first gate, withholds
+finite keyboard input until both handoff and application readiness, and checks initial guest
+geometry, two SIGWINCH-driven changes, natural completion and exact presentation delivery. The
+missing-runtime case requires withheld payload and keys. Both independently check local client
+reaping, relay PTY closure and restored borrowed input modes, file status and inheritable flags.
+Fixture observation is bounded and temporary; it adds no production sensitive-output retention.
+
+Native execution requires a separately authorized tester charter, a tester-owned account/home or
+independently established configured shell with no startup/home hook access, and installed OpenSSH
+client, key generator and server. `-F none` isolates client configuration; `PermitUserRC no` does
+not isolate account-shell startup. Missing platform or tools may skip before effects; unexpected
+server exit or product failure must fail. The whole case stays on an admitted retained fixture
+worker through borrowed resource cleanup. Its original operation deadline is 120 seconds, with
+bounded client/server reaping. Guest cleanup uses only its positively reported PID, start identity
+and UID, with a 20-second observation bound from its first application report (15 seconds of guest
+self-life plus five seconds for cleanup). Unknown, unobservable or remaining guest identity fails or
+adds explicit cleanup uncertainty to an existing failure; parent-server reaping supplies no
+guest-absence proof. No reported guest is signaled. A separate job timeout must still bound a hung
+test process. Use a short, private temporary parent with suitable ancestor permissions and no
+inherited ACLs.
+
+Collection performs no SSH, key generation, listener or PTY acquisition:
+
+<!-- cspell:ignore venv basetemp -->
+
+```sh
+timeout 90 .venv/bin/pytest tests/execution/carriers/ssh/test_terminal_installed.py \
+  --collect-only --basetemp=../scratch/terminal-collection
+```
+
+Under that separate native charter, run the two cases together with their own temporary root and
+external timeout, for example:
+
+```sh
+timeout 360 .venv/bin/pytest tests/execution/carriers/ssh/test_terminal_installed.py \
+  -m integration -n 0 --basetemp=/tmp/authorized-terminal-proof/cases
+```
+
+Source checks and collection do not establish a native pass. These Linux loopback cases supply no
+macOS/Windows proof, production RunContext composition or enabled SSHCarrier terminal feature.
+Readiness `finish()` is only collector finalization; shared presentation/emulator sanitation remains
+a separate open requirement. The refusal case does not cover the complete native interruption and
+restoration fault matrix.
+
 ## Trust maintenance and forwarding fixtures
 
 Trust tests operate only on isolated snapshots and owned temporary destinations. They cover complete
