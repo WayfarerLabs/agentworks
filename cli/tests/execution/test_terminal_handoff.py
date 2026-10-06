@@ -43,7 +43,8 @@ from agentworks.execution._terminal_handoff import (
     TerminalHandoffFailure,
     prepare_terminal_handoff,
 )
-from agentworks.execution.carrier import SinkOutput, TerminalInput
+from agentworks.execution.carrier import CarrierIO, Deadline, SinkOutput, TerminalInput
+from agentworks.execution.carriers import _subprocess
 
 
 class CollectSink:
@@ -111,7 +112,7 @@ def _prepared(presentation: CollectSink | None = None) -> tuple[PreparedTerminal
 def test_carrier_io_binds_existing_two_gate_endpoints_and_trusted_sinks() -> None:
     prepared, presentation = _prepared(CollectSink(max_write=2))
     diagnostics = CollectSink()
-    io = prepared.carrier_io(input_fd=0, output_fd=1, term="xterm", diagnostics=diagnostics, sensitive=True)
+    io = prepared.carrier_io(input_fd=0, output_fd=1, term="secret-term-canary", diagnostics=diagnostics)
 
     assert isinstance(io.input, TerminalInput)
     assert isinstance(io.output, SinkOutput)
@@ -120,7 +121,13 @@ def test_carrier_io_binds_existing_two_gate_endpoints_and_trusted_sinks() -> Non
     assert io.output.stderr is diagnostics
     assert not io.output.require_live
     assert io.sensitive
+    assert io.input.sensitive
+    assert "secret-term-canary" not in repr(io)
     assert io.input.bootstrap.try_read(4) is None
+    diagnostic_marker = _runtime_record(prepared) + _marker(prepared, PAYLOAD_READY)
+    assert io.output.stderr.try_write(memoryview(diagnostic_marker)) == len(diagnostic_marker)
+    assert io.input.bootstrap.try_read(4) is None
+    assert prepared.runtime_prerequisite.state is RuntimePrerequisiteState.UNKNOWN
     _admit_runtime(prepared)
     assert io.input.bootstrap.try_read(4) is None
     marker = _marker(prepared, PAYLOAD_READY)
@@ -139,6 +146,54 @@ def test_carrier_io_requires_diagnostic_sink() -> None:
     prepared, _ = _prepared()
     with pytest.raises(ValidationError):
         prepared.carrier_io(input_fd=0, output_fd=1, term="xterm", diagnostics=object())  # type: ignore[arg-type]
+
+
+def test_carrier_io_refuses_aliased_diagnostic_collector() -> None:
+    prepared, _ = _prepared()
+    with pytest.raises(ValidationError):
+        prepared.carrier_io(input_fd=0, output_fd=1, term="xterm", diagnostics=prepared.stdout)
+    assert prepared.bootstrap.try_read(1) is None
+
+
+def test_carrier_io_hides_diagnostic_member_lookup_failure() -> None:
+    class BrokenSink:
+        def __getattribute__(self, name: str) -> object:
+            if name == "try_write":
+                raise RuntimeError("secret-diagnostic-canary")
+            return super().__getattribute__(name)
+
+    prepared, _ = _prepared()
+    with pytest.raises(ValidationError) as raised:
+        prepared.carrier_io(input_fd=0, output_fd=1, term="xterm", diagnostics=BrokenSink())  # type: ignore[arg-type]
+    assert "secret-diagnostic-canary" not in repr(raised.value)
+    assert raised.value.__context__ is None
+    assert raised.value.__cause__ is None
+
+
+def test_carrier_io_preserves_diagnostic_control_exception() -> None:
+    class InterruptedSink:
+        def __getattribute__(self, name: str) -> object:
+            if name == "try_write":
+                raise KeyboardInterrupt
+            return super().__getattribute__(name)
+
+    prepared, _ = _prepared()
+    with pytest.raises(KeyboardInterrupt):
+        prepared.carrier_io(input_fd=0, output_fd=1, term="xterm", diagnostics=InterruptedSink())  # type: ignore[arg-type]
+
+
+def test_carrier_io_is_refused_by_nonterminal_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    prepared, _ = _prepared()
+    io = prepared.carrier_io(input_fd=0, output_fd=1, term="xterm", diagnostics=CollectSink())
+    assert isinstance(io, CarrierIO)
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("nonterminal process spawned")
+
+    monkeypatch.setattr(_subprocess, "run_owned_process", forbidden)
+    with pytest.raises(ValidationError):
+        _subprocess.run_process(["/bin/true"], io=io, deadline=Deadline(None), live_stdio=True)
+    assert prepared.bootstrap.try_read(1) is None
 
 
 @pytest.mark.parametrize("uppercase", [False, True], ids=["canonical", "uppercase"])

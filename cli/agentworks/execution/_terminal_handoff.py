@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 import struct
+from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, NoReturn
@@ -262,13 +263,21 @@ class PreparedTerminalHandoff:
         output_fd: int,
         term: str,
         diagnostics: ByteSink,
-        sensitive: bool = False,
     ) -> CarrierIO:
-        """Bind the existing two-gate endpoints to one terminal carrier attempt."""
-        if not callable(getattr(diagnostics, "try_write", None)):
-            raise ValidationError("Terminal handoff requires a trusted diagnostic sink")
+        """Bind the two-gate endpoints with a distinct trusted diagnostic sink.
+
+        The core supplies a diagnostic sink that does not forward to the readiness
+        collector. Identity checking only prevents accidental direct aliasing.
+        """
+        if diagnostics is self.stdout:
+            raise ValidationError("Terminal handoff requires a distinct diagnostic byte sink")
+        has_writer = False
+        with suppress(Exception):
+            has_writer = callable(getattr(diagnostics, "try_write", None))
+        if not has_writer:
+            raise ValidationError("Terminal handoff requires a diagnostic byte sink")
         return CarrierIO(
-            input=TerminalInput(input_fd, output_fd, term, self.bootstrap, sensitive=sensitive),
+            input=TerminalInput(input_fd, output_fd, term, self.bootstrap, sensitive=True),
             output=SinkOutput(self.stdout, diagnostics),
         )
 

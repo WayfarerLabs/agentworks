@@ -150,6 +150,31 @@ def test_terminal_input_rejects_invalid_boundary_values(field: str, value: objec
     assert raised.value.__cause__ is None
 
 
+def test_terminal_input_hides_bootstrap_member_lookup_failure() -> None:
+    class BrokenSource:
+        def __getattribute__(self, name: str) -> object:
+            if name == "try_read":
+                raise RuntimeError("secret-source-canary")
+            return super().__getattribute__(name)
+
+    with pytest.raises(ValidationError) as raised:
+        TerminalInput(0, 1, "xterm", BrokenSource())  # type: ignore[arg-type]
+    assert "secret-source-canary" not in repr(raised.value)
+    assert raised.value.__context__ is None
+    assert raised.value.__cause__ is None
+
+
+def test_terminal_input_preserves_bootstrap_control_exception() -> None:
+    class InterruptedSource:
+        def __getattribute__(self, name: str) -> object:
+            if name == "try_read":
+                raise KeyboardInterrupt
+            return super().__getattribute__(name)
+
+    with pytest.raises(KeyboardInterrupt):
+        TerminalInput(0, 1, "xterm", InterruptedSource())  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize("output", [Capture(), Discard()])
 def test_terminal_input_requires_sink_output(output: Capture | Discard) -> None:
     class Source:

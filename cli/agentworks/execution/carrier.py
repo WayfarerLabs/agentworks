@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import time
+from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol
@@ -126,7 +127,10 @@ class TerminalInput:
             self.term.encode("utf-8")
         except UnicodeEncodeError:
             raise ValidationError("Terminal type must be nonempty UTF-8 without NUL") from None
-        if not callable(getattr(self.bootstrap, "try_read", None)):
+        has_reader = False
+        with suppress(Exception):
+            has_reader = callable(getattr(self.bootstrap, "try_read", None))
+        if not has_reader:
             raise ValidationError("Terminal bootstrap must be a byte source")
         if type(self.sensitive) is not bool:
             raise ValidationError("Terminal sensitivity must be a boolean")
