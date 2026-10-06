@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 import sys
 import time
 from pathlib import Path
@@ -252,14 +253,16 @@ def test_default_create_refuses_existing_destination_before_remote_call(tmp_path
 def test_constructor_cleanup_failure_retains_stage_custody(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fstat = os.fstat
     unlink = os.unlink
-    inspections = 0
+    stage_inspections = 0
 
     def fail_first_inspection(fd: int) -> os.stat_result:
-        nonlocal inspections
-        inspections += 1
-        if inspections == 2:
+        nonlocal stage_inspections
+        observed = fstat(fd)
+        if stat.S_ISREG(observed.st_mode):
+            stage_inspections += 1
+        if stage_inspections == 1 and stat.S_ISREG(observed.st_mode):
             raise OSError("stage inspection failed")
-        return fstat(fd)
+        return observed
 
     def fail_unlink(path: str, *, dir_fd: int | None = None) -> None:
         raise OSError("stage unlink failed")
@@ -456,7 +459,7 @@ def test_ambiguous_stage_close_retains_local_cleanup_fact(tmp_path: Path, monkey
 
     def ambiguous_close(fd: int) -> None:
         nonlocal interrupted
-        if not interrupted:
+        if not interrupted and stat.S_ISREG(os.fstat(fd).st_mode):
             interrupted = True
             close(fd)
             raise ControlStop("close-return-lost")
@@ -487,7 +490,7 @@ def test_ambiguous_close_after_publication_never_claims_unchanged(
 
     def ambiguous_close(fd: int) -> None:
         nonlocal interrupted
-        if not interrupted:
+        if not interrupted and stat.S_ISREG(os.fstat(fd).st_mode):
             interrupted = True
             close(fd)
             raise ControlStop("close-return-lost")

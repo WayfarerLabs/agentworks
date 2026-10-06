@@ -24,7 +24,14 @@ class LocalDownloadStage(Protocol):
 
     def commit(self, *, verified_complete: bool, size: int, sha256: str, deadline: Deadline | None = None) -> None: ...
 
-    def abort(self) -> None: ...
+    def abort(self) -> None:
+        """Clean the owned stage and known handles, never the destination.
+
+        A failed abort retains publication facts and remaining custody. An
+        admitted close with an unknown result cannot be retried as a handle.
+        Host-specific handle cleanup order is not part of this protocol.
+        """
+        ...
 
 
 class LocalDownloadUnsupportedError(OSError):

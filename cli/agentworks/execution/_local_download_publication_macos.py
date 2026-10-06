@@ -3,7 +3,7 @@
 Create links a verified private stage into an absent name. Replace copies that
 stage into a held ordinary file, preserving its inode and access metadata. A
 failed write or close after replacement begins can leave partial new content;
-``local_mutation_started`` and ``publication_uncertain`` retain that fact.
+``publication_uncertain`` retains that fact.
 This primitive does not establish remote transfer or cleanup completeness; its
 caller must do so before passing ``verified_complete=True``.
 """
@@ -12,20 +12,14 @@ from __future__ import annotations
 
 import ctypes
 import errno
-import hashlib
 import os
-import secrets
 import stat
 import sys
-from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from agentworks.execution._local_download_stage import (
-    LocalDownloadCleanupError,
-    LocalDownloadCleanupUncertainError,
-    LocalDownloadUnsupportedError,
-)
+from agentworks.execution._local_download_publication_posix import _PosixLocalDownloadStage
+from agentworks.execution._local_download_stage import LocalDownloadUnsupportedError
 from agentworks.execution.files import Create, Replace
 
 if TYPE_CHECKING:
@@ -52,13 +46,15 @@ def _bsd_flags(observed: os.stat_result) -> int:
     return int(flags)
 
 
-def _has_extended_acl(fd: int) -> bool:
-    """Inspect the macOS extended ACL through the descriptor, refusing unknowns."""
+def _extended_acl_tags(fd: int) -> tuple[int, ...]:
+    """Enumerate bounded Darwin extended ACL tags through a held descriptor."""
     libc = ctypes.CDLL(None, use_errno=True)
     try:
         get_acl = libc.acl_get_fd_np
         free_acl = libc.acl_free
         get_entry = libc.acl_get_entry
+        get_tag = libc.acl_get_tag_type
+        valid_acl = libc.acl_valid
     except AttributeError as exc:
         raise LocalDownloadUnsupportedError("Local extended ACL inspection is unavailable") from exc
     get_acl.argtypes = (ctypes.c_int, ctypes.c_int)
@@ -67,25 +63,46 @@ def _has_extended_acl(fd: int) -> bool:
     free_acl.restype = ctypes.c_int
     get_entry.argtypes = (ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p))
     get_entry.restype = ctypes.c_int
+    get_tag.argtypes = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_int))
+    get_tag.restype = ctypes.c_int
+    valid_acl.argtypes = (ctypes.c_void_p,)
+    valid_acl.restype = ctypes.c_int
     ctypes.set_errno(0)
     acl = get_acl(fd, _ACL_TYPE_EXTENDED)
     if not acl:
         error = ctypes.get_errno()
         if error == errno.ENOENT:
-            return False
+            return ()
         raise LocalDownloadUnsupportedError(f"Cannot inspect local extended ACL (errno {error})")
     try:
-        entry = ctypes.c_void_p()
-        ctypes.set_errno(0)
-        result = get_entry(acl, 0, ctypes.byref(entry))  # Inspect the first indexed entry.
-        if result == 0:
-            return True
-        if ctypes.get_errno() == errno.EINVAL:
-            return False
-        raise LocalDownloadUnsupportedError("Cannot enumerate local extended ACL")
+        if valid_acl(acl) != 0:
+            raise LocalDownloadUnsupportedError("Local extended ACL is malformed")
+        tags: list[int] = []
+        for index in range(129):
+            entry = ctypes.c_void_p()
+            ctypes.set_errno(0)
+            result = get_entry(acl, index, ctypes.byref(entry))
+            if result == -1 and ctypes.get_errno() == errno.EINVAL:
+                return tuple(tags)
+            if result != 0 or not entry.value or index == 128:
+                raise LocalDownloadUnsupportedError("Cannot enumerate local extended ACL")
+            tag = ctypes.c_int()
+            if get_tag(entry, ctypes.byref(tag)) != 0:
+                raise LocalDownloadUnsupportedError("Cannot inspect local extended ACL tag")
+            tags.append(tag.value)
+        raise LocalDownloadUnsupportedError("Local extended ACL exceeds the supported entry bound")
     finally:
         if free_acl(acl) != 0:
             raise LocalDownloadUnsupportedError("Cannot release local extended ACL")
+
+
+def _has_extended_acl(fd: int) -> bool:
+    return bool(_extended_acl_tags(fd))
+
+
+def _has_non_deny_acl(fd: int) -> bool:
+    # A deny-only ACL cannot grant an alternate writer stage access.
+    return any(tag != 2 for tag in _extended_acl_tags(fd))
 
 
 def _has_xattrs(fd: int) -> bool:
@@ -104,7 +121,7 @@ def _has_xattrs(fd: int) -> bool:
     return count != 0
 
 
-def _metadata(fd: int) -> _Metadata:
+def _metadata(fd: int, *, private_stage: bool = False) -> _Metadata:
     observed = os.fstat(fd)
     if not stat.S_ISREG(observed.st_mode) or observed.st_nlink != 1:
         raise LocalDownloadUnsupportedError("Local destination must be an ordinary single-link regular file")
@@ -115,7 +132,8 @@ def _metadata(fd: int) -> _Metadata:
     try:
         if _has_xattrs(fd):
             raise LocalDownloadUnsupportedError("Local destination has unsupported extended attributes")
-        if _has_extended_acl(fd):
+        unsupported_acl = _has_non_deny_acl(fd) if private_stage else _has_extended_acl(fd)
+        if unsupported_acl:
             raise LocalDownloadUnsupportedError("Local destination has an unsupported extended ACL")
     except LocalDownloadUnsupportedError:
         raise
@@ -129,16 +147,7 @@ def _metadata(fd: int) -> _Metadata:
     )
 
 
-def _validate_directory_custody(observed: os.stat_result) -> None:
-    if not stat.S_ISDIR(observed.st_mode):
-        raise LocalDownloadUnsupportedError("Local download ancestor is not a directory")
-    if observed.st_uid not in (os.geteuid(), os.lstat("/").st_uid):
-        raise LocalDownloadUnsupportedError("Local download directory owner is not trusted")
-    if observed.st_mode & 0o022 and not observed.st_mode & stat.S_ISVTX:
-        raise LocalDownloadUnsupportedError("Local download directory allows unsafe stage replacement")
-
-
-class MacOSLocalDownloadPublication:
+class MacOSLocalDownloadPublication(_PosixLocalDownloadStage):
     """Own a same-directory stage and publish under ordinary caller authority.
 
     This class is private until its macOS filesystem and ACL behavior has native
@@ -160,97 +169,24 @@ class MacOSLocalDownloadPublication:
             <= os.supports_follow_symlinks
         ):
             raise LocalDownloadUnsupportedError("Local descriptor-relative publication is unavailable")
-        self._destination: Path = destination.absolute()
-        self._name: str = self._destination.name
-        if not self._name or ".." in self._destination.parts:
-            raise ValueError("Local download destination must name a normalized file path")
-        self._parent_fd: int | None = None
-        self._stage_fd: int | None = None
+        super().__init__(destination)
         self._target_fd: int | None = None
-        self._stage_name: str | None = None
-        self._stage_identity: tuple[int, int] | None = None
         self._original: _Metadata | None = None
-        self._stage_close_uncertain: bool = False
         self._target_close_uncertain: bool = False
-        self._parent_close_uncertain: bool = False
-        self._ancestor_close_uncertain: bool = False
-        self._digest: hashlib._Hash = hashlib.sha256()
-        self._size: int = 0
-        self.published: bool = False
-        self.publication_uncertain: bool = False
-        self.local_mutation_started: bool = False
         try:
-            self._open_parent()
+            self._open_parent(unsupported_acl=_has_non_deny_acl)
             if isinstance(condition, Replace):
                 self._hold_target()
             else:
-                try:
-                    os.stat(self._name, dir_fd=self._parent_fd, follow_symlinks=False)
-                except FileNotFoundError:
-                    pass
-                else:
-                    raise FileExistsError("Local download destination already exists")
-            for _ in range(8):
-                stage_name = f".agw-download-{secrets.token_hex(16)}"
-                try:
-                    fd = os.open(
-                        stage_name,
-                        os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                        0o600,
-                        dir_fd=self._parent_fd,
-                    )
-                except FileExistsError:
-                    continue
-                self._stage_fd = fd
-                self._stage_name = stage_name
-                staged = os.fstat(fd)
-                self._stage_identity = (staged.st_dev, staged.st_ino)
-                os.fchmod(fd, 0o600)
-                self._check_private_stage()
-                break
-            else:
-                raise FileExistsError("Cannot allocate a unique local download stage")
+                self._admit_create()
+            self._allocate_stage(readable=True, inspect=self._check_private_stage)
         except BaseException as setup_error:
-            try:
-                self.abort()
-            except BaseException as cleanup_error:
-                error_type = LocalDownloadCleanupUncertainError if self.cleanup_uncertain else LocalDownloadCleanupError
-                raise error_type(
-                    "Local download construction left unfinished cleanup",
-                    unfinished_stage=self,
-                    setup_error=setup_error,
-                    cleanup_error=cleanup_error,
-                ) from cleanup_error
+            self._abort_failed_construction(setup_error)
             raise
-
-    def _open_parent(self) -> None:
-        """Walk from root with held directory descriptors and inspect each ACL."""
-        self._parent_fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        for component in ("", *self._destination.parent.parts[1:]):
-            assert self._parent_fd is not None
-            _validate_directory_custody(os.fstat(self._parent_fd))
-            if _has_extended_acl(self._parent_fd):
-                raise LocalDownloadUnsupportedError("Local download ancestor has an unsupported ACL")
-            if not component:
-                continue
-            child_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=self._parent_fd)
-            old_fd = self._parent_fd
-            self._parent_fd = child_fd
-            self._ancestor_close_uncertain = True
-            os.close(old_fd)
-            self._ancestor_close_uncertain = False
-        assert self._parent_fd is not None
-        _validate_directory_custody(os.fstat(self._parent_fd))
-        if _has_extended_acl(self._parent_fd):
-            raise LocalDownloadUnsupportedError("Local download ancestor has an unsupported ACL")
-        bound = os.fstat(self._parent_fd)
-        named = os.stat(self._destination.parent, follow_symlinks=False)
-        if (bound.st_dev, bound.st_ino) != (named.st_dev, named.st_ino):
-            raise FileExistsError("Local download parent changed while opening")
 
     def _check_private_stage(self) -> None:
         assert self._stage_fd is not None
-        metadata = _metadata(self._stage_fd)
+        metadata = _metadata(self._stage_fd, private_stage=True)
         if (metadata.uid, metadata.mode) != (os.geteuid(), 0o600):
             raise LocalDownloadUnsupportedError("Local download stage is not private to the caller")
 
@@ -267,34 +203,7 @@ class MacOSLocalDownloadPublication:
 
     @property
     def cleanup_uncertain(self) -> bool:
-        return (
-            self._stage_close_uncertain
-            or self._target_close_uncertain
-            or self._parent_close_uncertain
-            or self._ancestor_close_uncertain
-        )
-
-    def try_write(self, data: memoryview) -> int:
-        if self._stage_fd is None or self.published or self.publication_uncertain or self.cleanup_uncertain:
-            raise ValueError("Local download stage is closed")
-        written = os.write(self._stage_fd, data)
-        self._digest.update(data[:written])
-        self._size += written
-        return written
-
-    def _check_stage_and_parent(self, size: int) -> None:
-        assert self._stage_fd is not None and self._stage_name is not None and self._parent_fd is not None
-        staged = os.fstat(self._stage_fd)
-        named = os.stat(self._stage_name, dir_fd=self._parent_fd, follow_symlinks=False)
-        if (staged.st_dev, staged.st_ino) != (named.st_dev, named.st_ino) or staged.st_nlink != 1:
-            raise LocalDownloadUnsupportedError("Local download stage changed before publication")
-        self._check_private_stage()
-        if staged.st_size != size:
-            raise ValueError("Local download stage size changed")
-        bound = os.fstat(self._parent_fd)
-        current = os.stat(self._destination.parent, follow_symlinks=False)
-        if (bound.st_dev, bound.st_ino) != (current.st_dev, current.st_ino):
-            raise FileExistsError("Local download parent changed before publication")
+        return super().cleanup_uncertain or self._target_close_uncertain
 
     def _check_target(self) -> None:
         assert self._target_fd is not None and self._parent_fd is not None and self._original is not None
@@ -304,35 +213,16 @@ class MacOSLocalDownloadPublication:
             raise FileExistsError("Local download destination changed before replacement")
 
     def commit(self, *, verified_complete: bool, size: int, sha256: str, deadline: Deadline | None = None) -> None:
+        self._check_ready(verified_complete, size, sha256, deadline)
+        self._check_stage_and_parent(size, inspect=self._check_private_stage)
         stage_fd = self._stage_fd
         parent_fd = self._parent_fd
-        stage_name = self._stage_name
-        if (
-            stage_fd is None
-            or parent_fd is None
-            or stage_name is None
-            or self.published
-            or self.publication_uncertain
-            or self.cleanup_uncertain
-        ):
-            raise ValueError("Local download stage is closed")
-        if not verified_complete or size != self._size or sha256 != self._digest.hexdigest():
-            raise ValueError("Local download is not completely verified")
-        if deadline is not None and deadline.expired:
-            raise TimeoutError("Local download deadline expired before publication")
-        self._check_stage_and_parent(size)
+        assert stage_fd is not None and parent_fd is not None
         os.fsync(stage_fd)
         if self._original is None:
             if deadline is not None and deadline.expired:
                 raise TimeoutError("Local download deadline expired before publication")
-            self.publication_uncertain = True
-            try:
-                os.link(stage_name, self._name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd, follow_symlinks=False)
-                self.published = True
-                self.publication_uncertain = False
-            except BaseException:
-                self._reconcile_create()
-                raise
+            self._link_create()
         else:
             self._check_target()
             if deadline is not None and deadline.expired:
@@ -356,7 +246,6 @@ class MacOSLocalDownloadPublication:
             while offset < len(chunk):
                 if deadline is not None and deadline.expired:
                     raise TimeoutError("Local download deadline expired during replacement")
-                self.local_mutation_started = True
                 self.publication_uncertain = True
                 written = os.write(self._target_fd, chunk[offset:])
                 if written <= 0:
@@ -365,7 +254,6 @@ class MacOSLocalDownloadPublication:
             remaining -= len(chunk)
         if deadline is not None and deadline.expired:
             raise TimeoutError("Local download deadline expired during replacement")
-        self.local_mutation_started = True
         self.publication_uncertain = True
         os.ftruncate(self._target_fd, size)
         os.fsync(self._target_fd)
@@ -388,16 +276,6 @@ class MacOSLocalDownloadPublication:
         self.published = True
         self.publication_uncertain = False
 
-    def _reconcile_create(self) -> None:
-        assert self._parent_fd is not None
-        try:
-            destination = os.stat(self._name, dir_fd=self._parent_fd, follow_symlinks=False)
-            if (destination.st_dev, destination.st_ino) == self._stage_identity:
-                self.published = True
-                self.publication_uncertain = False
-        except BaseException:
-            pass
-
     def _close_target(self) -> None:
         if self._target_fd is not None and not self._target_close_uncertain:
             self._target_close_uncertain = True
@@ -408,28 +286,4 @@ class MacOSLocalDownloadPublication:
     def abort(self) -> None:
         """Clean only the owned stage; retain publication and close uncertainty."""
         self._close_target()
-        if self._stage_name is not None and self._stage_identity is None:
-            if self._stage_fd is None or self._stage_close_uncertain:
-                raise LocalDownloadUnsupportedError("Local stage identity is unavailable for cleanup")
-            staged = os.fstat(self._stage_fd)
-            self._stage_identity = (staged.st_dev, staged.st_ino)
-        if self._stage_fd is not None and not self._stage_close_uncertain:
-            self._stage_close_uncertain = True
-            os.close(self._stage_fd)
-            self._stage_fd = None
-            self._stage_close_uncertain = False
-        if self._stage_name is not None and self._parent_fd is not None and not self._parent_close_uncertain:
-            with suppress(FileNotFoundError):
-                staged = os.stat(self._stage_name, dir_fd=self._parent_fd, follow_symlinks=False)
-                if (staged.st_dev, staged.st_ino) != self._stage_identity:
-                    raise LocalDownloadUnsupportedError("Local stage cleanup name changed identity")
-                os.unlink(self._stage_name, dir_fd=self._parent_fd)
-            self._stage_name = None
-            self._stage_identity = None
-        if self._parent_fd is not None and not self._parent_close_uncertain:
-            self._parent_close_uncertain = True
-            os.close(self._parent_fd)
-            self._parent_fd = None
-            self._parent_close_uncertain = False
-        if self.cleanup_uncertain:
-            raise LocalDownloadCleanupUncertainError("Local download descriptor cleanup has an uncertain close outcome")
+        self._abort_stage()

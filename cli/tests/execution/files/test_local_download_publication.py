@@ -59,6 +59,39 @@ def test_rejects_symlink_ancestor(tmp_path: Path) -> None:
     assert not list(actual.iterdir())
 
 
+def test_rejects_non_normal_destination_before_staging(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        local.LocalDownloadPublication(tmp_path / "other" / ".." / "download")
+    assert not list(tmp_path.iterdir())
+
+
+def test_ambiguous_ancestor_close_retains_uncertainty_without_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    close = os.close
+    interrupt = KeyboardInterrupt()
+    interrupted = False
+
+    def close_then_interrupt(fd: int) -> None:
+        nonlocal interrupted
+        if not interrupted and stat.S_ISDIR(os.fstat(fd).st_mode):
+            interrupted = True
+            close(fd)
+            raise interrupt
+        close(fd)
+
+    monkeypatch.setattr(os, "close", close_then_interrupt)
+    with pytest.raises(local.LocalDownloadCleanupUncertainError) as caught:
+        local.LocalDownloadPublication(tmp_path / "download")
+    stage = caught.value.unfinished_stage
+    assert stage is not None and stage.cleanup_uncertain
+    assert caught.value.setup_error is interrupt
+    assert not list(tmp_path.iterdir())
+    monkeypatch.setattr(os, "close", close)
+    with pytest.raises(local.LocalDownloadCleanupUncertainError):
+        stage.abort()
+
+
 def test_allows_trusted_sticky_parent(tmp_path: Path) -> None:
     tmp_path.chmod(0o1777)
     try:
@@ -589,14 +622,16 @@ def test_constructor_fstat_then_unlink_failure_retains_stage_for_retry(
     fstat = os.fstat
     setup_error = OSError("stage inspection failed")
     cleanup_error = PermissionError("stage removal failed")
-    inspections = 0
+    stage_inspections = 0
 
     def fail_first_inspection(fd: int) -> os.stat_result:
-        nonlocal inspections
-        inspections += 1
-        if inspections == 2:
+        nonlocal stage_inspections
+        observed = fstat(fd)
+        if stat.S_ISREG(observed.st_mode):
+            stage_inspections += 1
+        if stage_inspections == 1 and stat.S_ISREG(observed.st_mode):
             raise setup_error
-        return fstat(fd)
+        return observed
 
     def fail_removal(*args: object, **kwargs: object) -> None:
         raise cleanup_error
@@ -624,14 +659,12 @@ def test_constructor_keeps_stage_descriptor_when_identity_cannot_be_inspected(
 ) -> None:
     destination = tmp_path / "download"
     fstat = os.fstat
-    inspections = 0
 
     def fail_inspection(fd: int) -> os.stat_result:
-        nonlocal inspections
-        inspections += 1
-        if inspections == 1:
-            return fstat(fd)
-        raise OSError("stage inspection failed")
+        observed = fstat(fd)
+        if stat.S_ISREG(observed.st_mode):
+            raise OSError("stage inspection failed")
+        return observed
 
     with monkeypatch.context() as failure:
         failure.setattr(os, "fstat", fail_inspection)

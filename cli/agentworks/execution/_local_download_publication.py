@@ -26,17 +26,15 @@ writers can still race replacement. This is not an inode compare-and-swap protoc
 from __future__ import annotations
 
 import array
-import hashlib
 import os
 import platform
-import secrets
 import stat
 import struct
 import sys
-from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from agentworks.execution._local_download_publication_posix import _PosixLocalDownloadStage
 from agentworks.execution._local_download_stage import (
     LocalDownloadCleanupError as LocalDownloadCleanupError,
 )
@@ -109,24 +107,7 @@ def _metadata(fd: int) -> _Metadata:
     )
 
 
-def _validate_directory_custody(observed: os.stat_result) -> None:
-    if not stat.S_ISDIR(observed.st_mode):
-        raise LocalDownloadUnsupportedError("Local download ancestor is not a directory")
-    # An id-mapped host can expose the machine root directory under a UID
-    # other than zero. Its owner is still the local filesystem authority.
-    if observed.st_uid not in (os.geteuid(), os.lstat("/").st_uid):
-        raise LocalDownloadUnsupportedError("Local download directory owner is not trusted")
-    if observed.st_mode & 0o022 and not observed.st_mode & stat.S_ISVTX:
-        raise LocalDownloadUnsupportedError("Local download directory allows unsafe stage replacement")
-
-
-def _validate_ancestor_custody(parent: Path) -> None:
-    """Prove each pathname component cannot be swapped by another local user."""
-    for ancestor in reversed((parent, *parent.parents)):
-        _validate_directory_custody(os.lstat(ancestor))
-
-
-class LocalDownloadPublication:
+class LocalDownloadPublication(_PosixLocalDownloadStage):
     """Owned same-directory stage with a ByteSink-compatible try_write method.
 
     Create is atomic and cannot overwrite any existing directory entry. Replace
@@ -141,63 +122,19 @@ class LocalDownloadPublication:
             raise LocalDownloadUnsupportedError("Local download publication currently requires Linux")
         if type(condition) not in (Create, Replace):
             raise ValueError("Local download publication requires Create or Replace")
-        self._destination = destination.absolute()
-        self._name = self._destination.name
-        self._parent_fd: int | None = None
-        self._stage_fd: int | None = None
+        super().__init__(destination)
         self._metadata_fd: int | None = None
-        self._stage_name: str | None = None
-        self._stage_identity: tuple[int, int] | None = None
-        self._stage_close_uncertain = False
-        self._parent_close_uncertain = False
         self._metadata_close_uncertain = False
         self._original: _Metadata | None = None
-        self._digest = hashlib.sha256()
-        self._size = 0
-        self.published = False
-        self.publication_uncertain = False
         try:
-            _validate_ancestor_custody(self._destination.parent)
-            self._parent_fd = os.open(self._destination.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-            _validate_directory_custody(os.fstat(self._parent_fd))
+            self._open_parent()
             if isinstance(condition, Replace):
                 self._original = self._destination_metadata()
             else:
-                try:
-                    os.stat(self._name, dir_fd=self._parent_fd, follow_symlinks=False)
-                except FileNotFoundError:
-                    pass
-                else:
-                    raise FileExistsError("Local download destination already exists")
-            for _ in range(8):
-                name = f".agw-download-{secrets.token_hex(16)}"
-                try:
-                    fd = os.open(
-                        name,
-                        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                        0o600,
-                        dir_fd=self._parent_fd,
-                    )
-                except FileExistsError:
-                    continue
-                self._stage_fd = fd
-                self._stage_name = name
-                staged = os.fstat(fd)
-                self._stage_identity = (staged.st_dev, staged.st_ino)
-                break
-            else:
-                raise FileExistsError("Cannot allocate a unique local download stage")
+                self._admit_create()
+            self._allocate_stage(readable=False)
         except BaseException as setup_error:
-            try:
-                self.abort()
-            except BaseException as cleanup_error:
-                error_type = LocalDownloadCleanupUncertainError if self.cleanup_uncertain else LocalDownloadCleanupError
-                raise error_type(
-                    "Local download construction left unfinished cleanup",
-                    unfinished_stage=self,
-                    setup_error=setup_error,
-                    cleanup_error=cleanup_error,
-                ) from cleanup_error
+            self._abort_failed_construction(setup_error)
             raise
 
     def _destination_metadata(self) -> _Metadata:
@@ -226,16 +163,7 @@ class LocalDownloadPublication:
     @property
     def cleanup_uncertain(self) -> bool:
         """An admitted close has no established outcome; abort cannot resolve it."""
-        return self._stage_close_uncertain or self._parent_close_uncertain or self._metadata_close_uncertain
-
-    def try_write(self, data: memoryview) -> int:
-        """Accept one synchronous write, retaining only size and digest state."""
-        if self._stage_fd is None or self.published or self.publication_uncertain or self.cleanup_uncertain:
-            raise ValueError("Local download stage is closed")
-        written = os.write(self._stage_fd, data)
-        self._digest.update(data[:written])
-        self._size += written
-        return written
+        return super().cleanup_uncertain or self._metadata_close_uncertain
 
     def _preserve_metadata(self) -> None:
         original = self._original
@@ -272,32 +200,12 @@ class LocalDownloadPublication:
         inspect published and publication_uncertain and call abort. Neither a
         proved publication nor an uncertain attempt can be retried by this writer.
         """
+        self._check_ready(verified_complete, size, sha256, deadline)
+        self._check_stage_and_parent(size)
         fd = self._stage_fd
         parent_fd = self._parent_fd
         name = self._stage_name
-        if (
-            fd is None
-            or parent_fd is None
-            or name is None
-            or self.published
-            or self.publication_uncertain
-            or self.cleanup_uncertain
-        ):
-            raise ValueError("Local download stage is closed")
-        if not verified_complete or size != self._size or sha256 != self._digest.hexdigest():
-            raise ValueError("Local download is not completely verified")
-        if deadline is not None and deadline.expired:
-            raise TimeoutError("Local download deadline expired before publication")
-        staged = os.fstat(fd)
-        named = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-        if (staged.st_dev, staged.st_ino) != (named.st_dev, named.st_ino) or staged.st_nlink != 1:
-            raise LocalDownloadUnsupportedError("Local download stage changed before publication")
-        if staged.st_size != size:
-            raise ValueError("Local download stage size changed")
-        bound_parent = os.fstat(parent_fd)
-        current_parent = os.stat(self._destination.parent, follow_symlinks=False)
-        if (bound_parent.st_dev, bound_parent.st_ino) != (current_parent.st_dev, current_parent.st_ino):
-            raise FileExistsError("Local download parent changed before publication")
+        assert fd is not None and parent_fd is not None and name is not None
         if self._original is not None:
             self._preserve_metadata()
         os.fsync(fd)
@@ -307,17 +215,17 @@ class LocalDownloadPublication:
             raise FileExistsError("Local download destination changed before replacement")
         if deadline is not None and deadline.expired:
             raise TimeoutError("Local download deadline expired before publication")
-        self.publication_uncertain = True
-        try:
-            if self._original is None:
-                os.link(name, self._name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd, follow_symlinks=False)
-            else:
+        if self._original is None:
+            self._link_create()
+        else:
+            self.publication_uncertain = True
+            try:
                 os.replace(name, self._name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
-            self.published = True
-            self.publication_uncertain = False
-        except BaseException:
-            self._reconcile_publication(parent_fd)
-            raise
+                self.published = True
+                self.publication_uncertain = False
+            except BaseException:
+                self._reconcile_publication(parent_fd)
+                raise
         self.abort()
 
     def _reconcile_publication(self, parent_fd: int) -> None:
@@ -343,28 +251,4 @@ class LocalDownloadPublication:
         retained, and the destination is never removed.
         """
         self._close_metadata_descriptor()
-        if self._stage_name is not None and self._stage_identity is None:
-            if self._stage_fd is None or self._stage_close_uncertain:
-                raise LocalDownloadUnsupportedError("Local download stage identity is unavailable for cleanup")
-            staged = os.fstat(self._stage_fd)
-            self._stage_identity = (staged.st_dev, staged.st_ino)
-        if self._stage_fd is not None and not self._stage_close_uncertain:
-            self._stage_close_uncertain = True
-            os.close(self._stage_fd)
-            self._stage_fd = None
-            self._stage_close_uncertain = False
-        if self._stage_name is not None and self._parent_fd is not None and not self._parent_close_uncertain:
-            with suppress(FileNotFoundError):
-                staged = os.stat(self._stage_name, dir_fd=self._parent_fd, follow_symlinks=False)
-                if (staged.st_dev, staged.st_ino) != self._stage_identity:
-                    raise LocalDownloadUnsupportedError("Local download cleanup name changed identity")
-                os.unlink(self._stage_name, dir_fd=self._parent_fd)
-            self._stage_name = None
-            self._stage_identity = None
-        if self._parent_fd is not None and not self._parent_close_uncertain:
-            self._parent_close_uncertain = True
-            os.close(self._parent_fd)
-            self._parent_fd = None
-            self._parent_close_uncertain = False
-        if self.cleanup_uncertain:
-            raise LocalDownloadCleanupUncertainError("Local download descriptor cleanup has an uncertain close outcome")
+        self._abort_stage()
