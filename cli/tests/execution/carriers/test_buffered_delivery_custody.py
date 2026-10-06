@@ -105,7 +105,7 @@ def test_ssh_matching_version_with_pending_cleanup_cannot_dispatch(
         assert kwargs["custody"] is custody
         calls.append(argv)
         custody.begin_process()
-        return ProcessResult(True, 0, 0, CapturedOutput(), CapturedOutput(b"OpenSSH_9.9p1"), None)
+        return ProcessResult(True, 0, 0, CapturedOutput(), CapturedOutput(b"OpenSSH_9.9p1"), Failure.OBSERVATION)
 
     monkeypatch.setattr(client, "run_process", pending)
     try:
