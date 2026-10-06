@@ -617,6 +617,7 @@ def test_installed_ssh_owns_fresh_pipe_handles(
     trust = tmp_path / "known_hosts"
     key.write_bytes(b"fixture identity; authentication is never reached")
     trust.write_bytes(b"")
+    custody = LocalDeliveryCustody()
     received: list[bytes] = []
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -653,7 +654,7 @@ def test_installed_ssh_owns_fresh_pipe_handles(
                 # fixture's deliberate pre-authentication disconnect.
                 io=CarrierIO(input=FiniteInput(b"")),
                 deadline=Deadline.after(5),
-                custody=LocalDeliveryCustody(),
+                custody=custody,
             )
             assert received and received[0].startswith(b"SSH-2.0-")
             assert report.failure == Failure.OBSERVATION
@@ -662,12 +663,15 @@ def test_installed_ssh_owns_fresh_pipe_handles(
             assert report.stderr.data
             assert report.stdout.complete and report.stderr.complete
         finally:
-            # Wake accept even when the client refuses before connecting. Every
-            # peer operation and join is bounded and the fixture owns all sockets.
             try:
-                with socket.create_connection(listener.getsockname(), timeout=1):
+                assert custody.close(Deadline.after(2))
+            finally:
+                # Wake accept even when the client refuses before connecting. Every
+                # peer operation and join is bounded and the fixture owns all sockets.
+                try:
+                    with socket.create_connection(listener.getsockname(), timeout=1):
+                        pass
+                except OSError:
                     pass
-            except OSError:
-                pass
-            peer.join(timeout=6)
-            assert not peer.is_alive()
+                peer.join(timeout=6)
+                assert not peer.is_alive()
