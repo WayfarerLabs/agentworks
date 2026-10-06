@@ -176,8 +176,8 @@ def test_two_deliveries_preserve_exact_store_deadline_and_separate_nonce() -> No
         deadline=deadline,
         custody=custody,
     )
-    assert first.observation is not None and first.observation.result == ClockObservation(1000)
-    assert second.observation is not None and second.observation.result == LeasePublication(lease.expires_ns)
+    assert first.result == ClockObservation(1000) and first.issue is None
+    assert second.result == LeasePublication(lease.expires_ns) and second.issue is None
     assert carrier.custody is custody and carrier.deadline is deadline
     assert carrier.requests[0].nonce != carrier.requests[1].nonce
     assert carrier.requests[1].expected_launch == receipt
@@ -210,10 +210,9 @@ def test_carrier_and_custody_evidence_cannot_promote_helper_result(fault: str) -
         candidate = _clock(carrier, custody)
         assert candidate.dispatch is carrier.dispatch
         assert candidate.carrier_failure is carrier.failure
-        if fault == "runtime":
-            assert candidate.observation is None
-        else:
-            assert candidate.observation is not None and candidate.observation.result is None
+        assert candidate.result is None
+        if fault != "runtime":
+            assert candidate.issue is not None
     finally:
         assert custody.close(Deadline.after(3))
 
@@ -248,16 +247,15 @@ def test_closed_order_control_and_record_bounds(fault: str) -> None:
         return _records(request, (result, terminal))
 
     candidate = _clock(ScriptedCarrier(response), LocalDeliveryCustody())
-    assert candidate.observation is not None
-    assert candidate.observation.result is None and candidate.observation.issue is not None
+    assert candidate.result is None and candidate.issue is not None
 
 
-def test_clean_failed_is_refusal_and_publication_must_acknowledge_requested_expiry() -> None:
-    refusal = ScriptedCarrier(
+def test_clean_failed_is_helper_failure_and_publication_must_acknowledge_requested_expiry() -> None:
+    failed = ScriptedCarrier(
         lambda request: _records(request, ((FileRecordKind.FAILED, b""), (FileRecordKind.FINISHED, b"")))
     )
-    candidate = _clock(refusal, LocalDeliveryCustody())
-    assert candidate.observation is not None and candidate.observation.state is exchange.ManagedLeaseState.REFUSED
+    candidate = _clock(failed, LocalDeliveryCustody())
+    assert candidate.result is None and candidate.issue is exchange.ManagedLeaseIssue.HELPER_FAILED
     wrong = ScriptedCarrier(
         lambda request: _records(
             request, ((FileRecordKind.RESULT, encode_result(LeasePublication(1))), (FileRecordKind.FINISHED, b""))
@@ -273,7 +271,7 @@ def test_clean_failed_is_refusal_and_publication_must_acknowledge_requested_expi
         deadline=Deadline.after(3),
         custody=LocalDeliveryCustody(),
     )
-    assert candidate.observation is not None and candidate.observation.issue is exchange.ManagedLeaseIssue.CONTROL
+    assert candidate.result is None and candidate.issue is exchange.ManagedLeaseIssue.CONTROL
 
 
 @pytest.mark.parametrize("fault", ["boot", "run", "launch", "identity", "runtime", "deadline", "carrier", "unsettled"])
@@ -319,8 +317,7 @@ def test_late_clean_reply_cannot_reset_shared_cycle_deadline(monkeypatch: pytest
     carrier = ScriptedCarrier()
     candidate = _clock(carrier, LocalDeliveryCustody(), Deadline(10))
     assert carrier.calls == 1 and candidate.carrier_completion == ExitStatus(0)
-    assert candidate.observation is not None and candidate.observation.result is None
-    assert candidate.observation.issue is exchange.ManagedLeaseIssue.DEADLINE
+    assert candidate.result is None and candidate.issue is exchange.ManagedLeaseIssue.DEADLINE
 
 
 @pytest.mark.parametrize("exception", [KeyboardInterrupt(), SystemExit(7)])
@@ -344,7 +341,7 @@ def test_original_base_exception_escapes_and_private_buffers_clear(
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux protected store and packed helper")
-@pytest.mark.parametrize("fault", ["none", "guest", "identity", "stored_launch"])
+@pytest.mark.parametrize("fault", ["none", "guest", "identity", "stored_launch", "post_publication_fsync"])
 def test_actual_packed_bookworm_clock_and_publication(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -368,6 +365,15 @@ def test_actual_packed_bookworm_clock_and_publication(
         f"{GUEST.init_start_ticks + (fault == 'guest')})\n"
         "boottime_ns=lambda:1000\n"
     )
+    if fault == "post_publication_fsync":
+        injection += (
+            "import stat\n"
+            "_real_fsync=os.fsync\n"
+            "def _test_fsync(fd):\n"
+            " if stat.S_ISDIR(os.fstat(fd).st_mode):raise OSError('directory sync failed')\n"
+            " _real_fsync(fd)\n"
+            "os.fsync=_test_fsync\n"
+        )
     sources = tuple(
         (name, source + injection if name == "_managed_lease_guest" else source) for name, source in sources
     )
@@ -397,11 +403,10 @@ def test_actual_packed_bookworm_clock_and_publication(
         assert custody.close(Deadline.after(3))
     assert clock.runtime_prerequisite.state is RuntimePrerequisiteState.READY
     assert clock.runtime_prerequisite.selected_path == "/usr/bin/python3"
-    assert clock.observation is not None
     if fault in {"guest", "identity"}:
-        assert clock.observation.state is exchange.ManagedLeaseState.REFUSED
+        assert clock.result is None and clock.issue is exchange.ManagedLeaseIssue.HELPER_FAILED
     else:
-        assert clock.observation.result == ClockObservation(1000)
+        assert clock.result == ClockObservation(1000) and clock.issue is None
     try:
         publication = exchange.publish_operation_lease(
             carrier,
@@ -416,10 +421,14 @@ def test_actual_packed_bookworm_clock_and_publication(
     finally:
         assert custody.close(Deadline.after(3))
     assert publication.carrier_completion == ExitStatus(0)
-    assert publication.observation is not None
+    assert publication.dispatch is Dispatch.SENT
+    assert publication.carrier_local_status == 0 and publication.carrier_failure is None
+    assert publication.runtime_prerequisite.state is RuntimePrerequisiteState.READY
     if fault == "none":
-        assert publication.observation.state is exchange.ManagedLeaseState.PUBLISHED
+        assert publication.result == LeasePublication(sampled_lease(launch(), 1000).expires_ns)
+        assert publication.issue is None
+    else:
+        assert publication.result is None and publication.issue is exchange.ManagedLeaseIssue.HELPER_FAILED
+    if fault in {"none", "post_publication_fsync"}:
         with _store(tmp_path) as store:
             assert read_lease(store, launch()) == sampled_lease(launch(), 1000)
-    else:
-        assert publication.observation.state is exchange.ManagedLeaseState.REFUSED

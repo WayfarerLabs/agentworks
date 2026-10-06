@@ -9,10 +9,8 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError, ValidationError
 
-from ._delivery_custody import LocalDeliveryCustody
 from ._file_wire import FileRecord, FileRecordKind
 from ._file_wire_reader import FileRecordReader, FileWireError
-from ._helper_launcher import _validate_plan
 from ._managed_lease_bundle import FIXED_BUNDLE
 from ._managed_lease_protocol import (
     ClockObservation,
@@ -21,33 +19,27 @@ from ._managed_lease_protocol import (
     decode_result,
     encode_request,
 )
-from ._managed_lease_wire import LeaseError, OperationLease
+from ._managed_lease_wire import LeaseError
 from ._runtime_prerequisite import (
     RuntimePrefixSink,
     RuntimePrerequisiteObservation,
     RuntimePrerequisiteState,
-    RuntimeSelection,
     RuntimeTargetOS,
     build_runtime_identity_helper_argv,
 )
-from ._vm_guest_identity_protocol import VMGuestIdentity
 from .carrier import CarrierIO, Dispatch, Failure, FiniteInput, PreparedInvocation, Retention, SinkOutput
 
 if TYPE_CHECKING:
+    from ._delivery_custody import LocalDeliveryCustody
     from ._helper_launcher import IdentityPlan
+    from ._managed_lease_wire import OperationLease
+    from ._runtime_prerequisite import RuntimeSelection
+    from ._vm_guest_identity_protocol import VMGuestIdentity
     from .carrier import Carrier, Deadline, ExitStatus
 
 
-class ManagedLeaseState(StrEnum):
-    OBSERVED = "observed"
-    PUBLISHED = "published"
-    REFUSED = "refused"
-    INVALID = "invalid"
-    INCOMPLETE = "incomplete"
-    UNKNOWN = "unknown"
-
-
 class ManagedLeaseIssue(StrEnum):
+    HELPER_FAILED = "helper_failed"
     ORDER = "order"
     CONTROL = "control"
     POST_TERMINAL = "post_terminal"
@@ -60,13 +52,6 @@ class ManagedLeaseIssue(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class ManagedLeaseObservation:
-    state: ManagedLeaseState
-    result: ClockObservation | LeasePublication | None = field(default=None, repr=False)
-    issue: ManagedLeaseIssue | FileWireError | None = None
-
-
-@dataclass(frozen=True, slots=True)
 class ManagedLeaseCandidate:
     """Carrier evidence remains independent of the accepted helper result."""
 
@@ -75,7 +60,8 @@ class ManagedLeaseCandidate:
     carrier_local_status: int | None
     carrier_failure: Failure | None
     runtime_prerequisite: RuntimePrerequisiteObservation
-    observation: ManagedLeaseObservation | None
+    result: ClockObservation | LeasePublication | None = field(default=None, repr=False)
+    issue: ManagedLeaseIssue | FileWireError | None = None
 
 
 class _DiagnosticSink:
@@ -148,7 +134,7 @@ class _Collector:
         carrier_failure: Failure | None,
         settled: bool,
         expired: bool,
-    ) -> ManagedLeaseObservation:
+    ) -> tuple[ClockObservation | LeasePublication | None, ManagedLeaseIssue | FileWireError | None]:
         issue: ManagedLeaseIssue | FileWireError | None = self.issue or wire_error
         if issue is None and stderr_noise:
             issue = ManagedLeaseIssue.STDERR
@@ -162,28 +148,13 @@ class _Collector:
             issue = ManagedLeaseIssue.DEADLINE
         if issue is None and not self.terminal:
             issue = ManagedLeaseIssue.MISSING_TERMINAL
-        if dispatch is not Dispatch.SENT:
-            state = ManagedLeaseState.UNKNOWN if dispatch is Dispatch.UNKNOWN else ManagedLeaseState.INCOMPLETE
-        elif issue is not None:
-            state = (
-                ManagedLeaseState.INCOMPLETE
-                if issue
-                in (
-                    ManagedLeaseIssue.CARRIER,
-                    ManagedLeaseIssue.CUSTODY,
-                    ManagedLeaseIssue.DEADLINE,
-                    ManagedLeaseIssue.MISSING_TERMINAL,
-                    FileWireError.TRUNCATED,
-                )
-                else ManagedLeaseState.INVALID
-            )
-        elif self.failed:
-            state = ManagedLeaseState.REFUSED
-        else:
-            state = ManagedLeaseState.OBSERVED if self.request.lease is None else ManagedLeaseState.PUBLISHED
-        result = self.result if state in (ManagedLeaseState.OBSERVED, ManagedLeaseState.PUBLISHED) else None
+        if issue is None and dispatch is not Dispatch.SENT:
+            issue = ManagedLeaseIssue.CARRIER
+        if issue is None and self.failed:
+            issue = ManagedLeaseIssue.HELPER_FAILED
+        result = self.result if issue is None else None
         self.abort()
-        return ManagedLeaseObservation(state, result, issue)
+        return result, issue
 
 
 def _exchange(
@@ -197,14 +168,10 @@ def _exchange(
     deadline: Deadline,
     custody: LocalDeliveryCustody,
 ) -> ManagedLeaseCandidate:
-    if type(runtime_selection) is not RuntimeSelection or runtime_selection.target_os is not RuntimeTargetOS.LINUX:
+    if runtime_selection.target_os is not RuntimeTargetOS.LINUX:
         raise ValidationError("Operation lease requires a Linux runtime")
-    if _validate_plan(plan).euid != 0 or type(guest) is not VMGuestIdentity:
-        raise ValidationError("Operation lease requires root and a full guest identity")
     if deadline.expires_at is None:
         raise ValidationError("Operation lease delivery requires a finite deadline")
-    if type(custody) is not LocalDeliveryCustody:
-        raise ValidationError("Operation lease delivery requires caller-held local custody")
     if not custody.settled:
         raise StateError("Previous operation lease delivery remains unsettled")
     request = LeaseRequest(secrets.token_hex(16), plan.expected, guest, expected_launch, lease)
@@ -238,10 +205,11 @@ def _exchange(
             )
         report = carrier.execute(invocation, io=io, deadline=deadline, custody=custody)
         prerequisite = runtime.observation
-        observation = None
+        result = None
+        issue = None
         if prerequisite.state is RuntimePrerequisiteState.READY:
             reader.finish()
-            observation = collector.finish(
+            result, issue = collector.finish(
                 reader.error,
                 complete=(
                     report.stdout.retention is Retention.DELIVERED
@@ -257,7 +225,7 @@ def _exchange(
                 expired=deadline.expired,
             )
         return ManagedLeaseCandidate(
-            report.dispatch, report.completion, report.local_status, report.failure, prerequisite, observation
+            report.dispatch, report.completion, report.local_status, report.failure, prerequisite, result, issue
         )
     finally:
         runtime.clear()
@@ -300,8 +268,6 @@ def publish_operation_lease(
     custody: LocalDeliveryCustody,
 ) -> ManagedLeaseCandidate:
     """Publish the supplied sampled expiry without refreshing its clock or budget."""
-    if type(expected_launch) is not bytes or type(lease) is not OperationLease:
-        raise ValidationError("Operation lease publication requires an exact launch and lease")
     return _exchange(
         carrier,
         expected_launch=expected_launch,
