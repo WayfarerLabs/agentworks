@@ -402,6 +402,16 @@ def test_prepared_views_share_claim_and_clean_teardown(
         body = selected.execution._ordinary_plan.expected
         assert json.loads(result.stdout.data) == [body.euid, body.egid, list(body.groups)]
         assert route.local_deadlines[-1] is body_deadline
+        inline_rows = [
+            row for row in selected.owner.list_lifecycle_obligations() if row.obligation_kind == "carrier-dispatch"
+        ]
+        assert inline_rows
+        assert selected.execution.run(Command(["/bin/true"]), profile=Protection.DIRECT).ok
+        assert [
+            row.obligation_id
+            for row in selected.owner.list_lifecycle_obligations()
+            if row.obligation_kind == "carrier-dispatch"
+        ] == [row.obligation_id for row in inline_rows]
     assert views is not None
     assert native.events and "dispatch" in native.events
     assert route.guest.owner_id == views.owner.ownership.operation_id

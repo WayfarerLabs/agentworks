@@ -138,6 +138,7 @@ def test_each_body_plan_stays_distinct_from_fixed_root_entry(owner: tuple[Databa
         )
         assert carrier.calls == 1
         assert not outcome.requires_owner_retention
+    operation.finish()
     operation_owner.seal_lifecycle_obligations()
     operation_owner.record_effects_resolved()
     operation_owner.close()
@@ -169,6 +170,7 @@ def test_real_preparation_and_packed_helper_preserve_terminal_limits(
     else:
         assert result.application_state is ApplicationState.UNKNOWN and result.status is None
         assert not result.owned_cleanup_confirmed and not result.ok
+    operation.finish()
     operation_owner.seal_lifecycle_obligations()
     operation_owner.record_effects_resolved()
     operation_owner.close()

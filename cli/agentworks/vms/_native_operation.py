@@ -141,6 +141,8 @@ class _Workflow:
             self.owner.close()
             return
         self.owner.stop_admission()
+        if self.views is not None:
+            self.views.execution_operation.finish()
         if not self._components_settled():
             raise StateError("Native VM operation retains unsettled work")
         hold_settled = self._hold_settled(self.deadline if cleanup_deadline is None else cleanup_deadline)

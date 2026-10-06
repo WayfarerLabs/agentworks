@@ -129,6 +129,7 @@ def test_command_runs_with_exact_default_deadline_and_exit_status(bound: Bound, 
     assert result.stdout.data == b"data"
     assert carrier.deadlines[0] is deadline
     assert carrier.calls == 1
+    bound[2].finish()
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
@@ -155,6 +156,7 @@ def test_script_binary_stdin_discard_and_sensitive_suppression(
     assert request_sensitive.stdout.data == b""
     assert carrier.deadlines[0] is override
     assert carrier.calls == 4
+    bound[2].finish()
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
@@ -168,6 +170,7 @@ def test_longer_or_unbounded_override_keeps_composition_budget(bound: Bound, ove
     result = access.run(Command(("/bin/true",)), profile=Protection.DIRECT, deadline=override)
     assert result.status == ExitCode(0)
     assert carrier.deadlines == [composition]
+    bound[2].finish()
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
@@ -180,6 +183,7 @@ def test_stricter_request_uses_its_exact_deadline(bound: Bound) -> None:
     result = access.run(Command(("/bin/true",)), profile=Protection.DIRECT, deadline=requested)
     assert result.status == ExitCode(0)
     assert carrier.deadlines == [requested]
+    bound[2].finish()
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
@@ -194,6 +198,7 @@ def test_expired_composition_refuses_even_with_live_override(bound: Bound, overr
     with pytest.raises(ValidationError):
         access.run(Command(("/bin/true",)), profile=Protection.DIRECT, deadline=override)
     assert carrier.calls == 0
+    bound[2].finish()
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
@@ -206,6 +211,7 @@ def test_invalid_or_expired_request_refuses_before_dispatch(bound: Bound, overri
     with pytest.raises(ValidationError):
         access.run(Command(("/bin/true",)), profile=Protection.DIRECT, deadline=override)  # type: ignore[arg-type]
     assert carrier.calls == 0
+    bound[2].finish()
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
@@ -219,6 +225,7 @@ def test_finite_request_shortens_unbounded_composition(bound: Bound) -> None:
     result = access.run(Command(("/bin/true",)), profile=Protection.DIRECT, deadline=requested)
     assert result.status == ExitCode(0)
     assert carrier.deadlines == [requested]
+    bound[2].finish()
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
@@ -234,6 +241,7 @@ def test_checked_nonzero_uses_bound_diagnostic_identity(
     assert failure.value.result.status == ExitCode(7)
     assert failure.value.entity_kind == "vm"
     assert failure.value.entity_name == "execution-access-vm"
+    bound[2].finish()
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
