@@ -167,7 +167,9 @@ def test_failing_owned_child_exposes_controlled_evidence_after_reaping(
             return self.returncode
 
     child = Child()
-    monkeypatch.setenv("__PYVENV_LAUNCHER__", "prior-synthetic-launcher")
+    monkeypatch.setattr(
+        os, "environ", {"__PYVENV_LAUNCHER__": "prior-synthetic-launcher", "FIXTURE_VALUE": "synthetic-value"}
+    )
     parent_env = os.environ.copy()
     expected = probe._interpreter_identity()
 
