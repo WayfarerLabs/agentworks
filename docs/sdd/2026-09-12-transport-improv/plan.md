@@ -378,6 +378,14 @@ Independent integrated review and lead gates remain pending. Fresh recovery, nat
 construction, service entry, full availability and additive RunContext remain open; no completion
 checkbox or public feedback/fix round closes here.
 
+Project and generic review clear execution-state pin `716cd6eaa`, passing 121 and 58
+focused/adjacent cases respectively. The accepted complexity correction changes only the existing
+kind-mismatch test input to omit bootstrap, isolating owner-kind matching from platform-host
+bootstrap refusal. Deleting that owner-kind guard then fails the corrected case; no extra test or
+production change is needed. The owner again passes all 96 scoped cases and full strict typing/file
+gates. Corrected integrated re-review and final lead gates remain pending, without native acceptance
+or a public handoff.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
