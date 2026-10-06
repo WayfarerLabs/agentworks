@@ -80,7 +80,7 @@ def stub_process(monkeypatch: pytest.MonkeyPatch, body: bytes) -> MagicMock:
 
 @contextmanager
 def interrupted_worker(
-    monkeypatch: pytest.MonkeyPatch, control: BaseException
+    monkeypatch: pytest.MonkeyPatch, control: BaseException, custody: LocalDeliveryCustody
 ) -> Iterator[list[subprocess.Popen[bytes]]]:
     original = subprocess.Popen
     children: list[subprocess.Popen[bytes]] = []
@@ -98,13 +98,12 @@ def interrupted_worker(
     try:
         yield children
     finally:
+        assert custody.close(Deadline.after(3))
         for child in children:
-            if child.poll() is None:
-                child.kill()
-            child.wait(timeout=2)
+            assert child.returncode is not None
             for pipe in (child.stdin, child.stdout, child.stderr):
                 if pipe is not None:
-                    pipe.close()
+                    assert pipe.closed
 
 
 def test_connection_does_not_discover_or_expose_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -360,24 +359,28 @@ def test_owned_http_worker_is_killed_and_reaped_at_deadline(monkeypatch: pytest.
         return child
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
-    with pytest.raises(_WireFailure):
-        wire = _ProxmoxWire(connection())
-        if route == "config":
-            wire.request_current_config(timeout=0.05, custody=LocalDeliveryCustody())
-        elif route == "power":
-            wire.request_power(timeout=0.05, custody=LocalDeliveryCustody())
-        elif route == "start":
-            wire.request_vm_start(timeout=0.05, custody=LocalDeliveryCustody())
-        elif route == "task":
-            wire.request_task_status(
-                "UPID:node1:00000001:00000001:00000001:qmstart:123:user@pve:",
-                timeout=0.05,
-                custody=LocalDeliveryCustody(),
-            )
-        else:
-            wire.request("POST", "exec", body=b"{}", timeout=0.05, custody=LocalDeliveryCustody())
+    custody = LocalDeliveryCustody()
+    try:
+        with pytest.raises(_WireFailure):
+            wire = _ProxmoxWire(connection())
+            if route == "config":
+                wire.request_current_config(timeout=0.05, custody=custody)
+            elif route == "power":
+                wire.request_power(timeout=0.05, custody=custody)
+            elif route == "start":
+                wire.request_vm_start(timeout=0.05, custody=custody)
+            elif route == "task":
+                wire.request_task_status(
+                    "UPID:node1:00000001:00000001:00000001:qmstart:123:user@pve:",
+                    timeout=0.05,
+                    custody=custody,
+                )
+            else:
+                wire.request("POST", "exec", body=b"{}", timeout=0.05, custody=custody)
+    finally:
+        assert custody.close(Deadline.after(3))
     assert len(children) == 1
-    assert children[0].poll() is not None
+    assert children[0].returncode is not None
     assert children[0].stdin is not None and children[0].stdout is not None
     assert children[0].stdin.closed and children[0].stdout.closed
 
@@ -389,7 +392,7 @@ def test_worker_interrupt_reaps_before_propagating(
 ) -> None:
     control = interruption()
     custody = LocalDeliveryCustody()
-    with interrupted_worker(monkeypatch, control) as children:
+    with interrupted_worker(monkeypatch, control, custody) as children:
         with pytest.raises(interruption) as caught:
             wire = _ProxmoxWire(connection())
             if current_config:

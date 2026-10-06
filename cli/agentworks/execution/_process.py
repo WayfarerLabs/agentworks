@@ -754,7 +754,9 @@ class LocalProcessOwner:
                     self._cleanup_retry_requested = False
                     return
             try:
-                exited = status.poll() is not None
+                # Only a newly observed exit permits unsolicited bookkeeping
+                # cleanup. Failure after a known exit requires explicit retry.
+                exited = status.status is None and status.poll() is not None
             except BaseException:
                 exited = False
             if exited or status.lost:

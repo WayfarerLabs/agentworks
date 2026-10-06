@@ -11,7 +11,7 @@ import json
 import subprocess
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
@@ -20,6 +20,7 @@ import pytest
 
 from agentworks.errors import ValidationError
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
+from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers._proxmox_http import _request
 from agentworks.execution.carriers.proxmox import ProxmoxConnection, _ProxmoxWire, _WireFailure
 from tests.execution.test_proxmox import connection, interrupted_worker, stub_process, worker_payload
@@ -38,6 +39,7 @@ class _ActivationEndpoint:
     requests: list[tuple[str, str, bytes, str | None]]
     response: bytes = b'{"data":null}'
     status: int = 200
+    custody: LocalDeliveryCustody = field(default_factory=LocalDeliveryCustody)
 
 
 @pytest.fixture
@@ -70,17 +72,24 @@ def activation_endpoint(endpoint: _Endpoint) -> Iterator[_ActivationEndpoint]:
             pass
 
     endpoint.server.RequestHandlerClass = Handler
-    yield value
+    try:
+        yield value
+    finally:
+        assert value.custody.close(Deadline.after(3))
 
 
 def _call(wire: _ProxmoxWire, route: str, *, timeout: float = 30):
-    if route == "info":
-        return wire.request_guest_info(timeout=timeout, custody=LocalDeliveryCustody())
-    return (
-        wire.request_vm_start(timeout=timeout, custody=LocalDeliveryCustody())
-        if route == "start"
-        else wire.request_task_status(_UPID, timeout=timeout, custody=LocalDeliveryCustody())
-    )
+    custody = LocalDeliveryCustody()
+    try:
+        if route == "info":
+            return wire.request_guest_info(timeout=timeout, custody=custody)
+        return (
+            wire.request_vm_start(timeout=timeout, custody=custody)
+            if route == "start"
+            else wire.request_task_status(_UPID, timeout=timeout, custody=custody)
+        )
+    finally:
+        assert custody.close(Deadline.after(3))
 
 
 @pytest.mark.windows
@@ -95,10 +104,10 @@ def test_owned_tls_start_and_task_reads_are_fixed_body_free(
     value = activation_endpoint
     upid = _UPID.replace("qmstart", task_type)
     value.response = json.dumps({"data": upid}).encode()
-    assert value.wire.request_vm_start(timeout=30, custody=LocalDeliveryCustody()) == upid
+    assert value.wire.request_vm_start(timeout=30, custody=value.custody) == upid
     status = {"status": "stopped", "exitstatus": "OK", "upid": upid}
     value.response = json.dumps({"data": status}).encode()
-    assert value.wire.request_task_status(upid, timeout=30, custody=LocalDeliveryCustody()) == status
+    assert value.wire.request_task_status(upid, timeout=30, custody=value.custody) == status
     encoded = urllib.parse.quote(upid, safe="")
     assert value.requests == [
         ("POST", "/api2/json/nodes/node1/qemu/123/status/start", b"", "PVEAPIToken=user@pve!token=secret-canary"),
@@ -111,7 +120,7 @@ def test_owned_tls_start_and_task_reads_are_fixed_body_free(
 def test_literal_task_id_is_one_encoded_component(activation_endpoint: _ActivationEndpoint, upid: str) -> None:
     value = activation_endpoint
     value.response = b'{"data":{"status":"running"}}'
-    assert value.wire.request_task_status(upid, timeout=30, custody=LocalDeliveryCustody()) == {"status": "running"}
+    assert value.wire.request_task_status(upid, timeout=30, custody=value.custody) == {"status": "running"}
     encoded = urllib.parse.quote(upid, safe="").replace(".", "%2E")
     assert value.requests[0][1] == f"/api2/json/nodes/node1/tasks/{encoded}/status"
     assert value.requests[0][0] == "GET" and value.requests[0][2] == b""
@@ -193,9 +202,16 @@ def test_startup_consumes_worker_budget_and_credentials_stay_on_stdin(monkeypatc
 @pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit, GeneratorExit])
 def test_control_interrupt_kills_and_reaps_without_replay(monkeypatch: pytest.MonkeyPatch, route: str, interruption):
     control = interruption()
-    with interrupted_worker(monkeypatch, control) as children:
+    custody = LocalDeliveryCustody()
+    with interrupted_worker(monkeypatch, control, custody) as children:
         with pytest.raises(interruption) as caught:
-            _call(_ProxmoxWire(connection()), route, timeout=1)
+            wire = _ProxmoxWire(connection())
+            if route == "info":
+                wire.request_guest_info(timeout=1, custody=custody)
+            elif route == "start":
+                wire.request_vm_start(timeout=1, custody=custody)
+            else:
+                wire.request_task_status(_UPID, timeout=1, custody=custody)
         assert caught.value is control
         assert len(children) == 1 and children[0].returncode is not None
         assert children[0].stdout is not None and children[0].stdout.closed
@@ -329,7 +345,7 @@ def test_owned_tls_guest_info_is_fixed_readonly(activation_endpoint, monkeypatch
     value = activation_endpoint
     response = {"result": {"version": "9.0", "supported_commands": []}}
     value.response = json.dumps({"data": response}).encode()
-    assert value.wire.request_guest_info(timeout=30, custody=LocalDeliveryCustody()) == response
+    assert value.wire.request_guest_info(timeout=30, custody=value.custody) == response
     assert value.requests == [
         ("GET", "/api2/json/nodes/node1/qemu/123/agent/info", b"", "PVEAPIToken=user@pve!token=secret-canary")
     ]

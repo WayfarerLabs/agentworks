@@ -331,6 +331,58 @@ def test_retained_owner_observes_natural_exit_without_retry_or_signal(
     _assert_exact_cleanup(children)
 
 
+def test_failed_cleanup_after_natural_exit_waits_for_explicit_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, children: list[subprocess.Popen[bytes]]
+) -> None:
+    permit_exit = tmp_path / "permit-exit"
+    cleanup = core._cleanup
+    statuses: list[core._ProcessStatus] = []
+    observed_exit = threading.Event()
+    extra_cleanup = threading.Event()
+    allow_cleanup = False
+    owner = core.LocalProcessOwner()
+
+    def persistently_fail(status: core._ProcessStatus) -> bool:
+        statuses.append(status)
+        if len(statuses) == 2:
+            observed_exit.set()
+        elif len(statuses) > 2:
+            extra_cleanup.set()
+        return cleanup(status) if allow_cleanup else False
+
+    monkeypatch.setattr(core, "_cleanup", persistently_fail)
+    owner.start(
+        _request(
+            f"import time; from pathlib import Path; marker=Path({str(permit_exit)!r}); "
+            "\nwhile not marker.exists(): time.sleep(0.01)\nraise SystemExit(7)"
+        )
+    )
+    _wait_snapshot(owner, lambda snapshot: snapshot.pipes is not None)
+    try:
+        first = owner.close_bounded(_deadline())
+        assert first is not None and first.cleanup_retryable and not first.cleaned
+        assert len(statuses) == 1 and statuses[0].status is None
+        permit_exit.touch()
+        assert observed_exit.wait(3)
+        _wait_snapshot(owner, lambda snapshot: snapshot.terminal is not None and snapshot.terminal.local_status == 7)
+        assert not extra_cleanup.wait(0.1)
+        assert len(statuses) == 2
+        failed_retry = owner.close_bounded(_deadline())
+        assert failed_retry is not None and failed_retry.cleanup_retryable and not failed_retry.cleaned
+        extra_cleanup.clear()
+        assert not extra_cleanup.wait(0.1)
+        assert len(statuses) == 3
+        assert all(status is statuses[0] for status in statuses)
+        assert statuses[0].process is children[0]
+        assert owner.close() is first and not first.cleaned
+    finally:
+        permit_exit.touch()
+        allow_cleanup = True
+        terminal = owner.close_bounded(_deadline(3))
+        assert terminal is not None and terminal.cleaned
+    _assert_exact_cleanup(children)
+
+
 @pytest.mark.skipif(os.name != "posix", reason="exact wait loss and numeric signals are POSIX-only")
 def test_lost_exclusive_ownership_stops_retention_and_denies_every_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     process = _fake_process()

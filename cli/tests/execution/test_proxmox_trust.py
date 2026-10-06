@@ -162,9 +162,13 @@ def _execute(url: str, ca_bundle: Path | None):
     connection = ProxmoxConnection(url, "node1", 123, "test@pve!token", _TOKEN, ca_bundle=ca_bundle)
     # Trust decisions need two real worker starts on loaded CI, not a speed assertion.
     # Deadline enforcement is exercised separately in test_proxmox.py.
-    return ProxmoxCarrier(connection).execute(
-        PreparedInvocation(("/bin/true",)), io=CarrierIO(), deadline=Deadline.after(30), custody=LocalDeliveryCustody()
-    )
+    custody = LocalDeliveryCustody()
+    try:
+        return ProxmoxCarrier(connection).execute(
+            PreparedInvocation(("/bin/true",)), io=CarrierIO(), deadline=Deadline.after(30), custody=custody
+        )
+    finally:
+        assert custody.close(Deadline.after(3))
 
 
 @pytest.mark.windows
@@ -183,18 +187,22 @@ def test_passive_provider_observation_preserves_ca_and_hostname_policy(
         bundle = None
     wire = _ProxmoxWire(ProxmoxConnection(url, "node1", 123, "test@pve!token", _TOKEN, ca_bundle=bundle))
     observe = wire.request_current_config if current_config else wire.request_power
-    if trust == "matching":
-        expected = {"vmgenid": "613ea898-8445-4e6e-82c7-f6e9ae8d7235"} if current_config else {"status": "running"}
-        assert observe(timeout=30, custody=LocalDeliveryCustody()) == expected
-        route = "config?current=1" if current_config else "status/current"
-        assert endpoint.requests == [
-            ("GET", f"/api2/json/nodes/node1/qemu/123/{route}", f"PVEAPIToken=test@pve!token={_TOKEN}")
-        ]
-    else:
-        with pytest.raises(_WireFailure) as raised:
-            observe(timeout=30, custody=LocalDeliveryCustody())
-        assert _TOKEN not in str(raised.value)
-        assert endpoint.requests == []
+    custody = LocalDeliveryCustody()
+    try:
+        if trust == "matching":
+            expected = {"vmgenid": "613ea898-8445-4e6e-82c7-f6e9ae8d7235"} if current_config else {"status": "running"}
+            assert observe(timeout=30, custody=custody) == expected
+            route = "config?current=1" if current_config else "status/current"
+            assert endpoint.requests == [
+                ("GET", f"/api2/json/nodes/node1/qemu/123/{route}", f"PVEAPIToken=test@pve!token={_TOKEN}")
+            ]
+        else:
+            with pytest.raises(_WireFailure) as raised:
+                observe(timeout=30, custody=custody)
+            assert _TOKEN not in str(raised.value)
+            assert endpoint.requests == []
+    finally:
+        assert custody.close(Deadline.after(3))
 
 
 # These exercise workstation TLS, path serialization and the real owned worker.
