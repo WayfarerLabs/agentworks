@@ -14,6 +14,7 @@ from threading import current_thread, main_thread
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from threading import Thread
 
 _ENABLE_PROCESSED_INPUT = 0x0001
@@ -46,6 +47,11 @@ class _ConsoleAPI:
     def __init__(self) -> None:
         if sys.platform != "win32":
             raise OSError("Windows console resources are unavailable on this host")
+        import msvcrt
+
+        self._get_osfhandle: Callable[[int], int] = msvcrt.get_osfhandle
+        self._last_error: Callable[[], int] = ctypes.get_last_error
+        self._win_error: Callable[[int], OSError] = ctypes.WinError
         self.kernel: Any = ctypes.WinDLL("kernel32", use_last_error=True)
         k = self.kernel
         k.GetConsoleMode.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)]
@@ -58,11 +64,7 @@ class _ConsoleAPI:
         k.GetConsoleScreenBufferInfo.restype = ctypes.c_int32
 
     def handle(self, fd: int) -> int:
-        if sys.platform != "win32":
-            raise OSError("Windows console resources are unavailable on this host")
-        import msvcrt
-
-        return msvcrt.get_osfhandle(fd)
+        return self._get_osfhandle(fd)
 
     def input_mode(self, handle: int) -> int:
         # GetConsoleMode alone also accepts output buffers. This read-only query
@@ -88,13 +90,10 @@ class _ConsoleAPI:
             raise OSError("Console viewport geometry is invalid")
         return window.bottom - window.top + 1, window.right - window.left + 1
 
-    @staticmethod
-    def _error() -> OSError:
-        if sys.platform != "win32":
-            raise OSError("Windows console resources are unavailable on this host")
+    def _error(self) -> OSError:
         # use_last_error=True preserves the call's code in ctypes' thread-local
         # copy. WinError() without it would query the restored OS error instead.
-        return ctypes.WinError(ctypes.get_last_error())
+        return self._win_error(self._last_error())
 
 
 @dataclass
@@ -149,12 +148,6 @@ class WindowsTerminal:
         """Borrowed console input handle, usable only by the retained worker."""
         self._require_active()
         return self._input_handle
-
-    @property
-    def output_handle(self) -> int:
-        """Borrowed output geometry handle; this resource never changes its modes."""
-        self._require_active()
-        return self._output_handle
 
     def dimensions(self) -> tuple[int, int]:
         """Query current viewport rows/columns from the explicit output handle."""
