@@ -212,13 +212,14 @@ class ProxmoxActivation:
             raise ValidationError("Proxmox activation requires an exact selected VM")
         if type(expected_locator) is not ProviderLocator:
             raise ValidationError("Proxmox activation requires a selected locator")
-        locator = ProviderLocator(expected_locator.token)
         self._payload = ActivationPayload(
             connection.api_url,
             connection.node,
             connection.vmid,
             connection.token_id,
-            hashlib.sha256(b"agentworks:proxmox-activation:locator:v1\0" + locator.token.encode("utf-8")).hexdigest(),
+            hashlib.sha256(
+                b"agentworks:proxmox-activation:locator:v1\0" + expected_locator.token.encode("utf-8")
+            ).hexdigest(),
         )
         encode_activation_payload(self._payload)
         self._owner = owner
@@ -228,7 +229,6 @@ class ProxmoxActivation:
         self._obligation: LifecycleObligation | None = None
         self._attempted = False
         self._mark_began = False
-        self._post_began = False
         self._terminal: ActivationObservation | None = None
 
     @property
@@ -242,10 +242,6 @@ class ProxmoxActivation:
     @property
     def obligation(self) -> LifecycleObligation | None:
         return self._obligation
-
-    @property
-    def post_began(self) -> bool:
-        return self._post_began
 
     @staticmethod
     def _remaining(deadline: Deadline) -> float:
@@ -279,7 +275,6 @@ class ProxmoxActivation:
             self._mark_began = True
             self._obligation.mark_possible_effect()
             remaining = self._remaining(deadline)
-            self._post_began = True
             upid = self._wire.request_vm_start(timeout=remaining)
             receipt = decode_receipt(upid, self._payload)
             # Retain a matching response before CAS, including a late response.

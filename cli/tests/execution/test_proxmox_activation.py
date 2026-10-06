@@ -409,7 +409,7 @@ def test_deadline_after_ledger_commit_never_posts(owned, monkeypatch, stage):
     adapter.reconcile(Deadline.after(5))
     expected = LifecycleObligationState.RESOLVED if stage == "register" else LifecycleObligationState.POSSIBLE_EFFECT
     assert owner.list_lifecycle_obligations()[0].state is expected
-    assert not adapter.post_began and calls == []
+    assert calls == []
 
 
 def test_late_task_status_retains_and_fresh_observation_can_settle(owned, monkeypatch):
