@@ -717,6 +717,22 @@ annotation and formats the new evidence paragraph. Corrected whole-unit re-revie
 lead gates remain pending; no native, RunContext, broader plan or public-round completion is
 claimed.
 
+All three independent lanes clear the corrected whole unit at `fe1a7b4e9`: project passes 461
+focused/adjacent cases and scoped typing/style; generic passes 307 cases; complexity passes 175
+baseline and restored cases. Independently reverting only fenced reconciliation makes six
+second-write, failed-observation and stale-owner regressions fail. Project also verifies that a
+conflicting successor retains its borrow, attempt and rows while the old retry refuses. Each review
+tree is restored clean at the exact pin.
+
+The lead's exact corrected suite passes 15,201 non-integration tests with 49 skips and 27 existing
+fork warnings, exit 0. Complete Ruff/format, strict mypy (1,233 source and test files), typer
+isolation, file quality, locked-SDD, Rulesync and whitespace gates exit 0. Website validation passes
+160 Python and 103 Node cases, four builds and both deterministic comparisons. Published predecessor
+`aebeff4a0` passes hosted CI and CodeQL. These results establish the reviewed private file-recovery
+and inline-lifetime mechanisms, not native privilege/fencing/drain, production recovery, independent
+job availability, remaining platform factories or complete additive RunContext. Draft WIP
+publication closes no public round or broader plan gate; no database data or SSH branch changes.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
