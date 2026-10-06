@@ -4,14 +4,41 @@ from __future__ import annotations
 
 import os
 import select
-from collections.abc import Iterator
+import subprocess
+import sys
+from collections.abc import Callable, Iterator
+from functools import wraps
 from pathlib import Path
+from threading import Thread
 
 import pytest
 
 from agentworks.execution.carriers.ssh._terminal_posix import PosixTerminal
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="Requires POSIX terminal descriptors")
+
+
+def _native_worker[**P](test: Callable[P, None]) -> Callable[P, None]:
+    """Keep one owned worker through a native case, returning its exception intact."""
+
+    @wraps(test)
+    def run(*args: P.args, **kwargs: P.kwargs) -> None:
+        errors: list[BaseException] = []
+
+        def work() -> None:
+            try:
+                test(*args, **kwargs)
+            except BaseException as error:
+                errors.append(error)
+
+        worker = Thread(target=work)
+        worker.start()
+        worker.join(5)
+        assert not worker.is_alive()
+        if errors:
+            raise errors[0]
+
+    return run
 
 
 @pytest.fixture
@@ -36,6 +63,7 @@ def _assert_closed(fd: int) -> None:
 
 
 @pytest.mark.parametrize("borrowed_nonblocking,inheritable", [(False, False), (True, True)])
+@_native_worker
 def test_modes_geometry_flags_and_borrowed_lifetime(
     endpoint: tuple[int, int], borrowed_nonblocking: bool, inheritable: bool
 ) -> None:
@@ -45,6 +73,8 @@ def test_modes_geometry_flags_and_borrowed_lifetime(
     mode = termios.tcgetattr(borrowed)
     mode[3] &= ~termios.ECHO
     mode[6][termios.VINTR] = b"\x07"
+    mode[6][termios.VMIN] = b"\x07"
+    mode[6][termios.VTIME] = b"\x03"
     termios.tcsetattr(borrowed, termios.TCSANOW, mode)
     termios.tcsetwinsize(borrowed, (31, 97))
     os.set_blocking(borrowed, not borrowed_nonblocking)
@@ -78,6 +108,7 @@ def test_modes_geometry_flags_and_borrowed_lifetime(
         _ = terminal.slave_fd
 
 
+@_native_worker
 def test_acquisition_preserves_queued_input(endpoint: tuple[int, int]) -> None:
     import termios
 
@@ -108,6 +139,7 @@ def test_acquisition_preserves_queued_input(endpoint: tuple[int, int]) -> None:
     [(kind, side) for kind in ("negative", "closed", "pipe", "file") for side in ("input", "output")]
     + [("write_input", "input")],
 )
+@_native_worker
 def test_bad_fd_refuses_without_changing_terminal(
     endpoint: tuple[int, int], bad_endpoint: str, bad_side: str, tmp_path: Path
 ) -> None:
@@ -146,6 +178,7 @@ def test_bad_fd_refuses_without_changing_terminal(
             os.close(fd)
 
 
+@_native_worker
 def test_distinct_read_only_output_supplies_geometry(endpoint: tuple[int, int]) -> None:
     import termios
 
@@ -178,6 +211,7 @@ def test_distinct_read_only_output_supplies_geometry(endpoint: tuple[int, int]) 
 
 @pytest.mark.parametrize("stage", ["allocation", "copy", "raw"])
 @pytest.mark.parametrize("failure", [OSError("native failure"), KeyboardInterrupt(), SystemExit(17)])
+@_native_worker
 def test_acquisition_failure_restores_and_closes(
     endpoint: tuple[int, int], monkeypatch: pytest.MonkeyPatch, stage: str, failure: BaseException
 ) -> None:
@@ -215,6 +249,7 @@ def test_acquisition_failure_restores_and_closes(
 
 
 @pytest.mark.parametrize("failure", [OSError("restore failed"), KeyboardInterrupt(), SystemExit(23)])
+@_native_worker
 def test_release_reports_restore_failure_and_still_closes(
     endpoint: tuple[int, int], monkeypatch: pytest.MonkeyPatch, failure: BaseException
 ) -> None:
@@ -242,6 +277,7 @@ def test_release_reports_restore_failure_and_still_closes(
         set_mode(borrowed, termios.TCSANOW, mode)
 
 
+@_native_worker
 def test_acquisition_retains_primary_and_cleanup_failures(
     endpoint: tuple[int, int], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -290,6 +326,7 @@ def test_acquisition_retains_primary_and_cleanup_failures(
 
 
 @pytest.mark.parametrize("failure", [OSError("close failed"), KeyboardInterrupt()])
+@_native_worker
 def test_uncertain_close_is_reported_without_retry(
     endpoint: tuple[int, int], monkeypatch: pytest.MonkeyPatch, failure: BaseException
 ) -> None:
@@ -315,3 +352,134 @@ def test_uncertain_close_is_reported_without_retry(
     _assert_closed(master)
     _assert_closed(slave)
     os.fstat(borrowed)
+
+
+def test_main_thread_acquisition_refuses_before_native_work(
+    endpoint: tuple[int, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import termios
+
+    _, borrowed = endpoint
+    mode = termios.tcgetattr(borrowed)
+    flags = _flags(borrowed)
+
+    def unexpected_native(*args: object) -> None:
+        raise AssertionError("Native admission ran on the main thread")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(termios, "tcgetattr", unexpected_native)
+        patch.setattr(termios, "tcgetwinsize", unexpected_native)
+        patch.setattr(os, "openpty", unexpected_native)
+        with pytest.raises(RuntimeError):
+            PosixTerminal.acquire(borrowed, borrowed)
+    assert termios.tcgetattr(borrowed) == mode
+    assert _flags(borrowed) == flags
+    os.fstat(borrowed)
+
+
+@_native_worker
+def test_wrong_owner_refuses_resize_and_release_before_effects(endpoint: tuple[int, int]) -> None:
+    import termios
+
+    _, borrowed = endpoint
+    mode = termios.tcgetattr(borrowed)
+    termios.tcsetwinsize(borrowed, (31, 97))
+    terminal = PosixTerminal.acquire(borrowed, borrowed)
+    master, slave = terminal.master_fd, terminal.slave_fd
+    raw_mode = termios.tcgetattr(borrowed)
+
+    @_native_worker
+    def wrong_owner() -> None:
+        with pytest.raises(RuntimeError):
+            terminal.refresh_dimensions()
+        with pytest.raises(RuntimeError):
+            terminal.release()
+
+    try:
+        termios.tcsetwinsize(borrowed, (42, 113))
+        wrong_owner()
+        assert termios.tcgetattr(borrowed) == raw_mode
+        assert termios.tcgetwinsize(slave) == (31, 97)
+        os.fstat(master)
+        os.fstat(slave)
+        assert terminal.refresh_dimensions()
+        assert termios.tcgetwinsize(slave) == (42, 113)
+    finally:
+        assert terminal.release() == ()
+    assert termios.tcgetattr(borrowed) == mode
+    _assert_closed(master)
+    _assert_closed(slave)
+
+
+def test_main_sigint_keeps_native_worker_available_for_cleanup() -> None:
+    # Own the process as well as its PTY, so the real signal cannot reach pytest
+    # or an operator terminal. The worker stays retained until cleanup settles.
+    code = """
+import os
+import signal
+import termios
+from threading import Event, Thread
+from agentworks.execution.carriers.ssh._terminal_posix import PosixTerminal
+
+master, borrowed = os.openpty()
+mode = termios.tcgetattr(borrowed)
+ready, stop = Event(), Event()
+resources, errors, releases = [], [], []
+
+def native_worker():
+    terminal = None
+    try:
+        terminal = PosixTerminal.acquire(borrowed, borrowed)
+        resources.append((terminal, terminal.master_fd, terminal.slave_fd))
+        ready.set()
+        assert stop.wait(3)
+    except BaseException as error:
+        errors.append(error)
+    finally:
+        if terminal is not None:
+            releases.append(terminal.release())
+        ready.set()
+
+worker = Thread(target=native_worker)
+try:
+    worker.start()
+    try:
+        assert ready.wait(3)
+        assert not errors
+        assert termios.tcgetattr(borrowed) != mode
+        terminal, owned_master, owned_slave = resources[0]
+        for operation in (terminal.refresh_dimensions, terminal.release):
+            try:
+                operation()
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError('Main thread mutated a worker resource')
+        signal.raise_signal(signal.SIGINT)
+        raise AssertionError('SIGINT did not interrupt the main thread')
+    except KeyboardInterrupt:
+        assert worker.is_alive()
+        assert termios.tcgetattr(borrowed) != mode
+    finally:
+        stop.set()
+        worker.join(3)
+    assert not worker.is_alive()
+    assert not errors
+    assert releases == [()]
+    assert termios.tcgetattr(borrowed) == mode
+    os.fstat(borrowed)
+    for fd in (owned_master, owned_slave):
+        try:
+            os.fstat(fd)
+        except OSError:
+            pass
+        else:
+            raise AssertionError('Owned descriptor remained open')
+finally:
+    stop.set()
+    worker.join(3)
+    os.close(borrowed)
+    os.close(master)
+"""
+    result = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, timeout=10, check=False)
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
