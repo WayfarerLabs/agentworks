@@ -122,6 +122,7 @@ def test_comparison_reinjects_identical_vectors_and_reports_observations(private
     }
     for value in observations:
         assert value["phase"] == "input_comparison"
+        assert value["low_level_records"] == value["injected"]
         assert value["remaining_records"] == []
         assert value["nowait_seconds"] == 0.125
         assert value["input_mode"] == (0x0227 & ~(7 | 0x0200)) | (0x0200 if value["vt_input"] else 0)

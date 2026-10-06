@@ -1,4 +1,4 @@
-<!-- cspell:ignore asdict pathlib pseudoconsole -->
+<!-- cspell:ignore asdict nowait numpad pathlib pseudoconsole -->
 
 # SSH carrier tests and live handoff
 
@@ -23,7 +23,7 @@ its installed candidate without editable links or automatic synchronization:
 
 ```bash
 uv sync --frozen --no-editable
-uv run --no-sync pytest tests/execution/carriers/ssh/test_terminal_windows_native.py -m windows
+uv run --no-sync pytest tests/execution/carriers/ssh/test_terminal_windows_native.py::test_owned_console_resource_and_nowait_records -m windows -rP
 ```
 
 It checks native resource admission, early raw input, viewport geometry and exact restoration with
@@ -35,6 +35,25 @@ records. Each measured poll must finish within five seconds, a generous fixture 
 production keyboard cancellation guarantee. These injections establish record polling behavior;
 physical keyboard translation, virtual terminal key sequences, keyboard cancellation, SSH clients,
 pseudoconsole preparation and the complete Windows workflow still require separate proof.
+
+The same owned console supplies 48 record/character comparisons: six distinct input/output code-page
+pairs drawn from 437, 1252 and 932, VT input off/on, and four injected vectors per setting. Each
+vector contains a private-flagged `VK_MENU` release or an ordinary Unicode control, followed by an
+ordinary keydown sentinel. The low-level read reports kind, down, repeat, virtual key, UTF-16 unit
+and control state; `ReadConsoleW` consumes the byte-identical vector injected again and reports its
+actual returned UTF-16 batches. Native `MultiByteToWideChar` calls supply separate input-page and
+output-page conversion references. Packed two-byte private probes use only output page 932;
+single-byte private probes use output page 437 or 1252. The sentinel supplies a queued character
+when a release is ignored; the retained parent timeout bounds a stalled native call.
+
+The comparison runs on the retained fixture worker, using only its fresh hidden console and owned
+descriptors. It does not access the caller console, change global focus, generate physical
+Alt-numpad input, select a production decoder or enable the Windows keyboard. The command's `-rP`
+displays one structured passing report after the control and cleanup gates pass; per-vector JSON
+observations remain in the owned logs. Private-record values remain unobserved until that scoped
+report is collected and inspected. A green run whose passing output was not collected establishes
+the asserted control and cleanup gates, not private-flag normalization or supported Windows keyboard
+behavior.
 
 The parent retains and reaps exactly its child, with a 120-second execution timeout and a 10-second
 reaping timeout. It launches the real CPython interpreter directly using the
