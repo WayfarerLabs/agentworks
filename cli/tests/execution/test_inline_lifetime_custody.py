@@ -437,3 +437,116 @@ def test_terminal_capture_serializes_concurrent_bookkeeping(
     assert not operation.unfinished_inline_executions
     assert carrier.calls == (0 if terminal == "control" else 1)
     operation.finish()
+
+
+def _lose_second_mark(database: Database, monkeypatch: pytest.MonkeyPatch, *, committed: bool) -> None:
+    original = type(database.operations).mark_lifecycle_obligation_possible_effect
+    marks = 0
+
+    def lost_reply(self, *args, **kwargs):
+        nonlocal marks
+        marks += 1
+        if marks == 2:
+            if committed:
+                original(self, *args, **kwargs)
+            raise KeyboardInterrupt("attempt admission reply lost")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(type(database.operations), "mark_lifecycle_obligation_possible_effect", lost_reply)
+
+
+@pytest.mark.parametrize("committed", [False, True])
+def test_second_mark_reply_loss_retry_allows_fresh_command(
+    owned, monkeypatch: pytest.MonkeyPatch, committed: bool
+) -> None:
+    database, owner, operation = owned
+    _patch_candidate_execution(monkeypatch)
+    _lose_second_mark(database, monkeypatch, committed=committed)
+    carrier = RecordingCarrier(CarrierReport(Dispatch.SENT, ExitStatus(code=0)))
+    with pytest.raises(KeyboardInterrupt):
+        _run(operation, carrier)
+    assert carrier.calls == 0
+    (active,) = operation.active_inline_calls
+    assert active.borrow.has_outstanding_attempt
+    (before,) = database.operations.list_lifecycle_obligations(owner.ownership)
+    operation.retry_inline_bookkeeping()
+    assert carrier.calls == 0
+    assert operation.active_inline_calls == ()
+    assert not _run(operation, carrier).requires_owner_retention
+    assert carrier.calls == 1
+    (after,) = database.operations.list_lifecycle_obligations(owner.ownership)
+    assert before.obligation_id == after.obligation_id
+    operation.finish()
+
+
+@pytest.mark.parametrize("committed", [False, True])
+@pytest.mark.parametrize("refusal", ["observation", "stale"])
+def test_second_mark_retry_refusal_preserves_exact_custody(
+    owned, monkeypatch: pytest.MonkeyPatch, committed: bool, refusal: str
+) -> None:
+    database, owner, operation = owned
+    _patch_candidate_execution(monkeypatch)
+    _lose_second_mark(database, monkeypatch, committed=committed)
+    carrier = RecordingCarrier(CarrierReport(Dispatch.SENT, ExitStatus(code=0)))
+    with pytest.raises(KeyboardInterrupt):
+        _run(operation, carrier)
+    (active,) = operation.active_inline_calls
+    attempt = owner._outstanding_attempt
+    assert attempt is not None and active.borrow.has_outstanding_attempt
+    if refusal == "stale":
+        recovery = OperationOwner.recover(database.operations, owner.ownership, uuid4().hex)
+        rows = database.operations.list_lifecycle_obligations(recovery.ownership)
+    else:
+        original_inspect = type(database.operations).inspect
+
+        def unavailable(self, *args, **kwargs):
+            raise StateError("claim observation unavailable")
+
+        monkeypatch.setattr(type(database.operations), "inspect", unavailable)
+    with pytest.raises(StateError):
+        operation.retry_inline_bookkeeping()
+    assert operation.active_inline_calls == (active,)
+    assert owner._outstanding_attempt is attempt
+    assert active.borrow.has_outstanding_attempt
+    assert active.operation.coordination_uncertain
+    assert not active.borrow._closed
+    assert carrier.calls == 0
+    if refusal == "stale":
+        assert database.operations.list_lifecycle_obligations(recovery.ownership) == rows
+    else:
+        monkeypatch.setattr(type(database.operations), "inspect", original_inspect)
+        operation.retry_inline_bookkeeping()
+        assert not _run(operation, carrier).requires_owner_retention
+        assert carrier.calls == 1
+        operation.finish()
+
+
+def test_predispatch_retry_refuses_successor_borrow(owned, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, owner, operation = owned
+    _patch_candidate_execution(monkeypatch)
+    original = OperationBorrow.handoff_retained_effect
+
+    def lost_reply(self):
+        original(self)
+        raise KeyboardInterrupt("validation handoff reply lost")
+
+    class RefusingCarrier(RecordingCarrier):
+        def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+            raise ValidationError("refused")
+
+    monkeypatch.setattr(OperationBorrow, "handoff_retained_effect", lost_reply)
+    carrier = RefusingCarrier()
+    with pytest.raises(ValidationError):
+        _run(operation, carrier)
+    (active,) = operation.active_inline_calls
+    successor = owner.borrow()
+    with pytest.raises(StateError):
+        operation.retry_inline_bookkeeping()
+    assert operation.active_inline_calls == (active,)
+    assert not successor._closed
+    assert carrier.calls == 0
+    attempt = successor.begin_attempt()
+    attempt.settle()
+    successor.close()
+    operation.retry_inline_bookkeeping()
+    operation.finish()
