@@ -246,7 +246,7 @@ def test_lost_wait_status_never_becomes_forwarding_exit_zero(monkeypatch: pytest
     monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
     owner = process_core.LocalProcessOwner()
     resource = forwarding.OwnedForwarding(owner, b"unused\n")
-    resource._start(process_core.LocalProcessRequest(("unused",), True))
+    resource._start(process_core.LocalProcessRequest(("unused",), process_core.LocalProcessInput.PIPE))
 
     with pytest.raises(ForwardingError) as caught:
         resource.wait()

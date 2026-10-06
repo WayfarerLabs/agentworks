@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ConnectivityError, StateError, ValidationError
 from agentworks.execution._process import (
+    LocalProcessInput,
     LocalProcessOwner,
     LocalProcessPipes,
     LocalProcessRequest,
@@ -354,7 +355,7 @@ def open_local_forwards(
         environment = _child_environment()
         request = LocalProcessRequest(
             tuple(argv),
-            True,
+            LocalProcessInput.PIPE,
             None if environment is None else tuple(environment.items()),
         )
     except (OSError, ValueError):
