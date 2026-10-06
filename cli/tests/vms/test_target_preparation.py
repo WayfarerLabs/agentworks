@@ -10,7 +10,15 @@ from unittest.mock import Mock, call
 import pytest
 
 from agentworks.capabilities.vm_platform.base import ProviderLocator, ProviderLocatorUnavailable, VMPlatform
-from agentworks.db import Database, OperationClaimState, OperationResourceKind, OperationScope, VMRow
+from agentworks.db import (
+    Database,
+    LifecycleObligationState,
+    OperationClaimState,
+    OperationOwnership,
+    OperationResourceKind,
+    OperationScope,
+    VMRow,
+)
 from agentworks.db.operations import OperationRepository
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._helper_identity import IdentityExpectation
@@ -1047,20 +1055,24 @@ def test_second_locator_refuses_unavailable_invalid_exceptional_or_late_result(
 
 
 @pytest.mark.parametrize("selected_platform", [False, True])
+@pytest.mark.parametrize("committed", [False, True])
 def test_repository_release_failure_suppresses_prepared_target(
-    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch, selected_platform: bool
+    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch, selected_platform: bool, committed: bool
 ) -> None:
-    _, owner = owned
+    database, owner = owned
     borrows, releases = _watch_custody(monkeypatch)
     carrier = TranscriptCarrier(_success_payload())
     platform = _platform(carrier)
     resolution_calls = 0
+    original_resolution = OperationRepository.resolve_lifecycle_obligation
+    cleanup = StateError("injected obligation resolution failure")
 
-    def fail_resolution(*args: object, **kwargs: object) -> None:
+    def fail_resolution(repository: OperationRepository, ownership: OperationOwnership, obligation_id: str) -> None:
         nonlocal resolution_calls
-        del args, kwargs
         resolution_calls += 1
-        raise StateError("injected obligation resolution failure")
+        if committed:
+            original_resolution(repository, ownership, obligation_id)
+        raise cleanup
 
     monkeypatch.setattr(OperationRepository, "resolve_lifecycle_obligation", fail_resolution)
     with pytest.raises(StateError) as raised:
@@ -1069,6 +1081,7 @@ def test_repository_release_failure_suppresses_prepared_target(
         else:
             _prepare(owner, carrier)
 
+    assert raised.value is cleanup
     fact = raised.value.__cause__
     assert isinstance(fact, VMTargetPreparationControlFact)
     assert fact.preparation.status is VMTargetPreparationStatus.UNCERTAIN
@@ -1086,25 +1099,40 @@ def test_repository_release_failure_suppresses_prepared_target(
         owner.borrow()
     with pytest.raises(StateError):
         owner.close()
+    claim = database.operations.inspect(owner.ownership.scope)
+    assert claim is not None and claim.ownership == owner.ownership
+    rows = owner.list_lifecycle_obligations()
+    assert len(rows) == 1 and (rows[0].state is LifecycleObligationState.RESOLVED) is committed
 
 
+@pytest.mark.parametrize("committed", [False, True])
+@pytest.mark.parametrize("control_kind", ["malformed", "keyboard", "exit", "typed"])
 def test_confirmation_error_and_release_error_preserve_guest_and_control_chain(
-    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch
+    owned: tuple[Database, OperationOwner], monkeypatch: pytest.MonkeyPatch, committed: bool, control_kind: str
 ) -> None:
-    _, owner = owned
+    database, owner = owned
     borrows, releases = _watch_custody(monkeypatch)
     carrier = TranscriptCarrier(_success_payload())
     platform = _platform(carrier)
-    platform.observe_provider_locator.side_effect = [ProviderLocator("opaque"), "malformed"]
+    controls = {"keyboard": KeyboardInterrupt(), "exit": SystemExit(3), "typed": StateError("locator failure")}
+    control = controls.get(control_kind)
+    platform.observe_provider_locator.side_effect = [ProviderLocator("opaque"), control or "malformed"]
+    original_resolution = OperationRepository.resolve_lifecycle_obligation
+    resolution_calls = 0
 
-    def fail_resolution(*args: object, **kwargs: object) -> None:
-        del args, kwargs
+    def fail_resolution(repository: OperationRepository, ownership: OperationOwnership, obligation_id: str) -> None:
+        nonlocal resolution_calls
+        resolution_calls += 1
+        if committed:
+            original_resolution(repository, ownership, obligation_id)
         raise StateError("injected obligation resolution failure")
 
     monkeypatch.setattr(OperationRepository, "resolve_lifecycle_obligation", fail_resolution)
-    with pytest.raises(StateError) as raised:
+    with pytest.raises(type(control) if control is not None else ValidationError) as raised:
         _compose(owner, platform)
 
+    if control is not None:
+        assert raised.value is control
     fact = raised.value.__cause__
     assert isinstance(fact, VMTargetPreparationControlFact)
     assert fact.preparation.status is VMTargetPreparationStatus.UNCERTAIN
@@ -1113,15 +1141,22 @@ def test_confirmation_error_and_release_error_preserve_guest_and_control_chain(
     assert fact.preparation.failure is VMTargetPreparationFailure.LOCATOR_UNCONFIRMED
     assert fact.preparation.coordination_uncertain
     assert fact.preparation.requires_owner_retention
-    original = fact.__cause__
-    assert isinstance(original, ValidationError)
-    assert isinstance(original.__cause__, VMTargetPreparationControlFact)
-    assert original.__cause__.preparation.guest_result is not None
-    assert original.__cause__.preparation.target is None
-    assert carrier.calls == 1
+    original_fact = fact.__cause__
+    assert isinstance(original_fact, VMTargetPreparationControlFact)
+    assert original_fact.preparation.guest_result is fact.preparation.guest_result
+    assert original_fact.preparation.target is None
+    assert raised.value.__suppress_context__
+    assert carrier.calls == 1 and resolution_calls == 1
     assert len(borrows) == 1 and releases == borrows
     with pytest.raises(StateError):
         owner.borrow()
+    with pytest.raises(StateError):
+        owner.close()
+    claim = database.operations.inspect(owner.ownership.scope)
+    assert claim is not None and claim.ownership == owner.ownership
+    rows = owner.list_lifecycle_obligations()
+    assert len(rows) == 1 and (rows[0].state is LifecycleObligationState.RESOLVED) is committed
+    assert resolution_calls == 1
 
 
 def test_preparation_value_rejects_inconsistent_status_and_retention() -> None:

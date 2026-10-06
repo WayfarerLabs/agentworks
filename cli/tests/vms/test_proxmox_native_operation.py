@@ -444,6 +444,53 @@ def test_interrupted_owner_release_retries_exact_cleanup(database, tmp_path, mon
     assert route.local.calls == 0
 
 
+@pytest.mark.parametrize("committed", [False, True])
+@pytest.mark.parametrize("control_type", [KeyboardInterrupt, SystemExit])
+def test_locator_control_survives_borrow_release_failure(database, tmp_path, monkeypatch, committed, control_type):
+    platform, route = _install(database, monkeypatch)
+    control = control_type()
+    original_resolution = OperationRepository.resolve_lifecycle_obligation
+    observations = 0
+    resolutions = 0
+
+    def locator(*args, **kwargs):
+        nonlocal observations
+        observations += 1
+        if observations == 3:
+            raise control
+        return ProviderLocator("pve:generation")
+
+    def interrupted_release(repository, ownership, obligation_id):
+        nonlocal resolutions
+        resolutions += 1
+        if committed:
+            original_resolution(repository, ownership, obligation_id)
+        raise StateError("injected obligation resolution failure")
+
+    monkeypatch.setattr(platform, "observe_provider_locator", locator)
+    monkeypatch.setattr(OperationRepository, "resolve_lifecycle_obligation", interrupted_release)
+    with (
+        pytest.raises(control_type) as caught,
+        native_vm_operation(
+            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=PurePosixPath(tmp_path)
+        ),
+    ):
+        pytest.fail("uncertain preparation admitted body")
+    assert caught.value is control
+    fact = control.__cause__
+    assert isinstance(fact, NativeVMOperationControlFact)
+    preparation = fact._workflow.preparation_fact
+    assert preparation is not None and preparation.requires_owner_retention
+    assert preparation.guest_result is not None and preparation.guest_result.observation is not None
+    assert preparation.guest_result.observation.identity == route.local.observed
+    claim = database.operations.inspect(_scope())
+    assert claim is not None and claim.ownership == fact._workflow.owner.ownership
+    with pytest.raises(StateError):
+        fact.retry_cleanup(Deadline.after(10))
+    assert route.guest.calls == resolutions == 1
+    assert not route.accounts.calls and route.local.calls == 0
+
+
 def test_identity_borrow_release_failure_cannot_release_owner(database, tmp_path, monkeypatch):
     platform, route = _install(database, monkeypatch)
     original = release_borrow_after_custody

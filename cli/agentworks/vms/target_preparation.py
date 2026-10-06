@@ -391,9 +391,12 @@ def _release_preparation_borrow(
             True,
         )
         fact = VMTargetPreparationControlFact(uncertain)
-        if control is not None:
-            fact.__cause__ = control
-        raise release_error from fact
+        if control is None:
+            raise release_error from fact
+        fact.__cause__ = control.__cause__
+        control.__cause__ = fact
+        control.__suppress_context__ = True
+        control.add_note("Managed VM target preparation retained uncertain borrow-release custody")
 
 
 def _record_deadline(state: _State, deadline: Deadline) -> bool:

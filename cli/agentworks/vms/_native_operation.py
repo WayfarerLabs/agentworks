@@ -196,8 +196,6 @@ def _prepare_running_proxmox(
     Proxmox has no idle-stop hold. The exact VM owner still covers preparation,
     child obligations and aggregate teardown; stopped activation is unavailable.
     """
-    from agentworks.execution.binding import NativeExecutionBinding
-    from agentworks.execution.carriers.proxmox import ProxmoxCarrier
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
     if type(platform) is not ProxmoxPlatform:
@@ -209,18 +207,10 @@ def _prepare_running_proxmox(
         raise StateError("Native VM locator observation exceeded its deadline", entity_kind="vm", entity_name=vm.name)
     if type(locator) is not ProviderLocator:
         raise StateError("Native VM route is unavailable", entity_kind="vm", entity_name=vm.name)
-    locator = ProviderLocator(locator.token)
     workflow.selected_locator = locator
     binding = platform.resolve_native_execution_binding(vm, ctx, deadline=workflow.deadline, config=ctx.config)
     if workflow.deadline.expired:
         raise StateError("Native VM binding resolution exceeded its deadline", entity_kind="vm", entity_name=vm.name)
-    if (
-        type(binding) is not NativeExecutionBinding
-        or type(binding.carrier) is not ProxmoxCarrier
-        or binding.delivery_account != "root"
-        or binding._early_guest_facts_route is not None
-    ):
-        raise ValidationError("Native Proxmox operation requires its selected root QGA binding")
     workflow.selected_binding = binding
     try:
         preparation = prepare_managed_vm_target_from_platform(
