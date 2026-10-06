@@ -85,7 +85,9 @@ associated pending acceptance gates are superseded by this ruling.
       already-existing availability; it cannot activate a VM or start or extend a hold. Preserve the
       distinction between stopped intent and observed power: intent forbids automatic startup of a
       definitively stopped VM, but an already-running VM can still be used. Treat transitional and
-      unknown provider states explicitly rather than assuming they are stopped.
+      unknown provider states explicitly rather than assuming they are stopped. Implement this
+      boundary with its concrete activation producer and selected platform hold; a freely
+      constructible active-now token or test-only no-op adapter does not prove availability.
 - [ ] Cover pre-context activation and nested teardown when wiring ownership. At `806741ca`,
       `gated_vm_boundary` enters `activation_gate` before assembling its ordinary operation context,
       and `LiveVMNode` constructs a separate gate context. Context factories, harness setup's
