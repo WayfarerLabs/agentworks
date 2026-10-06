@@ -870,10 +870,10 @@ for an explicit retry and reports any close uncertainty. The stage does not cons
 or establish the caller's deadline and ownership facts. It is not wired to public
 `FileAccess.download`, and Windows and macOS local publication remain unaccepted.
 
-The private macOS and Windows stages implement the same local publication boundary. Create
-publishes caller-private access without overwriting an existing entry: mode 0600 on Linux/macOS and
-a caller-only protected DACL on Windows. macOS and Windows Replace copy into a held existing file;
-a later write, truncate, flush, close or deadline failure retains publication uncertainty. macOS
+The private macOS and Windows stages implement the same local publication boundary. Create publishes
+caller-private access without overwriting an existing entry: mode 0600 on Linux/macOS and a
+caller-only protected DACL on Windows. macOS and Windows Replace copy into a held existing file; a
+later write, truncate, flush, close or deadline failure retains publication uncertainty. macOS
 currently refuses ACLs, extended attributes, BSD flags and privilege-bearing modes. Windows uses
 native file identity, sharing and security-descriptor checks. Native macOS and Windows filesystem
 behavior still needs acceptance evidence before these candidates can supply production download
