@@ -119,6 +119,7 @@ the passive resource held before startup, with one explicit start operation:
 ```text
 OwnedForwarding(connection: SSHConnection, forwards: Sequence[LocalForward])
 OwnedForwarding.start(deadline: Deadline, custody: LocalDeliveryCustody) -> None
+OwnedForwarding.wait() -> int
 OwnedForwarding.close(deadline: Deadline) -> bool
 ```
 
@@ -132,14 +133,23 @@ own settlement.
 Closing permanently prevents new startup, bounds drainer shutdown and stops all pipe use before
 asking that owner for bounded cleanup. Incomplete drainer or native settlement returns incomplete
 cleanup without releasing ownership. An explicit later close may retry through the same native
-owner. Natural-exit observation and context cleanup must preserve this retained lifetime; neither
-may turn an incomplete close into released ownership. The startup deadline still does not limit a
-successfully held session's lifetime. This replaces factory startup before the caller receives
-ownership without adding a second forwarding coordinator or changing the raw carrier contract.
+owner. The startup deadline still does not limit a successfully held session's lifetime. This
+replaces factory startup before the caller receives ownership without adding a second forwarding
+coordinator or changing the raw carrier contract.
 
-Startup and cleanup preserve original control exceptions without placing resource capabilities in
-their causes. Context cleanup requires a finite observation budget and cannot silently replace
-explicit retry after incomplete cleanup.
+In this revised API, `close(deadline)` is the sole cleanup operation; there is no context-manager
+cleanup. `wait()` observes the local client's natural exit or an observation failure, without
+requesting cleanup or releasing ownership. It returns a known natural exit status or raises safe
+forwarding evidence when that status cannot be established. Waiting has no implicit timeout;
+interruption propagates while the caller retains the same resource. Another caller may explicitly
+close the resource while waiting; a cleanup-produced status is not reported as natural exit.
+
+The caller attempts close in its enclosing cleanup path with a fresh finite deadline and explicitly
+handles `False` by retaining the resource for retry. If startup or wait already raised a control
+exception, cleanup failure must not replace it: preserve that exception, record sanitized cleanup
+failure or incompleteness separately, and keep custody held. Without an existing failure, a cleanup
+error remains explicit. Reports, exception causes and diagnostic notes contain no live resource
+capabilities. Neither natural exit nor a returned status proves completed cleanup.
 
 ## Evidence
 

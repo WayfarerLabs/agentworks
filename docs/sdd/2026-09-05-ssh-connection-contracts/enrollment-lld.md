@@ -71,6 +71,15 @@ filesystem syscalls or process construction. The existing immutable candidate re
 evidence only, with no live resource attached. A later strict recovery uses a new resource with the
 same bundle and creation identity after prior cleanup releases the lock.
 
+The caller attempts explicit close with a fresh finite deadline on both success and failure, and
+retains the resource when close reports incomplete cleanup. If maintenance already raised a control
+exception, a native-cleanup or final-flush error must not replace it. The enclosing caller preserves
+the original exception and separately records sanitized cleanup failure or incompleteness, retaining
+custody until it can complete or explicitly handle that failure. Without an existing failure, the
+cleanup error remains explicit. Reports, exception causes and diagnostic notes contain no live
+cleanup capabilities; ordinary `finally` code that masks an earlier interruption does not satisfy
+this contract.
+
 ## Authentication and retained trust are separate observations
 
 The initial bounded installed-client operation uses the candidate as its first known-host file,
