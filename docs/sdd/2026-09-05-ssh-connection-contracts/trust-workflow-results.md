@@ -170,3 +170,15 @@ mutation, the corrected focused selection again passed **168 tests with 1 skip**
 Changed-test Ruff lint/format, strict scoped mypy and both documents' pinned formatting, Markdown
 and spelling checks pass. The original measurements above remain historical evidence; this
 correction adds the missing custody guard and does not expand the local acceptance scope.
+
+All three independent private source lanes clear corrected combined pin
+`81271915ea9487c1d68957734dd2f0e2d14123a7`. The lead's first integrated pin
+`ee3da60ee35f5ea01dfc7042f420a941af07c0de` passes the full suite: **15,770 non-integration tests, 51
+skips and 27 warnings**, exit 0 in 240.82 seconds. After the assertion/deletion correction, the
+lead's focused selection passes **168 tests with 1 skip**, exit 0. Final full Ruff/format (1,315
+files), strict mypy (1,278 sources), scoped Windows typing (one file with silent imports), exact CI
+typer isolation, locked-SDD and Rulesync checks pass. Fresh website checks pass 160 Python and 103
+Node tests, four builds and both deterministic comparisons. The corrected focused run is not a
+second full-suite run. Settled fixture/output roots are independently checked before removal; logs
+remain retained. These reviews and gates concern this private persistence increment, not full PR
+approval or native/production acceptance.

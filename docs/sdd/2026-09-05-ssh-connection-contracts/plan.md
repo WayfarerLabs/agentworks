@@ -189,6 +189,12 @@ local validation separately from the remaining shared integration and platform a
 [trust workflow record](trust-workflow-results.md) distinguishes newly composed installed-client
 proof fixtures from native execution and genuine production publication.
 
+The
+[local persisted-configuration record](trust-workflow-results.md#local-persisted-configuration-restoration)
+proves that restoring old TOML does not discard current managed policy, revocations, blocking or
+partial-update custody. Production writer coexistence and rollback through both usable RunContext
+paths still require transport composition and native acceptance.
+
 Shared subprocess adoption introduces an implementation dependency on transport #833. Current
 integration uses `1a5441722c995ea5c54095c7c8a47360a4b1c6f4`. Its shared carrier, process,
 preparation and terminal-input interfaces remain unchanged from the preceding SSH integration.
