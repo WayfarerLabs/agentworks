@@ -17,10 +17,12 @@ from ._managed_job_store import FactName, Stream
 from ._managed_observation_bundle import FIXED_BUNDLE
 from ._managed_observation_protocol import (
     FACT_ORDER,
+    ControllerObservation,
     ManagedObservationError,
     ManagedObservationRequest,
     ManagedOperation,
     ManagedResultControl,
+    checked_controller,
     checked_fact,
     decode_result,
     encode_request,
@@ -74,6 +76,7 @@ class ManagedObservation:
     facts: tuple[tuple[FactName, bytes], ...] = field(default=(), repr=False)
     output: bytes | None = field(default=None, repr=False)
     issue: ManagedObservationIssue | FileWireError | None = None
+    controller: ControllerObservation | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +145,10 @@ class _Collector:
         if record.kind is FileRecordKind.RESULT and self.control is None and not self.failed:
             try:
                 control = decode_result(record.body)
+                if control.controller is not None:
+                    if self.request.operation is not ManagedOperation.OBSERVE:
+                        raise ManagedObservationError("unexpected controller observation")
+                    checked_controller(control.controller, self.request.expected_launch)
                 if self.request.operation is ManagedOperation.READ_OUTPUT and control.facts not in (
                     (FactName.LAUNCH,),
                     (
@@ -252,7 +259,7 @@ class _Collector:
         facts = tuple(self.facts)
         output = bytes(self.output) if state is ManagedObservationState.AVAILABLE else None
         self.abort()
-        return ManagedObservation(state, facts, output)
+        return ManagedObservation(state, facts, output, controller=control.controller)
 
 
 def _exchange(

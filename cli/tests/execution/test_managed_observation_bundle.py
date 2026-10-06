@@ -10,18 +10,23 @@ import pytest
 
 from agentworks.execution import _managed_job_wire as wire
 from agentworks.execution import _managed_observation_guest as guest
-from agentworks.execution._file_wire import FileRecordKind
+from agentworks.execution._file_wire import FileRecord, FileRecordKind
+from agentworks.execution._file_wire_reader import FileRecordReader
 from agentworks.execution._helper_bundle import build_helper_modules
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._managed_job_store import FactName
 from agentworks.execution._managed_observation_bundle import FIXED_BUNDLE
 from agentworks.execution._managed_observation_protocol import (
+    ControllerState,
     ManagedObservationRequest,
     ManagedOperation,
     ManagedResultControl,
+    decode_result,
     encode_request,
 )
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
+from agentworks.execution.carrier import CarrierIO, FiniteInput
+from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
 
 NONCE = "b" * 32
 RUN = "a" * 32
@@ -132,3 +137,87 @@ def test_guest_writes_bounded_data_records_then_terminal() -> None:
         FileRecordKind.FINISHED,
     ]
     assert [len(body) for kind, body in records if kind is FileRecordKind.DATA][-2:] == [4096, 904]
+
+
+@pytest.mark.parametrize("interpreter", [sys.executable, "/usr/bin/python3.11"])
+@pytest.mark.parametrize("operation", list(ManagedOperation))
+def test_packed_helper_queries_finite_child_and_preserves_borrowed_store_anchor(
+    interpreter: str,
+    operation: ManagedOperation,
+    tmp_path: Path,
+) -> None:
+    from agentworks.execution._managed_job_store import Stream
+
+    from .test_managed_controller_observation import _properties
+
+    if not Path(interpreter).exists():
+        pytest.skip("interpreter unavailable")
+    request = ManagedObservationRequest(
+        NONCE,
+        operation,
+        _launch(),
+        IdentityExpectation(0, 0, (0,)),
+        GUEST,
+        Stream.STDOUT if operation is ManagedOperation.READ_OUTPUT else None,
+    )
+    setup = (
+        "g=sys.modules['_agw_managed_observation._managed_observation_guest']\n"
+        "s=sys.modules['_agw_managed_observation._managed_job_store']\n"
+        "n=sys.modules['_agw_managed_observation._managed_controller_guest']\n"
+        "request=g._read_request()\n"
+        "g._read_request=lambda:request\n"
+        "g._identity=lambda:request.guest\n"
+        "g.matches_current_identity=lambda expected:True\n"
+        "os.chmod(sys.argv[2],0o700)\n"
+        "anchor=os.open(sys.argv[2],os.O_RDONLY|os.O_DIRECTORY)\n"
+        "def store(run_id):\n"
+        " return s.ManagedJobStore(run_id,_namespace='managed',_owner_uid=os.getuid(),_anchor_fd=anchor)\n"
+        "g.ManagedJobStore=store\n"
+        "with store(" + repr(RUN) + ") as target:target.publish_fact(s.FactName.LAUNCH,request.expected_launch)\n"
+        "calls=[]\n"
+        "def argv(run_id):\n"
+        " calls.append(run_id)\n"
+        " return (sys.executable,'-I','-S','-c'," + repr("import os; os.write(1," + repr(_properties()) + ")") + ")\n"
+        "n._query_argv=argv\n"
+        "try:\n"
+        " result=g.main(sys.argv[1])\n"
+        " os.fstat(anchor)\n"
+        " assert calls==(" + repr([RUN] if operation is ManagedOperation.OBSERVE else []) + ")\n"
+        "finally:os.close(anchor)\n"
+        "raise SystemExit(result)\n"
+    )
+    source = FIXED_BUNDLE.bootstrap.rsplit("raise SystemExit(", 1)[0] + setup
+    result = subprocess.run(
+        [interpreter, "-I", "-S", "-B", "-c", source, NONCE, str(tmp_path)],
+        input=FIXED_BUNDLE.prefix + encode_request(request),
+        capture_output=True,
+        cwd=tmp_path,
+        env={"PYTHONPATH": str(tmp_path)},
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+    assert result.stderr == b""
+    records: list[FileRecord] = []
+    reader = FileRecordReader(NONCE, records.append)
+    reader.try_write(memoryview(result.stdout))
+    reader.finish()
+    assert reader.error is None
+    assert [record.kind for record in records] == [FileRecordKind.RESULT, FileRecordKind.DATA, FileRecordKind.FINISHED]
+    control = decode_result(records[0].body)
+    assert (control.controller.state if control.controller is not None else None) is (
+        ControllerState.RUNNING if operation is ManagedOperation.OBSERVE else None
+    )
+
+
+def test_complete_observation_fits_exact_qga_envelope() -> None:
+    from .test_managed_observation import ScriptedCarrier, _exchange, _records
+
+    carrier = ScriptedCarrier(
+        lambda request: _records(request.nonce, ManagedResultControl((FactName.LAUNCH,)), (_launch(),))
+    )
+    _exchange(carrier)
+    assert carrier.invocation is not None and isinstance(carrier.io, CarrierIO)
+    assert isinstance(carrier.io.input, FiniteInput)
+    qga = ProxmoxCarrier(ProxmoxConnection("https://pve.example", "node", 101, "operator!token", "synthetic"))
+    qga.validate(carrier.invocation, io=carrier.io)

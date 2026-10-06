@@ -7,6 +7,7 @@ import binascii
 import json
 from dataclasses import dataclass
 from enum import StrEnum
+from uuid import UUID
 
 from . import _managed_job_wire as wire
 from ._file_wire import valid_nonce
@@ -34,6 +35,23 @@ class ManagedOperation(StrEnum):
     READ_OUTPUT = "read_output"
 
 
+class ControllerState(StrEnum):
+    RUNNING = "running"
+    EXITED = "exited"
+    ABSENT = "absent"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class ControllerObservation:
+    """Native controller state, independent of workload and dispatch debt."""
+
+    state: ControllerState
+    unit: str
+    boot_id: str
+    receipt_sha256: str
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class ManagedObservationRequest:
     nonce: str
@@ -47,6 +65,7 @@ class ManagedObservationRequest:
 @dataclass(frozen=True, slots=True)
 class ManagedResultControl:
     facts: tuple[FactName, ...]
+    controller: ControllerObservation | None = None
 
 
 def _json(value: object) -> bytes:
@@ -161,21 +180,23 @@ def decode_request(data: bytes) -> ManagedObservationRequest:
 
 
 def encode_result(control: ManagedResultControl) -> bytes:
-    if type(control) is not ManagedResultControl:
-        raise ManagedObservationError("invalid managed result")
-    data = _json(
-        {
-            "version": 1,
-            "facts": [name.value for name in control.facts],
+    value: dict[str, object] = {"version": 1, "facts": [name.value for name in control.facts]}
+    if control.controller is not None:
+        native = control.controller
+        value["controller"] = {
+            "state": native.state.value,
+            "unit": native.unit,
+            "boot_id": native.boot_id,
+            "receipt_sha256": native.receipt_sha256,
         }
-    )
-    decode_result(data)
-    return data
+    return _json(value)
 
 
 def decode_result(data: bytes) -> ManagedResultControl:
     value = _load(data, MAX_CONTROL_BYTES)
-    if set(value) != {"version", "facts"} or type(value["version"]) is not int or value["version"] != 1:
+    if set(value) not in ({"version", "facts"}, {"version", "facts", "controller"}) or (
+        type(value["version"]) is not int or value["version"] != 1
+    ):
         raise ManagedObservationError("invalid managed result")
     try:
         names = value["facts"]
@@ -188,7 +209,45 @@ def decode_result(data: bytes) -> ManagedResultControl:
         raise ManagedObservationError("invalid managed result") from None
     if not facts or facts[0] is not FactName.LAUNCH or facts != tuple(name for name in FACT_ORDER if name in facts):
         raise ManagedObservationError("invalid managed result")
-    return ManagedResultControl(facts)
+    controller = None
+    if "controller" in value:
+        native = value["controller"]
+        if type(native) is not dict or set(native) != {"state", "unit", "boot_id", "receipt_sha256"}:
+            raise ManagedObservationError("invalid controller observation")
+        try:
+            if any(type(item) is not str for item in native.values()):
+                raise ValueError
+            state = ControllerState(native["state"])
+            unit = native["unit"]
+            boot = native["boot_id"]
+            digest = native["receipt_sha256"]
+            if (
+                len(unit) != 52
+                or not unit.startswith("agw-managed-")
+                or not unit.endswith(".service")
+                or not valid_nonce(unit[12:-8])
+                or str(UUID(boot)) != boot
+                or len(digest) != 64
+                or any(character not in "0123456789abcdef" for character in digest)
+            ):
+                raise ValueError
+        except (ValueError, TypeError):
+            raise ManagedObservationError("invalid controller observation") from None
+        controller = ControllerObservation(state, unit, boot, digest)
+    return ManagedResultControl(facts, controller)
+
+
+def checked_controller(controller: ControllerObservation, expected_launch: bytes) -> None:
+    """Correlate external native evidence with the complete exact launch."""
+    launch = checked_launch(expected_launch)
+    target = launch["target"]
+    if (
+        type(target) is not dict
+        or controller.unit != launch["unit"]
+        or controller.boot_id != target["boot_id"]
+        or controller.receipt_sha256 != wire.launch_sha256(launch)
+    ):
+        raise ManagedObservationError("controller observation binding mismatch")
 
 
 def checked_fact(name: FactName, data: bytes, expected_launch: bytes) -> dict[str, object]:

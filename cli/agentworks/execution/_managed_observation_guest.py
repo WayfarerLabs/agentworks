@@ -7,12 +7,15 @@ import sys
 from dataclasses import dataclass, field
 from typing import cast
 
+from . import _managed_job_wire as wire
 from ._file_wire import MAX_RECORD_BODY_BYTES, FileRecordKind, FileRecordWriter
 from ._helper_identity import matches_current_identity
+from ._managed_controller_guest import observe_controller
 from ._managed_job_store import FactName, ManagedJobStore, StoreError
 from ._managed_observation_protocol import (
     FACT_ORDER,
     MAX_REQUEST_BYTES,
+    ControllerObservation,
     ManagedObservationError,
     ManagedObservationRequest,
     ManagedOperation,
@@ -23,6 +26,7 @@ from ._managed_observation_protocol import (
     encode_result,
 )
 from ._vm_guest_identity_guest import _GuestRefusal, _identity
+from ._vm_guest_identity_protocol import vm_guest_boot_id
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -59,7 +63,15 @@ def _prepare(request: ManagedObservationRequest, store: ManagedJobStore) -> _Pre
                 checked_fact(name, data, launch)
                 observed.append((name, data))
         return _PreparedResult(
-            ManagedResultControl(tuple(name for name, _ in observed)),
+            ManagedResultControl(
+                tuple(name for name, _ in observed),
+                ControllerObservation(
+                    observe_controller(store.run_id),
+                    cast("str", expected["unit"]),
+                    vm_guest_boot_id(request.guest),
+                    wire.launch_sha256(expected),
+                ),
+            ),
             tuple(data for _, data in observed),
         )
     assert request.stream is not None

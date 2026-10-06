@@ -16,6 +16,7 @@ FIXED_BUNDLE = build_file_helper_bundle(
         "_vm_guest_identity_protocol",
         "_vm_guest_identity_guest",
         "_managed_observation_protocol",
+        "_managed_controller_guest",
         "_managed_observation_guest",
     ),
     "_managed_observation_guest",

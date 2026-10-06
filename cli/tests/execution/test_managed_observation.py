@@ -32,6 +32,7 @@ from agentworks.execution._managed_observation_protocol import (
     FACT_ORDER,
     MAX_CONTROL_BYTES,
     MAX_REQUEST_BYTES,
+    ControllerState,
     ManagedObservationError,
     ManagedObservationRequest,
     ManagedOperation,
@@ -118,7 +119,8 @@ def _fact(name: FactName, launch: bytes, *, disposition: str = "complete-capture
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> Generator[ManagedJobStore, None, None]:
+def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[ManagedJobStore, None, None]:
+    monkeypatch.setattr(guest, "observe_controller", lambda _run_id: ControllerState.UNKNOWN)
     os.chmod(tmp_path, 0o700)
     anchor = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
     try:
