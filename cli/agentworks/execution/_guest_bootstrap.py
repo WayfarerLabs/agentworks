@@ -5,13 +5,13 @@ from __future__ import annotations
 import os
 import sys
 from contextlib import suppress
+from typing import Any
 
 _INIT_PATH = "/proc/1/stat"
 _STATUS_PATH = "/proc/self/status"
 _INIT_LIMIT = 8192
 _STATUS_LIMIT = 16384
 _REFUSAL = 125
-_OBSERVER_MODULE = "_agw_bootstrap_guest._vm_guest_identity_guest"
 
 
 class _BootstrapRefusal(Exception):
@@ -61,9 +61,8 @@ def _run(
     uid: int,
     gid: int,
     groups: tuple[int, ...],
-    observer_source: str,
-    helper_source: str,
-    expected_guest: tuple[str, str, int] | None,
+    loader_source: str,
+    expected_guest: tuple[str, str, int],
 ) -> int:
     """Verify root, open the sole privileged descriptor, then drop credentials."""
     if os.getresuid() != (0, 0, 0):
@@ -87,39 +86,37 @@ def _run(
             _drop_and_verify(uid, gid, groups)
         except (OSError, ValueError, RuntimeError):
             raise _BootstrapRefusal from None
-        scope: dict[str, object] = {
+        scope: dict[str, Any] = {
             "__name__": "__main__",
-            "_agw_init_reader": read_init,
         }
         try:
-            exec(compile(observer_source, "<agentworks-guest-identity>", "exec"), scope)
-            observer = sys.modules[_OBSERVER_MODULE]
-            observer._bind_init_reader(read_init)
-            if expected_guest is not None:
-                identity = observer._identity()
-                if (identity.instance_marker, identity.boot_id, identity.init_start_ticks) != expected_guest:
-                    raise _BootstrapRefusal
-        except Exception:
+            exec(compile(loader_source, "<agentworks-fixed-loader>", "exec"), scope)
+            scope["_agw_load_identity"]()
+            guest = sys.modules[scope["_agw_guest_module"]]
+            guest._bind_init_reader(read_init)
+            identity = guest._identity()
+            if (identity.instance_marker, identity.boot_id, identity.init_start_ticks) != expected_guest:
+                raise _BootstrapRefusal
+        except BaseException:
             raise _BootstrapRefusal from None
-        exec(compile(helper_source, "<agentworks-fixed-helper>", "exec"), scope)
+        scope["_agw_load_remaining"]()
+        return scope["_agw_enter_body"]()
     finally:
         with suppress(OSError):
             os.close(descriptor)
-    return 0
 
 
 def main(
     uid: int,
     gid: int,
     groups: tuple[int, ...],
-    observer_source: str,
-    helper_source: str,
-    expected_guest: tuple[str, str, int] | None = None,
+    loader_source: str,
+    expected_guest: tuple[str, str, int],
 ) -> int:
     """Refuse closed on privileged admission failures without echoing input."""
     if sys.platform != "linux":
         return _REFUSAL
     try:
-        return _run(uid, gid, groups, observer_source, helper_source, expected_guest)
+        return _run(uid, gid, groups, loader_source, expected_guest)
     except _BootstrapRefusal:
         return _REFUSAL

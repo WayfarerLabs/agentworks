@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import bz2
 import posixpath
 import re
 from dataclasses import dataclass, field
@@ -10,7 +12,7 @@ from importlib.resources import files
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
-from agentworks.execution._helper_bundle import build_helper_modules
+from agentworks.execution._helper_bundle import RootGuestProgram, _compact_fixed_source
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import (
     IdentityMode,
@@ -198,9 +200,9 @@ def build_root_guest_bootstrap_argv(
     target_identity: IdentityExpectation,
     *,
     selection: RuntimeSelection,
-    fixed_source: str,
+    program: RootGuestProgram,
     nonce: str,
-    expected_guest: VMGuestIdentity | None = None,
+    expected_guest: VMGuestIdentity,
 ) -> tuple[tuple[str, ...], tuple[str, ...], str | None]:
     """Build one Linux system-Python helper entered through fixed root custody."""
     if (
@@ -210,30 +212,32 @@ def build_root_guest_bootstrap_argv(
         or type(root_entry) is not IdentityPlan
         or _validate_plan(root_entry).euid != 0
         or type(target_identity) is not IdentityExpectation
-        or type(fixed_source) is not str
+        or type(program) is not RootGuestProgram
+        or type(expected_guest) is not VMGuestIdentity
     ):
         raise ValidationError("Root guest bootstrap requires bound Linux system Python and identities")
     _validate_plan(IdentityPlan(target_identity, IdentityMode.DIRECT))
-    if expected_guest is not None and type(expected_guest) is not VMGuestIdentity:
-        raise ValidationError("Root guest bootstrap requires an exact expected guest")
-
-    observer_source = build_helper_modules(
-        "_agw_bootstrap_guest",
-        ("_vm_guest_identity_protocol", "_vm_guest_identity_guest"),
-    )
     bootstrap_source = files(__package__).joinpath("_guest_bootstrap.py").read_text(encoding="utf-8")
     guest_tuple = (
-        (expected_guest.instance_marker, expected_guest.boot_id, expected_guest.init_start_ticks)
-        if expected_guest is not None
-        else None
+        expected_guest.instance_marker,
+        expected_guest.boot_id,
+        expected_guest.init_start_ticks,
     )
     source = (
         bootstrap_source
         + "\nraise SystemExit(main("
         + f"{target_identity.euid!r},{target_identity.egid!r},{target_identity.groups!r},"
-        + f"{observer_source!r},{fixed_source!r},{guest_tuple!r}))\n"
+        + f"{program.loader_source!r},{guest_tuple!r}))\n"
     )
-    argv, candidates, system_shim = build_runtime_helper_argv(selection=selection, fixed_source=source, nonce=nonce)
+    compressed = base64.b64encode(bz2.compress(_compact_fixed_source(source).encode("utf-8"))).decode("ascii")
+    fixed_source = (
+        "import base64,bz2\n"
+        f"exec(compile(bz2.decompress(base64.b64decode({compressed!r})),"
+        "'<agentworks-root-bootstrap>','exec'))\n"
+    )
+    argv, candidates, system_shim = build_runtime_helper_argv(
+        selection=selection, fixed_source=fixed_source, nonce=nonce
+    )
     if candidates != (_SYSTEM_LINUX_PYTHON,):
         raise ValidationError("Root guest bootstrap requires system Python")
     capped = ("/usr/bin/setpriv", "--inh-caps=-all", "--ambient-caps=-all", "--", *argv)

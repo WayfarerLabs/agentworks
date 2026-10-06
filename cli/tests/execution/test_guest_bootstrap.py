@@ -1,18 +1,19 @@
-"""Synthetic custody checks for the fixed Linux guest bootstrap."""
+"""Synthetic checks for the fixed Linux two-phase guest bootstrap."""
 
 from __future__ import annotations
 
 import builtins
 import os
+import subprocess
 import sys
-from importlib.resources import files
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from agentworks.errors import ValidationError
 from agentworks.execution import _guest_bootstrap as bootstrap
-from agentworks.execution._helper_bundle import _build_file_helper_bundle, build_helper_modules
+from agentworks.execution._helper_bundle import RootGuestDelivery, _build_root_guest_program, build_root_guest_program
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution._runtime_prerequisite import (
@@ -22,23 +23,65 @@ from agentworks.execution._runtime_prerequisite import (
 )
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
 
-from .test_vm_guest_identity import _init_stat
-
 _NONCE = "a" * 32
 _ROOT = IdentityPlan(IdentityExpectation(0, 0, (0,)), IdentityMode.DIRECT)
 _TARGET = IdentityExpectation(1001, 1001, (1001,))
 _GUEST = VMGuestIdentity("a" * 32, "123e4567-e89b-12d3-a456-426614174000", 1234)
-_OBSERVER_SOURCE = build_helper_modules(
-    "_agw_bootstrap_guest", ("_vm_guest_identity_protocol", "_vm_guest_identity_guest")
-)
+_EXPECTED = (_GUEST.instance_marker, _GUEST.boot_id, _GUEST.init_start_ticks)
 
 
-def test_builder_keeps_one_system_runtime_and_fixed_capability_clear() -> None:
+def _synthetic_loader(identity: tuple[str, str, int] = _EXPECTED, *, body: str = "return 0") -> str:
+    body_source = "".join(f" {line}\n" for line in body.splitlines())
+    return (
+        "import builtins,sys,types\n"
+        "_agw_guest_module='_agw_test._vm_guest_identity_guest'\n"
+        "def _agw_load_identity():\n"
+        " builtins._agw_bootstrap_events.append('identity')\n"
+        " m=types.ModuleType(_agw_guest_module)\n"
+        " m._bind_init_reader=lambda reader:builtins._agw_bootstrap_events.append('bind')\n"
+        f" m._identity=lambda:types.SimpleNamespace(instance_marker={identity[0]!r},"
+        f"boot_id={identity[1]!r},init_start_ticks={identity[2]!r})\n"
+        " sys.modules[_agw_guest_module]=m\n"
+        "def _agw_load_remaining():builtins._agw_bootstrap_events.append('remaining')\n"
+        "def _agw_enter_body():\n"
+        " builtins._agw_bootstrap_events.append('body')\n" + body_source
+    )
+
+
+def _prepare(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, events: list[str]) -> list[int]:
+    stat_path = tmp_path / "stat"
+    stat_path.write_bytes(b"stat")
+    monkeypatch.setattr(bootstrap, "_INIT_PATH", str(stat_path))
+    monkeypatch.setattr(os, "getresuid", lambda: (0, 0, 0))
+    monkeypatch.setattr(bootstrap, "_drop_and_verify", lambda *_args: events.append("drop"))
+    monkeypatch.setattr(builtins, "_agw_bootstrap_events", events, raising=False)
+    opened: list[int] = []
+    real_open = os.open
+
+    def capture_open(path: str, flags: int, *, dir_fd: int | None = None) -> int:
+        descriptor = real_open(path, flags, dir_fd=dir_fd)
+        if path == str(stat_path):
+            opened.append(descriptor)
+            assert flags & os.O_NOFOLLOW
+            assert flags & os.O_CLOEXEC
+        return descriptor
+
+    monkeypatch.setattr(os, "open", capture_open)
+    return opened
+
+
+def test_builder_uses_one_system_runtime_and_requires_full_guest() -> None:
+    program = build_root_guest_program(
+        "_agw_test",
+        ("_vm_guest_identity_protocol", "_vm_guest_identity_guest"),
+        "_vm_guest_identity_guest",
+        delivery=RootGuestDelivery.INLINE,
+    )
     argv, candidates, shim = build_root_guest_bootstrap_argv(
         _ROOT,
         _TARGET,
         selection=RuntimeSelection(RuntimeTargetOS.LINUX),
-        fixed_source="pass",
+        program=program,
         nonce=_NONCE,
         expected_guest=_GUEST,
     )
@@ -47,29 +90,154 @@ def test_builder_keeps_one_system_runtime_and_fixed_capability_clear() -> None:
     assert argv[:4] == ("/usr/bin/setpriv", "--inh-caps=-all", "--ambient-caps=-all", "--")
     assert argv.count("/usr/bin/python3") == 1
     compile(argv[-2], "<fixed-bootstrap>", "exec")
+    invalid_guest: Any = None
+    with pytest.raises(ValidationError):
+        build_root_guest_bootstrap_argv(
+            _ROOT,
+            _TARGET,
+            selection=RuntimeSelection(RuntimeTargetOS.LINUX),
+            program=program,
+            nonce=_NONCE,
+            expected_guest=invalid_guest,
+        )
 
 
-@pytest.mark.parametrize(
-    ("selection", "root", "target"),
-    [
+@pytest.mark.parametrize("runtime", [Path(sys.executable), Path("/usr/bin/python3.11")])
+def test_compressed_root_source_refuses_nonroot_under_isolated_python(runtime: Path) -> None:
+    if sys.platform != "linux" or not runtime.is_file() or os.geteuid() == 0:
+        pytest.skip("requires nonroot Linux and the selected interpreter")
+    program = _build_root_guest_program(
+        "_agw_test",
+        (("_entry", "def main(nonce):return 0\n"),),
+        "_entry",
+        delivery=RootGuestDelivery.INLINE,
+    )
+    argv, _, _ = build_root_guest_bootstrap_argv(
+        _ROOT,
+        _TARGET,
+        selection=RuntimeSelection(RuntimeTargetOS.LINUX),
+        program=program,
+        nonce=_NONCE,
+        expected_guest=_GUEST,
+    )
+    completed = subprocess.run(
+        [str(runtime), "-I", "-S", "-B", "-c", argv[-2]],
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+    assert completed.returncode == 125
+    assert completed.stdout == completed.stderr == b""
+
+
+def test_builder_refuses_unbound_runtime_or_identity() -> None:
+    program = _build_root_guest_program(
+        "_agw_test",
+        (("_entry", "def main(nonce):return 0\n"),),
+        "_entry",
+        delivery=RootGuestDelivery.INLINE,
+    )
+    for selection, root, target in (
         (RuntimeSelection(RuntimeTargetOS.DARWIN), _ROOT, _TARGET),
         (RuntimeSelection(RuntimeTargetOS.LINUX, "/tmp/python3"), _ROOT, _TARGET),
-        (
-            RuntimeSelection(RuntimeTargetOS.LINUX),
-            IdentityPlan(_TARGET, IdentityMode.DIRECT),
-            _TARGET,
-        ),
+        (RuntimeSelection(RuntimeTargetOS.LINUX), IdentityPlan(_TARGET, IdentityMode.DIRECT), _TARGET),
         (RuntimeSelection(RuntimeTargetOS.LINUX), _ROOT, IdentityExpectation(1001, 1001, (1002,))),
-    ],
-)
-def test_builder_refuses_unbound_runtime_or_identity(
-    selection: RuntimeSelection, root: IdentityPlan, target: IdentityExpectation
-) -> None:
-    with pytest.raises(ValidationError):
-        build_root_guest_bootstrap_argv(root, target, selection=selection, fixed_source="pass", nonce=_NONCE)
+    ):
+        with pytest.raises(ValidationError):
+            build_root_guest_bootstrap_argv(
+                root,
+                target,
+                selection=selection,
+                program=program,
+                nonce=_NONCE,
+                expected_guest=_GUEST,
+            )
 
 
-def test_drop_sets_groups_then_all_gids_then_all_uids_and_verifies_caps(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_root_program_adds_identity_pair_and_loads_remaining_once() -> None:
+    program = _build_root_guest_program(
+        "_agw_test",
+        (("_entry", "def main(nonce):return 0\n"),),
+        "_entry",
+        delivery=RootGuestDelivery.INLINE,
+    )
+    assert program.prefix == b""
+    scope: dict[str, Any] = {}
+    exec(program.loader_source, scope)
+    scope["_agw_load_identity"]()
+    guest = sys.modules["_agw_test._vm_guest_identity_guest"]
+
+    def reader() -> bytes:
+        return b"held init fact"
+
+    guest._bind_init_reader(reader)
+    assert guest._INIT_READER is reader
+    assert "_agw_test._entry" not in sys.modules
+    scope["_agw_load_remaining"]()
+    assert sys.modules["_agw_test._vm_guest_identity_guest"] is guest
+    assert guest._INIT_READER is reader
+    assert "_agw_test._entry" in sys.modules
+    for invalid in (
+        (("_entry", "pass"), ("_entry", "pass")),
+        (("_vm_guest_identity_guest", "pass"), ("_entry", "pass")),
+        (("_vm_guest_identity_protocol", "pass"), ("_entry", "pass")),
+    ):
+        with pytest.raises(ValueError):
+            _build_root_guest_program("_agw_test", invalid, "_entry", delivery=RootGuestDelivery.INLINE)
+
+
+def test_fixed_prefix_is_read_once_and_verified_before_module_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    program = _build_root_guest_program(
+        "_agw_test_prefix",
+        (("_entry", "def main(nonce):return 0\n"),),
+        "_entry",
+        delivery=RootGuestDelivery.FIXED_PREFIX,
+    )
+    assert program.prefix
+    reads = 0
+
+    def read_prefix(descriptor: int, count: int) -> bytes:
+        nonlocal reads
+        assert descriptor == 0
+        reads += 1
+        return program.prefix
+
+    monkeypatch.setattr(os, "read", read_prefix)
+    scope: dict[str, Any] = {}
+    exec(program.loader_source, scope)
+    assert reads == 1
+    assert "_agw_test_prefix._vm_guest_identity_guest" not in sys.modules
+    scope["_agw_load_identity"]()
+    assert "_agw_test_prefix._entry" not in sys.modules
+    scope["_agw_load_remaining"]()
+    assert "_agw_test_prefix._entry" in sys.modules
+    monkeypatch.setattr(os, "read", lambda *_args: b"x" * len(program.prefix))
+    with pytest.raises(ValueError):
+        exec(program.loader_source, {})
+
+
+@pytest.mark.parametrize("runtime", [Path(sys.executable), Path("/usr/bin/python3.11")])
+def test_fixed_prefix_loader_executes_under_supported_isolated_python(runtime: Path) -> None:
+    if not runtime.is_file():
+        pytest.skip("Python 3.11 is unavailable")
+    program = _build_root_guest_program(
+        "_agw_test_runtime",
+        (("_entry", "def main(nonce):return 0\n"),),
+        "_entry",
+        delivery=RootGuestDelivery.FIXED_PREFIX,
+    )
+    completed = subprocess.run(
+        [str(runtime), "-I", "-S", "-B", "-c", program.loader_source + "_agw_load_identity()\n_agw_load_remaining()\n"],
+        input=program.prefix,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+    assert completed.returncode == 0
+    assert completed.stdout == completed.stderr == b""
+
+
+def test_drop_verifies_exact_credentials_and_capabilities(monkeypatch: pytest.MonkeyPatch) -> None:
     events: list[object] = []
     monkeypatch.setattr(os, "setgroups", lambda groups: events.append(("groups", groups)))
     monkeypatch.setattr(os, "setresgid", lambda *ids: events.append(("gid", ids)))
@@ -78,15 +246,14 @@ def test_drop_sets_groups_then_all_gids_then_all_uids_and_verifies_caps(monkeypa
     monkeypatch.setattr(os, "getresgid", lambda: (1001, 1001, 1001))
     monkeypatch.setattr(os, "getegid", lambda: 1001)
     monkeypatch.setattr(os, "getgroups", lambda: [1001])
-    monkeypatch.setattr(bootstrap, "_capabilities_zero", lambda *, non_root: events.append(("caps", non_root)) or True)
 
+    def capabilities_zero(*, non_root: bool) -> bool:
+        events.append(("caps", non_root))
+        return True
+
+    monkeypatch.setattr(bootstrap, "_capabilities_zero", capabilities_zero)
     bootstrap._drop_and_verify(1001, 1001, (1001,))
-    assert events == [
-        ("groups", [1001]),
-        ("gid", (1001, 1001, 1001)),
-        ("uid", (1001, 1001, 1001)),
-        ("caps", True),
-    ]
+    assert events == [("groups", [1001]), ("gid", (1001, 1001, 1001)), ("uid", (1001, 1001, 1001)), ("caps", True)]
 
 
 @pytest.mark.parametrize(
@@ -127,215 +294,126 @@ def test_held_init_reader_starts_at_zero_and_is_bounded(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="fixed Linux bootstrap")
-@pytest.mark.parametrize("actual", [(1001, 1001, 1001), (0, 1001, 0), (0, 0, 1001)])
-def test_nonroot_entry_refuses_before_privileged_open_or_body(
-    monkeypatch: pytest.MonkeyPatch, actual: tuple[int, int, int]
-) -> None:
-    monkeypatch.setattr(os, "getresuid", lambda: actual)
-
-    def forbidden_open(*_args: object, **_kwargs: object) -> int:
-        raise AssertionError("privileged open reached")
-
-    monkeypatch.setattr(os, "open", forbidden_open)
-    assert bootstrap.main(1001, 1001, (1001,), "raise AssertionError", "raise AssertionError") == 125
+def test_nonroot_entry_refuses_before_privileged_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(os, "getresuid", lambda: (0, 1001, 0))
+    monkeypatch.setattr(os, "open", lambda *_args, **_kwargs: pytest.fail("privileged open reached"))
+    assert bootstrap.main(1001, 1001, (1001,), "raise AssertionError", _EXPECTED) == 125
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="fixed Linux bootstrap")
-def test_drop_precedes_observer_and_body_and_closes_descriptor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    stat_path = tmp_path / "stat"
-    stat_path.write_text(_init_stat("1234"), encoding="ascii")
-    monkeypatch.setattr(bootstrap, "_INIT_PATH", str(stat_path))
-    monkeypatch.setattr(os, "getresuid", lambda: (0, 0, 0))
-    monkeypatch.setattr(os, "register_at_fork", lambda **_kwargs: pytest.fail("unexpected fork hook"))
+def test_drop_identity_check_remaining_body_and_descriptor_lifetime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     events: list[str] = []
-    monkeypatch.setattr(builtins, "_agw_bootstrap_events", events, raising=False)
-    monkeypatch.setattr(bootstrap, "_drop_and_verify", lambda *_args: events.append("drop"))
-    opened: list[int] = []
-    real_open = os.open
-
-    def capture_open(path: str, flags: int, *, dir_fd: int | None = None) -> int:
-        descriptor = real_open(path, flags, dir_fd=dir_fd)
-        if path == str(stat_path):
-            opened.append(descriptor)
-            assert flags & os.O_NOFOLLOW
-            assert flags & os.O_CLOEXEC
-        return descriptor
-
-    monkeypatch.setattr(os, "open", capture_open)
-    observer = (
-        "import builtins,sys,types\n"
-        "builtins._agw_bootstrap_events.append('observer')\n"
-        "m=types.ModuleType('_agw_bootstrap_guest._vm_guest_identity_guest')\n"
-        "m._bind_init_reader=lambda reader: None\n"
-        "sys.modules[m.__name__]=m\n"
-    )
-    body = "import builtins\nbuiltins._agw_bootstrap_events.append('body')\n"
-
-    assert bootstrap.main(1001, 1001, (1001,), observer, body) == 0
-    assert events == ["drop", "observer", "body"]
+    opened = _prepare(tmp_path, monkeypatch, events)
+    assert bootstrap.main(1001, 1001, (1001,), _synthetic_loader(), _EXPECTED) == 0
+    assert events == ["drop", "identity", "bind", "remaining", "body"]
     assert len(opened) == 1
     with pytest.raises(OSError):
         os.fstat(opened[0])
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="fixed Linux bootstrap")
-def test_failed_drop_refuses_before_loader_and_closes_descriptor(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_missing_guest_checkpoint_refuses_before_remaining_or_body(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    stat_path = tmp_path / "stat"
-    stat_path.write_bytes(b"stat")
-    monkeypatch.setattr(bootstrap, "_INIT_PATH", str(stat_path))
-    monkeypatch.setattr(os, "getresuid", lambda: (0, 0, 0))
-    opened: list[int] = []
-    real_open = os.open
-
-    def capture_open(path: str, flags: int, *, dir_fd: int | None = None) -> int:
-        descriptor = real_open(path, flags, dir_fd=dir_fd)
-        if path == str(stat_path):
-            opened.append(descriptor)
-        return descriptor
-
-    def fail_drop(*_args: object) -> None:
-        raise OSError("credential transition failed")
-
-    monkeypatch.setattr(os, "open", capture_open)
-    monkeypatch.setattr(bootstrap, "_drop_and_verify", fail_drop)
-    assert bootstrap.main(1001, 1001, (1001,), "raise AssertionError", "raise AssertionError") == 125
-    assert len(opened) == 1
-    with pytest.raises(OSError):
-        os.fstat(opened[0])
+    events: list[str] = []
+    _prepare(tmp_path, monkeypatch, events)
+    loader = (
+        "import builtins\n"
+        "def _agw_load_identity():builtins._agw_bootstrap_events.append('identity')\n"
+        "def _agw_load_remaining():raise AssertionError('remaining reached')\n"
+        "def _agw_enter_body():raise AssertionError('body reached')\n"
+    )
+    assert bootstrap.main(1001, 1001, (1001,), loader, _EXPECTED) == 125
+    assert events == ["drop", "identity"]
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="fixed Linux bootstrap")
-def test_exec_cannot_inherit_held_init_descriptor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    stat_path = tmp_path / "stat"
-    stat_path.write_bytes(b"stat")
-    monkeypatch.setattr(bootstrap, "_INIT_PATH", str(stat_path))
-    monkeypatch.setattr(os, "getresuid", lambda: (0, 0, 0))
-    monkeypatch.setattr(bootstrap, "_drop_and_verify", lambda *_args: None)
-    real_open = os.open
-
-    def capture_open(path: str, flags: int, *, dir_fd: int | None = None) -> int:
-        descriptor = real_open(path, flags, dir_fd=dir_fd)
-        if path == str(stat_path):
-            monkeypatch.setattr(builtins, "_agw_held_init_fd", descriptor, raising=False)
-        return descriptor
-
-    monkeypatch.setattr(os, "open", capture_open)
-    observer = (
-        "import sys,types\n"
-        "m=types.ModuleType('_agw_bootstrap_guest._vm_guest_identity_guest')\n"
-        "m._bind_init_reader=lambda reader: None\n"
-        "sys.modules[m.__name__]=m\n"
+def test_corrupt_prefix_refuses_before_identity_module_load(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[str] = []
+    opened = _prepare(tmp_path, monkeypatch, events)
+    program = _build_root_guest_program(
+        "_agw_corrupt",
+        (("_entry", "def main(nonce):return 0\n"),),
+        "_entry",
+        delivery=RootGuestDelivery.FIXED_PREFIX,
     )
-    probe = "import os,sys\ntry:os.fstat(int(sys.argv[1]))\nexcept OSError:raise SystemExit(0)\nraise SystemExit(1)\n"
-    body = (
-        "import builtins,os,subprocess,sys\n"
-        "fd=builtins._agw_held_init_fd\n"
-        "assert not os.get_inheritable(fd)\n"
-        f"result=subprocess.run((sys.executable,'-I','-c',{probe!r},str(fd)),close_fds=False,check=False)\n"
-        "assert result.returncode==0\n"
-    )
-    assert bootstrap.main(1001, 1001, (1001,), observer, body) == 0
+    monkeypatch.setattr(os, "read", lambda *_args: b"x" * len(program.prefix))
+    assert bootstrap.main(1001, 1001, (1001,), program.loader_source, _EXPECTED) == 125
+    assert events == ["drop"]
+    with pytest.raises(OSError):
+        os.fstat(opened[0])
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="fixed Linux bootstrap")
 @pytest.mark.parametrize("changed", ["marker", "boot", "init"])
-def test_guest_mismatch_refuses_before_body_or_stdin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: str
+def test_guest_mismatch_refuses_before_remaining_body_or_stdin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    changed: str,
 ) -> None:
-    stat_path = tmp_path / "stat"
-    stat_path.write_bytes(b"stat")
-    monkeypatch.setattr(bootstrap, "_INIT_PATH", str(stat_path))
-    monkeypatch.setattr(os, "getresuid", lambda: (0, 0, 0))
-    monkeypatch.setattr(bootstrap, "_drop_and_verify", lambda *_args: None)
-    values: list[object] = [_GUEST.instance_marker, _GUEST.boot_id, _GUEST.init_start_ticks]
-    values[{"marker": 0, "boot": 1, "init": 2}[changed]] = (
-        "b" * 32 if changed == "marker" else ("00000000-0000-4000-8000-000000000001" if changed == "boot" else 1235)
-    )
-    observer = (
-        "import sys,types\n"
-        "m=types.ModuleType('_agw_bootstrap_guest._vm_guest_identity_guest')\n"
-        "m._bind_init_reader=lambda reader: None\n"
-        f"m._identity=lambda:types.SimpleNamespace(instance_marker={values[0]!r},"
-        f"boot_id={values[1]!r},init_start_ticks={values[2]!r})\n"
-        "sys.modules[m.__name__]=m\n"
-    )
-    reads: list[int] = []
-    real_read = os.read
-
-    def capture_read(descriptor: int, count: int) -> bytes:
-        if descriptor == 0:
-            reads.append(count)
-        return real_read(descriptor, count)
-
-    monkeypatch.setattr(os, "read", capture_read)
-    assert (
-        bootstrap.main(
-            1001,
-            1001,
-            (1001,),
-            observer,
-            "import os\nos.read(0,1)\n",
-            (_GUEST.instance_marker, _GUEST.boot_id, _GUEST.init_start_ticks),
-        )
-        == 125
-    )
-    assert reads == []
+    events: list[str] = []
+    _prepare(tmp_path, monkeypatch, events)
+    changed_identity = {
+        "marker": ("b" * 32, _EXPECTED[1], _EXPECTED[2]),
+        "boot": (_EXPECTED[0], "00000000-0000-4000-8000-000000000001", _EXPECTED[2]),
+        "init": (_EXPECTED[0], _EXPECTED[1], 1235),
+    }[changed]
+    monkeypatch.setattr(os, "read", lambda *_args: pytest.fail("stdin reached"))
+    assert bootstrap.main(1001, 1001, (1001,), _synthetic_loader(changed_identity), _EXPECTED) == 125
+    assert events == ["drop", "identity", "bind"]
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="fixed Linux bootstrap")
-def test_real_observer_uses_held_reader_after_drop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    stat_path = tmp_path / "stat"
-    stat_path.write_text(_init_stat("1234"), encoding="ascii")
-    monkeypatch.setattr(bootstrap, "_INIT_PATH", str(stat_path))
-    monkeypatch.setattr(os, "getresuid", lambda: (0, 0, 0))
-    monkeypatch.setattr(bootstrap, "_drop_and_verify", lambda *_args: None)
+def test_body_control_propagates_and_closes_descriptor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[str] = []
+    opened = _prepare(tmp_path, monkeypatch, events)
+    with pytest.raises(KeyboardInterrupt):
+        bootstrap.main(1001, 1001, (1001,), _synthetic_loader(body="raise KeyboardInterrupt"), _EXPECTED)
+    assert events == ["drop", "identity", "bind", "remaining", "body"]
+    with pytest.raises(OSError):
+        os.fstat(opened[0])
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="fixed Linux bootstrap")
+def test_failed_drop_refuses_before_loader(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[str] = []
+    opened = _prepare(tmp_path, monkeypatch, events)
+
+    def fail_drop(*_args: object) -> None:
+        raise OSError("drop failed")
+
+    monkeypatch.setattr(bootstrap, "_drop_and_verify", fail_drop)
+    assert bootstrap.main(1001, 1001, (1001,), "raise AssertionError", _EXPECTED) == 125
+    assert events == []
+    with pytest.raises(OSError):
+        os.fstat(opened[0])
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="fixed Linux bootstrap")
+def test_exec_does_not_inherit_held_descriptor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[str] = []
+    opened = _prepare(tmp_path, monkeypatch, events)
+    existing_open = os.open
+
+    def mark_open(path: str, flags: int, *, dir_fd: int | None = None) -> int:
+        descriptor = existing_open(path, flags, dir_fd=dir_fd)
+        if path == bootstrap._INIT_PATH:
+            monkeypatch.setattr(builtins, "_agw_held_init_fd", descriptor, raising=False)
+        return descriptor
+
+    monkeypatch.setattr(os, "open", mark_open)
+    probe = "import os,sys\ntry:os.fstat(int(sys.argv[1]))\nexcept OSError:raise SystemExit(0)\nraise SystemExit(1)\n"
     body = (
-        "import sys\n"
-        "guest=sys.modules['_agw_bootstrap_guest._vm_guest_identity_guest']\n"
-        "assert guest._read_init_start_ticks()==1234\n"
+        "import os,subprocess,sys\n"
+        "fd=builtins._agw_held_init_fd\n"
+        "assert not os.get_inheritable(fd)\n"
+        f"result=subprocess.run((sys.executable,'-I','-c',{probe!r},str(fd)),close_fds=False,check=False)\n"
+        "assert result.returncode==0\n"
+        "return 0"
     )
-    assert bootstrap.main(1001, 1001, (1001,), _OBSERVER_SOURCE, body) == 0
-
-
-@pytest.mark.skipif(sys.platform != "linux", reason="fixed Linux bootstrap")
-def test_stdin_bundle_rebinds_reader_after_guest_module_reload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    stat_path = tmp_path / "stat"
-    stat_path.write_text(_init_stat("1234"), encoding="ascii")
-    monkeypatch.setattr(bootstrap, "_INIT_PATH", str(stat_path))
-    monkeypatch.setattr(os, "getresuid", lambda: (0, 0, 0))
-    monkeypatch.setattr(bootstrap, "_drop_and_verify", lambda *_args: None)
-    package = files("agentworks.execution")
-    sources = tuple(
-        (name, package.joinpath(f"{name}.py").read_text(encoding="utf-8"))
-        for name in ("_vm_guest_identity_protocol", "_vm_guest_identity_guest")
-    )
-    bundle = _build_file_helper_bundle(
-        "_agw_reloaded",
-        (
-            *sources,
-            (
-                "_entry",
-                "from . import _vm_guest_identity_guest as guest\n"
-                "def main(nonce):\n return int(guest._read_init_start_ticks()!=1234)\n",
-            ),
-        ),
-        "_entry",
-    )
-    reads = 0
-    real_read = os.read
-
-    def feed_prefix(descriptor: int, count: int) -> bytes:
-        nonlocal reads
-        if descriptor == 0:
-            reads += 1
-            return bundle.prefix if reads == 1 else b""
-        return real_read(descriptor, count)
-
-    monkeypatch.setattr(os, "read", feed_prefix)
-    monkeypatch.setattr(sys, "argv", ["agentworks-fixed-helper", _NONCE])
-    with pytest.raises(SystemExit) as raised:
-        bootstrap.main(1001, 1001, (1001,), _OBSERVER_SOURCE, bundle.bootstrap)
-    assert raised.value.code == 0
-    assert reads == 1
+    assert bootstrap.main(1001, 1001, (1001,), _synthetic_loader(body=body), _EXPECTED) == 0
+    assert len(opened) == 1

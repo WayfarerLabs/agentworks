@@ -8,6 +8,7 @@ import bz2
 import hashlib
 import json
 from dataclasses import dataclass
+from enum import StrEnum
 from importlib.resources import files
 
 
@@ -17,6 +18,105 @@ class FixedFileHelperBundle:
 
     bootstrap: str
     prefix: bytes
+
+
+class RootGuestDelivery(StrEnum):
+    INLINE = "inline"
+    FIXED_PREFIX = "fixed_prefix"
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class RootGuestProgram:
+    """One trusted two-phase loader and its explicit stdin delivery mode."""
+
+    loader_source: str
+    delivery: RootGuestDelivery
+    prefix: bytes
+
+
+_GUEST_MODULES = ("_vm_guest_identity_protocol", "_vm_guest_identity_guest")
+
+
+def build_root_guest_program(
+    package_name: str,
+    module_names: tuple[str, ...],
+    entrypoint_module: str,
+    *,
+    delivery: RootGuestDelivery,
+) -> RootGuestProgram:
+    """Package fixed first-party modules with a mandatory early guest checkpoint."""
+    package = files(__package__)
+    sources = tuple((name, package.joinpath(f"{name}.py").read_text(encoding="utf-8")) for name in module_names)
+    return _build_root_guest_program(package_name, sources, entrypoint_module, delivery=delivery)
+
+
+def _build_root_guest_program(
+    package_name: str,
+    sources: tuple[tuple[str, str], ...],
+    entrypoint_module: str,
+    *,
+    delivery: RootGuestDelivery,
+) -> RootGuestProgram:
+    """Place the canonical identity pair before all remaining trusted sources."""
+    names = tuple(name for name, _source in sources)
+    present = tuple(name in names for name in _GUEST_MODULES)
+    if (
+        type(delivery) is not RootGuestDelivery
+        or not package_name
+        or not names
+        or len(set(names)) != len(names)
+        or entrypoint_module not in names
+        or present == (True, False)
+        or present == (False, True)
+    ):
+        raise ValueError("invalid root guest program")
+    package = files(__package__)
+    identity = tuple((name, package.joinpath(f"{name}.py").read_text(encoding="utf-8")) for name in _GUEST_MODULES)
+    for name, source in identity:
+        dependencies = {
+            node.module for node in ast.walk(ast.parse(source)) if isinstance(node, ast.ImportFrom) and node.level > 0
+        }
+        allowed = {"_vm_guest_identity_protocol"} if name == "_vm_guest_identity_guest" else set()
+        if dependencies - allowed:
+            raise ValueError("guest checkpoint has an unknown local dependency")
+    ordered = identity + tuple((name, source) for name, source in sources if name not in _GUEST_MODULES)
+    compact = tuple((name, _compact_fixed_source(source)) for name, source in ordered)
+    prefix = base64.b64encode(bz2.compress(json.dumps(compact, ensure_ascii=False, separators=(",", ":")).encode()))
+    if delivery is RootGuestDelivery.INLINE:
+        input_source = f"b={prefix!r}\n"
+        delivered = b""
+    else:
+        input_source = (
+            "b=bytearray()\n"
+            f"while len(b)<{len(prefix)}:\n"
+            f" c=os.read(0,{len(prefix)}-len(b))\n"
+            " if not c:raise ValueError('missing fixed prefix')\n"
+            " b.extend(c)\n"
+            f"if hashlib.sha256(b).hexdigest()!={hashlib.sha256(prefix).hexdigest()!r}:"
+            "raise ValueError('invalid fixed prefix')\n"
+        )
+        delivered = prefix
+    expected_names = tuple(name for name, _source in compact)
+    entrypoint = f"{package_name}.{entrypoint_module}"
+    loader = (
+        "import os,base64,bz2,hashlib,json,sys,types\n"
+        f"_agw_guest_module={package_name + '._vm_guest_identity_guest'!r}\n"
+        f"{input_source}"
+        "_agw_sources=json.loads(bz2.decompress(base64.b64decode(b,validate=True)))\n"
+        f"if tuple(n for n,s in _agw_sources)!={expected_names!r}:"
+        "raise ValueError('invalid fixed modules')\n"
+        f"p=types.ModuleType({package_name!r});p.__path__=[];p.__package__={package_name!r};"
+        f"sys.modules[{package_name!r}]=p\n"
+        "def _agw_install(items):\n"
+        " for n,s in items:\n"
+        f"  q={package_name!r}+'.'+n;m=types.ModuleType(q);m.__file__='<'+q+'>';"
+        f"m.__package__={package_name!r};sys.modules[q]=m;"
+        "exec(compile(s,m.__file__,'exec'),m.__dict__)\n"
+        "def _agw_load_identity():_agw_install(_agw_sources[:2])\n"
+        "def _agw_load_remaining():_agw_install(_agw_sources[2:])\n"
+        f"def _agw_enter_body():return sys.modules[{entrypoint!r}].main(sys.argv[1])\n"
+    )
+    return RootGuestProgram(loader, delivery, delivered)
 
 
 def build_helper_modules(package_name: str, module_names: tuple[str, ...]) -> str:
