@@ -340,13 +340,15 @@ def test_conflicting_revision_refuses_poll(owned):
 
 def test_deadline_before_start_and_late_receipt_retains(owned, monkeypatch):
     _, owner, adapter, calls = owned
+    clock = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
     with pytest.raises(TimeoutError):
         adapter.start(Deadline.after(0))
     assert owner.list_lifecycle_obligations() == ()
 
     def late(*args, **kwargs):
         calls.append("start")
-        time.sleep(0.03)
+        clock[0] += 0.03
         return UPID
 
     monkeypatch.setattr(_ProxmoxWire, "request_vm_start", late)
@@ -394,12 +396,14 @@ def test_concurrent_start_sends_once(owned, monkeypatch):
 @pytest.mark.parametrize("stage", ["register", "mark"])
 def test_deadline_after_ledger_commit_never_posts(owned, monkeypatch, stage):
     repository, owner, adapter, calls = owned
+    clock = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
     name = "register_lifecycle_obligation" if stage == "register" else "mark_lifecycle_obligation_possible_effect"
     original = getattr(repository, name)
 
     def late(*args, **kwargs):
         result = original(*args, **kwargs)
-        time.sleep(0.03)
+        clock[0] += 0.03
         return result
 
     monkeypatch.setattr(repository, name, late)
@@ -414,6 +418,8 @@ def test_deadline_after_ledger_commit_never_posts(owned, monkeypatch, stage):
 
 def test_late_task_status_retains_and_fresh_observation_can_settle(owned, monkeypatch):
     _, owner, adapter, calls = owned
+    clock = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
     adapter.start(Deadline.after(5))
     with pytest.raises(TimeoutError):
         adapter.observe(Deadline.after(0))
@@ -421,7 +427,7 @@ def test_late_task_status_retains_and_fresh_observation_can_settle(owned, monkey
 
     def late(*args, **kwargs):
         calls.append("late-poll")
-        time.sleep(0.03)
+        clock[0] += 0.03
         return status()
 
     monkeypatch.setattr(_ProxmoxWire, "request_task_status", late)
