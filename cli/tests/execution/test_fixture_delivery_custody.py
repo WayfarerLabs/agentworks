@@ -8,7 +8,13 @@ from agentworks.execution import _process
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import CapturedOutput, CarrierIO, Deadline, Dispatch, Failure, PreparedInvocation
 from agentworks.execution.carriers._subprocess import ProcessResult
-from tests.execution import _bound_carrier_support, test_account_resolution, test_execution_access, test_target_identity
+from tests.execution import (
+    _bound_carrier_support,
+    test_account_resolution,
+    test_execution_access,
+    test_inline_helper,
+    test_target_identity,
+)
 from tests.execution.files import (
     _file_read_support,
     _file_snapshot_support,
@@ -26,6 +32,7 @@ _CARRIERS = (
     test_account_resolution.LocalCarrier,
     test_execution_access.LocalCarrier,
     test_target_identity.LocalCarrier,
+    test_inline_helper.LocalCarrier,
     _file_read_support.LocalCarrier,
     _file_snapshot_support.LocalCarrier,
     _file_stage_support.LocalCarrier,

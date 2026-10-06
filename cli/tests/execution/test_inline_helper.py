@@ -35,13 +35,12 @@ from agentworks.execution.carrier import (
     Deadline,
     Dispatch,
     ExitStatus,
-    Failure,
     PreparedInvocation,
     Retention,
 )
 from agentworks.execution.models import Command, Script, Shell
 from agentworks.execution.result import ApplicationState, ExitCode
-from tests.execution._bound_carrier_support import run_fixture_process
+from tests.execution._bound_carrier_support import fixture_dispatch, run_fixture_process
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the inline guest candidate requires Linux")
 PYTHON_311 = Path("/usr/bin/python3.11")
@@ -70,7 +69,6 @@ class LocalCarrier:
     ) -> CarrierReport:
         self.validate(invocation, io=io)
         self.calls += 1
-        held = self.local_delivery if custody is None else custody
         result = run_fixture_process(
             list(invocation.argv), io=io, deadline=deadline, custody=custody, standalone_custody=self.local_delivery
         )
@@ -82,11 +80,7 @@ class LocalCarrier:
                 else ExitStatus(code=result.exit_status)
             )
         report = CarrierReport(
-            Dispatch.SENT
-            if result.started
-            else Dispatch.UNKNOWN
-            if result.failure is Failure.OBSERVATION or not held.settled
-            else Dispatch.NOT_SENT,
+            fixture_dispatch(result),
             completion,
             result.local_status,
             result.stdout,
