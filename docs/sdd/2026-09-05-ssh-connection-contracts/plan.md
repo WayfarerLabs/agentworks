@@ -195,9 +195,9 @@ proves that restoring old TOML does not discard current managed policy, revocati
 partial-update custody. Production writer coexistence and rollback through both usable RunContext
 paths still require transport composition and native acceptance.
 
-Shared subprocess adoption introduces an implementation dependency on transport #833. Current
-private integration uses `12dcb01b8f76575a55e515940022f0a14a74e34f`, which adds mandatory
-caller-held `LocalDeliveryCustody`. The preceding published SSH head `dda32ee69` remains based on
+Shared subprocess adoption introduces an implementation dependency on transport #833. Current draft
+integration uses `12dcb01b8f76575a55e515940022f0a14a74e34f`, which adds mandatory caller-held
+`LocalDeliveryCustody`. The preceding published SSH head `dda32ee69` remains based on
 `e1d4c9b1189edbc247210c6c900975c6290ac531`; its hosted evidence does not validate this adoption.
 Private execution binds the selected owner scope and bootstrap boot; the WSL2 native factory
 requires both prepared identity plans and shares one elevated-plan/full-guest bootstrap between file
