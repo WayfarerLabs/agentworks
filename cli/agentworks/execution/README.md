@@ -248,10 +248,10 @@ resolution, but observes only the fixed provider `GET /status/current` endpoint.
 QGA, legacy status, guest commands or VM startup. Exact `running` and `stopped` fields establish
 power states; unavailable or malformed responses return UNKNOWN. One finite observation budget is
 checked before local configuration/secret preparation, before the owned HTTP worker and after its
-response. Local preparation is not hard-preemptible; the remaining worker lifetime covers DNS, TLS
-and response delivery. An expired or late observation refuses, and control interruptions kill and
-reap the worker before propagating. This is passive power evidence, not guest identity, availability
-custody, provider-locator acceptance or a complete platform operation.
+response. Local preparation cannot be forcibly interrupted; the remaining worker lifetime covers
+DNS, TLS and response delivery. An expired or late observation refuses, and control interruptions
+kill and reap the worker before propagating. This is passive power evidence, not guest identity,
+availability custody, provider-locator acceptance or a complete platform operation.
 
 `binding.py` carries a native carrier, its actual delivery account and explicit runtime selection.
 The private platform resolver is an explicit preparation operation with a required deadline, so a
