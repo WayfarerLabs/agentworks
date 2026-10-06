@@ -1,6 +1,7 @@
 # SSH Terminal Delivery: Feasibility and Joint Interface
 
-- Status: SSH-owned implementation candidate; shared types and terminal preparation remain open
+- Status: SSH-owned implementation candidate; shared input/preparation published, relay/native
+  acceptance open
 - Inspected SSH code: `678e487d`; transport bootstrap probe: `a885ef5a`, 2026-09-20
 - Requirements: [FRD R4/R5](frd.md#r4-one-attempt-byte-safe-io-and-truthful-evidence)
 - Shared boundary:
@@ -240,8 +241,10 @@ format, relevant mypy and file checks pass at that isolated correction.
 Production composition must retain the native worker before acquisition and through interrupted
 caller waits, client launch and cleanup settlement. Moving acquisition into an anonymous thread does
 not establish that custody. Asynchronous thread injection, fatal signals and allocation exhaustion
-are outside this interruption guarantee. The shared process owner still needs native stdin support;
-the actual relay, cleanup reduction, presentation sanitation and native acceptance remain open.
+are outside this interruption guarantee. Transport `d9315847` now supplies borrowed native stdin on
+the existing shared owner; the [implementation record](terminal-results.md) scopes its adoption.
+Owner-mediated resize, actual relay, cleanup reduction, presentation sanitation and native
+acceptance remain open.
 
 Use explicit worker completion facts when a caller wait is interrupted. The current signal case
 interrupts before joining and leaves interrupted-wait settlement unproved. The test helper retains
