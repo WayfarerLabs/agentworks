@@ -685,6 +685,15 @@ provide that evidence. The host import remains workstation-neutral. Actual sudo/
 acceptance and native integration remain open; these private plans are not grants and do not
 activate permissions.
 
+The separate private `build_root_guest_bootstrap_argv` builder accepts an explicit root-entry plan,
+exact target credentials and an optional expected guest. It permits only Linux system Python. Its
+fixed bootstrap verifies root entry before opening `/proc/1/stat`, then sets and verifies the target
+IDs, groups and capabilities before loading helper code or consuming its stdin prefix. A fresh
+bounded reader supplies init identity through the held non-inheritable descriptor, including when a
+trusted bundle reloads its guest-identity module. No process-global fork hook is installed. Existing
+ordinary helpers do not select this builder automatically. Native hardened-guest behavior, complete
+body fencing, recovery and production consumer wiring remain unproved.
+
 `_account.resolve_account` discovers a core-bound account's UID, primary GID and normalized groups
 through one read-only carrier attempt under the delivery identity. `RuntimeSelection` explicitly
 binds the destination OS and an optional sole interpreter path. Linux otherwise selects

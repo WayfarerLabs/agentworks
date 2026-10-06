@@ -97,9 +97,14 @@ removes the added exemptions without changing production code. The lead's integr
 pass 43 action tests and 17 native-operation composition tests; strict mypy passes 1,200 sources.
 These are local custody tests, not native production job-action acceptance.
 
-The hardened-guest bootstrap is a separate private prototype with explicit root entry and exact
-target credentials, not a completed body fence or permission-policy surface. No production consumer
-uses that entry yet and no database data has been deleted.
+The hardened-guest bootstrap at `f1ab22682` clears all three private review lanes after its direct
+bundle test was corrected to supply the real trampoline's argv shape under default parallel pytest.
+The lead's integrated runtime/loader/guest-identity run passes 119 tests; Ruff/format pass and
+strict mypy passes 1,202 sources at `c6564006b`. Root admission precedes the sole privileged
+init-stat open; exact target credentials and capability checks precede helper loading. The held
+descriptor provides fresh bounded reads and closes across exec without a process-global fork hook.
+This remains a separate private primitive, not a completed body fence or permission-policy surface.
+No production consumer uses that entry yet and no database data has been deleted.
 
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
