@@ -38,6 +38,7 @@ from agentworks.execution.carrier import (
     SinkOutput,
     TerminalInput,
 )
+from agentworks.execution.carriers._proxmox_http import _Endpoint, _valid_control_timeout, _valid_task_id
 
 _MAX_INPUT_BYTES = 65_536
 # Older supported PVE 8 HTTP servers limit the complete POST, independently
@@ -108,25 +109,55 @@ class _ProxmoxWire:
     def request(
         self, method: str, suffix: str, *, body: bytes | None = None, timeout: float | None
     ) -> dict[str, object]:
-        return self._request(method, suffix, body=body, timeout=timeout)
+        return self._request(_Endpoint.GUEST_AGENT, method, suffix, body=body, timeout=timeout)
 
     def request_power(self, *, timeout: float) -> dict[str, object]:
         """Read provider power through the fixed, passive status endpoint."""
-        return self._request("GET", None, body=None, timeout=timeout)
+        return self._request(_Endpoint.POWER, "GET", None, body=None, timeout=timeout)
 
     def request_current_config(self, *, timeout: float) -> dict[str, object]:
         """Read live provider configuration through one fixed, passive endpoint."""
-        return self._request("GET", None, body=None, timeout=timeout, current_config=True)
+        return self._request(_Endpoint.CURRENT_CONFIG, "GET", None, body=None, timeout=timeout)
+
+    def request_vm_start(self, *, timeout: float) -> str:
+        """Submit one fixed start, returning only a bounded raw acknowledgment."""
+        if not _valid_control_timeout(timeout):
+            raise ValidationError("Proxmox start requires a positive finite timeout")
+        data = self._exchange(_Endpoint.VM_START, "POST", None, body=None, timeout=timeout)
+        if not _valid_task_id(data):
+            raise _WireFailure("Proxmox returned an invalid start acknowledgment")
+        assert isinstance(data, str)
+        return data
+
+    def request_task_status(self, upid: str, *, timeout: float) -> dict[str, object]:
+        """Read one literal task under the selected node, without identity binding."""
+        if not _valid_control_timeout(timeout) or not _valid_task_id(upid):
+            raise ValidationError("Proxmox task status requires a bounded identifier and positive finite timeout")
+        return self._request(_Endpoint.TASK_STATUS, "GET", upid, body=None, timeout=timeout)
 
     def _request(
         self,
+        endpoint: _Endpoint,
         method: str,
         suffix: str | None,
         *,
         body: bytes | None,
         timeout: float | None,
-        current_config: bool = False,
     ) -> dict[str, object]:
+        data = self._exchange(endpoint, method, suffix, body=body, timeout=timeout)
+        if not isinstance(data, dict):
+            raise _WireFailure("Proxmox returned an invalid response envelope")
+        return dict(data)
+
+    def _exchange(
+        self,
+        endpoint: _Endpoint,
+        method: str,
+        suffix: str | None,
+        *,
+        body: bytes | None,
+        timeout: float | None,
+    ) -> object:
         """Own one HTTP worker until completion, timeout or propagated interruption."""
         started = time.monotonic()
         connection = asdict(self._connection)
@@ -138,7 +169,7 @@ class _ProxmoxWire:
                 "suffix": suffix,
                 "body": body.decode("ascii") if body is not None else None,
                 "timeout": timeout,
-                "current_config": current_config,
+                "endpoint": endpoint,
             }
         ).encode("ascii")
         process = subprocess.Popen(
@@ -162,9 +193,9 @@ class _ProxmoxWire:
             parsed = json.loads(encoded)
         except ValueError:
             raise _WireFailure("Proxmox returned invalid JSON") from None
-        if not isinstance(parsed, dict) or not isinstance(parsed.get("data"), dict):
+        if not isinstance(parsed, dict) or "data" not in parsed:
             raise _WireFailure("Proxmox returned an invalid response envelope")
-        return dict(parsed["data"])
+        return parsed["data"]
 
 
 class ProxmoxCarrier:

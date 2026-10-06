@@ -268,6 +268,15 @@ verification is mandatory. `ProxmoxConnection.ca_bundle` accepts an explicit PEM
 additional trust bypass. The API hostname must match the certificate; there is no server-name
 override. Redirects and ambient proxies are disabled, and provider exception text is not returned.
 
+Its private wire also offers fixed body-free VM-start POST and task-status GET requests with
+positive finite worker budgets. Start returns only the raw scalar acknowledgment; task reads retain
+dictionary data. Task identifiers are encoded as one literal path component and capped at 255 UTF-8
+bytes, including returned acknowledgments. This is a conservative wire retention capacity motivated
+by Proxmox's task-log filename, not an API/schema limit or task-identity validation. An unusable
+acknowledgment or HTTP failure does not prove start rejection. These primitives do not establish
+matching receipts, completed activation, generation freshness, drain or availability authority;
+startup lifecycle and owner integration remain separate work.
+
 The private Proxmox execution-power hook shares verified connection preparation with native binding
 resolution, but observes only the fixed provider `GET /status/current` endpoint. It does not invoke
 QGA, legacy status, guest commands or VM startup. Exact `running` and `stopped` fields establish

@@ -166,7 +166,7 @@ def test_actual_connection_and_fixed_request_use_scoped_token_without_legacy_loo
     result = platform.observe_provider_locator(_vm(), ctx, deadline=Deadline.after(10))
     assert isinstance(result, ProviderLocator)
     payload = json.loads(process.communicate.call_args.args[0])
-    assert payload["current_config"] is True
+    assert payload["endpoint"] == "current-config"
     assert payload["method"] == "GET" and payload["suffix"] is None and payload["body"] is None
     assert payload["connection"]["api_url"] == platform.config.api_url
     assert payload["connection"]["node"] == "node1"

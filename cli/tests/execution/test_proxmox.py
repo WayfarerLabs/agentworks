@@ -44,7 +44,14 @@ def connection() -> ProxmoxConnection:
 
 
 def worker_payload() -> dict[str, Any]:
-    return {"connection": asdict(connection()), "method": "POST", "suffix": "exec", "body": "{}", "timeout": 2.5}
+    return {
+        "connection": asdict(connection()),
+        "endpoint": "guest-agent",
+        "method": "POST",
+        "suffix": "exec",
+        "body": "{}",
+        "timeout": 2.5,
+    }
 
 
 def stub_process(monkeypatch: pytest.MonkeyPatch, body: bytes) -> MagicMock:
@@ -141,7 +148,13 @@ def test_observation_wire_uses_fixed_provider_get_and_verified_tls(
     build = MagicMock(return_value=opener)
     monkeypatch.setattr(urllib.request, "build_opener", build)
     bundle = Path("cluster-ca.pem")
-    payload = {**worker_payload(), "method": "GET", "suffix": None, "body": None, "current_config": current_config}
+    payload = {
+        **worker_payload(),
+        "method": "GET",
+        "suffix": None,
+        "body": None,
+        "endpoint": "current-config" if current_config else "power",
+    }
     payload["connection"]["ca_bundle"] = str(bundle)
     context = ssl.create_default_context()
     trust = MagicMock(return_value=context)
@@ -167,12 +180,20 @@ def test_provider_observation_route_refuses_mutating_shapes(
     method: str, body: str | None, current_config: bool
 ) -> None:
     with pytest.raises(ValueError):
-        _request({**worker_payload(), "method": method, "suffix": None, "body": body, "current_config": current_config})
+        _request(
+            {
+                **worker_payload(),
+                "method": method,
+                "suffix": None,
+                "body": body,
+                "endpoint": "current-config" if current_config else "power",
+            }
+        )
 
 
 def test_current_config_cannot_select_an_agent_endpoint() -> None:
     with pytest.raises(ValueError):
-        _request({**worker_payload(), "method": "GET", "body": None, "current_config": True})
+        _request({**worker_payload(), "method": "GET", "body": None, "endpoint": "current-config"})
 
 
 @pytest.mark.parametrize("current_config", [False, True])
@@ -204,7 +225,9 @@ def test_http_failure_is_not_replayed_or_exposed(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(urllib.request, "build_opener", lambda *args: opener)
     payload = worker_payload()
     if route != "agent":
-        payload.update(method="GET", suffix=None, body=None, current_config=route == "config")
+        payload.update(
+            method="GET", suffix=None, body=None, endpoint="current-config" if route == "config" else "power"
+        )
     source = io.BytesIO(json.dumps(payload).encode())
     sink = io.BytesIO()
     with monkeypatch.context() as context:
@@ -240,7 +263,9 @@ def test_wire_bounds_response_before_parsing(monkeypatch: pytest.MonkeyPatch, ro
     with pytest.raises(ValueError):
         payload = worker_payload()
         if route != "agent":
-            payload.update(method="GET", suffix=None, body=None, current_config=route == "config")
+            payload.update(
+                method="GET", suffix=None, body=None, endpoint="current-config" if route == "config" else "power"
+            )
         _request(payload)
     assert response.closed
 
@@ -278,7 +303,7 @@ def test_ca_bundle_path_serializes_only_for_worker(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.windows
-@pytest.mark.parametrize("route", ["agent", "power", "config"])
+@pytest.mark.parametrize("route", ["agent", "power", "config", "start", "task"])
 def test_owned_http_worker_is_killed_and_reaped_at_deadline(monkeypatch: pytest.MonkeyPatch, route: str) -> None:
     original = subprocess.Popen
     children = []
@@ -295,6 +320,10 @@ def test_owned_http_worker_is_killed_and_reaped_at_deadline(monkeypatch: pytest.
             wire.request_current_config(timeout=0.05)
         elif route == "power":
             wire.request_power(timeout=0.05)
+        elif route == "start":
+            wire.request_vm_start(timeout=0.05)
+        elif route == "task":
+            wire.request_task_status("UPID:node1:00000001:00000001:00000001:qmstart:123:user@pve:", timeout=0.05)
         else:
             wire.request("POST", "exec", body=b"{}", timeout=0.05)
     assert len(children) == 1
