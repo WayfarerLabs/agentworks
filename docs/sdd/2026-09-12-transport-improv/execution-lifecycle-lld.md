@@ -711,14 +711,15 @@ may be observed again under a fresh finite budget; task-list search and a runnin
 cannot reconstruct or settle a missing receipt.
 
 The activation row owns the one admitted start request, not every future effect of the VM. A fully
-matching ordinary start worker observed stopped can settle that request independently of its
-success, warning or unknown outcome. Retain that terminal observation before resolution so a lost
-database reply retries only bookkeeping. This is neither whole-operation resolution nor permission
-for a guest body: successful task outcome, fresh running power and exact target preparation remain
-separate admission conditions. The VM may keep running after aggregate operation release. Missing or
-mismatched task evidence retains the request, and an HA handoff cannot use ordinary-worker
-settlement to discharge manager work. Native proof of the limited worker-settlement interpretation
-remains required before production startup.
+matching ordinary start worker observed stopped with exact `OK` or supported `WARNINGS: N` can
+settle that request. Stopped status alone is insufficient: killing the original worker can leave its
+forked launch child running. Failed, unknown, missing or mismatched task evidence therefore retains
+custody. Retain successful terminal observation before resolution so a lost database reply retries
+only bookkeeping. This is neither whole-operation resolution nor permission for a guest body: fresh
+running power and exact target preparation remain separate admission conditions. The VM may keep
+running after aggregate operation release, and an HA handoff cannot use ordinary-worker settlement
+to discharge manager work. Native proof of the limited successful-worker interpretation remains
+required before production startup.
 
 HA-managed VMs return a different handoff task. Completion of that handoff is not proof that the HA
 manager's activation work has ended. Native ownership/availability proof must cover that path rather

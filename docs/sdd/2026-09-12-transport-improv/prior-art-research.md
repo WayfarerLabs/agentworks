@@ -790,6 +790,21 @@ Sources:
 [PVE 8 worker acknowledgment ordering](https://github.com/proxmox/pve-common/blob/91962804ffce2cdb70261f03b2df5c0b7a0a2c4d/src/PVE/RESTEnvironment.pm#L665-L731),
 [PVE 9 worker acknowledgment ordering](https://github.com/proxmox/pve-common/blob/defd246f31f327463f901a2daaf8dc52efcc5a97/src/PVE/RESTEnvironment.pm#L715-L732).
 
+Ordinary start uses a forked launch child. Killing the original task worker before its cleanup can
+leave that child preparing or launching QEMU even though task status reports the original worker
+stopped. Decision: worker disappearance, arbitrary failure and unknown log outcome do not settle the
+activation request. Exact `OK` or supported `WARNINGS: N` follows successful worker-closure return,
+after the synchronous fork helper has waited for its child. Only that fully matching ordinary
+successful-completion candidate may discharge this request's row; it does not prove general provider
+fencing or grant body authority. Native acceptance must still exercise interrupted launch and
+successful/warning settlement. HA handoff remains separate.
+
+Sources:
+[PVE 8 forked QEMU launch](https://github.com/proxmox/qemu-server/blob/5ccd363e5908aa5a7b969797babdff1df5159475/src/PVE/QemuServer.pm#L6286-L6309),
+[PVE 8 fork and parent cleanup](https://github.com/proxmox/pve-common/blob/91962804ffce2cdb70261f03b2df5c0b7a0a2c4d/src/PVE/Tools.pm#L1057-L1122),
+[PVE 8 worker result ordering](https://github.com/proxmox/pve-common/blob/91962804ffce2cdb70261f03b2df5c0b7a0a2c4d/src/PVE/RESTEnvironment.pm#L630-L648),
+[PVE 9 synchronous fork cleanup](https://github.com/proxmox/pve-common/blob/defd246f31f327463f901a2daaf8dc52efcc5a97/src/PVE/Tools.pm#L527-L616).
+
 ### Decisions still required
 
 The new-guest package and preinstalled macOS host runtime choices are settled, but their
