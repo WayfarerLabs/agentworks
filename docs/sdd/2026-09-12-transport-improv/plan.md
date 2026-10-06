@@ -930,6 +930,37 @@ are scripted and packed Linux bodies run locally. Whole-unit private reviews and
 remain pending; native PVE, Windows-native, HA, generation/drain and complete RunContext remain
 open. This source is integrated privately without a handoff signal or completion checkbox.
 
+All three independent lanes clear the complete stopped-startup and shipped-registration unit at
+`7145e4c2a`. Project carries its full earlier source and adjacent-operation review, then passes 481
+corrected cases and 310 final adapter/composition cases. Complexity passes 349 final parallel cases;
+generic passes 349 relevant cases and all 87 adapter cases. Project's 63 Windows-selected cases run
+on Linux, not a native Windows workstation. The reviews accept removal of redundant interior
+carrier/root validation and copied registration inventories, without changing external validation.
+Complexity deletion experiments break four settlement-restriction cases, six retained-terminal cases
+and both fresh-registration cases; restoring the candidate returns them to passing. Every review
+tree is restored clean at its exact pin.
+
+The first complete lead run at `a4375182c` fails one managed-output test with 15,629 passes and 49
+skips: the three-byte `abc` disclosure canary matches the hexadecimal address in an ordinary
+payload-free object representation. `81262bf7a` uses the same-length `q!z` canary, retaining the
+capture limit, exact returned bytes and disclosure assertion. Its complete suite passes 15,630 tests
+with 49 skips and 27 existing fork warnings. The complexity lane separately observes a
+20-millisecond activation-test budget expiring during SQLite setup before its simulated late reply.
+`7145e4c2a` replaces three sleep-based fixtures with controlled monotonic advancement at the late
+event, preserving every assertion and deadline. Removing advancement makes all four affected
+parameterized cases fail their timeout assertions; the corrected worker selection passes 310 cases.
+These diagnoses explain only the observed canary collision and scheduling assumption, not older
+unidentified CI failures. The final complete lead suite at `7145e4c2a` passes 15,630 tests with 49
+skips and 27 existing fork warnings, exit 0. Full Ruff/format (1,280 files), strict mypy (1,240
+sources), typer isolation, file quality, locked-SDD, Rulesync and whitespace checks pass. An initial
+static invocation cannot write its default uv cache; the corrected workspace-cache invocation
+passes. Website gates pass 160 Python and 103 Node cases, four builds and both deterministic
+comparisons. Native PVE, Windows-native, generation/drain, other-platform factories and complete
+additive RunContext remain open; no broader checkbox, public feedback round or SDD lock is completed
+by these local results. Explicit macOS/Windows in-place local Replace retains approved
+supported-metadata preservation and partial-failure reporting; no database data or SSH branch is
+changed.
+
 The transport lead owns this entire sequence, not just the API design. The operator confirms the
 mandate to build with the SSH developer, migrate all consumers and physically delete the old stack.
 The [0.19.0 migration inventory](migration-strategy.md) is the release baseline. The target state
@@ -3726,10 +3757,10 @@ roots before actual shipped registration and passive Proxmox/WSL2 construction/b
 forbidding process/network effects. Existing provider/Lima tests patch the canonical old dependency
 instead of its relocated incidental module global; all behavior assertions remain. The worker passes
 2,317 focused/adjacent cases with four skips, 68 relocated-patch cases, both Windows-selected
-fresh-process cases on Linux, 13-file typing/style, file quality and whitespace checks. This is
-integrated privately; whole-unit reviews and complete lead gates remain pending. Native Windows,
-other-platform binding/trust/provisioning, actual new-stack workflows and the complete additive
-RunContext remain open, so the broader factory checkbox is not completed.
+fresh-process cases on Linux, 13-file typing/style, file quality and whitespace checks. Final
+whole-unit reviews and complete lead gates at `7145e4c2a`, recorded above, include this registration
+work. Native Windows, other-platform binding/trust/provisioning, actual new-stack workflows and the
+complete additive RunContext remain open, so the broader factory checkbox is not completed.
 
 - [ ] Validate complete provisioning, native recovery without Tailscale, plugin operations, files,
       backup, host provisioning/rollback and interactive attachment through the new surface. Cover
