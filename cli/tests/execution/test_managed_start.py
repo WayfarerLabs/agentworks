@@ -326,7 +326,11 @@ def test_guest_stages_exact_assets_and_invokes_closed_service_argv(
         "--property=TimeoutStartSec=30s",
         "--property=TimeoutStopSec=5s",
     )
-    assert argv[-8:] == ("--", "/usr/bin/python3.11", "-I", "-S", "-B", "-c", FIXED_SOURCE, RUN.run_id)
+    assert argv[-9:-1] == ("--", "/usr/bin/python3.11", "-I", "-S", "-B", "-c", FIXED_SOURCE, RUN.run_id)
+    assert json.loads(argv[-1]) == {
+        "identity": {"euid": ROOT.euid, "egid": ROOT.egid, "groups": list(ROOT.groups)},
+        "guest": [GUEST.instance_marker, GUEST.boot_id, GUEST.init_start_ticks],
+    }
     assert "private-canary" not in repr(argv)
     with pytest.raises(ManagedStartError):
         guest._prepare_start(request, store, python="/usr/bin/python3.11", runner=runner)
@@ -646,12 +650,13 @@ def test_preflight_refuses_bogus_request_type_before_reservation_mutation(
     assert carrier.validations == carrier.calls == 0
 
 
+@pytest.mark.parametrize("stdin_bytes", [12_000, 50_000])
 def test_proxmox_structural_refusal_precedes_possible_dispatch(
-    reserved: tuple[ManagedRunRepository, ManagedRunRecord],
+    reserved: tuple[ManagedRunRepository, ManagedRunRecord], stdin_bytes: int
 ) -> None:
     repository, record = reserved
     carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.example", "node", 101, "operator!token", "secret"))
-    request = replace(_request(record), stdin=b"x" * 50_000)
+    request = replace(_request(record), stdin=b"x" * stdin_bytes)
     with pytest.raises(ValidationError):
         prepare_managed_start(
             carrier,
@@ -665,6 +670,30 @@ def test_proxmox_structural_refusal_precedes_possible_dispatch(
             GUEST,
         )
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
+
+
+def test_proxmox_complete_service_envelope_fits_with_bounded_workload_input(
+    reserved: tuple[ManagedRunRepository, ManagedRunRecord],
+) -> None:
+    repository, record = reserved
+    carrier = ProxmoxCarrier(ProxmoxConnection("https://pve.example", "node", 101, "operator!token", "secret"))
+    prepared = prepare_managed_start(
+        carrier,
+        record.identity,
+        record.spec,
+        record.output_policy,
+        replace(_request(record), stdin=b"x" * 10_000),
+        IdentityPlan(ROOT, IdentityMode.SUDO_ROOT),
+        Deadline.after(10),
+        RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
+        GUEST,
+    )
+    try:
+        assert isinstance(prepared.io, CarrierIO)
+        carrier.validate(prepared.invocation, io=prepared.io)
+        assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
+    finally:
+        prepared.discard()
 
 
 def test_unexpected_carrier_exception_propagates_after_possible_dispatch(

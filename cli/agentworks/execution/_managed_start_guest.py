@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -30,6 +31,9 @@ _ENV = {"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"}
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from ._helper_identity import IdentityExpectation
+    from ._vm_guest_identity_protocol import VMGuestIdentity
+
 
 @dataclass(frozen=True, slots=True, repr=False)
 class _PreparedStart:
@@ -47,8 +51,8 @@ def _read_request() -> ManagedStartRequest:
     return decode_request(bytes(data))
 
 
-def _service_argv(run_id: str, python: str) -> tuple[str, ...]:
-    """The unit and run ID are the sole request-derived command arguments."""
+def _service_argv(run_id: str, python: str, identity: IdentityExpectation, guest: VMGuestIdentity) -> tuple[str, ...]:
+    """Carry validated controller credentials and guest facts as bounded data."""
     if (
         type(run_id) is not str
         or len(run_id) != 32
@@ -58,6 +62,17 @@ def _service_argv(run_id: str, python: str) -> tuple[str, ...]:
         or "\0" in python
     ):
         raise ManagedStartError("invalid managed service identity")
+    admission = json.dumps(
+        {
+            "identity": {"euid": identity.euid, "egid": identity.egid, "groups": list(identity.groups)},
+            "guest": [guest.instance_marker, guest.boot_id, guest.init_start_ticks],
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    if len(admission) > 65_536:
+        raise ManagedStartError("managed service admission exceeds bound")
     return (
         _SYSTEMD_RUN,
         "--system",
@@ -81,6 +96,7 @@ def _service_argv(run_id: str, python: str) -> tuple[str, ...]:
         "-c",
         FIXED_SOURCE,
         run_id,
+        admission,
     )
 
 
@@ -120,7 +136,7 @@ def _prepare_start(
         store.read_request_asset(name) is not None for name in RequestAsset
     ):
         raise ManagedStartError("managed start already staged")
-    argv = _service_argv(run_id, python)
+    argv = _service_argv(run_id, python, request.identity, request.guest)
     store.publish_request(request.job)
     status = runner(argv)
     if status is not None and (type(status) is not int or not -255 <= status <= 255):
