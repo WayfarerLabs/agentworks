@@ -13,6 +13,17 @@ from pathlib import Path
 
 import pytest
 
+from agentworks.execution.carrier import (
+    CapturedOutput,
+    CarrierIO,
+    CarrierReport,
+    ChannelFeatures,
+    Deadline,
+    Dispatch,
+    ExitStatus,
+    PreparedInvocation,
+    Provenance,
+)
 from agentworks.execution.carriers.ssh import SSHCarrier, SSHConnection
 from tests.execution.conformance import check_buffered_contract
 
@@ -51,6 +62,30 @@ def test_shared_vectors_through_ssh_process_delivery(local_binding: SSHConnectio
     assert ambiguous.reported_exit is None
     assert ambiguous.streams_complete
     assert observations[-1].suppressed
+
+
+def test_framing_failure_diagnostics_do_not_include_payloads() -> None:
+    payload = b"untrusted-output-canary"
+
+    class MalformedCarrier:
+        features = ChannelFeatures()
+
+        def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+            del invocation, io
+
+        def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport:
+            del invocation, io, deadline
+            return CarrierReport(
+                Dispatch.SENT,
+                ExitStatus(code=0),
+                local_status=0,
+                stdout=CapturedOutput(payload, complete=True, provenance=Provenance.CARRIER_STDOUT),
+                stderr=CapturedOutput(payload, complete=True, provenance=Provenance.MIXED_STDERR),
+            )
+
+    with pytest.raises(AssertionError) as failure:
+        check_buffered_contract(MalformedCarrier())
+    assert payload.decode("ascii") not in str(failure.value)
 
 
 def test_ssh_executes_in_fresh_process_without_legacy(local_binding: SSHConnection) -> None:

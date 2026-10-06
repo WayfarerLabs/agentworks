@@ -124,7 +124,15 @@ def check_buffered_contract(carrier: Carrier, *, seconds_per_case: float = 15.0)
             _require(report.stdout.data == report.stderr.data == b"", name)
             _require(output.suppressed and output.stdout == output.stderr == b"", name)
         else:
-            _require(not output.framing_error and not output.bootstrap_failed, name)
+            _require(
+                not output.framing_error and not output.bootstrap_failed,
+                f"{name}; framing_error={output.framing_error}; bootstrap_failed={output.bootstrap_failed}; "
+                f"dispatch={report.dispatch}; completion={report.completion}; local_status={report.local_status}; "
+                f"failure={report.failure}; stdout_bytes={len(report.stdout.data)}; "
+                f"stderr_bytes={len(report.stderr.data)}; stdout_complete={report.stdout.complete}; "
+                f"stderr_complete={report.stderr.complete}; stdout_retention={report.stdout.retention}; "
+                f"stdout_provenance={report.stdout.provenance}",
+            )
             _require(complete, name)
             _require(output.stdout == expected_out and output.stderr == expected_err, name)
         if expected_exit == 255 and report.completion is None:
