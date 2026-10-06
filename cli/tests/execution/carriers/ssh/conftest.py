@@ -15,6 +15,7 @@ import pytest
 
 from agentworks.execution.carriers.ssh.connection import SSHConnection
 from agentworks.execution.carriers.ssh.trust import SSHTrustFiles
+from tests.execution.carriers.ssh.enrollment_server import LocalSSH, enrollment_server
 
 
 def _unused_port() -> int:
@@ -70,3 +71,10 @@ def local_sshd(tmp_path: Path) -> Iterator[SSHConnection]:
         server.wait(timeout=2)
         assert server.stderr is not None
         server.stderr.close()
+
+
+@pytest.fixture
+def enrollment_sshd(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[LocalSSH]:
+    """Share one enrollment server owner without overriding the byte-delivery fixture."""
+    with enrollment_server(tmp_path, request.param) as server:
+        yield server
