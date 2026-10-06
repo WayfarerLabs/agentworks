@@ -6,6 +6,7 @@ with fixture admission, so these tests do not prove native root or PVE behavior.
 
 from __future__ import annotations
 
+import builtins
 import json
 import os
 import subprocess
@@ -136,8 +137,36 @@ def test_running_views_share_owner_bootstrap_and_settle(database, tmp_path, monk
     source = root / "source"
     source.write_bytes(b"original")
     deadline = Deadline.after(30)
+    ctx = RunContext()
+    original_import = builtins.__import__
+    retired_roots = (
+        "agentworks.transports",
+        "agentworks.ssh",
+        "agentworks.remote_exec",
+        "agentworks.harness_setup.runner",
+        "agentworks.native_files",
+        "agentworks.plugins.proxmox.transport",
+    )
+
+    def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+        requested = (name, *(f"{name}.{member}" for member in fromlist or ()))
+        if any(
+            candidate == retired or candidate.startswith(retired + ".")
+            for candidate in requested
+            for retired in retired_roots
+        ):
+            raise AssertionError(name)
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    for retired in retired_roots:
+        with pytest.raises(AssertionError):
+            __import__(retired)
+        parent, _, leaf = retired.rpartition(".")
+        with pytest.raises(AssertionError):
+            __import__(parent, fromlist=(leaf,))
     with native_vm_operation(
-        database, "box", platform, RunContext(), deadline=deadline, trusted_root=PurePosixPath(root)
+        database, "box", platform, ctx, deadline=deadline, trusted_root=PurePosixPath(root)
     ) as views:
         assert views.file_operation._owner is views.execution_operation._owner is views.owner
         assert views.file_operation._bootstrap is views.execution_operation._bootstrap
