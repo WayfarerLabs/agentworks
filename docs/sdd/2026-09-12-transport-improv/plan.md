@@ -1042,6 +1042,13 @@ associated pending acceptance gates are superseded by this ruling.
       not introduce private SDK timeout mutation or a transport framework to imply hard preemption.
       Keep activation, selected execution routes and whole-workflow native evidence open; these
       observations alone cannot supply usable cloud RunContext targets.
+- [ ] Compose independent native SSH bindings for AWS, Azure and GCP from exact provider reads and
+      explicit new operator SSH settings. Use current valid public IPv4 endpoints and endpoint-keyed
+      admitted trust, preserving provider identity/network checks and the original deadline through
+      Azure's additional linked NIC/public-IP reads. Prove no retired execution imports or
+      binding-time process/file admission, no enrollment or ambient aliases, explicit root-to-named
+      Linux probing and fresh managed delivery. Keep activation, firewall routes, independent-job
+      availability, full RunContext and native acceptance separate and unfinished.
 
 The bounded owned-native extraction at `df6ab210a` clears all three independent private lanes
 against `c1c1e14c6`, including the corrected stopped-Proxmox tests and all managed route-check

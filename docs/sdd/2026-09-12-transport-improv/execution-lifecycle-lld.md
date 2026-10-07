@@ -1061,6 +1061,30 @@ late evidence as activation authority. These limitations do not weaken the separ
 execution/activation admission rules. Cloud activation and route factories still require their own
 reviewed evidence; passive power observation alone is not full native access.
 
+### Cloud SSH route composition
+
+The first cloud binding increment selects current public IPv4 endpoints from provider-owned
+exact-instance reads, not from the retired native transport. AWS retains its persisted account,
+region and instance checks; GCP also retains the recorded network, subnet and access-configuration
+checks. Azure follows NIC/public-IP references from its verified VM and validates the linked
+identities and subscription. Its additional reads share the original deadline and reject late
+successful responses. These SDK budgets retain the best-effort limitations above.
+
+Composition requires the explicit new `operator.ssh` settings, using their resolved identity,
+managed trust directory, agent and client policy. It does not read ambient SSH configuration or fall
+back to legacy fields. The first increment intentionally uses endpoint-keyed host trust
+(`host_key_alias=None`); it does not invent a VM alias mapping, enroll a target, reset trust or
+inspect key files during binding. Preserving/importing existing trust and creation-time enrollment
+remain separate work. A changed endpoint without admitted trust is refused rather than learned by
+ordinary execution.
+
+The Linux binding retains the recorded VM admin account for delivery and a fixed root-entry,
+named-account guest probe. Delivery as root uses direct entry; other admin accounts use explicit
+passwordless sudo. The existing bootstrap resolves the account's actual UID/GID/groups before its
+named body; no UID is guessed. Managed delivery uses fresh carriers with the same immutable
+connection. Binding alone advertises no independent-job availability: owned activation, firewall
+routes, keep-awake guarantees, complete RunContext composition and native proof remain open.
+
 ### Proxmox activation evidence boundary
 
 Stopped Proxmox startup needs a new bounded producer, not the retired start waiter. Its first
