@@ -335,6 +335,30 @@ Rulesync, file quality, locked-SDD and website jobs pass; Typer isolation is ski
 fails. This is hosted gate evidence, not native acceptance or a complete handoff. Both operator
 resource decisions, implementation and the recorded terminal/RunContext/native gates remain open.
 
+The following documentation tip `50bdd045e` has the same CLI tree. Its hosted run
+[`37549693530`](https://github.com/WayfarerLabs/agentworks/actions/runs/37549693530) repeats the
+same Linux counts, single Windows thread-join failure and three enrollment typing errors. Merge
+`8d5ed22c6b668c33dd6e8b053c12293f34839783` has transport `fc2e1992d` and that SSH tip as parents;
+tree `82e39974fcb0415425f3dbcff667cf1ea5f21e2f` exactly matches the source tip. Other repository and
+website jobs pass; hosted Typer isolation is skipped after mypy fails.
+
+Transport's
+[reviewed working increment](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6027924954)
+`fa730f1fcc5d6e5a1e6340fd9aa3e83b4ba743a8` adds private bound MANAGED OPERATION start and aggregate
+normal close, plus synchronized bounded phases in the failing Windows fixture. Its three private
+lanes clear code `9c9d93cfe`; native Windows confirmation and public RunContext remain open. SSH
+rebases without conflicts at `0d5d42bee0dab2e09e16fd448fcb68ab6f01fd22`. Range-diff retains all 171
+SSH commits: 170 patches match exactly, and the fixture patch drops only the observation correction
+now supplied by transport. The SSH implementation directory is byte-identical to the previous tip;
+shared process/custody/pump files match the new base exactly. The full Linux Python 3.12
+non-integration suite passes 16,529 tests with 49 skips and 27 warnings, exit 0 in 211.03 seconds.
+No live process has an argv path under its exact private test root. Full strict mypy checks 1,313
+sources and repeats only the three held enrollment errors, exit 1. Ruff/format (1,350 files), exact
+Typer isolation, file quality, locked-SDD, Rulesync and whitespace checks pass. Local website and
+native validation were not rerun for this draft rebase; new hosted results need their own full
+report. Both resource decisions and all recorded terminal, trust, RunContext and native acceptance
+gates remain open. No final-product feedback/fix round is consumed.
+
 Combined code pin `38934134e3b8d12af814f9371b62075daa49db3e` preserves all 64 Python paths in the
 SSH contribution, including deletions, from published `186458307b`. Its full suite passes 16,125
 non-integration tests with 51 skips and 27 warnings, exit 0 in 267.18 seconds. Full Ruff/format
