@@ -14,6 +14,7 @@ from ._managed_runs import (
     ManagedLaunchState,
     ManagedRunIdentity,
     ManagedRunLifetime,
+    ManagedRunOwner,
     ManagedRunOwnerKind,
     ManagedRunReceipt,
     ManagedRunRecord,
@@ -43,14 +44,17 @@ def preflight_bound_run(
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
     owner: OperationOwner,
+    expected_resource_owner: ManagedRunOwner | None = None,
     execution_operation: ExecutionOperation | None = None,
 ) -> tuple[ManagedRunRecord, bytes]:
-    """Inspect one exact row before borrow and match retained operation custody."""
+    """Inspect one exact row under explicit resource or retained operation custody."""
     if type(deadline) is not Deadline or deadline.expires_at is None:
         raise ValidationError("Managed access requires a finite deadline")
     if deadline.expired:
         raise ManagedDeadlineExpired("Managed access deadline expired before admission")
     if execution_operation is not None:
+        if expected_resource_owner is not None:
+            raise ValidationError("Managed operation access cannot use a resource-owner binding")
         run = execution_operation.require_managed_run(
             identity,
             repository=repository,
@@ -72,6 +76,11 @@ def preflight_bound_run(
         ):
             raise ValidationError("Managed access requires its exact acknowledged operation reservation")
         return record, encode_managed_job_fact(receipt)
+    if (
+        type(expected_resource_owner) is not ManagedRunOwner
+        or expected_resource_owner.kind is not ManagedRunOwnerKind.RESOURCE
+    ):
+        raise ValidationError("Independent managed access requires an explicit resource-owner binding")
     if (
         type(identity) is not ManagedRunIdentity
         or type(target) is not ManagedTargetIdentity
@@ -95,7 +104,7 @@ def preflight_bound_run(
         or record.spec.target != target
         or record.spec.target.kind is not ManagedTargetKind.VM
         or record.spec.lifetime is not ManagedRunLifetime.INDEPENDENT
-        or record.spec.owner.kind is not ManagedRunOwnerKind.RESOURCE
+        or record.spec.owner != expected_resource_owner
     ):
         raise ValidationError("Managed access requires an exact independent VM reservation")
     receipt = ManagedRunReceipt(record.identity, record.identity.unit_name, record.spec)

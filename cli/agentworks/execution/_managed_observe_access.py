@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
     from ._execution_operation import ExecutionOperation
     from ._helper_launcher import IdentityPlan
-    from ._managed_runs import ManagedRunRecord
+    from ._managed_runs import ManagedRunOwner, ManagedRunRecord
     from ._runtime_prerequisite import RuntimeSelection
     from ._vm_guest_identity_protocol import VMGuestIdentity
     from .carrier import Carrier, Deadline
@@ -85,6 +85,7 @@ def observe_and_reconcile_bound_managed_run(
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
     owner: OperationOwner,
+    expected_resource_owner: ManagedRunOwner | None = None,
 ) -> ManagedObserveOutcome:
     """Observe one exact run and reconcile only a validated launch receipt."""
     record, candidate, outcome = _bound_exchange(
@@ -97,6 +98,7 @@ def observe_and_reconcile_bound_managed_run(
         runtime_selection=runtime_selection,
         deadline=deadline,
         owner=owner,
+        expected_resource_owner=expected_resource_owner,
         stream=None,
     )
     try:
@@ -131,6 +133,7 @@ def observe_bound_managed_run(
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
     owner: OperationOwner,
+    expected_resource_owner: ManagedRunOwner | None = None,
     execution_operation: ExecutionOperation | None = None,
 ) -> ManagedObserveOutcome:
     """Read one exact VM run under its bound dispatch custody.
@@ -138,8 +141,8 @@ def observe_bound_managed_run(
     The caller supplies freshly prepared target and guest facts and retains
     responsibility for route freshness. This does not reconcile launch state,
     reduce output policy, or release the caller's operation owner. Operation
-    runs require the concrete retained execution context; omission retains the
-    independent resource-owned admission path.
+    runs require the concrete retained execution context; independent runs require
+    an explicit resource-owner binding.
     """
     _, _, outcome = _bound_exchange(
         repository,
@@ -151,6 +154,7 @@ def observe_bound_managed_run(
         runtime_selection=runtime_selection,
         deadline=deadline,
         owner=owner,
+        expected_resource_owner=expected_resource_owner,
         stream=None,
         execution_operation=execution_operation,
     )
@@ -169,6 +173,7 @@ def read_bound_managed_output(
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
     owner: OperationOwner,
+    expected_resource_owner: ManagedRunOwner | None = None,
     execution_operation: ExecutionOperation | None = None,
 ) -> ManagedReadOutputOutcome:
     """Read one exact closed stream and admit it under persisted output policy."""
@@ -184,6 +189,7 @@ def read_bound_managed_output(
         runtime_selection=runtime_selection,
         deadline=deadline,
         owner=owner,
+        expected_resource_owner=expected_resource_owner,
         stream=stream,
         execution_operation=execution_operation,
     )
@@ -205,6 +211,7 @@ def _bound_exchange(
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
     owner: OperationOwner,
+    expected_resource_owner: ManagedRunOwner | None = None,
     stream: Stream | None,
     execution_operation: ExecutionOperation | None = None,
 ) -> tuple[ManagedRunRecord, ManagedObservationCandidate | None, ManagedObserveOutcome]:
@@ -217,6 +224,7 @@ def _bound_exchange(
         runtime_selection=runtime_selection,
         deadline=deadline,
         owner=owner,
+        expected_resource_owner=expected_resource_owner,
         execution_operation=execution_operation,
     )
 

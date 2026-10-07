@@ -900,28 +900,34 @@ budget. The unchanged caller deadline bounds local observation, not guest cancel
 systemd and carrier acceptance, keeper consumption and whole-owner settlement remain unproved.
 
 `_managed_observe_access.py` privately admits one exact, persisted independent VM run under a
-caller-held VM operation owner. It derives the expected launch from that row, borrows dispatch
-custody for one fenced observation attempt, and reports both the raw candidate and whether the owner
-must be retained after uncertain delivery. The independent preflight remains its default; the
-concrete originating `ExecutionOperation` admits only its own retained acknowledged OPERATION runs
-and supplies the same lifetime dispatch row used by inline calls. Settled repeated observations and
-output reads reuse that row without relaxing the ledger's bound or reopening resolved obligations.
-Escaping control flow keeps its original exception with custody facts attached as its cause. The
-caller must supply fresh target and guest facts, keep the selected provider route current, and
-retain or release the owner explicitly. The read-only observe action neither reconciles run state
-nor establishes production routing or public RunContext. Its private read-output sibling uses the
-same exact-run admission and custody path for one selected closed stream. It accepts bytes only
-after the validated end fact agrees with the run's persisted capture policy and prefix bound.
-Discard and sensitivity suppression accept only their matching no-output end facts. The originating
-operation retains positive terminal observations before disposal can remove their source facts.
-Confirmed disposal supplies publication closure, so later aggregate cleanup neither stops that
-disposed run nor rereads deleted launch facts. A lost disposal response preserves exact terminal
-proof and helper debt; an exact receipt retry still requires separately proved helper termination.
-Retry inspects the existing exact lifecycle row: only confirmed resolution permits a fresh ID, while
-unknown debt retains its original ID. Retained terminal proof permits receipt-based retry even when
-interruption preceded local bookkeeping and the artifacts are already deleted. The raw candidate
-remains internal evidence even when policy admission fails; it must not be forwarded as a
-caller-facing output view. Missing or conflicting evidence stays unaccepted.
+caller-held VM operation owner and an explicit core-supplied `ManagedRunOwner` resource binding. The
+independent preflight validates this binding before looking up the run, then requires exact equality
+with its immutable persisted owner as well as the current VM and guest boot. A run reference is not
+resource-owner authority. It derives the expected launch from that row, borrows dispatch custody for
+one fenced observation attempt, and reports both the raw candidate and whether the owner must be
+retained after uncertain delivery. Missing or foreign resource bindings refuse independent observe,
+reconciliation, output, wait, stop and disposal without borrowing or delivery. The concrete
+originating `ExecutionOperation` admits only its own retained acknowledged OPERATION runs and
+supplies the same lifetime dispatch row used by inline calls. The adapters reject combining that
+operation context with a resource binding. This namespace check does not activate plugin permissions
+or change the existing VM operation lock scope. Settled repeated observations and output reads reuse
+that row without relaxing the ledger's bound or reopening resolved obligations. Escaping control
+flow keeps its original exception with custody facts attached as its cause. The caller must supply
+fresh target and guest facts, keep the selected provider route current, and retain or release the
+owner explicitly. The read-only observe action neither reconciles run state nor establishes
+production routing or public RunContext. Its private read-output sibling uses the same exact-run
+admission and custody path for one selected closed stream. It accepts bytes only after the validated
+end fact agrees with the run's persisted capture policy and prefix bound. Discard and sensitivity
+suppression accept only their matching no-output end facts. The originating operation retains
+positive terminal observations before disposal can remove their source facts. Confirmed disposal
+supplies publication closure, so later aggregate cleanup neither stops that disposed run nor rereads
+deleted launch facts. A lost disposal response preserves exact terminal proof and helper debt; an
+exact receipt retry still requires separately proved helper termination. Retry inspects the existing
+exact lifecycle row: only confirmed resolution permits a fresh ID, while unknown debt retains its
+original ID. Retained terminal proof permits receipt-based retry even when interruption preceded
+local bookkeeping and the artifacts are already deleted. The raw candidate remains internal evidence
+even when policy admission fails; it must not be forwarded as a caller-facing output view. Missing
+or conflicting evidence stays unaccepted.
 
 A separate private observe-and-reconcile action uses one complete, validated observation's exact
 launch receipt to reconcile a `POSSIBLE_DISPATCH` row idempotently. It records historical launch

@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from agentworks.operations import OperationOwner
 
     from ._helper_launcher import IdentityPlan
+    from ._managed_runs import ManagedRunOwner
     from ._runtime_prerequisite import RuntimeSelection
     from ._vm_guest_identity_protocol import VMGuestIdentity
     from .carrier import Carrier
@@ -69,6 +70,7 @@ def stop_bound_managed_run(
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
     owner: OperationOwner,
+    expected_resource_owner: ManagedRunOwner | None = None,
     obligation_id: str,
 ) -> ManagedStopOutcome:
     """Attempt one stop; caller keeps its owner and any unresolved custody.
@@ -91,6 +93,7 @@ def stop_bound_managed_run(
         runtime_selection=runtime_selection,
         deadline=deadline,
         owner=owner,
+        expected_resource_owner=expected_resource_owner,
     )
     if record.launch_state is not ManagedLaunchState.RECEIPT_CONFIRMED:
         raise ValidationError("Managed stop requires a reconciled launch receipt")

@@ -23,7 +23,7 @@ from agentworks.operations import LifecycleObligation, OperationBorrow, Operatio
 
 from .test_managed_disposal import ExchangeCarrier, _disposed
 from .test_managed_disposal_access import _confirmed
-from .test_managed_observe_access import GUEST, ROOT_PLAN, RUN, TARGET, _reserved
+from .test_managed_observe_access import GUEST, RESOURCE_OWNER, ROOT_PLAN, RUN, TARGET, _reserved
 from .test_managed_stop import Carrier
 from .test_managed_stop_access import _response
 
@@ -51,6 +51,7 @@ def _action(
                 runtime_selection=runtime_selection,
                 deadline=deadline,
                 owner=owner,
+                expected_resource_owner=RESOURCE_OWNER,
                 obligation_id="f" * 32,
             )
 
@@ -69,6 +70,7 @@ def _action(
             runtime_selection=runtime_selection,
             deadline=deadline,
             owner=owner,
+            expected_resource_owner=RESOURCE_OWNER,
             obligation_id="f" * 32,
         )
 

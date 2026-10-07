@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 
     from ._execution_operation import ExecutionOperation
     from ._helper_launcher import IdentityPlan
-    from ._managed_runs import ManagedTargetIdentity
+    from ._managed_runs import ManagedRunOwner, ManagedTargetIdentity
     from ._runtime_prerequisite import RuntimeSelection
     from ._vm_guest_identity_protocol import VMGuestIdentity
     from .carrier import Carrier
@@ -82,6 +82,7 @@ def wait_bound_managed_result(
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
     owner: OperationOwner,
+    expected_resource_owner: ManagedRunOwner | None = None,
     execution_operation: ExecutionOperation | None = None,
 ) -> ManagedResultOutcome:
     """Poll only a clean, settled pending run under one finite deadline.
@@ -103,6 +104,7 @@ def wait_bound_managed_result(
                 runtime_selection=runtime_selection,
                 deadline=deadline,
                 owner=owner,
+                expected_resource_owner=expected_resource_owner,
                 execution_operation=execution_operation,
             )
         except ManagedDeadlineExpired as error:
@@ -138,6 +140,7 @@ def collect_bound_managed_result(
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
     owner: OperationOwner,
+    expected_resource_owner: ManagedRunOwner | None = None,
     execution_operation: ExecutionOperation | None = None,
 ) -> ManagedResultOutcome:
     """Collect once under one finite deadline and caller-held owner.
@@ -154,6 +157,7 @@ def collect_bound_managed_result(
         runtime_selection=runtime_selection,
         deadline=deadline,
         owner=owner,
+        expected_resource_owner=expected_resource_owner,
         execution_operation=execution_operation,
     )
     if record.launch_state is not ManagedLaunchState.RECEIPT_CONFIRMED:
@@ -170,6 +174,7 @@ def collect_bound_managed_result(
             runtime_selection=runtime_selection,
             deadline=deadline,
             owner=owner,
+            expected_resource_owner=expected_resource_owner,
             execution_operation=execution_operation,
         )
         attempts.append(observed)
@@ -185,6 +190,7 @@ def collect_bound_managed_result(
             runtime_selection=runtime_selection,
             deadline=deadline,
             owner=owner,
+            expected_resource_owner=expected_resource_owner,
             execution_operation=execution_operation,
         )
     except BaseException as control:
@@ -208,6 +214,7 @@ def _reduce(
     runtime_selection: RuntimeSelection,
     deadline: Deadline,
     owner: OperationOwner,
+    expected_resource_owner: ManagedRunOwner | None = None,
     execution_operation: ExecutionOperation | None = None,
 ) -> ManagedResultOutcome:
     observed = attempts[0]
@@ -252,6 +259,7 @@ def _reduce(
                 runtime_selection=runtime_selection,
                 deadline=deadline,
                 owner=owner,
+                expected_resource_owner=expected_resource_owner,
                 execution_operation=execution_operation,
             )
         except ManagedDeadlineExpired as error:

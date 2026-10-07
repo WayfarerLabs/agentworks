@@ -56,6 +56,7 @@ RUN = ManagedRunIdentity("a" * 32)
 GUEST = VMGuestIdentity("d" * 32, "00000000-0000-4000-8000-000000000001", 1234)
 TARGET = ManagedTargetIdentity(ManagedTargetKind.VM, "vm-one", "v1:" + "c" * 64, vm_guest_boot_id(GUEST))
 ROOT_PLAN = IdentityPlan(IdentityExpectation(0, 0, (0,)), IdentityMode.SUDO_ROOT)
+RESOURCE_OWNER = ManagedRunOwner(ManagedRunOwnerKind.RESOURCE, "session-7")
 
 
 def _reserved(
@@ -68,7 +69,7 @@ def _reserved(
             TARGET,
             IdentityExpectation(1001, 1001, (1001,)),
             ManagedShellIdentity(None, None),
-            ManagedRunOwner(ManagedRunOwnerKind.RESOURCE, "session-7"),
+            RESOURCE_OWNER,
             ManagedRunLifetime.INDEPENDENT,
         ),
         output_policy=output_policy or ManagedOutputPolicy(ManagedOutputMode.CAPTURE, 4096),
@@ -87,6 +88,7 @@ def _options(owner: OperationOwner, carrier: ScriptedCarrier, **changes: object)
         "runtime_selection": RuntimeSelection(RuntimeTargetOS.LINUX, "/usr/bin/python3"),
         "deadline": Deadline.after(10),
         "owner": owner,
+        "expected_resource_owner": RESOURCE_OWNER,
     }
     options.update(changes)
     return options
