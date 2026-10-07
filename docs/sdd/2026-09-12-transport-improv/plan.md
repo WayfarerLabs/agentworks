@@ -3091,7 +3091,7 @@ working head or native acceptance. No new public handoff edge follows.
       owned lifecycle, not a per-call synthetic owner or a relaxed polling bound. The private
       foreground checkpoint does not establish those production capacity guarantees.
 
-- [ ] Implement the selected core unfinished-debt bound: 128 pending obligations, immutable resolved
+- [x] Implement the selected core unfinished-debt bound: 128 pending obligations, immutable resolved
       receipts until operation release, bounded pending enumeration, fenced exact lookup and
       history-independent SQL. Preserve any-row abandonment, exact-ID retries, no-rearm semantics
       and original exception identity. Add the state index through ordinary migration 42 without
@@ -3104,11 +3104,24 @@ The first private implementation candidate passes 16,232 non-integration tests, 
 correctness lanes reproduce a read race using separate database connections. Takeover between an
 owner check and its receipt query can report missing history under a stale owner; takeover followed
 by release also demonstrates that no valid-owner absence existed. Pending enumeration has the same
-snapshot requirement. Correct both reads with one bounded ownership-and-data snapshot and real
-takeover regressions before accepting this unit. A new control interruption during absence
-classification remains primary, retains the original registration error as context and never
-supplies clean-refusal evidence. The passing first candidate is not acceptance of the correction;
-the checkbox remains open until final review and gates.
+snapshot requirement. Both reads now use one bounded ownership-and-data snapshot with real takeover
+regressions. A new control interruption during absence classification remains primary, retains the
+original registration error as context and never supplies clean-refusal evidence. The passing first
+candidate is not acceptance of the correction; final review and gates are recorded separately below.
+
+The corrected complete capacity unit is accepted locally at `f63b0e398`. Project, generic
+correctness and complexity reviews have no remaining findings. Their final-pin verification passes
+54, 35 and 48 focused cases respectively, including actual query plans, two-connection
+takeover/release, corruption and overflow-before-decode probes. The redundant pending-query owner
+join is removed; the common ownership-and-data snapshot remains. The lead passes 16,244
+non-integration tests with 49 skips and 29 fork warnings in 298.39 seconds, exit 0. Ruff/format
+(1,310 files), strict mypy (1,274 sources), Typer isolation, file quality, locked-SDD, Rulesync and
+whitespace checks pass. Website gates pass 160 Python and 103 Node tests, four builds and both
+deterministic comparisons. Exact owned fixture roots are removed after terminal completion. Only
+this core accounting leaf closes: remaining independent-job availability, shell/output/payload
+features, native workflows, complete additive RunContext and public round 1 of 3 remain open. No
+database data or SSH branch is changed; migration 42 is additive and migrations 39-41 are unchanged.
+These local results are not hosted or native acceptance.
 
 The delegated capacity probe uses actual SQLite and controlled framed carriers, not live systemd.
 Forty-two completed MANAGED run/wait/dispose/cleanup cycles succeed under one owner; the forty-third
@@ -3117,9 +3130,10 @@ that refusal to keeper registration, leaving admission uncertain and aggregate c
 after all persisted rows resolve. Separately, 128 clean NOT_SENT file-stat admissions exhaust the
 limit and the next call retains its attached call/borrow. A DIRECT inline control completes 160
 admissions using one lifetime row. Four probe cases and three serial-package neighbors pass; keepers
-and owned scratch are cleaned. The proposed core unfinished-debt bound plus immutable completed
-receipts is under design review, not implemented. It must account for exact retry lookup, bounded
-recovery enumeration and query cost; merely changing the INSERT count is insufficient.
+and owned scratch are cleaned. At that probe checkpoint, the proposed core unfinished-debt bound
+plus immutable completed receipts was under design review, not implemented. It must account for
+exact retry lookup, bounded recovery enumeration and query cost; merely changing the INSERT count is
+insufficient.
 
 The fresh Astra design review at `0a8ceaf6c` confirms the simpler core rule serves current retry
 consumers without a new lifecycle state. Seventeen production enumeration calls need deliberate
@@ -3127,7 +3141,8 @@ migration: exact-receipt lookup, bounded unfinished-work enumeration, ownership 
 distinct finalization predicates. Its actual in-memory SQLite query-plan experiment confirms the
 existing schema cannot narrow by state and that the added ordinary index can. The lead accepts the
 rule, including its explicit growing-history and retained-run costs, rather than a retirement or
-slot-reuse protocol. Implementation and all private/production acceptance remain open.
+slot-reuse protocol. Implementation and private/production acceptance were still open at that design
+review; the later local implementation acceptance above does not establish production acceptance.
 
 The lead's read-only completion inventory at `ed3603c23` confirms that this next foreground unit is
 not the rest of the execution surface. Required work still includes unified independent launch and
