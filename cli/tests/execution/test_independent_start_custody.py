@@ -16,9 +16,9 @@ from agentworks.execution._managed_job_store import FactName
 from agentworks.execution._managed_job_wire import decode_fact, encode_fact
 from agentworks.execution._managed_observation_protocol import ControllerState
 from agentworks.execution._managed_runs import ManagedLaunchState, ManagedRunIdentity
-from agentworks.execution._managed_start_operation import start_borrowed_managed_run
+from agentworks.execution._managed_start_exchange import start_managed_run
 from agentworks.execution.access import ExecutionAccess
-from agentworks.execution.carrier import Deadline
+from agentworks.execution.carrier import CarrierReport, Deadline, Dispatch, Failure
 from agentworks.execution.models import Command, Lifetime, Output
 from agentworks.execution.profiles import Protection
 from agentworks.execution.result import ApplicationState, ExecutionFailure, ExitCode
@@ -108,7 +108,7 @@ def test_tracker_publication_failure_keeps_actual_call_if_committed(available, a
 
 def test_candidate_publication_control_retains_actual_ack_before_reconcile(available, monkeypatch):
     _, repository, operation, access, main, _ = available
-    original = start_borrowed_managed_run
+    original = start_managed_run
     control = SystemExit("candidate publication reply")
 
     def start_kernel(*args, **kwargs):
@@ -121,7 +121,7 @@ def test_candidate_publication_control_retains_actual_ack_before_reconcile(avail
         kwargs["publish_candidate"] = interrupt
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(resource_start, "start_borrowed_managed_run", start_kernel)
+    monkeypatch.setattr(resource_start, "start_managed_run", start_kernel)
     with pytest.raises(SystemExit) as caught:
         start(access)
     assert caught.value is control
@@ -405,3 +405,65 @@ def test_durable_possible_mark_rechecks_live_selected_admission_before_delivery(
     else:
         operation.retry_inline_bookkeeping()
         assert operation.active_inline_calls == () and workflow.owner._active_borrow is None
+
+
+def test_late_expiry_after_durable_mark_settles_only_actual_never_entered_start(available, monkeypatch):
+    _, repository, operation, access, main, workflow = available
+    now = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: now[0])
+    access._deadline = lambda: Deadline(101.0)
+    original = repository.mark_possible_dispatch
+
+    def mark(record):
+        possible = original(record)
+        now[0] = 102.0
+        return possible
+
+    monkeypatch.setattr(repository, "mark_possible_dispatch", mark)
+    with pytest.raises(StateError) as caught:
+        start(access)
+    assert isinstance(caught.value.__cause__, ManagedExecutionControlFact)
+    identity = ManagedRunIdentity(caught.value.__cause__.reference.run_id)
+    record = repository.inspect(identity)
+    assert record.launch_state is ManagedLaunchState.POSSIBLE_DISPATCH
+    assert main.start.calls == 0 and operation.active_inline_calls == ()
+    assert workflow.owner._active_borrow is None and workflow.owner.list_pending_lifecycle_obligations() == ()
+    operation.retry_inline_bookkeeping()
+    operation.retry_inline_bookkeeping()
+    operation.finish()
+    operation.finish()
+    assert repository.inspect(identity) == record and main.start.calls == 0
+
+
+@pytest.mark.parametrize("unsettled", [False, True])
+def test_supported_not_sent_settles_only_action_after_actual_local_closure(available, monkeypatch, unsettled):
+    _, repository, operation, access, main, _ = available
+    calls = []
+
+    def execute(*args, **kwargs):
+        calls.append(kwargs["custody"])
+        if unsettled:
+            kwargs["custody"].begin_process()
+        return CarrierReport(Dispatch.NOT_SENT, None, failure=Failure.DEADLINE)
+
+    monkeypatch.setattr(main.start, "execute", execute)
+    with pytest.raises(StateError) as caught:
+        start(access)
+    assert isinstance(caught.value.__cause__, ManagedExecutionControlFact)
+    identity = ManagedRunIdentity(caught.value.__cause__.reference.run_id)
+    if unsettled:
+        (active,) = operation.active_inline_calls
+        assert active.start is not None and active.borrow._attempt_started
+        identity = active.start.receipt.identity
+        with pytest.raises(StateError):
+            operation.retry_inline_bookkeeping()
+        assert calls[0].close(Deadline.after(2))
+        operation.retry_inline_bookkeeping()
+    else:
+        assert operation.active_inline_calls == ()
+    assert repository.inspect(identity).launch_state is ManagedLaunchState.POSSIBLE_DISPATCH
+    operation.retry_inline_bookkeeping()
+    operation.finish()
+    operation.finish()
+    assert operation.active_inline_calls == ()
+    assert len(calls) == 1

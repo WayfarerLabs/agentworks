@@ -24,12 +24,11 @@ from ._managed_runs import (
     ManagedRunSpec,
     ManagedShellIdentity,
 )
-from ._managed_start_exchange import ManagedStartCandidate, ManagedStartState, prepare_managed_start
+from ._managed_start_exchange import ManagedStartCandidate, ManagedStartState, prepare_managed_start, start_managed_run
 from ._managed_start_operation import (
     MANAGED_START_OBLIGATION_KIND,
     MANAGED_START_PAYLOAD_VERSION,
     encode_managed_start_obligation,
-    start_borrowed_managed_run,
 )
 from .binding import _IndependentJobAvailability
 from .carrier import Dispatch, ExitStatus
@@ -123,7 +122,13 @@ def capture_resource_start(
             record is None or record.launch_state in {ManagedLaunchState.RESERVED, ManagedLaunchState.POSSIBLE_DISPATCH}
         )
     )
-    proved = settled and (acknowledged or never_entered)
+    not_sent = (
+        isinstance(candidate, ManagedStartCandidate)
+        and candidate.dispatch is Dispatch.NOT_SENT
+        and record is not None
+        and record.launch_state in {ManagedLaunchState.RESERVED, ManagedLaunchState.POSSIBLE_DISPATCH}
+    )
+    proved = settled and (acknowledged or never_entered or not_sent)
     active.outcome = replace(outcome, requires_owner_retention=outcome.requires_owner_retention or not proved)
     active.bookkeeping_retained = True
     if not proved:
@@ -226,13 +231,11 @@ def start_resource_job(
 
             def require_delivery_admission() -> None:
                 operation.require_job_binding(carrier, runtime_selection)
-                if operation._wsl2_route is not None:
-                    operation._wsl2_route.require_selected_route(deadline)
 
             def publish_candidate(candidate: ManagedStartCandidate) -> None:
                 active.candidate = candidate
 
-            start_borrowed_managed_run(
+            attempt = start_managed_run(
                 repository,
                 reserved,
                 active.operation,
@@ -242,11 +245,16 @@ def start_resource_job(
                 before_delivery=require_delivery_admission,
                 publish_candidate=publish_candidate,
             )
+            active.operation.settle(attempt.candidate.dispatch, attempt.candidate.carrier_completion)
             with operation._admission_guard:
                 operation._capture(
                     active, operation._outcome(active, active.operation, deadline, include_candidate=False)
                 )
-            if active.outcome is None or active.outcome.requires_owner_retention:
+            if (
+                active.outcome is None
+                or active.outcome.requires_owner_retention
+                or attempt.record.launch_state is not ManagedLaunchState.RECEIPT_CONFIRMED
+            ):
                 raise StateError("Independent managed start was not acknowledged")
             return ResourceStartAcknowledgement(reference, action.output_policy)
         except BaseException as control:

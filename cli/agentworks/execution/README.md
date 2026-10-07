@@ -206,17 +206,19 @@ helper/borrow before reservation. It uses a dedicated run-ID-only `managed-start
 existing tracker and the same dispatch kernel as originating OPERATION and standalone starts.
 Candidate publication precedes receipt reconciliation; a confirmed receipt cannot hide actual helper
 or local delivery debt. Interrupted reservation is inspected exactly without reserving or launching
-again. Exact real wrapper/owner/attempt proof of never entering delivery can resolve only its START
-action, leaving a POSSIBLE_DISPATCH run unchanged and unacknowledged; it does not fabricate receipt
-absence. Bookkeeping and finish never launch, and an acknowledged independent job has no operation
-keeper or aggregate job cleanup owner. Foreground RESOURCE run shares its original deadline with
-wait; a cause-free expiry before the first observation uses only its same-invocation acknowledgement
-and frozen output policy. Explicit wait receives no such acknowledgement. Proxmox alone currently
-supplies the immutable no-idle-stop fact, separate from live operation and prepared guest admission.
-WSL2 leaves it absent and refuses independent launch, even with an operation command hold; a
-physical recoverable job-length availability hold remains future work. Explicit VM stop/reboot and
-host loss are outside that no-idle-stop fact. These private increments do not establish all-platform
-duration availability, session namespaces or a public RunContext surface.
+again. Exact real wrapper/owner/attempt proof of never entering delivery, or a supported NOT_SENT
+candidate with actual local settlement, can resolve only its START action, leaving a
+POSSIBLE_DISPATCH run unchanged and unacknowledged; neither fabricates receipt absence. Each
+ownership caller settles actual delivery separately and preserves observed launch precision if
+settlement is interrupted. Bookkeeping and finish never launch, and an acknowledged independent job
+has no operation keeper or aggregate job cleanup owner. Foreground RESOURCE run shares its original
+deadline with wait; a cause-free expiry before the first observation uses only its same-invocation
+acknowledgement and frozen output policy. Explicit wait receives no such acknowledgement. Proxmox
+alone currently supplies the immutable no-idle-stop fact, separate from live operation and prepared
+guest admission. WSL2 leaves it absent and refuses independent launch, even with an operation
+command hold; a physical recoverable job-length availability hold remains future work. Explicit VM
+stop/reboot and host loss are outside that no-idle-stop fact. These private increments do not
+establish all-platform duration availability, session namespaces or a public RunContext surface.
 
 `ExecutionOperation` requires an explicit managed target matching its owner's scope. An optional
 numeric bootstrap must match that VM's derived boot identity; platform-host targets cannot select
