@@ -67,13 +67,17 @@ write transaction held across remote work. Claims are coordination, not permissi
 process containment. The [file LLD](file-operations-lld.md#cooperating-writers-and-honest-limits)
 defines uncertainty and recovery.
 
-Each owned operation also has a bounded durable ledger of lifecycle obligations. Activation,
-platform holds, routes, nested teardown and other effect owners register independent obligations;
-several obligations of the same kind may coexist. An obligation records a closed generic state and a
-bounded, versioned, non-secret recovery payload that only its registered adapter interprets. Core
-seals the ledger after the workflow can create no more obligations and releases the operation claim
-only after every obligation has typed no-further-effects evidence. A context exit, local client
-exit, settled child attempt or ordinary workflow success is not that evidence.
+Each owned operation also has a durable ledger of lifecycle obligations. Core bounds unfinished
+obligations and each versioned, non-secret recovery payload; completed receipts remain immutable
+until operation release so exact retries can distinguish completion from absence. Receipt history
+therefore grows with completed work within that operation. Pending-work enumeration is bounded and
+does not load completed history; an ownership-fenced exact lookup serves receipt reconciliation.
+Activation, platform holds, routes, nested teardown and other effect owners register independent
+obligations; several obligations of the same kind may coexist. Only the registered adapter
+interprets its payload. Core seals the ledger after the workflow can create no more obligations and
+releases the operation claim only after every obligation has typed no-further-effects evidence. A
+context exit, local client exit, settled child attempt or ordinary workflow success is not that
+evidence.
 
 The ledger attaches to the operation identity, not to one resource level. This leaves the same
 mechanism usable when #377 extends one operation across hierarchical or multi-resource claims. A

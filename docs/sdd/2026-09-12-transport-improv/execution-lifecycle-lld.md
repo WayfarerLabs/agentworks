@@ -1015,8 +1015,8 @@ remain open; the wire slice alone cannot expose complete RunContext availability
 ### Durable lifecycle-obligation ledger
 
 Production ownership needs a durable handoff between the coarse resource claim and the independent
-effect owners inside one workflow. A bounded `lifecycle_obligations` ledger supplies that handoff.
-It is generic coordination state, not a serialized workflow. Each row belongs to one exact fenced
+effect owners inside one workflow. The `lifecycle_obligations` ledger supplies that handoff. It is
+generic coordination state, not a serialized workflow. Each row belongs to one exact fenced
 operation identity and has a fresh obligation identifier, a registered lower-kebab kind, a positive
 payload version, a bounded opaque non-secret payload, timestamps and one closed state:
 
@@ -1026,11 +1026,32 @@ payload version, a bounded opaque non-secret payload, timestamps and one closed 
 
 Core validates the exact operation fence for every transition but never decodes adapter payloads.
 The registered adapter owns payload validation, target/incarnation comparison, observation and the
-typed evidence accepted for resolution. Bound both the encoded payload size and number of
-obligations per operation. Payloads may contain target identity, protected namespaces and cleanup
-receipts, but never credentials, application input/output or arbitrary workflow state. Keep managed
-run records specialized until a real consumer proves that folding their typed schema into opaque
-obligations would simplify rather than weaken it.
+typed evidence accepted for resolution. Bound each encoded payload to 8,192 bytes and unfinished
+`registered`/`possible-effect` obligations to 128 per operation. Retain immutable `resolved`
+receipts until operation release for exact-ID registration and resolution retries; completion frees
+admission capacity but does not permit rearming or rewriting the receipt. Payloads may contain
+target identity, protected namespaces and cleanup receipts, but never credentials, application
+input/output or arbitrary workflow state. Keep managed run records specialized until a real consumer
+proves that folding their typed schema into opaque obligations would simplify rather than weaken it.
+
+Pending-obligation enumeration returns only the bounded unfinished rows. Exact receipt lookup
+separately checks current operation ownership, returning absence only under that valid fence;
+resolved receipt consumers must not treat exclusion from pending enumeration as missing history. Use
+a matching partial index for the fixed `state IS NOT 'resolved'` predicate so admission counts and
+pending queries do not scan completed history. Unexpected states remain unfinished for query
+purposes and must fail decoding, never count as completed. Bound enumeration before decoding.
+Whole-operation resolution and release use unfinished-row existence checks; reserved abandonment
+still refuses if any obligation exists, including a resolved receipt. A known never-dispatched
+registration refusal may relinquish its local admission only with current-owner absence evidence;
+interrupted replies, present/conflicting receipts and failed/stale observations retain original
+custody. Preserve control identity instead of converting cancellation into an ordinary refusal.
+
+The bound is on unfinished debt and decoded recovery work, not total within-operation disk use or
+constant memory/close time for the complete operation. Completed receipt rows and retained managed
+run instances grow with work, and release deletes that history. Do not add receipt retirement,
+tombstones, reusable slots or another adapter ledger solely to make that history constant-sized.
+Migration 42 adds the state index through the ordinary upgrade pipeline; migrations 39-41 remain
+unchanged and existing data is retained. This capacity correction remains an implementation gate.
 
 An adapter may replace its opaque payload with exact recovery identity while the obligation remains
 `possible-effect`. That update is not a generic lifecycle state or a sealing prerequisite. A typed

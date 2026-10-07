@@ -3091,6 +3091,15 @@ working head or native acceptance. No new public handoff edge follows.
       owned lifecycle, not a per-call synthetic owner or a relaxed polling bound. The private
       foreground checkpoint does not establish those production capacity guarantees.
 
+- [ ] Implement the selected core unfinished-debt bound: 128 pending obligations, immutable resolved
+      receipts until operation release, bounded pending enumeration, fenced exact lookup and
+      history-independent SQL. Preserve any-row abandonment, exact-ID retries, no-rearm semantics
+      and original control identity. Add the state index through ordinary migration 42 without
+      altering 39-41 or deleting existing data. Prove sequential work beyond the former limit and
+      clean genuine-cap refusal without clearing present, conflicting, stale or unreadable custody.
+      Review the complete ownership consumers and finalization paths; this is not a constant-memory
+      or constant-close-time promise for the whole operation.
+
 The delegated capacity probe uses actual SQLite and controlled framed carriers, not live systemd.
 Forty-two completed MANAGED run/wait/dispose/cleanup cycles succeed under one owner; the forty-third
 start reaches the 128-row limit before workload delivery. One preceding resolved file call moves
@@ -3101,6 +3110,14 @@ admissions using one lifetime row. Four probe cases and three serial-package nei
 and owned scratch are cleaned. The proposed core unfinished-debt bound plus immutable completed
 receipts is under design review, not implemented. It must account for exact retry lookup, bounded
 recovery enumeration and query cost; merely changing the INSERT count is insufficient.
+
+The fresh Astra design review at `0a8ceaf6c` confirms the simpler core rule serves current retry
+consumers without a new lifecycle state. Seventeen production enumeration calls need deliberate
+migration: exact-receipt lookup, bounded unfinished-work enumeration, ownership checks and three
+distinct finalization predicates. Its actual in-memory SQLite query-plan experiment confirms the
+existing schema cannot narrow by state and that the added ordinary index can. The lead accepts the
+rule, including its explicit growing-history and retained-run costs, rather than a retirement or
+slot-reuse protocol. Implementation and all private/production acceptance remain open.
 
 The lead's read-only completion inventory at `ed3603c23` confirms that this next foreground unit is
 not the rest of the execution surface. Required work still includes unified independent launch and
@@ -3537,13 +3554,13 @@ complexity reviews are clean; all 35 identity tests pass locally. All hosted che
       exact-operation path confinement and safe target/phase diagnostics. Complete production
       ownership, local download publication, directory transfer and native acceptance remain
       required; these private building blocks do not close those gates.
-- [ ] Resolve lifecycle-ledger capacity before migrating high-volume artifact publication. Keep the
-      current 128-row bound and commit-without-reply evidence model; do not prune resolved rows
-      without a separate durable tombstone protocol or merely raise the limit. Prove that one
-      bounded logical directory/package operation can publish many physical members under one
-      obligation, including the current maximum supported package, or introduce an explicit lower
-      product limit before production adoption. Per-file public calls must not make a supported
-      artifact package fail only because its owning command accumulated resolved rows.
+- [ ] Resolve lifecycle-ledger capacity before migrating high-volume artifact publication. Apply the
+      selected core 128-unfinished-obligation bound and preserve commit-without-reply evidence and
+      immutable completed receipts, rather than pruning, reusing IDs or increasing the limit.
+      Per-file public calls must not make a supported artifact package fail only because its owning
+      command accumulated resolved rows. Reassess the serial-package candidate against actual
+      directory-transfer and application-checkpoint consumers once the core bound removes its
+      capacity-only justification; retain only mechanisms those consumers need.
 
 The 2026-09-24 inventory found a generic capture ceiling of 4,096 regular-file members in
 `package_sources.py`, while the native harness inventory probe caps 512 entries including implied

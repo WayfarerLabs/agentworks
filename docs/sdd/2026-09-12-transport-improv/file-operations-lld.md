@@ -941,17 +941,21 @@ commands, credentials or unrestricted paths.
 
 ### Serial package capacity candidate
 
-Directory and artifact-package workflows need a separate logical batch call rather than a loop that
-registers one row for every member under the same operation. This includes preflight observation and
-reads, publication, retirement and cleanup: per-member preflight rows alone can exhaust the ledger
-before a write begins. The current 128-row bound counts resolved rows too, while supported captures
-can contain 4,096 files. The candidate batch design retains one serial borrow and one adapter-owned
-row, with the current child's bounded recovery identity and cleanup facts in the payload. Admit a
-distinct child before its effect. Generic directory copying is non-atomic and leaves confirmed
-destinations in place: core checkpoints bounded transfer progress only after that child's required
-remote and local work settles. Artifact workflows additionally require their application's durable
-per-file ownership checkpoint before advancing; a progress ordinal cannot establish which artifacts
-the application owns for later reconciliation or retirement.
+The private total-history limit originally motivated a separate logical batch call for directory and
+artifact-package workflows. It counts resolved preflight, read, publication and cleanup rows against
+128, while supported captures can contain 4,096 files. The selected core unfinished-debt rule in the
+[lifecycle LLD](execution-lifecycle-lld.md#durable-lifecycle-obligation-ledger) removes that
+ordinary sequential-call limit. A batch must therefore justify its own ownership and
+application-checkpoint scope, not exist only to bypass capacity. Reassess that need before public
+directory-transfer composition; the existing implementation remains private.
+
+The candidate batch design retains one serial borrow and one adapter-owned row, with the current
+child's bounded recovery identity and cleanup facts in the payload. Admit a distinct child before
+its effect. Generic directory copying is non-atomic and leaves confirmed destinations in place: core
+checkpoints bounded transfer progress only after that child's required remote and local work
+settles. Artifact workflows additionally require their application's durable per-file ownership
+checkpoint before advancing; a progress ordinal cannot establish which artifacts the application
+owns for later reconciliation or retirement.
 
 Advance by expected-revision payload replacement, reconciling a lost reply against that same child
 and revision. Retain exact current-child identity and outstanding cleanup facts until its checkpoint
