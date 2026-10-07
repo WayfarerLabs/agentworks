@@ -31,6 +31,7 @@ from agentworks.capabilities.vm_platform.base import (
     ProvisionResult,
     RetainedProvisioningError,
     VMPlatform,
+    execution_power_remaining,
     provider_locator_remaining,
 )
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
@@ -711,11 +712,40 @@ class EC2Platform(VMPlatform):
     ) -> ProviderLocatorObservation:
         """Read the exact EC2 instance and bind its live account namespace."""
         instance_id, region, account_id = self._locator_metadata(vm)
-        remaining = provider_locator_remaining(deadline, vm_name=vm.name)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        self._read_exact_instance(vm, ctx, (instance_id, region, account_id), deadline=deadline)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        return ProviderLocator(f"aws-ec2:{account_id}:{region}:{instance_id}")
+
+    def observe_execution_power(
+        self, vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody: LocalDeliveryCustody
+    ) -> VMStatus:
+        """Read exact owned EC2 power with best-effort SDK timeouts, without activation."""
+        identity = self._locator_metadata(vm)
+        execution_power_remaining(deadline, vm_name=vm.name)
+        instance = self._read_exact_instance(vm, ctx, identity, deadline=deadline)
+        execution_power_remaining(deadline, vm_name=vm.name)
+        state = instance.get("State")
+        name = state.get("Name") if isinstance(state, dict) else None
+        if type(name) is not str:
+            return VMStatus.UNKNOWN
+        return {"running": VMStatus.RUNNING, "stopped": VMStatus.STOPPED}.get(name, VMStatus.UNKNOWN)
+
+    def _read_exact_instance(
+        self, vm: VMRow, ctx: RunContext, identity: tuple[str, str, str], *, deadline: Deadline
+    ) -> dict[str, Any]:
+        """Invoke one SDK read and verify the persisted instance's account owner.
+
+        Timeouts are deadline-derived at client construction and cannot shrink
+        during setup. SDK credential work is non-preemptible; callers reject
+        successful results after the original deadline without replaying reads.
+        """
+        instance_id, region, account_id = identity
 
         from botocore.config import Config
 
         session = self._get_session(ctx)
+        remaining = provider_locator_remaining(deadline, vm_name=vm.name)
         try:
             ec2 = session.client(
                 "ec2",
@@ -729,6 +759,7 @@ class EC2Platform(VMPlatform):
         except Exception as exc:
             raise wrap_ec2_error(exc) from exc
         try:
+            provider_locator_remaining(deadline, vm_name=vm.name)
             try:
                 result = ec2.describe_instances(InstanceIds=[instance_id])
             except Exception as exc:
@@ -751,8 +782,9 @@ class EC2Platform(VMPlatform):
                 entity_name=vm.name,
                 hint="restore the original persisted AWS account identity before retrying",
             )
-        provider_locator_remaining(deadline, vm_name=vm.name)
-        return ProviderLocator(f"aws-ec2:{owner_id}:{region}:{instance_id}")
+        # _locator_owner_id validated the exact reservation and instance layout.
+        instance: dict[str, Any] = result["Reservations"][0]["Instances"][0]
+        return instance
 
     @staticmethod
     def _locator_metadata(vm: VMRow) -> tuple[str, str, str]:

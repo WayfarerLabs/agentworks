@@ -16,6 +16,7 @@ from agentworks.capabilities.vm_platform.base import (
     ProvisionRequest,
     ProvisionResult,
     VMPlatform,
+    execution_power_remaining,
     provider_locator_remaining,
 )
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
@@ -591,6 +592,33 @@ class GCEPlatform(VMPlatform):
         custody: LocalDeliveryCustody,
     ) -> ProviderLocatorObservation:
         """Read one owned GCE incarnation and return its provider namespace."""
+        project_id, zone, instance_name, instance_id = self._locator_metadata(vm)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        self._read_exact_instance(vm, ctx, (project_id, zone, instance_name, instance_id), deadline=deadline)
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        return ProviderLocator(f"gcp-gce:{project_id}:{zone}:{instance_id}")
+
+    def observe_execution_power(
+        self, vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody: LocalDeliveryCustody
+    ) -> VMStatus:
+        """Read one owned GCE incarnation's stable power without activating it."""
+        identity = self._locator_metadata(vm)
+        execution_power_remaining(deadline, vm_name=vm.name)
+        current = self._read_exact_instance(vm, ctx, identity, deadline=deadline)
+        execution_power_remaining(deadline, vm_name=vm.name)
+        state = getattr(current, "status", None)
+        if type(state) is not str:
+            return VMStatus.UNKNOWN
+        # GCE TERMINATED is a stopped, existing instance, unlike EC2 terminated.
+        return {
+            "RUNNING": VMStatus.RUNNING,
+            "TERMINATED": VMStatus.STOPPED,
+            "STOPPED": VMStatus.STOPPED,
+        }.get(state, VMStatus.UNKNOWN)
+
+    @staticmethod
+    def _locator_metadata(vm: VMRow) -> tuple[str, str, str, str]:
+        """Validate persisted GCE identity at the provider boundary."""
         metadata = vm.platform_metadata
         project_id = metadata.get("project_id")
         zone = metadata.get("zone")
@@ -612,8 +640,20 @@ class GCEPlatform(VMPlatform):
                 entity_name=vm.name,
                 hint="restore the persisted GCE project, zone, and instance identities before retrying",
             )
-        remaining = provider_locator_remaining(deadline, vm_name=vm.name)
+        return project_id, zone, instance_name, instance_id
+
+    def _read_exact_instance(
+        self, vm: VMRow, ctx: RunContext, identity: tuple[str, str, str, str], *, deadline: Deadline
+    ) -> Any:
+        """Invoke one SDK read of the persisted GCE provider incarnation.
+
+        Request budgets use the remaining deadline at dispatch. Disabled service
+        retries do not prevent SDK authentication resends; callers reject late
+        success against the original deadline and never manually replay reads.
+        """
+        project_id, zone, instance_name, instance_id = identity
         instances = self._clients.client("instances", ctx)
+        remaining = provider_locator_remaining(deadline, vm_name=vm.name)
         current = read_owned_instance(
             instances,
             project_id=project_id,
@@ -628,8 +668,7 @@ class GCEPlatform(VMPlatform):
                 entity_kind="vm",
                 entity_name=vm.name,
             )
-        provider_locator_remaining(deadline, vm_name=vm.name)
-        return ProviderLocator(f"gcp-gce:{project_id}:{zone}:{instance_id}")
+        return current
 
     def native_transport(
         self,
