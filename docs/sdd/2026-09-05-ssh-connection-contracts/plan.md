@@ -195,7 +195,7 @@ proves that restoring old TOML does not discard current managed policy, revocati
 partial-update custody. Production writer coexistence and rollback through both usable RunContext
 paths still require transport composition and native acceptance.
 
-Shared subprocess adoption introduces an implementation dependency on transport #833. Current draft
+Shared subprocess adoption introduces an implementation dependency on transport #833. Initial draft
 integration uses `12dcb01b8f76575a55e515940022f0a14a74e34f`, which adds mandatory caller-held
 `LocalDeliveryCustody`. The preceding published SSH head `dda32ee69` remains based on
 `e1d4c9b1189edbc247210c6c900975c6290ac531`; its hosted evidence does not validate this adoption.
@@ -419,6 +419,53 @@ registration and strand aggregate close. Transport owns the required capacity co
 retry receipts and bounded recovery still required. This defect remains open in this base;
 foreground composition and green fixtures do not dispose it. No public fix round is consumed, no
 completed checkbox changes, and this SDD remains unlocked.
+
+Published SSH `126a10c84fd2002fc4f62b069058c42264f5c670` has a complete
+[hosted report](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6029621599) on
+transport `62164b4a8`. Run `37561145205`, attempt 1, passes all four pytest jobs: Linux Python
+3.12-3.14 each report 16,472 passed, 203 skipped and 29 warnings; Windows Python 3.13 reports 1,527
+passed, 67 skipped and 25 warnings. Checkout merge `9681f3ef18dcbb988ace3eefedfd91deb9261452` has
+those exact parents and tree `8a93c09c1bfb78e067f3b142c4fc007fc53fd153`, equal to the published SSH
+tree. The run fails on the three held enrollment typing errors, a website Chromium startup failure
+and their aggregate gate. Website reports one failure among 160 Python tests; Node tests and
+deterministic builds are skipped. The exact failing browser test passes locally, but the hosted
+startup cause remains unproved. GitHub refuses the single website-only diagnostic rerun; no retry
+starts. Other repository gates pass, with hosted Typer isolation skipped after mypy failure.
+Transport's exact-base run `37560542843` passes every job. These results do not establish complete
+native or RunContext acceptance.
+
+Transport's
+[reviewed capacity increment](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6030161108)
+`94054f4ce19550a20997a6a1ed2d0166c63507b2` corrects the historical-capacity defect described above.
+Both admission queries now bound 128 unfinished obligations. Immutable resolved receipts remain
+until owner release, with fenced exact-ID inspection and bounded pending enumeration sharing the
+ownership read snapshot. Migration 42 adds the partial index without changing migrations 39-41 or
+existing data. Transport records three private lanes clear and actual SQLite/framed-carrier proof of
+300 completed managed cycles and 300 clean file admissions. This is local core evidence; native
+mixed-workload and full-RunContext acceptance remain open.
+
+SSH rebases without conflicts at `b0a0662d7c9593fda5fd32cd3c84c44423872a93`, retaining all 174 SSH
+patches exactly. The SSH implementation directory is unchanged, and shared process/custody/pump
+files match transport. The SSH-owned upload fixture at `813615877e579ef69e96a5e9106db86c3799a02b`
+captures actual admission IDs before dispatch and inspects each completed receipt individually,
+preserving token, state, target, metadata, suppression and cleanup assertions. It also requires zero
+pending obligations. Private project and complexity reviews clear that fixture unit; each review is
+narrower than final whole-PR acceptance. The complexity lane independently passes the real loopback
+fixture and finds only optional removal of sorting, retained for reproducible inspection order. Lead
+real Linux SSH upload validation passes one integration case in 5.81 seconds. The full combined
+Linux Python 3.12 non-integration suite passes 16,666 tests with 49 skips and 29 warnings, exit 0 in
+419.73 seconds. Full mypy checks 1,318 sources and repeats only the three held enrollment errors.
+Ruff/format (1,355 files) and local Typer isolation pass. Website passes 160 Python and 103 Node
+tests, four builds and both deterministic comparisons. Rulesync first fails in the selected Bun
+runner's incompatible YAML dependency; the same pinned version passes through Node. Exact owned
+SSH-fixture, pytest and build roots have no same-user argv/cwd/fd references or permission gaps and
+are removed; logs remain. Fresh combined hosted results require their own complete report.
+
+Both operator resource decisions remain pending. Retained enrollment/forwarding consumers, terminal
+state and physical Windows-key evidence, trust/creation authority, writer coexistence and rollback,
+complete additive RunContext and supported-workstation R1-R5 acceptance remain open. This draft
+dependency refresh consumes no public final-product fix round and changes none of the 25 completed
+plan blocks. The SDD remains unlocked.
 
 Combined code pin `38934134e3b8d12af814f9371b62075daa49db3e` preserves all 64 Python paths in the
 SSH contribution, including deletions, from published `186458307b`. Its full suite passes 16,125
