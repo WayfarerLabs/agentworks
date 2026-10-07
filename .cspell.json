@@ -15,6 +15,7 @@
     "Plurify",
     "RLIMITs",
     "SIGPIPE",
+    "SIGSEGV",
     "SIGWINCH",
     "Sunsetting",
     "Touchpoint",

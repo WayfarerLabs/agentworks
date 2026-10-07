@@ -3062,8 +3062,9 @@ inventory. Platform-factory and SSH ownership remain as previously assigned.
       wait fact only for an ordinary exit, so the private signaled case establishes resource closure
       but returns UNKNOWN application status. Keep missing-executable status unknown when entry is
       not proved. Reuse the existing optional signal representation rather than extend the wire;
-      prove producer and caller-facing projection, then native delivery. This supervisor acceptance
-      work is not implemented by the bounded job-control correction above.
+      prove producer and caller-facing projection, then native delivery. This is a future precision
+      improvement conditional on entry evidence, not a requirement to add a new exec-entry mechanism
+      before additive handoff. The selected documented UNKNOWN behavior remains supported.
 
 The parallel signal investigation at `a4379a51c` rejects the proposed close-on-exec EOF plus fresh
 `waitpid(WNOHANG)` inference before implementation. In
@@ -3074,6 +3075,35 @@ There is no hostile process requirement for this race. No producer change or pas
 The signal leaf remains open while a bounded read-only investigation checks whether documented
 exact-child process metadata can provide stronger exec-transition evidence without tracing, payload
 inspection or a new protocol. Foreground composition does not depend on that investigation.
+
+That follow-up rejects `PF_FORKNOEXEC` as successful-entry proof. On the owned Linux 6.1 host, four
+harmless children confirm the distinction: pre-exec SIGKILL and a missing executable retain the bit;
+an actual shell SIGTERM clears it; and an anonymous malformed ELF with no application code also
+clears it before fatal SIGSEGV. Kernel source confirms that clearing precedes remaining loader work.
+Each exact child is reaped, the anonymous descriptor closed and core dumps disabled; no disk fixture
+or producer edit remains. Reading this bit would add proc parsing and a wait phase without proving
+the stronger fact needed here.
+
+The fresh Astra architecture pass at `ef601de8d` confirms that FRD R4/R5 require available
+completion status, known-signal mapping and honest uncertainty, not exact application signals in
+every case. Preparation's selected retrospective rule and the managed lifecycle already explicitly
+keep unproved signaled entry UNKNOWN. Two additional actual-producer probes show normal wait exit 2
+for invalid shell source and exit 0 for dynamic-loader help without entering the shell body; their
+owned scratch is removed. Completion is not first-source-instruction proof. The lead accepts
+retaining the existing optional signal representation and conservative UNKNOWN with separately
+proved cleanup, and removes the unconditional eager-start requirement from preparation's conflicting
+live-gate/seam wording. No runtime behavior, accepted FRD requirement or native validation gate is
+weakened; stronger signal precision remains a clearly scoped future improvement. Re-review this
+clarification with the next complete foreground unit.
+
+Published job-control head `ebc8eedd4` completes
+[hosted CI run 37557251890](https://github.com/WayfarerLabs/agentworks/actions/runs/37557251890)
+with every job green. Linux Python 3.12, 3.13 and 3.14 each pass 16,005 cases with 203 skips and 29
+warnings. Windows Python 3.13 passes 1,267 cases with 57 skips and 25 warnings in 731.54 seconds.
+Full mypy passes 1,271 sources; static, file, locked-SDD, Rulesync and website jobs pass. This
+verifies selected Windows custody behavior on that published pin, not live WSL/QGA/systemd/SSH,
+complete target/RunContext or later working changes. Public round 1 of 3 and the broad additive
+gates remain open without a new ready or review-requested edge.
 
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
       serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one

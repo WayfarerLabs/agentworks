@@ -296,11 +296,13 @@ bootstrap or application completion. A missing, duplicate, out-of-order, or post
 a protocol failure. Frames captured before application proof are not returned as application
 stdout/stderr.
 
-Exact start acknowledgment remains a mechanism gate for reporting `STARTED`, returning before
-completion, detached launch and signaled-child attribution. A trusted supervisor may supply it where
-that profile is allowed. Readiness cannot install or stage a helper to manufacture it. Buffered
-direct execution does not claim eager start: it may establish only the selected retrospective normal
-completion below, without reducing exit-value coverage or acquiring a synthetic `STARTED` record.
+Eager application `STARTED`, live application-output promotion and signaled-child attribution
+require independent successful-exec evidence. A managed supervisor may acknowledge its exact launch
+and return a `JobRef` before application completion without claiming application `STARTED` or entry
+into a script body. Readiness cannot install or stage a helper to manufacture either kind of
+acknowledgment. Buffered direct execution does not claim eager start: it may establish only the
+selected retrospective normal completion below, without reducing exit-value coverage or acquiring a
+synthetic `STARTED` record.
 
 ### Selected retrospective completion
 
@@ -987,16 +989,16 @@ the hook itself is read-only.
 
 These claims require authorized live evidence before the public surface is wired:
 
-| Hypothesis                                                                            | Required evidence                                                                                                                                                                                                                                     |
-| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The 32 KiB inline and 24 KiB raw chunk candidates fit every supported carrier request | Whole-request measurements through SSH and QGA on both supported Proxmox majors, including framing overhead and refusal before dispatch above the settled bound.                                                                                      |
-| Linux startup argv has the stated sh/bash behavior                                    | Fixed and user-default shells for all four login/interactive combinations on supported Debian/Ubuntu images, including startup failure, stdin use, output, cwd/env changes, and elevated root lookup.                                                 |
-| Direct launch has exact start evidence on the no-staging substrate                    | Prove the selected exec-acknowledgment mechanism on every no-staging image, including death before/during exec, GNU env reserved codes, pre-exec signal injection, and application exits 125/126/127/143/255. This is a hard implementation gate.     |
-| Shared identity transition is exact                                                   | SSH direct, passwordless sudo, QGA root demotion, supplementary groups, unavailable elevation, and proof that ordinary QGA execution never remains root.                                                                                              |
-| Decoder filtering is safe under real delivery                                         | Sensitive hook reflection, split/short reads, duplex pressure, 255/drop after proved `STARTED` plus `FINISHED`, drop before `FINISHED`, provider truncation, local interruption, and no raw retained bytes on Linux, macOS, and Windows workstations. |
-| Private staging handles provider limits without replay                                | Large source/stdin and multi-megabyte separate output through SSH and QGA, lost write/read acknowledgments, deadline at every phase, exact range verification, and independently observed guest cleanup.                                              |
-| Proposed Linux helper tools exist at bootstrap                                        | Base image, pre-Phase-B recovery, demoted admin, elevated root, and supported guest release inventory with fixed executable paths and versions.                                                                                                       |
-| Darwin can satisfy the same contract without hidden installation                      | Pre-guest Remote Lima host execution on supported macOS, explicit account-shell lookup, no-staging bounded readiness, binary source/input separation, large staging, disconnect behavior, and cleanup.                                                |
+| Hypothesis                                                                            | Required evidence                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The 32 KiB inline and 24 KiB raw chunk candidates fit every supported carrier request | Whole-request measurements through SSH and QGA on both supported Proxmox majors, including framing overhead and refusal before dispatch above the settled bound.                                                                                                     |
+| Linux startup argv has the stated sh/bash behavior                                    | Fixed and user-default shells for all four login/interactive combinations on supported Debian/Ubuntu images, including startup failure, stdin use, output, cwd/env changes, and elevated root lookup.                                                                |
+| Direct execution has valid completion evidence on the no-staging substrate            | Prove the selected retrospective normal-completion rule on every no-staging image, including all application exit values and UNKNOWN after unproved entry, pre-exec signals or unavailable wait. Eager STARTED requires its separate exec acknowledgment if offered. |
+| Shared identity transition is exact                                                   | SSH direct, passwordless sudo, QGA root demotion, supplementary groups, unavailable elevation, and proof that ordinary QGA execution never remains root.                                                                                                             |
+| Decoder filtering is safe under real delivery                                         | Sensitive hook reflection, split/short reads, duplex pressure, 255/drop after proved `STARTED` plus `FINISHED`, drop before `FINISHED`, provider truncation, local interruption, and no raw retained bytes on Linux, macOS, and Windows workstations.                |
+| Private staging handles provider limits without replay                                | Large source/stdin and multi-megabyte separate output through SSH and QGA, lost write/read acknowledgments, deadline at every phase, exact range verification, and independently observed guest cleanup.                                                             |
+| Proposed Linux helper tools exist at bootstrap                                        | Base image, pre-Phase-B recovery, demoted admin, elevated root, and supported guest release inventory with fixed executable paths and versions.                                                                                                                      |
+| Darwin can satisfy the same contract without hidden installation                      | Pre-guest Remote Lima host execution on supported macOS, explicit account-shell lookup, no-staging bounded readiness, binary source/input separation, large staging, disconnect behavior, and cleanup.                                                               |
 
 No successful local fixture substitutes for these cells. A missing prerequisite is a production
 blocker or an operator disposition, not permission to report an optional feature or choose a weaker
@@ -1010,10 +1012,12 @@ The lead should settle these points with the named owner before assigning broade
    lifecycle, `require_live` meaning, and `DELIVERED` report disposition. The `Carrier.execute`
    signature stays unchanged, but current sensitive suppression semantics must change specifically
    for sink mode.
-2. **Direct start evidence, with preparation and platform owners:** choose and prove the
-   close-on-exec, supervisor, or base-image-helper mechanism. This is a hard gate for the direct
-   production path, including readiness: reserved wait-code inference cannot replace it or reduce
-   the required application exit range.
+2. **Direct execution evidence, with preparation and platform owners:** prove the selected
+   retrospective normal-completion rule on the actual no-staging production path, including
+   readiness and the full exit range. A mechanism offering eager application STARTED or precise
+   signaled-child attribution needs independent successful-exec acknowledgment. A managed launch
+   acknowledgment is a different fact; neither it nor reserved wait-code inference can substitute
+   for application completion.
 3. **Checked error base, with CLI owner:** approve one `CheckedExecutionError` carrying the
    immutable result, including how the CLI renders known guest failure, uncertainty, and incomplete
    output.
