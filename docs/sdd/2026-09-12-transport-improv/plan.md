@@ -3334,11 +3334,11 @@ as comment `6031565162` and the dependency notice on #832 as comment `6031568729
       despite exit zero, commit/reply loss, no silent stop or replay and retained OPERATION
       behavior. Complete all three private lanes and lead gates before closing this leaf.
 
-The complete private disposal unit is clear at integrated code `4a02c9900`, against `416503df2`.
-It adds the exact receipt and positive terminal evidence to the existing actual helper tracker,
-with a dedicated version-one disposal action row and stable replacement key. Explicit retries
-preserve prior action uncertainty and reconcile the exact row without rearming a resolved attempt
-or rereading removed launch artifacts. Helper termination and action settlement remain separate;
+The complete private disposal unit is clear at integrated code `4a02c9900`, against `416503df2`. It
+adds the exact receipt and positive terminal evidence to the existing actual helper tracker, with a
+dedicated version-one disposal action row and stable replacement key. Explicit retries preserve
+prior action uncertainty and reconcile the exact row without rearming a resolved attempt or
+rereading removed launch artifacts. Helper termination and action settlement remain separate;
 bookkeeping and finish never dispatch. Review found an initial and replacement admission race with
 operation finish; the corrected unit checks closing under the existing admission guard and proves
 both refusals without another borrow or disposal. The README describes the same bounded surface.
