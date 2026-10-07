@@ -2868,10 +2868,27 @@ The implementer's focused 183 cases, coherent 5,860-case suite (42 skips) and Wi
 The non-main-thread fixture now separates database setup from bounded start and drain phases rather
 than imposing the failed hosted two-second whole-test join. These are candidate-local results, not
 independent review clearance, native Windows confirmation or live acceptance. The unchanged QGA
-envelopes retain margins of 33 bytes independently and 2,085 bytes with the real lease. All three
-private review lanes and the lead's combined-pin gates are still pending. Full public RunContext,
-job observation/stop/output, other platform factories, recovery disposition and native proof remain
-open; no broad completion checkbox or public OPERATION admission follows from this candidate.
+envelopes retain margins of 33 bytes independently and 2,085 bytes with the real lease.
+
+All three private lanes subsequently clear the corrected whole unit at `9c9d93cfe`. Review removes
+duplicated acknowledgement predicates and source-line tracing without changing the lifecycle
+conditions. The shared pure rule preserves exact acknowledged launch independently of successful
+worker startup; a real delayed worker plus original escaping interruption proves that distinction
+and completed drain without replay. Project passes 157 related cases, complexity 320 and generic
+255, all on Linux. Complexity independently removes each of the current-helper and exact-hold gates
+and observes the expected premature-finish and premature-release failures, then restores both.
+
+The lead's full corrected suite at that pin passes 16,106 cases with 50 skips and 27 existing fork
+warnings, exit 0 in 254.60 seconds. Frozen dependency sync (70 packages), Ruff/format (1,305 files),
+strict CI mypy (1,269 sources), exact Typer isolation and whitespace checks pass. File quality,
+locked-SDD, Rulesync, website Python (160 cases), Node (103 cases), four builds and both
+deterministic comparisons pass for the unchanged collateral at `91d2659ed`. The earlier full
+16,105-pass result predates the acknowledged-worker regression. Owned test/build scratch is removed
+after the completed runs; review environments remain in their isolated review trees for follow-up.
+This supplies neither native Windows confirmation of the corrected timing fixture nor live
+WSL2/Proxmox acceptance. Full public RunContext, job observation/stop/output, other platform
+factories, recovery disposition and native proof remain open; no broad completion checkbox or public
+OPERATION admission follows from this private checkpoint.
 
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
       serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one

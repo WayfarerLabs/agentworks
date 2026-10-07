@@ -77,7 +77,7 @@ type _JsonFileStrategy = Literal["replace", "merge-overwrite", "merge-preserve",
 
 
 class ExecutionAccess:
-    """Private bound view for one foreground DIRECT operation."""
+    """Private bound execution view over one composition-owned operation."""
 
     def __init__(
         self,
