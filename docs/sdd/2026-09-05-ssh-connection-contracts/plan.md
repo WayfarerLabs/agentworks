@@ -657,6 +657,54 @@ R1-R5/native acceptance remain open. Transport's disposal and production composi
 separately. All 25 completed plan blocks are unchanged, no public final-product fix round is
 consumed, and this SDD remains unlocked.
 
+Published SSH `9644741564047e351c7eb7c5557fec102329e3fb` has a complete
+[hosted report](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6032185596) on
+transport `2add24df7`. Run `37579050040` passes all four pytest jobs: Linux Python 3.12-3.14 each
+report 16,754 passed, 203 skipped and 29 warnings; Windows Server 2025/Python 3.13 reports 1,622
+passed, 68 skipped and 25 warnings in 827.38 seconds. All six test/static/website logs identify
+checkout `b7986c72fbcf6fce9198488b5006e50dd0d666f7`; its exact transport/SSH parents and tree
+`ee11c9b9199d21d85c810b76bdb7bdf4589458f2` match published source. Only the three enrollment custody
+typing errors and aggregate gate fail. Other repository/site jobs pass, including website 160 Python
+and 103 Node tests, four builds and both deterministic comparisons. Hosted Typer isolation skips
+after mypy failure; the exact local check passes. Transport's exact base also has complete green
+hosted evidence from run `37578187771`, including Linux 16,332/203/29 and Windows 1,407/58/25 in
+842.87 seconds. Neither report establishes full native workflow acceptance.
+
+Transport's
+[reviewed RESOURCE disposal increment](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6032434995)
+`dd10ebbeee677570c95f9b0f30688f32f6891aeb` reuses ExecutionAccess and the existing actual-helper
+tracker. Exact core-bound namespace, confirmed receipt and positive terminal evidence precede its
+first effect. A dedicated run-ID-only action binding retains the receipt, terminal proof and prior
+remote-action uncertainty without adopting the independent job or adding an executor. Helper
+termination is distinct from action settlement. Bookkeeping and finish never dispatch; a separately
+requested exact retry after proved helper closure reconciles its prior row without rearming a
+resolved attempt or rereading removed launch artifacts. Unknown helper/local custody remains held.
+Whole-unit review found initial and retry admission races with closing; the corrected code checks
+closing under the admission guard and proves both refusals without another borrow or disposal. All
+three private code lanes and both completion-record lanes clear. The publication's formatting
+correction changes only completion prose. Carrier/custody wire, schema and SSH implementation are
+unchanged. The
+[coordination notice](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6032441878)
+adds no carrier requirement or operator resource ruling. Transport's unchecked unified independent
+launch design and private implementation remain its work, with separately required platform-owned
+availability, production composition and full RunContext.
+
+SSH rebases without conflicts at `4bf3832d1cecf55e793d3e577e135360569e9e52`, preserving all 180
+prior patches exactly. SSH production and fixtures are unchanged, and shared process/custody/pump
+files match transport. Full combined Linux Python 3.12 non-integration validation passes 16,983
+tests, 49 skips and 29 warnings, exit 0 in 223.88 seconds. Full strict mypy checks 1,328 sources and
+repeats only the three held enrollment errors, exit 1. Ruff/format (1,365 files), exact local CI
+Typer isolation, frozen dependency sync and Rulesync through Node pass. The exact owned pytest root
+has no same-user argv/cwd/fd references or permission gaps and is removed after terminal completion.
+Website files are unchanged; local website and native tests were not rerun for this draft rebase.
+Transport's new hosted run `37582372538` and fresh combined hosted results require their own
+complete reports.
+
+Both operator resource decisions, retained consumers, terminal and physical Windows input, genuine
+creation/trust authority, writer coexistence/rollback, both usable RunContext paths and complete
+R1-R5/native acceptance remain open. All 25 completed plan blocks are unchanged, no public
+final-product fix round is consumed, and this SDD remains unlocked.
+
 Combined code pin `38934134e3b8d12af814f9371b62075daa49db3e` preserves all 64 Python paths in the
 SSH contribution, including deletions, from published `186458307b`. Its full suite passes 16,125
 non-integration tests with 51 skips and 27 warnings, exit 0 in 267.18 seconds. Full Ruff/format
