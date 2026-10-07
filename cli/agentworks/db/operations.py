@@ -321,13 +321,11 @@ class OperationRepository:
                 self._raise_stale_or_invalid_state(ownership, None)
             rows = self._connection.execute(
                 "SELECT obligations.* FROM lifecycle_obligations AS obligations "
-                "JOIN operation_owners AS owners ON owners.operation_id = obligations.operation_id "
-                "WHERE obligations.operation_id = ? AND owners.generation_id = ? "
+                "WHERE obligations.operation_id = ? "
                 "AND obligations.state IS NOT 'resolved' "
                 "ORDER BY obligations.registered_at, obligations.obligation_id LIMIT ?",
                 (
                     ownership.operation_id,
-                    ownership.generation_id,
                     MAX_LIFECYCLE_OBLIGATIONS + 1,
                 ),
             ).fetchall()
