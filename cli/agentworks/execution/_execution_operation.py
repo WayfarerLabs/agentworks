@@ -97,14 +97,13 @@ from agentworks.operations import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from agentworks.execution._helper_launcher import IdentityPlan
     from agentworks.execution._managed_job_store import Stream
     from agentworks.execution._managed_start_exchange import ManagedStartCandidate
     from agentworks.execution._runtime_prerequisite import RuntimeSelection, _NumericGuestBootstrap
     from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
-    from agentworks.execution._wsl2_owned_operation import WSL2OwnedOperation
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Carrier, Deadline
     from agentworks.execution.models import Command, Input, Output
@@ -187,7 +186,7 @@ class ExecutionOperation:
         managed_repository: ManagedRunRepository | None = None,
         native_binding: NativeExecutionBinding | None = None,
         resource_owner: ManagedRunOwner | None = None,
-        wsl2_route: WSL2OwnedOperation | None = None,
+        route_check: Callable[[Deadline], None] | None = None,
     ) -> None:
         """Bind inline calls to one exact owner scope and selected target."""
         scope = owner.ownership.scope
@@ -211,7 +210,7 @@ class ExecutionOperation:
         self._managed_repository = managed_repository
         self._native_binding = native_binding
         self._resource_owner = resource_owner
-        self._wsl2_route = wsl2_route
+        self._route_check = route_check
         self._managed_runs: list[ManagedOperationRun] = []
         self._active_inline_calls: dict[object, _ActiveHelperCall] = {}
         self._unfinished_inline_executions: list[UnfinishedInlineExecution] = []
@@ -352,8 +351,8 @@ class ExecutionOperation:
             operation = active.operation
         try:
             self._admit(active)
-            if self._wsl2_route is not None:
-                self._wsl2_route.require_selected_route(deadline)
+            if self._route_check is not None:
+                self._route_check(deadline)
             if stream is None:
                 candidate = observe_managed_run(
                     operation,
@@ -600,8 +599,8 @@ class ExecutionOperation:
                     # A drained worker does not clear an earlier unknown closing
                     # helper; reuse its existing local-custody/binding gate.
                     run.keeper._require_cleanup(deadline)  # noqa: SLF001
-                if self._wsl2_route is not None:
-                    self._wsl2_route.require_selected_route(deadline)
+                if self._route_check is not None:
+                    self._route_check(deadline)
                 candidate = stop_managed_run(
                     operation,
                     expected_launch=expected_launch,
@@ -681,8 +680,8 @@ class ExecutionOperation:
             run.keeper._require_cleanup(deadline)  # noqa: SLF001
             repository, bootstrap, binding = self._managed_repository, self._bootstrap, self._native_binding
             assert repository is not None and bootstrap is not None and binding is not None
-            if self._wsl2_route is not None:
-                self._wsl2_route.require_selected_route(deadline)
+            if self._route_check is not None:
+                self._route_check(deadline)
             run.disposal_attempted = True
             try:
                 outcome = dispose_bound_managed_run(
@@ -842,11 +841,11 @@ class ExecutionOperation:
             self._managed_runs.append(run)
             reference = JobRef(identity.run_id)
             try:
-                route = self._wsl2_route
+                route = self._route_check
                 run.start(
                     body,
                     deadline,
-                    before_dispatch=(lambda: route.require_selected_route(deadline)) if route is not None else None,
+                    before_dispatch=(lambda: route(deadline)) if route is not None else None,
                 )
             except BaseException as control:
                 fact = ManagedExecutionControlFact(reference)
@@ -871,8 +870,8 @@ class ExecutionOperation:
             operation = active.operation
         try:
             self._admit(active)
-            if self._wsl2_route is not None:
-                self._wsl2_route.require_selected_route(deadline)
+            if self._route_check is not None:
+                self._route_check(deadline)
             result = observe_workload_shell(
                 operation, plan=plan, runtime_selection=runtime_selection, deadline=deadline
             )

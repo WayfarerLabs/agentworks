@@ -43,8 +43,10 @@ if TYPE_CHECKING:
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.binding import NativeExecutionBinding
     from agentworks.execution.carrier import Deadline
+    from agentworks.operations import OperationOwner
     from agentworks.resources.graph import Readiness
     from agentworks.transports import Transport
+    from agentworks.vms._native_execution_access import OwnedNativePlatformAccess
 
 _STATUS_TIMEOUT_SECONDS = 10
 _WSL2_LOCATOR_SID = re.compile(r"S-\d+(?:-\d+)+", re.ASCII)
@@ -1061,6 +1063,20 @@ class WSL2Platform(VMPlatform):
             result.stdout.data.decode("utf-8", errors="replace"), vm_name=vm.name
         )
         return ProviderLocator(f"wsl2:{machine_guid}:{user_sid}:{registration_guid}")
+
+    def build_native_execution_access(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        owner: OperationOwner,
+        custody: LocalDeliveryCustody,
+        config: Config | None = None,
+    ) -> OwnedNativePlatformAccess:
+        """Construct passive access for core to retain before preparation effects."""
+        from agentworks.vms._wsl2_native_access import WSL2OwnedNativePlatformAccess
+
+        return WSL2OwnedNativePlatformAccess(vm, self, ctx, owner, custody, config)
 
     def resolve_native_execution_binding(
         self,

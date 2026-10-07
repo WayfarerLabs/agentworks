@@ -33,6 +33,7 @@ from agentworks.errors import ExternalError, StateError, ValidationError
 from agentworks.execution import _target_identity
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._helper_identity import IdentityExpectation
+from agentworks.execution._proxmox_activation import ProxmoxActivation
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution.binding import NativeExecutionBinding
 from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, FiniteInput, PreparedInvocation
@@ -41,6 +42,7 @@ from agentworks.execution.models import Command
 from agentworks.execution.profiles import Protection
 from agentworks.execution.result import CheckedExecutionError
 from agentworks.operations import OperationAttempt, OperationOwner, release_borrow_after_custody
+from agentworks.plugins.proxmox._native_access import ProxmoxOwnedNativePlatformAccess
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms._native_operation import NativeVMOperationControlFact, native_vm_operation
 from tests.execution.test_target_identity import SyntheticCarrier
@@ -195,6 +197,93 @@ def test_running_views_share_owner_bootstrap_and_settle(database, tmp_path, monk
     assert database.operations.inspect(_scope()) is None
 
 
+@pytest.mark.parametrize("mode", ["success", "lost_ack", "ha", "interrupt"])
+def test_stopped_access_retains_single_activation_without_replay(database, tmp_path, monkeypatch, mode):
+    platform, route = _install(database, monkeypatch)
+    monkeypatch.setattr(platform, "observe_execution_power", lambda *args, **kwargs: VMStatus.STOPPED)
+    upid = "UPID:node:000000AB:000000CD:000000EF:qmstart:101:token:"
+    if mode == "ha":
+        upid = upid.replace("qmstart", "hastart")
+    calls = []
+    selected = []
+    original_factory = platform.build_native_execution_access
+
+    def factory(*args, **kwargs):
+        access = original_factory(*args, **kwargs)
+        assert isinstance(access, ProxmoxOwnedNativePlatformAccess)
+        assert access.activation is None and access.preparation is None and access.binding is None
+        selected.append(access)
+        return access
+
+    def start(wire, *, timeout, custody):
+        access = selected[0]
+        assert isinstance(access.activation, ProxmoxActivation)
+        assert access.custody is custody and database.operations.inspect(_scope()) is not None
+        assert access.owner.list_pending_lifecycle_obligations()
+        calls.append("start")
+        if mode == "lost_ack":
+            raise ExternalError("injected lost receipt")
+        if mode == "interrupt":
+            raise KeyboardInterrupt()
+        return upid
+
+    def poll(wire, receipt, *, timeout, custody):
+        assert receipt == upid and selected[0].custody is custody
+        calls.append("poll")
+        return {
+            "upid": upid,
+            "node": "node",
+            "pid": 0xAB,
+            "pstart": 0xCD,
+            "starttime": 0xEF,
+            "type": "hastart" if mode == "ha" else "qmstart",
+            "id": "101",
+            "user": "token",
+            "status": "stopped",
+            "exitstatus": "OK",
+        }
+
+    monkeypatch.setattr(platform, "build_native_execution_access", factory)
+    monkeypatch.setattr(_ProxmoxWire, "request_vm_start", start)
+    monkeypatch.setattr(_ProxmoxWire, "request_task_status", poll)
+    monkeypatch.setattr(_ProxmoxWire, "request_power", lambda *args, **kwargs: {"status": "running"})
+    monkeypatch.setattr(
+        _ProxmoxWire,
+        "request_guest_info",
+        lambda *args, **kwargs: {"result": {"version": "1", "supported_commands": []}},
+    )
+    monkeypatch.setattr(platform, "stop", lambda *args, **kwargs: pytest.fail("activated VM stopped at teardown"))
+    if mode == "success":
+        with native_vm_operation(
+            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=PurePosixPath(tmp_path)
+        ):
+            assert selected[0].preparation is not None
+            with pytest.raises(StateError):
+                selected[0].prepare(VMStatus.STOPPED, Deadline.after(10))
+        assert calls == ["start", "poll"]
+        assert database.operations.inspect(_scope()) is None
+        return
+    with (
+        pytest.raises(KeyboardInterrupt if mode == "interrupt" else StateError) as caught,
+        native_vm_operation(
+            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=PurePosixPath(tmp_path)
+        ),
+    ):
+        pytest.fail("unsettled activation admitted body")
+    fact = caught.value.__cause__
+    assert isinstance(fact, NativeVMOperationControlFact)
+    assert fact._workflow.access is selected[0]
+    assert selected[0].activation is not None and selected[0].preparation is None
+    with pytest.raises(StateError):
+        selected[0].prepare(VMStatus.STOPPED, Deadline.after(10))
+    assert database.operations.inspect(_scope()) is not None and route.guest.calls == 0
+    for _ in range(2):
+        with pytest.raises(StateError):
+            fact.retry_cleanup(Deadline.after(10))
+    assert calls.count("start") == 1
+    assert selected[0].activation.payload.upid == (upid if mode == "ha" else None)
+
+
 @pytest.mark.parametrize(
     "power,intent",
     [
@@ -313,11 +402,12 @@ def test_preparation_control_retains_exact_facts(database, tmp_path, monkeypatch
     fact = control.__cause__
     assert isinstance(fact, NativeVMOperationControlFact)
     workflow = fact._workflow
-    assert workflow.selected_locator == ProviderLocator("pve:generation")
-    assert workflow.selected_binding is not None
-    assert workflow.preparation_fact is not None
+    assert isinstance(workflow.access, ProxmoxOwnedNativePlatformAccess)
+    assert workflow.access.locator == ProviderLocator("pve:generation")
+    assert workflow.access.binding is not None
+    assert workflow.access.preparation is not None
     if phase == "guest":
-        assert workflow.preparation_fact.requires_owner_retention
+        assert workflow.access.preparation.requires_owner_retention
     else:
         assert workflow.identity is not None and workflow.identity.requires_owner_retention
     assert database.operations.inspect(_scope()) is not None
@@ -348,7 +438,8 @@ def test_unsettled_preparation_reply_retains_owner(database, tmp_path, monkeypat
     assert database.operations.inspect(_scope()) is not None
     fact = caught.value.__cause__
     assert isinstance(fact, NativeVMOperationControlFact)
-    preparation = fact._workflow.identity if phase == "accounts" else fact._workflow.preparation_fact
+    assert isinstance(fact._workflow.access, ProxmoxOwnedNativePlatformAccess)
+    preparation = fact._workflow.identity if phase == "accounts" else fact._workflow.access.preparation
     assert preparation is not None and preparation.pending_remote_effects
     assert route.local.calls == 0
 
@@ -421,12 +512,13 @@ def test_settlement_failure_retains_observed_preparation_facts(database, tmp_pat
     fact = control.__cause__
     assert isinstance(fact, NativeVMOperationControlFact)
     workflow = fact._workflow
-    assert workflow.preparation_fact is not None and workflow.preparation_fact.guest_result is not None
+    assert isinstance(workflow.access, ProxmoxOwnedNativePlatformAccess)
+    assert workflow.access.preparation is not None and workflow.access.preparation.guest_result is not None
     if phase == "accounts":
         assert workflow.identity is not None and workflow.identity.delivery_result is not None
         assert workflow.identity.coordination_uncertain
     else:
-        assert workflow.preparation_fact.coordination_uncertain
+        assert workflow.access.preparation.coordination_uncertain
     assert database.operations.inspect(_scope()) is not None
 
 
@@ -501,7 +593,8 @@ def test_locator_control_survives_borrow_release_failure(database, tmp_path, mon
     assert caught.value is control
     fact = control.__cause__
     assert isinstance(fact, NativeVMOperationControlFact)
-    preparation = fact._workflow.preparation_fact
+    assert isinstance(fact._workflow.access, ProxmoxOwnedNativePlatformAccess)
+    preparation = fact._workflow.access.preparation
     assert preparation is not None and preparation.requires_owner_retention
     assert preparation.guest_result is not None and preparation.guest_result.observation is not None
     assert preparation.guest_result.observation.identity == route.local.observed
@@ -535,7 +628,8 @@ def test_identity_borrow_release_failure_cannot_release_owner(database, tmp_path
     assert caught.value is control and retained_borrow is not None
     fact = control.__cause__
     assert isinstance(fact, NativeVMOperationControlFact)
-    assert fact._workflow.preparation_fact is not None
+    assert isinstance(fact._workflow.access, ProxmoxOwnedNativePlatformAccess)
+    assert fact._workflow.access.preparation is not None
     assert fact._workflow.identity is not None and fact._workflow.identity.delivery_result is not None
     assert fact._workflow.identity.coordination_uncertain
     assert database.operations.inspect(_scope()) is not None and route.local.calls == 0

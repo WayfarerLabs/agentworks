@@ -64,6 +64,7 @@ from agentworks.execution.result import CheckedExecutionError
 from agentworks.operations import OperationOwner
 from agentworks.vms import _native_operation
 from agentworks.vms._native_operation import NativeVMOperationControlFact, native_vm_operation
+from agentworks.vms._wsl2_native_access import WSL2OwnedNativePlatformAccess
 from agentworks.vms.target_preparation import (
     VMTargetPreparation,
     VMTargetPreparationControlFact,
@@ -79,6 +80,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from agentworks.db import VMRow
+    from agentworks.operations import LifecycleObligation
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="synthetic Linux helper proof")
 
@@ -123,6 +125,95 @@ def test_conflicting_claim_prevents_passive_provider_work(
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
+
+
+def test_owned_access_factory_is_passive(database: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = WSL2Platform("wsl2", {})
+    owner = OperationOwner.acquire(database.operations, _scope(), "passive-access")
+    vm = database.get_vm("box")
+    assert vm is not None
+    monkeypatch.setattr(platform, "observe_provider_locator", lambda *args, **kwargs: pytest.fail("factory observed"))
+    monkeypatch.setattr(
+        platform, "resolve_native_execution_binding", lambda *args, **kwargs: pytest.fail("factory resolved")
+    )
+    custody = LocalDeliveryCustody()
+    access = platform.build_native_execution_access(vm, RunContext(), owner=owner, custody=custody)
+    assert isinstance(access, WSL2OwnedNativePlatformAccess)
+    assert access.owner is owner and access.custody is custody
+    assert access.selected is None and access.binding is None and access.preparation is None
+    assert access.route_check is None and not owner.list_pending_lifecycle_obligations()
+    owner.seal_lifecycle_obligations()
+    owner.record_effects_resolved()
+    owner.close()
+
+
+@pytest.mark.parametrize("foreign_debt", [False, True])
+def test_root_retains_access_before_effects_and_independently_checks_ledger(
+    database: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, foreign_debt: bool
+) -> None:
+    platform = WSL2Platform("wsl2", {})
+    monkeypatch.setattr(platform, "observe_execution_power", lambda *args, **kwargs: VMStatus.RUNNING)
+    control = KeyboardInterrupt()
+    events: list[str] = []
+    debt: LifecycleObligation | None = None
+
+    class Access:
+        owner: OperationOwner
+        custody: LocalDeliveryCustody
+        binding = None
+        preparation = None
+        route_check = None
+        settled = False
+
+        def prepare(self, power: VMStatus, deadline: Deadline) -> None:
+            nonlocal debt
+            assert power is VMStatus.RUNNING and not deadline.expired
+            assert database.operations.inspect(_scope()) is not None
+            events.append("prepare")
+            if foreign_debt:
+                debt = self.owner.register_lifecycle_obligation("foreign", payload_version=1, payload=b"{}")
+                debt.mark_possible_effect()
+            raise control
+
+        def settle(self, deadline: Deadline) -> bool:
+            assert not deadline.expired and self.custody.settled
+            with pytest.raises(StateError):
+                self.owner.borrow()
+            events.append("settle")
+            return self.settled
+
+    access = Access()
+
+    def build(vm, ctx, *, owner, custody, config=None):
+        claim = database.operations.inspect(_scope())
+        assert claim is not None and claim.ownership == owner.ownership
+        access.owner = owner
+        access.custody = custody
+        events.append("build")
+        return access
+
+    monkeypatch.setattr(platform, "build_native_execution_access", build)
+    with (
+        pytest.raises(KeyboardInterrupt) as caught,
+        native_vm_operation(
+            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=_root(tmp_path)
+        ),
+    ):
+        pytest.fail("interrupted access admitted body")
+    assert caught.value is control
+    fact = control.__cause__
+    assert isinstance(fact, NativeVMOperationControlFact)
+    assert fact._workflow.access is access
+    assert events == ["build", "prepare", "settle"]
+    access.settled = True
+    if foreign_debt:
+        with pytest.raises(StateError):
+            fact.retry_cleanup(Deadline.after(10))
+        assert database.operations.inspect(_scope()) is not None
+        assert debt is not None
+        debt.resolve()
+    fact.retry_cleanup(Deadline.after(10))
+    assert database.operations.inspect(_scope()) is None
 
 
 def test_site_mismatch_refuses_before_power_observation(
@@ -714,6 +805,52 @@ def test_never_created_hold_releases_without_ready(
     assert native.events and "dispatch" in native.events
     assert not observer.events
     assert route.guest.calls == 0
+    assert database.operations.inspect(_scope()) is None
+
+
+def test_interruption_after_selected_preparation_keeps_actual_child_custody(
+    database: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    platform = WSL2Platform("wsl2", {})
+    _install_route(database, platform, monkeypatch)
+    original = WSL2OwnedOperation.start_and_prepare
+    control = KeyboardInterrupt()
+    prepared: VMTargetPreparation | None = None
+
+    def interrupted(selected: WSL2OwnedOperation, deadline: Deadline) -> VMGuestIdentity | None:
+        nonlocal prepared
+        original(selected, deadline)
+        assert selected.preparation is not None
+        prepared = selected.preparation
+        selected.preparation = replace(
+            prepared,
+            status=VMTargetPreparationStatus.UNCERTAIN,
+            pending_remote_effects=True,
+            requires_owner_retention=True,
+        )
+        raise control
+
+    monkeypatch.setattr(WSL2OwnedOperation, "start_and_prepare", interrupted)
+    with (
+        pytest.raises(KeyboardInterrupt) as caught,
+        native_vm_operation(
+            database, "box", platform, RunContext(), deadline=Deadline.after(10), trusted_root=_root(tmp_path)
+        ),
+    ):
+        pytest.fail("interrupted selected preparation admitted body")
+    assert caught.value is control
+    fact = control.__cause__
+    assert isinstance(fact, NativeVMOperationControlFact)
+    access = fact._workflow.access
+    assert isinstance(access, WSL2OwnedNativePlatformAccess) and access.selected is not None
+    assert access.preparation is access.selected.preparation
+    assert access.preparation is not None and access.preparation.pending_remote_effects
+    assert database.operations.inspect(_scope()) is not None
+    with pytest.raises(StateError):
+        fact.retry_cleanup(Deadline.after(10))
+    assert prepared is not None
+    access.selected.preparation = prepared
+    fact.retry_cleanup(Deadline.after(10))
     assert database.operations.inspect(_scope()) is None
 
 

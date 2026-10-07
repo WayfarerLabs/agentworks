@@ -393,7 +393,7 @@ def test_route_changes_after_positive_observation_prevent_actual_disposal(observ
             raise control
 
     route.require_selected_route.side_effect = fence
-    operation._wsl2_route = route
+    operation._route_check = route.require_selected_route
     with pytest.raises(StateError) as caught:
         access.dispose(JobRef(RUN.run_id))
     assert caught.value is control and main.dispose.calls == 0 and main.observe.calls == 1

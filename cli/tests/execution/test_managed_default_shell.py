@@ -7,7 +7,6 @@ import subprocess
 import sys
 import threading
 from dataclasses import replace
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -405,7 +404,7 @@ def test_selected_route_is_rechecked_before_lookup_and_start(view, lookup, refus
         if refuse:
             raise StateError("changed route")
 
-    workflow.views.execution_operation._wsl2_route = SimpleNamespace(require_selected_route=require)
+    workflow.views.execution_operation._route_check = require
     budget = Deadline.after(5)
     if refuse:
         with pytest.raises(StateError):
@@ -415,7 +414,7 @@ def test_selected_route_is_rechecked_before_lookup_and_start(view, lookup, refus
     else:
         start(access, deadline=budget)
         assert calls == [budget, budget]
-    workflow.views.execution_operation._wsl2_route = None
+    workflow.views.execution_operation._route_check = None
     workflow.close(cleanup_deadline=Deadline.after(5))
 
 

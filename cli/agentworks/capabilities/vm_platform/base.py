@@ -31,7 +31,9 @@ if TYPE_CHECKING:
     from agentworks.debian import DebianRelease
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.binding import NativeExecutionBinding
+    from agentworks.operations import OperationOwner
     from agentworks.transports import ExecTransport
+    from agentworks.vms._native_execution_access import OwnedNativePlatformAccess
 
 
 MAX_PROVIDER_LOCATOR_BYTES = 4096
@@ -468,6 +470,22 @@ class VMPlatform(Capability):
         a late result. Such timeouts are not magical preemption of a provider
         call.
         """
+
+    def build_native_execution_access(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        owner: OperationOwner,
+        custody: LocalDeliveryCustody,
+        config: Config | None = None,
+    ) -> OwnedNativePlatformAccess:
+        """Construct passive access for core to retain before preparation effects."""
+        raise StateError(
+            f"VM platform '{self.name}' has not implemented owned native execution access",
+            entity_kind="vm",
+            entity_name=vm.name,
+        )
 
     def resolve_native_execution_binding(
         self,
