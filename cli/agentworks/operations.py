@@ -32,8 +32,13 @@ _recovery_owners: weakref.WeakKeyDictionary[
 ] = weakref.WeakKeyDictionary()
 
 
-class _PreRegistrationClosingRefusal(StateError):
-    """A close request prevented a dispatch registration before it began."""
+class _PreRegistrationRefusal(StateError):
+    """No registration occurred: closing refused it or exact fenced absence proved it."""
+
+
+def _is_pre_registration_refusal(control: BaseException) -> bool:
+    """Recognize core's direct refusal or immediate proven-absent cause."""
+    return isinstance(control, _PreRegistrationRefusal) or isinstance(control.__cause__, _PreRegistrationRefusal)
 
 
 class OperationOwner:
@@ -121,10 +126,15 @@ class OperationOwner:
             attempt = self._outstanding_attempt
             return attempt is None or attempt.local_delivery.close(deadline)
 
-    def list_lifecycle_obligations(self) -> tuple[PersistedLifecycleObligation, ...]:
-        """Read fenced lifecycle facts from this owner's claim and repository."""
+    def list_pending_lifecycle_obligations(self) -> tuple[PersistedLifecycleObligation, ...]:
+        """Read bounded unfinished lifecycle debt under current ownership."""
         with self._guard:
-            return self._repository.list_lifecycle_obligations(self._ownership)
+            return self._repository.list_pending_lifecycle_obligations(self._ownership)
+
+    def inspect_lifecycle_obligation(self, obligation_id: str) -> PersistedLifecycleObligation | None:
+        """Read one exact receipt; missing is meaningful only under current ownership."""
+        with self._guard:
+            return self._repository.inspect_lifecycle_obligation(self._ownership, obligation_id)
 
     def register_lifecycle_obligation(
         self,
@@ -146,14 +156,43 @@ class OperationOwner:
                     entity_kind=self._ownership.scope.resource_kind,
                     entity_name=self._ownership.scope.resource_name,
                 )
-            obligation = self._repository.register_lifecycle_obligation(
-                self._ownership,
-                obligation_kind,
-                payload_version,
-                payload,
-                obligation_id=obligation_id,
+            obligation = self._register_lifecycle_obligation_locked(
+                obligation_id or uuid4().hex, obligation_kind, payload_version, payload
             )
             return LifecycleObligation(self, obligation)
+
+    def _register_lifecycle_obligation_locked(
+        self, obligation_id: str, obligation_kind: str, payload_version: int, payload: bytes
+    ) -> PersistedLifecycleObligation:
+        try:
+            return self._repository.register_lifecycle_obligation(
+                self._ownership, obligation_kind, payload_version, payload, obligation_id=obligation_id
+            )
+        except Exception as cause:
+            self._classify_registration_failure_locked(cause, obligation_id)
+            raise
+
+    def _classify_registration_failure_locked(self, cause: Exception, obligation_id: str) -> None:
+        # A reused exception object must not carry an earlier attempt's proof.
+        previous = cause.__cause__
+        if isinstance(previous, _PreRegistrationRefusal):
+            cause.__cause__ = previous.__cause__
+        try:
+            if self._repository.inspect_lifecycle_obligation(self._ownership, obligation_id) is not None:
+                return
+            if self._transition_uncertain:
+                self._reconcile_transition_locked()
+        except Exception:
+            return
+        # Controls and present, stale or unreadable receipts retain uncertainty.
+        # A current-owner exact read alone proves this registration absent.
+        refusal = _PreRegistrationRefusal(
+            "operation lifecycle registration did not persist",
+            entity_kind=self._ownership.scope.resource_kind,
+            entity_name=self._ownership.scope.resource_name,
+        )
+        refusal.__cause__ = cause.__cause__
+        cause.__cause__ = refusal
 
     def admit_recovery_support_obligation(
         self,
@@ -181,13 +220,17 @@ class OperationOwner:
                 self._reconcile_transition_locked()
             self._require_dispatch_admission_locked()
             self._transition_uncertain = True
-            obligation = self._repository.admit_recovery_support_obligation(
-                self._ownership,
-                obligation_kind,
-                payload_version,
-                payload,
-                obligation_id=obligation_id,
-            )
+            try:
+                obligation = self._repository.admit_recovery_support_obligation(
+                    self._ownership,
+                    obligation_kind,
+                    payload_version,
+                    payload,
+                    obligation_id=obligation_id,
+                )
+            except Exception as cause:
+                self._classify_registration_failure_locked(cause, obligation_id)
+                raise
             self._durable_possible_dispatch = True
             self._transition_uncertain = False
             return LifecycleObligation(self, obligation)
@@ -797,7 +840,7 @@ class OperationBorrow:
                     and self._dispatch_obligation is None
                     and self._dispatch_obligation_id is None
                 ):
-                    raise _PreRegistrationClosingRefusal(
+                    raise _PreRegistrationRefusal(
                         "operation borrow is closing",
                         entity_kind=self.ownership.scope.resource_kind,
                         entity_name=self.ownership.scope.resource_name,
@@ -833,12 +876,8 @@ class OperationBorrow:
                 self._supplied_dispatch = supplied
                 self._dispatch_obligation_id = obligation_id
             owner._transition_uncertain = True  # noqa: SLF001
-            self._dispatch_obligation = owner._repository.register_lifecycle_obligation(  # noqa: SLF001
-                self.ownership,
-                obligation_kind,
-                payload_version,
-                payload,
-                obligation_id=obligation_id,
+            self._dispatch_obligation = owner._register_lifecycle_obligation_locked(  # noqa: SLF001
+                obligation_id, obligation_kind, payload_version, payload
             )
             owner._transition_uncertain = False  # noqa: SLF001
             return LifecycleObligation(owner, self._dispatch_obligation)

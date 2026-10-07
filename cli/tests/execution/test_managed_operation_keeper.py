@@ -101,7 +101,7 @@ def test_passive_registration_sample_and_repeated_fences_during_real_borrow(boun
     carrier = ScriptedCarrier()
     keeper = make_keeper(owner, receipt, carrier)
     assert not keeper.registration_started and carrier.calls == 0
-    assert owner.list_lifecycle_obligations() == ()
+    assert owner.list_pending_lifecycle_obligations() == ()
     try:
         keeper.admit()
         obligation = keeper.obligation
@@ -148,7 +148,7 @@ def test_initial_binding_refuses_before_registration(bound, fault: str) -> None:
             root_plan=plan,
             runtime_selection=runtime,
         )
-    assert owner.list_lifecycle_obligations() == ()
+    assert owner.list_pending_lifecycle_obligations() == ()
 
 
 @pytest.mark.parametrize("fault", ["close", "takeover", "binding", "late"])
@@ -201,7 +201,7 @@ def test_interrupted_registration_and_arming_retain_exact_object(bound, monkeypa
         with pytest.raises(KeyboardInterrupt) as caught:
             keeper.admit()
         assert caught.value is error and keeper.admission_uncertain and keeper.obligation is not None
-        assert owner.list_lifecycle_obligations()[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+        assert owner.list_pending_lifecycle_obligations()[0].state is LifecycleObligationState.POSSIBLE_EFFECT
         with pytest.raises(StateError):
             keeper.admit()
     finally:
@@ -478,7 +478,7 @@ def test_uncertain_registration_retains_preheld_identity_without_replay(bound, m
             keeper.admit()
         assert caught.value is error and keeper.failed
         assert keeper.obligation is None and keeper.admission_uncertain
-        assert owner.list_lifecycle_obligations()[0].obligation_id == "b" * 32
+        assert owner.list_pending_lifecycle_obligations()[0].obligation_id == "b" * 32
         with pytest.raises(StateError):
             keeper.admit()
         assert carrier.calls == 0

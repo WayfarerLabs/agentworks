@@ -30,13 +30,13 @@ from agentworks.execution._managed_start_operation import ManagedStartOutcome
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution._wsl2_owned_managed_job import WSL2ManagedStartStatus, WSL2OwnedManagedJob
 from agentworks.execution._wsl2_owned_operation import WSL2RouteRefusal, WSL2RouteStatus
-from agentworks.execution._wsl2_platform_hold import OBLIGATION_KIND
 from agentworks.execution.binding import NativeExecutionBinding
 from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, PreparedInvocation
 from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
 from agentworks.execution.models import Command, Input, Output
 from agentworks.operations import LifecycleObligation, OperationOwner
 from tests.execution._bound_carrier_support import hold_operation_owner as hold_operation_owner
+from tests.execution._bound_carrier_support import obligation_receipt
 from tests.execution.test_wsl2_owned_download import GuestThenFileCarrier, _acquire_owner, _close_owner
 from tests.execution.test_wsl2_platform_hold import FakeNative, FakeObserver
 from tests.vms.test_target_preparation import _vm
@@ -322,9 +322,10 @@ def test_exact_hold_settles_before_other_obligation_and_owner_closes_after_resol
         monkeypatch.setattr(managed, "start_bound_managed_job", start)
         assert _start(subject, database) is WSL2ManagedStartStatus.ATTEMPTED
         assert subject.release_hold_if_settled(Deadline.after(30), safe=True)
-        rows = database.operations.list_lifecycle_obligations(subject.owner.ownership)
-        assert any(
-            row.obligation_kind == OBLIGATION_KIND and row.state is LifecycleObligationState.RESOLVED for row in rows
+        rows = database.operations.list_pending_lifecycle_obligations(subject.owner.ownership)
+        assert subject.hold.obligation is not None
+        assert (
+            obligation_receipt(owner, subject.hold.obligation.obligation_id).state is LifecycleObligationState.RESOLVED
         )
         assert any(
             row.obligation_kind == "managed-start" and row.state is LifecycleObligationState.POSSIBLE_EFFECT
@@ -360,6 +361,8 @@ def test_uncertain_start_or_escaping_control_retains_owner(
             monkeypatch.setattr(managed, "start_bound_managed_job", Mock(return_value=outcome))
             assert _start(subject, database) is WSL2ManagedStartStatus.ATTEMPTED
         assert subject.release_hold_if_settled(Deadline.after(30), safe=True)
-        rows = database.operations.list_lifecycle_obligations(subject.owner.ownership)
-        assert any(row.state is LifecycleObligationState.RESOLVED for row in rows)
+        assert subject.hold.obligation is not None
+        assert (
+            obligation_receipt(owner, subject.hold.obligation.obligation_id).state is LifecycleObligationState.RESOLVED
+        )
         assert database.operations.inspect(subject.owner.ownership.scope) is not None

@@ -942,6 +942,11 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
                 )
             );
     """,
+    42: """
+        CREATE INDEX lifecycle_obligations_pending
+            ON lifecycle_obligations(operation_id, registered_at, obligation_id)
+            WHERE state IS NOT 'resolved';
+    """,
 }
 
 LATEST_VERSION = max(MIGRATIONS)

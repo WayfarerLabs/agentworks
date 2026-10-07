@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
-from agentworks.operations import _PreRegistrationClosingRefusal
+from agentworks.operations import _is_pre_registration_refusal
 
 from ._fixed_helper_operation import BorrowedFixedHelperCarrier
 from ._managed_action_custody import ManagedActionCustody
@@ -128,10 +128,10 @@ def dispose_bound_managed_run(
             custody_fact.coordination_uncertain,
             custody_fact.requires_owner_retention,
         )
-    except _PreRegistrationClosingRefusal:
-        custody.close_pre_registration_refusal()
-        raise
     except BaseException as control:
+        if _is_pre_registration_refusal(control):
+            custody.close_pre_registration_refusal()
+            raise
         custody_fact = custody.escaped()
         fact = ManagedDisposalOutcome(
             candidate,

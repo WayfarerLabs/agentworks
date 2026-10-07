@@ -55,7 +55,7 @@ def test_durable_ready_requires_the_full_selected_anchor_payload(hold_operation_
         )
         ready = selected.hold.start(Deadline.after(10))
         assert selected._ready_is_durable(ready)  # noqa: SLF001
-        row = owner.list_lifecycle_obligations()[0]
+        row = owner.list_pending_lifecycle_obligations()[0]
         substitute = replace(decode_hold_payload(row.payload), nonce="f" * 32)
         database.operations.publish_lifecycle_obligation_payload(
             owner.ownership,
@@ -118,7 +118,7 @@ def test_invalid_owner_refuses_before_route_selection_or_native_effects(
         platform.observe_provider_locator.assert_not_called()
         platform.resolve_native_execution_binding.assert_not_called()
         assert native.events == [] and observer.events == []
-        assert not database.operations.list_lifecycle_obligations(retained.ownership)
+        assert not database.operations.list_pending_lifecycle_obligations(retained.ownership)
         claim = database.operations.inspect(scope)
         assert claim is not None and claim.ownership == retained.ownership
         next_step = retained.register_lifecycle_obligation("caller-next-step", payload_version=1, payload=b"next")
@@ -233,13 +233,13 @@ def test_hold_reads_and_settles_only_supplied_owners_database(
         assert early.account == connection.user
         assert subject.start_and_prepare(Deadline.after(30)) is not None
         assert carrier.owner_id == owner.ownership.operation_id
-        rows = owner.list_lifecycle_obligations()
-        assert rows == database.operations.list_lifecycle_obligations(owner.ownership)
+        rows = owner.list_pending_lifecycle_obligations()
+        assert rows == database.operations.list_pending_lifecycle_obligations(owner.ownership)
         assert any(row.state is LifecycleObligationState.POSSIBLE_EFFECT for row in rows)
         assert subject.release_hold_if_settled(Deadline.after(30), safe=True)
-        assert all(row.state is LifecycleObligationState.RESOLVED for row in owner.list_lifecycle_obligations())
+        assert owner.list_pending_lifecycle_obligations() == ()
         assert other_database.operations.inspect(other_owner.ownership.scope) == other_claim
-        assert not other_owner.list_lifecycle_obligations()
+        assert not other_owner.list_pending_lifecycle_obligations()
         _close_owner(owner)
         _close_owner(other_owner)
 
@@ -302,7 +302,7 @@ def test_unsupported_runtime_refuses_before_hold_construction_or_native_activati
 
         hold.assert_not_called()
         assert native.events == observer.events == []
-        assert not owner.list_lifecycle_obligations()
+        assert not owner.list_pending_lifecycle_obligations()
         claim = database.operations.inspect(owner.ownership.scope)
         assert claim is not None and claim.ownership == owner.ownership
         follow_up = owner.register_lifecycle_obligation("caller-next-step", payload_version=1, payload=b"next")

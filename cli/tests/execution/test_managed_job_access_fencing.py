@@ -61,10 +61,10 @@ def test_disposal_fresh_identity_publication_survives_interruption(view, monkeyp
             access.dispose(reference)
     assert run.disposal_attempted and run.disposal_obligation_id == published[0]
     assert run.terminal_proved(run.terminal_observation)
-    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
-    old_row = next(row for row in rows if row.obligation_id == old_id)
+    old_row = workflow.owner.inspect_lifecycle_obligation(old_id)
+    assert old_row is not None
     assert old_row.state is LifecycleObligationState.RESOLVED
-    assert not any(row.obligation_id == published[0] for row in rows)
+    assert workflow.owner.inspect_lifecycle_obligation(published[0]) is None
     before = main.dispose.calls
 
     # The intermediate state can deliver on its new, unregistered identity
@@ -73,17 +73,18 @@ def test_disposal_fresh_identity_publication_survives_interruption(view, monkeyp
     main.dispose.dispatch = Dispatch.SENT
     assert access.dispose(reference).disposed is False
     assert main.dispose.calls == before + 1 and main.observe.calls == 1
-    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
-    assert any(row.obligation_id == published[0] for row in rows)
+    assert workflow.owner.inspect_lifecycle_obligation(published[0]) is not None
     main.dispose.response = _disposed
+    last_id = run.disposal_obligation_id
     assert access.dispose(reference).disposed is True
     assert access.dispose(reference).disposed is True
     assert main.dispose.calls == before + 2
-    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
-    disposal_rows = [row for row in rows if row.obligation_kind == "managed-dispose"]
+    disposal_rows = [
+        workflow.owner.inspect_lifecycle_obligation(identity) for identity in (old_id, published[0], last_id)
+    ]
     assert len(disposal_rows) == 3
-    assert all(row.state is LifecycleObligationState.RESOLVED for row in disposal_rows)
-    assert next(row for row in disposal_rows if row.obligation_id == old_id) == old_row
+    assert all(row is not None and row.state is LifecycleObligationState.RESOLVED for row in disposal_rows)
+    assert disposal_rows[0] == old_row
     workflow.close(cleanup_deadline=Deadline.after(5))
     assert keeper.stop.calls == keeper.observe.calls == 0
     assert database.operations.inspect(workflow.owner.ownership.scope) is None
@@ -121,8 +122,8 @@ def test_disposal_settled_row_recovers_without_deleted_launch_observation(view, 
             access.dispose(reference)
     assert run.disposal_attempted and run.disposal_obligation_id == old_id and not run.disposal_confirmed
     assert run.terminal_proved(run.terminal_observation)
-    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
-    old_row = next(row for row in rows if row.obligation_id == old_id)
+    old_row = workflow.owner.inspect_lifecycle_obligation(old_id)
+    assert old_row is not None
     assert old_row.state is LifecycleObligationState.RESOLVED
     # A successful disposal can already have erased launch and output facts.
     # All these retries must use retained positive proof, not observe again.
@@ -132,10 +133,11 @@ def test_disposal_settled_row_recovers_without_deleted_launch_observation(view, 
     assert access.dispose(reference).disposed is True
     assert main.dispose.calls == 2 and main.observe.calls == 1
     assert run.disposal_obligation_id != old_id
-    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
-    disposal_rows = [row for row in rows if row.obligation_kind == "managed-dispose"]
-    assert len(disposal_rows) == 2 and all(row.state is LifecycleObligationState.RESOLVED for row in disposal_rows)
-    assert next(row for row in disposal_rows if row.obligation_id == old_id) == old_row
+    disposal_rows = [
+        workflow.owner.inspect_lifecycle_obligation(identity) for identity in (old_id, run.disposal_obligation_id)
+    ]
+    assert all(row is not None and row.state is LifecycleObligationState.RESOLVED for row in disposal_rows)
+    assert disposal_rows[0] == old_row
     workflow.close(cleanup_deadline=Deadline.after(5))
     assert keeper.stop.calls == keeper.observe.calls == 0
     assert database.operations.inspect(workflow.owner.ownership.scope) is None
@@ -159,16 +161,15 @@ def test_disposal_retry_refuses_mismatched_resolved_row(view, monkeypatch, field
         with pytest.raises(KeyboardInterrupt):
             access.dispose(reference)
     old_id = run.disposal_obligation_id
-    read_rows = workflow.owner.list_lifecycle_obligations
+    read_receipt = workflow.owner.inspect_lifecycle_obligation
     wrong = {"obligation_kind": "managed-stop", "payload_version": 2, "payload": b"wrong-run", "payload_revision": 1}
 
-    def mismatched_rows():
-        return tuple(
-            replace(row, **{field: wrong[field]}) if row.obligation_id == old_id else row for row in read_rows()
-        )
+    def mismatched_receipt(identity):
+        row = read_receipt(identity)
+        return replace(row, **{field: wrong[field]}) if identity == old_id and row is not None else row
 
     with monkeypatch.context() as patch:
-        patch.setattr(workflow.owner, "list_lifecycle_obligations", mismatched_rows)
+        patch.setattr(workflow.owner, "inspect_lifecycle_obligation", mismatched_receipt)
         with pytest.raises(StateError):
             access.dispose(reference)
     assert main.dispose.calls == 1 and run.disposal_obligation_id == old_id
@@ -293,7 +294,7 @@ def test_stop_interrupted_bookkeeping_uses_retained_lifetime_custody(view, monke
     assert run.keeper._stop.is_set() is (transition == "handoff_retained_effect")
     workflow.views.execution_operation.retry_inline_bookkeeping()
     access.observe(reference)
-    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
+    rows = database.operations.list_pending_lifecycle_obligations(workflow.owner.ownership)
     assert len([row for row in rows if row.obligation_kind == "carrier-dispatch"]) == 1
     workflow.close(cleanup_deadline=Deadline.after(5))
 

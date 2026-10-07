@@ -34,10 +34,10 @@ def test_support_admission_fences_generations_preserves_debts_and_blocks_finaliz
     assert claim is not None and claim.state is OperationClaimState.POSSIBLE_DISPATCH
     assert claim.obligations_sealed_at is not None
     assert support.state is LifecycleObligationState.POSSIBLE_EFFECT
-    assert replace(original, ownership=recovered) in repository.list_lifecycle_obligations(recovered)
+    assert replace(original, ownership=recovered) in repository.list_pending_lifecycle_obligations(recovered)
 
     successor = repository.recover_takeover(recovered, "d" * 32).ownership
-    assert {row.obligation_id for row in repository.list_lifecycle_obligations(successor)} == {
+    assert {row.obligation_id for row in repository.list_pending_lifecycle_obligations(successor)} == {
         old.obligation_id,
         support.obligation_id,
     }
@@ -88,7 +88,7 @@ def test_support_admission_requires_recovery_and_exact_possible_retry(db: Databa
             repository.admit_recovery_support_obligation(
                 recovered, kind, version, payload, obligation_id=admitted.obligation_id
             )
-    assert replace(old, ownership=recovered) in repository.list_lifecycle_obligations(recovered)
+    assert replace(old, ownership=recovered) in repository.list_pending_lifecycle_obligations(recovered)
     repository.resolve_lifecycle_obligation(recovered, admitted.obligation_id)
     with pytest.raises(StateError):
         repository.admit_recovery_support_obligation(
@@ -116,7 +116,7 @@ def test_support_admission_rolls_back_row_and_claim_together(db: Database, monke
         with pytest.raises(KeyboardInterrupt):
             repository.admit_recovery_support_obligation(before.ownership, "support", 1, b"new", obligation_id="c" * 32)
     assert repository.inspect(scope) == before
-    assert repository.list_lifecycle_obligations(before.ownership) == ()
+    assert repository.list_pending_lifecycle_obligations(before.ownership) == ()
     admitted = repository.admit_recovery_support_obligation(
         before.ownership, "support", 1, b"new", obligation_id="c" * 32
     )
@@ -144,4 +144,4 @@ def test_support_admission_retains_payload_and_row_bounds(db: Database) -> None:
     )
     with pytest.raises(StateError):
         repository.admit_recovery_support_obligation(recovered, "support", 1, b"", obligation_id="d" * 32)
-    assert len(repository.list_lifecycle_obligations(recovered)) == MAX_LIFECYCLE_OBLIGATIONS
+    assert len(repository.list_pending_lifecycle_obligations(recovered)) == MAX_LIFECYCLE_OBLIGATIONS

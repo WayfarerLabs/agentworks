@@ -55,6 +55,7 @@ from agentworks.execution.carrier import CarrierIO, Deadline, FiniteInput, Prepa
 from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
 from agentworks.operations import LifecycleObligation, OperationOwner
 from agentworks.vms._recovery_vm_span import RecoveryVMSpan
+from tests.execution._bound_carrier_support import obligation_receipt
 from tests.execution.files._runtime_support import runtime_nonce
 from tests.execution.files.test_file_snapshot_protocol import _reference
 from tests.execution.files.test_numeric_guest_helper_adoption import _CapturedCarrier
@@ -137,7 +138,7 @@ def _install(setup, context, family: str, *, version: int = 2, root_body: bool =
     database.operations.publish_lifecycle_obligation_payload(
         owner.ownership, old_id, expected_revision=0, payload_version=version, payload=encode_file_call_obligation(call)
     )
-    row = next(row for row in owner.list_lifecycle_obligations() if row.obligation_id == old_id)
+    row = obligation_receipt(owner, old_id)
     return call, row
 
 
@@ -192,7 +193,7 @@ def test_v2_uses_fresh_launcher_preserves_historical_plans_and_actual_hold(
         assert result.observation is not None and result.observation.state.value in {"recovered", "resolved"}
         if family == "download":
             adapter.cleanup(deadline=deadline)
-        current = next(row for row in owner.list_lifecycle_obligations() if row.obligation_id == old_id)
+        current = obligation_receipt(owner, old_id)
         retained = decode_file_call_obligation(current.payload)
         assert current.payload_version == retained.payload_version == 2
         assert retained.identity_plan == call.identity_plan
@@ -234,7 +235,7 @@ def test_v2_context_refuses_before_rebind_or_publication(setup, family, fault):
     if fault == "escaped":
         with pytest.raises(StateError):
             _open(owner, row, supplied, family)
-    current = next(value for value in owner.list_lifecycle_obligations() if value.obligation_id == row.obligation_id)
+    current = obligation_receipt(owner, row.obligation_id)
     assert current.payload == row.payload and current.payload_revision == row.payload_revision
     assert carrier.calls == ["guest", "admin", "root"]
 
@@ -315,7 +316,7 @@ def test_v2_complete_identity_mismatch_refuses_before_dispatch(setup, family, fa
             payload_version=2,
             payload=encode_file_call_obligation(call),
         )
-        row = next(value for value in owner.list_lifecycle_obligations() if value.obligation_id == old_id)
+        row = obligation_receipt(owner, old_id)
         with pytest.raises(StateError):
             _open(owner, row, context, family)
         assert carrier.calls == ["guest", "admin", "root"]
@@ -334,7 +335,7 @@ def test_escaped_after_open_and_free_carrier_refuse_before_pending_changes(setup
         _run(adapter, family, Deadline.after(1))
     with span.action(Deadline.after(10)), pytest.raises(StateError):
         _run(adapter, family, Deadline.after(1))
-    current = next(value for value in owner.list_lifecycle_obligations() if value.obligation_id == old_id)
+    current = obligation_receipt(owner, old_id)
     assert current.payload == row.payload and current.payload_revision == row.payload_revision
     assert carrier.calls == ["guest", "admin", "root"]
 
@@ -350,7 +351,7 @@ def test_v1_rejects_context_and_encoded_version_mismatch_without_upgrade(setup, 
         with pytest.raises(StateError):
             _open(owner, replace(row, payload_version=2), None, family)
         _open(owner, row, None, family)
-    current = next(value for value in owner.list_lifecycle_obligations() if value.obligation_id == old_id)
+    current = obligation_receipt(owner, old_id)
     assert current.payload == row.payload and current.payload_version == 1
 
 
@@ -374,7 +375,7 @@ def test_v2_cas_lost_reply_preserves_version_and_reopens_exact_latest_view(setup
             with pytest.raises(KeyboardInterrupt) as caught:
                 _run(adapter, family, Deadline.after(1))
             assert caught.value is interruption
-        current = next(value for value in owner.list_lifecycle_obligations() if value.obligation_id == old_id)
+        current = obligation_receipt(owner, old_id)
         retained = decode_file_call_obligation(current.payload)
         assert current.payload_version == 2 and current.payload_revision == row.payload_revision + 1
         assert retained.bootstrap == call.bootstrap and retained.identity_plan == call.identity_plan
@@ -412,7 +413,7 @@ def test_v2_unknown_helper_preserves_row_and_span(setup, monkeypatch, family, fa
             else:
                 result = _run(adapter, family, Deadline.after(1))
                 assert result.carrier_completion.code == 1
-    current = next(value for value in owner.list_lifecycle_obligations() if value.obligation_id == old_id)
+    current = obligation_receipt(owner, old_id)
     assert current.state is LifecycleObligationState.POSSIBLE_EFFECT and current.payload_version == 2
     with pytest.raises(StateError):
         span.close(Deadline.after(1))
@@ -431,9 +432,9 @@ def test_recovery_of_recovery_requires_new_owner_actual_span_and_exact_record(se
         wire.control = KeyboardInterrupt()
         with pytest.raises(KeyboardInterrupt):
             _run(adapter, family, Deadline.after(1))
-    retained = next(value for value in owner.list_lifecycle_obligations() if value.obligation_id == old_id)
+    retained = obligation_receipt(owner, old_id)
     recovered = OperationOwner.recover(database.operations, owner.ownership, "e" * 32)
-    current = next(value for value in recovered.list_lifecycle_obligations() if value.obligation_id == old_id)
+    current = obligation_receipt(recovered, old_id)
     assert current.payload == retained.payload and current.payload_version == 2
     with pytest.raises(StateError):
         _open(recovered, current, context, family)
@@ -458,7 +459,7 @@ def test_recovery_of_recovery_requires_new_owner_actual_span_and_exact_record(se
         result = _run(rebound, family, Deadline.after(1))
         assert result.observation is not None and result.observation.state.value in {"recovered", "resolved"}
         assert wire.calls == 1
-    latest = next(value for value in recovered.list_lifecycle_obligations() if value.obligation_id == old_id)
+    latest = obligation_receipt(recovered, old_id)
     recorded = decode_file_call_obligation(latest.payload)
     assert recorded.bootstrap == call.bootstrap and recorded.identity_plan == call.identity_plan
     assert latest.payload_version == recorded.payload_version == 2
@@ -502,7 +503,7 @@ def test_v2_lost_fence_confirmation_is_adopted_without_another_dispatch(setup, m
         with pytest.raises(StateError):
             adapter.advance(deadline=Deadline.after(1))
         assert wire.calls == 1
-        latest = next(value for value in owner.list_lifecycle_obligations() if value.obligation_id == old_id)
+        latest = obligation_receipt(owner, old_id)
         recorded = decode_file_call_obligation(latest.payload)
         assert latest.payload_revision == row.payload_revision + 2
         assert latest.payload_version == recorded.payload_version == 2

@@ -33,6 +33,7 @@ from agentworks.operations import LifecycleObligation, OperationOwner, Recovered
 from agentworks.vms._recovery_vm_span import RecoveryVMSpan, RecoveryVMSpanControlFact
 from tests.execution import test_recovery_guest_preparation as preparation_fixtures
 from tests.execution._bound_carrier_support import bind_carrier as bind_carrier
+from tests.execution._bound_carrier_support import obligation_receipt
 from tests.execution.test_recovery_guest_preparation import FixedCarrier
 from tests.execution.test_wsl2_platform_hold import BOOT, FakeNative, FakeObserver
 from tests.vms.test_target_preparation import _MARKER
@@ -140,7 +141,7 @@ def test_existing_recovery_claim_retains_hold_through_exact_bound_action(setup, 
     _resolve_old(database, owner, old_id)
     span.close(Deadline.after(10))
     assert not span.requires_owner_retention
-    assert all(row.state is LifecycleObligationState.RESOLVED for row in owner.list_lifecycle_obligations())
+    assert owner.list_pending_lifecycle_obligations() == ()
     assert database.operations.inspect(owner.ownership.scope).ownership == owner.ownership
     # Closing this span did not stop the aggregate owner's recovery admission.
     next_row = owner.admit_recovery_support_obligation("next", payload_version=1, payload=b"", obligation_id="f" * 32)
@@ -187,7 +188,7 @@ def test_guards_refuse_before_support_activation(setup, fault):
         span.open(deadline)
     assert carrier.calls == []
     assert native.events == [] and observer.events == []
-    assert {row.obligation_id for row in owner.list_lifecycle_obligations()} == {old_id}
+    assert {row.obligation_id for row in owner.list_pending_lifecycle_obligations()} == {old_id}
 
 
 def test_operator_intent_refresh_before_activation_and_running_manual_allowed(setup):
@@ -445,8 +446,8 @@ def test_settled_preparation_cleanup_retry_precedes_hold_release(setup, monkeypa
             span.open(Deadline.after(10))
     with pytest.raises(StateError):
         span.close(Deadline.after(10))
-    rows = {row.obligation_id: row for row in owner.list_lifecycle_obligations()}
-    assert rows[_PREPARATION_ID].state is LifecycleObligationState.RESOLVED
+    rows = {row.obligation_id: row for row in owner.list_pending_lifecycle_obligations()}
+    assert obligation_receipt(owner, _PREPARATION_ID).state is LifecycleObligationState.RESOLVED
     assert rows[old_id].state is rows[_HOLD_ID].state is LifecycleObligationState.POSSIBLE_EFFECT
     assert "eof" not in native.events
     _resolve_old(database, owner, old_id)
@@ -514,8 +515,8 @@ def test_known_noncreation_cleanup_does_not_disposition_predecessor_debt(setup):
     span.close(Deadline.after(10))
     assert not span.requires_owner_retention
     assert carrier.calls == []
-    assert owner.list_lifecycle_obligations()[0].obligation_id == old_id
-    assert owner.list_lifecycle_obligations()[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert owner.list_pending_lifecycle_obligations()[0].obligation_id == old_id
+    assert owner.list_pending_lifecycle_obligations()[0].state is LifecycleObligationState.POSSIBLE_EFFECT
 
 
 def test_lost_support_registration_reply_retains_and_never_launches(setup, monkeypatch):
@@ -534,7 +535,7 @@ def test_lost_support_registration_reply_retains_and_never_launches(setup, monke
     assert span.requires_owner_retention
     assert carrier.calls == []
     assert "dispatch" not in native.events
-    assert _HOLD_ID in {row.obligation_id for row in owner.list_lifecycle_obligations()}
+    assert _HOLD_ID in {row.obligation_id for row in owner.list_pending_lifecycle_obligations()}
 
 
 def test_same_boot_ready_payload_from_another_anchor_is_refused_before_probes(setup, monkeypatch):
@@ -545,7 +546,7 @@ def test_same_boot_ready_payload_from_another_anchor_is_refused_before_probes(se
 
     def substitute(self, deadline, **kwargs):
         ready = original(self, deadline, **kwargs)
-        row = next(row for row in owner.list_lifecycle_obligations() if row.obligation_id == _HOLD_ID)
+        row = next(row for row in owner.list_pending_lifecycle_obligations() if row.obligation_id == _HOLD_ID)
         payload = replace(decode_hold_payload(row.payload), nonce="f" * 32)
         database.operations.publish_lifecycle_obligation_payload(
             owner.ownership,

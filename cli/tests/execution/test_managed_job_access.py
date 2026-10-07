@@ -119,7 +119,7 @@ def test_bound_start_forwards_route_check_after_arming(tmp_path: Path) -> None:
         assert row is not None
         observed.append(row.launch_state)
         assert (
-            database.operations.list_lifecycle_obligations(owner.ownership)[0].state
+            database.operations.list_pending_lifecycle_obligations(owner.ownership)[0].state
             is LifecycleObligationState.POSSIBLE_EFFECT
         )
         assert carrier.calls == 0
@@ -192,7 +192,7 @@ def test_deadline_expiring_during_carrier_validation_leaves_no_reservation(tmp_p
         with pytest.raises(ValidationError):
             _call(repository, owner, carrier, deadline=deadline)
         assert repository.inspect(RUN) is None
-        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
         assert carrier.calls == 0
     finally:
         owner.close()
@@ -221,7 +221,7 @@ def test_deadline_expiring_after_reservation_keeps_one_shot_tombstone(
         reserved = repository.inspect(RUN)
         assert reserved is not None
         assert reserved.launch_state is ManagedLaunchState.RESERVED
-        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
         assert carrier.calls == 0
     finally:
         database.close()
@@ -244,7 +244,7 @@ def test_owner_borrow_refusal_after_reservation_keeps_known_id(tmp_path: Path, m
         assert reserved is not None
         assert reserved.identity == RUN
         assert reserved.launch_state is ManagedLaunchState.RESERVED
-        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
         assert carrier.calls == 0
     finally:
         database.close()

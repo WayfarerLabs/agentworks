@@ -126,7 +126,9 @@ def test_unknown_publication_allows_bound_stop_after_drain_without_resolving_deb
         assert all(custody is initial_custody for custody in carrier.cleanup_custodies)
         assert keeper.publication_uncertain
         assert original_debt.state is LifecycleObligationState.POSSIBLE_EFFECT
-        assert all(row.state is LifecycleObligationState.POSSIBLE_EFFECT for row in owner.list_lifecycle_obligations())
+        assert all(
+            row.state is LifecycleObligationState.POSSIBLE_EFFECT for row in owner.list_pending_lifecycle_obligations()
+        )
         with pytest.raises(StateError):
             owner.borrow()
     finally:

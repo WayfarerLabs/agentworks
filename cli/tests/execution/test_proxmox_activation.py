@@ -13,7 +13,12 @@ import pytest
 
 from agentworks.capabilities.vm_platform.base import ProviderLocator
 from agentworks.db import Database
-from agentworks.db.operations import LifecycleObligationState, OperationResourceKind, OperationScope
+from agentworks.db.operations import (
+    LifecycleObligation,
+    LifecycleObligationState,
+    OperationResourceKind,
+    OperationScope,
+)
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._proxmox_activation import (
@@ -70,7 +75,9 @@ def owned(tmp_path: Path, monkeypatch):
         def start(wire, *, timeout, custody):
             assert custody is local_delivery
             assert 0 < timeout <= 5
-            row = next(row for row in owner.list_lifecycle_obligations() if row.obligation_id == adapter.obligation_id)
+            row = next(
+                row for row in owner.list_pending_lifecycle_obligations() if row.obligation_id == adapter.obligation_id
+            )
             assert row.obligation_id == adapter.obligation_id
             assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
             assert decode_activation_payload(row.payload).upid is None
@@ -88,11 +95,17 @@ def owned(tmp_path: Path, monkeypatch):
         yield repository, owner, adapter, calls
 
 
+def _row(owner: OperationOwner, adapter: ProxmoxActivation) -> LifecycleObligation:
+    row = owner.inspect_lifecycle_obligation(adapter.obligation_id)
+    assert row is not None
+    return row
+
+
 def test_exact_armed_single_post_and_terminal_request_only(owned):
     repository, owner, adapter, calls = owned
     receipt = adapter.start(Deadline.after(5))
     assert receipt.pstart == 0x100000001
-    (row,) = owner.list_lifecycle_obligations()
+    row = _row(owner, adapter)
     assert row.payload_revision == 1
     assert decode_activation_payload(row.payload).upid == UPID
     assert b"secret-sentinel" not in row.payload and b"selected-provider-locator" not in row.payload
@@ -100,7 +113,7 @@ def test_exact_armed_single_post_and_terminal_request_only(owned):
     observation = adapter.observe(Deadline.after(5))
     assert observation.phase is TaskPhase.STOPPED and observation.outcome is TaskOutcome.OK
     assert observation.request_settled
-    assert owner.list_lifecycle_obligations()[0].state is LifecycleObligationState.RESOLVED
+    assert _row(owner, adapter).state is LifecycleObligationState.RESOLVED
     adapter.reconcile(Deadline.after(5))
     assert adapter.observe(Deadline.after(5)) == observation
     with pytest.raises(StateError):
@@ -139,7 +152,7 @@ def test_foreign_or_malformed_receipt_never_polls_or_replays(owned, monkeypatch,
     with pytest.raises(StateError):
         adapter.start(Deadline.after(5))
     assert calls == ["start"]
-    assert owner.list_lifecycle_obligations()[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert _row(owner, adapter).state is LifecycleObligationState.POSSIBLE_EFFECT
 
 
 @pytest.mark.parametrize(
@@ -166,7 +179,7 @@ def test_task_identity_conflict_is_unknown_and_retains(owned, monkeypatch, field
     monkeypatch.setattr(_ProxmoxWire, "request_task_status", lambda *args, **kwargs: response)
     observation = adapter.observe(Deadline.after(5))
     assert observation.phase is TaskPhase.UNKNOWN and not observation.request_settled
-    assert owner.list_lifecycle_obligations()[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert _row(owner, adapter).state is LifecycleObligationState.POSSIBLE_EFFECT
 
 
 @pytest.mark.parametrize(
@@ -192,9 +205,9 @@ def test_worker_outcome_is_separate_from_exact_settlement(
     assert observation.phase.value == phase and observation.outcome is outcome
     assert observation.warning_count == count and observation.request_settled is settled
     assert "provider secret" not in repr(observation)
-    assert b"provider secret" not in owner.list_lifecycle_obligations()[0].payload
+    assert b"provider secret" not in _row(owner, adapter).payload
     expected = LifecycleObligationState.RESOLVED if settled else LifecycleObligationState.POSSIBLE_EFFECT
-    assert owner.list_lifecycle_obligations()[0].state is expected
+    assert _row(owner, adapter).state is expected
 
 
 def test_ha_terminal_is_only_handoff(owned, monkeypatch):
@@ -206,7 +219,7 @@ def test_ha_terminal_is_only_handoff(owned, monkeypatch):
     observation = adapter.observe(Deadline.after(5))
     assert observation.ha_handoff and observation.phase is TaskPhase.STOPPED
     assert not observation.request_settled
-    assert owner.list_lifecycle_obligations()[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert _row(owner, adapter).state is LifecycleObligationState.POSSIBLE_EFFECT
 
 
 @pytest.mark.parametrize("stage", ["register", "mark", "publish", "resolve"])
@@ -242,7 +255,7 @@ def test_lost_ledger_reply_preserves_primary_and_exact_bookkeeping(
             adapter.reconcile(Deadline.after(5))
     else:
         adapter.reconcile(Deadline.after(5))
-        (row,) = owner.list_lifecycle_obligations()
+        row = _row(owner, adapter)
         expected = (
             LifecycleObligationState.RESOLVED
             if stage in {"register", "resolve"}
@@ -278,7 +291,7 @@ def test_wire_failure_never_claims_rejection_or_replays(owned, monkeypatch, stag
         (adapter.start if stage == "start" else adapter.observe)(Deadline.after(5))
     assert caught.value is primary
     adapter.reconcile(Deadline.after(5))
-    assert owner.list_lifecycle_obligations()[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert _row(owner, adapter).state is LifecycleObligationState.POSSIBLE_EFFECT
     assert calls.count("start") == 1
 
 
@@ -350,7 +363,7 @@ def test_deadline_before_start_and_late_receipt_retains(owned, monkeypatch):
     monkeypatch.setattr(time, "monotonic", lambda: clock[0])
     with pytest.raises(TimeoutError):
         adapter.start(Deadline.after(0))
-    assert owner.list_lifecycle_obligations() == ()
+    assert owner.list_pending_lifecycle_obligations() == ()
 
     def late(*args, **kwargs):
         calls.append("start")
@@ -362,7 +375,7 @@ def test_deadline_before_start_and_late_receipt_retains(owned, monkeypatch):
         adapter.start(Deadline.after(0.02))
     assert adapter.payload.upid == UPID
     adapter.reconcile(Deadline.after(5))
-    assert decode_activation_payload(owner.list_lifecycle_obligations()[0].payload).upid == UPID
+    assert decode_activation_payload(_row(owner, adapter).payload).upid == UPID
     assert calls == ["start"]
 
 
@@ -418,7 +431,7 @@ def test_deadline_after_ledger_commit_never_posts(owned, monkeypatch, stage):
     monkeypatch.setattr(repository, name, original)
     adapter.reconcile(Deadline.after(5))
     expected = LifecycleObligationState.RESOLVED if stage == "register" else LifecycleObligationState.POSSIBLE_EFFECT
-    assert owner.list_lifecycle_obligations()[0].state is expected
+    assert _row(owner, adapter).state is expected
     assert calls == []
 
 
@@ -440,7 +453,7 @@ def test_late_task_status_retains_and_fresh_observation_can_settle(owned, monkey
     with pytest.raises(TimeoutError):
         adapter.observe(Deadline.after(0.02))
     adapter.reconcile(Deadline.after(5))
-    assert owner.list_lifecycle_obligations()[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert _row(owner, adapter).state is LifecycleObligationState.POSSIBLE_EFFECT
     monkeypatch.setattr(_ProxmoxWire, "request_task_status", lambda *args, **kwargs: status())
     assert adapter.observe(Deadline.after(5)).request_settled
     assert calls == ["start", "late-poll"]
@@ -461,7 +474,8 @@ def test_takeover_during_status_read_cannot_settle_successor(owned, monkeypatch)
     successor = repository.inspect(owner.ownership.scope)
     assert successor is not None
     assert (
-        repository.list_lifecycle_obligations(successor.ownership)[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+        repository.list_pending_lifecycle_obligations(successor.ownership)[0].state
+        is LifecycleObligationState.POSSIBLE_EFFECT
     )
     assert calls == ["start", "poll"]
 
@@ -472,7 +486,7 @@ def test_unrelated_obligation_cannot_be_resolved_or_used(owned):
     other.mark_possible_effect()
     adapter.start(Deadline.after(5))
     assert adapter.observe(Deadline.after(5)).request_settled
-    rows = owner.list_lifecycle_obligations()
+    rows = owner.list_pending_lifecycle_obligations()
     assert (
         next(row for row in rows if row.obligation_id == other.obligation_id).state
         is LifecycleObligationState.POSSIBLE_EFFECT
@@ -487,7 +501,7 @@ def test_closed_admission_refuses_start_with_retained_registration_id(owned):
     with pytest.raises(StateError):
         adapter.start(Deadline.after(5))
     assert adapter.obligation_id == retained and calls == []
-    assert owner.list_lifecycle_obligations() == ()
+    assert owner.list_pending_lifecycle_obligations() == ()
     with pytest.raises(StateError):
         adapter.start(Deadline.after(5))
 

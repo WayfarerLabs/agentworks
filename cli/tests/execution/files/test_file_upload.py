@@ -529,7 +529,7 @@ def test_owner_reuses_one_borrow_obligation_and_revalidates_before_every_carrier
 
         assert outcome.status is FileUploadStatus.COMPLETE
         assert carrier.calls == 5
-        obligations = repository.list_lifecycle_obligations(owner.ownership)
+        obligations = repository.list_pending_lifecycle_obligations(owner.ownership)
         assert len(obligations) == 1
         assert marks == [obligations[0].obligation_id] * carrier.calls
         borrow.close()

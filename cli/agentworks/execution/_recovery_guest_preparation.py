@@ -19,6 +19,7 @@ from agentworks.execution._target_identity import (
     _validate_inputs,
 )
 from agentworks.execution.carrier import Dispatch, ExitStatus
+from agentworks.operations import _is_pre_registration_refusal
 from agentworks.vms.target_preparation import (
     VMTargetPreparation,
     VMTargetPreparationControlFact,
@@ -215,7 +216,7 @@ class RecoveryGuestPreparationBatch:
         _validate_operation_boundary(vm, deadline, self._owner)
         if platform.site_name != vm.site:
             raise ValidationError("Recovery guest preparation requires the VM's bound platform")
-        if any(row.obligation_id == self._obligation_id for row in self._owner.list_lifecycle_obligations()):
+        if self._owner.inspect_lifecycle_obligation(self._obligation_id) is not None:
             raise StateError("Recovery guest preparation requires a fresh batch identifier")
         self._started = True
         try:
@@ -274,7 +275,11 @@ class RecoveryGuestPreparationBatch:
                 payload_revision=self._obligation.payload_revision,
             )
             self._dispatch = self._recovered.open_dispatch()
-        except BaseException:
+        except BaseException as control:
+            if _is_pre_registration_refusal(control):
+                self._queries_accounted_for = True
+                self._resolved = True
+                raise
             self._coordination_uncertain = True
             if self._recovered is not None:
                 # Opening has no carrier action. Retain its exact binding for

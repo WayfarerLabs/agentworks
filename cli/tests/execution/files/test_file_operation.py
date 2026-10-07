@@ -26,6 +26,7 @@ from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
 from agentworks.execution.carrier import CarrierIO, CarrierReport, ChannelFeatures, Deadline, PreparedInvocation
 from agentworks.operations import OperationBorrow, OperationOwner
+from tests.execution._bound_carrier_support import obligation_receipt
 from tests.execution.files._file_download_support import BytesSink, LostCallStdoutCarrier
 from tests.execution.files._file_snapshot_support import LocalCarrier, install_fixture_bundle
 from tests.execution.files._runtime_support import runtime_selection
@@ -148,6 +149,7 @@ class ObligationInspectingCarrier:
         self._owner = owner
         self._inner = LocalCarrier()
         self.payloads: list[FileCallObligation] = []
+        self.receipt_ids: set[str] = set()
 
     @property
     def features(self) -> ChannelFeatures:
@@ -165,8 +167,9 @@ class ObligationInspectingCarrier:
         custody: LocalDeliveryCustody | None = None,
     ) -> CarrierReport:
         self.validate(invocation, io=io)
-        rows = self._database.operations.list_lifecycle_obligations(self._owner.ownership)
+        rows = self._database.operations.list_pending_lifecycle_obligations(self._owner.ownership)
         assert len(rows) == 1
+        self.receipt_ids.add(rows[0].obligation_id)
         self.payloads.append(decode_file_call_obligation(rows[0].payload))
         return self._inner.execute(invocation, io=io, deadline=deadline, custody=custody)
 
@@ -285,9 +288,9 @@ def test_download_installs_one_tokenized_file_call_before_dispatch_and_resolves_
         assert carrier.payloads
         assert all(payload.family is FileCallFamily.DOWNLOAD for payload in carrier.payloads)
         assert all(payload.token == outcome.token for payload in carrier.payloads)
-        rows = database.operations.list_lifecycle_obligations(owner.ownership)
-        assert len(rows) == 1
-        assert rows[0].state is LifecycleObligationState.RESOLVED
+        assert owner.list_pending_lifecycle_obligations() == ()
+        (receipt_id,) = carrier.receipt_ids
+        assert obligation_receipt(owner, receipt_id).state is LifecycleObligationState.RESOLVED
         owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()

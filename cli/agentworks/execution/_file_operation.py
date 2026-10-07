@@ -75,7 +75,7 @@ from agentworks.execution._managed_runs import ManagedTargetIdentity, ManagedTar
 from agentworks.execution._runtime_prerequisite import RuntimePrerequisiteState, RuntimeTargetOS, _NumericGuestBootstrap
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm_guest_boot_id
 from agentworks.execution.carrier import Dispatch
-from agentworks.operations import LifecycleObligation, _PreRegistrationClosingRefusal, release_borrow_after_custody
+from agentworks.operations import LifecycleObligation, _is_pre_registration_refusal, release_borrow_after_custody
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -1400,7 +1400,9 @@ class FileOperation:
                 payload_version=admission.payload_version,
                 payload=admission.payload,
             )
-        except _PreRegistrationClosingRefusal:
+        except BaseException as control:
+            if not _is_pre_registration_refusal(control):
+                raise
             if close_borrow_on_refusal:
                 active.borrow.close()
             active_records.pop(id(active))

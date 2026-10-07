@@ -31,6 +31,7 @@ from agentworks.execution._vm_guest_identity_protocol import vm_guest_boot_id
 from agentworks.execution.carrier import Deadline, Dispatch
 from agentworks.execution.models import Command, Input, Output, Script, Shell
 from agentworks.operations import OperationOwner
+from tests.execution._bound_carrier_support import obligation_receipt
 
 from . import test_managed_operation_keeper as keeper_tests
 from .test_managed_lease_exchange import PLAN, RUNTIME, ScriptedCarrier, _success
@@ -122,14 +123,12 @@ def test_real_sample_reservation_ack_and_renewal_during_ordinary_attempt(bound, 
             owner.borrow()
         attempt.settle()
         borrow.close()
-        rows = owner.list_lifecycle_obligations()
+        rows = owner.list_pending_lifecycle_obligations()
         assert any(
             row.obligation_kind == "managed-operation-keeper" and row.state is LifecycleObligationState.POSSIBLE_EFFECT
             for row in rows
         )
-        assert any(
-            row.obligation_kind == "managed-start" and row.state is LifecycleObligationState.RESOLVED for row in rows
-        )
+        assert obligation_receipt(owner, run._start_obligation_id).state is LifecycleObligationState.RESOLVED  # noqa: SLF001
         with pytest.raises(StateError):
             run.start(body_for(receipt), Deadline.after(1))
     finally:
@@ -193,7 +192,7 @@ def test_invalid_body_preparation_has_no_reservation_or_clock_effect(bound, faul
                 spec=receipt.spec,
             )
         assert not run.reservation_started and repository.inspect(receipt.identity) is None
-        assert owner.list_lifecycle_obligations() == () and start.calls == clock.calls == 0
+        assert owner.list_pending_lifecycle_obligations() == () and start.calls == clock.calls == 0
     finally:
         assert run.keeper.drain(Deadline.after(1)).drained
 
@@ -233,7 +232,7 @@ def test_equal_numeric_thread_identity_does_not_authorize_distinct_thread_object
         with pytest.raises(StateError):
             run.start(body_for(bound[2]), Deadline.after(1))
         assert not run.reservation_started and repository.inspect(bound[2].identity) is None
-        assert start.calls == clock.calls == 0 and bound[1].list_lifecycle_obligations() == ()
+        assert start.calls == clock.calls == 0 and bound[1].list_pending_lifecycle_obligations() == ()
     finally:
         assert run.keeper.drain(Deadline.after(1)).drained
 
@@ -537,7 +536,7 @@ def test_wrong_binding_refuses_before_reservation_and_clock(bound, fault) -> Non
             make_run(
                 bound, start_carrier=carrier, clock_carrier=carrier if fault == "shared_carrier" else None, **options
             )
-        assert owner.list_lifecycle_obligations() == ()
+        assert owner.list_pending_lifecycle_obligations() == ()
         return
     run, repository, start, clock = make_run(bound)
     wrong = replace(

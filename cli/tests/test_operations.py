@@ -27,7 +27,7 @@ from agentworks.operations import (
     LifecycleObligation,
     OperationBorrow,
     OperationOwner,
-    _PreRegistrationClosingRefusal,
+    _PreRegistrationRefusal,
     release_borrow_after_custody,
 )
 
@@ -97,7 +97,7 @@ def test_recovery_support_admission_reconciles_committed_lost_reply(
         "support", payload_version=1, payload=b"new", obligation_id="c" * 32
     )
     assert not owner._transition_uncertain  # noqa: SLF001
-    assert len(owner.list_lifecycle_obligations()) == 1
+    assert len(owner.list_pending_lifecycle_obligations()) == 1
     with pytest.raises(StateError):
         owner.borrow()
     with pytest.raises(StateError):
@@ -131,7 +131,7 @@ def test_recovery_support_admission_reconciles_uncommitted_interruption(
                 "support", payload_version=1, payload=b"new", obligation_id="c" * 32
             )
     assert repository.inspect(_scope()) == before
-    assert owner.list_lifecycle_obligations() == ()
+    assert owner.list_pending_lifecycle_obligations() == ()
     assert owner._transition_uncertain  # noqa: SLF001
     handle = owner.admit_recovery_support_obligation(
         "support", payload_version=1, payload=b"new", obligation_id="c" * 32
@@ -160,7 +160,7 @@ def test_recovery_support_admission_excludes_serial_custody_and_stopped_admissio
     dispatch.handoff_unresolved()
     with pytest.raises(StateError):
         owner.admit_recovery_support_obligation("support", payload_version=1, payload=b"new", obligation_id="d" * 32)
-    assert len(owner.list_lifecycle_obligations()) == 1
+    assert len(owner.list_pending_lifecycle_obligations()) == 1
     del attempt
     successor = OperationOwner.recover(db.operations, owner.ownership, "e" * 32)
     successor.stop_admission()
@@ -200,11 +200,11 @@ def test_recovery_rotates_only_generation_and_preserves_the_sealed_ledger(db: Da
     )
     obligation.mark_possible_effect()
     obligation.publish_payload(expected_revision=0, payload_version=2, payload=b"published")
-    before = db.operations.list_lifecycle_obligations(predecessor.ownership)[0]
+    before = db.operations.list_pending_lifecycle_obligations(predecessor.ownership)[0]
 
     recovered = OperationOwner.recover(db.operations, predecessor.ownership, "b" * 32)
     claim = db.operations.inspect(_scope())
-    after = db.operations.list_lifecycle_obligations(recovered.ownership)[0]
+    after = db.operations.list_pending_lifecycle_obligations(recovered.ownership)[0]
 
     assert claim is not None
     assert recovered.ownership.operation_id == predecessor.ownership.operation_id
@@ -293,7 +293,7 @@ def test_exact_recovery_retry_shares_live_custody_across_repository_facades(db: 
     dispatch.handoff_unresolved()
     with pytest.raises(StateError):
         rebound.publish_payload(expected_revision=0, payload_version=2, payload=b"competing")
-    assert db.operations.list_lifecycle_obligations(recovered.ownership)[0].payload == b"prepared"
+    assert db.operations.list_pending_lifecycle_obligations(recovered.ownership)[0].payload == b"prepared"
 
 
 def test_exact_recovery_retry_recreates_unreferenced_owner(db: Database) -> None:
@@ -477,7 +477,7 @@ def test_recovery_dispatch_revalidates_exact_possible_effect_without_auto_resolu
 
     attempt.settle()
     dispatch.close()
-    persisted = db.operations.list_lifecycle_obligations(recovered.ownership)
+    persisted = db.operations.list_pending_lifecycle_obligations(recovered.ownership)
     assert persisted[0].state is LifecycleObligationState.POSSIBLE_EFFECT
 
     changed = recovered.rebind_lifecycle_obligation(
@@ -527,7 +527,7 @@ def test_recovery_dispatch_uncertain_handoff_retains_owner_and_effect(db: Databa
             payload_version=1,
             payload=b"prepared",
         )
-    persisted = db.operations.list_lifecycle_obligations(recovered.ownership)
+    persisted = db.operations.list_pending_lifecycle_obligations(recovered.ownership)
     assert persisted[0].state is LifecycleObligationState.POSSIBLE_EFFECT
 
 
@@ -567,7 +567,7 @@ def test_recovery_dispatch_blocks_rebound_payload_publication_while_active_or_re
     with pytest.raises(StateError):
         stale.publish_payload(expected_revision=0, payload_version=2, payload=b"competing")
 
-    assert db.operations.list_lifecycle_obligations(recovered.ownership)[0].payload == b"prepared"
+    assert db.operations.list_pending_lifecycle_obligations(recovered.ownership)[0].payload == b"prepared"
 
 
 def test_recovery_dispatch_refuses_nonpossible_rows_and_changed_exact_identity(db: Database) -> None:
@@ -886,7 +886,7 @@ def test_commit_then_interrupt_begin_attempt_reports_maybe_armed_obligation(
         borrow.begin_attempt()
     assert borrow.dispatch_obligation_may_be_armed
     assert borrow.has_outstanding_attempt
-    rows = repository.list_lifecycle_obligations(owner.ownership)
+    rows = repository.list_pending_lifecycle_obligations(owner.ownership)
     assert len(rows) == 1
     assert rows[0].obligation_id == obligation_id
     assert rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
@@ -917,15 +917,14 @@ def test_interrupted_registration_before_attempt_retries_with_durable_admission(
 
     attempt = borrow.begin_attempt()
     claim = repository.inspect(_scope())
-    obligations = repository.list_lifecycle_obligations(owner.ownership)
+    obligations = repository.list_pending_lifecycle_obligations(owner.ownership)
     assert claim is not None and claim.state is OperationClaimState.POSSIBLE_DISPATCH
     assert any(obligation.state is LifecycleObligationState.POSSIBLE_EFFECT for obligation in obligations)
 
     attempt.settle()
     borrow.close()
-    assert [obligation.state for obligation in repository.list_lifecycle_obligations(owner.ownership)] == [
-        LifecycleObligationState.RESOLVED
-    ]
+    receipts = [owner.inspect_lifecycle_obligation(obligation.obligation_id) for obligation in obligations]
+    assert all(receipt is not None and receipt.state is LifecycleObligationState.RESOLVED for receipt in receipts)
 
 
 @pytest.mark.parametrize("committed", [False, True], ids=["before-commit", "after-commit"])
@@ -940,6 +939,8 @@ def test_interrupted_borrow_close_blocks_admission_until_retry(
     attempt = borrow.begin_attempt()
     attempt.settle()
     original = repository.resolve_lifecycle_obligation
+    (pending,) = owner.list_pending_lifecycle_obligations()
+    obligation_id = pending.obligation_id
 
     if committed:
         _interrupt_after_repository_return(
@@ -963,8 +964,9 @@ def test_interrupted_borrow_close_blocks_admission_until_retry(
         with pytest.raises(KeyboardInterrupt):
             borrow.close()
 
-    obligations = repository.list_lifecycle_obligations(owner.ownership)
-    assert obligations[0].state is (
+    receipt = owner.inspect_lifecycle_obligation(obligation_id)
+    assert receipt is not None
+    assert receipt.state is (
         LifecycleObligationState.RESOLVED if committed else LifecycleObligationState.POSSIBLE_EFFECT
     )
     with pytest.raises(StateError):
@@ -976,7 +978,8 @@ def test_interrupted_borrow_close_blocks_admission_until_retry(
 
     monkeypatch.setattr(repository, "resolve_lifecycle_obligation", original)
     borrow.close()
-    assert repository.list_lifecycle_obligations(owner.ownership)[0].state is LifecycleObligationState.RESOLVED
+    receipt = owner.inspect_lifecycle_obligation(obligation_id)
+    assert receipt is not None and receipt.state is LifecycleObligationState.RESOLVED
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
@@ -1287,13 +1290,14 @@ def test_supplied_dispatch_obligation_replaces_carrier_row_across_attempts(db: D
         attempt = borrow.begin_attempt()
         attempt.settle()
 
-    obligations = db.operations.list_lifecycle_obligations(owner.ownership)
+    obligations = db.operations.list_pending_lifecycle_obligations(owner.ownership)
     assert [(obligation.obligation_id, obligation.obligation_kind, obligation.state) for obligation in obligations] == [
         (obligation_id, "adapter-dispatch", LifecycleObligationState.POSSIBLE_EFFECT)
     ]
 
     borrow.close()
-    assert db.operations.list_lifecycle_obligations(owner.ownership)[0].state is LifecycleObligationState.RESOLVED
+    receipt = owner.inspect_lifecycle_obligation(obligation_id)
+    assert receipt is not None and receipt.state is LifecycleObligationState.RESOLVED
 
 
 def test_close_requested_before_supplied_install_proves_no_registration_started(db: Database) -> None:
@@ -1302,7 +1306,7 @@ def test_close_requested_before_supplied_install_proves_no_registration_started(
     with pytest.raises(StateError):
         owner.close()
 
-    with pytest.raises(_PreRegistrationClosingRefusal):
+    with pytest.raises(_PreRegistrationRefusal):
         borrow.install_dispatch_obligation(
             "9" * 32,
             "adapter-dispatch",
@@ -1310,7 +1314,7 @@ def test_close_requested_before_supplied_install_proves_no_registration_started(
             payload=b"prepared",
         )
 
-    assert db.operations.list_lifecycle_obligations(owner.ownership) == ()
+    assert db.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
     borrow.close()
     owner.close()
     assert db.operations.inspect(_scope()) is None
@@ -1362,7 +1366,7 @@ def test_interrupted_supplied_installation_retries_the_same_row(
         payload_version=1,
         payload=b"prepared",
     )
-    obligations = repository.list_lifecycle_obligations(owner.ownership)
+    obligations = repository.list_pending_lifecycle_obligations(owner.ownership)
     assert [obligation.obligation_id for obligation in obligations] == [obligation_id]
 
 
@@ -1394,7 +1398,7 @@ def test_retained_supplied_effect_refuses_outer_resolution_until_adapter_cleanup
     attempt.settle()
 
     release_borrow_after_custody(borrow, retain_effect=True)
-    obligations = db.operations.list_lifecycle_obligations(owner.ownership)
+    obligations = db.operations.list_pending_lifecycle_obligations(owner.ownership)
     assert obligations[0].state is LifecycleObligationState.POSSIBLE_EFFECT
 
     owner.seal_lifecycle_obligations()
@@ -1430,7 +1434,7 @@ def test_prearmed_adapter_effect_hands_off_without_carrier_attempt(db: Database)
     assert borrow.dispatch_obligation_may_be_armed
     release_borrow_after_custody(borrow, retain_effect=True)
 
-    row = db.operations.list_lifecycle_obligations(owner.ownership)[0]
+    row = db.operations.list_pending_lifecycle_obligations(owner.ownership)[0]
     claim = db.operations.inspect(_scope())
     assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
     assert claim is not None and claim.state is OperationClaimState.POSSIBLE_DISPATCH
@@ -1448,7 +1452,7 @@ def test_prearmed_adapter_effect_composes_with_later_attempt(db: Database) -> No
     attempt.settle()
     release_borrow_after_custody(borrow, retain_effect=True)
 
-    rows = db.operations.list_lifecycle_obligations(owner.ownership)
+    rows = db.operations.list_pending_lifecycle_obligations(owner.ownership)
     assert len(rows) == 1 and rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
 
 
@@ -1473,7 +1477,7 @@ def test_interrupted_prearming_allows_conservative_handoff(
     assert borrow.dispatch_obligation_may_be_armed
     release_borrow_after_custody(borrow, retain_effect=True)
 
-    rows = db.operations.list_lifecycle_obligations(owner.ownership)
+    rows = db.operations.list_pending_lifecycle_obligations(owner.ownership)
     assert len(rows) == 1
     assert rows[0].state is (
         LifecycleObligationState.POSSIBLE_EFFECT if committed else LifecycleObligationState.REGISTERED
@@ -1498,7 +1502,7 @@ def test_prepared_supplied_payload_stays_on_the_row_armed_for_dispatch(db: Datab
         payload=b"child-token",
     )
     attempt = borrow.begin_attempt()
-    row = db.operations.list_lifecycle_obligations(owner.ownership)[0]
+    row = db.operations.list_pending_lifecycle_obligations(owner.ownership)[0]
 
     assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
     assert row.payload_version == 2

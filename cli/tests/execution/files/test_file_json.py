@@ -973,7 +973,7 @@ def test_read_and_upload_reuse_one_durable_obligation_and_revalidate_before_ever
         outcome = _update(borrow, root, plan, b'{"source":true}', "merge-overwrite")
 
         assert outcome.status is FileJsonStatus.COMPLETE
-        obligations = repository.list_lifecycle_obligations(owner.ownership)
+        obligations = repository.list_pending_lifecycle_obligations(owner.ownership)
         assert len(obligations) == 1
         assert outcome.publication_attempts == 1
         assert marks == [obligations[0].obligation_id] * 5

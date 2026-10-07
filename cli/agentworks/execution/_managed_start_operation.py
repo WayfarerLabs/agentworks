@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.db import OperationResourceKind
 from agentworks.errors import ValidationError
-from agentworks.operations import _PreRegistrationClosingRefusal, release_borrow_after_custody
+from agentworks.operations import _is_pre_registration_refusal, release_borrow_after_custody
 
 from ._fixed_helper_operation import BorrowedFixedHelperCarrier
 from ._managed_run_obligation import decode_managed_run_obligation, encode_managed_run_obligation
@@ -152,11 +152,11 @@ def start_owned_managed_run(
         )
         release_borrow_after_custody(borrow, retain_effect=retained)
         return outcome
-    except _PreRegistrationClosingRefusal:
-        prepared.discard()
-        borrow.close()
-        raise
     except BaseException as control:
+        if _is_pre_registration_refusal(control):
+            prepared.discard()
+            borrow.close()
+            raise
         prepared.discard()
         armed_effect = borrow.dispatch_obligation_may_be_armed
         registration_uncertain = registration_started and not borrow.has_installed_dispatch_obligation

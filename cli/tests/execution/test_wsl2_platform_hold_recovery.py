@@ -40,6 +40,7 @@ from agentworks.execution._wsl2_platform_hold_recovery import WSL2PlatformHoldRe
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.wsl2 import WSL2Connection
 from agentworks.operations import OperationOwner
+from tests.execution._bound_carrier_support import obligation_receipt
 
 BOOT = "12345678-1234-1234-1234-123456789abc"
 SCOPE = OperationScope(OperationResourceKind.VM, "vm-one")
@@ -83,7 +84,7 @@ def test_recovery_default_observer_uses_and_publishes_original_version(
         )
         obligation.mark_possible_effect()
         owner = OperationOwner.recover(database.operations, predecessor.ownership, "d" * 32)
-        row = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        row = database.operations.list_pending_lifecycle_obligations(owner.ownership)[0]
         recovery = WSL2PlatformHoldRecovery(
             owner,
             row,
@@ -93,7 +94,7 @@ def test_recovery_default_observer_uses_and_publishes_original_version(
             controller_observer=Controller(),
         )
         assert recovery.recover(Deadline.after(2))
-        persisted = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        persisted = obligation_receipt(owner, row.obligation_id)
         assert persisted.state is LifecycleObligationState.RESOLVED
         assert persisted.payload_version == version
         assert decode_hold_payload(persisted.payload) == replace(payload, query_may_have_been_admitted=True)
@@ -120,12 +121,12 @@ def test_recovery_refuses_unknown_or_mismatched_envelope_before_rebinding(
             OBLIGATION_KIND, payload_version=envelope, payload=encode_hold_payload(payload)
         )
         owner = OperationOwner.recover(database.operations, predecessor.ownership, "d" * 32)
-        row = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        row = database.operations.list_pending_lifecycle_obligations(owner.ownership)[0]
         with pytest.raises(StateError):
             WSL2PlatformHoldRecovery(
                 owner, row, locator="opaque-locator", instance_marker="c" * 32, connection=CONNECTION
             )
-        assert database.operations.list_lifecycle_obligations(owner.ownership)[0] == row
+        assert database.operations.list_pending_lifecycle_obligations(owner.ownership)[0] == row
 
 
 @dataclass
@@ -226,7 +227,7 @@ def _start_hold(path: Path) -> tuple[OperationOwnership, str]:
         owner = OperationOwner.acquire(database.operations, SCOPE, "proof")
         subject = WSL2PlatformHold(owner, "vm-one", "opaque-locator", "c" * 32, CONNECTION, AnchorClient())
         subject.start(Deadline.after(2))
-        row = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        row = database.operations.list_pending_lifecycle_obligations(owner.ownership)[0]
         assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
         return owner.ownership, row.obligation_id
 
@@ -234,6 +235,7 @@ def _start_hold(path: Path) -> tuple[OperationOwnership, str]:
 def _recover(
     path: Path,
     predecessor: OperationOwnership,
+    receipt_id: str,
     *,
     generation: str = "d" * 32,
     controller: Controller,
@@ -241,7 +243,7 @@ def _recover(
 ) -> bool:
     with closing(Database(path)) as database:
         owner = OperationOwner.recover(database.operations, predecessor, generation)
-        row = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        row = obligation_receipt(owner, receipt_id)
         observer = WSL2GuestObserver(CONNECTION, client_factory=lambda: query) if query is not None else None
         recovery = WSL2PlatformHoldRecovery(
             owner,
@@ -257,15 +259,16 @@ def _recover(
 
 def test_ready_recovery_resolves_only_after_exact_settled_absence(tmp_path: Path) -> None:
     path = tmp_path / "hold.db"
-    predecessor, _ = _start_hold(path)
+    predecessor, receipt_id = _start_hold(path)
     query = QueryClient()
     controller = Controller()
-    assert _recover(path, predecessor, controller=controller, query=query)
+    assert _recover(path, predecessor, receipt_id, controller=controller, query=query)
     assert controller.calls == 1 and query.spawned and query.settled
     with closing(Database(path)) as database:
         current = database.operations.inspect(SCOPE)
         assert current is not None and current.ownership != predecessor
-        row = database.operations.list_lifecycle_obligations(current.ownership)[0]
+        row = database.operations.inspect_lifecycle_obligation(current.ownership, receipt_id)
+        assert row is not None
         assert row.state is LifecycleObligationState.RESOLVED
         assert decode_hold_payload(row.payload).query_may_have_been_admitted
 
@@ -290,22 +293,23 @@ def test_missing_ready_and_marked_query_retain_claim(tmp_path: Path) -> None:
         )
         obligation.mark_possible_effect()
         predecessor = owner.ownership
+        receipt_id = obligation.obligation_id
     controller = Controller()
     query = QueryClient()
-    assert not _recover(path, predecessor, controller=controller, query=query)
+    assert not _recover(path, predecessor, receipt_id, controller=controller, query=query)
     assert controller.calls == 0 and not query.spawned
     with closing(Database(path)) as database:
         current = database.operations.inspect(SCOPE)
         assert current is not None
         assert (
-            database.operations.list_lifecycle_obligations(current.ownership)[0].state
+            database.operations.list_pending_lifecycle_obligations(current.ownership)[0].state
             is LifecycleObligationState.POSSIBLE_EFFECT
         )
 
     other = tmp_path / "marked.db"
-    predecessor, _ = _start_hold(other)
+    predecessor, receipt_id = _start_hold(other)
     with closing(Database(other)) as database:
-        row = database.operations.list_lifecycle_obligations(predecessor)[0]
+        row = database.operations.list_pending_lifecycle_obligations(predecessor)[0]
         payload = decode_hold_payload(row.payload)
         from dataclasses import replace
 
@@ -318,7 +322,7 @@ def test_missing_ready_and_marked_query_retain_claim(tmp_path: Path) -> None:
         )
     controller = Controller()
     query = QueryClient()
-    assert not _recover(other, predecessor, controller=controller, query=query)
+    assert not _recover(other, predecessor, receipt_id, controller=controller, query=query)
     assert controller.calls == 0 and not query.spawned
 
 
@@ -343,7 +347,7 @@ def test_registered_takeover_resolves_and_mismatch_refuses(tmp_path: Path) -> No
         predecessor = owner.ownership
     with closing(Database(path)) as database:
         owner = OperationOwner.recover(database.operations, predecessor, "d" * 32)
-        row = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        row = database.operations.list_pending_lifecycle_obligations(owner.ownership)[0]
         with pytest.raises(StateError):
             WSL2PlatformHoldRecovery(
                 owner,
@@ -360,49 +364,50 @@ def test_registered_takeover_resolves_and_mismatch_refuses(tmp_path: Path) -> No
             connection=CONNECTION,
         )
         assert recovery.recover(Deadline.after(2))
-        assert (
-            database.operations.list_lifecycle_obligations(owner.ownership)[0].state
-            is LifecycleObligationState.RESOLVED
-        )
+        assert obligation_receipt(owner, row.obligation_id).state is LifecycleObligationState.RESOLVED
 
 
 def test_controller_presence_refuses_without_query_admission(tmp_path: Path) -> None:
     path = tmp_path / "hold.db"
-    predecessor, _ = _start_hold(path)
+    predecessor, receipt_id = _start_hold(path)
     controller = Controller(ControllerPresence.PRESENT)
     query = QueryClient()
-    assert not _recover(path, predecessor, controller=controller, query=query)
+    assert not _recover(path, predecessor, receipt_id, controller=controller, query=query)
     assert controller.calls == 1 and not query.spawned
     with closing(Database(path)) as database:
         current = database.operations.inspect(SCOPE)
         assert current is not None
-        row = database.operations.list_lifecycle_obligations(current.ownership)[0]
+        row = database.operations.inspect_lifecycle_obligation(current.ownership, receipt_id)
+        assert row is not None
         assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
         assert not decode_hold_payload(row.payload).query_may_have_been_admitted
 
 
 def test_incomplete_query_survives_second_takeover_without_replay(tmp_path: Path) -> None:
     path = tmp_path / "hold.db"
-    predecessor, _ = _start_hold(path)
+    predecessor, receipt_id = _start_hold(path)
     first_query = QueryClient(incomplete=True)
-    assert not _recover(path, predecessor, controller=Controller(), query=first_query)
+    assert not _recover(path, predecessor, receipt_id, controller=Controller(), query=first_query)
     assert first_query.spawned and first_query.settled
     with closing(Database(path)) as database:
         current = database.operations.inspect(SCOPE)
         assert current is not None
-        row = database.operations.list_lifecycle_obligations(current.ownership)[0]
+        row = database.operations.inspect_lifecycle_obligation(current.ownership, receipt_id)
+        assert row is not None
         assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
         assert decode_hold_payload(row.payload).query_may_have_been_admitted
         predecessor = current.ownership
     second_query = QueryClient()
     second_controller = Controller()
-    assert not _recover(path, predecessor, generation="e" * 32, controller=second_controller, query=second_query)
+    assert not _recover(
+        path, predecessor, receipt_id, generation="e" * 32, controller=second_controller, query=second_query
+    )
     assert second_controller.calls == 0 and not second_query.spawned
 
 
 def test_lost_query_admission_reply_does_not_dispatch_or_retry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "hold.db"
-    predecessor, _ = _start_hold(path)
+    predecessor, receipt_id = _start_hold(path)
     original = OperationRepository.publish_lifecycle_obligation_payload
 
     def lost_reply(self: OperationRepository, *args: object, **kwargs: object) -> object:
@@ -412,23 +417,24 @@ def test_lost_query_admission_reply_does_not_dispatch_or_retry(tmp_path: Path, m
     monkeypatch.setattr(OperationRepository, "publish_lifecycle_obligation_payload", lost_reply)
     query = QueryClient()
     with pytest.raises(OSError):
-        _recover(path, predecessor, controller=Controller(), query=query)
+        _recover(path, predecessor, receipt_id, controller=Controller(), query=query)
     assert not query.spawned
     monkeypatch.setattr(OperationRepository, "publish_lifecycle_obligation_payload", original)
     with closing(Database(path)) as database:
         current = database.operations.inspect(SCOPE)
         assert current is not None
-        row = database.operations.list_lifecycle_obligations(current.ownership)[0]
+        row = database.operations.inspect_lifecycle_obligation(current.ownership, receipt_id)
+        assert row is not None
         assert decode_hold_payload(row.payload).query_may_have_been_admitted
         predecessor = current.ownership
     retry_query = QueryClient()
-    assert not _recover(path, predecessor, generation="e" * 32, controller=Controller(), query=retry_query)
+    assert not _recover(path, predecessor, receipt_id, generation="e" * 32, controller=Controller(), query=retry_query)
     assert not retry_query.spawned
 
 
 def test_lost_resolution_reply_is_recognized_after_takeover(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "hold.db"
-    predecessor, _ = _start_hold(path)
+    predecessor, receipt_id = _start_hold(path)
     original = OperationRepository.resolve_lifecycle_obligation
 
     def lost_reply(self: OperationRepository, *args: object) -> object:
@@ -438,17 +444,18 @@ def test_lost_resolution_reply_is_recognized_after_takeover(tmp_path: Path, monk
     monkeypatch.setattr(OperationRepository, "resolve_lifecycle_obligation", lost_reply)
     first_query = QueryClient()
     with pytest.raises(OSError):
-        _recover(path, predecessor, controller=Controller(), query=first_query)
+        _recover(path, predecessor, receipt_id, controller=Controller(), query=first_query)
     assert first_query.spawned and first_query.settled
     monkeypatch.setattr(OperationRepository, "resolve_lifecycle_obligation", original)
     with closing(Database(path)) as database:
         current = database.operations.inspect(SCOPE)
         assert current is not None
-        row = database.operations.list_lifecycle_obligations(current.ownership)[0]
+        row = database.operations.inspect_lifecycle_obligation(current.ownership, receipt_id)
+        assert row is not None
         assert row.state is LifecycleObligationState.RESOLVED
         predecessor = current.ownership
     retry_query = QueryClient()
-    assert _recover(path, predecessor, generation="e" * 32, controller=Controller(), query=retry_query)
+    assert _recover(path, predecessor, receipt_id, generation="e" * 32, controller=Controller(), query=retry_query)
     assert not retry_query.spawned
 
 
@@ -457,10 +464,10 @@ def test_terminal_absence_retries_resolution_without_guest_query(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, committed: bool
 ) -> None:
     path = tmp_path / "hold.db"
-    predecessor, _ = _start_hold(path)
+    predecessor, receipt_id = _start_hold(path)
     with closing(Database(path)) as database:
         owner = OperationOwner.recover(database.operations, predecessor, "d" * 32)
-        row = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        row = database.operations.list_pending_lifecycle_obligations(owner.ownership)[0]
         query = QueryClient()
         created: list[QueryClient] = []
 
@@ -489,25 +496,22 @@ def test_terminal_absence_retries_resolution_without_guest_query(
         with pytest.raises(OSError):
             recovery.recover(Deadline.after(2))
         assert query.spawned and query.settled and len(created) == 1
-        persisted = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        persisted = obligation_receipt(owner, row.obligation_id)
         assert persisted.state is (
             LifecycleObligationState.RESOLVED if committed else LifecycleObligationState.POSSIBLE_EFFECT
         )
         monkeypatch.setattr(OperationRepository, "resolve_lifecycle_obligation", original)
         assert recovery.recover(Deadline.after(2))
         assert len(created) == 1 and controller.calls == 1
-        assert (
-            database.operations.list_lifecycle_obligations(owner.ownership)[0].state
-            is LifecycleObligationState.RESOLVED
-        )
+        assert obligation_receipt(owner, row.obligation_id).state is LifecycleObligationState.RESOLVED
 
 
 def test_unsettled_unknown_retains_native_client_for_cleanup_only(tmp_path: Path) -> None:
     path = tmp_path / "hold.db"
-    predecessor, _ = _start_hold(path)
+    predecessor, receipt_id = _start_hold(path)
     with closing(Database(path)) as database:
         owner = OperationOwner.recover(database.operations, predecessor, "d" * 32)
-        row = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        row = database.operations.list_pending_lifecycle_obligations(owner.ownership)[0]
         created: list[ReferenceType[QueryClient]] = []
 
         def factory() -> QueryClient:
@@ -533,17 +537,17 @@ def test_unsettled_unknown_retains_native_client_for_cleanup_only(tmp_path: Path
         assert client.settled and client.settle_calls == 2
         assert not recovery.recover(Deadline.after(2))
         assert len(created) == 1
-        persisted = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        persisted = obligation_receipt(owner, row.obligation_id)
         assert persisted.state is LifecycleObligationState.POSSIBLE_EFFECT
         assert decode_hold_payload(persisted.payload).query_may_have_been_admitted
 
 
 def test_complete_present_allows_same_controller_absence_retry(tmp_path: Path) -> None:
     path = tmp_path / "hold.db"
-    predecessor, _ = _start_hold(path)
+    predecessor, receipt_id = _start_hold(path)
     with closing(Database(path)) as database:
         owner = OperationOwner.recover(database.operations, predecessor, "d" * 32)
-        row = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        row = database.operations.list_pending_lifecycle_obligations(owner.ownership)[0]
         clients = [QueryClient(present=True), QueryClient()]
         created: list[QueryClient] = []
 
@@ -565,5 +569,5 @@ def test_complete_present_allows_same_controller_absence_retry(tmp_path: Path) -
         assert len(created) == 1 and clients[0].settled
         assert recovery.recover(Deadline.after(2))
         assert len(created) == 2 and clients[1].settled
-        persisted = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        persisted = obligation_receipt(owner, row.obligation_id)
         assert persisted.state is LifecycleObligationState.RESOLVED

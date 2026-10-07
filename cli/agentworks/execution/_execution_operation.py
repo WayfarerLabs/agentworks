@@ -63,7 +63,12 @@ from agentworks.execution.carrier import Dispatch, ExitStatus, Retention
 from agentworks.execution.jobs import JobDisposal, JobStop
 from agentworks.execution.models import JobRef
 from agentworks.execution.result import ApplicationState, ExecutionFailure, ExecutionOutput, ExecutionResult
-from agentworks.operations import LifecycleObligation, OperationAttempt, release_borrow_after_custody
+from agentworks.operations import (
+    LifecycleObligation,
+    OperationAttempt,
+    _is_pre_registration_refusal,
+    release_borrow_after_custody,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -187,7 +192,7 @@ class ExecutionOperation:
             self._owner._require_dispatch_admission_locked()  # noqa: SLF001
         # A passive generation check is admission evidence, not a replacement
         # for the separate persisted fence immediately before delivery.
-        self._owner.list_lifecycle_obligations()
+        self._owner.list_pending_lifecycle_obligations()
 
     def require_managed_run(
         self,
@@ -531,8 +536,7 @@ class ExecutionOperation:
         if run.disposal_confirmed:
             return JobDisposal(reference, True)
         if run.disposal_attempted:
-            rows = self._owner.list_lifecycle_obligations()
-            row = next((row for row in rows if row.obligation_id == run.disposal_obligation_id), None)
+            row = self._owner.inspect_lifecycle_obligation(run.disposal_obligation_id)
             if row is not None:
                 if (
                     row.ownership != self._owner.ownership
@@ -788,8 +792,8 @@ class ExecutionOperation:
             owner._reconcile_transition_locked()  # noqa: SLF001
             if owner._active_borrow is not borrow or borrow._attempt_started:  # noqa: SLF001
                 raise StateError("Inline registration no longer owns its unused borrow")
-            rows = owner._repository.list_lifecycle_obligations(owner.ownership)  # noqa: SLF001
-            row = next((row for row in rows if row.obligation_id == self._dispatch_id), None)
+            assert self._dispatch_id is not None
+            row = owner._repository.inspect_lifecycle_obligation(owner.ownership, self._dispatch_id)  # noqa: SLF001
             if row is None:
                 if self._dispatch_obligation is not None:
                     raise StateError("Inline lifetime obligation disappeared")
@@ -910,7 +914,10 @@ class ExecutionOperation:
                 retryable = (active.candidate is not None and self._known_termination(active.candidate)) or (
                     operation.coordination_uncertain and not operation.pending_remote_effects
                 )
-                if active.armed and not retryable:
+                if _is_pre_registration_refusal(control) and not active.installed and not active.armed:
+                    active.borrow.close()
+                    self._active_inline_calls.pop(id(active))
+                elif active.armed and not retryable:
                     self._capture(active, outcome)
                 else:
                     outcome = replace(outcome, coordination_uncertain=True, requires_owner_retention=True)
@@ -926,6 +933,7 @@ class ExecutionOperation:
                     if active.prepared is None
                     else InlineExecutionControlFact(outcome)
                 )
+                fact.__cause__ = control.__cause__
             except BaseException:
                 raise control from None
         raise control from fact

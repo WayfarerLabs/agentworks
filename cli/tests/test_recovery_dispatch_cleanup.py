@@ -131,7 +131,7 @@ def test_closed_local_dispatch_cannot_resolve_after_takeover(db: Database) -> No
     with pytest.raises(StateError):
         row.resolve()
     assert successor._active_recovery_dispatch is successor_dispatch  # noqa: SLF001
-    assert successor.list_lifecycle_obligations()[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+    assert successor.list_pending_lifecycle_obligations()[0].state is LifecycleObligationState.POSSIBLE_EFFECT
 
 
 def test_reused_binding_failed_open_preserves_earlier_callers_dispatch(db: Database) -> None:

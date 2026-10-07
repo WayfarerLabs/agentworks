@@ -42,7 +42,7 @@ from agentworks.execution.carrier import (
     SinkOutput,
 )
 from agentworks.operations import OperationAttempt, OperationOwner
-from tests.execution._bound_carrier_support import fixture_dispatch, run_fixture_process
+from tests.execution._bound_carrier_support import fixture_dispatch, obligation_receipt, run_fixture_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -707,12 +707,14 @@ def test_borrow_release_failure_preserves_observations_and_primary_control(
     control = ControlStop("primary-control")
     cleanup = KeyboardInterrupt()
     releases = 0
+    receipt_ids: list[str] = []
     original_release = OperationRepository.resolve_lifecycle_obligation
     original_settle = OperationAttempt.settle
 
     def interrupt_release(repository, ownership, obligation_id):
         nonlocal releases
         releases += 1
+        receipt_ids.append(obligation_id)
         if committed:
             original_release(repository, ownership, obligation_id)
         raise cleanup
@@ -740,9 +742,7 @@ def test_borrow_release_failure_preserves_observations_and_primary_control(
     assert carrier.calls == ["worker"] and releases == 1
     claim = database.operations.inspect(owner.ownership.scope)
     assert claim is not None
-    rows = owner.list_lifecycle_obligations()
-    assert len(rows) == 1
-    assert (rows[0].state is LifecycleObligationState.RESOLVED) is committed
+    assert (obligation_receipt(owner, receipt_ids[0]).state is LifecycleObligationState.RESOLVED) is committed
     with pytest.raises(StateError):
         owner.borrow()
     owner.stop_admission()

@@ -99,8 +99,7 @@ class _Workflow:
         activation = self.activation
         if activation is None:
             return True
-        rows = self.owner.list_lifecycle_obligations()
-        row = next((row for row in rows if row.obligation_id == activation.obligation_id), None)
+        row = self.owner.inspect_lifecycle_obligation(activation.obligation_id)
         obligation = activation.obligation
         if row is None and obligation is None:
             # No POST can precede a returned registration handle and durable arm.
@@ -213,19 +212,14 @@ class _Workflow:
         activation_settled = self._activation_settled(budget)
         if not activation_settled:
             raise StateError("Native VM activation remains unsettled")
-        obligations = self.owner.list_lifecycle_obligations()
+        obligations = self.owner.list_pending_lifecycle_obligations()
         hold = self.selected.hold.obligation if self.selected is not None else None
         held_row = hold._persisted_obligation if hold is not None else None  # noqa: SLF001
-        if any(row.state is not LifecycleObligationState.RESOLVED and row != held_row for row in obligations):
+        if any(row != held_row for row in obligations):
             raise StateError("Native VM lifecycle obligations remain unsettled")
         hold_settled = self._hold_settled(budget)
-        obligations = self.owner.list_lifecycle_obligations()
-        if (
-            hold_settled
-            and activation_settled
-            and self.local_delivery.settled
-            and all(row.state is LifecycleObligationState.RESOLVED for row in obligations)
-        ):
+        obligations = self.owner.list_pending_lifecycle_obligations()
+        if hold_settled and activation_settled and self.local_delivery.settled and not obligations:
             self.owner.seal_lifecycle_obligations()
             self.owner.record_effects_resolved()
             # A release may commit before its reply is interrupted. Retry the
@@ -329,7 +323,7 @@ def _activate_proxmox(
     if power.get("status") != "running":
         raise StateError("Native Proxmox activation did not establish running power")
     while True:
-        workflow.owner.list_lifecycle_obligations()
+        workflow.owner.list_pending_lifecycle_obligations()
         try:
             info = wire.request_guest_info(timeout=_remaining(workflow.deadline), custody=workflow.local_delivery)
         except Exception:
@@ -337,7 +331,7 @@ def _activate_proxmox(
         if not workflow.local_delivery.settled:
             raise StateError("Native Proxmox guest information retains unsettled local delivery")
         _remaining(workflow.deadline)
-        workflow.owner.list_lifecycle_obligations()
+        workflow.owner.list_pending_lifecycle_obligations()
         if _guest_info_responded(info):
             _remaining(workflow.deadline)
             return

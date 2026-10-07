@@ -57,6 +57,7 @@ class Startup:
         self.infos: list[dict[str, object] | BaseException] = [OSError("agent unavailable"), INFO]
         self.power: dict[str, object] = {"status": "running"}
         self.owner: OperationOwnership | None = None
+        self.activation_id: str | None = None
         self.workflow: native._Workflow | None = None
         self.responsive = False
         monkeypatch.setattr(self.platform, "observe_execution_power", lambda *args, **kwargs: VMStatus.STOPPED)
@@ -88,11 +89,16 @@ class Startup:
         if self.owner is None:
             self.owner = claim.ownership
         assert claim.ownership == self.owner
-        return next(
-            row
-            for row in self.database.operations.list_lifecycle_obligations(claim.ownership)
-            if row.obligation_kind == OBLIGATION_KIND
-        )
+        if self.activation_id is None:
+            pending = next(
+                row
+                for row in self.database.operations.list_pending_lifecycle_obligations(claim.ownership)
+                if row.obligation_kind == OBLIGATION_KIND
+            )
+            self.activation_id = pending.obligation_id
+        row = self.database.operations.inspect_lifecycle_obligation(claim.ownership, self.activation_id)
+        assert row is not None
+        return row
 
     def start(self, wire, *, timeout, custody) -> str:
         assert timeout > 0 and wire._connection.vmid == 101
@@ -412,7 +418,7 @@ def test_takeover_during_info_cannot_admit_guest_or_release_successor(database, 
 def test_uncertain_fence_cannot_clear_absent_registration(database, tmp_path, monkeypatch):
     startup = Startup(database, monkeypatch)
     primary = KeyboardInterrupt()
-    original = OperationRepository.list_lifecycle_obligations
+    original = OperationRepository.list_pending_lifecycle_obligations
 
     def interrupted(*args, **kwargs):
         raise primary
@@ -421,11 +427,11 @@ def test_uncertain_fence_cannot_clear_absent_registration(database, tmp_path, mo
         raise OSError("ledger read unavailable")
 
     monkeypatch.setattr(OperationRepository, "register_lifecycle_obligation", interrupted)
-    monkeypatch.setattr(OperationRepository, "list_lifecycle_obligations", unavailable)
+    monkeypatch.setattr(OperationRepository, "list_pending_lifecycle_obligations", unavailable)
     with pytest.raises(KeyboardInterrupt) as caught, startup.operation(tmp_path, Deadline.after(10)):
         pytest.fail("lost registration admitted helper")
     assert caught.value is primary and isinstance(primary.__cause__, NativeVMOperationControlFact)
     assert database.operations.inspect(_scope()) is not None
-    monkeypatch.setattr(OperationRepository, "list_lifecycle_obligations", original)
+    monkeypatch.setattr(OperationRepository, "list_pending_lifecycle_obligations", original)
     primary.__cause__.retry_cleanup(Deadline.after(10))
     assert database.operations.inspect(_scope()) is None and not startup.events

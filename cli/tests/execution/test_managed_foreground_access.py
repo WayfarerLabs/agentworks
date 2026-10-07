@@ -316,7 +316,7 @@ def test_observation_timeout_keeps_keeper_and_owner_live(view, monkeypatch, chec
     assert not run.keeper._stop.is_set() and not run.cleanup_complete
     assert run.keeper._worker is not None and run.keeper._worker.is_alive()
     assert run.keeper.obligation is not None
-    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
+    rows = database.operations.list_pending_lifecycle_obligations(workflow.owner.ownership)
     assert any(
         row.obligation_id == run.keeper.obligation.obligation_id
         and row.state is LifecycleObligationState.POSSIBLE_EFFECT

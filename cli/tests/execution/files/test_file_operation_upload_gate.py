@@ -47,6 +47,7 @@ from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity, vm
 from agentworks.execution.carrier import CarrierIO, CarrierReport, Deadline, PreparedInvocation
 from agentworks.operations import LifecycleObligation, OperationOwner
 from tests.execution._bound_carrier_support import hold_operation_owner as hold_operation_owner
+from tests.execution._bound_carrier_support import obligation_receipt
 from tests.execution.files._file_publication_support import LocalCarrier
 from tests.execution.files._file_upload_support import BytesSource, new_metadata
 from tests.execution.files._fixed_bundle_support import fixture_file_bundle
@@ -65,6 +66,7 @@ class _RowCheckingCarrier(LocalCarrier):
         self._gate = gate
         self.expected_index: int | None = None
         self.seen: list[tuple[FileCallFamily, int | None]] = []
+        self.receipt_ids: set[str] = set()
 
     def execute(
         self,
@@ -76,9 +78,10 @@ class _RowCheckingCarrier(LocalCarrier):
     ) -> CarrierReport:
         (row,) = (
             candidate
-            for candidate in self._database.operations.list_lifecycle_obligations(self._owner.ownership)
+            for candidate in self._database.operations.list_pending_lifecycle_obligations(self._owner.ownership)
             if candidate.state is LifecycleObligationState.POSSIBLE_EFFECT
         )
+        self.receipt_ids.add(row.obligation_id)
         call = decode_file_call_obligation(row.payload)
         assert call.effect_gate == self._gate
         assert call.batch_index == self.expected_index
@@ -155,7 +158,8 @@ def test_single_upload_persists_gate_before_dispatch_and_stale_generation_refuse
     assert first.status is FileUploadStatus.COMPLETE
     assert (root / "first").read_bytes() == b"a"
     assert carrier.seen and all(family is FileCallFamily.UPLOAD for family, _ in carrier.seen)
-    (row,) = database.operations.list_lifecycle_obligations(owner.ownership)
+    (receipt_id,) = carrier.receipt_ids
+    row = obligation_receipt(owner, receipt_id)
     forged = json.loads(row.payload)
     forged["target"]["boot_id"] = target_for_owner(owner).boot_id
     with pytest.raises(FileCallObligationCodecError):
@@ -186,7 +190,7 @@ def test_upload_setup_promotes_one_row_before_source_read(context) -> None:
             deadline: Deadline,
             custody: LocalDeliveryCustody | None = None,
         ) -> CarrierReport:
-            (row,) = database.operations.list_lifecycle_obligations(owner.ownership)
+            (row,) = database.operations.list_pending_lifecycle_obligations(owner.ownership)
             call = decode_file_call_obligation(row.payload)
             self.rows.append((row.payload_revision, call.family, call.token or b"", call.gate_setup is not None))
             if self.calls == 0:
@@ -216,7 +220,7 @@ def test_upload_setup_promotes_one_row_before_source_read(context) -> None:
     assert {row[1] for row in carrier.rows} == {FileCallFamily.UPLOAD}
     assert {row[2] for row in carrier.rows} == {result.token}
     assert len({row[0] for row in carrier.rows}) == 2
-    assert len(database.operations.list_lifecycle_obligations(owner.ownership)) == 1
+    assert owner.list_pending_lifecycle_obligations() == ()
 
 
 def test_upload_setup_publication_failure_retains_source_and_bound_row(
@@ -247,7 +251,7 @@ def test_upload_setup_publication_failure_retains_source_and_bound_row(
         )
     assert source.calls == 0
     assert len(operation.active_uploads) == 1
-    (row,) = database.operations.list_lifecycle_obligations(owner.ownership)
+    (row,) = database.operations.list_pending_lifecycle_obligations(owner.ownership)
     assert decode_file_call_obligation(row.payload).effect_gate == gate
     assert not (root / "target").exists()
 
@@ -287,16 +291,13 @@ def test_recovered_setup_only_upload_inspects_without_source_replay(
         )
     assert source.calls == 0
     recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "c" * 32))
-    (row,) = database.operations.list_lifecycle_obligations(recovered.ownership)
+    (row,) = database.operations.list_pending_lifecycle_obligations(recovered.ownership)
     assert decode_file_call_obligation(row.payload).gate_setup is not None
     result = FileGateSetupRecovery.open(
         recovered, replace(target_for_owner(recovered), boot_id=vm_guest_boot_id(_GUEST)), row
     ).inspect(LocalCarrier(), deadline=Deadline.after(30))
     assert result.observation is not None and result.observation.binding == gate
-    assert (
-        database.operations.list_lifecycle_obligations(recovered.ownership)[0].state
-        is LifecycleObligationState.RESOLVED
-    )
+    assert obligation_receipt(recovered, row.obligation_id).state is LifecycleObligationState.RESOLVED
     assert source.calls == 0
     assert not (root / "target").exists()
 
@@ -334,7 +335,7 @@ def test_upload_setup_failure_keeps_custody_without_source_read(
     assert source.calls == 0
     assert not (root / "target").exists()
     assert len(operation.active_uploads) == 1
-    (row,) = database.operations.list_lifecycle_obligations(owner.ownership)
+    (row,) = database.operations.list_pending_lifecycle_obligations(owner.ownership)
     call = decode_file_call_obligation(row.payload)
     if failure == "promotion":
         assert call.effect_gate == gate
@@ -393,7 +394,7 @@ def test_package_setup_binds_index_zero_before_any_child_side_effect(context) ->
             deadline: Deadline,
             custody: LocalDeliveryCustody | None = None,
         ) -> CarrierReport:
-            (row,) = database.operations.list_lifecycle_obligations(owner.ownership)
+            (row,) = database.operations.list_pending_lifecycle_obligations(owner.ownership)
             call = decode_file_call_obligation(row.payload)
             assert call.family is FileCallFamily.PACKAGE_UPLOAD
             assert call.batch_index in {0, 1}
@@ -425,7 +426,7 @@ def test_package_setup_binds_index_zero_before_any_child_side_effect(context) ->
     assert carrier.rows[0][1:] == (0, outcomes[0].token, True)
     assert all(not setup_only for _, _, _, setup_only in carrier.rows[1:])
     assert {index for _, index, _, _ in carrier.rows} == {0, 1}
-    assert len(database.operations.list_lifecycle_obligations(owner.ownership)) == 1
+    assert owner.list_pending_lifecycle_obligations() == ()
     assert (root / "first").read_bytes() == b"a"
     assert (root / "second").read_bytes() == b"b"
 
@@ -459,7 +460,7 @@ def test_package_setup_lost_reply_recovers_only_setup(hold_operation_owner, cont
         )
     assert source.calls == 0
     recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "c" * 32))
-    (row,) = database.operations.list_lifecycle_obligations(recovered.ownership)
+    (row,) = database.operations.list_pending_lifecycle_obligations(recovered.ownership)
     call = decode_file_call_obligation(row.payload)
     assert call.family is FileCallFamily.PACKAGE_UPLOAD and call.batch_index == 0
     assert call.gate_setup is not None
@@ -467,10 +468,7 @@ def test_package_setup_lost_reply_recovers_only_setup(hold_operation_owner, cont
         recovered, replace(target_for_owner(recovered), boot_id=vm_guest_boot_id(_GUEST)), row
     ).inspect(LocalCarrier(), deadline=Deadline.after(30))
     assert result.observation is not None and result.observation.binding == gate
-    assert (
-        database.operations.list_lifecycle_obligations(recovered.ownership)[0].state
-        is LifecycleObligationState.RESOLVED
-    )
+    assert obligation_receipt(recovered, row.obligation_id).state is LifecycleObligationState.RESOLVED
     assert not (root / "first").exists()
 
 
@@ -498,7 +496,7 @@ def test_package_setup_publication_failure_keeps_bound_index_zero(context, monke
     assert source.calls == 0
     with pytest.raises(StateError):
         owner.close()
-    (row,) = database.operations.list_lifecycle_obligations(owner.ownership)
+    (row,) = database.operations.list_pending_lifecycle_obligations(owner.ownership)
     call = decode_file_call_obligation(row.payload)
     assert call.effect_gate == gate and call.batch_index == 0
     assert not (root / "first").exists()
@@ -520,7 +518,7 @@ def test_package_setup_rejects_wrong_guest_before_dispatch(context) -> None:
             gate_setup=FileEffectGateSetup(gate.path, wrong),
         )
     assert source.calls == 0
-    assert not database.operations.list_lifecycle_obligations(owner.ownership)
+    assert not database.operations.list_pending_lifecycle_obligations(owner.ownership)
 
 
 def test_stale_gate_also_fences_failure_cleanup(context) -> None:
@@ -582,7 +580,7 @@ def test_mismatched_gate_refuses_before_dispatch(context, mismatch: str) -> None
             effect_gate=gate,
         )
     assert carrier.calls == 0
-    assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+    assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
 
 
 def test_managed_target_boot_mismatch_refuses_before_dispatch(context) -> None:
@@ -604,4 +602,4 @@ def test_managed_target_boot_mismatch_refuses_before_dispatch(context) -> None:
             effect_gate=gate,
         )
     assert carrier.calls == 0
-    assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+    assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()

@@ -40,8 +40,8 @@ _CLAIM_SELECT = """
 """
 
 # Lifecycle payloads are recovery metadata, not a general workflow store.
-# Keep the shared envelope small enough that a stuck operation remains cheap
-# to inspect, back up, and move through SQLite's single writer.
+# Bound unfinished debt and each recovery payload. Immutable resolved receipts
+# remain until operation release; total history is not bounded by this limit.
 MAX_LIFECYCLE_OBLIGATIONS = 128
 MAX_LIFECYCLE_PAYLOAD_BYTES = 8_192
 MAX_LIFECYCLE_PAYLOAD_VERSION = 2_147_483_647
@@ -313,8 +313,8 @@ class OperationRepository:
             ).fetchone()
             return None if row is None else self._decode_claim(row)
 
-    def list_lifecycle_obligations(self, ownership: OperationOwnership) -> tuple[LifecycleObligation, ...]:
-        """Return every bounded obligation for one exact currently owned operation."""
+    def list_pending_lifecycle_obligations(self, ownership: OperationOwnership) -> tuple[LifecycleObligation, ...]:
+        """Return bounded unfinished debt for one exact currently owned operation."""
         with self._connection_lock:
             claim = self._inspect_owned(ownership)
             if claim is None:
@@ -323,10 +323,30 @@ class OperationRepository:
                 "SELECT obligations.* FROM lifecycle_obligations AS obligations "
                 "JOIN operation_owners AS owners ON owners.operation_id = obligations.operation_id "
                 "WHERE obligations.operation_id = ? AND owners.generation_id = ? "
-                "ORDER BY obligations.registered_at, obligations.obligation_id",
-                (ownership.operation_id, ownership.generation_id),
+                "AND obligations.state IS NOT 'resolved' "
+                "ORDER BY obligations.registered_at, obligations.obligation_id LIMIT ?",
+                (
+                    ownership.operation_id,
+                    ownership.generation_id,
+                    MAX_LIFECYCLE_OBLIGATIONS + 1,
+                ),
             ).fetchall()
+            if len(rows) > MAX_LIFECYCLE_OBLIGATIONS:
+                raise StateError("operation unfinished lifecycle debt exceeds its bound")
             return tuple(self._decode_obligation(row, ownership) for row in rows)
+
+    def inspect_lifecycle_obligation(
+        self, ownership: OperationOwnership, obligation_id: str
+    ) -> LifecycleObligation | None:
+        """Read one immutable or unfinished receipt; only current ownership proves absence."""
+        _validate_obligation_id(obligation_id)
+        with self._connection_lock:
+            self._require_owned_claim(ownership)
+            row = self._connection.execute(
+                "SELECT * FROM lifecycle_obligations WHERE operation_id = ? AND obligation_id = ?",
+                (ownership.operation_id, obligation_id),
+            ).fetchone()
+            return None if row is None else self._decode_obligation(row, ownership)
 
     def rebind_lifecycle_obligation(
         self,
@@ -475,7 +495,8 @@ class OperationRepository:
                 "(operation_id, obligation_id, obligation_kind, state, payload_version, payload, payload_revision, "
                 "registered_at, updated_at) "
                 "SELECT ?, ?, ?, ?, ?, ?, 0, ?, ? "
-                "WHERE (SELECT COUNT(*) FROM lifecycle_obligations WHERE operation_id = ?) < ?",
+                "WHERE (SELECT COUNT(*) FROM lifecycle_obligations "
+                "WHERE operation_id = ? AND state IS NOT 'resolved') < ?",
                 (
                     ownership.operation_id,
                     obligation_id,
@@ -550,7 +571,8 @@ class OperationRepository:
                 "(operation_id, obligation_id, obligation_kind, state, payload_version, payload, payload_revision, "
                 "registered_at, updated_at) "
                 "SELECT ?, ?, ?, ?, ?, ?, 0, ?, ? "
-                "WHERE (SELECT COUNT(*) FROM lifecycle_obligations WHERE operation_id = ?) < ?",
+                "WHERE (SELECT COUNT(*) FROM lifecycle_obligations "
+                "WHERE operation_id = ? AND state IS NOT 'resolved') < ?",
                 (
                     ownership.operation_id,
                     obligation_id,
@@ -768,8 +790,7 @@ class OperationRepository:
                     entity_kind=ownership.scope.resource_kind,
                     entity_name=ownership.scope.resource_name,
                 )
-            obligations = self.list_lifecycle_obligations(ownership)
-            if any(obligation.state is not LifecycleObligationState.RESOLVED for obligation in obligations):
+            if self._has_lifecycle_obligations(ownership, pending_only=True):
                 raise StateError(
                     "operation lifecycle obligations require explicit resolution",
                     entity_kind=ownership.scope.resource_kind,
@@ -798,7 +819,7 @@ class OperationRepository:
             claim = self._require_owned_claim(ownership)
             if claim.state is not OperationClaimState.RESERVED:
                 self._raise_stale_or_invalid_state(ownership, OperationClaimState.RESERVED)
-            if claim.obligations_sealed_at is not None or self.list_lifecycle_obligations(ownership):
+            if claim.obligations_sealed_at is not None or self._has_lifecycle_obligations(ownership):
                 raise StateError(
                     "operation lifecycle obligations require explicit resolution",
                     entity_kind=ownership.scope.resource_kind,
@@ -812,14 +833,20 @@ class OperationRepository:
             claim = self._require_owned_claim(ownership)
             if claim.state is not OperationClaimState.RESOLVED:
                 self._raise_stale_or_invalid_state(ownership, OperationClaimState.RESOLVED)
-            obligations = self.list_lifecycle_obligations(ownership)
-            if any(obligation.state is not LifecycleObligationState.RESOLVED for obligation in obligations):
+            if self._has_lifecycle_obligations(ownership, pending_only=True):
                 raise StateError(
                     "operation lifecycle obligations require explicit resolution",
                     entity_kind=ownership.scope.resource_kind,
                     entity_name=ownership.scope.resource_name,
                 )
             self._delete_in_transaction(ownership, expected=OperationClaimState.RESOLVED)
+
+    def _has_lifecycle_obligations(self, ownership: OperationOwnership, *, pending_only: bool = False) -> bool:
+        query = "SELECT 1 FROM lifecycle_obligations WHERE operation_id = ?"
+        parameters: tuple[object, ...] = (ownership.operation_id,)
+        if pending_only:
+            query += " AND state IS NOT 'resolved'"
+        return self._connection.execute(query + " LIMIT 1", parameters).fetchone() is not None
 
     def _delete_in_transaction(self, ownership: OperationOwnership, *, expected: OperationClaimState) -> None:
         cursor = self._connection.execute(

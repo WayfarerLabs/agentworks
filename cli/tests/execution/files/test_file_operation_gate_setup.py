@@ -46,9 +46,10 @@ from agentworks.operations import (
     OperationBorrow,
     OperationOwner,
     RecoveryAttempt,
-    _PreRegistrationClosingRefusal,
+    _PreRegistrationRefusal,
 )
 from tests.execution._bound_carrier_support import hold_operation_owner as hold_operation_owner
+from tests.execution._bound_carrier_support import obligation_receipt
 from tests.execution.files._file_download_support import BytesSink
 from tests.execution.files._file_snapshot_support import LocalCarrier, install_fixture_bundle
 from tests.execution.files._fixed_bundle_support import fixture_file_bundle
@@ -71,6 +72,7 @@ class _InspectingCarrier(LocalCarrier):
         self._owner = owner
         self._fail_setup = fail_setup
         self.payloads: list[FileCallObligation] = []
+        self.receipt_ids: set[str] = set()
         self.borrows: list[OperationBorrow | None] = []
 
     def execute(
@@ -81,8 +83,9 @@ class _InspectingCarrier(LocalCarrier):
         deadline: Deadline,
         custody: LocalDeliveryCustody | None = None,
     ) -> CarrierReport:
-        rows = self._database.operations.list_lifecycle_obligations(self._owner.ownership)
+        rows = self._database.operations.list_pending_lifecycle_obligations(self._owner.ownership)
         assert len(rows) == 1 and rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
+        self.receipt_ids.add(rows[0].obligation_id)
         self.payloads.append(decode_file_call_obligation(rows[0].payload))
         self.borrows.append(self._owner._active_borrow)  # noqa: SLF001
         if self._fail_setup == "not_sent":
@@ -201,8 +204,9 @@ def test_acknowledged_setup_promotes_one_row_and_borrow_before_snapshot(
         assert all(payload.effect_gate == outcome.binding.effect_gate for payload in carrier.payloads[1:])
         assert all(payload.token == outcome.token for payload in carrier.payloads)
         assert len({id(borrow) for borrow in carrier.borrows}) == 1
-        rows = database.operations.list_lifecycle_obligations(owner.ownership)
-        assert len(rows) == 1 and rows[0].state is LifecycleObligationState.RESOLVED
+        assert owner.list_pending_lifecycle_obligations() == ()
+        (receipt_id,) = carrier.receipt_ids
+        assert obligation_receipt(owner, receipt_id).state is LifecycleObligationState.RESOLVED
         owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
@@ -215,15 +219,19 @@ def test_two_downloads_adopt_same_gate_at_current_generation(tmp_path: Path, mon
     database = Database(tmp_path / "state.db")
     owner, operation, setup = _context(database, gate_root)
     try:
-        first = _call(operation, LocalCarrier(), source, setup)
+        first_carrier = _InspectingCarrier(database, owner)
+        second_carrier = _InspectingCarrier(database, owner)
+        first = _call(operation, first_carrier, source, setup)
         current = inspect_file_effect_gate(setup.path, _GUEST, os.geteuid(), "core-file-vm", lambda: _GUEST)
-        second = _call(operation, LocalCarrier(), source, setup)
+        second = _call(operation, second_carrier, source, setup)
         assert first.binding.effect_gate == current
         assert second.binding.effect_gate == current
-        assert len(database.operations.list_lifecycle_obligations(owner.ownership)) == 2
+        assert owner.list_pending_lifecycle_obligations() == ()
+        receipt_ids = first_carrier.receipt_ids | second_carrier.receipt_ids
+        assert len(receipt_ids) == 2
         assert all(
-            row.state is LifecycleObligationState.RESOLVED
-            for row in database.operations.list_lifecycle_obligations(owner.ownership)
+            obligation_receipt(owner, receipt_id).state is LifecycleObligationState.RESOLVED
+            for receipt_id in receipt_ids
         )
         owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
@@ -255,7 +263,7 @@ def test_existing_unsafe_gate_refuses_before_snapshot(
         assert (after.st_dev, after.st_ino, after.st_size) == (before.st_dev, before.st_ino, before.st_size)
         assert carrier.calls == 1
         assert len(operation.active_downloads) == 1
-        rows = database.operations.list_lifecycle_obligations(owner.ownership)
+        rows = database.operations.list_pending_lifecycle_obligations(owner.ownership)
         assert len(rows) == 1 and rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
         with pytest.raises(StateError):
             owner.close()
@@ -273,7 +281,7 @@ def test_mismatched_setup_is_refused_before_registration(tmp_path: Path, monkeyp
             _call(operation, carrier, source, replace(setup, path=str(tmp_path / "unrelated.db")))
         assert carrier.calls == 0
         assert not operation.active_downloads
-        assert not database.operations.list_lifecycle_obligations(owner.ownership)
+        assert not database.operations.list_pending_lifecycle_obligations(owner.ownership)
         owner.close()
     finally:
         database.close()
@@ -295,11 +303,11 @@ def test_owner_close_before_setup_registration_releases_unused_borrow(
 
     monkeypatch.setattr(OperationBorrow, "install_dispatch_obligation", close_before_install)
     try:
-        with pytest.raises(_PreRegistrationClosingRefusal):
+        with pytest.raises(_PreRegistrationRefusal):
             _call(operation, carrier, source, setup)
         assert carrier.calls == 0
         assert not operation.active_downloads
-        assert not database.operations.list_lifecycle_obligations(owner.ownership)
+        assert not database.operations.list_pending_lifecycle_obligations(owner.ownership)
         owner.close()
     finally:
         database.close()
@@ -316,8 +324,9 @@ def test_explicit_not_sent_setup_resolves_unused_row(tmp_path: Path, monkeypatch
         assert carrier.calls == 1
         assert not Path(setup.path).exists()
         assert not operation.active_downloads
-        rows = database.operations.list_lifecycle_obligations(owner.ownership)
-        assert len(rows) == 1 and rows[0].state is LifecycleObligationState.RESOLVED
+        assert owner.list_pending_lifecycle_obligations() == ()
+        (receipt_id,) = carrier.receipt_ids
+        assert obligation_receipt(owner, receipt_id).state is LifecycleObligationState.RESOLVED
         owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
@@ -369,7 +378,7 @@ def test_setup_failures_retain_one_exact_pending_call(
         assert active[0].borrow is pending.operation._borrow  # noqa: SLF001
         assert pending.operation.has_outstanding_attempt is (failure in {"lost", "exit1"})
         assert active[0].outcome is None
-        rows = database.operations.list_lifecycle_obligations(owner.ownership)
+        rows = database.operations.list_pending_lifecycle_obligations(owner.ownership)
         assert len(rows) == 1 and rows[0].state in {
             LifecycleObligationState.REGISTERED,
             LifecycleObligationState.POSSIBLE_EFFECT,
@@ -398,17 +407,14 @@ def test_recovered_setup_only_inspection_settles_that_obligation_without_helper_
         assert old_obligation is not None
         predecessor = owner.ownership
         recovered = hold_operation_owner(OperationOwner.recover(database.operations, predecessor, "c" * 32))
-        row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
+        row = database.operations.list_pending_lifecycle_obligations(recovered.ownership)[0]
         assert decode_file_call_obligation(row.payload).gate_setup == setup
 
         result = FileGateSetupRecovery.open(recovered, _target(recovered), row).inspect(
             LocalCarrier(), deadline=Deadline.after(20)
         )
         assert result.observation is not None and result.observation.binding is not None
-        assert (
-            database.operations.list_lifecycle_obligations(recovered.ownership)[0].state
-            is LifecycleObligationState.RESOLVED
-        )
+        assert obligation_receipt(recovered, row.obligation_id).state is LifecycleObligationState.RESOLVED
         assert Path(setup.path).is_file()
         stale_payload = encode_file_call_obligation(
             replace(
@@ -440,16 +446,13 @@ def test_delayed_setup_cannot_publish_or_start_snapshot_after_takeover(
     def takeover() -> None:
         nonlocal recovered
         recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "c" * 32))
-        row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
+        row = database.operations.list_pending_lifecycle_obligations(recovered.ownership)[0]
         assert decode_file_call_obligation(row.payload).gate_setup == setup
         inspected = FileGateSetupRecovery.open(recovered, _target(recovered), row).inspect(
             LocalCarrier(), deadline=Deadline.after(20)
         )
         assert inspected.observation is not None and inspected.observation.binding is not None
-        assert (
-            database.operations.list_lifecycle_obligations(recovered.ownership)[0].state
-            is LifecycleObligationState.RESOLVED
-        )
+        assert obligation_receipt(recovered, row.obligation_id).state is LifecycleObligationState.RESOLVED
 
     carrier = _TakeoverAfterSetupCarrier(takeover)
     try:
@@ -474,15 +477,12 @@ def test_recovered_setup_only_inspection_refuses_missing_gate(
             _call(operation, _InspectingCarrier(database, owner, fail_setup="lost"), source, setup)
         Path(setup.path).unlink()
         recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "c" * 32))
-        row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
+        row = database.operations.list_pending_lifecycle_obligations(recovered.ownership)[0]
         result = FileGateSetupRecovery.open(recovered, _target(recovered), row).inspect(
             LocalCarrier(), deadline=Deadline.after(20)
         )
         assert result.observation is not None and result.observation.binding is None
-        assert (
-            database.operations.list_lifecycle_obligations(recovered.ownership)[0].state
-            is LifecycleObligationState.POSSIBLE_EFFECT
-        )
+        assert obligation_receipt(recovered, row.obligation_id).state is LifecycleObligationState.POSSIBLE_EFFECT
         with pytest.raises(StateError):
             recovered.close()
     finally:
@@ -499,22 +499,16 @@ def test_recovered_setup_only_inspection_requires_complete_observation(
         with pytest.raises(RuntimeError, match="lost setup reply"):
             _call(operation, _InspectingCarrier(database, owner, fail_setup="lost"), source, setup)
         recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "c" * 32))
-        row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
+        row = database.operations.list_pending_lifecycle_obligations(recovered.ownership)[0]
         recovery = FileGateSetupRecovery.open(recovered, _target(recovered), row)
         incomplete = recovery.inspect(
             _InspectingCarrier(database, recovered, fail_setup="malformed"), deadline=Deadline.after(20)
         )
         assert incomplete.observation is not None and incomplete.observation.binding is None
-        assert (
-            database.operations.list_lifecycle_obligations(recovered.ownership)[0].state
-            is LifecycleObligationState.POSSIBLE_EFFECT
-        )
+        assert obligation_receipt(recovered, row.obligation_id).state is LifecycleObligationState.POSSIBLE_EFFECT
         complete = recovery.inspect(LocalCarrier(), deadline=Deadline.after(20))
         assert complete.observation is not None and complete.observation.binding is not None
-        assert (
-            database.operations.list_lifecycle_obligations(recovered.ownership)[0].state
-            is LifecycleObligationState.RESOLVED
-        )
+        assert obligation_receipt(recovered, row.obligation_id).state is LifecycleObligationState.RESOLVED
     finally:
         database.close()
 
@@ -536,7 +530,7 @@ def test_recovered_setup_only_inspection_refuses_already_bound_row(
         with pytest.raises(RuntimeError, match="lost publication reply"):
             _call(operation, LocalCarrier(), source, setup)
         recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "c" * 32))
-        row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
+        row = database.operations.list_pending_lifecycle_obligations(recovered.ownership)[0]
         assert decode_file_call_obligation(row.payload).effect_gate is not None
         with pytest.raises(StateError):
             FileGateSetupRecovery.open(recovered, _target(recovered), row)
@@ -575,7 +569,7 @@ def test_recovered_setup_only_refuses_cross_scope_target_before_inspection(
         )
         obligation.mark_possible_effect()
         recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "c" * 32))
-        row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
+        row = database.operations.list_pending_lifecycle_obligations(recovered.ownership)[0]
         with pytest.raises(StateError):
             FileGateSetupRecovery.open(recovered, foreign_target, row)
         assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
@@ -594,7 +588,7 @@ def test_recovered_setup_only_settle_interruption_releases_local_dispatch(
         with pytest.raises(RuntimeError, match="lost setup reply"):
             _call(operation, _InspectingCarrier(database, owner, fail_setup="lost"), source, setup)
         recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "c" * 32))
-        row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
+        row = database.operations.list_pending_lifecycle_obligations(recovered.ownership)[0]
         recovery = FileGateSetupRecovery.open(recovered, _target(recovered), row)
         original_settle = RecoveryAttempt.settle
 
@@ -606,14 +600,8 @@ def test_recovered_setup_only_settle_interruption_releases_local_dispatch(
         with pytest.raises(KeyboardInterrupt):
             recovery.inspect(LocalCarrier(), deadline=Deadline.after(20))
         monkeypatch.setattr(RecoveryAttempt, "settle", original_settle)
-        assert (
-            database.operations.list_lifecycle_obligations(recovered.ownership)[0].state
-            is LifecycleObligationState.POSSIBLE_EFFECT
-        )
+        assert obligation_receipt(recovered, row.obligation_id).state is LifecycleObligationState.POSSIBLE_EFFECT
         assert recovery.inspect(LocalCarrier(), deadline=Deadline.after(20)).observation is not None
-        assert (
-            database.operations.list_lifecycle_obligations(recovered.ownership)[0].state
-            is LifecycleObligationState.RESOLVED
-        )
+        assert obligation_receipt(recovered, row.obligation_id).state is LifecycleObligationState.RESOLVED
     finally:
         database.close()

@@ -56,7 +56,7 @@ class RowCheckingCarrier:
         deadline: Deadline,
         custody: LocalDeliveryCustody | None = None,
     ) -> CarrierReport:
-        (row,) = self._database.operations.list_lifecycle_obligations(self._owner.ownership)
+        (row,) = self._database.operations.list_pending_lifecycle_obligations(self._owner.ownership)
         call = decode_file_call_obligation(row.payload)
         assert call.family is FileCallFamily.PACKAGE_UPLOAD
         assert call.batch_index == self.expected_index
@@ -123,7 +123,7 @@ def test_129_member_plan_stops_before_next_failed_checkpoint(hold_operation_owne
 
     def checkpoint(index: int, outcome: FileUploadOutcome) -> None:
         assert outcome.status is FileUploadStatus.COMPLETE
-        rows = database.operations.list_lifecycle_obligations(owner.ownership)
+        rows = database.operations.list_pending_lifecycle_obligations(owner.ownership)
         assert len(rows) == 1
         call = decode_file_call_obligation(rows[0].payload)
         assert call.family is FileCallFamily.PACKAGE_UPLOAD
@@ -153,7 +153,7 @@ def test_129_member_plan_stops_before_next_failed_checkpoint(hold_operation_owne
         assert all(source.calls == 0 for source in sources[65:])
         assert operation.unfinished_package_uploads[0].index == 64
         assert operation.unfinished_package_uploads[0].checkpoint_pending
-        assert len(database.operations.list_lifecycle_obligations(owner.ownership)) == 1
+        assert len(database.operations.list_pending_lifecycle_obligations(owner.ownership)) == 1
         with pytest.raises(StateError):
             owner.close()
     finally:
@@ -176,6 +176,7 @@ def test_4096_synthetic_members_fit_one_lifecycle_row(
     plan = _plan()
     selection = runtime_selection(sys.executable)
     seen: list[int] = []
+    receipt_ids: set[str] = set()
 
     @dataclass
     class Prepared:
@@ -215,11 +216,12 @@ def test_4096_synthetic_members_fit_one_lifecycle_row(
 
     def checkpoint(index: int, outcome: FileUploadOutcome) -> None:
         assert outcome.status is FileUploadStatus.COMPLETE
-        (row,) = database.operations.list_lifecycle_obligations(owner.ownership)
+        (row,) = database.operations.list_pending_lifecycle_obligations(owner.ownership)
         call = decode_file_call_obligation(row.payload)
         assert call.batch_index == index
         assert call.relative_path == f"member-{index}"
         seen.append(index)
+        receipt_ids.add(row.obligation_id)
 
     results = operation.upload_package(
         LocalCarrier(),
@@ -232,7 +234,10 @@ def test_4096_synthetic_members_fit_one_lifecycle_row(
     )
     assert len(results) == 4096
     assert len(seen) == 4096
-    assert len(database.operations.list_lifecycle_obligations(owner.ownership)) == 1
+    assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
+    assert len(receipt_ids) == 1
+    receipt = owner.inspect_lifecycle_obligation(next(iter(receipt_ids)))
+    assert receipt is not None and receipt.state is LifecycleObligationState.RESOLVED
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
@@ -251,6 +256,13 @@ def test_later_preparation_refusal_closes_checkpointed_batch(hold_operation_owne
     root = tmp_path / "root"
     root.mkdir()
     committed: list[int] = []
+    receipt_ids: list[str] = []
+
+    def checkpoint(index, outcome):
+        committed.append(index)
+        (row,) = owner.list_pending_lifecycle_obligations()
+        receipt_ids.append(row.obligation_id)
+
     members = (
         PackageUploadMember("first", BytesSource(b"a"), 1, Create(), new_metadata()),
         PackageUploadMember("invalid", BytesSource(b"b"), -1, Create(), new_metadata()),
@@ -260,7 +272,7 @@ def test_later_preparation_refusal_closes_checkpointed_batch(hold_operation_owne
             LocalCarrier(),
             trusted_root_path=str(root),
             members=members,
-            checkpoint=lambda index, outcome: committed.append(index),
+            checkpoint=checkpoint,
             plan=_plan(),
             deadline=Deadline.after(30),
             runtime_selection=runtime_selection(sys.executable),
@@ -268,7 +280,8 @@ def test_later_preparation_refusal_closes_checkpointed_batch(hold_operation_owne
     assert committed == [0]
     assert (root / "first").read_bytes() == b"a"
     assert not (root / "invalid").exists()
-    (row,) = database.operations.list_lifecycle_obligations(owner.ownership)
+    row = owner.inspect_lifecycle_obligation(receipt_ids[0])
+    assert row is not None
     assert row.state is LifecycleObligationState.RESOLVED
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
@@ -291,13 +304,13 @@ def test_lost_child_cas_reply_retries_only_the_exact_intended_payload(
     root.mkdir()
     original = type(database.operations).publish_lifecycle_obligation_payload
     lost = False
-    attempts: list[tuple[int, bytes]] = []
+    attempts: list[tuple[str, int, bytes]] = []
 
     def publish(repository, ownership, obligation_id, *, expected_revision, payload_version, payload):
         nonlocal lost
         call = decode_file_call_obligation(payload)
         if call.family is FileCallFamily.PACKAGE_UPLOAD and call.batch_index == 1:
-            attempts.append((expected_revision, payload))
+            attempts.append((obligation_id, expected_revision, payload))
             result = original(
                 repository,
                 ownership,
@@ -339,7 +352,8 @@ def test_lost_child_cas_reply_retries_only_the_exact_intended_payload(
     assert len(attempts) == 2
     assert attempts[0] == attempts[1]
     assert (root / "member-1").read_bytes() == b"\x01"
-    (row,) = database.operations.list_lifecycle_obligations(owner.ownership)
+    row = owner.inspect_lifecycle_obligation(attempts[0][0])
+    assert row is not None
     assert row.payload_revision == 1
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
@@ -396,7 +410,7 @@ def test_unconfirmed_child_cas_never_dispatches_that_child(
         )
     assert checkpoints == [0]
     assert len(attempts) == 2 and attempts[0] == attempts[1]
-    (row,) = database.operations.list_lifecycle_obligations(owner.ownership)
+    (row,) = database.operations.list_pending_lifecycle_obligations(owner.ownership)
     assert decode_file_call_obligation(row.payload).batch_index == 0
     assert source.calls == 0
     assert not (root / "second").exists()
@@ -459,7 +473,7 @@ def test_child_cas_control_stop_never_retries_or_dispatches_next_child(
     assert checkpoints == [0]
     assert source.calls == 0
     assert not (root / "second").exists()
-    (row,) = database.operations.list_lifecycle_obligations(owner.ownership)
+    (row,) = database.operations.list_pending_lifecycle_obligations(owner.ownership)
     assert decode_file_call_obligation(row.payload).batch_index == 1
     with pytest.raises(StateError):
         owner.close()

@@ -187,7 +187,9 @@ def _prepare(batch: RecoveryGuestPreparationBatch, *, workload: str = "admin", e
 
 
 def _row(owner: OperationOwner):
-    return next(row for row in owner.list_lifecycle_obligations() if row.obligation_id == _BATCH_ID)
+    row = owner.inspect_lifecycle_obligation(_BATCH_ID)
+    assert row is not None
+    return row
 
 
 def test_distinct_batch_debt_and_selected_guest_route(recovery):
@@ -229,8 +231,8 @@ def test_distinct_batch_debt_and_selected_guest_route(recovery):
     assert result.identity.elevated_plan == IdentityPlan(_ROOT, IdentityMode.SUDO_ROOT)
     assert result.identity.delivery_result is result.identity.workload_result
     assert not result.requires_owner_retention
-    rows = {row.obligation_id: row for row in owner.list_lifecycle_obligations()}
-    assert rows[_BATCH_ID].state is LifecycleObligationState.RESOLVED
+    rows = {row.obligation_id: row for row in owner.list_pending_lifecycle_obligations()}
+    assert _row(owner).state is LifecycleObligationState.RESOLVED
     assert rows[old_id].state is rows[hold.obligation_id].state is LifecycleObligationState.POSSIBLE_EFFECT
     with pytest.raises(StateError):
         owner.borrow()
@@ -404,7 +406,7 @@ def test_takeover_between_probes_stops_and_preserves_batch(recovery):
     assert carrier.calls == ["guest"]
     assert batch.preparation.requires_owner_retention
     assert successor is not None
-    rows = successor.list_lifecycle_obligations()
+    rows = successor.list_pending_lifecycle_obligations()
     assert {row.obligation_id for row in rows} == {old_id, hold.obligation_id, _BATCH_ID}
     assert all(row.state is LifecycleObligationState.POSSIBLE_EFFECT for row in rows)
     assert all(row.ownership == successor.ownership for row in rows)
@@ -436,7 +438,7 @@ def test_boundary_validation_precedes_admission(recovery):
         _prepare(batch, vm=replace(_vm(), name="different"))
     with pytest.raises(ValidationError):
         _prepare(batch, deadline=Deadline.after(None))
-    assert _BATCH_ID not in {row.obligation_id for row in owner.list_lifecycle_obligations()}
+    assert _BATCH_ID not in {row.obligation_id for row in owner.list_pending_lifecycle_obligations()}
 
 
 @pytest.mark.parametrize("change", ["revision", "resolved"])
@@ -628,12 +630,12 @@ def test_post_resolution_interruption_retains_until_local_normalization(recovery
     assert dispatch is not None
     with pytest.raises(StateError):
         dispatch.begin_attempt()
-    rows = owner.list_lifecycle_obligations()
+    rows = owner.list_pending_lifecycle_obligations()
     monkeypatch.setattr(LifecycleObligation, "resolve", Mock(side_effect=AssertionError("Unexpected resolution")))
     monkeypatch.setattr(RecoveryDispatch, "close", Mock(side_effect=AssertionError("Unexpected close")))
     normalized = batch.retry_resolution()
     assert batch._dispatch is None  # noqa: SLF001
     assert not normalized.coordination_uncertain
     assert not normalized.requires_owner_retention
-    assert owner.list_lifecycle_obligations() == rows
+    assert owner.list_pending_lifecycle_obligations() == rows
     assert carrier.calls == ["guest", "admin", "root"]

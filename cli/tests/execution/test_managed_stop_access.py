@@ -30,6 +30,7 @@ from agentworks.execution._managed_stop_access import (
 from agentworks.execution._managed_stop_exchange import ManagedStopState
 from agentworks.execution._managed_stop_protocol import ManagedStopResult
 from agentworks.execution.carrier import Dispatch
+from tests.execution._bound_carrier_support import obligation_receipt
 
 from .test_managed_observe_access import GUEST, RUN, TARGET, _options, _reserved
 from .test_managed_stop import Carrier, _boundary, _records
@@ -109,7 +110,7 @@ def test_preborrow_refusal_does_not_install_or_call_carrier(
             _stop(repository, owner, carrier, **changes)
         assert borrow_calls == 0
         assert carrier.calls == 0
-        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
     finally:
         database.close()
 
@@ -126,7 +127,7 @@ def test_validated_response_resolves_temporary_obligation_but_not_run(tmp_path: 
         assert not outcome.pending_remote_effects
         assert carrier.calls == 1
         assert repository.inspect(RUN) == row
-        (obligation,) = database.operations.list_lifecycle_obligations(owner.ownership)
+        obligation = obligation_receipt(owner, OBLIGATION_ID)
         assert obligation.obligation_id == OBLIGATION_ID
         assert obligation.obligation_kind == MANAGED_STOP_OBLIGATION_KIND
         assert obligation.state is LifecycleObligationState.RESOLVED
@@ -145,7 +146,7 @@ def test_not_sent_settles_and_resolves_without_stop_evidence(tmp_path: Path) -> 
         assert outcome.state is None
         assert outcome.candidate is not None and outcome.candidate.dispatch is Dispatch.NOT_SENT
         assert not outcome.requires_owner_retention
-        (obligation,) = database.operations.list_lifecycle_obligations(owner.ownership)
+        obligation = obligation_receipt(owner, OBLIGATION_ID)
         assert obligation.state is LifecycleObligationState.RESOLVED
     finally:
         database.close()
@@ -167,7 +168,7 @@ def test_uncertain_or_failed_delivery_keeps_exact_stop_obligation(tmp_path: Path
         assert outcome.requires_owner_retention
         assert outcome.pending_remote_effects
         assert carrier.calls == 1
-        (obligation,) = database.operations.list_lifecycle_obligations(owner.ownership)
+        obligation = obligation_receipt(owner, OBLIGATION_ID)
         assert obligation.state is LifecycleObligationState.POSSIBLE_EFFECT
         assert decode_managed_stop_obligation(obligation.payload) == RUN
     finally:
@@ -191,7 +192,7 @@ def test_failed_pure_validation_resolves_unarmed_obligation(tmp_path: Path, monk
         assert isinstance(failure.__cause__, ManagedStopControlFact)
         assert not failure.__cause__.outcome.requires_owner_retention
         assert carrier.calls == 0
-        (obligation,) = database.operations.list_lifecycle_obligations(owner.ownership)
+        obligation = obligation_receipt(owner, OBLIGATION_ID)
         assert obligation.state is LifecycleObligationState.RESOLVED
     finally:
         database.close()
@@ -221,7 +222,7 @@ def test_commit_then_interrupted_begin_attempt_keeps_original_control_and_possib
         assert failure.__cause__.outcome.pending_remote_effects
         assert carrier.calls == 0
         assert carrier.validations >= 1
-        (obligation,) = database.operations.list_lifecycle_obligations(owner.ownership)
+        obligation = obligation_receipt(owner, OBLIGATION_ID)
         assert obligation.state is LifecycleObligationState.POSSIBLE_EFFECT
     finally:
         database.close()

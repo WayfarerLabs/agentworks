@@ -35,7 +35,7 @@ def _registered(database: Database, ownership: OperationOwnership, kind: str = "
 
 
 def _resolve_all(database: Database, ownership: OperationOwnership) -> None:
-    for obligation in database.operations.list_lifecycle_obligations(ownership):
+    for obligation in database.operations.list_pending_lifecycle_obligations(ownership):
         database.operations.resolve_lifecycle_obligation(ownership, obligation.obligation_id)
 
 
@@ -64,7 +64,7 @@ def test_v38_upgrade_adds_empty_ledger(tmp_path: Path) -> None:
     database = Database(path)
     try:
         ownership = database.operations.claim(_scope("upgraded"), "vm-reinitialize")
-        assert database.operations.list_lifecycle_obligations(ownership) == ()
+        assert database.operations.list_pending_lifecycle_obligations(ownership) == ()
         assert database._conn.execute("PRAGMA foreign_key_check").fetchall() == []  # noqa: SLF001
     finally:
         database.close()
@@ -76,7 +76,7 @@ def test_multiple_same_kind_obligations_are_independent_and_bounded(db: Database
     second = _registered(db, ownership)
 
     assert first != second
-    obligations = db.operations.list_lifecycle_obligations(ownership)
+    obligations = db.operations.list_pending_lifecycle_obligations(ownership)
     assert [obligation.obligation_kind for obligation in obligations] == ["platform-hold", "platform-hold"]
     assert all(obligation.state is LifecycleObligationState.REGISTERED for obligation in obligations)
 
@@ -146,13 +146,15 @@ def test_borrow_reuses_one_generic_carrier_obligation_across_many_attempts(db: D
         attempt = borrow.begin_attempt()
         attempt.settle()
 
-    obligations = db.operations.list_lifecycle_obligations(owner.ownership)
+    obligations = db.operations.list_pending_lifecycle_obligations(owner.ownership)
     assert len(obligations) == 1
     assert obligations[0].obligation_kind == "carrier-dispatch"
     assert obligations[0].state is LifecycleObligationState.POSSIBLE_EFFECT
 
     borrow.close()
-    assert db.operations.list_lifecycle_obligations(owner.ownership)[0].state is LifecycleObligationState.RESOLVED
+    receipt = db.operations.inspect_lifecycle_obligation(owner.ownership, obligations[0].obligation_id)
+    assert receipt is not None and receipt.state is LifecycleObligationState.RESOLVED
+    assert db.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
     owner.close()
@@ -167,9 +169,11 @@ def test_borrow_close_refuses_until_its_outstanding_attempt_is_settled(db: Datab
         borrow.close()
 
     assert borrow.has_outstanding_attempt
+    (receipt,) = db.operations.list_pending_lifecycle_obligations(owner.ownership)
     attempt.settle()
     borrow.close()
-    assert db.operations.list_lifecycle_obligations(owner.ownership)[0].state is LifecycleObligationState.RESOLVED
+    resolved = db.operations.inspect_lifecycle_obligation(owner.ownership, receipt.obligation_id)
+    assert resolved is not None and resolved.state is LifecycleObligationState.RESOLVED
 
 
 def test_borrow_handoff_retains_its_possible_effect_for_recovery(db: Database) -> None:
@@ -183,7 +187,7 @@ def test_borrow_handoff_retains_its_possible_effect_for_recovery(db: Database) -
     attempt = borrow.begin_attempt()
     borrow.handoff_unresolved()
 
-    obligations = db.operations.list_lifecycle_obligations(owner.ownership)
+    obligations = db.operations.list_pending_lifecycle_obligations(owner.ownership)
     assert len(obligations) == 1
     assert obligations[0].state is LifecycleObligationState.POSSIBLE_EFFECT
     with pytest.raises(StateError):
@@ -258,7 +262,7 @@ def test_corrupt_obligation_is_not_treated_as_absent(tmp_path: Path) -> None:
     reopened = Database(path)
     try:
         with pytest.raises(StateError) as raised:
-            reopened.operations.list_lifecycle_obligations(ownership)
+            reopened.operations.list_pending_lifecycle_obligations(ownership)
         assert raised.value.entity_kind == "database"
     finally:
         reopened.close()
@@ -275,7 +279,7 @@ def test_independent_connections_see_registration_and_admit_without_loss(tmp_pat
         assert first_id != second_id
 
         second.operations.mark_lifecycle_obligation_possible_effect(ownership, second_id)
-        visible = first.operations.list_lifecycle_obligations(ownership)
+        visible = first.operations.list_pending_lifecycle_obligations(ownership)
         assert {obligation.obligation_id for obligation in visible} == {first_id, second_id}
         assert first.operations.inspect(ownership.scope).state is OperationClaimState.POSSIBLE_DISPATCH  # type: ignore[union-attr]
     finally:
@@ -311,7 +315,7 @@ def test_one_repository_serializes_concurrent_registration_and_admission(db: Dat
 
     assert all(not thread.is_alive() for thread in threads)
     assert [outcome for outcome, _obligation_id in outcomes] == ["admitted", "admitted"]
-    obligations = db.operations.list_lifecycle_obligations(ownership)
+    obligations = db.operations.list_pending_lifecycle_obligations(ownership)
     assert len(obligations) == 2
     assert all(obligation.state is LifecycleObligationState.POSSIBLE_EFFECT for obligation in obligations)
 
@@ -345,7 +349,7 @@ def test_concurrent_registration_and_admission_preserve_both_obligations(tmp_pat
     assert all(outcome == "admitted" for outcome, _obligation_id in observed), observed
     reopened = Database(path)
     try:
-        obligations = reopened.operations.list_lifecycle_obligations(ownership)
+        obligations = reopened.operations.list_pending_lifecycle_obligations(ownership)
         assert len(obligations) == 2
         assert all(obligation.state is LifecycleObligationState.POSSIBLE_EFFECT for obligation in obligations)
         assert reopened.operations.inspect(ownership.scope).state is OperationClaimState.POSSIBLE_DISPATCH  # type: ignore[union-attr]

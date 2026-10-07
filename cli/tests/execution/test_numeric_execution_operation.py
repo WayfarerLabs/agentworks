@@ -81,7 +81,7 @@ def test_constructor_refuses_mismatch_before_borrow(
         ExecutionOperation(operation_owner, target, bootstrap=None if mismatch == "kind" else _CONTEXT)
     claim = database.operations.inspect(operation_owner.ownership.scope)
     assert claim is not None and claim.state is OperationClaimState.RESERVED
-    assert database.operations.list_lifecycle_obligations(operation_owner.ownership) == ()
+    assert database.operations.list_pending_lifecycle_obligations(operation_owner.ownership) == ()
     operation_owner.close()
 
 
@@ -95,7 +95,7 @@ def test_platform_host_accepts_context_free_operation_and_refuses_bootstrap(tmp_
         ExecutionOperation(operation_owner, target)
         with pytest.raises(ValidationError):
             ExecutionOperation(operation_owner, target, bootstrap=_CONTEXT)
-        assert database.operations.list_lifecycle_obligations(operation_owner.ownership) == ()
+        assert database.operations.list_pending_lifecycle_obligations(operation_owner.ownership) == ()
         operation_owner.close()
     finally:
         database.close()

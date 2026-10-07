@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterator, Mapping
 
 import pytest
 
+from agentworks.db.operations import LifecycleObligation
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import (
     Carrier,
@@ -17,6 +18,13 @@ from agentworks.execution.carrier import (
 )
 from agentworks.execution.carriers._subprocess import ProcessResult, run_process
 from agentworks.operations import OperationOwner
+
+
+def obligation_receipt(owner: OperationOwner, obligation_id: str) -> LifecycleObligation:
+    """Assert one retained receipt without enumerating completed history."""
+    row = owner.inspect_lifecycle_obligation(obligation_id)
+    assert row is not None
+    return row
 
 
 def fixture_dispatch(result: ProcessResult) -> Dispatch:

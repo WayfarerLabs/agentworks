@@ -102,7 +102,7 @@ def test_handed_off_attempt_keeps_local_cleanup_separate_from_remote_debt(
     owner, dispatch, attempt = _attempt(db, recovery)
     try:
         _launch(attempt.local_delivery, entered)
-        before = owner.list_lifecycle_obligations()
+        before = owner.list_pending_lifecycle_obligations()
         with pytest.raises(StateError):
             attempt.settle()
         dispatch.handoff_unresolved()
@@ -112,12 +112,12 @@ def test_handed_off_attempt_keeps_local_cleanup_separate_from_remote_debt(
         with pytest.raises(StateError):
             owner.close()
         assert db.operations.inspect(_scope()) is not None
-        assert owner.list_lifecycle_obligations() == before
+        assert owner.list_pending_lifecycle_obligations() == before
     finally:
         release.set()
         assert owner.close_local_delivery(Deadline.after(30))
     assert attempt.local_delivery.settled
-    assert owner.list_lifecycle_obligations() == before
+    assert owner.list_pending_lifecycle_obligations() == before
     with pytest.raises(StateError):
         attempt.settle()
     with pytest.raises(StateError):
@@ -136,7 +136,7 @@ def test_pre_target_workflow_releases_only_after_retained_worker_settles(
         with pytest.raises(StateError):
             workflow.close(cleanup_deadline=Deadline.after(0))
         assert db.operations.inspect(_scope()) is not None
-        assert owner.list_lifecycle_obligations() == ()
+        assert owner.list_pending_lifecycle_obligations() == ()
         with pytest.raises(StateError):
             owner.borrow()
     finally:

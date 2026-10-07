@@ -334,7 +334,7 @@ class _RouteCarrier:
             if isinstance(request, dict) and "account" in request:
                 return self.accounts.execute(invocation, io=io, deadline=deadline, custody=custody)
         self.local_deadlines.append(deadline)
-        for row in self.guest.database.operations.list_lifecycle_obligations(claim.ownership):
+        for row in self.guest.database.operations.list_pending_lifecycle_obligations(claim.ownership):
             if row.obligation_kind == "file-call":
                 assert row.payload_version == 2
                 self.file_records.append(row.payload)
@@ -425,13 +425,15 @@ def test_prepared_views_share_claim_and_clean_teardown(
         assert json.loads(result.stdout.data) == [body.euid, body.egid, list(body.groups)]
         assert route.local_deadlines[-1] is body_deadline
         inline_rows = [
-            row for row in selected.owner.list_lifecycle_obligations() if row.obligation_kind == "carrier-dispatch"
+            row
+            for row in selected.owner.list_pending_lifecycle_obligations()
+            if row.obligation_kind == "carrier-dispatch"
         ]
         assert inline_rows
         assert selected.execution.run(Command(["/bin/true"]), profile=Protection.DIRECT).ok
         assert [
             row.obligation_id
-            for row in selected.owner.list_lifecycle_obligations()
+            for row in selected.owner.list_pending_lifecycle_obligations()
             if row.obligation_kind == "carrier-dispatch"
         ] == [row.obligation_id for row in inline_rows]
     assert views is not None
@@ -524,7 +526,7 @@ def test_same_kind_foreign_hold_debt_prevents_owned_hold_release(
         ) as views,
     ):
         (held_row,) = (
-            row for row in views.owner.list_lifecycle_obligations() if row.obligation_kind == OBLIGATION_KIND
+            row for row in views.owner.list_pending_lifecycle_obligations() if row.obligation_kind == OBLIGATION_KIND
         )
         foreign = views.owner.register_lifecycle_obligation(
             OBLIGATION_KIND,
@@ -588,7 +590,7 @@ def test_managed_route_guard_retains_exact_start_debt_before_delivery(
         assert not run.acknowledged and run.keeper._worker is None
         assert any(
             row.obligation_kind == "managed-start" and row.state is LifecycleObligationState.POSSIBLE_EFFECT
-            for row in views.owner.list_lifecycle_obligations()
+            for row in views.owner.list_pending_lifecycle_obligations()
         )
         assert managed.clock.calls == 1 and managed.start.calls == 0
     assert not observer.events

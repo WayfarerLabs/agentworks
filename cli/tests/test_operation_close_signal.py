@@ -32,7 +32,7 @@ def test_close_intent_does_not_wait_for_lifecycle_repository_lock(
     if repeated:
         admitted.mark_possible_effect()
     before_claim = repository.inspect(scope)
-    before_ledger = repository.list_lifecycle_obligations(owner.ownership)
+    before_ledger = repository.list_pending_lifecycle_obligations(owner.ownership)
     entered = threading.Event()
     stopped = threading.Event()
     fence_finished = threading.Event()
@@ -100,7 +100,7 @@ def test_close_intent_does_not_wait_for_lifecycle_repository_lock(
         assert not close_errors
     assert admitted.state is LifecycleObligationState.POSSIBLE_EFFECT
     after_claim = repository.inspect(scope)
-    after_ledger = repository.list_lifecycle_obligations(owner.ownership)
+    after_ledger = repository.list_pending_lifecycle_obligations(owner.ownership)
     assert after_claim is not None and after_claim.state is OperationClaimState.POSSIBLE_DISPATCH
     assert {item.obligation_id for item in after_ledger} == {item.obligation_id for item in before_ledger}
     if repeated:
@@ -120,7 +120,7 @@ def test_close_intent_does_not_wait_for_lifecycle_repository_lock(
     with pytest.raises(StateError):
         owner.register_lifecycle_obligation("late", payload_version=1, payload=b"")
     assert repository.inspect(scope) == after_claim
-    assert repository.list_lifecycle_obligations(owner.ownership) == after_ledger
+    assert repository.list_pending_lifecycle_obligations(owner.ownership) == after_ledger
     admitted.resolve()
     pending.resolve()
     owner.seal_lifecycle_obligations()
@@ -158,15 +158,15 @@ def test_closing_retains_prior_dispatch_registration_uncertainty(
             borrow.install_dispatch_obligation(
                 obligation_id, "adapter-dispatch", payload_version=1, payload=b"prepared"
             )
-    before = repository.list_lifecycle_obligations(owner.ownership)
+    before = repository.list_pending_lifecycle_obligations(owner.ownership)
     assert len(before) == int(committed)
     owner.stop_admission()
     with pytest.raises(StateError) as refused:
         borrow.install_dispatch_obligation(obligation_id, "adapter-dispatch", payload_version=1, payload=b"prepared")
     assert type(refused.value) is StateError
-    assert repository.list_lifecycle_obligations(owner.ownership) == before
+    assert repository.list_pending_lifecycle_obligations(owner.ownership) == before
     with pytest.raises(StateError):
         owner.borrow()
     with pytest.raises(StateError):
         owner.close()
-    assert repository.list_lifecycle_obligations(owner.ownership) == before
+    assert repository.list_pending_lifecycle_obligations(owner.ownership) == before

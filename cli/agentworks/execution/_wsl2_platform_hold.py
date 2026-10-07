@@ -24,6 +24,7 @@ from agentworks.execution._wsl2_lifecycle import (
     WSL2GuestAnchorOwner,
 )
 from agentworks.execution.carrier import Deadline
+from agentworks.operations import _is_pre_registration_refusal
 
 if TYPE_CHECKING:
     from agentworks.execution.carriers.wsl2 import WSL2Connection
@@ -297,17 +298,22 @@ class WSL2PlatformHold:
         self._payload = payload
         encoded = encode_hold_payload(payload)
         self._registration_uncertain = True
-        if recovery_obligation_id is None:
-            self._obligation = self._owner.register_lifecycle_obligation(
-                OBLIGATION_KIND, payload_version=PAYLOAD_VERSION, payload=encoded
-            )
-        else:
-            self._obligation = self._owner.admit_recovery_support_obligation(
-                OBLIGATION_KIND,
-                payload_version=PAYLOAD_VERSION,
-                payload=encoded,
-                obligation_id=recovery_obligation_id,
-            )
+        try:
+            if recovery_obligation_id is None:
+                self._obligation = self._owner.register_lifecycle_obligation(
+                    OBLIGATION_KIND, payload_version=PAYLOAD_VERSION, payload=encoded
+                )
+            else:
+                self._obligation = self._owner.admit_recovery_support_obligation(
+                    OBLIGATION_KIND,
+                    payload_version=PAYLOAD_VERSION,
+                    payload=encoded,
+                    obligation_id=recovery_obligation_id,
+                )
+        except BaseException as control:
+            if _is_pre_registration_refusal(control):
+                self._registration_uncertain = False
+            raise
         self._registration_uncertain = False
         if recovery_obligation_id is None:
             self._obligation.mark_possible_effect()

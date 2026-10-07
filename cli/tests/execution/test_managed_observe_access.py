@@ -366,7 +366,7 @@ def test_refuses_wrong_row_or_target_before_borrow_and_carrier(
             _observe(repository, owner, carrier, **changes)
         assert carrier.calls == 0
         assert borrow_calls == 0
-        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
         borrow = owner.borrow()
         borrow.close()
     finally:
@@ -583,7 +583,7 @@ def test_read_refuses_before_borrow_and_carrier(tmp_path: Path, case: str, monke
         with pytest.raises(ValidationError):
             _read(repository, owner, carrier, **changes)
         assert calls == 0 and carrier.calls == 0
-        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
     finally:
         database.close()
 

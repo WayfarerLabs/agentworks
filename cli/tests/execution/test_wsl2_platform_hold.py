@@ -36,6 +36,7 @@ from agentworks.execution._wsl2_platform_hold import (
 from agentworks.execution.carrier import Deadline
 from agentworks.execution.carriers.wsl2 import WSL2Connection
 from agentworks.operations import OperationOwner
+from tests.execution._bound_carrier_support import obligation_receipt
 
 BOOT = "12345678-1234-1234-1234-123456789abc"
 GUEST = GuestAnchorIdentity(BOOT, 137, 8192, 4096)
@@ -363,7 +364,7 @@ def test_real_observer_interrupted_query_cannot_resolve_hold_after_local_settlem
 
         assert len(query_factory.clients) == 1
         assert query_factory.clients[0].settlement_attempts == 1
-        rows = database.operations.list_lifecycle_obligations(owner.ownership)
+        rows = database.operations.list_pending_lifecycle_obligations(owner.ownership)
         assert len(rows) == 2 and all(row.state is LifecycleObligationState.POSSIBLE_EFFECT for row in rows)
         assert subject.payload is not None and unrelated.payload is not None
         markers_by_nonce = {
@@ -378,7 +379,7 @@ def test_real_observer_interrupted_query_cannot_resolve_hold_after_local_settlem
         assert len(query_factory.clients) == 1
         assert query_factory.clients[0].settlement_attempts == 2
         assert "query-2:create" not in events
-        rows = database.operations.list_lifecycle_obligations(owner.ownership)
+        rows = database.operations.list_pending_lifecycle_obligations(owner.ownership)
         assert len(rows) == 2
         states_by_nonce = {decode_hold_payload(row.payload).nonce: row.state for row in rows}
         assert subject.payload is not None and unrelated.payload is not None
@@ -407,13 +408,10 @@ def test_real_observer_complete_query_resolves_only_its_hold(tmp_path: Path) -> 
 
         subject.release(Deadline.after(1))
 
-        rows = database.operations.list_lifecycle_obligations(owner.ownership)
-        states_by_nonce = {decode_hold_payload(row.payload).nonce: row.state for row in rows}
-        assert subject.payload is not None and unrelated.payload is not None
-        assert states_by_nonce == {
-            subject.payload.nonce: LifecycleObligationState.RESOLVED,
-            unrelated.payload.nonce: LifecycleObligationState.POSSIBLE_EFFECT,
-        }
+        rows = database.operations.list_pending_lifecycle_obligations(owner.ownership)
+        assert subject.obligation is not None
+        assert obligation_receipt(owner, subject.obligation.obligation_id).state is LifecycleObligationState.RESOLVED
+        assert len(rows) == 1 and rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
         assert len(query_factory.clients) == 1
         assert query_factory.clients[0].argv[:5] == ("wsl.exe", "--distribution", "Ubuntu", "--user", "root")
 
@@ -462,7 +460,7 @@ def test_real_owner_persists_independent_rows_and_remains_borrowable(tmp_path: P
         )
         first.start(Deadline.after(1))
         second.start(Deadline.after(1))
-        rows = database.operations.list_lifecycle_obligations(owner.ownership)
+        rows = database.operations.list_pending_lifecycle_obligations(owner.ownership)
         assert len(rows) == 2
         assert len({row.obligation_id for row in rows}) == 2
         assert {row.obligation_kind for row in rows} == {OBLIGATION_KIND}
@@ -471,16 +469,16 @@ def test_real_owner_persists_independent_rows_and_remains_borrowable(tmp_path: P
         borrow = owner.borrow()
         borrow.close()
         first.release(Deadline.after(1))
-        rows = database.operations.list_lifecycle_obligations(owner.ownership)
-        assert [row.state for row in rows].count(LifecycleObligationState.RESOLVED) == 1
+        rows = database.operations.list_pending_lifecycle_obligations(owner.ownership)
+        assert first.obligation is not None
+        assert obligation_receipt(owner, first.obligation.obligation_id).state is LifecycleObligationState.RESOLVED
         assert [row.state for row in rows].count(LifecycleObligationState.POSSIBLE_EFFECT) == 1
         borrow = owner.borrow()
         borrow.close()
         second.release(Deadline.after(1))
-        assert all(
-            row.state is LifecycleObligationState.RESOLVED
-            for row in database.operations.list_lifecycle_obligations(owner.ownership)
-        )
+        assert owner.list_pending_lifecycle_obligations() == ()
+        assert second.obligation is not None
+        assert obligation_receipt(owner, second.obligation.obligation_id).state is LifecycleObligationState.RESOLVED
 
 
 def test_release_waits_for_start_after_mark_before_ready(tmp_path: Path) -> None:
@@ -518,12 +516,12 @@ def test_release_waits_for_start_after_mark_before_ready(tmp_path: Path) -> None
         starter.start()
         try:
             assert native.entered.wait(5)
-            rows = database.operations.list_lifecycle_obligations(owner.ownership)
+            rows = database.operations.list_pending_lifecycle_obligations(owner.ownership)
             assert len(rows) == 1 and rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
             assert rows[0].payload_revision == 0
             releaser.start()
             assert transition_lock.contended.wait(5)
-            rows = database.operations.list_lifecycle_obligations(owner.ownership)
+            rows = database.operations.list_pending_lifecycle_obligations(owner.ownership)
             assert rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
         finally:
             native.proceed.set()
@@ -531,8 +529,8 @@ def test_release_waits_for_start_after_mark_before_ready(tmp_path: Path) -> None
             if releaser.ident is not None:
                 releaser.join(timeout=10)
         assert not starter.is_alive() and not releaser.is_alive() and not errors
-        rows = database.operations.list_lifecycle_obligations(owner.ownership)
-        assert len(rows) == 1 and rows[0].state is LifecycleObligationState.RESOLVED
+        assert subject.obligation is not None
+        assert obligation_receipt(owner, subject.obligation.obligation_id).state is LifecycleObligationState.RESOLVED
         assert events.index("dispatch") < events.index("observe")
 
 
@@ -564,14 +562,14 @@ def test_short_deadline_release_does_not_wait_for_paused_start(tmp_path: Path) -
         starter.start()
         try:
             assert native.entered.wait(5)
-            before = database.operations.list_lifecycle_obligations(owner.ownership)
+            before = database.operations.list_pending_lifecycle_obligations(owner.ownership)
             assert len(before) == 1 and before[0].state is LifecycleObligationState.POSSIBLE_EFFECT
             began = time.monotonic()
             with pytest.raises(TimeoutError):
                 subject.release(Deadline.after(0.2))
             assert time.monotonic() - began < 1.5
             assert transition_lock.contended.is_set()
-            during = database.operations.list_lifecycle_obligations(owner.ownership)
+            during = database.operations.list_pending_lifecycle_obligations(owner.ownership)
             assert during[0].state is LifecycleObligationState.POSSIBLE_EFFECT
             assert "observe" not in events
         finally:
@@ -579,14 +577,11 @@ def test_short_deadline_release_does_not_wait_for_paused_start(tmp_path: Path) -
             starter.join(timeout=10)
         assert not starter.is_alive() and not errors
         assert (
-            database.operations.list_lifecycle_obligations(owner.ownership)[0].state
+            database.operations.list_pending_lifecycle_obligations(owner.ownership)[0].state
             is LifecycleObligationState.POSSIBLE_EFFECT
         )
         subject.release(Deadline.after(1))
-        assert (
-            database.operations.list_lifecycle_obligations(owner.ownership)[0].state
-            is LifecycleObligationState.RESOLVED
-        )
+        assert obligation_receipt(owner, during[0].obligation_id).state is LifecycleObligationState.RESOLVED
 
 
 def test_short_deadline_second_start_does_not_register_or_dispatch_again(tmp_path: Path) -> None:
@@ -622,7 +617,7 @@ def test_short_deadline_second_start_does_not_register_or_dispatch_again(tmp_pat
                 subject.start(Deadline.after(0.2))
             assert time.monotonic() - began < 1.5
             assert transition_lock.contended.is_set()
-            rows = database.operations.list_lifecycle_obligations(owner.ownership)
+            rows = database.operations.list_pending_lifecycle_obligations(owner.ownership)
             assert len(rows) == 1 and rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
             assert events.count("dispatch") == 0
         finally:
@@ -630,7 +625,7 @@ def test_short_deadline_second_start_does_not_register_or_dispatch_again(tmp_pat
             starter.join(timeout=10)
         assert not starter.is_alive() and not errors
         assert events.count("dispatch") == 1
-        assert len(database.operations.list_lifecycle_obligations(owner.ownership)) == 1
+        assert len(database.operations.list_pending_lifecycle_obligations(owner.ownership)) == 1
 
 
 def test_concurrent_start_registers_and_dispatches_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -686,7 +681,7 @@ def test_concurrent_start_registers_and_dispatches_once(tmp_path: Path, monkeypa
         assert len(results) == 2 and results.count(None) == 1
         assert sum(isinstance(result, ValidationError) for result in results) == 1
         assert events.count("dispatch") == 1
-        rows = database.operations.list_lifecycle_obligations(owner.ownership)
+        rows = database.operations.list_pending_lifecycle_obligations(owner.ownership)
         assert len(rows) == 1 and rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
 
 
@@ -898,8 +893,8 @@ def test_real_lost_ready_reply_requires_fresh_admission_cas(
             subject.release(Deadline.after(1))
             assert events.count("observe") == 1
 
-        rows = repository.list_lifecycle_obligations(owner.ownership)
-        assert len(rows) == 1
+        assert subject.obligation is not None
+        rows = (obligation_receipt(owner, subject.obligation.obligation_id),)
         assert rows[0].state is (
             LifecycleObligationState.POSSIBLE_EFFECT
             if committed_before_reply_lost

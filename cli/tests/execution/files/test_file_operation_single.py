@@ -151,7 +151,7 @@ def test_single_call_admission_refusal_closes_predispatch_borrow(
 
         assert carrier.calls == 0
         assert operation.active_stats == ()
-        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
         owner.close()
     finally:
         assert owner.close_local_delivery(Deadline.after(3))
@@ -554,7 +554,7 @@ def test_multiple_unfinished_single_file_outcomes_remain_distinct(
         )
         assert retained_outcomes[0] is not retained_outcomes[1]
         assert operation.active_stats == ()
-        rows = database.operations.list_lifecycle_obligations(owner.ownership)
+        rows = database.operations.list_pending_lifecycle_obligations(owner.ownership)
         assert len(rows) == 2
         assert all(row.state is LifecycleObligationState.POSSIBLE_EFFECT for row in rows)
         owner.seal_lifecycle_obligations()

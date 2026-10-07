@@ -57,6 +57,7 @@ from agentworks.vms.target_preparation import (
     prepare_managed_vm_target,
     prepare_managed_vm_target_from_platform,
 )
+from tests.execution._bound_carrier_support import obligation_receipt
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
@@ -1136,8 +1137,9 @@ def test_repository_release_failure_suppresses_prepared_target(
         owner.close()
     claim = database.operations.inspect(owner.ownership.scope)
     assert claim is not None and claim.ownership == owner.ownership
-    rows = owner.list_lifecycle_obligations()
-    assert len(rows) == 1 and (rows[0].state is LifecycleObligationState.RESOLVED) is committed
+    receipt_id = borrows[0]._dispatch_obligation_id  # noqa: SLF001
+    assert receipt_id is not None
+    assert (obligation_receipt(owner, receipt_id).state is LifecycleObligationState.RESOLVED) is committed
 
 
 @pytest.mark.parametrize("committed", [False, True])
@@ -1189,8 +1191,9 @@ def test_confirmation_error_and_release_error_preserve_guest_and_control_chain(
         owner.close()
     claim = database.operations.inspect(owner.ownership.scope)
     assert claim is not None and claim.ownership == owner.ownership
-    rows = owner.list_lifecycle_obligations()
-    assert len(rows) == 1 and (rows[0].state is LifecycleObligationState.RESOLVED) is committed
+    receipt_id = borrows[0]._dispatch_obligation_id  # noqa: SLF001
+    assert receipt_id is not None
+    assert (obligation_receipt(owner, receipt_id).state is LifecycleObligationState.RESOLVED) is committed
     assert resolution_calls == 1
 
 

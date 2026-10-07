@@ -309,8 +309,7 @@ class ProxmoxActivation:
     def _reconcile_locked(self) -> None:
         if not self._attempted:
             raise StateError("Proxmox activation has no registration attempt")
-        rows = self._owner.list_lifecycle_obligations()
-        row = next((row for row in rows if row.obligation_id == self._obligation_id), None)
+        row = self._owner.inspect_lifecycle_obligation(self._obligation_id)
         if row is None:
             raise StateError("Proxmox activation registration remains uncertain")
         if row.obligation_kind != OBLIGATION_KIND or row.payload_version != PAYLOAD_VERSION:

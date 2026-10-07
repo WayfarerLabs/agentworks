@@ -264,7 +264,7 @@ def test_bound_job_reads_share_one_lifetime_row(view, monkeypatch):
     for _ in range(3):
         access.run(Command(["/bin/true"]), profile=Protection.DIRECT)
         access.observe(reference)
-    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
+    rows = database.operations.list_pending_lifecycle_obligations(workflow.owner.ownership)
     assert len([row for row in rows if row.obligation_kind == "carrier-dispatch"]) == 1
     assert keeper.stop.calls == 0
     main.observe.response = lambda request: observation_tests._records(
@@ -314,7 +314,7 @@ def test_actual_file_calls_mix_with_lifetime_job_reads(view, tmp_path, monkeypat
         read = files.read_file(PurePosixPath(tmp_path / "data"), max_bytes=100)
         assert read is not None and read.data == b"mixed-file-bytes"
         access.observe(reference)
-    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
+    rows = database.operations.list_pending_lifecycle_obligations(workflow.owner.ownership)
     assert len([row for row in rows if row.obligation_kind == "carrier-dispatch"]) == 1
     assert keeper.stop.calls == 0
     workflow.close(cleanup_deadline=Deadline.after(5))
@@ -483,8 +483,8 @@ def test_known_terminated_lost_disposal_reply_reuses_exact_obligation(view):
     assert access.dispose(reference).disposed
     assert run.disposal_obligation_id == old_id
     assert main.observe.calls == 1 and keeper.stop.calls == 0
-    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
-    assert len([row for row in rows if row.obligation_kind == "managed-dispose"]) == 1
+    row = workflow.owner.inspect_lifecycle_obligation(old_id)
+    assert row is not None and row.state is LifecycleObligationState.RESOLVED
     workflow.close(cleanup_deadline=Deadline.after(5))
 
 
@@ -498,6 +498,8 @@ def test_disposal_clean_refusal_uses_new_row_on_later_explicit_attempt(view, ref
     reference = access.start(
         Command(["/bin/true"]), profile=Protection.MANAGED, lifetime=Lifetime.OPERATION, output=Output.discard()
     )
+    run = workflow.views.execution_operation.managed_runs[0]
+    old_id = run.disposal_obligation_id
     if refusal == "not-sent":
         main.dispose.dispatch = Dispatch.NOT_SENT
     elif refusal == "not-ready":
@@ -512,10 +514,11 @@ def test_disposal_clean_refusal_uses_new_row_on_later_explicit_attempt(view, ref
     main.dispose.dispatch = Dispatch.SENT
     main.dispose.response = disposal_tests._disposed
     main.dispose.refuse_validation = False
+    next_id = run.disposal_obligation_id
     assert access.dispose(reference).disposed
-    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
-    disposed_rows = [row for row in rows if row.obligation_kind == "managed-dispose"]
-    assert len(disposed_rows) == 2 and all(row.state is LifecycleObligationState.RESOLVED for row in disposed_rows)
+    assert next_id != old_id
+    disposed_rows = [workflow.owner.inspect_lifecycle_obligation(identity) for identity in (old_id, next_id)]
+    assert all(row is not None and row.state is LifecycleObligationState.RESOLVED for row in disposed_rows)
     assert main.observe.calls == 2
     workflow.close(cleanup_deadline=Deadline.after(5))
 
@@ -694,7 +697,7 @@ def test_read_lost_bookkeeping_reply_reuses_retained_lifetime_row(view, monkeypa
     operation = workflow.views.execution_operation
     operation.retry_inline_bookkeeping()
     access.observe(reference)
-    rows = database.operations.list_lifecycle_obligations(workflow.owner.ownership)
+    rows = database.operations.list_pending_lifecycle_obligations(workflow.owner.ownership)
     assert len([row for row in rows if row.obligation_kind == "carrier-dispatch"]) == 1
     assert main.observe.calls <= 2
     workflow.close(cleanup_deadline=Deadline.after(5))
@@ -826,7 +829,7 @@ def test_unknown_start_keeps_independent_debt_even_with_terminal_store(view):
     assert main.observe.calls == main.dispose.calls == 0
     with pytest.raises(StateError):
         workflow.close(cleanup_deadline=Deadline.after(2))
-    rows = workflow.owner.list_lifecycle_obligations()
+    rows = workflow.owner.list_pending_lifecycle_obligations()
     assert any(
         row.obligation_kind == "managed-start" and row.state is LifecycleObligationState.POSSIBLE_EFFECT for row in rows
     )

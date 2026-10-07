@@ -222,7 +222,7 @@ class _OriginatingDownloadCarrier(LocalCarrier):
     def execute(
         self, invocation: PreparedInvocation, *, io, deadline, custody: LocalDeliveryCustody | None = None
     ) -> CarrierReport:
-        rows = self._database.operations.list_lifecycle_obligations(self._owner.ownership)
+        rows = self._database.operations.list_pending_lifecycle_obligations(self._owner.ownership)
         assert len(rows) == 1 and rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
         call = decode_file_call_obligation(rows[0].payload)
         assert call.family is FileCallFamily.DOWNLOAD and call.token is not None
@@ -583,7 +583,7 @@ def _crash_recovery_controller(
     database = Database(Path(database_path))
     predecessor = database.operations.inspect(OperationScope(OperationResourceKind.VM, "download-vm"))
     assert predecessor is not None
-    persisted = database.operations.list_lifecycle_obligations(predecessor.ownership)[0]
+    persisted = database.operations.list_pending_lifecycle_obligations(predecessor.ownership)[0]
     call = decode_file_call_obligation(persisted.payload)
     token = call.token
     assert token is not None
@@ -693,7 +693,7 @@ def _possible_download(
         obligation_id="a" * 32,
     )
     obligation.mark_possible_effect()
-    return owner, call, database.operations.list_lifecycle_obligations(owner.ownership)[0]
+    return owner, call, database.operations.list_pending_lifecycle_obligations(owner.ownership)[0]
 
 
 def test_recovery_reconciles_then_persists_exact_debt_before_cleanup(
@@ -738,7 +738,7 @@ def test_recovery_reconciles_then_persists_exact_debt_before_cleanup(
         assert reconciled.observation is not None
         assert reconciled.observation.state is FileSnapshotObservationState.RECOVERED
 
-        row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
+        row = database.operations.list_pending_lifecycle_obligations(recovered.ownership)[0]
         retained = decode_file_call_obligation(row.payload)
         assert retained.scratch_cleanup_debt is not None
         recovered_again = hold_operation_owner(
@@ -752,13 +752,13 @@ def test_recovery_reconciles_then_persists_exact_debt_before_cleanup(
         )
         repeated = FileDownloadRecovery.open(recovered_again, target, row, repeated_evidence)
         repeated.reconcile(LocalCarrier(), deadline=Deadline.after(30))
-        same_debt = database.operations.list_lifecycle_obligations(recovered_again.ownership)[0]
+        same_debt = database.operations.list_pending_lifecycle_obligations(recovered_again.ownership)[0]
         assert same_debt.payload_revision == row.payload_revision
         cleaned = repeated.cleanup(LocalCarrier(), deadline=Deadline.after(30))
         assert cleaned.observation is not None
         assert cleaned.observation.state is FileSnapshotObservationState.CLEANED
         assert not tuple(scratch.iterdir())
-        assert database.operations.list_lifecycle_obligations(recovered_again.ownership)[0].state is (
+        assert database.operations.list_pending_lifecycle_obligations(recovered_again.ownership)[0].state is (
             LifecycleObligationState.POSSIBLE_EFFECT
         )
     finally:
@@ -778,7 +778,7 @@ def test_download_recovery_settle_interruption_releases_local_dispatch(
     owner, call, _ = _possible_download(database, root, _target(), _plan())
     try:
         recovered = hold_operation_owner(OperationOwner.recover(database.operations, owner.ownership, "b" * 32))
-        row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
+        row = database.operations.list_pending_lifecycle_obligations(recovered.ownership)[0]
         evidence = _local_drain_evidence(
             recovered.ownership, row, call, (_LocalHelperDrainRecord("previous-helper", exited=True),)
         )
@@ -795,7 +795,7 @@ def test_download_recovery_settle_interruption_releases_local_dispatch(
         monkeypatch.setattr(RecoveryAttempt, "settle", original_settle)
         assert recovery.reconcile(LocalCarrier(), deadline=Deadline.after(30)).observation is not None
         assert (
-            database.operations.list_lifecycle_obligations(recovered.ownership)[0].state
+            database.operations.list_pending_lifecycle_obligations(recovered.ownership)[0].state
             is LifecycleObligationState.POSSIBLE_EFFECT
         )
     finally:
@@ -829,7 +829,7 @@ def test_spawned_controller_loss_after_helper_completion_keeps_download_recovera
         scope = OperationScope(OperationResourceKind.VM, "download-vm")
         predecessor = database.operations.inspect(scope)
         assert predecessor is not None
-        persisted = database.operations.list_lifecycle_obligations(predecessor.ownership)[0]
+        persisted = database.operations.list_pending_lifecycle_obligations(predecessor.ownership)[0]
         call = decode_file_call_obligation(persisted.payload)
         assert persisted.state is LifecycleObligationState.POSSIBLE_EFFECT
         assert call.family is FileCallFamily.DOWNLOAD and call.token is not None
@@ -849,7 +849,7 @@ def test_spawned_controller_loss_after_helper_completion_keeps_download_recovera
         cleaned = recovery.cleanup(LocalCarrier(), deadline=Deadline.after(30))
         assert cleaned.observation is not None
         assert cleaned.observation.state is FileSnapshotObservationState.CLEANED
-        assert database.operations.list_lifecycle_obligations(recovered.ownership)[0].state is (
+        assert database.operations.list_pending_lifecycle_obligations(recovered.ownership)[0].state is (
             LifecycleObligationState.POSSIBLE_EFFECT
         )
     finally:
@@ -878,7 +878,7 @@ def test_spawned_live_helper_blocks_download_recovery_until_it_disappears(hold_o
     try:
         predecessor = database.operations.inspect(OperationScope(OperationResourceKind.VM, "download-vm"))
         assert predecessor is not None
-        persisted = database.operations.list_lifecycle_obligations(predecessor.ownership)[0]
+        persisted = database.operations.list_pending_lifecycle_obligations(predecessor.ownership)[0]
         call = decode_file_call_obligation(persisted.payload)
         assert persisted.state is LifecycleObligationState.POSSIBLE_EFFECT
         assert call.family is FileCallFamily.DOWNLOAD and call.token is not None
@@ -900,7 +900,7 @@ def test_spawned_live_helper_blocks_download_recovery_until_it_disappears(hold_o
     try:
         predecessor = database.operations.inspect(OperationScope(OperationResourceKind.VM, "download-vm"))
         assert predecessor is not None
-        persisted = database.operations.list_lifecycle_obligations(predecessor.ownership)[0]
+        persisted = database.operations.list_pending_lifecycle_obligations(predecessor.ownership)[0]
         call = decode_file_call_obligation(persisted.payload)
         assert call.token is not None
         completed_records = _drain_records_from_journal(journal_path, call.token)
@@ -955,7 +955,7 @@ def test_spawned_recovery_crash_retains_persisted_debt_for_the_next_generation(
     try:
         predecessor = database.operations.inspect(OperationScope(OperationResourceKind.VM, "download-vm"))
         assert predecessor is not None
-        persisted = database.operations.list_lifecycle_obligations(predecessor.ownership)[0]
+        persisted = database.operations.list_pending_lifecycle_obligations(predecessor.ownership)[0]
         call = decode_file_call_obligation(persisted.payload)
         assert call.scratch_cleanup_debt is not None
         token = call.token
@@ -976,7 +976,7 @@ def test_spawned_recovery_crash_retains_persisted_debt_for_the_next_generation(
         )
         assert cleaned.observation is not None
         assert cleaned.observation.state is FileSnapshotObservationState.CLEANED
-        assert database.operations.list_lifecycle_obligations(recovered.ownership)[0].state is (
+        assert database.operations.list_pending_lifecycle_obligations(recovered.ownership)[0].state is (
             LifecycleObligationState.POSSIBLE_EFFECT
         )
     finally:
@@ -1049,7 +1049,7 @@ def test_gated_recovery_of_recovery_retries_interrupted_exact_cleanup(
         try:
             predecessor = database.operations.inspect(OperationScope(OperationResourceKind.VM, "download-vm"))
             assert predecessor is not None
-            persisted = database.operations.list_lifecycle_obligations(predecessor.ownership)[0]
+            persisted = database.operations.list_pending_lifecycle_obligations(predecessor.ownership)[0]
             call_b = decode_file_call_obligation(persisted.payload)
             debt = call_b.scratch_cleanup_debt
             token = call_b.token
@@ -1068,7 +1068,7 @@ def test_gated_recovery_of_recovery_retries_interrupted_exact_cleanup(
             pending = _publish_gate_binding(recovered_c, persisted, proposed)
             with pytest.raises(FileEffectGateError):
                 advance_file_effect_gate(proposed, lambda: _GUEST, expires_at=time.monotonic() + 0.2)
-            still_pending = database.operations.list_lifecycle_obligations(recovered_c.ownership)[0]
+            still_pending = database.operations.list_pending_lifecycle_obligations(recovered_c.ownership)[0]
             assert still_pending == pending
             assert decode_file_call_obligation(still_pending.payload).scratch_cleanup_debt == debt
             assert (scratch_directory / "receipt").is_file()
@@ -1121,7 +1121,7 @@ def test_gated_recovery_of_recovery_retries_interrupted_exact_cleanup(
             assert reconciled.observation is not None
             assert reconciled.observation.state is FileSnapshotObservationState.RECOVERED
             assert reconciled.observation.cleanup_debt == debt
-            retained = database.operations.list_lifecycle_obligations(recovered_c.ownership)[0]
+            retained = database.operations.list_pending_lifecycle_obligations(recovered_c.ownership)[0]
             assert decode_file_call_obligation(retained.payload).scratch_cleanup_debt == debt
             cleaned = recovery.cleanup(
                 _JournalCarrier(str(journal_path), token, "FileSnapshotCleanupRequest"),
@@ -1130,7 +1130,7 @@ def test_gated_recovery_of_recovery_retries_interrupted_exact_cleanup(
             assert cleaned.observation is not None
             assert cleaned.observation.state is FileSnapshotObservationState.CLEANED
             assert not tuple(scratch.iterdir())
-            final = database.operations.list_lifecycle_obligations(recovered_c.ownership)[0]
+            final = database.operations.list_pending_lifecycle_obligations(recovered_c.ownership)[0]
             assert final.state is LifecycleObligationState.POSSIBLE_EFFECT
             assert decode_file_call_obligation(final.payload).scratch_cleanup_debt == debt
             journal = [json.loads(line) for line in journal_path.read_text(encoding="ascii").splitlines()]
@@ -1369,7 +1369,7 @@ def test_stale_recovery_dispatch_never_calls_the_carrier_and_allows_current_rebi
         with pytest.raises(StateError):
             recovery.reconcile(carrier, deadline=Deadline.after(30))
         assert carrier.calls == 0
-        current = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
+        current = database.operations.list_pending_lifecycle_obligations(recovered.ownership)[0]
         FileDownloadRecovery.open(
             recovered,
             target,
@@ -1428,7 +1428,7 @@ def test_interrupted_recovery_attempt_before_return_releases_current_custody(
             payload_version=persisted.payload_version,
             payload=persisted.payload,
         )
-        current = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
+        current = database.operations.list_pending_lifecycle_obligations(recovered.ownership)[0]
         FileDownloadRecovery.open(
             recovered,
             target,
@@ -1508,7 +1508,7 @@ def test_interruption_after_attempt_return_retains_uncertain_custody(
             recovered.close()
 
         successor = hold_operation_owner(OperationOwner.recover(database.operations, recovered.ownership, "c" * 32))
-        current = database.operations.list_lifecycle_obligations(successor.ownership)[0]
+        current = database.operations.list_pending_lifecycle_obligations(successor.ownership)[0]
         FileDownloadRecovery.open(
             successor,
             target,
@@ -1577,7 +1577,7 @@ def test_recovery_dispatch_refuses_competing_payload_before_carrier_entry(
 
         def execute(invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None):
             carrier.validate(invocation, io=io)
-            seen_rows.append(database.operations.list_lifecycle_obligations(recovered.ownership)[0])
+            seen_rows.append(database.operations.list_pending_lifecycle_obligations(recovered.ownership)[0])
             return original_execute(invocation, io=io, deadline=deadline)
 
         monkeypatch.setattr(carrier, "execute", execute)
@@ -1586,7 +1586,7 @@ def test_recovery_dispatch_refuses_competing_payload_before_carrier_entry(
         admitted = replace(persisted, ownership=recovered.ownership)
         assert carrier.calls == 1
         assert seen_rows == [admitted]
-        assert database.operations.list_lifecycle_obligations(recovered.ownership)[0] == admitted
+        assert database.operations.list_pending_lifecycle_obligations(recovered.ownership)[0] == admitted
     finally:
         database.close()
 
@@ -1643,7 +1643,7 @@ def test_cleanup_debt_commit_then_lost_reply_adopts_exact_row_and_rethrows(
         monkeypatch.setattr(OwnerLifecycleObligation, "publish_payload", commit_then_lose_reply)
         with pytest.raises(_LostReply):
             recovery.reconcile(LocalCarrier(), deadline=Deadline.after(30))
-        row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
+        row = database.operations.list_pending_lifecycle_obligations(recovered.ownership)[0]
         assert row.payload_revision == persisted.payload_revision + 1
         assert recovery._persisted == row  # noqa: SLF001
         assert recovery._call.scratch_cleanup_debt is not None  # noqa: SLF001
@@ -1793,7 +1793,7 @@ def test_cleanup_debt_lost_reply_without_exact_row_preserves_original_state(
             recovery._persist_cleanup_debt(debt)  # noqa: SLF001
         assert recovery._persisted == persisted  # noqa: SLF001
         assert recovery._call == call  # noqa: SLF001
-        row = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
+        row = database.operations.list_pending_lifecycle_obligations(recovered.ownership)[0]
         if publish == "no-commit":
             assert row.payload == persisted.payload
             assert row.payload_revision == persisted.payload_revision
@@ -1869,7 +1869,7 @@ guest._operate=_fixture_failure_after_reconcile
         assert result.observation is not None
         assert result.observation.failure is not None
         assert result.observation.failure.cleanup_debt is not None
-        retained = database.operations.list_lifecycle_obligations(recovered.ownership)[0]
+        retained = database.operations.list_pending_lifecycle_obligations(recovered.ownership)[0]
         assert (
             decode_file_call_obligation(retained.payload).scratch_cleanup_debt
             == result.observation.failure.cleanup_debt

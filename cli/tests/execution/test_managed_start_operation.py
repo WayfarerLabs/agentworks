@@ -64,7 +64,7 @@ from agentworks.execution.carrier import (
     Retention,
     SinkOutput,
 )
-from agentworks.operations import OperationBorrow, OperationOwner, _PreRegistrationClosingRefusal
+from agentworks.operations import OperationBorrow, OperationOwner, _PreRegistrationRefusal
 
 RUN = ManagedRunIdentity("a" * 32)
 OBLIGATION = "b" * 32
@@ -108,7 +108,7 @@ def test_operation_start_requires_actual_operation_owner(owned) -> None:
                 owner=owner,
                 obligation_id=OBLIGATION,
             )
-        assert carrier.calls == 0 and owner.list_lifecycle_obligations() == ()
+        assert carrier.calls == 0 and owner.list_pending_lifecycle_obligations() == ()
         assert repository.inspect(identity) == record
     finally:
         prepared.discard()
@@ -261,7 +261,7 @@ def test_pre_dispatch_refusal_keeps_armed_obligation_and_reserved_run(
     observed: list[LifecycleObligationState] = []
 
     def refuse_after_arm() -> None:
-        rows = database.operations.list_lifecycle_obligations(owner.ownership)
+        rows = database.operations.list_pending_lifecycle_obligations(owner.ownership)
         observed.append(rows[0].state)
         assert repository.inspect(record.identity).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
         assert carrier.calls == 0
@@ -315,7 +315,7 @@ def test_preparation_precedes_reservation_and_binds_owned_start(tmp_path: Path) 
         with pytest.raises(ValidationError):
             prepare_managed_start(unsupported, RUN, spec, policy, request, plan, deadline, runtime, GUEST)
         assert repository.inspect(RUN) is None
-        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
         assert carrier.calls == unsupported.calls == 0
 
         prepared = prepare_managed_start(carrier, RUN, spec, policy, request, plan, deadline, runtime, GUEST)
@@ -326,7 +326,7 @@ def test_preparation_precedes_reservation_and_binds_owned_start(tmp_path: Path) 
             start_owned_managed_run(
                 repository, wrong, carrier, prepared=prepared, deadline=deadline, owner=owner, obligation_id=OBLIGATION
             )
-        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
         outcome = start_owned_managed_run(
             repository, record, carrier, prepared=prepared, deadline=deadline, owner=owner, obligation_id=OBLIGATION
         )
@@ -379,7 +379,7 @@ def test_preparation_can_be_discarded_after_reservation_failure(tmp_path: Path) 
                 owner=owner,
                 obligation_id=OBLIGATION,
             )
-        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
         assert carrier.calls == 0
     finally:
         database.close()
@@ -414,7 +414,7 @@ def test_deadline_expiring_between_preparation_and_claim_refuses_before_borrow(
             obligation_id=OBLIGATION,
         )
     prepared.discard()
-    assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+    assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
     assert carrier.calls == 0
 
@@ -429,11 +429,11 @@ def test_confirmed_receipt_hands_off_to_resource_owned_run(
     assert outcome.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
     assert not outcome.requires_owner_retention
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RECEIPT_CONFIRMED  # type: ignore[union-attr]
-    rows = database.operations.list_lifecycle_obligations(owner.ownership)
-    assert len(rows) == 1 and rows[0].state is LifecycleObligationState.RESOLVED
-    assert rows[0].payload == encode_managed_start_obligation(RUN.run_id)
-    assert decode_managed_start_obligation(rows[0].payload) == RUN
-    assert b"private-canary" not in rows[0].payload
+    row = owner.inspect_lifecycle_obligation(OBLIGATION)
+    assert row is not None and row.state is LifecycleObligationState.RESOLVED
+    assert row.payload == encode_managed_start_obligation(RUN.run_id)
+    assert decode_managed_start_obligation(row.payload) == RUN
+    assert b"private-canary" not in row.payload
     assert b"private-canary" not in repr(outcome).encode()
 
 
@@ -453,7 +453,7 @@ def test_wrong_vm_scope_refuses_before_borrow(
     carrier = Carrier(lambda request: _records(request, receipt=True))
     with pytest.raises(ValidationError):
         _start(owned, carrier, owner=wrong)
-    assert not database.operations.list_lifecycle_obligations(wrong.ownership)
+    assert not database.operations.list_pending_lifecycle_obligations(wrong.ownership)
     assert repository.inspect(record.identity).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
     assert carrier.calls == 0
 
@@ -475,7 +475,8 @@ def test_interrupted_registration_after_return_resolves_unused_row(
     assert isinstance(caught.value.__cause__, ManagedStartControlFact)
     assert not caught.value.__cause__.outcome.requires_owner_retention
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
-    assert database.operations.list_lifecycle_obligations(owner.ownership)[0].state is LifecycleObligationState.RESOLVED
+    row = owner.inspect_lifecycle_obligation(OBLIGATION)
+    assert row is not None and row.state is LifecycleObligationState.RESOLVED
     assert carrier.calls == 0
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
@@ -495,10 +496,10 @@ def test_owner_close_before_registration_releases_unused_borrow(
         return original(self, *args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(OperationBorrow, "install_dispatch_obligation", close_before_install)
-    with pytest.raises(_PreRegistrationClosingRefusal):
+    with pytest.raises(_PreRegistrationRefusal):
         _start(owned, carrier)
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
-    assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+    assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
     assert carrier.calls == 0
     owner.close()
 
@@ -538,7 +539,8 @@ def test_owner_close_after_registration_before_arming_resolves_unused_row(
     assert isinstance(caught.value.__cause__, ManagedStartControlFact)
     assert not caught.value.__cause__.outcome.requires_owner_retention
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
-    assert database.operations.list_lifecycle_obligations(owner.ownership)[0].state is LifecycleObligationState.RESOLVED
+    row = owner.inspect_lifecycle_obligation(OBLIGATION)
+    assert row is not None and row.state is LifecycleObligationState.RESOLVED
     assert carrier.calls == 0
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
@@ -564,7 +566,8 @@ def test_deadline_expiring_during_registration_resolves_unused_obligation(
     assert isinstance(caught.value.__cause__, ManagedStartControlFact)
     assert not caught.value.__cause__.outcome.requires_owner_retention
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
-    assert database.operations.list_lifecycle_obligations(owner.ownership)[0].state is LifecycleObligationState.RESOLVED
+    row = owner.inspect_lifecycle_obligation(OBLIGATION)
+    assert row is not None and row.state is LifecycleObligationState.RESOLVED
     assert carrier.calls == 0
     owner.seal_lifecycle_obligations()
     owner.record_effects_resolved()
@@ -579,7 +582,7 @@ def test_invalid_obligation_id_releases_unused_borrow(
     with pytest.raises(ValueError):
         _start(owned, carrier, obligation_id="invalid")
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
-    assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+    assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
     assert carrier.calls == 0
     owner.close()
 
@@ -603,7 +606,7 @@ def test_commit_uncertain_arming_hands_off_actual_possible_effect(
     assert caught.value.__cause__.outcome.requires_owner_retention
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
     assert (
-        database.operations.list_lifecycle_obligations(owner.ownership)[0].state
+        database.operations.list_pending_lifecycle_obligations(owner.ownership)[0].state
         is LifecycleObligationState.POSSIBLE_EFFECT
     )
     assert carrier.calls == 0
@@ -629,7 +632,7 @@ def test_interrupted_admission_keeps_possible_effect(
     assert caught.value.__cause__.outcome.requires_owner_retention
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
     assert (
-        database.operations.list_lifecycle_obligations(owner.ownership)[0].state
+        database.operations.list_pending_lifecycle_obligations(owner.ownership)[0].state
         is LifecycleObligationState.POSSIBLE_EFFECT
     )
     assert carrier.calls == 0
@@ -657,7 +660,7 @@ def test_outcome_allocation_failure_keeps_confirmed_dispatch_custody(
     assert caught.value.__cause__.outcome.requires_owner_retention
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RECEIPT_CONFIRMED  # type: ignore[union-attr]
     assert (
-        database.operations.list_lifecycle_obligations(owner.ownership)[0].state
+        database.operations.list_pending_lifecycle_obligations(owner.ownership)[0].state
         is LifecycleObligationState.POSSIBLE_EFFECT
     )
     assert carrier.calls == 1
@@ -683,7 +686,7 @@ def test_deadline_after_admission_hands_off_without_carrier_attempt(
     assert outcome.launch_state is ManagedLaunchState.POSSIBLE_DISPATCH
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.POSSIBLE_DISPATCH  # type: ignore[union-attr]
     assert (
-        database.operations.list_lifecycle_obligations(owner.ownership)[0].state
+        database.operations.list_pending_lifecycle_obligations(owner.ownership)[0].state
         is LifecycleObligationState.POSSIBLE_EFFECT
     )
     assert carrier.calls == 0
@@ -699,7 +702,7 @@ def test_settled_carrier_without_receipt_retains_effect(
     assert outcome.launch_state is ManagedLaunchState.POSSIBLE_DISPATCH
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.POSSIBLE_DISPATCH  # type: ignore[union-attr]
     assert (
-        database.operations.list_lifecycle_obligations(owner.ownership)[0].state
+        database.operations.list_pending_lifecycle_obligations(owner.ownership)[0].state
         is LifecycleObligationState.POSSIBLE_EFFECT
     )
     assert carrier.calls == 1
@@ -716,7 +719,7 @@ def test_unfinished_carrier_retains_outstanding_attempt(
     assert outcome.launch_state is ManagedLaunchState.POSSIBLE_DISPATCH
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.POSSIBLE_DISPATCH  # type: ignore[union-attr]
     assert (
-        database.operations.list_lifecycle_obligations(owner.ownership)[0].state
+        database.operations.list_pending_lifecycle_obligations(owner.ownership)[0].state
         is LifecycleObligationState.POSSIBLE_EFFECT
     )
     assert carrier.calls == 1
@@ -742,7 +745,7 @@ def test_preflight_refusal_leaves_reservation(
     with pytest.raises(ValidationError):
         _start(owned, carrier, request=bad)
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.RESERVED  # type: ignore[union-attr]
-    assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+    assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
     assert carrier.calls == 0
 
 
@@ -758,7 +761,7 @@ def test_escaping_carrier_retains_outstanding_attempt(
     assert b"private-canary" not in repr(caught.value.__cause__.outcome).encode()
     assert repository.inspect(RUN).launch_state is ManagedLaunchState.POSSIBLE_DISPATCH  # type: ignore[union-attr]
     assert (
-        database.operations.list_lifecycle_obligations(owner.ownership)[0].state
+        database.operations.list_pending_lifecycle_obligations(owner.ownership)[0].state
         is LifecycleObligationState.POSSIBLE_EFFECT
     )
     assert carrier.calls == 1

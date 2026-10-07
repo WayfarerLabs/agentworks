@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.capabilities.base import ScopeLevel
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
-from agentworks.db import LifecycleObligationState, OperationClaimState, OperationResourceKind, VMStatus
+from agentworks.db import OperationClaimState, OperationResourceKind, VMStatus
 from agentworks.errors import StateError, ValidationError
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._recovery_guest_preparation import RecoveryGuestPreparationBatch
@@ -257,8 +257,10 @@ class RecoveryVMSpan:
             if not isinstance(self._platform, WSL2Platform):
                 raise StateError("Recovery VM span is unavailable on this platform")
             vm = self._fresh_vm(deadline)
-            rows = self._owner.list_lifecycle_obligations()
-            if any(row.obligation_id in (self._hold_id, self._preparation_id) for row in rows):
+            if any(
+                self._owner.inspect_lifecycle_obligation(identity) is not None
+                for identity in (self._hold_id, self._preparation_id)
+            ):
                 raise StateError("Recovery span support identifiers must be fresh")
             self._selected = WSL2OwnedOperation.from_platform(
                 vm,
@@ -431,11 +433,8 @@ class RecoveryVMSpan:
             if hold.payload is None and never_created:
                 self._closed = True
                 return
-            rows = self._owner.list_lifecycle_obligations()
-            if not never_created and any(
-                row.obligation_id != self._hold_id and row.state is not LifecycleObligationState.RESOLVED
-                for row in rows
-            ):
+            rows = self._owner.list_pending_lifecycle_obligations()
+            if not never_created and any(row.obligation_id != self._hold_id for row in rows):
                 raise StateError("Recovery span retains unsettled operation debt")
             released = hold.release(deadline)
             if not released.local.settled or not (

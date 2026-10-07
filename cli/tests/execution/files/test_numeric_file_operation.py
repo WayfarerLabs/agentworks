@@ -117,7 +117,7 @@ def _context(tmp_path: Path, *, numeric: bool = True) -> tuple[Database, Operati
 def _row(
     database: Database, owner: OperationOwner, *, version: int = 2, body: IdentityPlan = _BODY
 ) -> FileCallObligation:
-    (row,) = database.operations.list_lifecycle_obligations(owner.ownership)
+    (row,) = database.operations.list_pending_lifecycle_obligations(owner.ownership)
     record = decode_file_call_obligation(row.payload)
     assert row.payload_version == record.payload_version == version
     assert record.bootstrap == (_BOOTSTRAP if version == 2 else None)
@@ -278,7 +278,7 @@ def test_constructor_refuses_inapplicable_context_without_obligations(
     owner = OperationOwner.acquire(database.operations, OperationScope(kind, "wrong"), "files")
     with pytest.raises(ValidationError):
         FileOperation(owner, target_for_owner(owner), bootstrap=_BOOTSTRAP)
-    assert not database.operations.list_lifecycle_obligations(owner.ownership)
+    assert not database.operations.list_pending_lifecycle_obligations(owner.ownership)
     owner.close()
 
 
@@ -356,7 +356,7 @@ def test_invalid_aggregate_refuses_before_registration_and_source(tmp_path: Path
     with pytest.raises(ValidationError):
         operation.upload(carrier, source=source, size=7, condition=Replace(), create_metadata=new_metadata(), **common)
     assert source.calls == carrier.calls == 0
-    assert not database.operations.list_lifecycle_obligations(owner.ownership)
+    assert not database.operations.list_pending_lifecycle_obligations(owner.ownership)
     owner.close()
 
 

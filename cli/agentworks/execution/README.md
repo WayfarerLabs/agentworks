@@ -252,6 +252,12 @@ obligation, replacing the generic carrier row rather than adding a second row. U
 bind their scratch token in the initial payload. JSON uses one parent row without a token, then
 publishes the child token and bounded attempt before nested upload dispatch.
 
+Completed calls leave immutable receipts, not pending debt, so serial ordinary calls do not consume
+the 128 unfinished-obligation capacity through their history. Exact current-owner absence after a
+failed registration permits cleanup of its never-dispatched borrow; uncertain receipt or helper
+custody remains attached. Managed starts use the same core rule for their keeper and start
+admission.
+
 The private `FileOperation.upload_package` path accepts 1 to 4,096 upload members under one serial
 borrow and one `file-call` row. The row carries only the current child's path, token, index and
 bounded recovery facts. It replaces that identity by expected-revision publication before the next
@@ -263,8 +269,9 @@ already passed their checkpoints. The caller owns its original plan and partial 
 originating path is not wired to artifact publication. A private package takeover adapter can now
 advance an exact bound guest gate for the retained child, but it does not reconcile or clean that
 child. Native mutation-path coverage, predecessor-controller and non-gated effect evidence, and
-application-checkpoint reconciliation remain necessary before package recovery or the
-ledger-capacity migration gate can settle.
+application-checkpoint reconciliation remain necessary before package recovery can settle. The
+one-row package path provides serial checkpoint custody, not a workaround for completed-call
+history.
 
 Retained recovery facts and cleanup debt are published before the borrow is handed off; a clean,
 quiescent row resolves. Payloads carry lifecycle evidence only. They exclude file or JSON content,

@@ -242,7 +242,7 @@ class WSL2OwnedOperation:
         identity = ready.identity
         if obligation is None or identity is None:
             return False
-        rows = self.owner.list_lifecycle_obligations()
+        rows = self.owner.list_pending_lifecycle_obligations()
         for row in rows:
             if (
                 row.obligation_id != obligation.obligation_id

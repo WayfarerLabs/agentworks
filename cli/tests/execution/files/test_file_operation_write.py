@@ -61,6 +61,7 @@ from agentworks.execution.carrier import (
 )
 from agentworks.execution.files import FileFailureReason, FileOperationPhase
 from agentworks.operations import LifecycleObligation, OperationBorrow, OperationOwner
+from tests.execution._bound_carrier_support import obligation_receipt
 from tests.execution.files._file_publication_support import LocalCarrier
 from tests.execution.files._file_publication_support import install_fixture_bundle as install_publication_bundle
 from tests.execution.files._file_read_support import install_fixture_bundle as install_read_bundle
@@ -196,6 +197,7 @@ class ObligationInspectingCarrier:
         self._owner = owner
         self._inner = LocalCarrier()
         self.payloads: list[FileCallObligation] = []
+        self.receipt_ids: set[str] = set()
 
     @property
     def features(self) -> ChannelFeatures:
@@ -213,9 +215,10 @@ class ObligationInspectingCarrier:
         custody: LocalDeliveryCustody | None = None,
     ) -> CarrierReport:
         self.validate(invocation, io=io)
-        rows = self._database.operations.list_lifecycle_obligations(self._owner.ownership)
+        rows = self._database.operations.list_pending_lifecycle_obligations(self._owner.ownership)
         assert len(rows) == 1
         assert rows[0].obligation_kind == "file-call"
+        self.receipt_ids.add(rows[0].obligation_id)
         self.payloads.append(decode_file_call_obligation(rows[0].payload))
         return self._inner.execute(invocation, io=io, deadline=deadline, custody=custody)
 
@@ -372,9 +375,9 @@ def test_upload_installs_one_tokenized_file_call_before_dispatch_and_resolves_it
         assert carrier.payloads
         assert all(payload.family is FileCallFamily.UPLOAD for payload in carrier.payloads)
         assert all(payload.token == outcome.token for payload in carrier.payloads)
-        rows = database.operations.list_lifecycle_obligations(owner.ownership)
-        assert len(rows) == 1
-        assert rows[0].state is LifecycleObligationState.RESOLVED
+        assert owner.list_pending_lifecycle_obligations() == ()
+        (receipt_id,) = carrier.receipt_ids
+        assert obligation_receipt(owner, receipt_id).state is LifecycleObligationState.RESOLVED
         owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
@@ -426,9 +429,9 @@ def test_json_replaces_its_tokenless_file_call_payload_before_child_dispatch(
         assert len(attempts) == len(carrier.payloads[1:])
         assert attempts == sorted(attempts)
         assert all(1 <= attempt <= 8 for attempt in attempts)
-        rows = database.operations.list_lifecycle_obligations(owner.ownership)
-        assert len(rows) == 1
-        assert rows[0].state is LifecycleObligationState.RESOLVED
+        assert owner.list_pending_lifecycle_obligations() == ()
+        (receipt_id,) = carrier.receipt_ids
+        assert obligation_receipt(owner, receipt_id).state is LifecycleObligationState.RESOLVED
         owner.seal_lifecycle_obligations()
         owner.record_effects_resolved()
         owner.close()
@@ -472,7 +475,7 @@ def test_registration_started_interruption_keeps_the_attached_upload_and_owner_b
             _upload(operation, root, plan, BytesSource(b"interrupted"))
 
         assert len(operation.active_uploads) == 1
-        assert len(database.operations.list_lifecycle_obligations(owner.ownership)) == 1
+        assert len(database.operations.list_pending_lifecycle_obligations(owner.ownership)) == 1
         with pytest.raises(StateError):
             owner.borrow()
     finally:
@@ -517,7 +520,7 @@ def test_close_requested_before_install_releases_unregistered_active_upload(
 
         assert carrier.calls == 0
         assert operation.active_uploads == ()
-        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
         owner.close()
         assert database.operations.inspect(owner.ownership.scope) is None
     finally:
@@ -565,7 +568,7 @@ def test_failed_pre_registration_cleanup_keeps_the_active_upload(
             _upload(operation, root, plan, BytesSource(b"unreleased"))
 
         assert len(operation.active_uploads) == 1
-        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
     finally:
         assert owner.close_local_delivery(Deadline.after(3))
         database.close()
@@ -819,7 +822,7 @@ def test_upload_and_json_admission_overflow_closes_predispatch_borrows(
         assert upload_carrier.calls == json_carrier.calls == 0
         assert operation.active_uploads == ()
         assert operation.active_json_updates == ()
-        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
         owner.close()
     finally:
         assert owner.close_local_delivery(Deadline.after(3))

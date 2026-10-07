@@ -29,6 +29,7 @@ from agentworks.execution._managed_runs import (
 )
 from agentworks.execution._managed_start_operation import encode_managed_start_obligation
 from agentworks.execution.carrier import Dispatch
+from tests.execution._bound_carrier_support import obligation_receipt
 
 from .test_managed_disposal import ExchangeCarrier, _disposed, _records
 from .test_managed_observe_access import GUEST, RUN, TARGET, _options, _reserved
@@ -110,7 +111,7 @@ def test_preborrow_refusal_does_not_install_or_call_carrier(
             _dispose(repository, owner, carrier, **changes)
         assert borrow_calls == 0
         assert carrier.calls == 0
-        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
     finally:
         database.close()
 
@@ -134,7 +135,7 @@ def test_validated_response_resolves_temporary_obligation_without_changing_run(
         assert not outcome.pending_remote_effects
         assert carrier.calls == 1
         assert repository.inspect(RUN) == row
-        (obligation,) = database.operations.list_lifecycle_obligations(owner.ownership)
+        obligation = obligation_receipt(owner, OBLIGATION_ID)
         assert obligation.obligation_id == OBLIGATION_ID
         assert obligation.obligation_kind == MANAGED_DISPOSAL_OBLIGATION_KIND
         assert obligation.state is LifecycleObligationState.RESOLVED
@@ -152,7 +153,7 @@ def test_not_sent_resolves_without_disposal_claim(tmp_path: Path) -> None:
         assert outcome.state is None
         assert outcome.candidate is not None and outcome.candidate.dispatch is Dispatch.NOT_SENT
         assert not outcome.requires_owner_retention
-        (obligation,) = database.operations.list_lifecycle_obligations(owner.ownership)
+        obligation = obligation_receipt(owner, OBLIGATION_ID)
         assert obligation.state is LifecycleObligationState.RESOLVED
     finally:
         database.close()
@@ -182,7 +183,7 @@ def test_uncertain_or_failed_delivery_keeps_exact_disposal_obligation(tmp_path: 
         assert outcome.pending_remote_effects
         assert carrier.calls == 1
         assert repository.inspect(RUN) == row
-        (obligation,) = database.operations.list_lifecycle_obligations(owner.ownership)
+        obligation = obligation_receipt(owner, OBLIGATION_ID)
         assert obligation.state is LifecycleObligationState.POSSIBLE_EFFECT
         assert decode_managed_disposal_obligation(obligation.payload) == RUN
     finally:
@@ -206,7 +207,7 @@ def test_failed_pure_validation_resolves_unarmed_obligation(tmp_path: Path, monk
         assert isinstance(failure.__cause__, ManagedDisposalControlFact)
         assert not failure.__cause__.outcome.requires_owner_retention
         assert carrier.calls == 0
-        (obligation,) = database.operations.list_lifecycle_obligations(owner.ownership)
+        obligation = obligation_receipt(owner, OBLIGATION_ID)
         assert obligation.state is LifecycleObligationState.RESOLVED
     finally:
         database.close()
@@ -236,7 +237,7 @@ def test_commit_then_interrupted_begin_attempt_keeps_original_control_and_possib
         assert failure.__cause__.outcome.pending_remote_effects
         assert carrier.calls == 0
         assert carrier.validations >= 1
-        (obligation,) = database.operations.list_lifecycle_obligations(owner.ownership)
+        obligation = obligation_receipt(owner, OBLIGATION_ID)
         assert obligation.state is LifecycleObligationState.POSSIBLE_EFFECT
     finally:
         database.close()

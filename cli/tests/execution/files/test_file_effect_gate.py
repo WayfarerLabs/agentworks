@@ -228,7 +228,7 @@ def test_binding_codec_and_exact_file_call_row_survive_reopen(tmp_path: Path) ->
             payload=encode_file_call_obligation(call),
             obligation_id="a" * 32,
         )
-        row = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+        row = database.operations.list_pending_lifecycle_obligations(owner.ownership)[0]
         assert decode_file_call_obligation(row.payload).effect_gate == binding
         proposed = replace(binding, proposed_generation=secrets.token_bytes(16))
         assert decode_file_effect_gate(encode_file_effect_gate(proposed)) == proposed
@@ -640,7 +640,7 @@ def test_fixed_snapshot_survives_controller_loss_and_is_fenced_before_recovery(
         try:
             predecessor = database.operations.inspect(OperationScope(OperationResourceKind.VM, "gate-vm"))
             assert predecessor is not None
-            row = database.operations.list_lifecycle_obligations(predecessor.ownership)[0]
+            row = database.operations.list_pending_lifecycle_obligations(predecessor.ownership)[0]
             call = decode_file_call_obligation(row.payload)
             assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
             assert call.effect_gate == binding and call.token is not None
@@ -670,7 +670,7 @@ def test_fixed_snapshot_survives_controller_loss_and_is_fenced_before_recovery(
             assert advanced is not None
             # Simulate an acknowledgment lost after the guest committed.
             assert advance_file_effect_gate(proposed, _observe_guest) == advanced
-            pending_row = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+            pending_row = database.operations.list_pending_lifecycle_obligations(owner.ownership)[0]
             confirmed = owner.rebind_lifecycle_obligation(
                 pending_row.obligation_id,
                 "file-call",
@@ -682,7 +682,7 @@ def test_fixed_snapshot_survives_controller_loss_and_is_fenced_before_recovery(
                 payload_version=FILE_CALL_OBLIGATION_PAYLOAD_VERSION,
                 payload=encode_file_call_obligation(replace(call, effect_gate=advanced)),
             )
-            final_row = database.operations.list_lifecycle_obligations(owner.ownership)[0]
+            final_row = database.operations.list_pending_lifecycle_obligations(owner.ownership)[0]
             assert decode_file_call_obligation(final_row.payload).effect_gate == advanced
             install_fixture_bundle(
                 monkeypatch,
@@ -753,7 +753,7 @@ def test_real_download_persists_gate_before_dispatch_and_retains_missing_gate(
             def execute(self, invocation, *, io, deadline, custody: LocalDeliveryCustody | None = None):
                 rows = tuple(
                     row
-                    for row in database.operations.list_lifecycle_obligations(owner.ownership)
+                    for row in database.operations.list_pending_lifecycle_obligations(owner.ownership)
                     if row.state is LifecycleObligationState.POSSIBLE_EFFECT
                 )
                 assert len(rows) == 1

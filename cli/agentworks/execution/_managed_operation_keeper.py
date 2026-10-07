@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.db import LifecycleObligationState, OperationResourceKind
 from agentworks.errors import StateError, ValidationError
+from agentworks.operations import _is_pre_registration_refusal
 
 from ._delivery_custody import LocalDeliveryCustody
 from ._helper_launcher import _validate_plan
@@ -239,7 +240,9 @@ class ManagedOperationKeeper:
                 obligation_id=self._obligation_id,
             )
             self._fence()
-        except BaseException:
+        except BaseException as control:
+            if _is_pre_registration_refusal(control):
+                self.admission_uncertain = False
             self.failed = True
             self._stop.set()
             raise

@@ -19,7 +19,7 @@ from agentworks.execution._managed_runs import ManagedRunRepository
 from agentworks.execution._managed_stop_access import ManagedStopControlFact, ManagedStopOutcome, stop_bound_managed_run
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution.carrier import Deadline
-from agentworks.operations import LifecycleObligation, OperationBorrow, OperationOwner, _PreRegistrationClosingRefusal
+from agentworks.operations import LifecycleObligation, OperationBorrow, OperationOwner, _PreRegistrationRefusal
 
 from .test_managed_disposal import ExchangeCarrier, _disposed
 from .test_managed_disposal_access import _confirmed
@@ -115,7 +115,7 @@ def test_interrupted_registration_preserves_original_and_uncertain_owner(
         assert outcome.requires_owner_retention
         assert outcome.coordination_uncertain
         assert carrier.calls == 0
-        obligations = database.operations.list_lifecycle_obligations(owner.ownership)
+        obligations = database.operations.list_pending_lifecycle_obligations(owner.ownership)
         assert len(obligations) == int(after_commit)
         if after_commit:
             assert obligations[0].state is LifecycleObligationState.REGISTERED
@@ -175,7 +175,7 @@ def test_interrupted_carrier_before_reply_retains_attempt(
         assert failure.__cause__.outcome.pending_remote_effects
         assert failure.__cause__.outcome.coordination_uncertain
         assert carrier.calls == 1
-        (obligation,) = database.operations.list_lifecycle_obligations(owner.ownership)
+        (obligation,) = database.operations.list_pending_lifecycle_obligations(owner.ownership)
         assert obligation.state is LifecycleObligationState.POSSIBLE_EFFECT
     finally:
         database.close()
@@ -209,10 +209,10 @@ def test_pre_registration_closing_refusal_closes_borrow_without_control_fact(
 
     monkeypatch.setattr(OperationBorrow, "install_dispatch_obligation", close_then_register)
     try:
-        with pytest.raises(_PreRegistrationClosingRefusal) as raised:
+        with pytest.raises(_PreRegistrationRefusal) as raised:
             invoke()
         assert raised.value.__cause__ is None
         assert carrier.calls == 0
-        assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+        assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
     finally:
         database.close()

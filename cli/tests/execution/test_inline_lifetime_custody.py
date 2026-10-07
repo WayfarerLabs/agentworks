@@ -87,7 +87,7 @@ def test_actual_mixed_calls_share_one_lifetime_row(owned, tmp_path: Path) -> Non
             )
             assert not observed.requires_owner_retention
             file_calls += 1
-        rows = database.operations.list_lifecycle_obligations(owner.ownership)
+        rows = database.operations.list_pending_lifecycle_obligations(owner.ownership)
         dispatch = [row for row in rows if row.obligation_kind == "carrier-dispatch"]
         assert len(dispatch) == 1
         dispatch_ids.add(dispatch[0].obligation_id)
@@ -105,7 +105,7 @@ def test_unused_finish_and_post_finish_refusal(owned) -> None:
     database, owner, operation = owned
     operation.finish()
     operation.finish()
-    assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+    assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
     carrier = RecordingCarrier()
     with pytest.raises(StateError):
         _run(operation, carrier)
@@ -124,11 +124,11 @@ def test_validation_refusal_preserves_lifetime_row_for_next_call(owned, monkeypa
     refused = RefusingCarrier()
     with pytest.raises(ValidationError):
         _run(operation, refused)
-    (before,) = database.operations.list_lifecycle_obligations(owner.ownership)
+    (before,) = database.operations.list_pending_lifecycle_obligations(owner.ownership)
     assert before.state is LifecycleObligationState.POSSIBLE_EFFECT
     clean = RecordingCarrier(CarrierReport(Dispatch.NOT_SENT))
     assert not _run(operation, clean).requires_owner_retention
-    (after,) = database.operations.list_lifecycle_obligations(owner.ownership)
+    (after,) = database.operations.list_pending_lifecycle_obligations(owner.ownership)
     assert after.obligation_id == before.obligation_id
     assert refused.calls == 0 and clean.calls == 1
     operation.finish()
@@ -164,7 +164,9 @@ def test_lost_bookkeeping_reply_never_replays_helper(
     carrier = RecordingCarrier(CarrierReport(Dispatch.SENT, ExitStatus(code=0)))
     with pytest.raises(KeyboardInterrupt):
         _run(operation, carrier)
-    retained_ids = {row.obligation_id for row in database.operations.list_lifecycle_obligations(owner.ownership)}
+    retained_ids = {
+        row.obligation_id for row in database.operations.list_pending_lifecycle_obligations(owner.ownership)
+    }
     assert len(operation.active_inline_calls) == 1
     dispatched_calls = 1 if transition in {"settlement", "handoff"} else 0
     assert carrier.calls == dispatched_calls
@@ -177,9 +179,9 @@ def test_lost_bookkeeping_reply_never_replays_helper(
         assert carrier.calls == dispatched_calls
         assert not _run(operation, carrier).requires_owner_retention
         operation.finish()
-    rows = database.operations.list_lifecycle_obligations(owner.ownership)
-    assert {row.obligation_id for row in rows} == retained_ids
-    assert all(row.state is LifecycleObligationState.RESOLVED for row in rows)
+    rows = [owner.inspect_lifecycle_obligation(identifier) for identifier in retained_ids]
+    assert all(row is not None and row.state is LifecycleObligationState.RESOLVED for row in rows)
+    assert owner.list_pending_lifecycle_obligations() == ()
     assert carrier.calls == dispatched_calls + (0 if finish else 1)
 
 
@@ -198,7 +200,7 @@ def test_finish_recovers_registration_failure_without_creating_row(owned, monkey
     operation.finish()
     assert carrier.calls == 0
     assert operation.active_inline_calls == ()
-    assert database.operations.list_lifecycle_obligations(owner.ownership) == ()
+    assert database.operations.list_pending_lifecycle_obligations(owner.ownership) == ()
     owner.close()
 
 
@@ -222,7 +224,9 @@ def test_finish_resolution_reply_loss_retries_exact_id(owned, monkeypatch: pytes
     operation.finish()
     assert len(ids) == 2 and len(set(ids)) == 1
     assert carrier.calls == 1
-    assert database.operations.list_lifecycle_obligations(owner.ownership)[0].state is LifecycleObligationState.RESOLVED
+    assert operation._dispatch_id is not None
+    receipt = owner.inspect_lifecycle_obligation(operation._dispatch_id)
+    assert receipt is not None and receipt.state is LifecycleObligationState.RESOLVED
 
 
 @pytest.mark.parametrize("finish", [False, True])
@@ -248,7 +252,9 @@ def test_lost_begin_attempt_reply_has_no_helper_to_replay(owned, monkeypatch: py
         operation.retry_inline_bookkeeping()
         operation.finish()
     assert operation.active_inline_calls == ()
-    assert database.operations.list_lifecycle_obligations(owner.ownership)[0].state is LifecycleObligationState.RESOLVED
+    assert operation._dispatch_id is not None
+    receipt = owner.inspect_lifecycle_obligation(operation._dispatch_id)
+    assert receipt is not None and receipt.state is LifecycleObligationState.RESOLVED
 
 
 def test_handoff_reply_loss_does_not_mutate_successor_borrow(owned, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -313,7 +319,7 @@ def test_finish_racing_active_call_closes_admission_without_resolving(owned, mon
     carrier = RecordingCarrier(CarrierReport(Dispatch.SENT, ExitStatus(code=0)), before_dispatch=during_dispatch)
     assert not _run(operation, carrier).requires_owner_retention
     assert len(refusals) == 1
-    (row,) = database.operations.list_lifecycle_obligations(owner.ownership)
+    (row,) = database.operations.list_pending_lifecycle_obligations(owner.ownership)
     assert row.state is LifecycleObligationState.POSSIBLE_EFFECT
     with pytest.raises(StateError):
         _run(operation, carrier)
@@ -327,7 +333,7 @@ def test_stale_takeover_prevents_lifetime_resolution(owned, monkeypatch: pytest.
     recovery = OperationOwner.recover(database.operations, owner.ownership, uuid4().hex)
     with pytest.raises(StateError):
         operation.finish()
-    rows = database.operations.list_lifecycle_obligations(recovery.ownership)
+    rows = database.operations.list_pending_lifecycle_obligations(recovery.ownership)
     assert len(rows) == 1 and rows[0].state is LifecycleObligationState.POSSIBLE_EFFECT
 
 
@@ -468,13 +474,13 @@ def test_second_mark_reply_loss_retry_allows_fresh_command(
     assert carrier.calls == 0
     (active,) = operation.active_inline_calls
     assert active.borrow.has_outstanding_attempt
-    (before,) = database.operations.list_lifecycle_obligations(owner.ownership)
+    (before,) = database.operations.list_pending_lifecycle_obligations(owner.ownership)
     operation.retry_inline_bookkeeping()
     assert carrier.calls == 0
     assert operation.active_inline_calls == ()
     assert not _run(operation, carrier).requires_owner_retention
     assert carrier.calls == 1
-    (after,) = database.operations.list_lifecycle_obligations(owner.ownership)
+    (after,) = database.operations.list_pending_lifecycle_obligations(owner.ownership)
     assert before.obligation_id == after.obligation_id
     operation.finish()
 
@@ -495,7 +501,7 @@ def test_second_mark_retry_refusal_preserves_exact_custody(
     assert attempt is not None and active.borrow.has_outstanding_attempt
     if refusal == "stale":
         recovery = OperationOwner.recover(database.operations, owner.ownership, uuid4().hex)
-        rows = database.operations.list_lifecycle_obligations(recovery.ownership)
+        rows = database.operations.list_pending_lifecycle_obligations(recovery.ownership)
     else:
         original_inspect = type(database.operations).inspect
 
@@ -512,7 +518,7 @@ def test_second_mark_retry_refusal_preserves_exact_custody(
     assert not active.borrow._closed
     assert carrier.calls == 0
     if refusal == "stale":
-        assert database.operations.list_lifecycle_obligations(recovery.ownership) == rows
+        assert database.operations.list_pending_lifecycle_obligations(recovery.ownership) == rows
     else:
         monkeypatch.setattr(type(database.operations), "inspect", original_inspect)
         operation.retry_inline_bookkeeping()

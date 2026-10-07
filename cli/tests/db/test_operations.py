@@ -200,7 +200,7 @@ def test_repository_rebind_requires_a_sealed_recovery_claim(db: Database) -> Non
         1,
         b"prepared",
     )
-    assert rebound == db.operations.list_lifecycle_obligations(recovered.ownership)[0]
+    assert rebound == db.operations.list_pending_lifecycle_obligations(recovered.ownership)[0]
 
 
 def test_v38_migration_preserves_existing_data_and_adds_empty_claim_store(tmp_path: Path) -> None:
@@ -601,7 +601,7 @@ def test_caller_retained_obligation_id_retries_only_an_exact_registration(db: Da
     )
 
     assert retried == registered
-    assert [obligation.obligation_id for obligation in db.operations.list_lifecycle_obligations(ownership)] == [
+    assert [obligation.obligation_id for obligation in db.operations.list_pending_lifecycle_obligations(ownership)] == [
         obligation_id
     ]
     with pytest.raises(StateError):

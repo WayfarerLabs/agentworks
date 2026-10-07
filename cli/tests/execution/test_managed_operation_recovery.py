@@ -95,7 +95,7 @@ def recovery_setup(tmp_path, monkeypatch, request):
         return helpers.execute(invocation, io=io, deadline=deadline, custody=custody)  # type: ignore[no-untyped-call]
 
     monkeypatch.setattr(WSL2Carrier, "execute", execute)
-    row = next(row for row in owner.list_lifecycle_obligations() if row.obligation_id == old_id)
+    row = next(row for row in owner.list_pending_lifecycle_obligations() if row.obligation_id == old_id)
     repository = ManagedRunRepository(database)
     recovery = ManagedOperationRecovery(repository, owner, row, prepared)
     try:
@@ -130,7 +130,8 @@ def test_fresh_fixed_ceiling_and_current_poll_without_high_water_writes(recovery
     assert database._conn.total_changes == changes
     assert all(request.lease is None for request in helpers.requests)
     assert (
-        next(value for value in owner.list_lifecycle_obligations() if value.obligation_id == row.obligation_id) == row
+        next(value for value in owner.list_pending_lifecycle_obligations() if value.obligation_id == row.obligation_id)
+        == row
     )
 
 
@@ -145,7 +146,8 @@ def test_exact_stop_precedes_clock_and_absent_controller_is_only_observation(rec
     assert observation.observation is not None and observation.observation.controller is not None
     assert recovery.last_observation is observation and not recovery.authority_elapsed
     assert (
-        next(value for value in owner.list_lifecycle_obligations() if value.obligation_id == row.obligation_id) == row
+        next(value for value in owner.list_pending_lifecycle_obligations() if value.obligation_id == row.obligation_id)
+        == row
     )
 
 

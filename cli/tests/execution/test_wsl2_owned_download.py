@@ -650,7 +650,7 @@ def test_uncertain_guest_absence_retains_claim(
         assert _download(subject, tmp_path, BytesSink()) is WSL2DownloadStatus.RETAINED
         assert carrier.calls == 1
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
-        rows = database.operations.list_lifecycle_obligations(subject.owner.ownership)
+        rows = database.operations.list_pending_lifecycle_obligations(subject.owner.ownership)
         assert any(row.state is LifecycleObligationState.POSSIBLE_EFFECT for row in rows)
 
 
@@ -674,7 +674,7 @@ def test_unresolved_gate_setup_retains_claim_and_hold(
             _download(subject, root, BytesSink())
         assert carrier.calls > 1 and observer.events == []
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
-        rows = database.operations.list_lifecycle_obligations(subject.owner.ownership)
+        rows = database.operations.list_pending_lifecycle_obligations(subject.owner.ownership)
         assert any(row.state is LifecycleObligationState.POSSIBLE_EFFECT for row in rows)
 
 
@@ -698,5 +698,5 @@ def test_unresolved_file_exchange_retains_claim_and_hold(
         assert carrier.calls > 1 and observer.events == []
         assert subject.outcome is not None and subject.outcome.requires_owner_retention
         assert database.operations.inspect(subject.owner.ownership.scope) is not None
-        rows = database.operations.list_lifecycle_obligations(subject.owner.ownership)
+        rows = database.operations.list_pending_lifecycle_obligations(subject.owner.ownership)
         assert any(row.state is LifecycleObligationState.POSSIBLE_EFFECT for row in rows)
