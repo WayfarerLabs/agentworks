@@ -3203,17 +3203,17 @@ interrupted-before-close and lost-reply-after-close outcomes, preserving origina
 and actual remaining custody. These changes neither activate permissions nor change existing
 registration/effect handlers, wire contracts or SSH implementation.
 
-Final combined lead validation passes 16,396 non-integration tests with 49 skips and 29 fork warnings
-in 318.32 seconds, exit 0. Ruff/format (1,314 files), strict mypy (1,278 sources), Typer isolation,
-file quality, locked-SDD, Rulesync and whitespace gates pass. Website passes 160 Python and 103
-Node cases, four builds and both deterministic comparisons. The normal Rulesync check uses its
-declared npm fallback with an isolated cache; the unrelated malformed shared Bunx dependency cache
-is left unchanged. A preceding resource-binding website run failed one mouse-hold case; five
-isolated repeats and two subsequent full website runs pass, but the original cause is not proved
-and no website fix is claimed. Exact owned pytest/site fixtures are removed after terminal runs.
-Only these bounded private leaves close. Unified independent admission, job-length availability,
-active output, remaining platform factories, complete additive RunContext and native acceptance
-remain open. Hosted acceptance of this increment and public round 1 of 3 remain open as well.
+Final combined lead validation passes 16,396 non-integration tests with 49 skips and 29 fork
+warnings in 318.32 seconds, exit 0. Ruff/format (1,314 files), strict mypy (1,278 sources), Typer
+isolation, file quality, locked-SDD, Rulesync and whitespace gates pass. Website passes 160 Python
+and 103 Node cases, four builds and both deterministic comparisons. The normal Rulesync check uses
+its declared npm fallback with an isolated cache; the unrelated malformed shared Bunx dependency
+cache is left unchanged. A preceding resource-binding website run failed one mouse-hold case; five
+isolated repeats and two subsequent full website runs pass, but the original cause is not proved and
+no website fix is claimed. Exact owned pytest/site fixtures are removed after terminal runs. Only
+these bounded private leaves close. Unified independent admission, job-length availability, active
+output, remaining platform factories, complete additive RunContext and native acceptance remain
+open. Hosted acceptance of this increment and public round 1 of 3 remain open as well.
 
 The lead's read-only completion inventory at `ed3603c23` confirms that this next foreground unit is
 not the rest of the execution surface. Required work still includes unified independent launch and
