@@ -387,6 +387,39 @@ this draft dependency refresh. Both operator resource decisions and the recorded
 writer coexistence, enclosing-consumer, RunContext and native acceptance gates remain open. All 25
 completed plan blocks remain unchanged. No final-product feedback/fix round is consumed.
 
+Published SSH `04a460a0566f3cdc2eccabf0177ca4c6295aa332` has a complete
+[hosted report](https://github.com/WayfarerLabs/agentworks/pull/832#issuecomment-6029147754) on
+transport `ebc8eedd4`. Run `37557868516` passes every pytest job: Linux Python 3.12-3.14 each report
+16,427 passed, 203 skipped and 29 warnings; Windows Server 2025/Python 3.13 reports 1,482 passed, 67
+skipped and 25 warnings. Checkout merge `8f64366685dd85549e3a7f95f2c79ae027548fef` has those exact
+parents and tree `ee721515a8993e0befd4f608069a5471ec743b1a`, equal to the published SSH tree. The
+overall run remains red on the three held enrollment errors. Other repository/site jobs pass; hosted
+Typer isolation is skipped after mypy fails. Transport's base run `37557251890` is independently
+verified green in every job. Neither run establishes complete native or RunContext workflows.
+
+Transport's
+[reviewed foreground increment](https://github.com/WayfarerLabs/agentworks/pull/833#issuecomment-6029389391)
+`62164b4a80299161808b147976c27d8ce8027fec` composes private MANAGED/OPERATION run from the existing
+launch/wait machinery and one finite deadline. Budget expiry retains an acknowledged safe job
+reference without stopping, draining, disposing or releasing its owner. Three private lanes clear
+the corrected unit at `0a8ceaf6c`; the carrier contract is unchanged. SSH rebases without conflicts
+at `0b72d013d1c6c0e61d4d5d5011628bd5b997fdbb`, retaining all 173 commit patches exactly. SSH
+implementation files are unchanged, and shared process/custody/pump files match transport. The full
+combined Linux Python 3.12 non-integration suite passes 16,628 tests with 49 skips and 29 warnings,
+exit 0 in 213.86 seconds. Full mypy checks 1,316 sources and repeats only the three held enrollment
+errors. Ruff/format (1,353 files), local Typer isolation, locked-SDD, Rulesync and whitespace checks
+pass. New hosted results require their own complete report; local website/native checks were not
+rerun for this draft refresh. Both operator resource decisions and the existing
+terminal/trust/writer/enclosing-consumer/RunContext/native gates remain open.
+
+Transport also reports a controlled SQLite/framed-carrier capacity failure after 42 completed
+MANAGED cycles. Both lifecycle admission queries still count resolved history against 128 rows
+(`cli/agentworks/db/operations.py`); a preceding file call can shift the refusal into keeper
+registration and strand aggregate close. Transport owns the required capacity correction, with exact
+retry receipts and bounded recovery still required. This defect remains open in this base;
+foreground composition and green fixtures do not dispose it. No public fix round is consumed, no
+completed checkbox changes, and this SDD remains unlocked.
+
 Combined code pin `38934134e3b8d12af814f9371b62075daa49db3e` preserves all 64 Python paths in the
 SSH contribution, including deletions, from published `186458307b`. Its full suite passes 16,125
 non-integration tests with 51 skips and 27 warnings, exit 0 in 267.18 seconds. Full Ruff/format
