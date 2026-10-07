@@ -3184,6 +3184,16 @@ not supplied by these local results.
       enforcement, an independent availability proof or a second public job interface; complete
       unified admission and platform-owned job-length holds remain required.
 
+- [ ] Guard unused borrowed-helper setup in private independent observation, stop, disposal and
+      default-shell lookup before adopting these controls into unified execution. Construction can
+      fail after a borrow is acquired but before the existing cleanup path exists. Close only that
+      unused borrow without registering or dispatching, and preserve the original control object,
+      cause and traceback through a secondary close failure. Distinguish interrupted close before
+      relinquishment from a lost reply after successful close: retain and explicitly retry only the
+      actual existing custody. Keep registration/effect handlers unchanged, with no new recovery
+      framework. Prove all current constructor sites and complete private reviews and final gates;
+      this does not establish native recovery or independent availability.
+
 The lead's read-only completion inventory at `ed3603c23` confirms that this next foreground unit is
 not the rest of the execution surface. Required work still includes unified independent launch and
 subsequent-operation reconnect/control with exact resource-owned admission and job-length
