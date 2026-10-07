@@ -2975,6 +2975,25 @@ Ruff/format, strict mypy over 1,271 sources and file quality pass; all completed
 removed. The final worker pin changes only the class docstring and repeats style/type checks.
 Whole-unit re-review and corrected lead validation remain open. No native result is claimed.
 
+Lead validation at `957c5a41e` passes the corrected full Linux Python 3.12 suite: 16,150 passed, 50
+skipped and 29 warnings in 281.95 seconds, exit 0. Frozen sync, Ruff/check-format, exact CI mypy
+over 1,271 sources, Typer isolation, file quality, locked-SDD, Rulesync and whitespace checks pass.
+Website gates pass 160 Python and 103 Node tests and both deterministic double-build comparisons.
+The exact short test fixture and site-build roots are removed after terminal runs and process
+checks; logs and independently owned environments remain.
+
+The three whole-unit re-reviews at that pin ran 249 project, 180 generic and 409 complexity cases.
+The project lane's additional diagnostic removes Unix identity APIs and passes 67 Windows-selected
+cases, with three Linux-only cases deselected; this is not native Windows proof. Complexity guard
+removal independently breaks five overlap, unknown-helper and disposal-publication cases; restoring
+the guards passes all five. Earlier material findings and all three requested deletions are
+resolved. The generic lane nevertheless proves one more material interruption gap: after a clean
+disposal refusal, both normal and exception paths clear the attempted flag before publishing a fresh
+row ID. Retry can then arm the old resolved row, fail repeatedly without another helper and retain
+aggregate ownership. The lead accepts publishing the fresh ID before making the new attempt
+eligible, with both interruption paths and aggregate cleanup covered. This surviving correction
+keeps both bounded leaves open despite green suites; no public handoff follows.
+
 - [ ] Preserve exact signal termination evidence in the managed supervisor when child entry is
       proved and `waitpid` returns a signaled status. The existing producer currently publishes a
       wait fact only for an ordinary exit, so the private signaled case establishes resource closure
