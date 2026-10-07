@@ -2900,7 +2900,7 @@ native SSH or production RunContext acceptance. Static, file, locked-SDD, Rulesy
 also pass. These hosted counts are their own test selection, not replacements for the complete local
 suite recorded above.
 
-- [ ] Complete the private unified OPERATION job-control unit on the originating `ExecutionAccess`:
+- [x] Complete the private unified OPERATION job-control unit on the originating `ExecutionAccess`:
       observe, selected-stream output with cursors, bounded wait carrying the safe reference,
       explicit selected-run stop and terminal-artifact disposal. Reuse the exact operation-lifetime
       dispatch row for settled reads; prove more than 128 mixed polls without relaxing the ledger
@@ -2908,7 +2908,7 @@ suite recorded above.
       helpers, not a third job-access object or parallel result collector. Require the retained
       acknowledged run and exact current ownership before effects; ordinary observation never
       reconciles uncertain start. Keep independent-job behavior unchanged.
-- [ ] In that same unit, separate resource closure from application exit evidence. Prove authentic
+- [x] In that same unit, separate resource closure from application exit evidence. Prove authentic
       launch, both closed streams, boundary emptiness and independently positive exact controller
       termination without requiring `wait`; validate it when present and preserve UNKNOWN when
       absent. Cover the actual missing-executable and signaled producer shapes, a later-observed
@@ -3012,10 +3012,31 @@ aggregate close. The final worker full Linux suite passes 16,160 tests, 50 skips
 245.93 seconds, exit 0. Its 212 affected/neighbor tests, Ruff/format, strict mypy over 1,271
 sources, file quality and whitespace checks pass. Its final fixture roots are removed and tracked
 tree is clean. The earlier ordering-only 16,153-test run is not final evidence. Lead verifies that
-the integrated Python files match the final worker pin exactly. Whole-unit three-lane re-review
-remains required: the agent runner currently rejects both new agents and the completed generic lane
-with `agent thread limit reached`. The lead escalates runner restoration; no public publication,
-completion checkbox or ready signal substitutes for the missing review.
+the integrated Python files match the final worker pin exactly. The agent runner initially rejected
+new agents and a completed generic lane with `agent thread limit reached`. After the implementation
+worker became terminal, the lanes resumed without an operator reset. No public publication,
+completion checkbox or ready signal substituted for the missing review.
+
+All three final whole-unit lanes clear `ed3603c23`, including its code and collateral against
+published base `fa730f1fc`. The generic lane passes 190 focused cases and four independent
+interruption probes. The project lane passes 259 affected/neighbor cases and 77 Windows-selected
+portable cases with Unix identity APIs unavailable; the latter is not native Windows proof. A fresh
+Astra complexity lane passes 135 focused cases and 27 fencing cases after restoring its experiment.
+Both project and complexity deletion experiments independently reproduce three interrupted disposal
+retry failures when exact resolved-row rotation is removed. No material finding remains for this
+private unit. Ordinary admission, unknown-helper debt and positive controller proof remain intact.
+
+The lead's final Linux Python 3.12 suite at that same pin passes 16,160 tests, 50 skips and 29
+warnings in 277.39 seconds, exit 0. Frozen sync, Ruff/check-format over 1,307 files, exact CI mypy
+over 1,271 sources, Typer isolation, file quality (475 Markdown and 448 spelling inputs),
+locked-SDD, Rulesync and whitespace checks pass. Website gates pass 160 Python and 103 Node tests
+plus four builds and both deterministic comparisons. The exact short owned pytest and website
+fixture roots are removed after terminal runs; reusable environments and logs remain. This closes
+only the two bounded private job-control/resource-closure leaves above. Signal precision,
+independent lifetime, foreground MANAGED composition, incremental active output, production limits,
+full platform/target and RunContext composition, hosted validation of the new working head and
+native acceptance remain open. No ready or review-requested edge, public loop closeout or merge
+intent follows.
 
 - [ ] Preserve exact signal termination evidence in the managed supervisor when child entry is
       proved and `waitpid` returns a signaled status. The existing producer currently publishes a
