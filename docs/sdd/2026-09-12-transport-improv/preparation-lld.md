@@ -340,10 +340,11 @@ eligibility decision for this initial implementation. See the
 
 A signaled child without independent entry evidence stays unknown. For scripts, the exact normal
 wait proves completion of the selected interpreter, not entry into the first script-body command.
-Detached launch, early running-state reporting and live application-output promotion retain their
-independent acknowledgment gate. Buffered capture may keep bounded bytes private until completion
-evidence is established. The shell experiment and its wait-code result gain no stronger meaning from
-the selected Python-helper rule.
+Detached managed launch requires acknowledgment of the exact supervised launch, not proof of
+application entry. Eager application `STARTED` reporting and live application-output promotion still
+require independent successful-exec evidence. Buffered capture may keep bounded bytes private until
+completion evidence is established. The shell experiment and its wait-code result gain no stronger
+meaning from the selected Python-helper rule.
 
 Application stdout and stderr can never inject control records because the bootstrap encodes them
 through dedicated descriptors. Raw account-shell output before bootstrap is not framed application

@@ -3058,6 +3058,19 @@ pin. All three complete-unit reviews and lead final gates, including the signal-
 remain required before completing the leaf or publishing runtime changes. No native/public claim
 follows.
 
+All three private lanes review the complete foreground unit at `e5c80eeff`. Project and generic
+correctness each pass 146 affected/neighbor cases; Astra Muntz passes those cases and independently
+proves the cause guard necessary. No runtime defect is found. The lead accepts a narrow preparation
+clarification separating exact supervised-launch acknowledgment from successful-exec evidence, and
+removal of duplicate job tagging from the private timeout result, leaving its single public-boundary
+assignment. The lead's full Linux suite at the baseline passes 16,205 tests, 50 skips and 29
+warnings in 294.01 seconds, exit 0. Frozen sync, full static/file/locked-SDD/Rulesync/whitespace
+gates and the 160 Python/103 Node website tests plus both deterministic double-build comparisons
+pass. The owned 1.1 GB pytest and 1.1 MB site fixtures are removed after terminal runs. The
+corrected complete pin still requires all three re-reviews and final gates before the foreground
+leaf closes; production capacity, full target/RunContext composition and native acceptance are not
+established here.
+
 - [ ] Audit cumulative managed-run and lifecycle-ledger bounds before public composition. Both
       lifecycle INSERT paths count all rows for the operation, including resolved rows, against the
       unchanged 128-row bound (`db/operations.py`). Settled polling now reuses one row, but repeated
