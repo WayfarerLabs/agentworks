@@ -1034,7 +1034,7 @@ associated pending acceptance gates are superseded by this ruling.
       duplicate guest-identity fields, a generic task registry or whole-owner closure by adapters.
       Prove fresh import behavior and unchanged legacy hooks; cloud/Lima access and complete
       RunContext/native acceptance remain separate requirements.
-- [ ] Implement and privately review passive exact-instance power observations for AWS, Azure and
+- [x] Implement and privately review passive exact-instance power observations for AWS, Azure and
       GCP using their provider-owned locator reads. Cover stable/transitional/malformed states,
       identity/account mismatch, setup expiry, actual SDK request serialization and successful
       late-result refusal. SDK timeouts are best-effort: AWS construction can consume configured
@@ -1042,6 +1042,15 @@ associated pending acceptance gates are superseded by this ruling.
       not introduce private SDK timeout mutation or a transport framework to imply hard preemption.
       Keep activation, selected execution routes and whole-workflow native evidence open; these
       observations alone cannot supply usable cloud RunContext targets.
+
+The bounded cloud power unit at `58a27b550` clears all three independent private lanes against
+`ad471c8a0`. Project review observes 372 focused/adjacent passes; generic review observes 307 related
+passes plus six independent SDK probes; complexity review observes 113 focused passes and proves
+that removing the late-result checks admits expired SDK responses. Real SDK serialization and
+authentication-resend probes establish successful late-result refusal, not hard preemption. This
+records only the passive power/locator increment, not cloud activation, routes, RunContext or native
+acceptance.
+
 - [ ] Add fixed bounded Proxmox start/task-status wire primitives, preserving scalar acknowledgment
       and object observation as separate envelopes. Prove exact body-free routes, literal task-ID
       encoding, verified authority, finite local worker custody and unchanged guest/power/config
