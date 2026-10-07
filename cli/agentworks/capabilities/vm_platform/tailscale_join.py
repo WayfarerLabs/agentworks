@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import ProvisioningError
-from agentworks.ssh import SSHError
 
 if TYPE_CHECKING:
     from agentworks.transports import ExecTransport
@@ -85,6 +84,8 @@ class EphemeralTailscaleBootstrap:
         return self._tailscale_ip()
 
     def _wait_for_readiness(self) -> None:
+        from agentworks.ssh import SSHError
+
         output.detail(f"Waiting for {self._readiness_label} bootstrap to complete (this may take several minutes)...")
 
         for attempt in range(30):
@@ -104,6 +105,8 @@ class EphemeralTailscaleBootstrap:
             ) from exc
 
     def _tailscale_ip(self) -> str | None:
+        from agentworks.ssh import SSHError
+
         try:
             result = self._target.run("tailscale ip -4", sudo=True, check=True, timeout=15)
         except SSHError as exc:

@@ -43,6 +43,7 @@ def _request(*, tailscale_auth_key: str = "tskey-test") -> ProvisionRequest:
         debian_release=DebianRelease.TRIXIE,
         hostname="lima--myvm",
         system_slug=None,
+        instance_marker="0123456789abcdef0123456789abcdef",
         admin_username="agw",
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=Path("/dev/null"),
@@ -184,7 +185,7 @@ def test_remote_logger_close_interrupt_preserves_active_failure_and_cleanup_orde
         raise primary
 
     _wire_remote_host(monkeypatch, events=[])  # type: ignore[arg-type]
-    monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
+    monkeypatch.setattr("agentworks.ssh.run", _ssh_run)
     monkeypatch.setattr("agentworks.ssh.SSHLogger", _InterruptingLogger)
     monkeypatch.setattr(remote_exec, "run_detached", _run)
 
@@ -234,7 +235,7 @@ def test_remote_standalone_logger_close_interrupt_propagates_after_cleanup(
         return SimpleNamespace(exit_code=0, output="")
 
     _wire_remote_host(monkeypatch, events=[])
-    monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
+    monkeypatch.setattr("agentworks.ssh.run", _ssh_run)
     monkeypatch.setattr("agentworks.ssh.SSHLogger", _InterruptingLogger)
     monkeypatch.setattr(remote_exec, "run_detached", _run)
 
@@ -285,7 +286,7 @@ def test_remote_template_cleanup_interrupt_preserves_active_failure_and_order(
         raise primary
 
     _wire_remote_host(monkeypatch, events=[])
-    monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
+    monkeypatch.setattr("agentworks.ssh.run", _ssh_run)
     monkeypatch.setattr("agentworks.ssh.SSHLogger", _Logger)
     monkeypatch.setattr(remote_exec, "run_detached", _run)
 
@@ -335,7 +336,7 @@ def test_remote_standalone_template_cleanup_interrupt_remains_visible(
         return SimpleNamespace(exit_code=0, output="")
 
     _wire_remote_host(monkeypatch, events=[])
-    monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
+    monkeypatch.setattr("agentworks.ssh.run", _ssh_run)
     monkeypatch.setattr("agentworks.ssh.SSHLogger", _Logger)
     monkeypatch.setattr(remote_exec, "run_detached", _run)
 
@@ -360,7 +361,7 @@ def test_remote_provision_log_is_removed_by_normal_vm_delete(
     log_dir = tmp_path / "logs"
     monkeypatch.setattr(ssh, "LOG_DIR", log_dir)
     _wire_remote_host(monkeypatch, [])
-    monkeypatch.setattr(lima_mod, "ssh_run", lambda target, command, **kwargs: _remote_ssh_success(command))
+    monkeypatch.setattr("agentworks.ssh.run", lambda target, command, **kwargs: _remote_ssh_success(command))
     monkeypatch.setattr(
         remote_exec,
         "run_detached",
@@ -442,8 +443,7 @@ def test_remote_interrupt_kills_the_detached_limactl_before_deleting(
     # Seams around _create_remote's edges: stdin staging, verified remote
     # removal, and the SSH log file.
     monkeypatch.setattr(
-        lima_mod,
-        "ssh_run",
+        "agentworks.ssh.run",
         lambda target, cmd, **kw: events.append(("ssh", cmd)) or _remote_ssh_success(cmd),
     )
 
@@ -520,7 +520,7 @@ def test_remote_stdin_write_failure_removes_partial_template_and_preserves_error
             raise write_failure
         return _remote_ssh_success(command)
 
-    monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
+    monkeypatch.setattr("agentworks.ssh.run", _ssh_run)
 
     with pytest.raises(SSHError) as caught:
         LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
@@ -548,7 +548,7 @@ def test_remote_template_staging_is_mode_0600_stdin_and_verified_cleanup(
         calls.append((command, kwargs))
         return _remote_ssh_success(command)
 
-    monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
+    monkeypatch.setattr("agentworks.ssh.run", _ssh_run)
 
     LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
         "myvm",
@@ -612,7 +612,7 @@ def test_remote_template_uses_private_random_directory_not_predictable_path(
             ok=True,
         )
 
-    monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
+    monkeypatch.setattr("agentworks.ssh.run", _ssh_run)
 
     LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
         "myvm",
@@ -643,7 +643,7 @@ def test_remote_template_rejects_untrusted_allocation_path(
         calls.append(command)
         return SimpleNamespace(stdout="/tmp/agentworks-lima-template.not-safe\n/tmp/other\n")
 
-    monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
+    monkeypatch.setattr("agentworks.ssh.run", _ssh_run)
 
     with pytest.raises(ProvisioningError) as caught:
         LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(

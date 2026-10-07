@@ -20,8 +20,8 @@ from agentworks.capabilities.config import (
     resolved_capability_modes,
     validate_capability_config,
 )
-from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
+from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.errors import ConfigError
 from agentworks.plugins.aws.platform import EC2Platform
@@ -295,6 +295,15 @@ def test_proxmox_no_longer_reads_a_string_verify_ssl_as_true() -> None:
     # A value the quotes are not the story for keeps the plain phrasing.
     with pytest.raises(ConfigError, match="verify_ssl: must be a boolean$"):
         _validate("proxmox", {**PROXMOX_CONFIG, "verify_ssl": 5})
+
+
+def test_proxmox_ca_bundle_requires_verified_tls() -> None:
+    _validate("proxmox", {**PROXMOX_CONFIG, "ca_bundle": "/trust/cluster-ca.pem"})
+    with pytest.raises(ConfigError):
+        _validate(
+            "proxmox",
+            {**PROXMOX_CONFIG, "ca_bundle": "/trust/cluster-ca.pem", "verify_ssl": False},
+        )
 
 
 @pytest.mark.parametrize(

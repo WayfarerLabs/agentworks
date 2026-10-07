@@ -19,6 +19,7 @@ PROVISIONING_PACKAGES = [
     "sudo",
     "ca-certificates",
     "gnupg",
+    "python3",
 ]
 
 # System packages installed during init (every create/reinit).

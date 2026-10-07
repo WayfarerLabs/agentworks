@@ -79,14 +79,14 @@ def _config(tmp_path: Path, site: str = "", *, enabled: bool = False) -> Config:
 
 
 def test_gcp_is_seated_by_vendor_bundle() -> None:
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+    from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
     from agentworks.plugins import SYSTEM_PLUGINS
     from agentworks.plugins.gcp.platform import GCEPlatform
 
     assert SYSTEM_PLUGINS["gcp"].capabilities == {"vm-platform": (GCEPlatform,)}
     assert SYSTEM_PLUGINS["gcp"].manifests == "agentworks.plugins.gcp"
     assert VM_PLATFORM_REGISTRY["gcp-gce"] is GCEPlatform
-    assert GCEPlatform.contract_version == 1
+    assert GCEPlatform.contract_version == 2
 
 
 def test_gcp_row_is_present_but_disabled_by_default(tmp_path: Path) -> None:

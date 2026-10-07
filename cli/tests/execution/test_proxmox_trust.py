@@ -18,8 +18,9 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from agentworks.errors import ValidationError
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import CarrierIO, Deadline, Dispatch, ExitStatus, Failure, PreparedInvocation
-from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection
+from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnection, _ProxmoxWire, _WireFailure
 
 _TOKEN = "synthetic-secret-token"
 
@@ -74,7 +75,7 @@ class _TLSServer(HTTPServer):
     def get_request(self) -> tuple[ssl.SSLSocket, tuple[str, int]]:
         connection, address = super().get_request()
         self.connections += 1
-        connection.settimeout(2)
+        connection.settimeout(30)
         try:
             return self.context.wrap_socket(connection, server_side=True), address
         except BaseException:
@@ -129,7 +130,12 @@ def endpoint(tmp_path: Path) -> Iterator[_Endpoint]:
             self.reply(b'{"data":{"pid":42}}')
 
         def do_GET(self) -> None:
-            self.reply(b'{"data":{"exited":1,"exitcode":0}}')
+            if self.path.endswith("/status/current"):
+                self.reply(b'{"data":{"status":"running"}}')
+            elif self.path.endswith("/config?current=1"):
+                self.reply(b'{"data":{"vmgenid":"613ea898-8445-4e6e-82c7-f6e9ae8d7235"}}')
+            else:
+                self.reply(b'{"data":{"exited":1,"exitcode":0}}')
 
         def reply(self, body: bytes) -> None:
             requests.append((self.command, self.path, self.headers.get("Authorization")))
@@ -156,9 +162,47 @@ def _execute(url: str, ca_bundle: Path | None):
     connection = ProxmoxConnection(url, "node1", 123, "test@pve!token", _TOKEN, ca_bundle=ca_bundle)
     # Trust decisions need two real worker starts on loaded CI, not a speed assertion.
     # Deadline enforcement is exercised separately in test_proxmox.py.
-    return ProxmoxCarrier(connection).execute(
-        PreparedInvocation(("/bin/true",)), io=CarrierIO(), deadline=Deadline.after(30)
-    )
+    custody = LocalDeliveryCustody()
+    try:
+        return ProxmoxCarrier(connection).execute(
+            PreparedInvocation(("/bin/true",)), io=CarrierIO(), deadline=Deadline.after(30), custody=custody
+        )
+    finally:
+        assert custody.close(Deadline.after(3))
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("trust", ["matching", "unknown-ca", "wrong-host", "system"])
+@pytest.mark.parametrize("current_config", [False, True])
+def test_passive_provider_observation_preserves_ca_and_hostname_policy(
+    endpoint: _Endpoint, trust: str, current_config: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+    monkeypatch.setenv("https_proxy", "http://127.0.0.1:1")
+    monkeypatch.setenv("NO_PROXY", "")
+    monkeypatch.setenv("no_proxy", "")
+    url = endpoint.url.replace("localhost", "127.0.0.1") if trust == "wrong-host" else endpoint.url
+    bundle: Path | None = endpoint.unknown_ca if trust == "unknown-ca" else endpoint.ca_bundle
+    if trust == "system":
+        bundle = None
+    wire = _ProxmoxWire(ProxmoxConnection(url, "node1", 123, "test@pve!token", _TOKEN, ca_bundle=bundle))
+    observe = wire.request_current_config if current_config else wire.request_power
+    custody = LocalDeliveryCustody()
+    try:
+        if trust == "matching":
+            expected = {"vmgenid": "613ea898-8445-4e6e-82c7-f6e9ae8d7235"} if current_config else {"status": "running"}
+            assert observe(timeout=30, custody=custody) == expected
+            route = "config?current=1" if current_config else "status/current"
+            assert endpoint.requests == [
+                ("GET", f"/api2/json/nodes/node1/qemu/123/{route}", f"PVEAPIToken=test@pve!token={_TOKEN}")
+            ]
+        else:
+            with pytest.raises(_WireFailure) as raised:
+                observe(timeout=30, custody=custody)
+            assert _TOKEN not in str(raised.value)
+            assert endpoint.requests == []
+    finally:
+        assert custody.close(Deadline.after(3))
 
 
 # These exercise workstation TLS, path serialization and the real owned worker.

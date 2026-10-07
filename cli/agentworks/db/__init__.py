@@ -82,6 +82,17 @@ from agentworks.db.models import (
     VMStatus,
     WorkspaceRow,
 )
+from agentworks.db.operations import (
+    MAX_LIFECYCLE_OBLIGATIONS,
+    MAX_LIFECYCLE_PAYLOAD_BYTES,
+    LifecycleObligation,
+    LifecycleObligationState,
+    OperationClaim,
+    OperationClaimState,
+    OperationOwnership,
+    OperationResourceKind,
+    OperationScope,
+)
 
 DB_PATH = CONFIG_DIR / "agentworks.db"
 
@@ -115,7 +126,16 @@ __all__ = [
     "InstanceRecordDiagnostic",
     "InstanceRecordMetadata",
     "InstanceStateInspection",
+    "LifecycleObligation",
+    "LifecycleObligationState",
     "MigrationContext",
+    "MAX_LIFECYCLE_OBLIGATIONS",
+    "MAX_LIFECYCLE_PAYLOAD_BYTES",
+    "OperationClaim",
+    "OperationClaimState",
+    "OperationOwnership",
+    "OperationResourceKind",
+    "OperationScope",
     "MalformedInstanceRecord",
     "ProvisioningStatus",
     "PreparedRestore",

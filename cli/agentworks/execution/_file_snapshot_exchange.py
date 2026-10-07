@@ -1,0 +1,571 @@
+"""One-attempt host exchanges for private snapshot transfer and recovery."""
+
+from __future__ import annotations
+
+import hashlib
+import secrets
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import TYPE_CHECKING
+
+from agentworks.errors import ValidationError
+from agentworks.execution._file_snapshot_bundle import FIXED_BUNDLE, ROOT_PROGRAM
+from agentworks.execution._file_snapshot_host import (
+    _historical_cleanup_shape,
+    encode_file_snapshot_request,
+    parse_empty_file_snapshot_body,
+    parse_file_snapshot_begin_result,
+    parse_file_snapshot_chunk_result,
+    parse_file_snapshot_cleanup_result,
+    parse_file_snapshot_failure,
+    parse_file_snapshot_reconcile_result,
+    parse_file_snapshot_stream_result,
+)
+from agentworks.execution._file_snapshot_protocol import (
+    FileSnapshotBeginRequest,
+    FileSnapshotChunkRequest,
+    FileSnapshotChunkResult,
+    FileSnapshotCleanupRequest,
+    FileSnapshotControlError,
+    FileSnapshotFailureCode,
+    FileSnapshotFailureControl,
+    FileSnapshotOperation,
+    FileSnapshotReconcileRequest,
+    FileSnapshotRequest,
+    FileSnapshotRequestError,
+    FileSnapshotStreamRequest,
+)
+from agentworks.execution._file_wire import (
+    MAX_RECORD_BODY_BYTES,
+    FileRecord,
+    FileRecordKind,
+)
+from agentworks.execution._file_wire_reader import FileRecordReader, FileWireError
+from agentworks.execution._runtime_prerequisite import (
+    RuntimePrefixSink,
+    RuntimePrerequisiteObservation,
+    RuntimePrerequisiteState,
+    RuntimeSelection,
+    _NumericGuestBootstrap,
+    build_root_guest_bootstrap_argv,
+    build_runtime_identity_helper_argv,
+)
+from agentworks.execution._scratch import ScratchPhase, _cleanup_debt
+from agentworks.execution.carrier import (
+    CarrierIO,
+    Dispatch,
+    Failure,
+    FiniteInput,
+    PreparedInvocation,
+    Retention,
+    SinkOutput,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from agentworks.execution._file_effect_gate import FileEffectGateBinding
+    from agentworks.execution._file_spool import SpoolSnapshot
+    from agentworks.execution._fixed_helper_operation import BoundHelperCarrier
+    from agentworks.execution._helper_launcher import IdentityPlan
+    from agentworks.execution._scratch import ReadyScratchReference
+    from agentworks.execution._scratch_receipt import ScratchCleanupDebt
+    from agentworks.execution.carrier import Deadline, ExitStatus
+
+
+class FileSnapshotObservationState(StrEnum):
+    READY = "ready"
+    CHUNK = "chunk"
+    STREAM = "stream"
+    ABSENT = "absent"
+    RECOVERED = "recovered"
+    OWNERSHIP_UNCERTAIN = "ownership_uncertain"
+    CLEANED = "cleaned"
+    REFUSED = "refused"
+    INVALID = "invalid"
+    INCOMPLETE = "incomplete"
+    UNCERTAIN = "uncertain"
+
+
+class FileSnapshotObservationError(StrEnum):
+    CONTROL = "control"
+    ORDER = "order"
+    CONTENT = "content"
+    POST_TERMINAL = "post_terminal"
+    STDERR = "stderr"
+    CARRIER = "carrier"
+    MISSING_TERMINAL = "missing_terminal"
+
+
+@dataclass(frozen=True, slots=True)
+class FileSnapshotObservation:
+    state: FileSnapshotObservationState
+    snapshot: SpoolSnapshot | None = field(default=None, repr=False)
+    chunk: FileSnapshotChunkResult | None = field(default=None, repr=False)
+    failure: FileSnapshotFailureControl | None = field(default=None, repr=False)
+    cleanup_debt: ScratchCleanupDebt | None = field(default=None, repr=False)
+    error: FileSnapshotObservationError | FileWireError | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FileSnapshotCandidateResult:
+    """Separate carrier facts from one typed snapshot observation."""
+
+    dispatch: Dispatch
+    carrier_completion: ExitStatus | None
+    carrier_local_status: int | None
+    carrier_failure: Failure | None
+    runtime_prerequisite: RuntimePrerequisiteObservation
+    observation: FileSnapshotObservation | None
+
+
+class FileSnapshotCreationUncertain(Exception):
+    def __init__(self) -> None:
+        super().__init__("private snapshot creation may have been dispatched")
+
+
+class FileSnapshotChunkUncertain(Exception):
+    def __init__(self) -> None:
+        super().__init__("private snapshot chunk observation is unavailable")
+
+
+class FileSnapshotStreamUncertain(Exception):
+    def __init__(self) -> None:
+        super().__init__("private snapshot stream observation is unavailable")
+
+
+class FileSnapshotReconcileUncertain(Exception):
+    def __init__(self) -> None:
+        super().__init__("private snapshot reconciliation observation is unavailable")
+
+
+class FileSnapshotCleanupUncertain(Exception):
+    def __init__(self) -> None:
+        super().__init__("private snapshot cleanup may have been dispatched")
+
+
+def _control_uncertainty(operation: FileSnapshotOperation) -> Exception:
+    if operation is FileSnapshotOperation.BEGIN:
+        return FileSnapshotCreationUncertain()
+    if operation is FileSnapshotOperation.CHUNK:
+        return FileSnapshotChunkUncertain()
+    if operation is FileSnapshotOperation.STREAM:
+        return FileSnapshotStreamUncertain()
+    if operation is FileSnapshotOperation.RECONCILE:
+        return FileSnapshotReconcileUncertain()
+    return FileSnapshotCleanupUncertain()
+
+
+class _DiagnosticSink:
+    def __init__(self) -> None:
+        self.saw_data = False
+
+    def try_write(self, data: memoryview) -> int:
+        if data:
+            self.saw_data = True
+        return len(data)
+
+
+class _FileSnapshotCollector:
+    """Reduce one closed transcript while retaining only verified typed facts."""
+
+    def __init__(self, request: FileSnapshotRequest, on_stream_data: Callable[[bytes], bool] | None = None) -> None:
+        self._request = request
+        self._on_stream_data = on_stream_data
+        self._data = bytearray()
+        self._stream_bytes = 0
+        self._stream_digest = hashlib.sha256()
+        self._short_data_record = False
+        self._outcome: FileSnapshotObservation | None = None
+        self._terminal = False
+        self._error: FileSnapshotObservationError | None = None
+
+    def accept(self, record: FileRecord) -> None:
+        if self._error is not None:
+            return
+        if self._terminal:
+            self._fail(FileSnapshotObservationError.POST_TERMINAL)
+            return
+        try:
+            self._accept(record)
+        except FileSnapshotControlError:
+            self._fail(FileSnapshotObservationError.CONTROL)
+
+    def _accept(self, record: FileRecord) -> None:
+        if record.kind is FileRecordKind.DATA:
+            if isinstance(self._request, FileSnapshotStreamRequest):
+                length = self._request.ready._reference._ownership._length
+                if (
+                    not record.body
+                    or self._has_outcome()
+                    or self._stream_bytes + len(record.body) > length
+                    or self._on_stream_data is None
+                    or not self._on_stream_data(record.body)
+                ):
+                    self._fail(FileSnapshotObservationError.CONTENT)
+                else:
+                    self._stream_bytes += len(record.body)
+                    self._stream_digest.update(record.body)
+            elif not isinstance(self._request, FileSnapshotChunkRequest) or self._has_outcome():
+                self._fail(FileSnapshotObservationError.ORDER)
+            elif (
+                not record.body or self._short_data_record or len(self._data) + len(record.body) > self._request.length
+            ):
+                self._fail(FileSnapshotObservationError.CONTENT)
+            else:
+                self._data.extend(record.body)
+                self._short_data_record = len(record.body) < MAX_RECORD_BODY_BYTES
+            return
+        if record.kind is FileRecordKind.RESULT:
+            if self._has_outcome():
+                self._fail(FileSnapshotObservationError.ORDER)
+            elif isinstance(self._request, FileSnapshotBeginRequest):
+                result = parse_file_snapshot_begin_result(
+                    record.body,
+                    self._request.token,
+                    self._request.identity,
+                    self._request.max_bytes,
+                )
+                if result is None:
+                    self._outcome = FileSnapshotObservation(FileSnapshotObservationState.ABSENT)
+                else:
+                    self._outcome = FileSnapshotObservation(FileSnapshotObservationState.READY, snapshot=result)
+            elif isinstance(self._request, FileSnapshotChunkRequest):
+                chunk = parse_file_snapshot_chunk_result(
+                    record.body,
+                    self._request.offset,
+                    self._request.length,
+                    bytes(self._data),
+                )
+                self._outcome = FileSnapshotObservation(FileSnapshotObservationState.CHUNK, chunk=chunk)
+            elif isinstance(self._request, FileSnapshotStreamRequest):
+                parse_file_snapshot_stream_result(
+                    record.body,
+                    self._request.ready._reference._ownership._length,
+                    self._request.ready._digest,
+                    self._stream_bytes,
+                    self._stream_digest.digest(),
+                )
+                self._outcome = FileSnapshotObservation(FileSnapshotObservationState.STREAM)
+            elif isinstance(self._request, FileSnapshotReconcileRequest):
+                cleanup = parse_file_snapshot_reconcile_result(
+                    record.body,
+                    self._request.token,
+                    self._request.identity,
+                )
+                if cleanup is None:
+                    self._outcome = FileSnapshotObservation(FileSnapshotObservationState.OWNERSHIP_UNCERTAIN)
+                else:
+                    self._outcome = FileSnapshotObservation(
+                        FileSnapshotObservationState.RECOVERED, cleanup_debt=cleanup
+                    )
+            else:
+                parse_file_snapshot_cleanup_result(record.body)
+                self._outcome = FileSnapshotObservation(FileSnapshotObservationState.CLEANED)
+            return
+        if record.kind is FileRecordKind.FAILED:
+            if (self._data and not isinstance(self._request, FileSnapshotStreamRequest)) or self._has_outcome():
+                self._fail(FileSnapshotObservationError.ORDER)
+                return
+            failure = parse_file_snapshot_failure(record.body, self._request.token, self._request.identity)
+            if self._valid_failure(failure):
+                self._outcome = FileSnapshotObservation(FileSnapshotObservationState.REFUSED, failure=failure)
+            else:
+                self._fail(FileSnapshotObservationError.CONTROL)
+            return
+        if record.kind is FileRecordKind.FINISHED:
+            parse_empty_file_snapshot_body(record.body)
+            if not self._has_outcome():
+                self._fail(FileSnapshotObservationError.ORDER)
+            else:
+                self._terminal = True
+            return
+        self._fail(FileSnapshotObservationError.ORDER)
+
+    def _has_outcome(self) -> bool:
+        return self._outcome is not None
+
+    def _valid_failure(self, failure: FileSnapshotFailureControl) -> bool:
+        if failure.code is FileSnapshotFailureCode.ROOT_REFUSED:
+            return isinstance(self._request, FileSnapshotBeginRequest)
+        if failure.code is FileSnapshotFailureCode.SPOOL:
+            return isinstance(self._request, FileSnapshotBeginRequest)
+        if failure.code is not FileSnapshotFailureCode.SCRATCH:
+            return True
+        expected_phase = {
+            FileSnapshotChunkRequest: ScratchPhase.READ,
+            FileSnapshotStreamRequest: ScratchPhase.READ,
+            FileSnapshotReconcileRequest: ScratchPhase.RECONCILE,
+            FileSnapshotCleanupRequest: ScratchPhase.CLEANUP,
+        }.get(type(self._request))
+        if failure.scratch_phase is not expected_phase or expected_phase is None:
+            return False
+        if isinstance(self._request, FileSnapshotChunkRequest):
+            return failure.cleanup_debt == _cleanup_debt(self._request.ready)
+        if isinstance(self._request, FileSnapshotStreamRequest):
+            return failure.cleanup_debt == _cleanup_debt(self._request.ready)
+        if isinstance(self._request, FileSnapshotCleanupRequest):
+            return failure.cleanup_debt == self._request.cleanup_debt
+        return failure.cleanup_debt is None or _historical_cleanup_shape(failure.cleanup_debt)
+
+    def _fail(self, error: FileSnapshotObservationError) -> None:
+        if self._error is None:
+            self._error = error
+        self._clear()
+
+    def _clear(self) -> None:
+        self._data.clear()
+        self._stream_bytes = 0
+        self._stream_digest = hashlib.sha256()
+        self._short_data_record = False
+        self._outcome = None
+        self._terminal = False
+
+    def abort(self) -> None:
+        self._clear()
+
+    def finish(
+        self,
+        wire_error: FileWireError | None,
+        *,
+        streams_complete: bool,
+        stderr_noise: bool,
+        dispatch: Dispatch,
+    ) -> FileSnapshotObservation:
+        error: FileSnapshotObservationError | FileWireError | None = self._error or wire_error
+        state = FileSnapshotObservationState.INVALID
+        if error is None and stderr_noise:
+            error = FileSnapshotObservationError.STDERR
+        if error is None and not streams_complete:
+            error = FileSnapshotObservationError.CARRIER
+            state = FileSnapshotObservationState.INCOMPLETE
+        elif error is None and not self._terminal:
+            error = FileSnapshotObservationError.MISSING_TERMINAL
+            state = FileSnapshotObservationState.INCOMPLETE
+        elif error is FileWireError.TRUNCATED:
+            state = FileSnapshotObservationState.INCOMPLETE
+        if error is not None:
+            self._clear()
+            if dispatch is not Dispatch.NOT_SENT:
+                state = FileSnapshotObservationState.UNCERTAIN
+            return FileSnapshotObservation(state, error=error)
+        outcome = self._outcome
+        assert outcome is not None
+        self._clear()
+        return outcome
+
+
+def _validate_text(value: object) -> str:
+    if type(value) is not str or "\0" in value:
+        raise ValidationError("File-snapshot paths must be valid non-NUL UTF-8 strings")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValidationError("File-snapshot paths must be valid non-NUL UTF-8 strings") from None
+    return value
+
+
+def _request_data(request: FileSnapshotRequest) -> bytes:
+    try:
+        return encode_file_snapshot_request(request)
+    except FileSnapshotRequestError as error:
+        failure = error.failure
+    if failure is FileSnapshotFailureCode.OVERSIZED_REQUEST:
+        raise ValidationError("File-snapshot request exceeds the 32768-byte manifest bound") from None
+    raise ValidationError("File-snapshot request contains an invalid field") from None
+
+
+def _exchange(
+    carrier: BoundHelperCarrier,
+    request: FileSnapshotRequest,
+    plan: IdentityPlan,
+    deadline: Deadline,
+    runtime_selection: RuntimeSelection,
+    on_stream_data: Callable[[bytes], bool] | None = None,
+    *,
+    bootstrap: _NumericGuestBootstrap | None = None,
+) -> FileSnapshotCandidateResult:
+    if bootstrap is None:
+        fixed_argv, candidates, system_shim = build_runtime_identity_helper_argv(
+            plan,
+            selection=runtime_selection,
+            fixed_source=FIXED_BUNDLE.bootstrap,
+            nonce=request.nonce,
+        )
+        prefix = FIXED_BUNDLE.prefix
+    else:
+        if request.effect_gate is not None and request.effect_gate.guest != bootstrap.guest:
+            raise ValidationError("Snapshot effect-gate guest does not match its numeric bootstrap")
+        fixed_argv, candidates, system_shim = build_root_guest_bootstrap_argv(
+            bootstrap.root_entry,
+            plan.expected,
+            selection=runtime_selection,
+            program=ROOT_PROGRAM,
+            nonce=request.nonce,
+            expected_guest=bootstrap.guest,
+        )
+        prefix = ROOT_PROGRAM.prefix
+    collector = _FileSnapshotCollector(request, on_stream_data)
+    reader = FileRecordReader(request.nonce, collector.accept)
+    runtime = RuntimePrefixSink(request.nonce, candidates, reader, system_shim)
+    stderr = _DiagnosticSink()
+    io = CarrierIO(
+        input=FiniteInput(prefix + _request_data(request), sensitive=True),
+        output=SinkOutput(runtime, stderr, require_live=isinstance(request, FileSnapshotStreamRequest)),
+        sensitive=True,
+    )
+    dispatch = Dispatch.UNKNOWN
+    try:
+        report = carrier.execute(PreparedInvocation(fixed_argv), io=io, deadline=deadline)
+        dispatch = report.dispatch
+        runtime_prerequisite = runtime.observation
+        if runtime_prerequisite.state is RuntimePrerequisiteState.READY:
+            reader.finish()
+            delivered = (
+                report.stdout.retention is Retention.DELIVERED and report.stderr.retention is Retention.DELIVERED
+            )
+            observation = collector.finish(
+                reader.error,
+                streams_complete=delivered and report.stdout.complete and report.stderr.complete,
+                stderr_noise=stderr.saw_data,
+                dispatch=report.dispatch,
+            )
+        else:
+            reader.abort()
+            collector.abort()
+            observation = None
+        return FileSnapshotCandidateResult(
+            report.dispatch,
+            report.completion,
+            report.local_status,
+            report.failure,
+            runtime_prerequisite,
+            observation,
+        )
+    except BaseException as control:
+        reader.abort()
+        collector.abort()
+        if dispatch is not Dispatch.NOT_SENT:
+            raise control from _control_uncertainty(request.operation)
+        raise
+    finally:
+        runtime.clear()
+
+
+def snapshot_begin(
+    carrier: BoundHelperCarrier,
+    *,
+    trusted_root_path: str,
+    relative_path: str,
+    max_bytes: int,
+    token: bytes,
+    plan: IdentityPlan,
+    deadline: Deadline,
+    runtime_selection: RuntimeSelection,
+    effect_gate: FileEffectGateBinding | None = None,
+    bootstrap: _NumericGuestBootstrap | None = None,
+) -> FileSnapshotCandidateResult:
+    """Create one immutable private snapshot through one fresh attempt."""
+    request = FileSnapshotBeginRequest(
+        secrets.token_hex(16),
+        token,
+        _validate_text(trusted_root_path),
+        _validate_text(relative_path),
+        max_bytes,
+        plan.expected,
+        deadline.remaining(),
+        effect_gate,
+    )
+    return _exchange(carrier, request, plan, deadline, runtime_selection, bootstrap=bootstrap)
+
+
+def snapshot_chunk(
+    carrier: BoundHelperCarrier,
+    *,
+    token: bytes,
+    ready: ReadyScratchReference,
+    offset: int,
+    length: int,
+    plan: IdentityPlan,
+    deadline: Deadline,
+    runtime_selection: RuntimeSelection,
+    effect_gate: FileEffectGateBinding | None = None,
+    bootstrap: _NumericGuestBootstrap | None = None,
+) -> FileSnapshotCandidateResult:
+    """Read one exact bounded range from an immutable private snapshot."""
+    request = FileSnapshotChunkRequest(
+        secrets.token_hex(16),
+        token,
+        ready,
+        offset,
+        length,
+        plan.expected,
+        deadline.remaining(),
+        effect_gate,
+    )
+    return _exchange(carrier, request, plan, deadline, runtime_selection, bootstrap=bootstrap)
+
+
+def snapshot_stream(
+    carrier: BoundHelperCarrier,
+    *,
+    token: bytes,
+    ready: ReadyScratchReference,
+    write_data: Callable[[bytes], bool],
+    plan: IdentityPlan,
+    deadline: Deadline,
+    runtime_selection: RuntimeSelection,
+    effect_gate: FileEffectGateBinding | None = None,
+    bootstrap: _NumericGuestBootstrap | None = None,
+) -> FileSnapshotCandidateResult:
+    """Stream one READY scratch over one live-stdio attempt, without replay."""
+    if not carrier.features.live_stdio:
+        raise ValidationError("Snapshot streaming requires a live-stdio carrier")
+    request = FileSnapshotStreamRequest(
+        secrets.token_hex(16), token, ready, plan.expected, deadline.remaining(), effect_gate
+    )
+    return _exchange(carrier, request, plan, deadline, runtime_selection, write_data, bootstrap=bootstrap)
+
+
+def snapshot_reconcile(
+    carrier: BoundHelperCarrier,
+    *,
+    token: bytes,
+    plan: IdentityPlan,
+    deadline: Deadline,
+    runtime_selection: RuntimeSelection,
+    effect_gate: FileEffectGateBinding | None = None,
+    bootstrap: _NumericGuestBootstrap | None = None,
+) -> FileSnapshotCandidateResult:
+    """Read historical cleanup ownership without replaying snapshot creation."""
+    request = FileSnapshotReconcileRequest(
+        secrets.token_hex(16),
+        token,
+        plan.expected,
+        deadline.remaining(),
+        effect_gate,
+    )
+    return _exchange(carrier, request, plan, deadline, runtime_selection, bootstrap=bootstrap)
+
+
+def snapshot_cleanup(
+    carrier: BoundHelperCarrier,
+    *,
+    token: bytes,
+    cleanup_debt: ScratchCleanupDebt,
+    plan: IdentityPlan,
+    deadline: Deadline,
+    runtime_selection: RuntimeSelection,
+    effect_gate: FileEffectGateBinding | None = None,
+    bootstrap: _NumericGuestBootstrap | None = None,
+) -> FileSnapshotCandidateResult:
+    """Attempt exact identity-bound cleanup once without a quiescence claim."""
+    request = FileSnapshotCleanupRequest(
+        secrets.token_hex(16),
+        token,
+        cleanup_debt,
+        plan.expected,
+        deadline.remaining(),
+        effect_gate,
+    )
+    return _exchange(carrier, request, plan, deadline, runtime_selection, bootstrap=bootstrap)

@@ -37,11 +37,11 @@ production enforcement and any reliance on it wait for the removal gate.
 
 Operational invariants apply from the first new-stack release: bound identity/route and lifetime,
 explicit shell/elevation/profile selection, actual guest OS permissions, SSH trust, sensitivity,
-safe filesystem object handling and truthful outcomes. A requested MANAGED or CONTAINED profile must
-deliver its advertised protections even during coexistence; it does not confine other calls through
-the legacy API. Readiness's no-staging restriction remains an operation contract, not a deferred
-recipient permission. No claim of a file-only or profile-required recipient boundary is valid while
-legacy access remains.
+safe filesystem object handling and truthful outcomes. A requested MANAGED profile must deliver its
+advertised protections even during coexistence; it does not confine other calls through the legacy
+API. Readiness's no-staging restriction remains an operation contract, not a deferred recipient
+permission. No claim of a file-only or profile-required recipient boundary is valid while legacy
+access remains.
 
 ## Caller contract
 
@@ -113,15 +113,15 @@ execution identity, not the workstation SSH process. A deadline is one monotonic
 preparation and observation; omission follows the explicitly bound operation policy, not a
 carrier-selected timeout or retry default.
 
-| Surface                                                                       | Proposed behavior                                                                                                                       |
-| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `features`, identity/route metadata                                           | Passive values from the bound target; no connection or authority discovery.                                                             |
-| `read_file`, `stat`, `write_file`, `upload`, `download`                       | Bounded bytes or explicit paths, metadata and publication policy; file reads are separately granted.                                    |
-| `upload_directory`, `download_directory`                                      | Explicit merge/replace choice, confined paths and extraction; no implicit recursive deletion.                                           |
-| `update_json`, `list_directory`, `ensure_directory`, `set_metadata`, `remove` | Structured updates, bounded inventory and filesystem lifecycle under core-approved paths/actions; no command grant required.            |
-| `observe`, `read_output`, `wait`                                              | Separate status, bounded cursor-based output reads, and waiting for a known job; observing never deletes its records.                   |
-| `stop`, `dispose`                                                             | Request owned-workload termination with truthful confirmation, or dispose terminal-job artifacts; neither guesses authority from a PID. |
-| Terminal I/O and `attach(job, terminal=...)`                                  | Optional terminal launch/attachment, distinct from lifetime, shell startup and authorization to launch additional work.                 |
+| Surface                                                                       | Proposed behavior                                                                                                                                           |
+| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `features`, identity/route metadata                                           | Passive values from the bound target; no connection or authority discovery.                                                                                 |
+| `read_file`, `stat`, `write_file`, `upload`, `download`                       | Bounded bytes or explicit paths, metadata and publication policy; download has explicit local create/replace choice, and file reads are separately granted. |
+| `upload_directory`, `download_directory`                                      | Explicit merge/replace choice, confined paths and extraction; no implicit recursive deletion.                                                               |
+| `update_json`, `list_directory`, `ensure_directory`, `set_metadata`, `remove` | Structured updates, bounded inventory and filesystem lifecycle under core-approved paths/actions; no command grant required.                                |
+| `observe`, `read_output`, `wait`                                              | Separate status, bounded cursor-based output reads, and waiting for a known job; observing never deletes its records.                                       |
+| `stop`, `dispose`                                                             | Request owned-workload termination with truthful confirmation, or dispose terminal-job artifacts; neither guesses authority from a PID.                     |
+| Terminal I/O and `attach(job, terminal=...)`                                  | Optional terminal launch/attachment, distinct from lifetime, shell startup and authorization to launch additional work.                                     |
 
 `ExecutionResult` carries available guest exit status, byte output and completeness, and the outcome
 facts needed to distinguish failure, timeout, and uncertainty. A typed execution error carries the
@@ -173,15 +173,18 @@ Exact option types belong in the file LLD. The intended behaviors are:
 
 Every mutation uses the immutable core ceiling intersected with recipient path/action and
 metadata/elevation grants. Known denials raise `AuthorizationError` before staging or dispatch;
-destination-side object checks enforce FRD R7 at use time. Public reads have their own path grants.
-The mutation ceiling here covers the bound destination filesystem; local download publication also
-needs the owning operation's explicit local destination, not an implied workstation sandbox.
+destination-side object checks enforce FRD R7 at use time, under the
+[file-safety ruling](frd.md#file-safety-and-guest-runtime-rulings). Those checks do not promise
+containment of malicious processes already running as the target user. Public reads have their own
+path grants. The mutation ceiling here covers the bound destination filesystem; local download
+publication also needs the owning operation's explicit local destination, not an implied workstation
+sandbox.
 
 Core entries distinguish an exact file, descendants of an approved root, and explicit root creation
 or removal. Core alone supplies trusted identity-based path expansion. A caller-controlled path,
 environment, symlink or derived view cannot widen it. An exact-file grant does not confer arbitrary
-sibling writes: private staging/publication/lock names are internal authority with owned cleanup,
-not a public parent grant. Helpers and carrier optimizations must honor the same boundary.
+sibling writes: private staging/publication names are internal authority with owned cleanup, not a
+public parent grant. Helpers and carrier optimizations must honor the same boundary.
 
 Mutation results report changed/unchanged and safe publication evidence, with typed conflict,
 failure or uncertainty. A lost acknowledgement is not permission to repeat a merge or deletion.
@@ -234,10 +237,10 @@ may stage source without exposing `FileAccess`. Internal helpers cannot be reque
 to arbitrary execution through a file-only interface. Validate that boundary, not that no internal
 command was used. As FRD R9 states, an arbitrary foreground or detached execution grant already
 conveys the execution account's guest authority, including filesystem and configured sudo powers;
-these in-process views are not a plugin sandbox. The proposed CONTAINED profile adds reviewed
-guest-side protections, not Python-plugin isolation. Authorize the requested public action: `run`
-using shared launch/wait machinery does not require a public `start` grant. Existing-job operations
-recheck current authority and the bound job profile; possession of a reference is not a grant.
+these in-process views are not a plugin sandbox. MANAGED supplies lifecycle ownership, not hostile
+target-user containment. Authorize the requested public action: `run` using shared launch/wait
+machinery does not require a public `start` grant. Existing-job operations recheck current authority
+and the bound job profile; possession of a reference is not a grant.
 
 The public surface does not expose SSH credentials, provider task IDs, or a carrier constructor.
 `RunContext.admin_execution_target()` and `.agent_execution_target()` return
@@ -260,14 +263,29 @@ carrier-specific detached API.
 class Carrier(Protocol):
     features: ChannelFeatures
 
+    def validate(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+    ) -> None: ...
+
     def execute(
         self,
         invocation: PreparedInvocation,
         *,
         io: CarrierIO,
         deadline: Deadline,
+        custody: LocalDeliveryCustody,
     ) -> CarrierReport: ...
 ```
+
+`validate` is a pure structural preflight for one fully prepared invocation. It can reject only
+deterministic local incompatibility, including unsupported I/O shapes and a carrier's direct
+envelope bound. It performs no discovery, credential lookup, process or network I/O, durable
+attempt, or other effect. `execute` repeats the same structural checks before effects and remains
+the sole delivery primitive. Deadline observation is call-time handling; readiness, credentials,
+connectivity, and actual delivery remain with execution.
 
 This is a private adapter-author seam, not a plugin alternative to `ExecutionTarget`. A platform
 plugin can implement it but ordinary capability consumers cannot use it to bypass bound policy.
@@ -280,6 +298,30 @@ before dispatch when absent from the channel's one immutable feature description
 | `CarrierIO`          | One explicit input choice: EOF, finite source, live source, or terminal endpoint. Output is bounded capture, discard, explicit byte-stream sinks, or terminal presentation. Carries effective sensitivity and authorized presentation policy. |
 | `Deadline`           | Remaining total budget, passed through local startup, dispatch and observation; never restarted for each poll. An explicitly unbounded operation remains distinct from a default.                                                             |
 | `CarrierReport`      | Dispatch evidence (`not_sent`, `sent`, or `unknown`), completion evidence, observed guest status if known, carrier/local status separately, available output with completeness/provenance, and safe diagnostics.                              |
+
+`LocalDeliveryCustody` is caller-held storage for exact local cleanup ownership, installed before
+process admission. It is not another dispatch API, process owner, durable record or remote
+cancellation handle. The existing operation attempt holds it during ordinary delivery; the keeper
+and pre-target platform workflow hold theirs for their own lifetimes. Passing it is mandatory at
+actual delivery, including fixed provider reads that construct local workers. At most one unsettled
+local worker occupies it; sequential polling may replace a worker only after confirmed cleanup.
+Pending or lost-ownership cleanup prevents another exchange through that custody.
+
+The carrier stores its existing inert native process owner there before starting it. Bounded close
+may return while construction or cleanup remains pending, without dropping the exact owner. A later
+explicit serialized cleanup attempt or observed natural exit may establish local settlement; lost
+exclusive ownership remains uncertainty and never authorizes signaling a reused numeric PID. Reports
+remain immutable observations and exceptions remain control flow, rather than transporting live
+cleanup capabilities through result reducers or exception causes. Local settlement, remote
+completion and dispatch evidence remain independent facts. Neither `not_sent` nor remote exit zero
+alone clears an attempt with unsettled local custody.
+
+The owning aggregate retains this storage after an ordinary borrow hands back unresolved work. Its
+non-dispatch cleanup path can settle local custody without reopening that borrow, admitting more
+work or resolving unknown remote effects. Provider hooks receive storage held by the enclosing
+workflow, not a temporary hook-local object or a new RunContext accessor. This signature and its
+consumer integration are the next implementation contract, not a claim that the current buffered
+adapters already implement bounded retained close.
 
 `sent` means the delivery request was submitted, not that the application started or finished.
 `not_sent` requires positive evidence that no remote dispatch could have occurred. Raw completion
@@ -308,8 +350,10 @@ duration of `execute` and never closes them. The carrier alone consumes the sele
 attempt, and owns/closes the pipes and other local delivery resources it creates. EOF on a source
 closes the outgoing input channel, not the caller's stream; observation continues until completion
 or the operation deadline. Returning or raising leaves no background pump using a borrowed stream.
-The shared preparation layer owns its temporary finite sources and closes them after the carrier
-finishes. There is no hidden rewind, reuse, or retry of a consumed input source.
+The shared preparation layer owns its temporary finite sources. A borrowed native descriptor that an
+admitted but unfinished constructor can still inherit must remain held, with any associated terminal
+state, until that local custody settles. Returning pending cleanup is not permission to close, reuse
+or restore such resources. There is no hidden rewind, reuse, or retry of a consumed input source.
 
 Input pumping and output draining are concurrent where the carrier requires it. Flow control must
 bound buffering without deadlocking duplex commands. Supplied live sources and sinks must satisfy a
@@ -330,15 +374,16 @@ mechanism, including sensitive-input suppression and a readiness path that stage
 
 Each call makes at most one dispatch attempt. Idempotent status polling is allowed; reconnecting and
 resending the invocation is not. On timeout or connection loss, the carrier returns the available
-partial evidence after bounded local cleanup. Stopping the local SSH process does not claim remote
-cancellation. Operational exceptions must retain the same safe partial report; request validation
-may fail before dispatch. Only the owning operation can authorize a new attempt when it knows
-repetition is safe.
+partial evidence after a bounded local cleanup attempt, retaining unfinished local custody in the
+caller-held storage. Stopping the local SSH process does not claim remote cancellation. Operational
+exceptions must retain the same safe partial report; request validation may fail before dispatch.
+Only the owning operation can authorize a new attempt when it knows repetition is safe.
 
-Control-flow interruption, including `KeyboardInterrupt`, propagates after bounded local cleanup,
-regardless of `check`. Safe partial evidence may accompany it but must not convert it to an ordinary
-returned result or checked-command error. The owning operation's interrupt rollback must still run;
-remote cancellation remains a separate explicit action.
+Control-flow interruption, including `KeyboardInterrupt`, propagates after a bounded local cleanup
+attempt, with unfinished local ownership already retained by the caller, regardless of `check`. Safe
+partial evidence may accompany it but must not convert it to an ordinary returned result or
+checked-command error. The owning operation's interrupt rollback must still run; remote cancellation
+remains a separate explicit action.
 
 For the buffered PoC, the operator accepted deferring guest cancellation on 2026-09-17. Live
 deadline tests confirmed that ordinary guest processes and bootstrap descendants can remain running
@@ -401,6 +446,53 @@ evidence from the inner delivery. Shared host files/jobs use actual host identit
 userspace. Reuse this composition rather than introducing another SSH runner or a generic
 virtualization framework.
 
+### Core native binding
+
+Add `VMPlatform.resolve_native_execution_binding(vm, ctx, *, deadline, config=None)` alongside the
+legacy hook. This is an explicit core/platform preparation operation, not an accessor supplied to
+file or execution consumers. It returns a `NativeExecutionBinding` containing the independent
+carrier, its actual delivery account name and explicit runtime selection. Constructing that value
+and the resulting RunContext views remains passive.
+
+The private WSL composition also binds a separate core-owned initial guest-facts route. It selects
+root entry and the configured named body account for the fixed canonical probe, without changing
+ordinary delivery or providing a consumer-facing root carrier. Core wraps that route in the same
+preparation borrow and requires separate runtime and guest evidence. The route supplies no arbitrary
+source callback, fallback or permission grant. Other platforms' adoption remains part of the
+complete factory gate.
+
+Core acquires operation ownership before activation, enters the platform-owned route lifetime, then
+invokes resolution with one preparation deadline before constructing the target views. Cloud
+platforms may need bounded provider reads to resolve a current endpoint: AWS, Azure and GCP obtain
+live public IPs that cannot safely be inferred from stored VM metadata. Those reads and delivered
+secret consumption belong to this explicit step. They must not be deferred to a property access or
+hidden in the carrier constructor. Core owns route activation and cleanup separately; the resolver
+does not implicitly open a route, launch a guest workload or retry an uncertain invocation.
+
+Proxmox and WSL2 already have their required endpoint/distribution facts, so their resolvers remain
+passive and perform no provider lookup. Create-time composition should use the platform's already
+observed endpoint facts instead of inventing a VM-row round trip or constructing a legacy transport
+to recover them. Provider metadata remains opaque to core in every case. The
+[remaining-platform inventory](migration-strategy.md#remaining-native-platform-inventory-2026-09-21)
+records the actual input and trust gaps.
+
+Delivery account and requested execution account are distinct facts. QGA delivers as root; WSL2's
+binding explicitly selects the VM's admin account. Target composition must observe the requested
+account and choose a proved identity transition before exposing its view. The binding does not
+certify numeric credentials, grant elevation or claim that a platform supports every identity path.
+
+The first hook implementations cover Proxmox and WSL2. Other platform implementations and
+provisioning-result composition remain required before the additive surface is accepted; an
+unfinished hook is a delivery gap, not an optional native-execution capability. Existing hooks and
+callers remain unchanged. Move legacy execution imports to their actual legacy callers so producing
+a new binding never constructs or imports a retirement transport.
+
+Proxmox configuration adds an explicit workstation CA-bundle path alongside system trust. Apply the
+same CA choice to platform API access and the new QGA connection; never reinterpret
+`verify_ssl=False` as acceptable new-stack trust. That legacy setting retains its old meaning only
+for unmigrated calls, and the new binding rejects it with migration guidance. Loading the selected
+trust material belongs to delivery/readiness, not passive carrier or binding-value construction.
+
 ## Filesystem and package layout
 
 These are proposed destination paths, not directories to create in this documentation revision. Use
@@ -421,7 +513,9 @@ cli/agentworks/
     systemd.py                  private Linux managed-boundary mechanism, after lifecycle proof
     diagnostics.py              safe execution diagnostics, no legacy SSHLogger
     carrier.py                  leaf carrier protocol and carrier-only values
+    binding.py                  core/platform native carrier and delivery-account facts
     carriers/
+      _subprocess.py            bounded local process I/O; carrier owns evidence interpretation
       ssh/
         __init__.py             SSHCarrier and SSHConnection exports
         connection.py           explicit connection value and option policy

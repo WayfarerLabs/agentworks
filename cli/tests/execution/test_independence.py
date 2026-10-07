@@ -37,7 +37,8 @@ for module in pkgutil.walk_packages(
     importlib.import_module(module.name)
 
 from agentworks.execution.carrier import CarrierIO, Deadline, PreparedInvocation
-from agentworks.execution.preparation import Command, prepare
+from agentworks.execution.models import Command
+from agentworks.execution.preparation import prepare
 prepared = prepare(Command(("/bin/true",)))
 assert isinstance(prepared.invocation, PreparedInvocation)
 assert isinstance(prepared.io, CarrierIO)

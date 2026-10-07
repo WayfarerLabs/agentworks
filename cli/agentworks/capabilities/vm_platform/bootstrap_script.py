@@ -18,6 +18,7 @@ import shlex
 from dataclasses import dataclass, field
 
 from agentworks.capabilities.vm_platform.skel import BASHRC, ZSHRC
+from agentworks.vms.identity import VM_INSTANCE_MARKER_PATH, validate_vm_instance_marker
 
 # Canonical cloud-init drop-in that stops host-key regeneration on stop/start.
 # By default cloud-init may delete and regenerate /etc/ssh/ssh_host_* on some
@@ -36,6 +37,10 @@ SSH_PRESERVE_KEYS_CONTENT = "".join(f"{line}\n" for line in SSH_PRESERVE_KEYS_LI
 # the Apple-vz SVE mask writes it. It lives on tmpfs, so the restart clears
 # it. Shared so the writers and the probe cannot drift apart.
 REBOOT_SENTINEL_PATH = "/run/agentworks-reboot-required"
+
+# Boot recreates these volatile directories from the root-owned drop-in. The
+# numeric admin identity is resolved on the guest after its account exists.
+FILE_GATES_TMPFILES_PATH = "/etc/tmpfiles.d/agentworks-file-gates.conf"
 
 # grub drop-in that disables SVE at the kernel cmdline on Apple Virtualization
 # guests (see the "Mask SVE" step below for the why). Shared by the create-time
@@ -108,6 +113,8 @@ chown "$VM_USER:$VM_USER" "$HOME_DIR/.bashrc" "$HOME_DIR/.zshrc"
 chmod 644 "$HOME_DIR/.bashrc" "$HOME_DIR/.zshrc"
 echo "##SUCCESS## shell rc seeds installed"
 
+{instance_marker_step}
+
 # -- Step 2: Provisioning packages --
 echo "##STEP## Provisioning packages"
 export DEBIAN_FRONTEND=noninteractive
@@ -116,6 +123,42 @@ timeout 600 apt-get dist-upgrade -y -qq -o Dpkg::Options::="--force-confnew"
 # shellcheck disable=SC2086
 apt-get install -y -qq -o Dpkg::Options::="--force-confnew" $PROVISIONING_PACKAGES
 echo "##SUCCESS## provisioning packages installed"
+
+# -- Step 2a: Volatile file gate directories --
+# Lima replays this provisioner on every boot. Keep existing gate databases
+# in place, and fail before tmpfiles can change an unexpected directory.
+echo "##STEP## File gate directories"
+ADMIN_UID=$(id -u "$VM_USER")
+ADMIN_GID=$(id -g "$VM_USER")
+check_gate_dir() {{
+    local path="$1" expected="$2"
+    if [ -e "$path" ] || [ -L "$path" ]; then
+        if [ -L "$path" ] || [ ! -d "$path" ] \
+            || [ "$(stat -c '%u:%g:%a' "$path")" != "$expected" ]; then
+            echo "##ERROR## Unexpected file gate directory: $path"
+            exit 1
+        fi
+    fi
+}}
+check_gate_dir /run/agentworks 0:0:755
+check_gate_dir /run/agentworks/file-gates-v1 0:0:755
+check_gate_dir /run/agentworks/file-gates-v1/0 0:0:700
+check_gate_dir "/run/agentworks/file-gates-v1/$ADMIN_UID" "$ADMIN_UID:$ADMIN_GID:700"
+if [ -L {file_gates_tmpfiles_path} ] \
+    || ( [ -e {file_gates_tmpfiles_path} ] && [ ! -f {file_gates_tmpfiles_path} ] ); then
+    echo "##ERROR## Unexpected file gate tmpfiles drop-in"
+    exit 1
+fi
+cat > {file_gates_tmpfiles_path} <<AGW_FILE_GATES_TMPFILES
+d /run/agentworks 0755 0 0 -
+d /run/agentworks/file-gates-v1 0755 0 0 -
+d /run/agentworks/file-gates-v1/0 0700 0 0 -
+d /run/agentworks/file-gates-v1/$ADMIN_UID 0700 $ADMIN_UID $ADMIN_GID -
+AGW_FILE_GATES_TMPFILES
+chown root:root {file_gates_tmpfiles_path}
+chmod 0644 {file_gates_tmpfiles_path}
+systemd-tmpfiles --create {file_gates_tmpfiles_path}
+echo "##SUCCESS## file gate directories ready"
 
 # -- Step 2b: Preserve SSH host keys across reboots --
 # By default, cloud-init may delete and regenerate SSH host keys on certain
@@ -247,6 +290,71 @@ else
 fi
 """
 
+_INSTANCE_MARKER_INSTALLER_TEMPLATE = """\\
+set -euo pipefail
+
+# -- Step 1c: VM instance marker --
+# This marker belongs to the VM record, not to a template. A clone therefore
+# receives the marker generated for this create rather than inheriting its
+# source's value. Existing leaves are deliberately constrained: following a
+# symlink, replacing a non-regular leaf, or writing a multiply-linked file
+# creates an ownership ambiguity we do not need to support.
+echo "##STEP## VM instance marker"
+VM_INSTANCE_MARKER={instance_marker}
+MARKER_FILE={instance_marker_path}
+MARKER_DIR="$(dirname "$MARKER_FILE")"
+if [ -L "$MARKER_DIR" ]; then
+    echo "##ERROR## VM instance marker directory is a symlink"
+    exit 1
+fi
+if [ -e "$MARKER_DIR" ] && [ ! -d "$MARKER_DIR" ]; then
+    echo "##ERROR## VM instance marker directory is not a directory"
+    exit 1
+fi
+mkdir -p "$MARKER_DIR"
+chown root:root "$MARKER_DIR"
+chmod 0755 "$MARKER_DIR"
+if [ -L "$MARKER_FILE" ]; then
+    echo "##ERROR## VM instance marker path is a symlink"
+    exit 1
+fi
+if [ -e "$MARKER_FILE" ]; then
+    if [ ! -f "$MARKER_FILE" ]; then
+        echo "##ERROR## VM instance marker path is not a regular file"
+        exit 1
+    fi
+    LINK_COUNT="$(stat -c %h "$MARKER_FILE")" || {{
+        echo "##ERROR## could not inspect VM instance marker link count"
+        exit 1
+    }}
+    if [ "$LINK_COUNT" != 1 ]; then
+        echo "##ERROR## VM instance marker path has multiple links"
+        exit 1
+    fi
+fi
+printf '%s\\n' "$VM_INSTANCE_MARKER" > "$MARKER_FILE"
+chown root:root "$MARKER_FILE"
+chmod 0444 "$MARKER_FILE"
+echo "##SUCCESS## VM instance marker installed"
+"""
+
+
+def generate_instance_marker_installer(*, instance_marker: str) -> str:
+    """Render the fixed-path, creation-only VM marker installer."""
+    return _render_instance_marker_installer(
+        instance_marker=instance_marker,
+        marker_path=VM_INSTANCE_MARKER_PATH,
+    )
+
+
+def _render_instance_marker_installer(*, instance_marker: str, marker_path: str) -> str:
+    """Render a marker installer for the fixed production path or an isolated test path."""
+    instance_marker = validate_vm_instance_marker(instance_marker)
+    return _INSTANCE_MARKER_INSTALLER_TEMPLATE.format(
+        instance_marker=shlex.quote(instance_marker),
+        instance_marker_path=shlex.quote(marker_path),
+    )
+
 
 def generate_bootstrap_script(
     *,
@@ -256,6 +364,7 @@ def generate_bootstrap_script(
     tailscale_auth_key: str | None,
     hostname: str,
     swap: int,
+    instance_marker: str | None = None,
 ) -> str:
     """Generate the create-time bootstrap script with parameters baked in.
 
@@ -269,7 +378,14 @@ def generate_bootstrap_script(
     to hand, so a default here would be a second declaration of the
     system default, free to disagree with the first. It did: this
     parameter defaulted to 0 while ``ResolvedVMTemplate.swap`` is 4.
+
+    ``instance_marker=None`` omits installation for Lima's retained YAML and
+    for compatibility with a v1 external platform that already calls this
+    shared helper. Such a path cannot establish managed target identity.
     """
+    instance_marker_step = ""
+    if instance_marker is not None:
+        instance_marker_step = generate_instance_marker_installer(instance_marker=instance_marker)
     if tailscale_auth_key is not None:
         from agentworks.secrets.line_safety import (
             LineOrientedSecretUse,
@@ -286,10 +402,12 @@ def generate_bootstrap_script(
         provisioning_packages=shlex.quote(" ".join(provisioning_packages)),
         tailscale_auth_key=shlex.quote(tailscale_auth_key or ""),
         vm_hostname=shlex.quote(hostname),
+        instance_marker_step=instance_marker_step,
         swap=swap,
         ssh_preserve_path=SSH_PRESERVE_KEYS_PATH,
         ssh_preserve_content=SSH_PRESERVE_KEYS_CONTENT,
         reboot_sentinel=REBOOT_SENTINEL_PATH,
+        file_gates_tmpfiles_path=FILE_GATES_TMPFILES_PATH,
         sve_apple_vz_grep=SVE_APPLE_VZ_GREP,
         sve_cpuinfo_grep=SVE_CPUINFO_GREP,
         sve_grub_path=SVE_NOSVE_GRUB_PATH,

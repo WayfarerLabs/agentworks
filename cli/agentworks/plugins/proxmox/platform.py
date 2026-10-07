@@ -3,16 +3,27 @@ via the Proxmox REST API."""
 
 from __future__ import annotations
 
+import hashlib
+import json
 import sys
 import time
 import urllib.parse
 import uuid
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
+from pathlib import Path
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self
 
 from pydantic import Field, model_validator
 
 from agentworks import output
-from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
+from agentworks.capabilities.vm_platform.base import (
+    ProviderLocator,
+    ProviderLocatorObservation,
+    ProvisionRequest,
+    ProvisionResult,
+    VMPlatform,
+    execution_power_remaining,
+    provider_locator_remaining,
+)
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.capabilities.vm_platform.debian_release import (
@@ -20,14 +31,13 @@ from agentworks.capabilities.vm_platform.debian_release import (
 )
 from agentworks.db import VMStatus
 from agentworks.debian import DebianRelease
-from agentworks.errors import ProvisioningError, StateError
+from agentworks.errors import ConfigError, ConnectivityError, ProvisioningError, StateError
 from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
 from agentworks.plugins.proxmox.teardown import (
     rollback_create_on_interrupt,
     rollback_partial_create,
     stop_and_delete_vm,
 )
-from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
 from agentworks.schema import AgwModel, NonEmptyStr, PositiveInt, SecretRef
 from agentworks.topics import TopicProse
 
@@ -37,6 +47,11 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
+    from agentworks.execution.binding import NativeExecutionBinding
+    from agentworks.execution.carrier import Deadline
+    from agentworks.execution.carriers.proxmox import ProxmoxConnection
+    from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
 
 
 def _warn_bootstrap_file_residue() -> None:
@@ -96,6 +111,16 @@ class ProxmoxConfig(AgwModel):
     """Whether to verify the cluster's TLS certificate. Write booleans
     unquoted; quoted strings such as ``"no"`` are invalid."""
 
+    ca_bundle: NonEmptyStr | None = Field(default=None, examples=["~/.config/agentworks/proxmox-ca.pem"])
+    """Optional workstation PEM CA bundle for the cluster. Omission uses
+    normal system trust."""
+
+    @model_validator(mode="after")
+    def _validate_tls_trust(self) -> Self:
+        if self.ca_bundle is not None and not self.verify_ssl:
+            raise ValueError("ca_bundle cannot be combined with verify_ssl: false")
+        return self
+
     @model_validator(mode="before")
     @classmethod
     def _adapt_legacy_bookworm_template(cls, value: object) -> object:
@@ -121,7 +146,7 @@ class ProxmoxConfig(AgwModel):
 class ProxmoxPlatform(VMPlatform):
     """Runs VMs on a Proxmox VE cluster."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
     name: ClassVar[str] = "proxmox"
     description: ClassVar[str] = "Proxmox VE cluster VMs (clone + cloud-init)"
     config_model: ClassVar[type[ProxmoxConfig]] = ProxmoxConfig
@@ -195,12 +220,42 @@ class ProxmoxPlatform(VMPlatform):
             use=LineOrientedSecretUse.PROXMOX_API,
             secret_name=self.config.token_secret,
         )
-        return ProxmoxAPI(
-            api_url=self.config.api_url,
-            token_id=self.config.token_id,
-            token_secret=token_value,
-            verify_ssl=self.config.verify_ssl,
-        )
+        ca_bundle = self._ca_bundle()
+        try:
+            api = ProxmoxAPI(
+                api_url=self.config.api_url,
+                token_id=self.config.token_id,
+                token_secret=token_value,
+                verify_ssl=self.config.verify_ssl,
+                ca_bundle=ca_bundle,
+            )
+        except (OSError, ValueError):
+            api = None
+        if api is None:
+            raise ConfigError(
+                f"Proxmox CA bundle for vm-site '{self.site_name}' could not be loaded",
+                entity_kind="vm-site",
+                entity_name=self.site_name,
+                hint=f"Check the ca_bundle path and PEM contents: {ca_bundle}",
+            )
+        return api
+
+    def _ca_bundle(self) -> Path | None:
+        configured = self.config.ca_bundle
+        if configured is None:
+            return None
+        try:
+            expanded = Path(configured).expanduser()
+        except RuntimeError:
+            expanded = None
+        if expanded is None:
+            raise ConfigError(
+                f"Proxmox CA bundle for vm-site '{self.site_name}' could not be resolved",
+                entity_kind="vm-site",
+                entity_name=self.site_name,
+                hint=f"Check the ca_bundle path: {configured}",
+            )
+        return expanded
 
     def _api(self, ctx: RunContext) -> ProxmoxAPI:
         """The op client, built on first need from the context's scoped
@@ -404,12 +459,15 @@ class ProxmoxPlatform(VMPlatform):
                     provisioning_packages=PROVISIONING_PACKAGES,
                     tailscale_auth_key=request.tailscale_auth_key,
                     hostname=request.hostname,
+                    instance_marker=request.instance_marker,
                     swap=request.swap_gib,
                 )
                 tailscale_ip = self._run_bootstrap_via_agent(node, newid, bootstrap, ctx)
                 if not tailscale_ip:
                     raise ProvisioningError("Proxmox bootstrap did not return a Tailscale IP")
                 output.detail(f"Tailscale IP: {tailscale_ip}")
+
+                from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
 
                 target = ProxmoxExecTransport(
                     self._api(ctx),
@@ -493,12 +551,172 @@ class ProxmoxPlatform(VMPlatform):
         config: Config | None = None,
     ) -> ProxmoxExecTransport:
         """Build the VM's Tailscale-independent QGA execution channel."""
+        from agentworks.plugins.proxmox.transport import ProxmoxExecTransport
+
         del config
         return ProxmoxExecTransport(
             self._api(ctx),
             node=self._vm_node(vm),
             vmid=self._vmid(vm),
             admin_username=vm.admin_username,
+        )
+
+    def observe_provider_locator(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody,
+    ) -> ProviderLocatorObservation:
+        """Observe current generation under the exact configured verified authority.
+
+        Node is a route, not incarnation identity. A different origin spelling
+        requires explicit re-adoption. This observation does not establish guest
+        identity, predecessor drain or cancellation of queued requests.
+        Local configuration and secret preparation are checked against the
+        deadline, but cannot themselves be preempted by this hook.
+        """
+        from agentworks.execution.carriers.proxmox import _ProxmoxWire
+
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        connection = self._execution_connection(vm, ctx)
+        timeout = provider_locator_remaining(deadline, vm_name=vm.name)
+        try:
+            response = _ProxmoxWire(connection).request_current_config(timeout=timeout, custody=custody)
+        except Exception:
+            response = None
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        if response is None:
+            raise ConnectivityError(
+                f"Could not observe Proxmox generation for VM '{vm.name}'",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+
+        # UUID parsing accepts braces and raw hex; only canonical hyphenated
+        # provider strings establish generation evidence at this boundary.
+        generation = response.get("vmgenid")
+        parsed_generation = None
+        if type(generation) is str:
+            try:
+                candidate = uuid.UUID(generation)
+                if candidate.int != 0 and str(candidate) == generation.lower():
+                    parsed_generation = str(candidate)
+            except ValueError:
+                pass
+        if parsed_generation is None:
+            raise StateError(
+                f"Proxmox VM '{vm.name}' has no usable current generation",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+
+        # A versioned JSON array frames fields independently without exposing
+        # provider facts or restricting the configured namespace's length.
+        framed = json.dumps(
+            ("agentworks.proxmox.provider-locator.v1", connection.api_url, connection.vmid, parsed_generation),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        locator = ProviderLocator("proxmox:v1:" + hashlib.sha256(framed).hexdigest())
+        provider_locator_remaining(deadline, vm_name=vm.name)
+        return locator
+
+    def resolve_native_execution_binding(
+        self,
+        vm: VMRow,
+        ctx: RunContext,
+        *,
+        deadline: Deadline,
+        config: Config | None = None,
+    ) -> NativeExecutionBinding:
+        """Bind verified QGA delivery without probing or constructing legacy execution."""
+        from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
+        from agentworks.execution.binding import NativeExecutionBinding
+        from agentworks.execution.carriers.proxmox import ProxmoxCarrier
+
+        del deadline, config
+        connection = self._execution_connection(vm, ctx)
+        return NativeExecutionBinding(
+            ProxmoxCarrier(connection),
+            "root",
+            RuntimeSelection(RuntimeTargetOS.LINUX),
+            _new_managed_delivery=lambda: ProxmoxCarrier(connection),
+        )
+
+    def observe_execution_power(
+        self, vm: VMRow, ctx: RunContext, *, deadline: Deadline, custody: LocalDeliveryCustody
+    ) -> VMStatus:
+        """Observe provider power without starting a VM or contacting its guest.
+
+        The owned HTTP worker bounds DNS, TLS and response delivery. Local
+        configuration and scoped secret delivery are checked against the budget
+        before dispatch, but cannot themselves be preempted by this hook.
+        """
+        from agentworks.execution.carriers.proxmox import _ProxmoxWire
+
+        execution_power_remaining(deadline, vm_name=vm.name)
+        connection = self._execution_connection(vm, ctx)
+        timeout = execution_power_remaining(deadline, vm_name=vm.name)
+        try:
+            response = _ProxmoxWire(connection).request_power(timeout=timeout, custody=custody)
+        except Exception:
+            response = {}
+        execution_power_remaining(deadline, vm_name=vm.name)
+        status = response.get("status")
+        if type(status) is str:
+            if status == "running":
+                return VMStatus.RUNNING
+            if status == "stopped":
+                return VMStatus.STOPPED
+        return VMStatus.UNKNOWN
+
+    def _execution_connection(self, vm: VMRow, ctx: RunContext) -> ProxmoxConnection:
+        """Prepare explicit verified authority shared by new execution routes."""
+        from agentworks.execution.carriers.proxmox import ProxmoxConnection
+        from agentworks.secrets.line_safety import (
+            LineOrientedSecretUse,
+            require_line_safe_secret,
+        )
+
+        if not self.config.verify_ssl:
+            raise ConfigError(
+                f"Native execution for vm-site '{self.site_name}' requires TLS certificate verification",
+                entity_kind="vm-site",
+                entity_name=self.site_name,
+                hint="Enable verify_ssl and configure ca_bundle when the cluster CA is not in system trust.",
+            )
+        # Persisted provider metadata is external input. Never let lossy
+        # conversion select a different VM before scoped secret delivery.
+        raw_vmid: object = vm.platform_metadata.get("vmid")
+        vmid: int | None = None
+        if type(raw_vmid) is int:
+            vmid = raw_vmid
+        elif type(raw_vmid) is str and raw_vmid.isascii() and raw_vmid.isdecimal():
+            try:
+                vmid = int(raw_vmid)
+            except ValueError:
+                vmid = None
+        if vmid is None or vmid <= 0:
+            raise StateError(
+                f"VM '{vm.name}' has no valid positive Proxmox VM identifier",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
+        token_name = self.config.token_secret
+        token = require_line_safe_secret(
+            ctx.secret(token_name),
+            use=LineOrientedSecretUse.PROXMOX_API,
+            secret_name=token_name,
+        )
+        return ProxmoxConnection(
+            self.config.api_url,
+            self._vm_node(vm),
+            vmid,
+            self.config.token_id,
+            token,
+            ca_bundle=self._ca_bundle(),
         )
 
     # -- Helpers ---------------------------------------------------------------

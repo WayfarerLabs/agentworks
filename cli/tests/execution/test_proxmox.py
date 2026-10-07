@@ -8,6 +8,8 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,8 +19,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution import _process as process_core
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import (
     Capture,
+    CapturedOutput,
     CarrierIO,
     Deadline,
     Discard,
@@ -31,6 +36,7 @@ from agentworks.execution.carrier import (
     Retention,
 )
 from agentworks.execution.carriers._proxmox_http import _NoRedirect, _request, main
+from agentworks.execution.carriers._subprocess import ProcessResult
 from agentworks.execution.carriers.proxmox import (
     ProxmoxCarrier,
     ProxmoxConnection,
@@ -44,15 +50,60 @@ def connection() -> ProxmoxConnection:
 
 
 def worker_payload() -> dict[str, Any]:
-    return {"connection": asdict(connection()), "method": "POST", "suffix": "exec", "body": "{}", "timeout": 2.5}
+    return {
+        "connection": asdict(connection()),
+        "endpoint": "guest-agent",
+        "method": "POST",
+        "suffix": "exec",
+        "body": "{}",
+        "timeout": 2.5,
+    }
 
 
 def stub_process(monkeypatch: pytest.MonkeyPatch, body: bytes) -> MagicMock:
+    """Stub the shared runner, leaving actual ownership to real-child tests."""
     process = MagicMock()
-    process.communicate.return_value = (body, None)
+    process.exchange.return_value = body
     process.returncode = 0
-    monkeypatch.setattr(subprocess, "Popen", MagicMock(return_value=process))
+
+    def run(argv, *, io, deadline, custody):
+        process.before_exchange()
+        encoded = process.exchange(io.input.data, timeout=deadline.remaining())
+        io.output.stdout.try_write(memoryview(encoded)) if encoded else None
+        stream = CapturedOutput(b"", True, retention=Retention.DELIVERED)
+        return ProcessResult(True, process.returncode, process.returncode, stream, stream, None)
+
+    process.run_process.side_effect = run
+    monkeypatch.setattr("agentworks.execution.carriers.proxmox.run_process", process.run_process)
     return process
+
+
+@contextmanager
+def interrupted_worker(
+    monkeypatch: pytest.MonkeyPatch, control: BaseException, custody: LocalDeliveryCustody
+) -> Iterator[list[subprocess.Popen[bytes]]]:
+    original = subprocess.Popen
+    children: list[subprocess.Popen[bytes]] = []
+
+    def spawn(argv, **kwargs):
+        child = original([sys.executable, "-c", "import time; time.sleep(30)"], **kwargs)
+        children.append(child)
+        return child
+
+    def interrupt(*args, **kwargs):
+        raise control
+
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    monkeypatch.setattr(process_core, "_pump_owned_pipes", interrupt)
+    try:
+        yield children
+    finally:
+        assert custody.close(Deadline.after(3))
+        for child in children:
+            assert child.returncode is not None
+            for pipe in (child.stdin, child.stdout, child.stderr):
+                if pipe is not None:
+                    assert pipe.closed
 
 
 def test_connection_does_not_discover_or_expose_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -129,14 +180,98 @@ def test_wire_sends_json_and_uses_explicit_network_policy(monkeypatch: pytest.Mo
     assert response.closed
 
 
+@pytest.mark.parametrize("current_config", [False, True])
+def test_observation_wire_uses_fixed_provider_get_and_verified_tls(
+    monkeypatch: pytest.MonkeyPatch, current_config: bool
+) -> None:
+    import ssl
+
+    response = io.BytesIO(b'{"data":{"status":"running"}}')
+    opener = MagicMock()
+    opener.open.return_value = response
+    build = MagicMock(return_value=opener)
+    monkeypatch.setattr(urllib.request, "build_opener", build)
+    bundle = Path("cluster-ca.pem")
+    payload = {
+        **worker_payload(),
+        "method": "GET",
+        "suffix": None,
+        "body": None,
+        "endpoint": "current-config" if current_config else "power",
+    }
+    payload["connection"]["ca_bundle"] = str(bundle)
+    context = ssl.create_default_context()
+    trust = MagicMock(return_value=context)
+    monkeypatch.setattr(ssl, "create_default_context", trust)
+    assert _request(payload) == b'{"data":{"status":"running"}}'
+    request = opener.open.call_args.args[0]
+    endpoint = "config?current=1" if current_config else "status/current"
+    assert request.full_url == f"https://pve.example:8006/api2/json/nodes/node1/qemu/123/{endpoint}"
+    assert request.get_method() == "GET" and request.data is None
+    assert request.get_header("Authorization") == "PVEAPIToken=user@pve!token=secret-canary"
+    trust.assert_called_once_with(cafile=str(bundle))
+    assert context.check_hostname and context.verify_mode == ssl.CERT_REQUIRED
+    assert any(isinstance(handler, _NoRedirect) for handler in build.call_args.args)
+    assert any(
+        isinstance(handler, urllib.request.ProxyHandler) and vars(handler)["proxies"] == {}
+        for handler in build.call_args.args
+    )
+
+
+@pytest.mark.parametrize("method,body", [("POST", None), ("GET", "{}")])
+@pytest.mark.parametrize("current_config", [False, True])
+def test_provider_observation_route_refuses_mutating_shapes(
+    method: str, body: str | None, current_config: bool
+) -> None:
+    with pytest.raises(ValueError):
+        _request(
+            {
+                **worker_payload(),
+                "method": method,
+                "suffix": None,
+                "body": body,
+                "endpoint": "current-config" if current_config else "power",
+            }
+        )
+
+
+def test_current_config_cannot_select_an_agent_endpoint() -> None:
+    with pytest.raises(ValueError):
+        _request({**worker_payload(), "method": "GET", "body": None, "endpoint": "current-config"})
+
+
+@pytest.mark.parametrize("current_config", [False, True])
+def test_observation_worker_startup_subtracts_from_timeout(
+    monkeypatch: pytest.MonkeyPatch, current_config: bool
+) -> None:
+    now = [100.0]
+    monkeypatch.setattr("time.monotonic", lambda: now[0])
+    process = stub_process(monkeypatch, b'{"data":{"status":"running"}}')
+
+    def before_exchange():
+        now[0] = 102.0
+
+    process.before_exchange.side_effect = before_exchange
+    wire = _ProxmoxWire(connection())
+    request = wire.request_current_config if current_config else wire.request_power
+    assert request(timeout=5, custody=LocalDeliveryCustody()) == {"status": "running"}
+    assert process.exchange.call_args.kwargs["timeout"] == 3
+
+
 @pytest.mark.parametrize("status", [301, 302, 303, 307, 308, 401, 500])
-def test_http_failure_is_not_replayed_or_exposed(monkeypatch: pytest.MonkeyPatch, status: int) -> None:
+@pytest.mark.parametrize("route", ["agent", "power", "config"])
+def test_http_failure_is_not_replayed_or_exposed(monkeypatch: pytest.MonkeyPatch, status: int, route: str) -> None:
     response = io.BytesIO(b"secret-canary")
     error = urllib.error.HTTPError("https://pve.example", status, "secret-canary", {}, response)
     opener = MagicMock()
     opener.open.side_effect = error
     monkeypatch.setattr(urllib.request, "build_opener", lambda *args: opener)
-    source = io.BytesIO(json.dumps(worker_payload()).encode())
+    payload = worker_payload()
+    if route != "agent":
+        payload.update(
+            method="GET", suffix=None, body=None, endpoint="current-config" if route == "config" else "power"
+        )
+    source = io.BytesIO(json.dumps(payload).encode())
     sink = io.BytesIO()
     with monkeypatch.context() as context:
         context.setattr(sys, "stdin", SimpleNamespace(buffer=source))
@@ -148,20 +283,33 @@ def test_http_failure_is_not_replayed_or_exposed(monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.parametrize("body", [b"invalid", b"[]", b'{"data":null}', b'{"data":[]}'])
-def test_malformed_wire_envelope_is_not_execution_evidence(monkeypatch: pytest.MonkeyPatch, body: bytes) -> None:
+@pytest.mark.parametrize("current_config", [False, True])
+def test_malformed_wire_envelope_is_not_execution_evidence(
+    monkeypatch: pytest.MonkeyPatch, body: bytes, current_config: bool
+) -> None:
     stub_process(monkeypatch, body)
     with pytest.raises(_WireFailure):
-        _ProxmoxWire(connection()).request("GET", "exec-status?pid=42", timeout=1)
+        wire = _ProxmoxWire(connection())
+        if current_config:
+            wire.request_current_config(timeout=1, custody=LocalDeliveryCustody())
+        else:
+            wire.request("GET", "exec-status?pid=42", timeout=1, custody=LocalDeliveryCustody())
 
 
-def test_wire_bounds_response_before_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("route", ["agent", "power", "config"])
+def test_wire_bounds_response_before_parsing(monkeypatch: pytest.MonkeyPatch, route: str) -> None:
     monkeypatch.setattr("agentworks.execution.carriers._proxmox_http._MAX_RESPONSE_BYTES", 10)
-    response = io.BytesIO(b'{"data":{"pid":42}}')
+    response = io.BytesIO(b"x" * 11)
     opener = MagicMock()
     opener.open.return_value = response
     monkeypatch.setattr(urllib.request, "build_opener", lambda *args: opener)
     with pytest.raises(ValueError):
-        _request(worker_payload())
+        payload = worker_payload()
+        if route != "agent":
+            payload.update(
+                method="GET", suffix=None, body=None, endpoint="current-config" if route == "config" else "power"
+            )
+        _request(payload)
     assert response.closed
 
 
@@ -170,15 +318,22 @@ def test_redirect_handler_never_follows() -> None:
     assert _NoRedirect().redirect_request(request, None, 307, "", {}, "https://other.example") is None
 
 
-def test_worker_credentials_use_only_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("current_config", [False, True])
+def test_worker_credentials_use_only_stdin(monkeypatch: pytest.MonkeyPatch, current_config: bool) -> None:
     process = stub_process(monkeypatch, b'{"data":{"pid":42}}')
-    spawn = MagicMock(return_value=process)
-    monkeypatch.setattr(subprocess, "Popen", spawn)
-    assert _ProxmoxWire(connection()).request("POST", "exec", body=b"{}", timeout=1) == {"pid": 42}
-    payload = json.loads(process.communicate.call_args.args[0])
+    wire = _ProxmoxWire(connection())
+    result = (
+        wire.request_current_config(timeout=1, custody=LocalDeliveryCustody())
+        if current_config
+        else wire.request("POST", "exec", body=b"{}", timeout=1, custody=LocalDeliveryCustody())
+    )
+    assert result == {"pid": 42}
+    payload = json.loads(process.exchange.call_args.args[0])
     assert payload["connection"]["token_secret"] == "secret-canary"
-    assert "secret-canary" not in repr(spawn.call_args)
-    assert spawn.call_args.kwargs["stderr"] == subprocess.DEVNULL
+    assert "secret-canary" not in repr(process.run_process.call_args)
+    worker_io = process.run_process.call_args.kwargs["io"]
+    assert worker_io.sensitive
+    assert worker_io.output.stderr.try_write(memoryview(b"secret-canary")) == len(b"secret-canary")
 
 
 def test_ca_bundle_path_serializes_only_for_worker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -186,12 +341,15 @@ def test_ca_bundle_path_serializes_only_for_worker(monkeypatch: pytest.MonkeyPat
     bundle = tmp_path / "cluster CA.pem"
     value = replace(connection(), ca_bundle=bundle)
     assert value.ca_bundle == bundle
-    assert _ProxmoxWire(value).request("POST", "exec", body=b"{}", timeout=1) == {"pid": 42}
-    assert json.loads(process.communicate.call_args.args[0])["connection"]["ca_bundle"] == str(bundle)
+    assert _ProxmoxWire(value).request("POST", "exec", body=b"{}", timeout=1, custody=LocalDeliveryCustody()) == {
+        "pid": 42
+    }
+    assert json.loads(process.exchange.call_args.args[0])["connection"]["ca_bundle"] == str(bundle)
 
 
 @pytest.mark.windows
-def test_owned_http_worker_is_killed_and_reaped_at_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("route", ["agent", "power", "config", "start", "task"])
+def test_owned_http_worker_is_killed_and_reaped_at_deadline(monkeypatch: pytest.MonkeyPatch, route: str) -> None:
     original = subprocess.Popen
     children = []
 
@@ -201,30 +359,62 @@ def test_owned_http_worker_is_killed_and_reaped_at_deadline(monkeypatch: pytest.
         return child
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
-    with pytest.raises(subprocess.TimeoutExpired):
-        _ProxmoxWire(connection()).request("POST", "exec", body=b"{}", timeout=0.05)
+    custody = LocalDeliveryCustody()
+    try:
+        with pytest.raises(_WireFailure):
+            wire = _ProxmoxWire(connection())
+            if route == "config":
+                wire.request_current_config(timeout=0.05, custody=custody)
+            elif route == "power":
+                wire.request_power(timeout=0.05, custody=custody)
+            elif route == "start":
+                wire.request_vm_start(timeout=0.05, custody=custody)
+            elif route == "task":
+                wire.request_task_status(
+                    "UPID:node1:00000001:00000001:00000001:qmstart:123:user@pve:",
+                    timeout=0.05,
+                    custody=custody,
+                )
+            else:
+                wire.request("POST", "exec", body=b"{}", timeout=0.05, custody=custody)
+    finally:
+        assert custody.close(Deadline.after(3))
     assert len(children) == 1
-    assert children[0].poll() is not None
+    assert children[0].returncode is not None
     assert children[0].stdin is not None and children[0].stdout is not None
     assert children[0].stdin.closed and children[0].stdout.closed
 
 
 @pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit, GeneratorExit])
-def test_worker_interrupt_reaps_before_propagating(monkeypatch: pytest.MonkeyPatch, interruption: type) -> None:
-    process = stub_process(monkeypatch, b"")
-    process.communicate.side_effect = [interruption(), (b"", None)]
-    process.poll.return_value = None
-    with pytest.raises(interruption):
-        _ProxmoxWire(connection()).request("POST", "exec", body=b"{}", timeout=1)
-    process.kill.assert_called_once()
-    assert process.communicate.call_count == 2
+@pytest.mark.parametrize("current_config", [False, True])
+def test_worker_interrupt_reaps_before_propagating(
+    monkeypatch: pytest.MonkeyPatch, interruption: type, current_config: bool
+) -> None:
+    control = interruption()
+    custody = LocalDeliveryCustody()
+    with interrupted_worker(monkeypatch, control, custody) as children:
+        with pytest.raises(interruption) as caught:
+            wire = _ProxmoxWire(connection())
+            if current_config:
+                wire.request_current_config(timeout=1, custody=custody)
+            else:
+                wire.request("POST", "exec", body=b"{}", timeout=1, custody=custody)
+        assert caught.value is control
+        assert custody.settled
+        assert len(children) == 1 and children[0].returncode is not None
+        assert children[0].stdout is not None and children[0].stdout.closed
 
 
-def test_failed_worker_never_exposes_its_output(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("current_config", [False, True])
+def test_failed_worker_never_exposes_its_output(monkeypatch: pytest.MonkeyPatch, current_config: bool) -> None:
     process = stub_process(monkeypatch, b"secret-canary")
     process.returncode = 1
     with pytest.raises(_WireFailure) as raised:
-        _ProxmoxWire(connection()).request("POST", "exec", body=b"{}", timeout=1)
+        wire = _ProxmoxWire(connection())
+        if current_config:
+            wire.request_current_config(timeout=1, custody=LocalDeliveryCustody())
+        else:
+            wire.request("POST", "exec", body=b"{}", timeout=1, custody=LocalDeliveryCustody())
     assert "secret-canary" not in str(raised.value)
 
 
@@ -286,8 +476,42 @@ def wire(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 
 def execute(io: CarrierIO | None = None, deadline: Deadline | None = None):
     return ProxmoxCarrier(connection()).execute(
-        PreparedInvocation(("/bin/true",)), io=io or CarrierIO(), deadline=deadline or Deadline(None)
+        PreparedInvocation(("/bin/true",)),
+        io=io or CarrierIO(),
+        deadline=deadline or Deadline(None),
+        custody=LocalDeliveryCustody(),
     )
+
+
+def test_structural_validation_is_pure_and_execute_repeats_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    request = MagicMock()
+    monkeypatch.setattr(_ProxmoxWire, "request", request)
+    carrier = ProxmoxCarrier(connection())
+    invocation = PreparedInvocation(("/bin/true",))
+    valid = CarrierIO(input=FiniteInput(b"armored"))
+    carrier.validate(invocation, io=valid)
+    request.assert_not_called()
+    invalid = CarrierIO(input=FiniteInput(b"\xff"))
+    with pytest.raises(ValidationError):
+        carrier.validate(invocation, io=invalid)
+    with pytest.raises(ValidationError):
+        carrier.execute(invocation, io=invalid, deadline=Deadline(None), custody=LocalDeliveryCustody())
+    request.assert_not_called()
+
+    original = ProxmoxCarrier._request_body
+    calls = 0
+
+    def counted(prepared: PreparedInvocation, selected: CarrierIO) -> bytes:
+        nonlocal calls
+        calls += 1
+        return original(prepared, selected)
+
+    monkeypatch.setattr(ProxmoxCarrier, "_request_body", staticmethod(counted))
+    report = carrier.execute(invocation, io=valid, deadline=Deadline.after(0), custody=LocalDeliveryCustody())
+    assert report.dispatch is Dispatch.NOT_SENT
+    assert report.failure is Failure.DEADLINE
+    assert calls == 1
+    request.assert_not_called()
 
 
 @pytest.mark.parametrize("code", [0, 1, 255])
@@ -462,10 +686,46 @@ def test_unprepared_or_oversized_input_refused_before_effect(wire: MagicMock, pa
     wire.assert_not_called()
 
 
-def test_input_limit_does_not_count_bootstrap_argv(wire: MagicMock) -> None:
-    report = execute(CarrierIO(input=FiniteInput(b"x" * 65_536)))
-    assert report.completion == ExitStatus(code=0)
-    assert len(json.loads(wire.call_args_list[0].kwargs["body"])["input-data"]) == 65_536
+@pytest.mark.parametrize("extra_bytes", [0, 1])
+def test_complete_http_body_limit_includes_bootstrap_and_framing(wire: MagicMock, extra_bytes: int) -> None:
+    argv = ("/usr/bin/python3", "-c", 'print("fixed bootstrap")')
+    overhead = len(json.dumps({"command": argv, "input-data": ""}).encode("ascii"))
+    payload = b"x" * (65_536 - overhead + extra_bytes)
+    carrier = ProxmoxCarrier(connection())
+    invocation = PreparedInvocation(argv)
+    carrier_io = CarrierIO(input=FiniteInput(payload))
+    if extra_bytes:
+        with pytest.raises(ValidationError):
+            carrier.execute(invocation, io=carrier_io, deadline=Deadline(None), custody=LocalDeliveryCustody())
+        wire.assert_not_called()
+    else:
+        report = carrier.execute(invocation, io=carrier_io, deadline=Deadline(None), custody=LocalDeliveryCustody())
+        assert report.completion == ExitStatus(code=0)
+        body = wire.call_args_list[0].kwargs["body"]
+        assert len(body) == 65_536
+        assert json.loads(body)["input-data"].encode("ascii") == payload
+
+
+@pytest.mark.parametrize(
+    "argv,payload",
+    [
+        (("/bin/true",), b"x" * 65_536),
+        (("/bin/true",), b"\n" * 40_000),
+        (("/bin/true", "x" * 65_536), b""),
+        (("/bin/true", '"' * 40_000), b""),
+    ],
+)
+def test_http_limit_refuses_oversized_argv_or_escaped_input(
+    wire: MagicMock, argv: tuple[str, ...], payload: bytes
+) -> None:
+    with pytest.raises(ValidationError):
+        ProxmoxCarrier(connection()).execute(
+            PreparedInvocation(argv),
+            io=CarrierIO(input=FiniteInput(payload)),
+            deadline=Deadline(None),
+            custody=LocalDeliveryCustody(),
+        )
+    wire.assert_not_called()
 
 
 def test_optional_features_are_passively_absent(wire: MagicMock) -> None:

@@ -112,7 +112,8 @@ def test_idempotency_marker_reads_through_overrides() -> None:
 
 
 def test_vm_platform_flags_start_stop_delete() -> None:
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY, VMPlatform
+    from agentworks.capabilities.vm_platform import VMPlatform
+    from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
 
     for op in ("start", "stop", "delete"):
         assert is_idempotent_op(VMPlatform, op), op

@@ -1,0 +1,169 @@
+"""Private ordinary-path observer for one exact WSL2 guest anchor.
+
+The observer retains each native WSL client until local settlement is known.
+It does not recover a client after controller death or establish native WSL proof.
+"""
+
+from __future__ import annotations
+
+import secrets
+from threading import TIMEOUT_MAX, Lock
+from typing import TYPE_CHECKING
+
+from agentworks.errors import ValidationError
+from agentworks.execution._wsl2_early_bootstrap import build_early_argv, require_early_runtime
+from agentworks.execution._wsl2_guest_query import (
+    FIXED_GUEST_QUERY_SOURCE,
+    LEGACY_GUEST_QUERY_SOURCE,
+    MAX_GUEST_QUERY_RESPONSE_BYTES,
+    reduce_guest_query_response,
+)
+from agentworks.execution._wsl2_lifecycle import GuestAnchorIdentity, GuestAnchorPresence
+from agentworks.execution.carrier import Deadline
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from agentworks.execution._wsl2_lifecycle import OwnedHostClient
+    from agentworks.execution.carriers.wsl2 import WSL2Connection
+
+_CLEANUP_SECONDS = 0.5
+
+
+class WSL2GuestObserver:
+    """Run a fixed query; an unaccounted dispatch permanently blocks retry.
+
+    Settling a local WSL client does not prove that WSLService drained its
+    guest-side dispatch. Only a complete, exact query result permits another.
+    """
+
+    def __init__(
+        self,
+        connection: WSL2Connection,
+        *,
+        client_factory: Callable[[], OwnedHostClient] | None = None,
+    ) -> None:
+        from agentworks.execution._wsl2_windows import WindowsWSL2HostClient
+
+        if connection.wsl_executable.casefold() not in {"wsl", "wsl.exe"}:
+            raise ValidationError("WSL2 guest observation requires the native WSL executable")
+        self._connection = connection
+        self._client_factory = WindowsWSL2HostClient if client_factory is None else client_factory
+        self._transition_lock = Lock()
+        self._pending: OwnedHostClient | None = None
+        self._query_uncertain = False
+
+    def observe(self, identity: GuestAnchorIdentity, deadline: Deadline) -> GuestAnchorPresence:
+        """Observe one identity; unresolved local custody prevents new dispatch."""
+        if type(identity) is not GuestAnchorIdentity or type(deadline) is not Deadline or deadline.expires_at is None:
+            raise ValidationError("WSL2 guest observation requires exact identity and finite deadline")
+        remaining = deadline.remaining()
+        assert remaining is not None
+        if remaining <= 0 or not self._transition_lock.acquire(timeout=min(remaining, TIMEOUT_MAX)):
+            return GuestAnchorPresence.UNKNOWN
+        try:
+            if not self._settle_pending() or self._query_uncertain or deadline.expired:
+                return GuestAnchorPresence.UNKNOWN
+            nonce = secrets.token_hex(16)
+            client = self._client_factory()
+            self._pending = client  # Retain before any call that can dispatch.
+            self._query_uncertain = True
+            try:
+                client.spawn_owned(self._argv(identity, nonce), deadline)
+                client.close_stdin()
+                self._admit_runtime(client, nonce, deadline)
+                response = client.read_stdout_line(MAX_GUEST_QUERY_RESPONSE_BYTES, deadline)
+                exit_status = client.wait(deadline)
+                trailing = client.read_stdout_line(1, deadline)
+                complete = trailing == b""
+                settled = self._settle_pending()
+                if not settled:
+                    return GuestAnchorPresence.UNKNOWN
+                presence = reduce_guest_query_response(
+                    response,
+                    identity,
+                    nonce,
+                    exit_status=exit_status,
+                    complete=complete,
+                    deadline_expired=deadline.expired,
+                )
+                if presence is not GuestAnchorPresence.UNKNOWN:
+                    self._query_uncertain = False
+                return presence
+            except BaseException as error:
+                try:
+                    self._settle_pending()
+                except BaseException as cleanup_error:
+                    if not isinstance(cleanup_error, Exception):
+                        raise
+                    error.add_note("WSL2 guest query local settlement remains uncertain")
+                if isinstance(error, Exception):
+                    return GuestAnchorPresence.UNKNOWN
+                raise
+        finally:
+            self._transition_lock.release()
+
+    def settle_pending(self, deadline: Deadline) -> bool:
+        """Retry only local client settlement; never clear query uncertainty."""
+        if type(deadline) is not Deadline or deadline.expires_at is None:
+            raise ValidationError("WSL2 guest settlement requires a finite deadline")
+        remaining = deadline.remaining()
+        assert remaining is not None
+        if remaining <= 0 or not self._transition_lock.acquire(timeout=min(remaining, TIMEOUT_MAX)):
+            return False
+        try:
+            if deadline.expired:
+                return False
+            return self._settle_pending(deadline)
+        finally:
+            self._transition_lock.release()
+
+    def _settle_pending(self, deadline: Deadline | None = None) -> bool:
+        client = self._pending
+        if client is None:
+            return True
+        try:
+            cleanup_seconds = _CLEANUP_SECONDS
+            if deadline is not None:
+                remaining = deadline.remaining()
+                assert remaining is not None
+                cleanup_seconds = min(cleanup_seconds, remaining)
+            allowance = Deadline.after(cleanup_seconds)
+            settled = client.settle(allowance).settled
+        except Exception:
+            return False
+        if settled:
+            self._pending = None
+        return settled
+
+    def _argv(self, identity: GuestAnchorIdentity, nonce: str) -> tuple[str, ...]:
+        source = f"_agw_query_pid = {identity.pid!r}\n" + FIXED_GUEST_QUERY_SOURCE
+        return build_early_argv(self._connection, source, nonce)
+
+    def _admit_runtime(self, client: OwnedHostClient, nonce: str, deadline: Deadline) -> None:
+        require_early_runtime(client, nonce, deadline)
+
+
+class _LegacyWSL2GuestObserver(WSL2GuestObserver):
+    """Former same-user query for persisted v3 hold recovery only."""
+
+    def _admit_runtime(self, client: OwnedHostClient, nonce: str, deadline: Deadline) -> None:
+        pass
+
+    def _argv(self, identity: GuestAnchorIdentity, nonce: str) -> tuple[str, ...]:
+        return (
+            self._connection.wsl_executable,
+            "--distribution",
+            self._connection.distribution,
+            "--user",
+            self._connection.user,
+            "--exec",
+            "/usr/bin/python3",
+            "-I",
+            "-S",
+            "-B",
+            "-c",
+            LEGACY_GUEST_QUERY_SOURCE,
+            nonce,
+            str(identity.pid),
+        )

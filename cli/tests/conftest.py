@@ -529,10 +529,8 @@ def publish_all_platforms(registry: object) -> None:
     """Publish every installed platform's capability row, bypassing the
     host-support gate. For registry-shape tests that need the full
     four-platform graph regardless of the test host's OS."""
-    from agentworks.capabilities.vm_platform import (
-        VM_PLATFORM_REGISTRY,
-        VMPlatformEntry,
-    )
+    from agentworks.capabilities.vm_platform import VMPlatformEntry
+    from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
     from agentworks.resources import Origin
 
     origin = Origin.built_in(source="tests.conftest")
@@ -557,7 +555,7 @@ def stub_platform_support(monkeypatch: pytest.MonkeyPatch) -> None:
     host's actual state. Tests OF the readiness model itself patch the
     individual methods instead.
     """
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+    from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
     from agentworks.resources.graph import Readiness
 
     for cls in VM_PLATFORM_REGISTRY.values():
@@ -839,7 +837,7 @@ class _StubRegistry:
             # Serve the built-in same-named sites so resolve_site /
             # lookup_site work against namespace configs (a stubbed
             # test VM's site is one of the four platform names).
-            from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+            from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
             from agentworks.vms.sites import VMSiteDecl
 
             if name not in VM_PLATFORM_REGISTRY:

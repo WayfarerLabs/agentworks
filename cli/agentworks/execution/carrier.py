@@ -1,4 +1,4 @@
-"""Buffered invocation boundary for independent carrier implementations.
+"""Invocation boundary for independent carrier implementations.
 
 Reports describe channel observations, not proof that a bootstrap or application ran.
 Payload fields deliberately have no diagnostic representation. No type imports
@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import math
 import time
+from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from agentworks.errors import ValidationError
+
+if TYPE_CHECKING:
+    from agentworks.execution._delivery_custody import LocalDeliveryCustody
 
 
 @dataclass(frozen=True)
@@ -89,6 +93,52 @@ class FiniteInput:
             raise ValidationError("Finite input must be bytes")
 
 
+class ByteSource(Protocol):
+    """Borrowed nonblocking byte source; None means temporarily stalled."""
+
+    def try_read(self, limit: int) -> bytes | None: ...
+
+
+@dataclass(frozen=True)
+class LiveInput:
+    """Borrow one bounded source for the duration of a carrier attempt."""
+
+    source: ByteSource = field(repr=False)
+    sensitive: bool = False
+
+
+@dataclass(frozen=True)
+class TerminalInput:
+    """Borrow explicit Python terminal descriptors for one terminal attempt.
+
+    Adapter-author callers can be outside static typing. Construction checks
+    only shape; native handle admission belongs to a terminal carrier.
+    """
+
+    input_fd: int
+    output_fd: int
+    term: str = field(repr=False)
+    bootstrap: ByteSource = field(repr=False)
+    sensitive: bool = False
+
+    def __post_init__(self) -> None:
+        if type(self.input_fd) is not int or self.input_fd < 0 or type(self.output_fd) is not int or self.output_fd < 0:
+            raise ValidationError("Terminal descriptors must be nonnegative Python file descriptors")
+        if type(self.term) is not str or not self.term or "\0" in self.term:
+            raise ValidationError("Terminal type must be nonempty UTF-8 without NUL")
+        try:
+            self.term.encode("utf-8")
+        except UnicodeEncodeError:
+            raise ValidationError("Terminal type must be nonempty UTF-8 without NUL") from None
+        has_reader = False
+        with suppress(Exception):
+            has_reader = callable(getattr(self.bootstrap, "try_read", None))
+        if not has_reader:
+            raise ValidationError("Terminal bootstrap must be a byte source")
+        if type(self.sensitive) is not bool:
+            raise ValidationError("Terminal sensitivity must be a boolean")
+
+
 @dataclass(frozen=True)
 class Capture:
     """Maximum retained bytes per carrier stream, not a truncation permission."""
@@ -105,22 +155,48 @@ class Discard:
     """Observe execution without retaining stream contents."""
 
 
-@dataclass(frozen=True)
-class CarrierIO:
-    """The sole input owner for the buffered proof subset of the carrier API.
+class ByteSink(Protocol):
+    """Borrowed nonblocking byte sink; None means temporarily stalled."""
 
-    Live streams and terminals are deliberately not accepted by this slice.
-    They require a proven cancellation/ownership contract before implementation.
+    def try_write(self, data: memoryview) -> int | None: ...
+
+
+@dataclass(frozen=True)
+class SinkOutput:
+    """Deliver raw streams; preflight an optional successful-stdout bound.
+
+    The bound is a capacity requirement, not a truncation permission or a
+    promise that a failed command will emit no stderr. A carrier with finite
+    buffering must reject a requirement it cannot support before dispatch.
     """
 
-    input: EndOfInput | FiniteInput = field(default_factory=EndOfInput)
-    output: Capture | Discard = field(default_factory=Capture)
+    stdout: ByteSink = field(repr=False)
+    stderr: ByteSink = field(repr=False)
+    require_live: bool = False
+    required_complete_stdout_bytes: int | None = None
+
+    def __post_init__(self) -> None:
+        bound = self.required_complete_stdout_bytes
+        if bound is not None and (type(bound) is not int or bound <= 0):
+            raise ValidationError("Complete stdout capacity must be a positive integer")
+
+
+@dataclass(frozen=True)
+class CarrierIO:
+    """The sole input owner and borrowed-output selection for one attempt."""
+
+    input: EndOfInput | FiniteInput | LiveInput | TerminalInput = field(default_factory=EndOfInput)
+    output: Capture | Discard | SinkOutput = field(default_factory=Capture)
     sensitive: bool = False
 
     def __post_init__(self) -> None:
-        if not isinstance(self.input, EndOfInput | FiniteInput) or not isinstance(self.output, Capture | Discard):
-            raise ValidationError("The buffered carrier requires finite input and capture or discard output")
-        if isinstance(self.input, FiniteInput) and self.input.sensitive:
+        if not isinstance(self.input, EndOfInput | FiniteInput | LiveInput | TerminalInput) or not isinstance(
+            self.output, Capture | Discard | SinkOutput
+        ):
+            raise ValidationError("Carrier I/O requires one supported input and output mode")
+        if isinstance(self.input, TerminalInput) and not isinstance(self.output, SinkOutput):
+            raise ValidationError("Terminal input requires trusted sink output")
+        if isinstance(self.input, FiniteInput | LiveInput | TerminalInput) and self.input.sensitive:
             object.__setattr__(self, "sensitive", True)
 
 
@@ -138,6 +214,7 @@ class Provenance(StrEnum):
 
 class Retention(StrEnum):
     CAPTURED = "captured"
+    DELIVERED = "delivered"
     DISCARDED = "discarded"
     SUPPRESSED = "suppressed"
 
@@ -170,7 +247,7 @@ class ExitStatus:
 
 @dataclass(frozen=True)
 class CapturedOutput:
-    """Retained raw carrier bytes with independent completeness and provenance."""
+    """Raw carrier stream disposition, completeness, and captured bytes if any."""
 
     data: bytes = field(default=b"", repr=False)
     complete: bool = False
@@ -201,9 +278,20 @@ class CarrierReport:
 
 
 class Carrier(Protocol):
-    """Dispatch at most once; clean local resources before return or interrupt."""
+    """Dispatch at most once under caller-held local cleanup custody."""
 
     @property
     def features(self) -> ChannelFeatures: ...
 
-    def execute(self, invocation: PreparedInvocation, *, io: CarrierIO, deadline: Deadline) -> CarrierReport: ...
+    def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        """Check deterministic structural limits without discovery or effects."""
+        ...
+
+    def execute(
+        self,
+        invocation: PreparedInvocation,
+        *,
+        io: CarrierIO,
+        deadline: Deadline,
+        custody: LocalDeliveryCustody,
+    ) -> CarrierReport: ...

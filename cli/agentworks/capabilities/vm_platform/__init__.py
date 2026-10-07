@@ -1,6 +1,6 @@
 """The vm-platform capability: code that runs VMs on one backend kind.
 
-``VM_PLATFORM_REGISTRY`` holds the code behind the read-only
+``registry.VM_PLATFORM_REGISTRY`` holds the code behind the read-only
 ``vm-platform`` capability resources: one :class:`VMPlatform` subclass
 per backend kind (``lima``, ``wsl2`` as core built-ins). The declarable
 ``vm-site`` kind exposes a configured platform, and site resolution
@@ -10,7 +10,7 @@ classes.
 
 The ``proxmox``, ``azure-vm``, ``aws-ec2``, and ``gcp-gce`` platforms ship in opt-in system
 plugins; each plugin's adapter re-seats its class into
-``VM_PLATFORM_REGISTRY`` at import, so site resolution still finds it by
+``registry.VM_PLATFORM_REGISTRY`` at import, so site resolution still finds it by
 registry name, while its ROW publishes with a ``system-plugin`` origin
 (the built-in publisher skips it).
 """
@@ -21,48 +21,34 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks.capabilities.vm_platform.base import (
+    MAX_PROVIDER_LOCATOR_BYTES,
     BootstrapProgress,
+    ProviderLocator,
+    ProviderLocatorObservation,
+    ProviderLocatorUnavailable,
     ProvisionRequest,
     ProvisionResult,
     RetainedProvisioningError,
     VMPlatform,
+    provider_locator_remaining,
 )
-from agentworks.capabilities.vm_platform.lima import LimaPlatform
-from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 
 if TYPE_CHECKING:
     from agentworks.origin import Origin
 
 __all__ = [
     "BootstrapProgress",
-    "VM_PLATFORM_REGISTRY",
-    "LimaPlatform",
+    "MAX_PROVIDER_LOCATOR_BYTES",
     "ProvisionRequest",
     "ProvisionResult",
+    "ProviderLocator",
+    "ProviderLocatorObservation",
+    "ProviderLocatorUnavailable",
     "RetainedProvisioningError",
     "VMPlatform",
     "VMPlatformEntry",
-    "WSL2Platform",
+    "provider_locator_remaining",
 ]
-
-VM_PLATFORM_REGISTRY: dict[str, type[VMPlatform]] = {
-    LimaPlatform.name: LimaPlatform,
-    WSL2Platform.name: WSL2Platform,
-}
-"""Every platform this BUILD ships (INSTALLED, in doctor's vocabulary).
-Which of them are usable on this host is the platform's own call, but
-that call is READINESS, not presence: every installed platform publishes
-a ``vm-platform`` row (R13), and :meth:`VMPlatform.unsupported_reason`
-feeds the row's readiness verdict rather than gating publication, so a
-host-unsupported platform (wsl2 off Windows) is a present-but-not-ready
-node, not an absent one. Every site (bundled and declared alike)
-registers unconditionally and is not-ready when its platform is
-host-unsupported or the bound config reports a missing requirement
-(:meth:`Capability.not_ready`). The knowledge lives on the platform
-class (no config knob, no host sniffing anywhere else), which is exactly
-the shape a plugin's platform brings along. Future plugins register here
-(and publish their own capability resources with plugin origins).
-"""
 
 
 @dataclass(frozen=True)

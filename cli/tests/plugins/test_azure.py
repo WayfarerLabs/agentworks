@@ -113,7 +113,7 @@ def test_azure_seated_by_plugin() -> None:
     import (so resolution finds them by registry name), and the plugin is
     indexed once."""
     from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+    from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
     from agentworks.plugins import SYSTEM_PLUGINS
 
     assert "azure" in SYSTEM_PLUGINS

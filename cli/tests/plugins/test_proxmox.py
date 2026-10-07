@@ -95,7 +95,7 @@ def test_proxmox_seated_by_plugin() -> None:
     """The proxmox platform ships as the ``proxmox`` system plugin, whose
     adapter re-seats the platform class into the code registry at import (so
     site resolution can construct it), and the plugin is indexed."""
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+    from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
     from agentworks.plugins import SYSTEM_PLUGINS
 
     assert "proxmox" in SYSTEM_PLUGINS

@@ -16,7 +16,8 @@ from pathlib import Path
 import pytest
 
 from agentworks.execution.carrier import CapturedOutput, FiniteInput, Provenance
-from agentworks.execution.preparation import PreparedExecution, Script, Shell, decode_output, prepare
+from agentworks.execution.models import Script, Shell
+from agentworks.execution.preparation import PreparedExecution, decode_output, prepare
 
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Fault injection requires Linux /proc")
 
@@ -139,7 +140,7 @@ def test_killed_producer_cannot_report_successful_partial_delivery(producer: str
     import fcntl
 
     source = 'kill -STOP "$$"; /bin/cat' if producer == "stdin" else 'kill -STOP "$$"\n#' + "x" * 150_000
-    prepared = prepare(Script(source, Shell.fixed("sh")), stdin=b"x" * 150_000 if producer == "stdin" else b"")
+    prepared = prepare(Script(source, Shell.SH), stdin=b"x" * 150_000 if producer == "stdin" else b"")
     with _running_bootstrap(prepared, restore_signals=restore_signals) as (process, prefix, handles):
         pipe_path = f"/proc/{process.pid}/fd/{5 if producer == 'source' else 6}"
         pipe = os.readlink(pipe_path)
@@ -168,7 +169,7 @@ def test_killed_producer_cannot_report_successful_partial_delivery(producer: str
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
 @pytest.mark.parametrize("restore_signals", [True, False])
 def test_failed_encoder_cannot_report_successful_complete_delivery(stream: str, restore_signals: bool) -> None:
-    prepared = prepare(Script('kill -STOP "$$"; exit 0', Shell.fixed("sh")))
+    prepared = prepare(Script('kill -STOP "$$"; exit 0', Shell.SH))
     with _running_bootstrap(prepared, restore_signals=restore_signals) as (process, prefix, handles):
         _, payload_handle = _wait_fixture_process(process.pid, (b"/bin/sh", b"/dev/fd/5"), handles, stopped=True)
         pipe = os.readlink(f"/proc/{process.pid}/fd/{8 if stream == 'stdout' else 9}")
@@ -187,7 +188,7 @@ def test_failed_encoder_cannot_report_successful_complete_delivery(stream: str, 
 @pytest.mark.parametrize("field", ["source", "stdin"])
 def test_malformed_input_fails_before_application_execution(field: str, tmp_path: Path) -> None:
     marker = tmp_path / "payload-started"
-    prepared = prepare(Script('printf must-not-run; : > "$MARKER"', Shell.fixed("sh")), env={"MARKER": str(marker)})
+    prepared = prepare(Script('printf must-not-run; : > "$MARKER"', Shell.SH), env={"MARKER": str(marker)})
     assert isinstance(prepared.io.input, FiniteInput)
     lines = prepared.io.input.data.split(b"\n")
     index = -3 if field == "source" else -2

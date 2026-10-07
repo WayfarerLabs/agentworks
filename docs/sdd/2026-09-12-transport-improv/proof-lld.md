@@ -124,9 +124,11 @@ TLS and response observation, not just socket inactivity. It does not cancel an 
 guest process. Redirects and environment proxies are disabled; TLS verification is mandatory. An
 explicit cluster CA bundle provides an alternative to the connection type's default trust without
 disabling hostname verification. Use a certificate-matching API hostname, not a server-name
-override. The wire worker caps a response at 4 MiB. PVE input is capped at 65,536 ASCII bytes;
-whole-request acceptance, including bootstrap argv, remains a live-test measurement rather than a
-guessed limit.
+override. The wire worker caps a response at 8 MiB, including the JSON envelope. This accommodates
+the maximum bounded directory inventory after framing without adding paging or guest scratch. Native
+acceptance must still prove the complete response through supported PVE/QGA versions. PVE input is
+capped at 65,536 ASCII bytes; whole-request acceptance, including bootstrap argv, remains a
+live-test measurement rather than a guessed limit.
 
 Preparation caps the complete encoded input envelope at 262,144 bytes. Source, argv, environment,
 cwd, framing and application stdin share that budget; neither encoded limit is a raw-stdin

@@ -13,9 +13,9 @@ self-registers into ``KIND_REGISTRY`` at load.
 implementations live in ``agentworks.capabilities.vm_platform``; the
 companion publisher there adds one ``VMPlatformEntry`` row per installed
 platform, built-in with source
-``"agentworks.capabilities.vm_platform"``. The row (``VMPlatformEntry``)
-stays in the package ``__init__`` beside the registry it mirrors, which
-is where the ``vm-site`` era put it.
+``"agentworks.capabilities.vm_platform"``. The ``VMPlatformEntry`` row
+stays in the package ``__init__``; the concrete registry lives in
+``registry.py``.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ class _VMPlatformKind:
         Proxmox uses QEMU Guest Agent for execution and directs interactive access to its
         provider console.
 
-        Contract version 1 receives core's concrete current Debian release, resolves it
+        Contract version 2 receives core's concrete current Debian release, resolves it
         to a platform-owned artifact, and fails before backend mutation when the mapping is
         missing. A platform completes its Tailscale join before returning transport and backend identity,
         reports bootstrap through the manager-owned progress sink, and rolls back partial
@@ -105,7 +105,7 @@ KIND_REGISTRY["vm-platform"] = _VMPlatformKind()
 
 
 def _registry() -> dict[str, Any]:
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+    from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
 
     return VM_PLATFORM_REGISTRY
 
@@ -132,10 +132,12 @@ def _readiness(name: str, impl: Any) -> Readiness:
 
 VM_PLATFORM_DESCRIPTOR = CapabilityKindDescriptor(
     kind="vm-platform",
-    contract_version=1,
+    contract_version=2,
     implementation_contract=VMPlatform,
     registry=_registry,
-    required_operations=frozenset({"create", "start", "stop", "delete", "status", "display_backend_name"}),
+    required_operations=frozenset(
+        {"create", "start", "stop", "delete", "status", "display_backend_name", "observe_provider_locator"}
+    ),
     # Empty: VMPlatform supplies every non-operation member a subclass needs.
     required_attributes=frozenset(),
     entry_factory=_entry,

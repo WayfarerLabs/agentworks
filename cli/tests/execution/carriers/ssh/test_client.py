@@ -12,12 +12,14 @@ import sys
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from subprocess import Popen
 from threading import Thread
 from typing import Any
 
 import pytest
 
+from agentworks.errors import ValidationError
+from agentworks.execution import _process
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.carrier import (
     Capture,
     CarrierIO,
@@ -31,7 +33,8 @@ from agentworks.execution.carrier import (
     Provenance,
     Retention,
 )
-from agentworks.execution.carriers.ssh import _io, client
+from agentworks.execution.carriers import _subprocess
+from agentworks.execution.carriers.ssh import client
 from agentworks.execution.carriers.ssh.client import SSHCarrier
 from agentworks.execution.carriers.ssh.connection import SSHConnection
 
@@ -45,15 +48,20 @@ class SyntheticSSH:
     version: str = "import sys; sys.stderr.write('OpenSSH_9.9p1, LibreSSL 3.3.6\\n')"
     calls: list[list[str]] = field(default_factory=list)
     children: list[subprocess.Popen[bytes]] = field(default_factory=list)
+    custody: LocalDeliveryCustody = field(default_factory=LocalDeliveryCustody)
 
     def execute(self, io: CarrierIO | None = None, seconds: float | None = 10):
         return self.carrier.execute(
-            PreparedInvocation(("/synthetic/program",)), io=io or CarrierIO(), deadline=Deadline.after(seconds)
+            PreparedInvocation(("/synthetic/program",)),
+            io=io or CarrierIO(),
+            deadline=Deadline.after(seconds),
+            custody=self.custody,
         )
 
     def assert_closed(self) -> None:
+        assert self.custody.settled
         for child in self.children:
-            assert child.poll() is not None
+            assert child.returncode is not None
             for pipe in (child.stdin, child.stdout, child.stderr):
                 assert pipe is None or pipe.closed
 
@@ -77,19 +85,42 @@ def synthetic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
     yield value
-    # Failed assertions must not leave synthetic processes running.
-    for child in value.children:
-        if child.poll() is None:
-            child.kill()
-        child.wait(timeout=2)
-        for pipe in (child.stdin, child.stdout, child.stderr):
-            if pipe is not None:
-                pipe.close()
+    assert value.custody.close(Deadline.after(2))
+    value.assert_closed()
 
 
 def test_inspection_is_passive(synthetic: SyntheticSSH) -> None:
     assert not synthetic.carrier.features.live_stdio
     assert not synthetic.carrier.features.terminal
+    assert synthetic.calls == []
+
+
+def test_validate_does_not_admit_or_probe_connection(synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("validation performed SSH admission or process work")
+
+    monkeypatch.setattr(client, "validate_connection_files", forbidden)
+    monkeypatch.setattr(client, "build_ssh_argv", forbidden)
+    monkeypatch.setattr(client, "run_process", forbidden)
+    synthetic.carrier.validate(PreparedInvocation(("/prepared/bootstrap",)), io=CarrierIO())
+    assert synthetic.calls == []
+
+
+def test_execute_validates_before_connection_or_process_work(
+    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(_invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+        raise ValidationError("unsupported static request")
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("validation refusal did not stop SSH work")
+
+    monkeypatch.setattr(synthetic.carrier, "validate", refuse)
+    monkeypatch.setattr(client, "validate_connection_files", forbidden)
+    monkeypatch.setattr(client, "build_ssh_argv", forbidden)
+    monkeypatch.setattr(client, "run_process", forbidden)
+    with pytest.raises(ValidationError, match="unsupported static request"):
+        synthetic.execute()
     assert synthetic.calls == []
 
 
@@ -117,7 +148,7 @@ def test_status_and_raw_stream_evidence(synthetic: SyntheticSSH, code: int) -> N
 def test_native_status_outside_posix_exit_range_is_not_guest_completion(
     synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
-    original = _io.run_process
+    original = _subprocess.run_process
 
     def run(argv, **kwargs):
         result = original(argv, **kwargs)
@@ -198,14 +229,14 @@ def test_unretained_output_never_enters_capture(
         "import sys; data=sys.stdin.buffer.read()*10000; sys.stdout.buffer.write(data); sys.stderr.buffer.write(data)"
     )
     observed = []
-    original = _io._Output.report
+    original = _process._Output.report
 
     def report(output):
-        if output.retention != Retention.CAPTURED:
+        if output.limit is None:
             observed.append(len(output.data))
         return original(output)
 
-    monkeypatch.setattr(_io._Output, "report", report)
+    monkeypatch.setattr(_process._Output, "report", report)
     result = synthetic.execute(io)
     assert observed == [0, 0]
     assert result.stdout.data == result.stderr.data == b""
@@ -332,51 +363,56 @@ def test_nonblocking_setup_failure_cleans_without_guessing_dispatch(
     synthetic.assert_closed()
 
 
-def test_failed_reap_is_explicit(synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch) -> None:
-    original = Popen.wait
+def test_failed_cleanup_retains_custody_until_explicit_retry(
+    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = _process._cleanup
 
-    def wait(process, timeout=None):
-        if len(synthetic.children) == 2 and process is synthetic.children[-1]:
-            raise subprocess.TimeoutExpired("secret-canary", timeout)
-        return original(process, timeout=timeout)
+    def cleanup(status):
+        if len(synthetic.children) == 2 and status.process is synthetic.children[-1]:
+            return False
+        return original(status)
 
     synthetic.command = "import time; time.sleep(30)"
     with monkeypatch.context() as context:
-        context.setattr(Popen, "wait", wait)
+        context.setattr(_process, "_cleanup", cleanup)
         report = synthetic.execute(seconds=0.1)
     assert report.failure == Failure.OBSERVATION
     assert report.completion is None
     assert report.dispatch == Dispatch.UNKNOWN
     assert "secret-canary" not in repr(report)
-    synthetic.children[-1].wait(timeout=2)
+    assert not synthetic.custody.settled
+    assert synthetic.custody.close(Deadline.after(2))
     synthetic.assert_closed()
 
 
-def test_interrupted_failed_reap_attaches_safe_evidence(
+def test_interrupted_failed_cleanup_retains_original_control_exception(
     synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    original_wait = Popen.wait
-    original_read = _io._Output.read
+    original_cleanup = _process._cleanup
+    original_read = _process._Output.advance
+    interrupted = KeyboardInterrupt()
 
     def read(output, pipe):
         if len(synthetic.children) == 2:
-            raise KeyboardInterrupt()
+            raise interrupted
         return original_read(output, pipe)
 
-    def wait(process, timeout=None):
-        if len(synthetic.children) == 2 and process is synthetic.children[-1]:
-            raise subprocess.TimeoutExpired("secret-canary", timeout)
-        return original_wait(process, timeout=timeout)
+    def cleanup(status):
+        if len(synthetic.children) == 2 and status.process is synthetic.children[-1]:
+            return False
+        return original_cleanup(status)
 
     synthetic.command = "import time; time.sleep(30)"
     with monkeypatch.context() as context:
-        context.setattr(_io._Output, "read", read)
-        context.setattr(Popen, "wait", wait)
+        context.setattr(_process._Output, "advance", read)
+        context.setattr(_process, "_cleanup", cleanup)
         with pytest.raises(KeyboardInterrupt) as raised:
             synthetic.execute()
-    assert raised.value.__notes__
+    assert raised.value is interrupted and raised.value.__notes__
     assert "secret-canary" not in repr(raised.value.__notes__)
-    synthetic.children[-1].wait(timeout=2)
+    assert not synthetic.custody.settled
+    assert synthetic.custody.close(Deadline.after(2))
     synthetic.assert_closed()
 
 
@@ -430,14 +466,14 @@ def test_failed_spawn_does_not_claim_dispatch_or_expose_exception(
 def test_interruption_cleans_owned_process_before_propagating(
     synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, interruption: type[BaseException]
 ) -> None:
-    original = _io._Output.read
+    original = _process._Output.advance
 
     def read(output, pipe):
         if len(synthetic.children) == 2:
             raise interruption()
         return original(output, pipe)
 
-    monkeypatch.setattr(_io._Output, "read", read)
+    monkeypatch.setattr(_process._Output, "advance", read)
     synthetic.command = "import time; time.sleep(30)"
     with pytest.raises(interruption):
         synthetic.execute()
@@ -477,15 +513,15 @@ def test_descendant_output_handles_do_not_block_cleanup(
         "sys.stdout.write('parent')"
     )
     if flood:
-        original = _io._Output.read
+        original = _process._Output.advance
 
         def read(output, pipe):
-            progressed = original(output, pipe)
+            progressed, failed = original(output, pipe)
             # Model uninterrupted pipe readiness even if this test scheduler
             # happens to pause the real flooding writer between two reads.
-            return progressed or (len(synthetic.children) == 2 and not output.eof)
+            return progressed or (len(synthetic.children) == 2 and not output.eof), failed
 
-        monkeypatch.setattr(_io._Output, "read", read)
+        monkeypatch.setattr(_process._Output, "advance", read)
     try:
         started = time.monotonic()
         report = synthetic.execute(CarrierIO(output=Capture(32)), seconds=None)
@@ -581,6 +617,7 @@ def test_installed_ssh_owns_fresh_pipe_handles(
     trust = tmp_path / "known_hosts"
     key.write_bytes(b"fixture identity; authentication is never reached")
     trust.write_bytes(b"")
+    custody = LocalDeliveryCustody()
     received: list[bytes] = []
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -613,8 +650,11 @@ def test_installed_ssh_owns_fresh_pipe_handles(
             )
             report = carrier.execute(
                 PreparedInvocation(("true",)),
-                io=CarrierIO(input=FiniteInput(b"synthetic input")),
+                # Keep stdin piped without racing payload delivery against the
+                # fixture's deliberate pre-authentication disconnect.
+                io=CarrierIO(input=FiniteInput(b"")),
                 deadline=Deadline.after(5),
+                custody=custody,
             )
             assert received and received[0].startswith(b"SSH-2.0-")
             assert report.failure == Failure.OBSERVATION
@@ -623,12 +663,15 @@ def test_installed_ssh_owns_fresh_pipe_handles(
             assert report.stderr.data
             assert report.stdout.complete and report.stderr.complete
         finally:
-            # Wake accept even when the client refuses before connecting. Every
-            # peer operation and join is bounded and the fixture owns all sockets.
             try:
-                with socket.create_connection(listener.getsockname(), timeout=1):
+                assert custody.close(Deadline.after(2))
+            finally:
+                # Wake accept even when the client refuses before connecting. Every
+                # peer operation and join is bounded and the fixture owns all sockets.
+                try:
+                    with socket.create_connection(listener.getsockname(), timeout=1):
+                        pass
+                except OSError:
                     pass
-            except OSError:
-                pass
-            peer.join(timeout=6)
-            assert not peer.is_alive()
+                peer.join(timeout=6)
+                assert not peer.is_alive()

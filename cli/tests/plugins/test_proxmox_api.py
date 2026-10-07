@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import ssl
 import urllib.error
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -454,3 +456,32 @@ class TestSSLConfig:
         )
         assert api._ssl_ctx is not None
         assert api._ssl_ctx.check_hostname is False
+        assert api._ssl_ctx.verify_mode == ssl.CERT_NONE
+
+    def test_ca_bundle_builds_verified_hostname_context(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        context = MagicMock(check_hostname=True, verify_mode=ssl.CERT_REQUIRED)
+        create = MagicMock(return_value=context)
+        monkeypatch.setattr(ssl, "create_default_context", create)
+        bundle = Path("/trust/cluster-ca.pem")
+
+        api = ProxmoxAPI(
+            api_url="https://pve.example.com:8006",
+            token_id="u@p!t",
+            token_secret="s",
+            ca_bundle=bundle,
+        )
+
+        create.assert_called_once_with(cafile=str(bundle))
+        assert api._ssl_ctx is context
+        assert api._ssl_ctx.check_hostname is True
+        assert api._ssl_ctx.verify_mode == ssl.CERT_REQUIRED
+
+    def test_ca_bundle_cannot_accompany_legacy_verification_bypass(self) -> None:
+        with pytest.raises(ValueError):
+            ProxmoxAPI(
+                api_url="https://pve.example.com:8006",
+                token_id="u@p!t",
+                token_secret="s",
+                verify_ssl=False,
+                ca_bundle=Path("/trust/cluster-ca.pem"),
+            )

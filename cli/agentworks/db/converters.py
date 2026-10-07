@@ -22,7 +22,8 @@ from agentworks.db.models import (
     _canonical_session_identity,
 )
 from agentworks.debian import DebianRelease, profile_for_release
-from agentworks.errors import StateError
+from agentworks.errors import StateError, ValidationError
+from agentworks.vms.identity import validate_vm_instance_marker
 
 if TYPE_CHECKING:
     import sqlite3
@@ -77,6 +78,18 @@ def _to_vm(row: sqlite3.Row) -> VMRow:
                 entity_name=row["name"],
                 hint="Upgrade Agentworks to a build that supports the recorded Debian release.",
             ) from None
+    raw_marker = row["instance_marker"]
+    instance_marker: str | None = None
+    if raw_marker is not None:
+        try:
+            instance_marker = validate_vm_instance_marker(raw_marker)
+        except ValidationError as error:
+            raise StateError(
+                "stored VM instance marker is invalid",
+                entity_kind="vm",
+                entity_name=row["name"],
+                hint="Restore a valid Agentworks database backup.",
+            ) from error
     return VMRow(
         name=row["name"],
         site=row["site"],
@@ -92,6 +105,7 @@ def _to_vm(row: sqlite3.Row) -> VMRow:
         swap_gib=row["swap_gib"],
         admin_username=row["admin_username"],
         hostname=row["hostname"],
+        instance_marker=instance_marker,
         created_at=row["created_at"],
         last_seen_at=row["last_seen_at"],
         debian_release=debian_release,

@@ -29,6 +29,7 @@ from agentworks.capabilities.vm_platform.lima import (
 )
 from agentworks.debian import DebianRelease
 from agentworks.ssh import SSHError
+from agentworks.vms.identity import VM_INSTANCE_MARKER_PATH
 
 
 def _request(*, tailscale_auth_key: str = "tskey-test") -> ProvisionRequest:
@@ -37,6 +38,7 @@ def _request(*, tailscale_auth_key: str = "tskey-test") -> ProvisionRequest:
         debian_release=DebianRelease.TRIXIE,
         hostname="lima--myvm",
         system_slug=None,
+        instance_marker="0123456789abcdef0123456789abcdef",
         admin_username="agw",
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=Path("/dev/null"),
@@ -189,11 +191,20 @@ def test_submitted_lima_configuration_never_contains_tailscale_key(
     persisted_config = cast("dict[str, Any]", yaml.safe_load(submitted_yaml))
     provider_list_render = json.dumps({"name": "myvm", "config": persisted_config}, sort_keys=True)
     assert secret not in submitted_yaml
+    assert VM_INSTANCE_MARKER_PATH not in submitted_yaml
     assert secret not in provider_list_render
     assert all(secret not in step["script"] for step in persisted_config["provision"])
 
     sensitive_calls = [(command, kwargs) for command, kwargs in calls if kwargs.get("input_text") is not None]
-    assert sensitive_calls == [
+    assert sensitive_calls[0] == (
+        "limactl shell myvm sudo -n /bin/bash -s",
+        {"input_text": sensitive_calls[0][1]["input_text"]},
+    )
+    marker_installer = sensitive_calls[0][1]["input_text"]
+    assert isinstance(marker_installer, str)
+    assert _request().instance_marker in marker_installer
+    assert VM_INSTANCE_MARKER_PATH in marker_installer
+    assert sensitive_calls[1:] == [
         (
             "limactl shell myvm sudo -n /bin/bash -c "
             '\'IFS= read -r TAILSCALE_AUTH_KEY && test -n "$TAILSCALE_AUTH_KEY" '
@@ -240,3 +251,19 @@ def test_ip_probe_failure_returns_missing_ip_after_successful_join(
     assert submitted and secret not in submitted[0]
     assert sum(kwargs.get("input_text") == f"{secret}\n" for _command, kwargs in calls) == 1
     assert "retry IP discovery without the auth key" in "\n".join(warnings)
+
+
+def test_later_start_never_delivers_or_repairs_instance_marker(monkeypatch: pytest.MonkeyPatch) -> None:
+    commands: list[tuple[str, dict[str, object]]] = []
+    platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
+    vm = SimpleNamespace(name="myvm", platform_metadata={"instance_name": "myvm"})
+    monkeypatch.setattr(LimaPlatform, "status", lambda self, vm, ctx: "stopped")
+    monkeypatch.setattr(
+        LimaPlatform,
+        "_run_lima",
+        lambda self, command, **kwargs: commands.append((command, kwargs)) or "",
+    )
+
+    platform.start(vm, RunContext())  # type: ignore[arg-type]
+
+    assert commands == [("limactl start myvm", {})]

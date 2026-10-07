@@ -161,6 +161,8 @@ def test_create_vm_request_shape_and_row(
     assert request.debian_release is DebianRelease.TRIXIE
     assert request.hostname == "dvm"  # no slug: the bare name
     assert request.system_slug is None
+    assert len(request.instance_marker) == 32
+    assert all(character in "0123456789abcdef" for character in request.instance_marker)
     assert request.cpus == 6
     assert request.admin_username == "operator"
     assert request.ssh_public_key == TEST_SSH_PUBLIC_KEY
@@ -171,6 +173,7 @@ def test_create_vm_request_shape_and_row(
     assert vm is not None
     assert vm.site == "lima-local"
     assert vm.hostname == "dvm"
+    assert vm.instance_marker == request.instance_marker
     assert vm.platform_metadata == {"instance_name": "dvm"}
     assert vm.debian_release is DebianRelease.TRIXIE
     assert vm.debian_release_observed_at is not None

@@ -113,6 +113,142 @@ These rulings supersede the earlier single-increment cutover and permission-enfo
 R7/R9/R10 and their acceptance scenarios, not the final-state requirements. The response and staged
 acceptance gates are in the [migration strategy](migration-strategy.md#sequence-and-cutover-gates).
 
+On transport ownership of the shared cgroup/supervisor implementation and session adoption:
+
+> Yes, transport owns that implementation
+
+On investigation of an early Python prerequisite:
+
+> Investigate an early Python prerequisite (recommended)
+
+On the earlier session-cgroups PR:
+
+> And 770 has been closed with a note
+
+#### File safety and guest runtime rulings
+
+On adding Python to the guest provisioning package list:
+
+> So we're already requiring some apt packages as part of provisioning, right? We probably need to
+> put more structure around that, but if you're simply asking to put python3 in that list, all good.
+> Just please ensure you don't use anything that wouldn't be supported by Bookworm's python3.
+
+On general authorization:
+
+> Isn't #1 simply: (when security lands), things can't do what they're not authorized to do? Please
+> don't tell me you have special requirements/rules/logic around just this one narrow case.
+
+On keeping file safety small and preserving access semantics:
+
+> Ok. I'm glad #1 is general.
+>
+> And for #2, I agree but keep it smart/small/elegant. And for the atomic writes, please consider it
+> a requirement that the file end up as if it were written directly, including impact of
+> ACLs/perms/etc. I'm not an expert here but I feel like writing the temp file to the target
+> directory (with a conflict-free name) is the right move.
+>
+> And finally, what situation would an operation have more OS priv than the caller? That sounds like
+> a bad idea. Can we just do everything as the target user?
+
+On conservative support and refusal:
+
+> Yeah, honestly, do we really want atomic writes? And we should err on the side of caution across
+> the board. Refusing to write strange files (sym or hard links, etc.) is perfectly reasonable,
+> especially at first. And I'd prefer that to a bunch of complexity that we'll never use.
+
+On accepting conservative atomic whole-file replacement with defined metadata semantics, and
+excluding malicious target-user process containment:
+
+> Perfect. Agreed.
+>
+> And then my general assumption is that a malicious process running as a given user will be able to
+> pwn any other process owned by that user as well as the files that user has access to. Maybe
+> cgroups give us something here (can we block process inspection outside the group?) but more is
+> going to require proper jails, which we're not doing.
+>
+> So, no, we shouldn't be protecting against a malicious target user process. That's already game
+> over for that user.
+
+<!-- cspell:ignore pwn -->
+
+On requiring a preinstalled Python 3.11 or newer, compatible with the guest helper, on SSH-accessed
+macOS platform hosts without implicit installation:
+
+> Require preinstalled Python 3
+
+On prerequisite detection and diagnostics:
+
+> Just make sure you detect when python isn't present (or is the system-default xcode shim) and
+> report that very cleanly.
+
+#### Platform authority and operation coordination ruling, 2026-09-20
+
+On the VM-host threat boundary and database-level coordination:
+
+> The only thing running stuff on VM hosts are VM platforms. And they inherently have the ability to
+> do just about anything. Something on the VM host is not going to stop a malicious platform, right?
+> Or am I missing something?
+>
+> And then I've long wanted to do db-level locks to prevent ops from conflicting with each other. I
+> would hope that takes care of most concerns. Using conflict-free filenames should then solve for
+> most of the rest. What do we really need from the file-level locking?
+
+On the recommendation to make database-level operation coordination primary, retain unique scratch
+names and conservative file checks, and require a concrete remaining race to justify any
+destination-side lock rather than imposing blanket machine-wide locking and privileged host setup:
+
+> I agree with your recommendations. Make it happen please.
+
+The [file coordination design](file-operations-lld.md#cooperating-writers-and-honest-limits) and
+[platform-host lifecycle](execution-lifecycle-lld.md#placement-host-resource-lifetime) implement
+this ruling. Host-side cooperation is not containment of a malicious platform. The existing
+exclusion of malicious target-user processes and the guest MANAGED lifecycle requirements remain.
+
+#### Hierarchical coordination follow-up ruling, 2026-09-20
+
+> Ok. Please take a look at #377. Done properly, we should be able to expand this to the other
+> levels, complete with the hierarchy (workspace locks are aware of the VM locks, etc.).
+>
+> You don't have to implement all of this but please leave room in the design and clearly indicate
+> what you didn't do in the SDD plan and lockfile.
+
+The [coordination extension design](hla.md#operation-coordination-and-hierarchical-extension) and
+[explicit follow-up scope](plan.md#hierarchical-coordination-follow-up-377) record the response.
+
+#### Availability, local download, and development-schema rulings, 2026-10-05
+
+On VM and independent-job availability, the operator clarified:
+
+<!-- cspell:ignore availabilty -->
+
+> So this seems fishy. Don't we want to force WSL to stay awake through a job?
+>
+> And this really shouldn't be wsl specific. We generally want to ensure vm availabilty for all
+> platforms. For most that's a no-op but no harm in wrapping everything we do.
+
+Every authorized VM operation that can perform guest work therefore enters a platform-owned
+availability boundary. Passive readiness/preflight may inspect already-existing availability but
+cannot activate a VM or start or extend a hold. An independent job cannot claim disconnect survival
+on a platform that can idle-stop its VM unless a recoverable availability hold covers that job's
+active lifetime. Explicit stop, reboot and host loss remain outside that promise. A platform unable
+to prove the hold refuses that lifetime; it does not weaken the meaning of `INDEPENDENT`.
+
+For local download destinations, the operator chose explicit replacement in the first version, in
+addition to create-only publication. For macOS and Windows, a fully verified download may be written
+into the existing local file under the caller's ordinary authority. A local failure after that write
+begins can leave partial new content and must report that effect honestly; a failed remote transfer
+or cleanup never authorizes the first local mutation. Linux may retain stronger rename publication.
+Native metadata and failure proof remain gates; this choice does not authorize implicit replacement
+or deletion of existing local data.
+
+The operator explicitly confirmed the macOS/Windows publication choice on 2026-10-06:
+
+> Allow in-place Replace with explicit partial-failure reporting (Recommended)
+
+For the unreleased transport migrations 39–41, the operator directed removal of the special
+branch-built-schema guard. Known development databases are retained until separate approval for any
+deletion. Ordinary released-database migration and interrupted-migration recovery remain required.
+
 ### Implementation scope
 
 In scope for the eventual implementation:
@@ -273,7 +409,11 @@ operational cancellation contract, not containment of a malicious process that e
 
 Disconnect survival assumes the VM remains running. Detached work does not promise survival of
 reboot, VM stop, or host shutdown, and cannot override an operator's explicit stop. Platform holds
-must cover an active operation; releasing a client context must not masquerade as stopping its job.
+must cover an active operation. On a platform that can idle-stop its VM, a recoverable hold must
+also cover an independent job's active lifetime, not merely its initiating call, or that lifetime is
+unavailable there. Every authorized VM operation that can perform guest work uses the platform
+availability boundary, which may be a no-op where no hold is needed. Passive readiness/preflight
+remains no-effects. Releasing a client context must not masquerade as stopping its job.
 
 ### R7. Files
 
@@ -285,6 +425,12 @@ access. These are required file semantics on supported VM targets, not SSH-only 
 Regular-file operations reject special objects rather than block opening a pipe. Session owners can
 remove an exact stale socket only after establishing runtime absence; the file API does not perform
 that liveness check, create sockets or provide FIFO creation.
+
+A download to a local path supports an explicit create-only or replace-existing choice. Replacement
+must not silently discard local metadata or turn a failed transfer into a successful publication;
+the local result reports partial or uncertain change if a verified transfer is later followed by an
+incomplete in-place replacement. No cross-platform atomic-replace guarantee is made. Supported
+metadata preservation and refusal rules require native proof before public exposure.
 
 Callers select ordinary or elevated placement without hand-writing copy, chmod, or sudo wrappers.
 Elevation covers staging, publication and metadata under the bound file grant, not general admin

@@ -187,6 +187,7 @@ def test_bootstrap_forces_private_group_idempotently() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
 

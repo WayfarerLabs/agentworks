@@ -37,7 +37,8 @@ def test_provisioning_packages_minimal() -> None:
     assert "curl" in PROVISIONING_PACKAGES
     assert "sudo" in PROVISIONING_PACKAGES
     assert "ca-certificates" in PROVISIONING_PACKAGES
-    # These should NOT be in provisioning -- they belong in init
+    assert "python3" in PROVISIONING_PACKAGES
+    # These belong in init, not provisioning.
     assert "git" not in PROVISIONING_PACKAGES
     assert "tmux" not in PROVISIONING_PACKAGES
     assert "jq" not in PROVISIONING_PACKAGES
@@ -45,6 +46,7 @@ def test_provisioning_packages_minimal() -> None:
 
 def test_init_system_packages() -> None:
     """INIT_SYSTEM_PACKAGES contains the packages installed during init."""
+    assert "python3" in INIT_SYSTEM_PACKAGES
     assert "git" in INIT_SYSTEM_PACKAGES
     assert "tmux" in INIT_SYSTEM_PACKAGES
     assert "tmuxinator" in INIT_SYSTEM_PACKAGES

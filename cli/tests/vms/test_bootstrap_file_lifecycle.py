@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
 
 _AUTH_KEY = "tskey-bootstrap-file-sentinel"
+_INSTANCE_MARKER = "0123456789abcdef0123456789abcdef"
 _SUCCESS_OUTPUT = "\n".join(
     (
         "##STEP## Tailscale",
@@ -139,6 +140,7 @@ def _call(
         ssh_public_key="ssh-ed25519 AAAA test",
         tailscale_auth_key=_AUTH_KEY,
         hostname="wsl2--vm1",
+        instance_marker=_INSTANCE_MARKER,
         swap_gib=0,
         progress=progress if progress is not None else MagicMock(),
     )

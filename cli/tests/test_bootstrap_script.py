@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import pytest
 
 from agentworks.capabilities.vm_platform.bootstrap_script import (
@@ -21,6 +24,7 @@ def test_generate_bootstrap_script_all_steps() -> None:
         provisioning_packages=["curl", "git"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
 
@@ -28,6 +32,7 @@ def test_generate_bootstrap_script_all_steps() -> None:
     assert "set -euo pipefail" in script
     assert "##STEP## Ensure user" in script
     assert "##STEP## Provisioning packages" in script
+    assert "##STEP## File gate directories" in script
     assert "##STEP## SSH public key" in script
     assert "##STEP## Swap file" in script
     assert "##STEP## Hostname" in script
@@ -39,6 +44,120 @@ def test_generate_bootstrap_script_all_steps() -> None:
     assert "lima--myvm" in script
 
 
+@requires_posix_shell
+@pytest.mark.skipif(sys.platform != "linux", reason="generated bootstrap step uses Debian GNU stat")
+def test_file_gate_bootstrap_preserves_db_and_refuses_bad_ancestors(
+    tmp_path: Path,
+) -> None:
+    """The generated guest step preserves gate contents across Lima replays."""
+    import os
+    import pwd
+    import subprocess
+
+    script = generate_bootstrap_script(
+        admin_username="testuser",
+        ssh_public_key="",
+        provisioning_packages=["python3"],
+        tailscale_auth_key=None,
+        hostname="lima--myvm",
+        swap=0,
+    )
+    step = script.split("# -- Step 2a: Volatile file gate directories --\n", 1)[1].split("# -- Step 2b:", 1)[0]
+    uid, gid = os.getuid(), os.getgid()
+    username = pwd.getpwuid(uid).pw_name
+    gate_root = Path(tmp_path) / "agentworks"
+    drop_in = Path(tmp_path) / "file-gates.conf"
+    # Run the generated shell against a caller-owned sandbox. A shell function
+    # records the tmpfiles call; creation under /tmp is rejected by systemd's
+    # unsafe path transition guard, independent of the drop-in's correctness.
+    step = step.replace("/run/agentworks", str(gate_root))
+    step = step.replace("/etc/tmpfiles.d/agentworks-file-gates.conf", str(drop_in))
+    step = step.replace("0:0:", f"{uid}:{gid}:")
+    step = step.replace(" 0 0 -", f" {uid} {gid} -")
+    step = step.replace("chown root:root", f"chown {uid}:{gid}")
+    applied = Path(tmp_path) / "applied"
+    step = (
+        f"set -euo pipefail\nVM_USER={username}\n"
+        f'systemd-tmpfiles() {{ test "$1" = --create && test "$2" = {drop_in}; '
+        f"touch {applied}; }}\n" + step
+    )
+
+    gate_root.mkdir()
+    gate_root.chmod(0o755)
+    version_dir = gate_root / "file-gates-v1"
+    version_dir.mkdir()
+    version_dir.chmod(0o755)
+    root_dir = version_dir / "0"
+    root_dir.mkdir(mode=0o700)
+    admin_dir = version_dir / str(uid)
+    if admin_dir != root_dir:
+        admin_dir.mkdir(mode=0o700)
+
+    first = subprocess.run(["bash", "-c", step], text=True, capture_output=True)
+    assert first.returncode == 0, first.stderr
+    assert applied.exists()
+    rules = [line.split() for line in drop_in.read_text().splitlines()]
+    assert len(rules) == 4
+    assert all(fields[0] == "d" and fields[5] == "-" for fields in rules)
+    assert [fields[2] for fields in rules] == ["0755", "0755", "0700", "0700"]
+    assert [fields[1] for fields in rules] == [
+        str(gate_root),
+        str(gate_root / "file-gates-v1"),
+        str(gate_root / "file-gates-v1" / "0"),
+        str(gate_root / "file-gates-v1" / str(uid)),
+    ]
+
+    gate_db = admin_dir / "gate.db"
+    gate_db.write_bytes(b"existing gate database")
+    again = subprocess.run(["bash", "-c", step], text=True, capture_output=True)
+    assert again.returncode == 0, again.stderr
+    assert gate_db.read_bytes() == b"existing gate database"
+
+    gate_root.chmod(0o777)
+    refused = subprocess.run(["bash", "-c", step], text=True, capture_output=True)
+    assert refused.returncode != 0
+    assert gate_root.stat().st_mode & 0o777 == 0o777
+    assert gate_db.read_bytes() == b"existing gate database"
+
+    gate_root.chmod(0o755)
+    saved_version_dir = Path(tmp_path) / "saved-gates"
+    version_dir.rename(saved_version_dir)
+    version_dir.symlink_to(saved_version_dir, target_is_directory=True)
+    refused_symlink = subprocess.run(["bash", "-c", step], text=True, capture_output=True)
+    assert refused_symlink.returncode != 0
+    assert (saved_version_dir / str(uid) / "gate.db").read_bytes() == b"existing gate database"
+
+
+def test_generate_bootstrap_script_rejects_noncanonical_instance_marker() -> None:
+    with pytest.raises(ValidationError):
+        generate_bootstrap_script(
+            admin_username="testuser",
+            ssh_public_key="ssh-ed25519 AAAA testkey",
+            provisioning_packages=["curl"],
+            tailscale_auth_key=None,
+            hostname="lima--myvm",
+            instance_marker="not-a-marker",
+            swap=0,
+        )
+
+
+@requires_posix_shell
+def test_pre_marker_helper_call_still_produces_valid_shell() -> None:
+    import subprocess
+
+    script = generate_bootstrap_script(
+        admin_username="testuser",
+        ssh_public_key="ssh-ed25519 AAAA testkey",
+        provisioning_packages=["curl"],
+        tailscale_auth_key=None,
+        hostname="lima--myvm",
+        swap=0,
+    )
+
+    result = subprocess.run(["bash", "-n"], input=script, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+
+
 def test_generate_bootstrap_script_can_omit_join_from_retained_payload() -> None:
     """Lima's retained bootstrap shape installs Tailscale but omits the key."""
     sentinel = "tskey-persistence-sentinel"
@@ -48,6 +167,7 @@ def test_generate_bootstrap_script_can_omit_join_from_retained_payload() -> None
         provisioning_packages=["curl", "git"],
         tailscale_auth_key=sentinel,
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
     script = generate_bootstrap_script(
@@ -56,6 +176,7 @@ def test_generate_bootstrap_script_can_omit_join_from_retained_payload() -> None
         provisioning_packages=["curl", "git"],
         tailscale_auth_key=None,
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
 
@@ -75,6 +196,7 @@ def test_generate_bootstrap_script_rejects_line_unsafe_tailscale_key() -> None:
             provisioning_packages=["curl", "git"],
             tailscale_auth_key=auth_key,
             hostname="lima--myvm",
+            instance_marker="0123456789abcdef0123456789abcdef",
             swap=4,
         )
 
@@ -90,6 +212,7 @@ def test_generate_bootstrap_script_masks_sve_gated_on_apple() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
 
@@ -123,6 +246,7 @@ def test_sve_gate_matches_sve_and_sve2_as_whole_words() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
 
@@ -161,6 +285,7 @@ def test_generate_bootstrap_script_preserves_ssh_host_keys() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
 
@@ -178,6 +303,7 @@ def test_generate_bootstrap_script_swap_disabled() -> None:
         provisioning_packages=["curl", "git"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="azure--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=0,
     )
 
@@ -203,6 +329,7 @@ def test_generate_bootstrap_script_writes_shell_rc_seeds() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
 
@@ -232,6 +359,7 @@ def test_authorized_keys_install_is_idempotent() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
 
@@ -258,6 +386,7 @@ def test_ssh_key_install_is_skipped_when_the_key_is_empty() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
     # The step is present but gated on a non-empty key, and the skip branch runs.
@@ -274,6 +403,7 @@ def test_ssh_key_install_is_skipped_when_the_key_is_empty() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
     assert "ssh-ed25519 AAAA testkey" in with_key
@@ -294,6 +424,7 @@ def test_swap_fstab_append_is_guarded_against_re_execution() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
 
@@ -322,6 +453,7 @@ def test_generate_bootstrap_script_passes_bash_syntax_check() -> None:
         provisioning_packages=["curl", "tmux"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=2,
     )
     # Pass the script as a real file rather than /dev/stdin, which does not
@@ -359,6 +491,7 @@ def test_generate_bootstrap_script_no_platform_specific_tailscale_config() -> No
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="wsl2--myvm",
+        instance_marker="0123456789abcdef0123456789abcdef",
         swap=4,
     )
 

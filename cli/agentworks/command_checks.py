@@ -5,8 +5,6 @@ from __future__ import annotations
 import shlex
 from typing import TYPE_CHECKING
 
-from agentworks.ssh import SSHError
-
 if TYPE_CHECKING:
     from agentworks.ssh import SSHResult
     from agentworks.transports import Transport
@@ -61,6 +59,8 @@ def check_required_commands(
     user workloads. A result other than present or absent is indeterminate and
     fails with a value-safe transport error.
     """
+    from agentworks.ssh import SSHError
+
     missing: list[str] = []
     for command in commands:
         result = run_user_shell_command(

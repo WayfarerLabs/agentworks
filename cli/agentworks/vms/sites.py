@@ -69,7 +69,7 @@ class VMSiteDecl(DeclaredResource):
         cross-field rule over ``name`` and ``platform.name`` reads the
         platform registry during decode.
         """
-        from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+        from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
 
         if self.name in VM_PLATFORM_REGISTRY and self.platform.name != self.name:
             raise ValueError(
@@ -315,7 +315,7 @@ def resolve_site(
     readiness guard lives here: using a not-ready site is a typed error
     naming the reason chain.
     """
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+    from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
 
     decl = lookup_site(name, registry)
     ensure_site_ready(decl, registry)

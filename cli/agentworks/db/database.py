@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -46,6 +47,7 @@ if TYPE_CHECKING:
         VMRow,
         WorkspaceRow,
     )
+    from agentworks.db.operations import OperationRepository
     from agentworks.debian import DebianRelease
 
 
@@ -81,8 +83,12 @@ class Database:
         """
         assert timeout is None or read_only, "timeout only applies to the read-only path"
         self._read_only = read_only
+        self._operation_lock = threading.RLock()
+        self._operation_connection: sqlite3.Connection | None = None
+        self._closed = False
         self._read_tx_active = False
         self._tx_depth = 0
+        self._transaction_thread_id: int | None = None
         self._use_lock: sqlite3.Connection | None = None
         db_path = (path or _db.DB_PATH).resolve()
         self.path = db_path
@@ -95,6 +101,26 @@ class Database:
             try:
                 connection = _connect_ro(ro_uri, timeout=timeout)
                 row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
+                current = row[0]
+                if current is None:
+                    current = 0
+                elif type(current) is not int or current < 0:
+                    raise StateError("state database schema version is invalid", entity_kind="database")
+                if current > LATEST_VERSION:
+                    raise StateError(
+                        f"state database schema is newer than this release ({current}/{LATEST_VERSION})",
+                        entity_kind="database",
+                        hint="Use a release that understands this database schema.",
+                    )
+                if current != LATEST_VERSION:
+                    raise StateError(
+                        f"state database schema is outdated ({current}/{LATEST_VERSION})",
+                        entity_kind="database",
+                        hint="Run a normal Agentworks command to initialize or migrate the state database.",
+                    )
+                connection.row_factory = sqlite3.Row
+                connection.execute("PRAGMA foreign_keys = ON")
+                self._conn = connection
             except sqlite3.DatabaseError as error:
                 if connection is not None:
                     connection.close()
@@ -105,29 +131,10 @@ class Database:
                     entity_kind="database",
                     hint="Run a normal Agentworks command to initialize or repair the state database.",
                 ) from error
-            current = row[0]
-            if current is None:
-                current = 0
-            elif type(current) is not int or current < 0:
-                connection.close()
-                raise StateError("state database schema version is invalid", entity_kind="database")
-            if current > LATEST_VERSION:
-                connection.close()
-                raise StateError(
-                    f"state database schema is newer than this release ({current}/{LATEST_VERSION})",
-                    entity_kind="database",
-                    hint="Use a release that understands this database schema.",
-                )
-            if current != LATEST_VERSION:
-                connection.close()
-                raise StateError(
-                    f"state database schema is outdated ({current}/{LATEST_VERSION})",
-                    entity_kind="database",
-                    hint="Run a normal Agentworks command to initialize or migrate the state database.",
-                )
-            self._conn = connection
-            self._conn.row_factory = sqlite3.Row
-            self._conn.execute("PRAGMA foreign_keys = ON")
+            except BaseException:
+                if connection is not None:
+                    connection.close()
+                raise
             return
         db_path.parent.mkdir(parents=True, exist_ok=True)
         from agentworks.db.backup import (
@@ -150,7 +157,7 @@ class Database:
             self._conn = writable_connection
             self._conn.row_factory = sqlite3.Row
             self._conn.execute("PRAGMA foreign_keys = ON")
-            self._reject_future_schema()
+            self._reject_incompatible_schema()
             self._conn.execute("PRAGMA journal_mode = WAL")
             self._migrate()
         except BaseException:
@@ -163,6 +170,11 @@ class Database:
 
     def close(self) -> None:
         try:
+            with self._operation_lock:
+                if self._operation_connection is not None:
+                    self._operation_connection.close()
+                    self._operation_connection = None
+                self._closed = True
             self._conn.close()
         finally:
             use_lock = self._use_lock
@@ -184,6 +196,10 @@ class Database:
 
             raise StateError("a write transaction requires a writable database", entity_kind="database")
         if self._tx_depth > 0:
+            if self._transaction_thread_id != threading.get_ident():
+                from agentworks.errors import StateError
+
+                raise StateError("a database transaction belongs to another thread", entity_kind="database")
             self._tx_depth += 1
             try:
                 yield
@@ -191,6 +207,7 @@ class Database:
                 self._tx_depth -= 1
             return
         self._tx_depth = 1
+        self._transaction_thread_id = threading.get_ident()
         try:
             with self._conn:
                 if not self._conn.in_transaction:
@@ -201,6 +218,7 @@ class Database:
                 yield
         finally:
             self._tx_depth = 0
+            self._transaction_thread_id = None
 
     @contextmanager
     def read_transaction(self) -> Iterator[None]:
@@ -249,6 +267,38 @@ class Database:
 
         return InstanceStateRepository(self)
 
+    @property
+    def operations(self) -> OperationRepository:
+        """Return the durable operation-ownership repository."""
+        from agentworks.db.operations import OperationRepository
+
+        return OperationRepository(self)
+
+    def _operation_connection_for_repository(self) -> sqlite3.Connection:
+        """Return the separately serialized connection for operation state.
+
+        Ordinary database methods retain their thread-affine connection and
+        transaction boundary. Operation coordination uses this one connection
+        behind ``_operation_lock`` so its short durable transitions cannot
+        join an unrelated transaction on the legacy facade.
+        """
+        with self._operation_lock:
+            if self._closed:
+                from agentworks.errors import StateError
+
+                raise StateError("state database is closed", entity_kind="database")
+            if self._operation_connection is None:
+                if self._read_only:
+                    uri = f"{self.path.as_uri()}?mode=ro"
+                    connection = sqlite3.connect(uri, uri=True, check_same_thread=False)
+                else:
+                    connection = sqlite3.connect(str(self.path), check_same_thread=False)
+                    connection.execute("PRAGMA journal_mode = WAL")
+                connection.row_factory = sqlite3.Row
+                connection.execute("PRAGMA foreign_keys = ON")
+                self._operation_connection = connection
+            return self._operation_connection
+
     @staticmethod
     def check_schema(path: Path | None = None) -> tuple[bool, int, int]:
         """Check DB schema version without migrating.
@@ -272,8 +322,8 @@ class Database:
             inspection.latest_version,
         )
 
-    def _reject_future_schema(self) -> None:
-        """Refuse a schema newer than this facade understands."""
+    def _reject_incompatible_schema(self) -> None:
+        """Refuse a database whose schema version this release cannot open."""
         from agentworks.errors import StateError
 
         entry = self._conn.execute("SELECT type FROM sqlite_master WHERE name = 'schema_version'").fetchone()
@@ -371,12 +421,17 @@ class Database:
         disk_gib: int | None = None,
         swap_gib: int | None = None,
         admin_username: str = "agentworks",
+        instance_marker: str | None = None,
     ) -> VMRow:
+        if instance_marker is not None:
+            from agentworks.vms.identity import validate_vm_instance_marker
+
+            instance_marker = validate_vm_instance_marker(instance_marker)
         self._conn.execute(
             "INSERT INTO vms "
             "(name, site, hostname, template, admin_template, cpus, "
-            "memory_gib, disk_gib, swap_gib, admin_username) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "memory_gib, disk_gib, swap_gib, admin_username, instance_marker) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 site,
@@ -388,6 +443,7 @@ class Database:
                 disk_gib,
                 swap_gib,
                 admin_username,
+                instance_marker,
             ),
         )
         self._commit_unless_in_tx()

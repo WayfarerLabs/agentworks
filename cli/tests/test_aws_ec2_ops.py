@@ -85,6 +85,7 @@ def _request(
         debian_release=DebianRelease.TRIXIE,
         hostname="dev",
         system_slug=None,
+        instance_marker="0123456789abcdef0123456789abcdef",
         admin_username="agw",
         ssh_public_key=ssh_key,
         ssh_private_key=None,

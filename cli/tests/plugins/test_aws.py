@@ -64,7 +64,7 @@ def _config(tmp_path: Path, site: str = "", *, enabled: bool = False) -> Config:
 
 
 def test_aws_seated_by_plugin() -> None:
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+    from agentworks.capabilities.vm_platform.registry import VM_PLATFORM_REGISTRY
     from agentworks.plugins import SYSTEM_PLUGINS
 
     assert "aws" in SYSTEM_PLUGINS

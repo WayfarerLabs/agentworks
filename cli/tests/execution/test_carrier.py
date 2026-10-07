@@ -7,18 +7,23 @@ import math
 import pytest
 
 from agentworks.errors import ValidationError
+from agentworks.execution._process import SinkWriteError, try_write_to_sink
 from agentworks.execution.carrier import (
     Capture,
     CapturedOutput,
     CarrierIO,
     CarrierReport,
     Deadline,
+    Discard,
     Dispatch,
     EndOfInput,
     ExitStatus,
     FiniteInput,
+    LiveInput,
     PreparedInvocation,
     Retention,
+    SinkOutput,
+    TerminalInput,
 )
 
 
@@ -71,6 +76,139 @@ def test_input_sensitivity_cannot_be_downgraded() -> None:
     assert isinstance(CarrierIO().input, EndOfInput)
 
 
+def test_live_endpoint_representations_are_hidden_and_sensitivity_is_promoted() -> None:
+    class Endpoint:
+        def __repr__(self) -> str:
+            return "secret-endpoint-canary"
+
+    source = Endpoint()
+    stdout = Endpoint()
+    stderr = Endpoint()
+    io = CarrierIO(
+        input=LiveInput(source, sensitive=True),  # type: ignore[arg-type]
+        output=SinkOutput(stdout, stderr),  # type: ignore[arg-type]
+    )
+    assert io.sensitive
+    for value in (io.input, io.output, io):
+        assert "secret-endpoint-canary" not in repr(value)
+
+
+def test_terminal_input_construction_is_passive_and_promotes_sensitivity() -> None:
+    class Source:
+        def __repr__(self) -> str:
+            return "secret-source-canary"
+
+        def try_read(self, limit: int) -> bytes | None:
+            raise AssertionError("construction read bootstrap")
+
+    class Sink:
+        def try_write(self, data: memoryview) -> int:
+            return len(data)
+
+    terminal = TerminalInput(0, 1, "secret-term-canary", Source(), sensitive=True)
+    io = CarrierIO(input=terminal, output=SinkOutput(Sink(), Sink()))
+    assert (terminal.input_fd, terminal.output_fd, terminal.term) == (0, 1, "secret-term-canary")
+    assert io.sensitive
+    assert "secret" not in repr(terminal)
+    assert "secret" not in repr(io)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("input_fd", -1),
+        ("input_fd", True),
+        ("input_fd", 1.0),
+        ("output_fd", -1),
+        ("output_fd", False),
+        ("output_fd", "1"),
+        ("term", ""),
+        ("term", "x\0secret"),
+        ("term", "secret\ud800"),
+        ("term", b"x"),
+        ("bootstrap", object()),
+        ("sensitive", 1),
+        ("sensitive", "false"),
+    ],
+)
+def test_terminal_input_rejects_invalid_boundary_values(field: str, value: object) -> None:
+    class Source:
+        def try_read(self, limit: int) -> bytes | None:
+            return None
+
+    fields: dict[str, object] = {
+        "input_fd": 0,
+        "output_fd": 1,
+        "term": "xterm-256color",
+        "bootstrap": Source(),
+        "sensitive": False,
+    }
+    fields[field] = value
+    with pytest.raises(ValidationError) as raised:
+        TerminalInput(**fields)  # type: ignore[arg-type]
+    assert "secret" not in repr(raised.value)
+    assert raised.value.__cause__ is None
+
+
+def test_terminal_input_hides_bootstrap_member_lookup_failure() -> None:
+    class BrokenSource:
+        def __getattribute__(self, name: str) -> object:
+            if name == "try_read":
+                raise RuntimeError("secret-source-canary")
+            return super().__getattribute__(name)
+
+    with pytest.raises(ValidationError) as raised:
+        TerminalInput(0, 1, "xterm", BrokenSource())  # type: ignore[arg-type]
+    assert "secret-source-canary" not in repr(raised.value)
+    assert raised.value.__context__ is None
+    assert raised.value.__cause__ is None
+
+
+def test_terminal_input_preserves_bootstrap_control_exception() -> None:
+    class InterruptedSource:
+        def __getattribute__(self, name: str) -> object:
+            if name == "try_read":
+                raise KeyboardInterrupt
+            return super().__getattribute__(name)
+
+    with pytest.raises(KeyboardInterrupt):
+        TerminalInput(0, 1, "xterm", InterruptedSource())  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("output", [Capture(), Discard()])
+def test_terminal_input_requires_sink_output(output: Capture | Discard) -> None:
+    class Source:
+        def try_read(self, limit: int) -> bytes | None:
+            return None
+
+    with pytest.raises(ValidationError):
+        CarrierIO(input=TerminalInput(0, 1, "xterm", Source()), output=output)
+
+
+@pytest.mark.parametrize("field", ["input", "output"])
+def test_unknown_io_mode_is_refused(field: str) -> None:
+    kwargs = {field: object()}
+    with pytest.raises(ValidationError):
+        CarrierIO(**kwargs)  # type: ignore[arg-type]
+
+
+def test_delivered_output_cannot_retain_raw_bytes() -> None:
+    with pytest.raises(ValidationError):
+        CapturedOutput(b"private", retention=Retention.DELIVERED)
+
+
+def test_sink_adapter_failure_has_no_payload_or_exception_chain() -> None:
+    class BrokenSink:
+        def try_write(self, data: memoryview) -> int | None:
+            raise RuntimeError("secret-sink-canary")
+
+    with pytest.raises(SinkWriteError) as failure:
+        try_write_to_sink(BrokenSink(), memoryview(b"private"))
+    assert failure.value.__context__ is None
+    assert failure.value.__cause__ is None
+    assert "secret" not in repr(failure.value)
+
+
 @pytest.mark.parametrize("bound", [-1, 1.5, True])
 def test_invalid_capture_bound_is_refused(bound: object) -> None:
     with pytest.raises(ValidationError):
@@ -102,12 +240,13 @@ def test_local_status_does_not_manufacture_completion() -> None:
 
 @pytest.mark.parametrize("field", ["source", "environment", "arguments"])
 def test_invalid_sensitive_text_does_not_retain_a_codec_exception(field: str) -> None:
-    from agentworks.execution.preparation import Command, Script, Shell, prepare
+    from agentworks.execution.models import Command, Script, Shell
+    from agentworks.execution.preparation import prepare
 
     value = "synthetic-private-payload\ud800"
     with pytest.raises(ValidationError) as failure:
         if field == "source":
-            prepare(Script(value, Shell.fixed("sh")), sensitive=True)
+            prepare(Script(value, Shell.SH), sensitive=True)
         elif field == "environment":
             prepare(Command(("/bin/true",)), env={"PRIVATE": value}, sensitive=True)
         else:

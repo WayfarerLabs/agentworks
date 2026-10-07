@@ -13,6 +13,18 @@ from pathlib import Path
 
 import pytest
 
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
+from agentworks.execution.carrier import (
+    CapturedOutput,
+    CarrierIO,
+    CarrierReport,
+    ChannelFeatures,
+    Deadline,
+    Dispatch,
+    ExitStatus,
+    PreparedInvocation,
+    Provenance,
+)
 from agentworks.execution.carriers.ssh import SSHCarrier, SSHConnection
 from tests.execution.conformance import check_buffered_contract
 
@@ -53,6 +65,37 @@ def test_shared_vectors_through_ssh_process_delivery(local_binding: SSHConnectio
     assert observations[-1].suppressed
 
 
+def test_framing_failure_diagnostics_do_not_include_payloads() -> None:
+    payload = b"untrusted-output-canary"
+
+    class MalformedCarrier:
+        features = ChannelFeatures()
+
+        def validate(self, invocation: PreparedInvocation, *, io: CarrierIO) -> None:
+            del invocation, io
+
+        def execute(
+            self,
+            invocation: PreparedInvocation,
+            *,
+            io: CarrierIO,
+            deadline: Deadline,
+            custody: LocalDeliveryCustody | None = None,
+        ) -> CarrierReport:
+            del invocation, io, deadline
+            return CarrierReport(
+                Dispatch.SENT,
+                ExitStatus(code=0),
+                local_status=0,
+                stdout=CapturedOutput(payload, complete=True, provenance=Provenance.CARRIER_STDOUT),
+                stderr=CapturedOutput(payload, complete=True, provenance=Provenance.MIXED_STDERR),
+            )
+
+    with pytest.raises(AssertionError) as failure:
+        check_buffered_contract(MalformedCarrier())
+    assert payload.decode("ascii") not in str(failure.value)
+
+
 def test_ssh_executes_in_fresh_process_without_legacy(local_binding: SSHConnection) -> None:
     script = r"""
 import importlib.abc
@@ -72,6 +115,7 @@ class BlockRetired(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, BlockRetired())
 from agentworks.execution.carriers.ssh import SSHCarrier, SSHConnection
 from agentworks.execution.carrier import Deadline
+from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution.preparation import Command, prepare, decode_output
 
 connection = SSHConnection(
@@ -79,7 +123,16 @@ connection = SSHConnection(
     identity_file=Path(sys.argv[2]), known_hosts_file=Path(sys.argv[3]),
 )
 prepared = prepare(Command(("/bin/cat",)), stdin=b"\x00\xff\r\n")
-result = SSHCarrier(connection).execute(prepared.invocation, io=prepared.io, deadline=Deadline.after(10))
+custody = LocalDeliveryCustody()
+try:
+    result = SSHCarrier(connection).execute(
+        prepared.invocation, io=prepared.io, deadline=Deadline.after(10), custody=custody,
+    )
+    if not custody.settled:
+        raise AssertionError("SSH fixture returned pending local delivery")
+finally:
+    if not custody.close(Deadline.after(3)):
+        raise AssertionError("SSH fixture retained local delivery")
 output = decode_output(prepared, result.stdout)
 if result.failure is not None or result.completion is None or result.completion.code != 0:
     raise AssertionError("SSH fixture did not complete")

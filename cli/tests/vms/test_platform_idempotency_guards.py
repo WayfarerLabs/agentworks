@@ -66,13 +66,12 @@ def test_lima_status_uses_bounded_provider_call(monkeypatch: pytest.MonkeyPatch)
 def test_remote_lima_status_rejects_corrupt_stored_instance_name_before_transport(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agentworks.capabilities.vm_platform import lima as lima_mod
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
     def refuse_transport(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("transport must not receive corrupt persisted state")
 
-    monkeypatch.setattr(lima_mod, "ssh_run", refuse_transport)
+    monkeypatch.setattr("agentworks.ssh.run", refuse_transport)
     platform = LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "host.example"}})
     vm = SimpleNamespace(name="v1", platform_metadata={"instance_name": "v1; touch /tmp/pwned"})
 
@@ -88,7 +87,6 @@ def test_remote_lima_status_rejects_corrupt_stored_instance_name_before_transpor
 def test_remote_lima_status_accepts_valid_historical_instance_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agentworks.capabilities.vm_platform import lima as lima_mod
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
     calls: list[str] = []
@@ -97,7 +95,7 @@ def test_remote_lima_status_accepts_valid_historical_instance_name(
         calls.append(command)
         return SimpleNamespace(stdout='{"status":"Running"}\n')
 
-    monkeypatch.setattr(lima_mod, "ssh_run", run)
+    monkeypatch.setattr("agentworks.ssh.run", run)
     platform = LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "host.example"}})
     vm = SimpleNamespace(name="v1", platform_metadata={"instance_name": "legacy--team_vm"})
 
