@@ -14,17 +14,21 @@ from agentworks.execution import _managed_job_access as access
 from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._managed_job_protocol import encode_managed_job_fact
 from agentworks.execution._managed_runs import (
     ManagedLaunchState,
     ManagedOutputMode,
     ManagedRunIdentity,
+    ManagedRunLifetime,
     ManagedRunOwner,
     ManagedRunOwnerKind,
+    ManagedRunReceipt,
     ManagedRunRepository,
     ManagedTargetIdentity,
     ManagedTargetKind,
 )
 from agentworks.execution._managed_start_bundle import FIXED_BUNDLE
+from agentworks.execution._managed_start_protocol import ManagedStartRequest
 from agentworks.execution._runtime_prerequisite import (
     RuntimePrerequisiteObservation,
     RuntimePrerequisiteState,
@@ -391,10 +395,40 @@ def test_shell_release_interrupt_preserves_original_control_and_safe_fact(
         database.close()
 
 
-def test_user_default_shell_is_observed_before_reservation(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "input,output,sensitive,mode,prefix",
+    (
+        (Input.bytes(b"literal input"), Output.capture(7), False, ManagedOutputMode.CAPTURE, 7),
+        (Input.bytes(b"literal input"), Output.discard(), False, ManagedOutputMode.DISCARD, None),
+        (Input.sensitive(b"literal input"), Output.capture(7), False, ManagedOutputMode.SENSITIVITY_SUPPRESSED, None),
+        (Input.bytes(b"literal input"), Output.discard(), True, ManagedOutputMode.SENSITIVITY_SUPPRESSED, None),
+    ),
+)
+def test_user_default_start_freezes_body_before_shell_observation(
+    tmp_path: Path,
+    input: Input,
+    output: Output,
+    sensitive: bool,
+    mode: ManagedOutputMode,
+    prefix: int | None,
+) -> None:
     database = Database(tmp_path / "state.db")
     repository = ManagedRunRepository(database)
     owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "start")
+
+    class ProbeEnvironment(dict[str, str]):
+        traversals = 0
+
+        def items(self):
+            self.traversals += 1
+            return super().items()
+
+    environment = ProbeEnvironment(LANG="C")
+    saved: list[ManagedStartRequest] = []
+
+    def start_response(request: ManagedStartRequest) -> bytes:
+        saved.append(request)
+        return _records(request, receipt=True)
 
     class DualCarrier(Carrier):
         def execute(
@@ -409,6 +443,7 @@ def test_user_default_shell_is_observed_before_reservation(tmp_path: Path) -> No
             if io.input.data.startswith(FIXED_BUNDLE.prefix):
                 return super().execute(invocation, io=io, deadline=deadline, custody=custody)
             self.calls += 1
+            environment["LANG"] = "changed"
             assert isinstance(io.output, SinkOutput)
             nonce = invocation.argv[invocation.argv.index("agentworks-runtime-prerequisite") + 1]
             payload = f"AGW_RUNTIME_1:{nonce}:ready:0\n".encode()
@@ -417,34 +452,64 @@ def test_user_default_shell_is_observed_before_reservation(tmp_path: Path) -> No
             channel = CapturedOutput(complete=True, retention=Retention.DELIVERED)
             return CarrierReport(Dispatch.SENT, ExitStatus(code=0), stdout=channel, stderr=channel)
 
-    carrier = DualCarrier(lambda request: _records(request, receipt=True))
+    carrier = DualCarrier(start_response)
     try:
-        outcome = _call(repository, owner, carrier, invocation=Script("echo hello", Shell.USER_DEFAULT))
+        outcome = _call(
+            repository,
+            owner,
+            carrier,
+            invocation=Script("read value", Shell.USER_DEFAULT, login=True),
+            env=environment,
+            input=input,
+            output=output,
+            sensitive=sensitive,
+            cwd="/tmp",
+        )
         assert outcome.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
         assert outcome.attempt is not None
         assert outcome.attempt.record.spec.shell.requested is Shell.USER_DEFAULT
         assert outcome.attempt.record.spec.shell.resolved_executable == "/usr/bin/bash"
         assert carrier.calls == 2
+        assert (environment.traversals, saved[0].job.environment) == (1, (("LANG", "C"),))
+        assert environment["LANG"] == "changed"
+        request = saved[0].job
+        assert request.source == b"read value" and request.stdin == input.data and request.cwd == "/tmp"
+        record = outcome.attempt.record
+        assert record.spec.lifetime is ManagedRunLifetime.INDEPENDENT and record.spec.shell.login
+        assert request.launch == encode_managed_job_fact(
+            ManagedRunReceipt(record.identity, record.identity.unit_name, record.spec)
+        )
+        assert request.output_mode == mode.value and request.capture_prefix_bytes == prefix
+        assert record.output_policy.mode is mode and record.output_policy.capture_prefix_bytes == prefix
     finally:
         database.close()
 
 
-def test_invalid_user_default_request_refuses_before_shell_probe(tmp_path: Path) -> None:
+@pytest.mark.parametrize("invalid", ("env", "cwd", "input", "output", "source"))
+def test_invalid_user_default_request_refuses_before_shell_probe(tmp_path: Path, invalid: str) -> None:
     database = Database(tmp_path / "state.db")
     repository = ManagedRunRepository(database)
     owner = OperationOwner.acquire(database.operations, OperationScope(OperationResourceKind.VM, "vm-one"), "start")
     carrier = Carrier(lambda request: _records(request, receipt=True))
+    cases: dict[str, dict[str, object]] = {
+        "env": {"env": {"bad=name": "x"}},
+        "cwd": {"cwd": "relative"},
+        "input": {"input": b"untyped"},
+        "output": {"output": Output.capture(2**30)},
+        "source": {"invocation": Script("\ud800", Shell.USER_DEFAULT)},
+    }
+    changes = cases[invalid]
     try:
         with pytest.raises(ValidationError):
             _call(
                 repository,
                 owner,
                 carrier,
-                invocation=Script("echo hello", Shell.USER_DEFAULT),
-                env={"bad=name": "x"},
+                **{"invocation": Script("echo hello", Shell.USER_DEFAULT), **changes},
             )
         assert carrier.calls == 0
         assert repository.inspect(RUN) is None
+        assert owner.list_pending_lifecycle_obligations() == ()
     finally:
         owner.close()
         database.close()

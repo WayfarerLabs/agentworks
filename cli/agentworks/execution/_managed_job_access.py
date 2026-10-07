@@ -7,7 +7,7 @@ caller must still hold the route and revalidate target facts at dispatch.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from agentworks.db import OperationResourceKind
@@ -15,12 +15,14 @@ from agentworks.errors import ValidationError
 
 from ._fixed_helper_operation import BorrowedFixedHelperCarrier
 from ._helper_launcher import IdentityPlan, _validate_plan
-from ._managed_request_adapter import compose_managed_request
+from ._managed_job_protocol import encode_managed_job_fact
+from ._managed_request_adapter import compose_managed_body, compose_managed_request
 from ._managed_runs import (
     ManagedRunIdentity,
     ManagedRunLifetime,
     ManagedRunOwner,
     ManagedRunOwnerKind,
+    ManagedRunReceipt,
     ManagedRunRepository,
     ManagedRunSpec,
     ManagedShellIdentity,
@@ -39,6 +41,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from agentworks.operations import OperationOwner
+
+    from ._managed_request_adapter import _ManagedBody
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -128,6 +132,7 @@ def start_bound_managed_job(
     if _validate_plan(root_plan).euid != 0:
         raise ValidationError("Managed job requires a root helper plan")
 
+    body: _ManagedBody | None = None
     if isinstance(invocation, Script):
         if invocation.shell is Shell.USER_DEFAULT:
             provisional_spec = ManagedRunSpec(
@@ -137,7 +142,7 @@ def start_bound_managed_job(
                 run_owner,
                 ManagedRunLifetime.INDEPENDENT,
             )
-            compose_managed_request(
+            body = compose_managed_body(
                 invocation,
                 input=input,
                 output=output,
@@ -201,9 +206,14 @@ def start_bound_managed_job(
         shell = _explicit_managed_shell(invocation)
 
     spec = ManagedRunSpec(target, workload, shell, run_owner, ManagedRunLifetime.INDEPENDENT)
-    request, policy = compose_managed_request(
-        invocation, input=input, output=output, env=env, cwd=cwd, sensitive=sensitive, identity=identity, spec=spec
-    )
+    if body is None:
+        request, policy = compose_managed_request(
+            invocation, input=input, output=output, env=env, cwd=cwd, sensitive=sensitive, identity=identity, spec=spec
+        )
+    else:
+        receipt = ManagedRunReceipt(identity, identity.unit_name, spec)
+        request = replace(body.request, launch=encode_managed_job_fact(receipt))
+        policy = body.output_policy
     prepared = prepare_managed_start(
         carrier, identity, spec, policy, request, root_plan, deadline, runtime_selection, guest
     )
