@@ -165,10 +165,15 @@ class ExecutionOperation:
         bootstrap: _NumericGuestBootstrap | None = None,
         managed_repository: ManagedRunRepository | None = None,
         native_binding: NativeExecutionBinding | None = None,
+        resource_owner: ManagedRunOwner | None = None,
         wsl2_route: WSL2OwnedOperation | None = None,
     ) -> None:
         """Bind inline calls to one exact owner scope and selected target."""
         scope = owner.ownership.scope
+        if resource_owner is not None and (
+            type(resource_owner) is not ManagedRunOwner or resource_owner.kind is not ManagedRunOwnerKind.RESOURCE
+        ):
+            raise ValidationError("Execution resource binding requires an immutable RESOURCE owner")
         if (
             type(target) is not ManagedTargetIdentity
             or target.kind.value != scope.resource_kind.value
@@ -184,6 +189,7 @@ class ExecutionOperation:
         self._bootstrap = bootstrap
         self._managed_repository = managed_repository
         self._native_binding = native_binding
+        self._resource_owner = resource_owner
         self._wsl2_route = wsl2_route
         self._managed_runs: list[ManagedOperationRun] = []
         self._active_inline_calls: dict[int, _ActiveHelperCall] = {}
@@ -211,9 +217,8 @@ class ExecutionOperation:
         # for the separate persisted fence immediately before delivery.
         self._owner.list_pending_lifecycle_obligations()
 
-    def require_managed_run(
+    def _require_managed_context(
         self,
-        identity: ManagedRunIdentity,
         *,
         repository: ManagedRunRepository,
         owner: OperationOwner,
@@ -221,8 +226,8 @@ class ExecutionOperation:
         guest: VMGuestIdentity,
         root_plan: IdentityPlan,
         runtime_selection: RuntimeSelection,
-    ) -> ManagedOperationRun:
-        """Resolve authority from this operation's retained acknowledged start."""
+    ) -> None:
+        """Match exact context facts before inspecting any managed reservation."""
         bootstrap, binding = self._bootstrap, self._native_binding
         if (
             owner is not self._owner
@@ -235,6 +240,61 @@ class ExecutionOperation:
             or runtime_selection != binding.runtime_selection
         ):
             raise ValidationError("Managed access does not match its originating operation")
+
+    def require_managed_read(
+        self,
+        identity: ManagedRunIdentity,
+        *,
+        repository: ManagedRunRepository,
+        owner: OperationOwner,
+        target: ManagedTargetIdentity,
+        guest: VMGuestIdentity,
+        root_plan: IdentityPlan,
+        runtime_selection: RuntimeSelection,
+    ) -> ManagedOperationRun | ManagedRunOwner:
+        """Select planned OP custody explicitly, otherwise require bound RESOURCE."""
+        if any(run.receipt.identity == identity for run in self._managed_runs):
+            return self.require_managed_run(
+                identity,
+                repository=repository,
+                owner=owner,
+                target=target,
+                guest=guest,
+                root_plan=root_plan,
+                runtime_selection=runtime_selection,
+            )
+        self._require_managed_context(
+            repository=repository,
+            owner=owner,
+            target=target,
+            guest=guest,
+            root_plan=root_plan,
+            runtime_selection=runtime_selection,
+        )
+        if self._resource_owner is None:
+            raise ValidationError("Managed resource reads require this operation's core resource binding")
+        return self._resource_owner
+
+    def require_managed_run(
+        self,
+        identity: ManagedRunIdentity,
+        *,
+        repository: ManagedRunRepository,
+        owner: OperationOwner,
+        target: ManagedTargetIdentity,
+        guest: VMGuestIdentity,
+        root_plan: IdentityPlan,
+        runtime_selection: RuntimeSelection,
+    ) -> ManagedOperationRun:
+        """Resolve authority from this operation's retained acknowledged start."""
+        self._require_managed_context(
+            repository=repository,
+            owner=owner,
+            target=target,
+            guest=guest,
+            root_plan=root_plan,
+            runtime_selection=runtime_selection,
+        )
         run = next((run for run in self._managed_runs if run.receipt.identity == identity), None)
         if (
             run is None
@@ -315,7 +375,7 @@ class ExecutionOperation:
         )
 
     def observe_job(self, reference: JobRef, carrier: Carrier, deadline: Deadline) -> ManagedObserveOutcome:
-        """Observe only a job retained by this exact operation."""
+        """Observe a retained OP job or an exact constructor-bound RESOURCE job."""
         repository, bootstrap = self._managed_repository, self._bootstrap
         if type(reference) is not JobRef or repository is None or bootstrap is None or self._native_binding is None:
             raise ValidationError("Managed observation requires its bound operation")
@@ -331,6 +391,10 @@ class ExecutionOperation:
             owner=self._owner,
             execution_operation=self,
         )
+        if outcome.terminal_proved and any(
+            run.receipt.identity.run_id == reference.run_id for run in self._managed_runs
+        ):
+            self.retain_job_terminal_observation(reference, outcome.candidate)
         return outcome
 
     def retain_job_terminal_observation(
@@ -395,7 +459,9 @@ class ExecutionOperation:
                 execution_operation=self,
             )
         except ManagedDeadlineExpired as control:
-            if control.__cause__ is not None:
+            if control.__cause__ is not None or not any(
+                run.receipt.identity.run_id == reference.run_id for run in self._managed_runs
+            ):
                 raise
             # Launch acknowledgement may consume the selected wait budget.
             # Resolve only retained local evidence: no renewed deadline, I/O

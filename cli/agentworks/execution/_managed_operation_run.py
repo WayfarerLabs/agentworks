@@ -14,15 +14,13 @@ from uuid import uuid4
 from agentworks.errors import StateError, ValidationError
 
 from ._managed_job_protocol import encode_managed_job_fact
-from ._managed_job_store import FactName
-from ._managed_observation_exchange import ManagedObservationCandidate, ManagedObservationState
-from ._managed_observation_protocol import ControllerState
 from ._managed_operation_keeper import ManagedOperationKeeper, _clean_start_acknowledged
 from ._managed_request_adapter import _ManagedBody
 from ._managed_runs import ManagedLaunchState
 from ._managed_start_exchange import prepare_managed_start
 from ._managed_start_operation import ManagedStartControlFact, ManagedStartOutcome, start_owned_managed_run
 from ._managed_stop_exchange import ManagedStopState
+from ._managed_terminal import terminal_observation_proved
 from .carrier import Dispatch, ExitStatus
 
 if TYPE_CHECKING:
@@ -31,6 +29,7 @@ if TYPE_CHECKING:
     from agentworks.operations import OperationOwner
 
     from ._helper_launcher import IdentityPlan
+    from ._managed_observation_exchange import ManagedObservationCandidate
     from ._managed_runs import ManagedRunReceipt, ManagedRunRecord, ManagedRunRepository, ManagedTargetIdentity
     from ._managed_start_exchange import _PreparedAttempt
     from ._runtime_prerequisite import RuntimeSelection
@@ -98,20 +97,7 @@ class ManagedOperationRun:
 
     def terminal_proved(self, candidate: ManagedObservationCandidate | None) -> bool:
         """Positive resource closure is independent of application exit precision."""
-        observation = None if candidate is None else candidate.observation
-        required = {FactName.LAUNCH, FactName.STDOUT_END, FactName.STDERR_END, FactName.BOUNDARY_EMPTY}
-        return (
-            self.acknowledged
-            and candidate is not None
-            and candidate.dispatch is Dispatch.SENT
-            and candidate.carrier_completion == ExitStatus(0)
-            and candidate.carrier_failure is None
-            and observation is not None
-            and observation.state is ManagedObservationState.OBSERVED
-            and required.issubset({name for name, _ in observation.facts})
-            and observation.controller is not None
-            and observation.controller.state in {ControllerState.EXITED, ControllerState.ABSENT}
-        )
+        return self.acknowledged and terminal_observation_proved(candidate, self._expected_launch)
 
     @property
     def acknowledged(self) -> bool:

@@ -37,6 +37,7 @@ from agentworks.execution._file_obligation import decode_file_call_obligation
 from agentworks.execution._file_operation import _ActiveFileUpload
 from agentworks.execution._helper_identity import IdentityExpectation
 from agentworks.execution._helper_launcher import IdentityMode, IdentityPlan
+from agentworks.execution._managed_runs import ManagedRunOwner, ManagedRunOwnerKind
 from agentworks.execution._runtime_prerequisite import RuntimeSelection, RuntimeTargetOS
 from agentworks.execution._target_identity import TargetIdentityPreparation, TargetIdentityStatus
 from agentworks.execution._vm_guest_identity_protocol import VMGuestIdentity
@@ -401,6 +402,9 @@ def test_prepared_views_share_claim_and_clean_teardown(
         assert claim is not None and claim.ownership == selected.owner.ownership
         assert selected.file_operation._owner is selected.owner
         assert selected.execution_operation._owner is selected.owner
+        assert selected.execution_operation._resource_owner == ManagedRunOwner(
+            ManagedRunOwnerKind.RESOURCE, "vm:" + _MARKER
+        )
         bootstrap = selected.file_operation._bootstrap
         assert bootstrap is not None and selected.execution_operation._bootstrap is bootstrap
         assert bootstrap.guest == VMGuestIdentity(_MARKER, BOOT, route.guest.init_ticks)

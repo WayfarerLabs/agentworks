@@ -151,13 +151,21 @@ shares the launch and wait budget, and selected-route checks precede lookup and 
 an immutable, credential-free `JobRef` only after exact clean launch acknowledgement. Other modes
 refuse before managed reservation. Ordinary uncertain starts raise `StateError` with a safe
 run-reference cause; escaping control exceptions preserve their identity. Its private `observe`,
-selected-stream `read_output`, `wait`, `stop` and `dispose` address only acknowledged runs retained
-by that originating operation. Status separates application precision from positive resource
-closure; output cursors address the verified retained prefix, whose EOF does not imply complete
-source capture. `capture_complete` describes the whole verified capture, not consumption of this
-returned slice; intentional discard or suppression leaves it false without an output-limit failure.
-Wait returns the existing `ExecutionResult` with a safe managed reference and never stops the
-workload or drains renewal. MANAGED `run` composes that same launch and wait without requiring a
+selected-stream `read_output` and `wait` explicitly select a planned originating OPERATION run or an
+independent RESOURCE run matching the operation's core-supplied immutable namespace. Native VM
+composition binds `vm:<validated persisted instance marker>`; an absent namespace refuses RESOURCE
+lookup. A planned OPERATION ID never falls back to RESOURCE admission after refusal. Current
+repository, VM target, full guest identity, root plan and runtime bindings must match before helper
+admission. RESOURCE reads reconnect under a fresh operation and reuse its ordinary lifetime helper
+row, but never reconcile launch, adopt the job, drain a keeper or register it among owned runs.
+Observer close resolves only its own read-helper custody and leaves the independent job untouched;
+unknown helper custody still prevents that close. `stop` and `dispose` remain limited to
+acknowledged originating OPERATION runs. Status separates application precision from positive
+resource closure; output cursors address the verified retained prefix, whose EOF does not imply
+complete source capture. `capture_complete` describes the whole verified capture, not consumption of
+this returned slice; intentional discard or suppression leaves it false without an output-limit
+failure. Wait returns the existing `ExecutionResult` with a safe managed reference and never stops
+the workload or drains renewal. MANAGED `run` composes that same launch and wait without requiring a
 separate caller-facing start step. It selects its finite observation budget once for both phases;
 acknowledgement that exhausts the budget still returns UNKNOWN application progress, DEADLINE,
 incomplete output with the effective retention policy, and its safe `JobRef`, without further I/O or
@@ -172,8 +180,13 @@ existing lifetime row and actual borrowed helper attempt, retaining unknown help
 fresh observation. An overlapping file or other component's borrow refuses before drain or dispatch.
 Accepted intent is independent of proved termination. Disposal observes terminal proof before
 draining; active or unproved work stays not ready without stopping it. Uncertain stop or disposal
-remains distinct from a proved refusal. These private controls do not establish independent-job
-access after reconnection, complete target composition or a public RunContext surface.
+remains distinct from a proved refusal. RESOURCE closure requires a reconciled reservation,
+authentic launch, both stream ends, positive boundary-empty and positive exact controller
+termination under a settled helper. A missing WAIT preserves UNKNOWN application precision without
+blocking proved resource closure; live or unknown controller state can still be polled within the
+original deadline. No RESOURCE terminal observation is cached on an owned run. These private reads
+do not establish independent launch, mutation, duration availability, session namespaces or a public
+RunContext surface.
 
 `ExecutionOperation` requires an explicit managed target matching its owner's scope. An optional
 numeric bootstrap must match that VM's derived boot identity; platform-host targets cannot select

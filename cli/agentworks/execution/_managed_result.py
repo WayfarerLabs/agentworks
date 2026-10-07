@@ -8,13 +8,14 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
 
-from ._managed_bound_run import ManagedDeadlineExpired, preflight_bound_run
+from ._managed_bound_run import ManagedDeadlineExpired, preflight_bound_read
 from ._managed_job_protocol import (
     BoundaryEmptyFact,
     ManagedJobFactError,
     StreamDisposition,
     WorkloadWaitFact,
     decode_managed_job_fact,
+    encode_managed_job_fact,
 )
 from ._managed_job_store import FactName, Stream
 from ._managed_observation_exchange import ManagedObservationState
@@ -28,9 +29,12 @@ from ._managed_runs import (
     ManagedLaunchState,
     ManagedOutputMode,
     ManagedRunIdentity,
+    ManagedRunLifetime,
+    ManagedRunReceipt,
     ManagedRunRecord,
     ManagedRunRepository,
 )
+from ._managed_terminal import terminal_observation_proved
 from .carrier import Deadline, Dispatch, Failure, Retention
 from .models import JobRef
 from .result import ApplicationState, ExecutionFailure, ExecutionOutput, ExecutionResult, ExitCode, Signal
@@ -148,7 +152,7 @@ def collect_bound_managed_result(
     The bound access helpers validate the persisted run before borrowing. A
     retained owner ends this attempt; the caller owns all later recovery.
     """
-    record, _ = preflight_bound_run(
+    record, _ = preflight_bound_read(
         repository,
         identity,
         target=target,
@@ -355,7 +359,15 @@ def _reduce(
         and (status is None or boundary is None or len(outputs) != 2)
     )
     if execution_operation is not None:
-        closed = settled and execution_operation.retain_job_terminal_observation(JobRef(identity.run_id), candidate)
+        if record.spec.lifetime is ManagedRunLifetime.OPERATION:
+            closed = settled and execution_operation.retain_job_terminal_observation(JobRef(identity.run_id), candidate)
+        else:
+            receipt = ManagedRunReceipt(identity, identity.unit_name, record.spec)
+            closed = (
+                settled
+                and record.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
+                and terminal_observation_proved(candidate, encode_managed_job_fact(receipt))
+            )
         result = replace(result, owned_cleanup_confirmed=result.owned_cleanup_confirmed and closed)
         awaiting_facts = can_poll and not closed
     return ManagedResultOutcome(result, tuple(attempts), awaiting_facts)

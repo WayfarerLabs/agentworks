@@ -171,7 +171,7 @@ class ExecutionAccess:
             else None
             if valid and status is not None
             else ExecutionFailure.OBSERVATION,
-            valid and self._operation.retain_job_terminal_observation(job, candidate),
+            valid and outcome.terminal_proved,
             expired,
         )
 

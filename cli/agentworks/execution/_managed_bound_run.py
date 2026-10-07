@@ -28,6 +28,7 @@ from .carrier import Deadline
 
 if TYPE_CHECKING:
     from ._execution_operation import ExecutionOperation
+    from ._managed_operation_run import ManagedOperationRun
 
 
 class ManagedDeadlineExpired(ValidationError):
@@ -64,18 +65,7 @@ def preflight_bound_run(
             root_plan=root_plan,
             runtime_selection=runtime_selection,
         )
-        receipt = run.receipt
-        record = repository.inspect(identity)
-        if (
-            record is None
-            or record.identity != identity
-            or record.spec != receipt.spec
-            or run.reserved is None
-            or record.output_policy != run.reserved.output_policy
-            or record.launch_state is not ManagedLaunchState.RECEIPT_CONFIRMED
-        ):
-            raise ValidationError("Managed access requires its exact acknowledged operation reservation")
-        return record, encode_managed_job_fact(receipt)
+        return _inspect_operation_run(repository, identity, run)
     if (
         type(expected_resource_owner) is not ManagedRunOwner
         or expected_resource_owner.kind is not ManagedRunOwnerKind.RESOURCE
@@ -109,3 +99,66 @@ def preflight_bound_run(
         raise ValidationError("Managed access requires an exact independent VM reservation")
     receipt = ManagedRunReceipt(record.identity, record.identity.unit_name, record.spec)
     return record, encode_managed_job_fact(receipt)
+
+
+def _inspect_operation_run(
+    repository: ManagedRunRepository, identity: ManagedRunIdentity, run: ManagedOperationRun
+) -> tuple[ManagedRunRecord, bytes]:
+    receipt = run.receipt
+    record = repository.inspect(identity)
+    if (
+        record is None
+        or record.identity != identity
+        or record.spec != receipt.spec
+        or run.reserved is None
+        or record.output_policy != run.reserved.output_policy
+        or record.launch_state is not ManagedLaunchState.RECEIPT_CONFIRMED
+    ):
+        raise ValidationError("Managed access requires its exact acknowledged operation reservation")
+    return record, encode_managed_job_fact(receipt)
+
+
+def preflight_bound_read(
+    repository: ManagedRunRepository,
+    identity: ManagedRunIdentity,
+    *,
+    target: ManagedTargetIdentity,
+    guest: VMGuestIdentity,
+    root_plan: IdentityPlan,
+    runtime_selection: RuntimeSelection,
+    deadline: Deadline,
+    owner: OperationOwner,
+    expected_resource_owner: ManagedRunOwner | None = None,
+    execution_operation: ExecutionOperation | None = None,
+) -> tuple[ManagedRunRecord, bytes]:
+    """Admit reads only through retained OP or constructor-bound RESOURCE authority."""
+    if execution_operation is not None:
+        if expected_resource_owner is not None:
+            raise ValidationError("Managed operation access cannot use a resource-owner binding")
+        if type(deadline) is not Deadline or deadline.expires_at is None:
+            raise ValidationError("Managed access requires a finite deadline")
+        if deadline.expired:
+            raise ManagedDeadlineExpired("Managed access deadline expired before admission")
+        admission = execution_operation.require_managed_read(
+            identity,
+            repository=repository,
+            owner=owner,
+            target=target,
+            guest=guest,
+            root_plan=root_plan,
+            runtime_selection=runtime_selection,
+        )
+        if not isinstance(admission, ManagedRunOwner):
+            return _inspect_operation_run(repository, identity, admission)
+        expected_resource_owner = admission
+    return preflight_bound_run(
+        repository,
+        identity,
+        target=target,
+        guest=guest,
+        root_plan=root_plan,
+        runtime_selection=runtime_selection,
+        deadline=deadline,
+        owner=owner,
+        expected_resource_owner=expected_resource_owner,
+    )

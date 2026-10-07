@@ -18,7 +18,7 @@ from agentworks.execution._delivery_custody import LocalDeliveryCustody
 from agentworks.execution._execution_operation import ExecutionOperation
 from agentworks.execution._file_operation import FileOperation
 from agentworks.execution._file_paths import normalized_root
-from agentworks.execution._managed_runs import ManagedRunRepository
+from agentworks.execution._managed_runs import ManagedRunOwner, ManagedRunOwnerKind, ManagedRunRepository
 from agentworks.execution._proxmox_activation import (
     ActivationObservation,
     ProxmoxActivation,
@@ -392,7 +392,7 @@ def _prepare(
     trusted_root: PurePosixPath,
 ) -> NativeVMOperation:
     vm = _require_vm_row(db, vm_name, platform, ctx)
-    validate_vm_instance_marker(vm.instance_marker)
+    instance_marker = validate_vm_instance_marker(vm.instance_marker)
     try:
         encode_account_request(AccountRequest("0" * 32, vm.admin_username))
     except AccountRequestError as error:
@@ -463,6 +463,7 @@ def _prepare(
         target,
         bootstrap=bootstrap,
         managed_repository=ManagedRunRepository(db),
+        resource_owner=ManagedRunOwner(ManagedRunOwnerKind.RESOURCE, "vm:" + instance_marker),
         native_binding=binding,
         wsl2_route=workflow.selected,
     )

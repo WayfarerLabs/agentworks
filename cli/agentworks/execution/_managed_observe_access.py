@@ -8,12 +8,13 @@ from typing import TYPE_CHECKING
 from agentworks.errors import ValidationError
 
 from ._fixed_helper_operation import BorrowedFixedHelperCarrier
-from ._managed_bound_run import preflight_bound_run
+from ._managed_bound_run import preflight_bound_read
 from ._managed_job_protocol import (
     ManagedJobFactError,
     StreamDisposition,
     StreamEndFact,
     decode_managed_job_fact,
+    encode_managed_job_fact,
 )
 from ._managed_job_store import FactName, Stream
 from ._managed_observation_exchange import (
@@ -24,12 +25,14 @@ from ._managed_observation_exchange import (
 )
 from ._managed_runs import (
     ManagedLaunchObservation,
+    ManagedLaunchState,
     ManagedOutputMode,
     ManagedRunIdentity,
     ManagedRunReceipt,
     ManagedRunRepository,
     ManagedTargetIdentity,
 )
+from ._managed_terminal import terminal_observation_proved
 from .carrier import Dispatch
 
 if TYPE_CHECKING:
@@ -51,6 +54,7 @@ class ManagedObserveOutcome:
     pending_remote_effects: bool = False
     coordination_uncertain: bool = False
     requires_owner_retention: bool = False
+    terminal_proved: bool = False
 
 
 class ManagedObserveControlFact(Exception):
@@ -144,7 +148,7 @@ def observe_bound_managed_run(
     runs require the concrete retained execution context; independent runs require
     an explicit resource-owner binding.
     """
-    _, _, outcome = _bound_exchange(
+    record, _, outcome = _bound_exchange(
         repository,
         identity,
         target=target,
@@ -158,7 +162,13 @@ def observe_bound_managed_run(
         stream=None,
         execution_operation=execution_operation,
     )
-    return outcome
+    receipt = ManagedRunReceipt(record.identity, record.identity.unit_name, record.spec)
+    return replace(
+        outcome,
+        terminal_proved=record.launch_state is ManagedLaunchState.RECEIPT_CONFIRMED
+        and not outcome.requires_owner_retention
+        and terminal_observation_proved(outcome.candidate, encode_managed_job_fact(receipt)),
+    )
 
 
 def read_bound_managed_output(
@@ -215,7 +225,7 @@ def _bound_exchange(
     stream: Stream | None,
     execution_operation: ExecutionOperation | None = None,
 ) -> tuple[ManagedRunRecord, ManagedObservationCandidate | None, ManagedObserveOutcome]:
-    record, expected_launch = preflight_bound_run(
+    record, expected_launch = preflight_bound_read(
         repository,
         identity,
         target=target,
