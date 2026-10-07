@@ -3065,6 +3065,16 @@ inventory. Platform-factory and SSH ownership remain as previously assigned.
       prove producer and caller-facing projection, then native delivery. This supervisor acceptance
       work is not implemented by the bounded job-control correction above.
 
+The parallel signal investigation at `a4379a51c` rejects the proposed close-on-exec EOF plus fresh
+`waitpid(WNOHANG)` inference before implementation. In
+[Linux 6.12 `kernel/exit.c`](https://github.com/torvalds/linux/blob/v6.12/kernel/exit.c#L879),
+`exit_files` precedes `exit_notify`, which establishes `EXIT_ZOMBIE`; the wait path relies on that
+state. A pre-exec killed child can therefore close the pipe before its wait status is available.
+There is no hostile process requirement for this race. No producer change or passing claim follows.
+The signal leaf remains open while a bounded read-only investigation checks whether documented
+exact-child process metadata can provide stronger exec-transition evidence without tracing, payload
+inspection or a new protocol. Foreground composition does not depend on that investigation.
+
 - [ ] Compose the core-owned keeper as one admitted support effect without relaxing ordinary owner
       serialization. Prove renewal while ordinary work holds its borrow, close/takeover races, one
       in-flight exchange, exact uncertainty retention and drain before release/disposal. Bind it to
