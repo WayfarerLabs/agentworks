@@ -3144,6 +3144,17 @@ rule, including its explicit growing-history and retained-run costs, rather than
 slot-reuse protocol. Implementation and private/production acceptance were still open at that design
 review; the later local implementation acceptance above does not establish production acceptance.
 
+- [ ] Extend the private MANAGED OPERATION start/run path with explicit `USER_DEFAULT` shell
+      selection. Freeze and validate finite caller input before observing the selected numeric
+      workload account through the existing tracked helper lifetime; resolve before reservation and
+      persist the interpreter with the run. Share the original launch/wait deadline, recheck
+      admission and the selected route, and refuse unsettled or unsupported lookup without a run.
+      Preserve exact custody, original control identity and cause through failed local bookkeeping
+      or allocation. Guard unused helper construction consistently for inline, shell lookup, managed
+      observation and stop without another execution framework. Prove adjacent cleanup and close
+      races and complete all three private reviews and final gates. Independent lifetime,
+      interactive startup, active output and complete RunContext remain separate open work.
+
 The lead's read-only completion inventory at `ed3603c23` confirms that this next foreground unit is
 not the rest of the execution surface. Required work still includes unified independent launch and
 subsequent-operation reconnect/control with exact resource-owned admission and job-length
