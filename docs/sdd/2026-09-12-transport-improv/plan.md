@@ -3046,6 +3046,27 @@ intent follows.
       retain the same result/reference. Prove ordinary admission, interruption and keeper survival
       without changing DIRECT, independent-job admission, shared carrier or public RunContext.
 
+Worker `722d3980c`, integrated at `f874d4678`, implements that foreground leaf in five owned files.
+It uses the existing start and wait methods, not a second supervisor or a renewed observation
+budget. Cause-free expiry before the first wait attempt projects only the originating operation's
+retained acknowledged run and actual output policy; cause-bearing controls remain controls. The
+worker reports 228 affected/neighbor cases, including 45 new portable cases, and a full Linux suite
+of 16,205 passed, 50 skipped and 29 warnings in 268.30 seconds, exit 0. Ruff/format over 1,308
+files, mypy over 1,272 sources, file quality and whitespace checks pass. Its completed short fixture
+roots are removed and its tree is clean. The lead verifies exact Python equality with the worker
+pin. All three complete-unit reviews and lead final gates, including the signal-prose clarification,
+remain required before completing the leaf or publishing runtime changes. No native/public claim
+follows.
+
+- [ ] Audit cumulative managed-run and lifecycle-ledger bounds before public composition. Both
+      lifecycle INSERT paths count all rows for the operation, including resolved rows, against the
+      unchanged 128-row bound (`db/operations.py`). Settled polling now reuses one row, but repeated
+      managed launches allocate distinct start/keeper records. Prove ordinary repeated completed
+      run/start/control behavior under production workloads and deliberate MANAGED selection without
+      stranding ownership or silently bypassing bounded recovery. Resolve this with the existing
+      owned lifecycle, not a per-call synthetic owner or a relaxed polling bound. The private
+      foreground checkpoint does not establish those production capacity guarantees.
+
 The lead's read-only completion inventory at `ed3603c23` confirms that this next foreground unit is
 not the rest of the execution surface. Required work still includes unified independent launch and
 subsequent-operation reconnect/control with exact resource-owned admission and job-length
