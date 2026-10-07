@@ -3144,7 +3144,7 @@ rule, including its explicit growing-history and retained-run costs, rather than
 slot-reuse protocol. Implementation and private/production acceptance were still open at that design
 review; the later local implementation acceptance above does not establish production acceptance.
 
-- [ ] Extend the private MANAGED OPERATION start/run path with explicit `USER_DEFAULT` shell
+- [x] Extend the private MANAGED OPERATION start/run path with explicit `USER_DEFAULT` shell
       selection. Freeze and validate finite caller input before observing the selected numeric
       workload account through the existing tracked helper lifetime; resolve before reservation and
       persist the interpreter with the run. Share the original launch/wait deadline, recheck
@@ -3154,6 +3154,35 @@ review; the later local implementation acceptance above does not establish produ
       observation and stop without another execution framework. Prove adjacent cleanup and close
       races and complete all three private reviews and final gates. Independent lifetime,
       interactive startup, active output and complete RunContext remain separate open work.
+
+The complete default-shell unit is accepted locally at `332a7d501`. Project, generic correctness and
+complexity lanes clear the complete code and collateral, with 217, 190 and 198 final-pin
+focused/adjacent cases respectively. Review corrects two allocation boundaries: unpublished helper
+construction must release its unused borrow, and failed fallback allocation must preserve the
+original control and cause while retaining custody. One small constructor shares that setup across
+four current consumers without moving their admission checks. The README states resolution before
+reservation and persistence with the run, not an extra write. Independent allocation probes verify
+original identity, cause and traceback; an interrupted unused-borrow close retains the exact handle
+for explicit retry rather than claiming automatic recovery.
+
+Final lead validation passes 16,294 non-integration tests with 49 skips and 29 fork warnings in
+523.24 seconds, exit 0. Ruff/format (1,312 files), strict mypy (1,276 sources), Typer isolation,
+file quality, locked-SDD, Rulesync and whitespace checks pass. Website passes 160 Python and 103
+Node cases, four builds and both deterministic comparisons. Exact owned fixture roots are removed
+after terminal completion. Only this private OPERATION shell/setup leaf closes; supported native
+identity/startup choices, independent-job availability, active output, remaining platform factories,
+complete additive RunContext and public round 1 of 3 remain open. Hosted and native acceptance are
+not supplied by these local results.
+
+- [ ] Bind private independent-run controls to an explicit core-supplied resource owner before
+      adopting them into unified ExecutionAccess. A matching RESOURCE kind alone is insufficient:
+      exact resource identity and freshly bound VM/guest facts must agree with the immutable run.
+      Refuse a missing or mismatched binding before borrowing, dispatch or control, and do not infer
+      it from a caller's JobRef. Preserve the existing acknowledged OPERATION admission and recovery
+      custody. Prove observe, output, wait, stop, disposal and reconciliation against same-VM
+      foreign-resource and prior-operation references. This namespace binding is not permission
+      enforcement, an independent availability proof or a second public job interface; complete
+      unified admission and platform-owned job-length holds remain required.
 
 The lead's read-only completion inventory at `ed3603c23` confirms that this next foreground unit is
 not the rest of the execution surface. Required work still includes unified independent launch and
