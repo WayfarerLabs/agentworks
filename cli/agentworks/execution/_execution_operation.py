@@ -748,11 +748,18 @@ class ExecutionOperation:
             if self._finishing or self._finished or self._active_inline_calls or self._unfinished_inline_executions:
                 raise StateError("Execution operation cannot admit a shell lookup")
             borrow = self._owner.borrow()
-            operation = BorrowedFixedHelperCarrier(carrier, borrow)
-            active = _ActiveHelperCall(carrier, borrow, None, operation)
-            if self._dispatch_id is None:
-                self._dispatch_id = uuid4().hex
-            self._active_inline_calls[id(active)] = active
+            try:
+                operation = BorrowedFixedHelperCarrier(carrier, borrow)
+                active = _ActiveHelperCall(carrier, borrow, None, operation)
+                if self._dispatch_id is None:
+                    self._dispatch_id = uuid4().hex
+                self._active_inline_calls[id(active)] = active
+            except BaseException as control:
+                try:
+                    borrow.close()
+                except BaseException:
+                    raise control from control.__cause__
+                raise
         try:
             self._admit(active)
             if self._wsl2_route is not None:
@@ -1021,8 +1028,11 @@ class ExecutionOperation:
                     outcome = replace(outcome, coordination_uncertain=True, requires_owner_retention=True)
                     active.outcome = outcome
             except BaseException:
-                outcome = replace(outcome, coordination_uncertain=True, requires_owner_retention=True)
-                active.outcome = outcome
+                try:
+                    outcome = replace(outcome, coordination_uncertain=True, requires_owner_retention=True)
+                    active.outcome = outcome
+                except BaseException:
+                    raise control from control.__cause__
             try:
                 fact: Exception = (
                     ManagedObserveControlFact(

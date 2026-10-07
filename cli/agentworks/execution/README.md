@@ -138,31 +138,31 @@ exported from the package root, placed in an `ExecutionTarget`, or supplied thro
 private `start(...)` now accepts explicit MANAGED protection and OPERATION lifetime for finite
 commands or scripts with SH, BASH or USER_DEFAULT selection, including optional elevation.
 USER_DEFAULT freezes and validates the finite body before observing the selected workload account's
-supported shell through the operation's tracked helper lifetime. The resolved path is persisted
-before reservation; refused or unsettled lookup never creates a run. Lookup shares the launch and
-wait budget, and selected-route checks precede lookup and launch. It returns an immutable,
-credential-free `JobRef` only after exact clean launch acknowledgement. Other modes refuse before
-managed reservation. Ordinary uncertain starts raise `StateError` with a safe run-reference cause;
-escaping control exceptions preserve their identity. Its private `observe`, selected-stream
-`read_output`, `wait`, `stop` and `dispose` address only acknowledged runs retained by that
-originating operation. Status separates application precision from positive resource closure; output
-cursors address the verified retained prefix, whose EOF does not imply complete source capture.
-`capture_complete` describes the whole verified capture, not consumption of this returned slice;
-intentional discard or suppression leaves it false without an output-limit failure. Wait returns the
-existing `ExecutionResult` with a safe managed reference and never stops the workload or drains
-renewal. MANAGED `run` composes that same launch and wait without requiring a separate caller-facing
-start step. It selects its finite observation budget once for both phases; acknowledgement that
-exhausts the budget still returns UNKNOWN application progress, DEADLINE, incomplete output with the
-effective retention policy, and its safe `JobRef`, without further I/O or cleanup. Checked MANAGED
-run and wait use the bound logical entity and existing contextual checker, preserving the exact
-result/reference; known application failures remain application-phase, while deadline and
-observation-collection failures retain observation phase. Start's existing overlap boundaries can
-retain a reservation and keeper-admission uncertainty when ownership is already borrowed, or
-admitted initial-clock keeper evidence when a later borrow refuses actual launch. Foreground
-composition does not bypass or erase either retained state. Stop first acquires the whole owner's
-ordinary serial borrow, then drains only the selected keeper. It delivers through the existing
-lifetime row and actual borrowed helper attempt, retaining unknown helper debt before any fresh
-observation. An overlapping file or other component's borrow refuses before drain or dispatch.
+supported shell through the operation's tracked helper lifetime. The shell is resolved before
+reservation and persisted with the run; refused or unsettled lookup never creates a run. Lookup
+shares the launch and wait budget, and selected-route checks precede lookup and launch. It returns
+an immutable, credential-free `JobRef` only after exact clean launch acknowledgement. Other modes
+refuse before managed reservation. Ordinary uncertain starts raise `StateError` with a safe
+run-reference cause; escaping control exceptions preserve their identity. Its private `observe`,
+selected-stream `read_output`, `wait`, `stop` and `dispose` address only acknowledged runs retained
+by that originating operation. Status separates application precision from positive resource
+closure; output cursors address the verified retained prefix, whose EOF does not imply complete
+source capture. `capture_complete` describes the whole verified capture, not consumption of this
+returned slice; intentional discard or suppression leaves it false without an output-limit failure.
+Wait returns the existing `ExecutionResult` with a safe managed reference and never stops the
+workload or drains renewal. MANAGED `run` composes that same launch and wait without requiring a
+separate caller-facing start step. It selects its finite observation budget once for both phases;
+acknowledgement that exhausts the budget still returns UNKNOWN application progress, DEADLINE,
+incomplete output with the effective retention policy, and its safe `JobRef`, without further I/O or
+cleanup. Checked MANAGED run and wait use the bound logical entity and existing contextual checker,
+preserving the exact result/reference; known application failures remain application-phase, while
+deadline and observation-collection failures retain observation phase. Start's existing overlap
+boundaries can retain a reservation and keeper-admission uncertainty when ownership is already
+borrowed, or admitted initial-clock keeper evidence when a later borrow refuses actual launch.
+Foreground composition does not bypass or erase either retained state. Stop first acquires the whole
+owner's ordinary serial borrow, then drains only the selected keeper. It delivers through the
+existing lifetime row and actual borrowed helper attempt, retaining unknown helper debt before any
+fresh observation. An overlapping file or other component's borrow refuses before drain or dispatch.
 Accepted intent is independent of proved termination. Disposal observes terminal proof before
 draining; active or unproved work stays not ready without stopping it. Uncertain stop or disposal
 remains distinct from a proved refusal. These private controls do not establish independent-job
