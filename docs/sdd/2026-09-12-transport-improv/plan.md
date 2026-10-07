@@ -3366,18 +3366,34 @@ remain open. This closes only the private disposal leaf, with no merge intent or
       authority from a request or reference. Freeze the body once, then retain generated identity,
       planned receipt/output policy and actual temporary launch custody before reservation. Reuse
       the start v1 obligation, existing one-shot exchange and monotonic repository transitions;
-      factor supplied tracked custody from the existing allocating start wrapper without a second
-      borrow or executor. Publish the actual candidate before receipt reconciliation can lose its
-      reply. Recover exact reservation, registration and receipt bookkeeping without another
-      dispatch, and require actual helper/local settlement as well as confirmed receipt for a
-      dispatched start. Preserve original controls and discard ended preparation references. Never
-      adopt the independent run into OPERATION keeper/cleanup state; start plus wait shares one
-      deadline and context close does not stop the job. Prove source/finite-input separation, lookup
-      ordering, reserve and reconcile commit/reply loss, setup/publication failures, late helper
-      uncertainty, bounded action accounting, lost acknowledgement and retained OPERATION behavior.
-      Complete all three private lanes and lead gates. This initial no-op-backed increment does not
-      close recoverable WSL2/job-length holds, all-platform factories, production RunContext or
-      native acceptance.
+      reuse that exchange with supplied tracked custody and preserve the allocating caller's actual
+      attempt before fallible settlement or outcome construction, without a second borrow or
+      executor. Publish the actual candidate before receipt reconciliation can lose its reply.
+      Recover exact reservation, registration and receipt bookkeeping without another dispatch, and
+      require actual helper/local settlement as well as confirmed receipt for a dispatched start.
+      Recheck admission after possible-dispatch publication immediately before delivery. Supported
+      NOT_SENT plus actual custody closure may settle only the exact temporary START action; leave
+      POSSIBLE_DISPATCH unchanged and unacknowledged. Preserve original controls and discard ended
+      preparation references. Never adopt the independent run into OPERATION keeper/cleanup state;
+      start plus wait shares one deadline and context close does not stop the job. Prove
+      source/finite-input separation, lookup ordering, reserve and reconcile commit/reply loss,
+      setup/publication failures, late helper uncertainty, bounded action accounting, lost
+      acknowledgement and retained OPERATION behavior. Complete all three private lanes and lead
+      gates. This initial no-op-backed increment does not close recoverable WSL2/job-length holds,
+      all-platform factories, production RunContext or native acceptance.
+
+The initial private candidate at `0b8778c7e` passes 16,628 non-integration tests, but all three
+independent review lanes identify two material defects. A pure pre-entry deadline can leave a proven
+no-delivery START action retained forever, and an extra settlement wrapper can discard already known
+allocating launch precision when settlement or outcome construction is interrupted. Correction
+`b176d8f7a` removes that wrapper and retains the actual attempt before either step. Action-only
+settlement accepts supported NOT_SENT only with actual custody closure and matching ownership and
+reservation; uncertain run state remains unchanged, and no acknowledgement or replay follows. The
+correction also removes two dormant RESOURCE WSL route checks: unsupported independent availability
+already refuses before admission, while real WSL job-length holds remain required work. Corrected
+whole-unit reviews and final lead gates are pending; this leaf remains unchecked. Public testing
+head `dd10ebbee` stays fixed while complete native reports are awaited, with no new public fix
+round.
 
 The lead's read-only completion inventory at `ed3603c23` confirms that this next foreground unit is
 not the rest of the execution surface. Required work still includes unified independent launch and

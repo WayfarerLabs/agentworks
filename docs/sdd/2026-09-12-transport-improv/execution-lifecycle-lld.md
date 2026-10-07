@@ -201,9 +201,13 @@ Freeze the complete finite invocation before tracked shell lookup. Retain its ge
 identity, planned receipt and output policy with one concrete START binding before reservation,
 alongside the actual helper, borrow and local delivery in existing tracking. Use the dedicated
 `managed-start` version-one run-ID obligation and existing one-shot preparation, reservation,
-possible-dispatch and receipt-validation transitions. Factor the current owned-start work to consume
-supplied tracked custody; keep an allocating wrapper for existing callers, rather than nesting
-another borrow. Guard that wrapper's unused setup and original control flow as well.
+possible-dispatch and receipt-validation transitions. Reuse the existing one-shot exchange with
+supplied tracked custody; retain the allocating wrapper for existing callers, rather than nesting
+another borrow or settlement wrapper. Each ownership caller retains the actual returned attempt
+before fallible settlement or outcome construction, preserving already observed launch precision
+when those steps are interrupted. Guard the allocating wrapper's unused setup and original control
+flow as well. Recheck selected binding and operation admission after marking possible dispatch and
+immediately before entering delivery; the actual helper attempt still applies its owner fence.
 
 Publish the actual start candidate into the retained entry before repository receipt reconciliation
 can commit or raise. A later confirmed database row does not prove that the original helper or local
@@ -211,8 +215,14 @@ delivery settled. START bookkeeping therefore requires both exact receipt confir
 helper/local-custody settlement for a dispatched launch, not code-zero completion alone. Interrupted
 reservation is inspected only by its already retained exact identity: proved absence or a matching
 RESERVED record can settle reservation uncertainty without launching, while conflict or unreadable
-state stays retained. Preserve unknown registration, possible dispatch and helper debt. Bookkeeping
-and finish never launch or reserve again; no replay uses the retained frozen body.
+state stays retained. Supported NOT_SENT evidence with actually settled helper, borrow and local
+delivery can resolve only that exact temporary START action under its current owner and matching
+reservation. Actual proof that the wrapper never entered delivery can do the same without a
+candidate. Neither changes a POSSIBLE_DISPATCH run into NOT_LAUNCHED, invents receipt absence or
+acknowledges launch. Unknown delivery, interrupted return without supported evidence and unsettled
+local or coordination custody remain retained. Preserve unknown registration, possible dispatch and
+helper debt. Bookkeeping and finish never launch or reserve again; no replay uses the retained
+frozen body.
 
 Discard preparation/source references when their one-shot attempt ends. Retain only the exact launch
 evidence and custody needed for zero-dispatch recovery; safe facts and durable payloads carry no
