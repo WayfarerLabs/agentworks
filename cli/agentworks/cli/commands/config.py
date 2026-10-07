@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path  # noqa: TC003  # Typer resolves the runtime annotation.
+from typing import Annotated
+
 import typer
 
 from agentworks.cli._app import app
@@ -109,3 +112,61 @@ def config_sync_ssh_config() -> None:
     from agentworks.ssh_config import sync_ssh_config
 
     sync_ssh_config(load_config(), get_db())
+
+
+@config_app.command("import-ssh-trust")
+def config_import_ssh_trust(
+    directory: Annotated[Path, typer.Argument(help="Absolute path for a new owned trust bundle.")],
+    sources: Annotated[list[Path], typer.Argument(help="Complete, stable known-host file snapshots.")],
+    authority: Annotated[str, typer.Option(help="Policy maintainer responsible for these snapshots.")],
+    revoked_host_keys: Annotated[Path | None, typer.Option(help="Complete revocation file snapshot.")] = None,
+) -> None:
+    """Import explicit SSH trust snapshots without changing operator configuration."""
+    from agentworks.execution.carriers.ssh.trust_maintenance import import_ssh_trust
+
+    import_ssh_trust(directory, sources=sources, authority=authority, revoked_host_keys=revoked_host_keys)
+
+
+@config_app.command("refresh-ssh-trust")
+def config_refresh_ssh_trust(
+    directory: Annotated[Path, typer.Argument(help="Absolute path of the owned trust bundle.")],
+    sources: Annotated[list[Path], typer.Argument(help="Complete replacement known-host file snapshots.")],
+    authority: Annotated[str, typer.Option(help="Policy maintainer responsible for these snapshots.")],
+    expected_generation: Annotated[
+        str, typer.Option(help="Generation from describe-ssh-trust; 'none' only for a partial initial import.")
+    ],
+    revoked_host_keys: Annotated[Path | None, typer.Option(help="Complete replacement revocation snapshot.")] = None,
+) -> None:
+    """Replace complete SSH policy with admissions blocked during publication."""
+    from agentworks.execution.carriers.ssh.trust_maintenance import refresh_ssh_trust
+
+    refresh_ssh_trust(
+        directory,
+        sources=sources,
+        authority=authority,
+        expected_generation=expected_generation,
+        revoked_host_keys=revoked_host_keys,
+    )
+
+
+@config_app.command("block-ssh-trust")
+def config_block_ssh_trust(
+    directory: Annotated[Path, typer.Argument(help="Absolute path of the owned trust bundle.")],
+    expected_generation: Annotated[
+        str, typer.Option(help="Generation from describe-ssh-trust; 'none' only for a partial initial import.")
+    ],
+) -> None:
+    """Refuse new SSH operations through this bundle, preserving its evidence."""
+    from agentworks.execution.carriers.ssh.trust_maintenance import block_ssh_trust
+
+    block_ssh_trust(directory, expected_generation=expected_generation)
+
+
+@config_app.command("describe-ssh-trust")
+def config_describe_ssh_trust(
+    directory: Annotated[Path, typer.Argument(help="Absolute path of the owned trust bundle.")],
+) -> None:
+    """Show SSH trust maintenance state, generation, and source attribution."""
+    from agentworks.execution.carriers.ssh.trust_maintenance import describe_ssh_trust
+
+    describe_ssh_trust(directory)

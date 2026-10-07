@@ -53,6 +53,23 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #    "198.51.100.0/24",
 #]
 
+# --- Independent SSH policy ---
+# Optional policy for the new execution path. Existing SSH callers keep using
+# the operator settings above; loading this table does not migrate callers.
+# To configure the new path, uncomment the table AND supply trust_store.
+# Trust must be explicitly imported/maintained before connecting. Loading config
+# checks shapes and native paths only: it does not create trust, connect, or
+# require these new files to exist. Unknown keys in this table are errors.
+# Paths must be absolute after ~ expansion; OpenSSH expansion tokens are refused.
+#[operator.ssh]
+#trust_store = "~/.config/agentworks/ssh-trust"  # required; example, no inferred default
+#identity_file = "~/.ssh/id_ed25519"            # defaults to operator.ssh_private_key
+# Agent use is disabled unless an explicit supported Unix socket is configured.
+#agent_socket = "~/.ssh/agent.sock"            # example, no default or ambient lookup
+#ssh_executable = "ssh"                       # command name or absolute native path
+#keepalive_interval = 15                      # seconds; 0 disables probes
+#keepalive_count_max = 4                      # positive unanswered probe count
+
 # --- Local terminal behavior ---
 
 [terminal]

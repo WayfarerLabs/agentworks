@@ -1402,13 +1402,29 @@ of configuration health.
 
 ### Config
 
-| Command                             | Description                                  |
-| ----------------------------------- | -------------------------------------------- |
-| `agw config init`                   | Create a sample config file                  |
-| `agw config edit`                   | Open config in `$EDITOR`                     |
-| `agw config sample`                 | Print the sample config to stdout            |
-| `agw config sync-ssh-config`        | Rebuild SSH config entries for VMs + agents  |
-| `agw config sync-vscode-workspaces` | Regenerate .code-workspace files for all VMs |
+| Command                                                                                               | Description                                                  |
+| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `agw config init`                                                                                     | Create a sample config file                                  |
+| `agw config edit`                                                                                     | Open config in `$EDITOR`                                     |
+| `agw config sample`                                                                                   | Print the sample config to stdout                            |
+| `agw config sync-ssh-config`                                                                          | Rebuild SSH config entries for VMs + agents                  |
+| `agw config sync-vscode-workspaces`                                                                   | Regenerate .code-workspace files for all VMs                 |
+| `agw config import-ssh-trust DIRECTORY SOURCES... --authority NAME`                                   | Create an owned bundle from complete stable trust snapshots  |
+| `agw config refresh-ssh-trust DIRECTORY SOURCES... --authority NAME --expected-generation GENERATION` | Replace complete policy against the inspected generation     |
+| `agw config block-ssh-trust DIRECTORY --expected-generation GENERATION`                               | Refuse new admissions while retaining trust evidence         |
+| `agw config describe-ssh-trust DIRECTORY`                                                             | Inspect maintenance state, generation and source attribution |
+
+Trust maintenance requires explicit absolute paths and does not load operator configuration or the
+database. Import and refresh accept `--revoked-host-keys PATH` for the complete revocation snapshot.
+Refresh sources must include all applicable policy, not just changed records. Omission of the
+revocation option selects no revocation file in the replacement policy. `--expected-generation`
+comes from describe; `none` only identifies an incomplete initial import. Refresh blocks admission
+before copying; stale-generation refusal leaves the state unchanged. Inspect maintenance state after
+failure. If storage could not establish durable blocking, stop new use and repair it. An already
+admitted connection can continue. Pause source writers or supply stable snapshots. These commands do
+not modify their source files, rewrite configuration, enroll unknown targets or enable the new
+execution stack. See
+[SSH policy ownership](agentworks/execution/carriers/ssh/README.md#trust-ownership).
 
 ### Resource Graph
 

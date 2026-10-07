@@ -33,10 +33,17 @@ from agentworks.execution.carrier import (
     Provenance,
     Retention,
 )
-from agentworks.execution.carriers import _subprocess
-from agentworks.execution.carriers.ssh import client
+from agentworks.execution.carriers.ssh import _io, client
 from agentworks.execution.carriers.ssh.client import SSHCarrier
-from agentworks.execution.carriers.ssh.connection import SSHConnection
+from agentworks.execution.carriers.ssh.connection import SSHConnection, admit_connection
+from agentworks.execution.carriers.ssh.trust import (
+    SSHTrustFiles,
+    block_trust,
+    import_trust,
+    refresh_trust,
+    resolve_trust,
+    trust_status,
+)
 
 pytestmark = pytest.mark.windows
 
@@ -68,11 +75,12 @@ class SyntheticSSH:
 
 @pytest.fixture
 def synthetic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    tmp_path = tmp_path.resolve()
     key = tmp_path / "identity"
     known_hosts = tmp_path / "known_hosts"
     key.write_bytes(b"synthetic identity")
     known_hosts.write_bytes(b"synthetic trust")
-    connection = SSHConnection("synthetic.example", "user", key, known_hosts)
+    connection = SSHConnection("synthetic.example", "user", key, SSHTrustFiles((known_hosts,)))
     value = SyntheticSSH(SSHCarrier(connection))
     original = subprocess.Popen
 
@@ -90,7 +98,7 @@ def synthetic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_inspection_is_passive(synthetic: SyntheticSSH) -> None:
-    assert not synthetic.carrier.features.live_stdio
+    assert synthetic.carrier.features.live_stdio
     assert not synthetic.carrier.features.terminal
     assert synthetic.calls == []
 
@@ -99,8 +107,9 @@ def test_validate_does_not_admit_or_probe_connection(synthetic: SyntheticSSH, mo
     def forbidden(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("validation performed SSH admission or process work")
 
-    monkeypatch.setattr(client, "validate_connection_files", forbidden)
+    monkeypatch.setattr(client, "admit_connection", forbidden)
     monkeypatch.setattr(client, "build_ssh_argv", forbidden)
+    monkeypatch.setattr(client, "check_client_version", forbidden)
     monkeypatch.setattr(client, "run_process", forbidden)
     synthetic.carrier.validate(PreparedInvocation(("/prepared/bootstrap",)), io=CarrierIO())
     assert synthetic.calls == []
@@ -116,11 +125,34 @@ def test_execute_validates_before_connection_or_process_work(
         raise AssertionError("validation refusal did not stop SSH work")
 
     monkeypatch.setattr(synthetic.carrier, "validate", refuse)
-    monkeypatch.setattr(client, "validate_connection_files", forbidden)
+    monkeypatch.setattr(client, "admit_connection", forbidden)
     monkeypatch.setattr(client, "build_ssh_argv", forbidden)
+    monkeypatch.setattr(client, "check_client_version", forbidden)
     monkeypatch.setattr(client, "run_process", forbidden)
     with pytest.raises(ValidationError, match="unsupported static request"):
         synthetic.execute()
+    assert synthetic.calls == []
+
+
+@pytest.mark.parametrize("seconds", [0, 10])
+def test_unsupported_input_refuses_before_connection_or_process_work(
+    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, seconds: int
+) -> None:
+    io = CarrierIO()
+    # Model a shared input extension before this pipe adapter implements it.
+    object.__setattr__(io, "input", object())
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("unsupported input performed SSH admission or process work")
+
+    monkeypatch.setattr(client, "admit_connection", forbidden)
+    monkeypatch.setattr(client, "build_ssh_argv", forbidden)
+    monkeypatch.setattr(client, "check_client_version", forbidden)
+    monkeypatch.setattr(client, "run_process", forbidden)
+    with pytest.raises(ValidationError):
+        synthetic.carrier.validate(PreparedInvocation(("/prepared/bootstrap",)), io=io)
+    with pytest.raises(ValidationError):
+        synthetic.execute(io, seconds=seconds)
     assert synthetic.calls == []
 
 
@@ -148,7 +180,7 @@ def test_status_and_raw_stream_evidence(synthetic: SyntheticSSH, code: int) -> N
 def test_native_status_outside_posix_exit_range_is_not_guest_completion(
     synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
-    original = _subprocess.run_process
+    original = _io.run_process
 
     def run(argv, **kwargs):
         result = original(argv, **kwargs)
@@ -312,6 +344,8 @@ def test_deadline_keeps_partial_evidence_and_reaps(synthetic: SyntheticSSH) -> N
     assert report.dispatch == Dispatch.UNKNOWN
     assert report.completion is None
     assert report.stdout.data == b"partial" and report.stderr.data == b"diagnostic"
+    assert report.stdout.provenance == Provenance.CARRIER_STDOUT
+    assert report.stderr.provenance == Provenance.MIXED_STDERR
     assert not report.stdout.complete and not report.stderr.complete
     synthetic.assert_closed()
 
@@ -443,8 +477,16 @@ def test_supported_client_banners(synthetic: SyntheticSSH, version: str) -> None
 
 
 @pytest.mark.parametrize("phase", ["version", "command"])
+@pytest.mark.parametrize(
+    "io,retention",
+    [
+        (CarrierIO(), Retention.CAPTURED),
+        (CarrierIO(output=Discard()), Retention.DISCARDED),
+        (CarrierIO(sensitive=True), Retention.SUPPRESSED),
+    ],
+)
 def test_failed_spawn_does_not_claim_dispatch_or_expose_exception(
-    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, phase: str
+    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, phase: str, io: CarrierIO, retention: Retention
 ) -> None:
     original = subprocess.Popen
 
@@ -454,10 +496,13 @@ def test_failed_spawn_does_not_claim_dispatch_or_expose_exception(
         return original(argv, **kwargs)
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
-    report = synthetic.execute()
+    report = synthetic.execute(io)
     assert report.dispatch == Dispatch.NOT_SENT
     assert report.failure == Failure.DISPATCH
     assert report.completion is None
+    assert report.stdout.provenance == Provenance.CARRIER_STDOUT
+    assert report.stderr.provenance == Provenance.MIXED_STDERR
+    assert report.stdout.retention == report.stderr.retention == retention
     assert "secret-canary" not in repr(report)
     synthetic.assert_closed()
 
@@ -596,6 +641,7 @@ def test_child_environment_preserves_parent_and_unrelated_values(
     assert os.environ["OPENSSH_STDIO_MODE"] == "nonsock"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("inherited_mode", [None, "stdio", "descriptors"])
 def test_installed_ssh_owns_fresh_pipe_handles(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, inherited_mode: str | None
@@ -643,7 +689,7 @@ def test_installed_ssh_owns_fresh_pipe_handles(
                     "127.0.0.1",
                     "fixture",
                     key,
-                    trust,
+                    SSHTrustFiles((trust,)),
                     port=listener.getsockname()[1],
                     ssh_executable=executable,
                 )
@@ -675,3 +721,137 @@ def test_installed_ssh_owns_fresh_pipe_handles(
                     pass
                 peer.join(timeout=6)
                 assert not peer.is_alive()
+
+
+@pytest.mark.parametrize("refusal", ["blocked", "corrupt", "nested_manifest"])
+def test_each_command_admits_current_managed_policy(synthetic: SyntheticSSH, tmp_path: Path, refusal: str) -> None:
+    connection = synthetic.carrier._connection
+    bundle = import_trust(tmp_path.resolve() / "managed", sources=connection.trust, authority="fixture")
+    synthetic.carrier = SSHCarrier(replace(connection, trust=bundle))
+    first = resolve_trust(bundle)
+    assert synthetic.execute().failure is None
+    assert f'UserKnownHostsFile="{first.known_hosts[0].as_posix()}"' in synthetic.calls[-1]
+    source = tmp_path.resolve() / "replacement"
+    source.write_bytes(b"complete replacement policy")
+    refresh_trust(
+        bundle,
+        sources=SSHTrustFiles((source,)),
+        authority="fixture",
+        expected_generation=trust_status(bundle).generation,
+    )
+    second = resolve_trust(bundle)
+    assert second != first
+    assert synthetic.execute().failure is None
+    assert f'UserKnownHostsFile="{second.known_hosts[0].as_posix()}"' in synthetic.calls[-1]
+    assert first.known_hosts[0].read_bytes() == b"synthetic trust"
+    if refusal == "blocked":
+        block_trust(bundle, expected_generation=trust_status(bundle).generation)
+    elif refusal == "nested_manifest":
+        (bundle.directory / "state.json").write_bytes(b"[" * 10_000 + b"]" * 10_000)
+    else:
+        second.known_hosts[0].write_bytes(b"corrupt policy")
+    previous_calls = len(synthetic.calls)
+    report = synthetic.execute()
+    assert report.dispatch == Dispatch.NOT_SENT
+    assert report.failure == Failure.DISPATCH
+    assert len(synthetic.calls) == previous_calls
+    synthetic.assert_closed()
+
+
+@pytest.mark.parametrize("stage", ["admission", "version"])
+def test_expiry_during_local_checks_prevents_dispatch(
+    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    original = admit_connection
+
+    def admit(connection: SSHConnection) -> SSHTrustFiles:
+        trust = original(connection)
+        if stage == "admission":
+            clock[0] = 2.0
+        return trust
+
+    def version(connection: SSHConnection, *, deadline: Deadline, custody: LocalDeliveryCustody) -> None:
+        clock[0] = 2.0
+
+    monkeypatch.setattr(client, "admit_connection", admit)
+    monkeypatch.setattr(client, "check_client_version", version)
+    report = synthetic.execute(seconds=1)
+    assert report.dispatch == Dispatch.NOT_SENT
+    assert report.failure == Failure.DEADLINE
+    assert synthetic.calls == []
+
+
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit])
+def test_admission_preserves_control_flow(
+    synthetic: SyntheticSSH, monkeypatch: pytest.MonkeyPatch, interruption: type[BaseException]
+) -> None:
+    def interrupt(connection: SSHConnection) -> SSHTrustFiles:
+        raise interruption()
+
+    monkeypatch.setattr(client, "admit_connection", interrupt)
+    with pytest.raises(interruption):
+        synthetic.execute()
+    assert synthetic.calls == []
+
+
+@pytest.mark.parametrize("stage", ["version", "command"])
+@pytest.mark.parametrize("settle_before_reduction", [False, True])
+def test_pending_constructor_keeps_dispatch_history_and_exact_custody(
+    synthetic: SyntheticSSH,
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+    settle_before_reduction: bool,
+) -> None:
+    """Exercise the shared delayed-constructor vector at SSH's two dispatch boundaries."""
+    from threading import Event
+
+    from agentworks.errors import StateError
+    from agentworks.execution.carriers import _subprocess
+
+    release = Event()
+    entered = Event()
+    spawn = subprocess.Popen
+    pump = _subprocess.run_process
+    stores: list[LocalDeliveryCustody] = []
+
+    def delayed(argv, **kwargs):
+        if (argv[-1] == "-V") == (stage == "version"):
+            entered.set()
+            assert release.wait(5)
+        return spawn(argv, **kwargs)
+
+    def observe(argv, *, custody, **kwargs):
+        stores.append(custody)
+        result = pump(argv, custody=custody, **kwargs)
+        if entered.is_set() and settle_before_reduction:
+            release.set()
+            assert custody.close(Deadline.after(3))
+        return result
+
+    monkeypatch.setattr(subprocess, "Popen", delayed)
+    monkeypatch.setattr(_subprocess, "run_process", observe)
+    try:
+        report = synthetic.execute(seconds=0.2)
+        assert entered.is_set()
+        assert stores == [synthetic.custody] * (1 if stage == "version" else 2)
+        assert report.failure is Failure.OBSERVATION
+        assert report.dispatch is (Dispatch.NOT_SENT if stage == "version" else Dispatch.UNKNOWN)
+        assert report.completion is None
+        if not settle_before_reduction:
+            assert not synthetic.custody.settled
+            assert not synthetic.custody.close(Deadline.after(0))
+            calls = list(synthetic.calls)
+
+            def forbidden(*args, **kwargs):
+                raise AssertionError("unsettled delivery performed trust admission")
+
+            monkeypatch.setattr(client, "admit_connection", forbidden)
+            with pytest.raises(StateError):
+                synthetic.execute()
+            assert synthetic.calls == calls
+    finally:
+        release.set()
+        assert synthetic.custody.close(Deadline.after(3))
+    synthetic.assert_closed()

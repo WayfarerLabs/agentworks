@@ -15,6 +15,7 @@ from agentworks.execution.carriers.proxmox import ProxmoxCarrier, ProxmoxConnect
 from agentworks.execution.carriers.ssh import client as ssh_client
 from agentworks.execution.carriers.ssh.client import SSHCarrier
 from agentworks.execution.carriers.ssh.connection import SSHConnection
+from agentworks.execution.carriers.ssh.trust import SSHTrustFiles
 from agentworks.execution.carriers.wsl2 import WSL2Carrier, WSL2Connection
 
 
@@ -62,12 +63,17 @@ def test_wsl2_refuses_terminal_before_local_spawn(monkeypatch: pytest.MonkeyPatc
     run.assert_not_called()
 
 
-def test_buffered_ssh_refuses_terminal_before_connection_access(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.windows
+def test_buffered_ssh_refuses_terminal_before_connection_access(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     local_delivery = LocalDeliveryCustody()
-    carrier = SSHCarrier(SSHConnection("host.example", "user", Path("/missing/key"), Path("/missing/hosts")))
+    carrier = SSHCarrier(
+        SSHConnection("host.example", "user", tmp_path / "missing-key", SSHTrustFiles((tmp_path / "missing-hosts",)))
+    )
     validate_files = MagicMock(side_effect=AssertionError("connection files accessed"))
     run = MagicMock(side_effect=AssertionError("local client spawned"))
-    monkeypatch.setattr(ssh_client, "validate_connection_files", validate_files)
+    monkeypatch.setattr(ssh_client, "admit_connection", validate_files)
     monkeypatch.setattr(ssh_client, "run_process", run)
     invocation = PreparedInvocation(("/bin/true",))
     io = _io()
