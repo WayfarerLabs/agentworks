@@ -157,7 +157,7 @@ class OperationOwner:
                     entity_name=self._ownership.scope.resource_name,
                 )
             obligation = self._register_lifecycle_obligation_locked(
-                obligation_id or uuid4().hex, obligation_kind, payload_version, payload
+                uuid4().hex if obligation_id is None else obligation_id, obligation_kind, payload_version, payload
             )
             return LifecycleObligation(self, obligation)
 

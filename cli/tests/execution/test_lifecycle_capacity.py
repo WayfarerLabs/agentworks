@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from contextlib import closing
+
 import pytest
 
-from agentworks.db import LifecycleObligationState
+from agentworks.db import Database, LifecycleObligationState
 from agentworks.errors import StateError
 from agentworks.execution._execution_operation import InlineExecutionControlFact
 from agentworks.execution._file_operation import FileOperation
 from agentworks.execution.carrier import CarrierReport, Deadline, Dispatch
 from agentworks.execution.models import Command, Lifetime, Output
 from agentworks.execution.profiles import Protection
+from agentworks.operations import _is_pre_registration_refusal
 from tests.execution.files._target_support import target_for_owner
 from tests.execution.test_execution_operation import RecordingCarrier
 from tests.execution.test_managed_foreground_access import _status
@@ -199,3 +202,70 @@ def test_keeper_registration_unknown_or_present_custody_is_not_erased(view, monk
     assert run.keeper.drain(Deadline.after(5)).drained
     with pytest.raises(StateError):
         run.finish_cleanup(Deadline.after(5))
+
+
+def test_control_during_absence_inspection_keeps_original_registration_context_and_keeper_debt(view, monkeypatch):
+    database, workflow, access, main, keeper = view
+    primary, control = OSError(), KeyboardInterrupt()
+
+    def registration_error(*args, **kwargs):
+        raise primary
+
+    def interrupted_inspection(*args):
+        raise control
+
+    with monkeypatch.context() as patch:
+        patch.setattr(type(database.operations), "register_lifecycle_obligation", registration_error)
+        patch.setattr(type(database.operations), "inspect_lifecycle_obligation", interrupted_inspection)
+        with pytest.raises(KeyboardInterrupt) as caught:
+            access.run(Command(["/bin/true"]), profile=Protection.MANAGED, output=Output.discard())
+    assert caught.value is control and control.__context__ is primary
+    assert not _is_pre_registration_refusal(primary) and not _is_pre_registration_refusal(control)
+    (run,) = workflow.views.execution_operation.managed_runs
+    assert run.keeper.admission_uncertain and run.keeper.obligation is None
+    assert main.start.calls == main.observe.calls == keeper.clock.calls == 0
+    assert run.keeper.drain(Deadline.after(5)).drained
+    with pytest.raises(StateError):
+        run.finish_cleanup(Deadline.after(5))
+
+
+def test_keeper_keeps_unknown_admission_after_snapshot_takeover_and_receipt_release(view, monkeypatch):
+    database, workflow, access, main, keeper = view
+    repository = workflow.owner._repository
+    register = type(repository).register_lifecycle_obligation
+    inspect = type(repository)._inspect_owned
+    primary = OSError()
+    identifier = None
+    raced = False
+    with closing(Database(database.path)) as other_database:
+        other = other_database.operations
+
+        def commit_then_raise(current, ownership, kind, version, payload, *, obligation_id=None):
+            nonlocal identifier
+            register(current, ownership, kind, version, payload, obligation_id=obligation_id)
+            identifier = obligation_id
+            raise primary
+
+        def takeover_after_owned_check(current, ownership):
+            nonlocal raced
+            claim = inspect(current, ownership)
+            if current is repository and identifier is not None and not raced:
+                raced = True
+                recovered = other.recover_takeover(ownership, "b" * 32).ownership
+                other.resolve_lifecycle_obligation(recovered, identifier)
+                other.record_effects_resolved(recovered)
+                other.release_resolved(recovered)
+            return claim
+
+        with monkeypatch.context() as patch:
+            patch.setattr(type(repository), "register_lifecycle_obligation", commit_then_raise)
+            patch.setattr(type(repository), "_inspect_owned", takeover_after_owned_check)
+            with pytest.raises(OSError) as caught:
+                access.run(Command(["/bin/true"]), profile=Protection.MANAGED, output=Output.discard())
+        assert raced and caught.value is primary and not _is_pre_registration_refusal(primary)
+        (run,) = workflow.views.execution_operation.managed_runs
+        assert run.keeper.admission_uncertain and run.keeper.obligation is None
+        assert main.start.calls == main.observe.calls == keeper.clock.calls == 0
+        assert run.keeper.drain(Deadline.after(5)).drained
+        with pytest.raises(StateError):
+            run.finish_cleanup(Deadline.after(5))

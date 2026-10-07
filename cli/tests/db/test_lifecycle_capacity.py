@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -222,3 +223,98 @@ def test_reused_error_does_not_reuse_an_earlier_absence_proof(owned, monkeypatch
     assert not _is_pre_registration_refusal(primary)
     receipt = owner.inspect_lifecycle_obligation(identifier)
     assert receipt is not None and receipt.state is LifecycleObligationState.REGISTERED
+
+
+@pytest.mark.parametrize("read_kind", ["pending", "exact"])
+@pytest.mark.parametrize("released", [False, True])
+def test_receipt_read_keeps_owner_snapshot_across_other_connection_takeover(owned, monkeypatch, read_kind, released):
+    database, owner = owned
+    repository = owner._repository
+    obligation = owner.register_lifecycle_obligation("owned", payload_version=1, payload=b"retained")
+    before = owner.inspect_lifecycle_obligation(obligation.obligation_id)
+    assert before is not None
+    original = type(repository)._inspect_owned
+    raced = False
+    with closing(Database(database.path)) as other_database:
+        other = other_database.operations
+
+        def takeover_after_owned_check(current, ownership):
+            nonlocal raced
+            claim = original(current, ownership)
+            if current is repository and not raced:
+                raced = True
+                recovered = other.recover_takeover(ownership, "b" * 32).ownership
+                if released:
+                    other.resolve_lifecycle_obligation(recovered, obligation.obligation_id)
+                    other.record_effects_resolved(recovered)
+                    other.release_resolved(recovered)
+            return claim
+
+        monkeypatch.setattr(type(repository), "_inspect_owned", takeover_after_owned_check)
+        if read_kind == "pending":
+            assert owner.list_pending_lifecycle_obligations() == (before,)
+        else:
+            assert owner.inspect_lifecycle_obligation(obligation.obligation_id) == before
+        assert raced and not repository._connection.in_transaction
+        with pytest.raises(StateError):
+            owner.list_pending_lifecycle_obligations()
+        with pytest.raises(StateError):
+            owner.inspect_lifecycle_obligation("f" * 32)
+
+
+def test_read_does_not_end_callers_existing_snapshot(owned):
+    _, owner = owned
+    connection = owner._repository._connection
+    connection.execute("BEGIN")
+    try:
+        assert owner.list_pending_lifecycle_obligations() == ()
+        assert owner.inspect_lifecycle_obligation("e" * 32) is None
+        assert connection.in_transaction
+    finally:
+        connection.rollback()
+
+
+@pytest.mark.parametrize("identifier", ["", 0, False])
+def test_explicit_invalid_falsey_id_is_not_replaced_with_a_fresh_registration(owned, identifier):
+    _, owner = owned
+    with pytest.raises(ValueError):
+        owner.register_lifecycle_obligation("owned", payload_version=1, payload=b"same", obligation_id=identifier)
+    assert owner.list_pending_lifecycle_obligations() == ()
+
+
+def test_failed_registration_keeps_present_snapshot_after_takeover_and_release(owned, monkeypatch):
+    database, owner = owned
+    repository = owner._repository
+    register = type(repository).register_lifecycle_obligation
+    inspect = type(repository)._inspect_owned
+    identifier = "c" * 32
+    primary, original_cause = OSError(), ValueError()
+    primary.__cause__ = original_cause
+    committed = raced = False
+    with closing(Database(database.path)) as other_database:
+        other = other_database.operations
+
+        def commit_then_raise(current, ownership, kind, version, payload, *, obligation_id=None):
+            nonlocal committed
+            register(current, ownership, kind, version, payload, obligation_id=obligation_id)
+            committed = True
+            raise primary
+
+        def takeover_after_owned_check(current, ownership):
+            nonlocal raced
+            claim = inspect(current, ownership)
+            if current is repository and committed and not raced:
+                raced = True
+                recovered = other.recover_takeover(ownership, "b" * 32).ownership
+                other.resolve_lifecycle_obligation(recovered, identifier)
+                other.record_effects_resolved(recovered)
+                other.release_resolved(recovered)
+            return claim
+
+        monkeypatch.setattr(type(repository), "register_lifecycle_obligation", commit_then_raise)
+        monkeypatch.setattr(type(repository), "_inspect_owned", takeover_after_owned_check)
+        with pytest.raises(OSError) as caught:
+            owner.register_lifecycle_obligation("owned", payload_version=1, payload=b"same", obligation_id=identifier)
+        assert raced and caught.value is primary and primary.__cause__ is original_cause
+        assert not _is_pre_registration_refusal(primary)
+        assert other.inspect(owner.ownership.scope) is None

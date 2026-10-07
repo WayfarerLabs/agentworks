@@ -20,7 +20,9 @@ transition atomically arms the coarse claim. Later obligations advance independe
 
 `list_pending_lifecycle_obligations` returns bounded unfinished debt under current ownership;
 `inspect_lifecycle_obligation` separately reads one exact receipt, including completed receipts.
-Only a valid current owner can establish that an exact receipt is missing. Resolved receipts remain
+Only a valid current owner can establish that an exact receipt is missing. Ownership and
+receipt/debt data share one bounded SQLite read snapshot; its ownership read is a linearization
+point, not a guarantee of later ownership or permission to dispatch. Resolved receipts remain
 immutable until operation release, preserving interrupted-reply registration and resolution retries
 without permitting rearming. Completed history grows with work; this is not a total-storage or
 constant-close-time guarantee. Migration 42 adds a partial unfinished-debt index, using the same

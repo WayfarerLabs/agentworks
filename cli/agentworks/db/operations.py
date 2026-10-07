@@ -315,7 +315,7 @@ class OperationRepository:
 
     def list_pending_lifecycle_obligations(self, ownership: OperationOwnership) -> tuple[LifecycleObligation, ...]:
         """Return bounded unfinished debt for one exact currently owned operation."""
-        with self._connection_lock:
+        with self._read_snapshot():
             claim = self._inspect_owned(ownership)
             if claim is None:
                 self._raise_stale_or_invalid_state(ownership, None)
@@ -340,7 +340,7 @@ class OperationRepository:
     ) -> LifecycleObligation | None:
         """Read one immutable or unfinished receipt; only current ownership proves absence."""
         _validate_obligation_id(obligation_id)
-        with self._connection_lock:
+        with self._read_snapshot():
             self._require_owned_claim(ownership)
             row = self._connection.execute(
                 "SELECT * FROM lifecycle_obligations WHERE operation_id = ? AND obligation_id = ?",
@@ -930,6 +930,22 @@ class OperationRepository:
             entity_kind=ownership.scope.resource_kind,
             entity_name=ownership.scope.resource_name,
         )
+
+    @contextmanager
+    def _read_snapshot(self) -> Iterator[None]:
+        """Read ownership and bounded receipt data at the same SQLite snapshot.
+
+        The first ownership SELECT is the linearization point, not a promise
+        that ownership remains current after this read. An existing transaction
+        already supplies the snapshot and remains owned by its caller.
+        """
+        with self._connection_lock:
+            if self._connection.in_transaction:
+                yield
+            else:
+                with self._connection:
+                    self._connection.execute("BEGIN")
+                    yield
 
     @contextmanager
     def _standalone_transaction(self) -> Iterator[None]:
