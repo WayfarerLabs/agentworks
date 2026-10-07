@@ -159,34 +159,38 @@ repository, VM target, full guest identity, root plan and runtime bindings must 
 admission. RESOURCE reads reconnect under a fresh operation and reuse its ordinary lifetime helper
 row, but never reconcile launch, adopt the job, drain a keeper or register it among owned runs.
 Observer close resolves only its own read-helper custody and leaves the independent job untouched;
-unknown helper custody still prevents that close. `stop` and `dispose` remain limited to
-acknowledged originating OPERATION runs. Status separates application precision from positive
-resource closure; output cursors address the verified retained prefix, whose EOF does not imply
-complete source capture. `capture_complete` describes the whole verified capture, not consumption of
-this returned slice; intentional discard or suppression leaves it false without an output-limit
-failure. Wait returns the existing `ExecutionResult` with a safe managed reference and never stops
-the workload or drains renewal. MANAGED `run` composes that same launch and wait without requiring a
-separate caller-facing start step. It selects its finite observation budget once for both phases;
-acknowledgement that exhausts the budget still returns UNKNOWN application progress, DEADLINE,
-incomplete output with the effective retention policy, and its safe `JobRef`, without further I/O or
-cleanup. Checked MANAGED run and wait use the bound logical entity and existing contextual checker,
-preserving the exact result/reference; known application failures remain application-phase, while
-deadline and observation-collection failures retain observation phase. Start's existing overlap
-boundaries can retain a reservation and keeper-admission uncertainty when ownership is already
-borrowed, or admitted initial-clock keeper evidence when a later borrow refuses actual launch.
-Foreground composition does not bypass or erase either retained state. Stop first acquires the whole
-owner's ordinary serial borrow, then drains only the selected keeper. It delivers through the
-existing lifetime row and actual borrowed helper attempt, retaining unknown helper debt before any
-fresh observation. An overlapping file or other component's borrow refuses before drain or dispatch.
-Accepted intent is independent of proved termination. Disposal observes terminal proof before
-draining; active or unproved work stays not ready without stopping it. Uncertain stop or disposal
-remains distinct from a proved refusal. RESOURCE closure requires a reconciled reservation,
-authentic launch, both stream ends, positive boundary-empty and positive exact controller
-termination under a settled helper. A missing WAIT preserves UNKNOWN application precision without
-blocking proved resource closure; live or unknown controller state can still be polled within the
-original deadline. No RESOURCE terminal observation is cached on an owned run. These private reads
-do not establish independent launch, mutation, duration availability, session namespaces or a public
-RunContext surface.
+unknown helper custody still prevents that close. `stop` also admits exact constructor-bound
+RESOURCE jobs with confirmed launch receipts; `dispose` remains limited to acknowledged originating
+OPERATION runs. Status separates application precision from positive resource closure; output
+cursors address the verified retained prefix, whose EOF does not imply complete source capture.
+`capture_complete` describes the whole verified capture, not consumption of this returned slice;
+intentional discard or suppression leaves it false without an output-limit failure. Wait returns the
+existing `ExecutionResult` with a safe managed reference and never stops the workload or drains
+renewal. MANAGED `run` composes that same launch and wait without requiring a separate caller-facing
+start step. It selects its finite observation budget once for both phases; acknowledgement that
+exhausts the budget still returns UNKNOWN application progress, DEADLINE, incomplete output with the
+effective retention policy, and its safe `JobRef`, without further I/O or cleanup. Checked MANAGED
+run and wait use the bound logical entity and existing contextual checker, preserving the exact
+result/reference; known application failures remain application-phase, while deadline and
+observation-collection failures retain observation phase. Start's existing overlap boundaries can
+retain a reservation and keeper-admission uncertainty when ownership is already borrowed, or
+admitted initial-clock keeper evidence when a later borrow refuses actual launch. Foreground
+composition does not bypass or erase either retained state. Stop first acquires the whole owner's
+ordinary serial borrow, then drains only the selected OPERATION keeper. RESOURCE stop owns no keeper
+and never adopts the independent job. Both deliver through the existing lifetime row and actual
+borrowed helper attempt, retaining unknown helper debt before any fresh observation. An overlapping
+file or other component's borrow refuses before drain or dispatch. Accepted intent is independent of
+proved termination; RESOURCE stop requires a fresh exact observation for closure and shares its
+original finite deadline. Its settled helpers reuse the same empty-payload lifetime row, while
+unknown helper custody blocks new work and observer finish. Observer finish never stops or cleans
+the independent job. Disposal observes terminal proof before draining; active or unproved work stays
+not ready without stopping it. Uncertain stop or disposal remains distinct from a proved refusal.
+RESOURCE closure requires a reconciled reservation, authentic launch, both stream ends, positive
+boundary-empty and positive exact controller termination under a settled helper. A missing WAIT
+preserves UNKNOWN application precision without blocking proved resource closure; live or unknown
+controller state can still be polled within the original deadline. No RESOURCE terminal observation
+is cached on an owned run. These private reads do not establish independent launch or disposal,
+duration availability, session namespaces or a public RunContext surface.
 
 `ExecutionOperation` requires an explicit managed target matching its owner's scope. An optional
 numeric bootstrap must match that VM's derived boot identity; platform-host targets cannot select

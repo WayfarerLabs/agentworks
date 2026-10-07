@@ -47,6 +47,7 @@ from agentworks.execution._managed_observe_access import (
 )
 from agentworks.execution._managed_operation_run import ManagedOperationRun
 from agentworks.execution._managed_request_adapter import compose_managed_body
+from agentworks.execution._managed_resource_stop import stop_resource_job
 from agentworks.execution._managed_result import ManagedResultOutcome, wait_bound_managed_result
 from agentworks.execution._managed_runs import (
     ManagedOutputMode,
@@ -241,7 +242,7 @@ class ExecutionOperation:
         ):
             raise ValidationError("Managed access does not match its originating operation")
 
-    def require_managed_read(
+    def require_managed_access(
         self,
         identity: ManagedRunIdentity,
         *,
@@ -272,7 +273,7 @@ class ExecutionOperation:
             runtime_selection=runtime_selection,
         )
         if self._resource_owner is None:
-            raise ValidationError("Managed resource reads require this operation's core resource binding")
+            raise ValidationError("Managed resource access requires this operation's core resource binding")
         return self._resource_owner
 
     def require_managed_run(
@@ -521,11 +522,15 @@ class ExecutionOperation:
         )
 
     def stop_job(self, reference: JobRef, deadline: Deadline) -> JobStop:
-        """Drain and permanently stop only this run, retaining its closure facts."""
+        """Stop one exact OP or RESOURCE job without adopting independent custody."""
+        if type(reference) is not JobRef:
+            raise ValidationError("Managed control requires its bound operation")
+        if not any(run.receipt.identity.run_id == reference.run_id for run in self._managed_runs):
+            return stop_resource_job(self, reference, deadline)
         run = self._control_run(reference, deadline)
         if run.disposal_confirmed:
             return JobStop(reference, True, True)
-        outcome = self._stop_managed(run, deadline)
+        outcome = self._stop_managed(encode_managed_job_fact(run.receipt), deadline, run=run)
         accepted = outcome.state in {ManagedStopState.ACCEPTED, ManagedStopState.TERMINATED}
         if not accepted:
             return JobStop(
@@ -556,8 +561,10 @@ class ExecutionOperation:
             deadline.expired,
         )
 
-    def _stop_managed(self, run: ManagedOperationRun, deadline: Deadline) -> ManagedStopOutcome:
-        """Acquire ordinary lifetime custody before draining this selected keeper."""
+    def _stop_managed(
+        self, expected_launch: bytes, deadline: Deadline, *, run: ManagedOperationRun | None = None
+    ) -> ManagedStopOutcome:
+        """Acquire ordinary lifetime custody; drain only an actual selected OP keeper."""
         binding, bootstrap = self._native_binding, self._bootstrap
         assert binding is not None and bootstrap is not None
         with self._admission_guard:
@@ -568,22 +575,24 @@ class ExecutionOperation:
         candidate = None
         try:
             self._admit(active)
-            if run.keeper.drain(deadline).drained:
-                # A drained worker does not clear an earlier unknown closing
-                # helper; reuse its existing local-custody/binding gate.
-                run.keeper._require_cleanup(deadline)  # noqa: SLF001
+            if run is None or run.keeper.drain(deadline).drained:
+                if run is not None:
+                    # A drained worker does not clear an earlier unknown closing
+                    # helper; reuse its existing local-custody/binding gate.
+                    run.keeper._require_cleanup(deadline)  # noqa: SLF001
                 if self._wsl2_route is not None:
                     self._wsl2_route.require_selected_route(deadline)
                 candidate = stop_managed_run(
                     operation,
-                    expected_launch=encode_managed_job_fact(run.receipt),
+                    expected_launch=expected_launch,
                     plan=bootstrap.root_entry,
                     deadline=deadline,
                     runtime_selection=binding.runtime_selection,
                     guest=bootstrap.guest,
                 )
                 active.candidate = candidate
-                run.keeper.last_stop = candidate
+                if run is not None:
+                    run.keeper.last_stop = candidate
                 operation.settle(candidate.dispatch, candidate.carrier_completion)
             custody = self._outcome(active, operation, deadline, include_candidate=False)
         except BaseException as control:

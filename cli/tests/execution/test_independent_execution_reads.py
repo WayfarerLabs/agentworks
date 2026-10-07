@@ -343,9 +343,8 @@ def test_resource_binding_does_not_grant_mutating_preflight_or_expired_wait_fall
         preflight_bound_run(repository, RUN, **options(observer))
     with pytest.raises(ManagedDeadlineExpired):
         operation.wait_job(JobRef(RUN.run_id), main, Deadline.after(0))
-    for control in (access.stop, access.dispose):
-        with pytest.raises(ValidationError):
-            control(JobRef(RUN.run_id))
+    with pytest.raises(ValidationError):
+        access.dispose(JobRef(RUN.run_id))
     assert main.observe.calls == main.stop.calls == main.dispose.calls == 0
 
 

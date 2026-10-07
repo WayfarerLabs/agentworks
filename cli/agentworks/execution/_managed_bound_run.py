@@ -139,7 +139,7 @@ def preflight_bound_read(
             raise ValidationError("Managed access requires a finite deadline")
         if deadline.expired:
             raise ManagedDeadlineExpired("Managed access deadline expired before admission")
-        admission = execution_operation.require_managed_read(
+        admission = execution_operation.require_managed_access(
             identity,
             repository=repository,
             owner=owner,
