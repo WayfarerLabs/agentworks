@@ -1044,9 +1044,9 @@ associated pending acceptance gates are superseded by this ruling.
       observations alone cannot supply usable cloud RunContext targets.
 
 The bounded cloud power unit at `58a27b550` clears all three independent private lanes against
-`ad471c8a0`. Project review observes 372 focused/adjacent passes; generic review observes 307 related
-passes plus six independent SDK probes; complexity review observes 113 focused passes and proves
-that removing the late-result checks admits expired SDK responses. Real SDK serialization and
+`ad471c8a0`. Project review observes 372 focused/adjacent passes; generic review observes 307
+related passes plus six independent SDK probes; complexity review observes 113 focused passes and
+proves that removing the late-result checks admits expired SDK responses. Real SDK serialization and
 authentication-resend probes establish successful late-result refusal, not hard preemption. This
 records only the passive power/locator increment, not cloud activation, routes, RunContext or native
 acceptance.
