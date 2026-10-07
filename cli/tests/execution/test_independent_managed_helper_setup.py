@@ -51,14 +51,14 @@ def _invoke(
 
 @pytest.mark.parametrize("module,constructor", SETUPS)
 @pytest.mark.parametrize("failure_type", (MemoryError, KeyboardInterrupt, SystemExit))
-@pytest.mark.parametrize("close_fails", (False, True))
-def test_unused_setup_retains_original_failure_and_exact_borrow(
+@pytest.mark.parametrize("close_mode", ("success", "before-close", "after-close"))
+def test_unused_setup_preserves_original_failure_and_actual_owner_custody(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     module: ModuleType,
     constructor: str,
     failure_type: type[BaseException],
-    close_fails: bool,
+    close_mode: str,
 ) -> None:
     database, repository, owner = _confirmed(tmp_path)
     carrier = ScriptedCarrier(_reply)
@@ -88,9 +88,11 @@ def test_unused_setup_retains_original_failure_and_exact_borrow(
 
     def capture_close(borrow: OperationBorrow) -> None:
         closes.append(borrow)
-        if close_fails:
+        if close_mode == "before-close":
             raise KeyboardInterrupt("unused borrow close interrupted")
         original_close(borrow)
+        if close_mode == "after-close":
+            raise KeyboardInterrupt("unused borrow close reply interrupted")
 
     def forbid_registration(*args: object, **kwargs: object) -> NoReturn:
         registrations.append(args)
@@ -119,11 +121,13 @@ def test_unused_setup_retains_original_failure_and_exact_borrow(
         assert repository.inspect(START_RUN) is None
         monkeypatch.setattr(OperationBorrow, "close", original_close)
         monkeypatch.setattr(OperationBorrow, "install_dispatch_obligation", original_register)
-        if close_fails:
+        if close_mode == "before-close":
             assert owner._active_borrow is borrows[0]  # noqa: SLF001
             with pytest.raises(StateError):
                 original_borrow()
             borrows[0].close()
+        else:
+            assert owner._active_borrow is None  # noqa: SLF001
         next_borrow = original_borrow()
         next_borrow.close()
         owner.seal_lifecycle_obligations()

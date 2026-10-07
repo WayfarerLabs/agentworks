@@ -87,15 +87,16 @@ preflight, reservation and owned start. `USER_DEFAULT` first observes the worklo
 under a borrow; unresolved or uncertain observation creates no run row. Independent shell lookup,
 observation, stop and disposal close an unused borrow if helper-wrapper or action-custody setup
 fails before registration or delivery. The original exception and cause escape unchanged. If that
-local close also fails, the exact borrow remains on its operation owner for explicit cleanup; no
-helper effect or automatic recovery is claimed. This is not a production caller or job API. The
-caller must still hold the selected route and revalidate the provider locator and current target
-before launch. The guest helper independently rereads its fixed identity paths and refuses a
-mismatch before opening the store. Once a reservation succeeds, a later refusal may retain its
-`RESERVED` row as a one-shot tombstone. The caller keeps the supplied run ID, inspects it after any
-escaping failure, and never retries start with that ID. A still-armed or uncertain obligation keeps
-owner custody. Recovery, later job actions, native SSH/QGA proof and RunContext delivery remain
-open.
+local close also escapes, the caller inspects actual owner custody: an unclosed borrow remains
+available for explicit cleanup, while a completed close may already have relinquished it despite an
+interrupted reply. No helper effect or automatic recovery is claimed. This is not a production
+caller or job API. The caller must still hold the selected route and revalidate the provider locator
+and current target before launch. The guest helper independently rereads its fixed identity paths
+and refuses a mismatch before opening the store. Once a reservation succeeds, a later refusal may
+retain its `RESERVED` row as a one-shot tombstone. The caller keeps the supplied run ID, inspects it
+after any escaping failure, and never retries start with that ID. A still-armed or uncertain
+obligation keeps owner custody. Recovery, later job actions, native SSH/QGA proof and RunContext
+delivery remain open.
 
 `models.py` defines immutable literal commands and scripts with explicit `Shell.SH`, `Shell.BASH` or
 `Shell.USER_DEFAULT` selection and separate startup flags. It also defines finite `Input`, bounded
