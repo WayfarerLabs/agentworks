@@ -16,7 +16,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from agentworks.capabilities.base import RunContext
-    from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.binding import NativeExecutionBinding
@@ -36,7 +35,6 @@ class ProxmoxOwnedNativePlatformAccess:
     ctx: RunContext
     owner: OperationOwner
     custody: LocalDeliveryCustody
-    config: Config | None = None
     binding: NativeExecutionBinding | None = None
     preparation: VMTargetPreparation | None = None
     locator: ProviderLocator | None = None
@@ -57,7 +55,7 @@ class ProxmoxOwnedNativePlatformAccess:
             raise StateError("Native VM route is unavailable", entity_kind="vm", entity_name=self.vm.name)
         self.locator = locator
         binding = self.platform.resolve_native_execution_binding(
-            self.vm, self.ctx, deadline=deadline, config=self.config
+            self.vm, self.ctx, deadline=deadline, config=self.ctx.config
         )
         if deadline.expired:
             raise StateError(

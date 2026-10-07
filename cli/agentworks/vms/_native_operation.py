@@ -192,9 +192,7 @@ def _prepare(
         raise StateError("Native VM power cannot authorize activation", entity_kind="vm", entity_name=vm_name)
     if power is VMStatus.STOPPED and vm.operator_stopped:
         raise StateError("Operator-stopped VM cannot be started automatically", entity_kind="vm", entity_name=vm_name)
-    access = platform.build_native_execution_access(
-        vm, ctx, owner=workflow.owner, custody=workflow.local_delivery, config=ctx.config
-    )
+    access = platform.build_native_execution_access(vm, ctx, owner=workflow.owner, custody=workflow.local_delivery)
     workflow.access = access
     access.prepare(power, workflow.deadline)
     preparation = access.preparation

@@ -632,12 +632,11 @@ class ProxmoxPlatform(VMPlatform):
         *,
         owner: OperationOwner,
         custody: LocalDeliveryCustody,
-        config: Config | None = None,
     ) -> OwnedNativePlatformAccess:
         """Construct passive access for core to retain before preparation effects."""
         from agentworks.plugins.proxmox._native_access import ProxmoxOwnedNativePlatformAccess
 
-        return ProxmoxOwnedNativePlatformAccess(vm, self, ctx, owner, custody, config)
+        return ProxmoxOwnedNativePlatformAccess(vm, self, ctx, owner, custody)
 
     def resolve_native_execution_binding(
         self,

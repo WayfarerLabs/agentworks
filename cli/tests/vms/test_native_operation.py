@@ -184,7 +184,7 @@ def test_root_retains_access_before_effects_and_independently_checks_ledger(
 
     access = Access()
 
-    def build(vm, ctx, *, owner, custody, config=None):
+    def build(vm, ctx, *, owner, custody):
         claim = database.operations.inspect(_scope())
         assert claim is not None and claim.ownership == owner.ownership
         access.owner = owner

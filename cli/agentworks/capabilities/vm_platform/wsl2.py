@@ -1071,12 +1071,11 @@ class WSL2Platform(VMPlatform):
         *,
         owner: OperationOwner,
         custody: LocalDeliveryCustody,
-        config: Config | None = None,
     ) -> OwnedNativePlatformAccess:
         """Construct passive access for core to retain before preparation effects."""
         from agentworks.vms._wsl2_native_access import WSL2OwnedNativePlatformAccess
 
-        return WSL2OwnedNativePlatformAccess(vm, self, ctx, owner, custody, config)
+        return WSL2OwnedNativePlatformAccess(vm, self, ctx, owner, custody)
 
     def resolve_native_execution_binding(
         self,

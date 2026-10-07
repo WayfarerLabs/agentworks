@@ -15,7 +15,6 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
-    from agentworks.config import Config
     from agentworks.db import VMRow, VMStatus
     from agentworks.execution._delivery_custody import LocalDeliveryCustody
     from agentworks.execution.binding import NativeExecutionBinding
@@ -33,7 +32,6 @@ class WSL2OwnedNativePlatformAccess:
     ctx: RunContext
     owner: OperationOwner
     custody: LocalDeliveryCustody
-    config: Config | None = None
     selected: WSL2OwnedOperation | None = None
     _preparation_fact: VMTargetPreparation | None = field(default=None, init=False, repr=False)
     _used: bool = field(default=False, init=False, repr=False)
@@ -63,7 +61,7 @@ class WSL2OwnedNativePlatformAccess:
             self.ctx,
             owner=self.owner,
             deadline=deadline,
-            config=self.config,
+            config=self.ctx.config,
             provider_custody=self.custody,
         )
         if selected is None:

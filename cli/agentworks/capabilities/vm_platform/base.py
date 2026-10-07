@@ -478,7 +478,6 @@ class VMPlatform(Capability):
         *,
         owner: OperationOwner,
         custody: LocalDeliveryCustody,
-        config: Config | None = None,
     ) -> OwnedNativePlatformAccess:
         """Construct passive access for core to retain before preparation effects."""
         raise StateError(
